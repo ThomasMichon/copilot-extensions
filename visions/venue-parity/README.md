@@ -32,6 +32,17 @@ is reproduced and *hardened in a container first*, then trusted in the more
 costly, less controllable cloud venue. Parity is what makes that substitution
 sound — a bug fixed against a container is a bug fixed everywhere.
 
+**Parity applies to _trusted_ venues.** CodeSpaces are inherently trusted, and a
+**trusted container fleet** is their local peer — it receives the full harness
+projection (launch parity, the repo's own local-marketplace plugins, the
+credential relay, and eventually container-local worktrees + multi-repo). An
+**untrusted/restricted container** is a different mode: a bounded,
+deny-by-construction sandbox where the provider mostly wrangles the container
+runtime and offers an à-la-carte tool surface, and the host agent + scenario
+decide what to use. Untrusted venues are **out of the parity scope by design**;
+the trust model and both postures are owned by the
+[agent-containers vision](plugins/agent-containers/README.md).
+
 ## Concepts & Components
 
 - **The coordination layer — the venue-agnostic dispatch core.** agent-bridge
@@ -146,11 +157,17 @@ shared back-channel with no venue-specific setup visible to the agent.
 - **Not the dispatched-agent *content* fixes themselves.** *What* good context/
   model/skill parity means is realized by the launch-parity work; this vision
   requires those guarantees live in the shared core so both venues inherit them.
+- **Not parity for untrusted/restricted containers.** Full launch/plugin/worktree
+  projection targets **trusted** venues (CodeSpaces + trusted fleets). A
+  restricted sandbox deliberately receives none of it by default; provisioning it
+  and offering à-la-carte tools is the
+  [agent-containers vision](plugins/agent-containers/README.md)'s concern, not a
+  parity gap.
 
 ## See Also
 
 - Parent vision: [agent-fabric](../agent-fabric/README.md)
-- Related visions: [plugins/agent-bridge](../plugins/agent-bridge/README.md) (the coordination layer that owns the dispatch core) · [plugins/agent-codespaces](../plugins/agent-codespaces/README.md) (the CodeSpace venue provider)
+- Related visions: [plugins/agent-bridge](../plugins/agent-bridge/README.md) (the coordination layer that owns the dispatch core) · [plugins/agent-codespaces](../plugins/agent-codespaces/README.md) (the CodeSpace venue provider) · [plugins/agent-containers](../plugins/agent-containers/README.md) (the container venue provider + the trusted/restricted trust model this vision scopes parity by)
 - Child visions: none (leaf)
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -168,3 +185,9 @@ shared back-channel with no venue-specific setup visible to the agent.
   not the venue providers; **both** venues ultimately provide an **SSH transport**;
   and the auth-relay **back-channel** should be unified (over SSH `-R`) so it works
   seamlessly and identically in every venue.
+- **2026-08-23** — Scoped parity to **trusted** venues (operator direction):
+  segment container fleets into **trusted** (project full harness capabilities —
+  launch parity, relay, eventually container-local worktrees + multi-repo — to be
+  a seamless agent-bridge node) vs **untrusted** (provider wrangles the container
+  runtime + à-la-carte tools; host agent/scenario decide). Untrusted containers
+  are out of parity scope; the trust model is owned by the agent-containers vision.
