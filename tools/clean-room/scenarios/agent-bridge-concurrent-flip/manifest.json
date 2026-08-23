@@ -1,0 +1,27 @@
+{
+  "name": "agent-bridge-concurrent-flip",
+  "description": "Tier-P F1 version-flip coherence scenario: install + provision agent-bridge on a fresh box, then drive the REAL immutable-runtime layout manager (versioned_runtime -- atomic current-version publish via os.replace + a current -> last-known-good -> newest resolver) under a STORM of racing installers and assert the invariant that makes a concurrent plugin update safe -- while multiple installers race to flip the active version (the effect of several new Copilot sessions each firing the sessionStart-hook reinstall at once), a reader resolving the runtime must ALWAYS land on a valid, existing version slot, never a torn/half-written current-version marker or a pointer to a slot that isn't there. Third leg of the concurrent-update triad: agent-bridge-concurrent-relay (the relay recovers), agent-bridge-concurrent-daemon (a duplicate daemon is refused), and this (the version flip stays coherent). Checks: (flip-storm-coherent-resolution) two installers race to flip current-version between two valid slots; over thousands of reads the resolver always returns an existing slot python (never None, never a missing path) and both versions are observed active; (marker-never-torn) the raw current-version marker is never empty/partial during the storm (os.replace atomicity). FIDELITY: a fully live 'two real installers race the sessionStart hook + a live daemon end-to-end' assertion is a Tier-E concern; this Tier-P probe proves the version-resolution MECHANISM. The probe is portable stdlib-only (drives the real versioned_runtime with cross-process flippers), so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "version-slot-flip-coherence",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_FLIP_CHECKS": "comma-separated subset of: flip-storm-coherent-resolution,marker-never-torn"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-bridge",
+    "~/.copilot/installed-plugins/<marketplace>/agent-bridge/scripts/versioned_runtime.py",
+    "~/.agent-bridge/versions/<ver>/bin/python (built slot)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-bridge" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "version-slot flip coherence under racing installers" }
+  ]
+}
