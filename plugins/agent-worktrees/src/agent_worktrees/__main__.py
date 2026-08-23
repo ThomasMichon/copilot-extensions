@@ -70,6 +70,7 @@ from . import (
     activity,
     disposition_history,
     git_ops,
+    list_cache,
     locks,
     output,
     permissions,
@@ -6194,6 +6195,24 @@ def cmd_list(args: argparse.Namespace) -> int:
                 worktrees.append(raw)
             _json_output({"worktrees": worktrees})
             return 0
+        # Coalescing result cache (list-coalescing, cx#918): a fresh cached
+        # payload for this exact arg-shape short-circuits the expensive scan
+        # (scan_sessions_fast + git classify + mux + bare-orphan), so concurrent
+        # /repeated Picker polls don't each re-scan and churn CPU. `--fresh`
+        # bypasses the read; the cache is bounded by a short TTL (display rows
+        # tolerate a few seconds of staleness) and best-effort.
+        _lc_key = None
+        try:
+            _lc_key = list_cache.cache_key(
+                args, project=cfg.project_name(),
+                tracking_status=getattr(args, "tracking_status", "all"))
+        except Exception:
+            _lc_key = None
+        if _lc_key and not getattr(args, "fresh", False):
+            _cached = list_cache.read_fresh(_lc_key)
+            if isinstance(_cached, dict) and "worktrees" in _cached:
+                _json_output(_cached)
+                return 0
         mux_map: dict[str, sessions.MuxInfo] = {}
         if getattr(args, "mux_details", False):
             wt_ids = [rec.worktree_id for rec in records]
@@ -6235,7 +6254,10 @@ def cmd_list(args: argparse.Namespace) -> int:
             from .picker_tui.data_local import _stamp_from_raw
             for wt_dict, rec in zip(worktrees, records, strict=True):
                 _stamp_from_raw(rec, wt_dict, session_ctx)
-        _json_output({"worktrees": worktrees})
+        _payload = {"worktrees": worktrees}
+        if _lc_key:
+            list_cache.write(_lc_key, _payload)
+        _json_output(_payload)
         return 0
 
     if not records:
@@ -14460,6 +14482,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "begin frame, fast (unclassified) rows, then classified "
                         "rows (with --classify), then a done frame. Implies "
                         "--json.")
+    p.add_argument("--fresh", action="store_true",
+                   help="Bypass the coalescing result cache (list-coalescing, "
+                        "cx#918) and force a live scan, refreshing the cache. "
+                        "Use when exactness matters; normal polling reads a "
+                        "short-TTL cache so concurrent/repeated calls coalesce "
+                        "onto one scan (tune via AGENT_WORKTREES_LIST_CACHE_TTL, "
+                        "0 disables).")
 
     # claims (a worktree's full claim ledger: outbound resources + inbound tasks)
     p = sub.add_parser(
