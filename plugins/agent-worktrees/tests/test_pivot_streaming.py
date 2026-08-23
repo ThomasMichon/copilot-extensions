@@ -200,6 +200,87 @@ def test_subscribe_live_delta_then_close_tears_down(tmp_path):
     assert rt._procs == []
 
 
+# A one-shot provider whose output GROWS between calls (keyed off a counter
+# file), so a repoll can be shown to pick up a task/card that appeared after the
+# first fetch -- the externally-created-card staleness the Tasks pivot suffered.
+_COUNTING_PROVIDER = r'''
+import sys, json, pathlib
+counter = pathlib.Path(sys.argv[1])
+n = int(counter.read_text()) if counter.exists() else 0
+counter.write_text(str(n + 1))
+rows = [{"id": "a", "title": "A"}]
+if n >= 1:
+    rows.append({"id": "b", "title": "B"})
+print(json.dumps(rows))
+'''
+
+
+def _make_counting_pivot(tmp_path):
+    script = tmp_path / "counting_provider.py"
+    script.write_text(_COUNTING_PROVIDER, encoding="utf-8")
+    counter = tmp_path / "calls.txt"
+    data = {
+        "label": "Counting",
+        "list": [sys.executable, str(script), str(counter)],
+        "entry": {"id": "id", "title": "title"},
+        "stream": False,
+        "subscribe": False,
+    }
+    return pivots.parse_manifest(data, name="counting", source_path=str(script))
+
+
+def test_repoll_refetches_in_place_without_flicker(tmp_path):
+    # The staleness fix: a card/task created by ANOTHER session appears in an
+    # already-loaded Tasks pivot via repoll() -- a forced refetch that swaps in
+    # place. Unlike ensure() it refetches even when cached; unlike
+    # invalidate()+ensure() it never clears the cache first (no loading flicker).
+    rt = tasks.RegisteredPivotRuntime(_make_counting_pivot(tmp_path))
+    rt.ensure(None)
+    state, rows, _err = _wait_ready(rt, None)
+    assert state == "ready"
+    assert [r["id"] for r in rows] == ["a"]
+
+    # A second ensure() is a no-op (already cached) -- it must NOT pick up "b".
+    rt.ensure(None)
+    time.sleep(0.3)
+    assert [r["id"] for r in rt.get(None)[1]] == ["a"]
+
+    # repoll() forces a refetch; the "b" that appeared now swaps in.
+    rt.repoll(None)
+    # Non-flicker: the old rows stay visible (state never flips to loading/idle)
+    # while the refetch is in flight.
+    assert rt.get(None)[0] == "ready"
+    state, rows, _err = _wait(
+        rt, None, lambda s, r, e: [x["id"] for x in r] == ["a", "b"])
+    assert state == "ready"
+    assert [r["id"] for r in rows] == ["a", "b"]
+
+
+def test_repoll_is_noop_on_stream_pivot(tmp_path):
+    # A streaming/subscribe pivot is already live; repoll() must not kick a
+    # redundant fetch (it returns without scheduling one).
+    rt = tasks.RegisteredPivotRuntime(_make_pivot(tmp_path, "ndjson", stream=True))
+    rt.repoll(None)
+    state, rows, _err = rt.get(None)
+    assert state == "idle"        # no fetch was scheduled
+    assert rows == []
+
+
+def test_repoll_coalesces_with_inflight_fetch(tmp_path):
+    # repoll() while a fetch is already in flight is idempotent -- it must not
+    # spawn a duplicate (the runtime's in-flight guard coalesces it).
+    rt = tasks.RegisteredPivotRuntime(_make_counting_pivot(tmp_path))
+    with rt._lock:
+        rt._inflight.add(None)     # simulate an in-flight fetch
+    calls = []
+    real_run = rt._run_list
+    rt._run_list = lambda *a, **k: calls.append(a)  # would-be duplicate spawn
+    rt.repoll(None)
+    time.sleep(0.1)
+    assert calls == []             # coalesced: no duplicate fetch scheduled
+    rt._run_list = real_run
+
+
 # --- D4: run_action_stream (progress-reporting actions) --------------------
 
 _ACTION_PROVIDER = r'''
