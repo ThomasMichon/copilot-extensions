@@ -159,6 +159,18 @@ def test_build_artifacts_are_ignored(repo: Path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_gitignore_and_test_venvs_are_ignored(repo: Path):
+    # A per-plugin .gitignore and throwaway test-venv artifacts are dev-hygiene,
+    # not runtime payload, so touching them must not demand a version bump.
+    _write(repo, "plugins/alpha/.gitignore", ".venv-test/\n__pycache__/\n")
+    _write(repo, "plugins/alpha/.venv-test/Lib/site-packages/x/_c.pyd", "binary\n")
+    _write(repo, "plugins/beta/.gitignore", ".venv-test/\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "add per-plugin .gitignore + a test-venv artifact")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_new_plugin_is_not_charged(repo: Path):
     # A brand-new plugin has no base version to bump from -> skipped.
     _plugin(repo, "gamma", "0.1.0-dev1")

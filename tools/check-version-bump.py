@@ -22,7 +22,11 @@ What requires a bump, for a push/PR diff (`<base>..HEAD`):
 
 What does **not** require a bump: repo-root files that are not vendored into any
 plugin -- `tools/`, `.github/`, the repo-root `docs/`, `CONTRIBUTING.md`,
-`README.md`, etc. (CONTRIBUTING.md § Version scheme).
+`README.md`, etc. (CONTRIBUTING.md § Version scheme). Also exempt, even under
+`plugins/<p>/`: build/venv/cache artifacts (`build/`, `dist/`, `.venv*/`,
+`.test-venvs/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `*.pyc`) and
+dev-hygiene files that never ship (`.gitignore`) -- none change the runtime
+payload.
 
 Scope is the push/PR diff only (like `check-no-internal-identifiers.py`), so a
 pre-existing un-bumped state in an untouched plugin never blocks an unrelated
@@ -50,8 +54,14 @@ PLUGINS_DIR = REPO / "plugins"
 LIBS_DIR = REPO / "libs"
 
 # Build/artifact noise under a plugin dir that never counts as "content".
-_IGNORE_PARTS = {"build", "dist", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache"}
+_IGNORE_PARTS = {
+    "build", "dist", ".venv", ".venv-test", ".venv-tools", ".test-venvs",
+    ".testvenv", "__pycache__", ".pytest_cache", ".ruff_cache",
+}
 _IGNORE_SUFFIX = {".pyc", ".pyo"}
+# Dev-hygiene files that never ship as plugin runtime, so a change to one must
+# not force a version bump / redeploy (e.g. a per-plugin .gitignore).
+_IGNORE_NAMES = {".gitignore"}
 
 _PLUGIN_JSON_VERSION = re.compile(r'"version"\s*:\s*"([^"]+)"')
 
@@ -107,6 +117,8 @@ def _vendored_consumers() -> dict[str, list[str]]:
 
 def _is_ignored(rel_parts: tuple[str, ...], name: str) -> bool:
     if _IGNORE_PARTS & set(rel_parts):
+        return True
+    if name in _IGNORE_NAMES:
         return True
     return any(name.endswith(s) for s in _IGNORE_SUFFIX)
 
