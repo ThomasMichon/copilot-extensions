@@ -20,13 +20,21 @@ security posture an explicit part of the venue rather than an assumption hidden
 in launch defaults.
 
 The provider serves two legitimate modes. A **trusted development venue** may
-borrow host capabilities needed for ordinary engineering work. A **restricted
-venue** is a security boundary for lower-trust or injection-prone reasoning:
-its blast radius is the container and its one repository workspace, host
-credentials do not cross the boundary, network reach and tools are explicitly
-granted, and the failure mode is a disposable bad diff rather than host impact.
-Both remain the same kind of fabric participant; trust changes authority, not
-the coordination interface.
+borrow host capabilities needed for ordinary engineering work — and, more than
+that, aims to project **as much of the harness as possible** into the container
+(its plugins/skills, the credential relay, launch parity, and — as the
+capability matures — **multiple repositories and their worktrees living
+container-local**), so a trusted container becomes a **seamless agent-bridge
+node** on par with a CodeSpace rather than a stripped-down runner. A
+**restricted venue** is a security boundary for lower-trust or injection-prone
+reasoning: its blast radius is the container and its one repository workspace,
+host credentials do not cross the boundary, network reach and tools are
+explicitly granted, and the failure mode is a disposable bad diff rather than
+host impact. In the restricted mode the provider deliberately does **little more
+than wrangle the container runtime** and hand over an à-la-carte tool surface —
+the host agent and scenario decide what to use. Both remain the same kind of
+fabric participant; trust changes authority (and how much of the harness is
+projected), not the coordination interface.
 
 ## Concepts & Components
 
@@ -66,6 +74,17 @@ Fleets declare whether they are trusted development venues or restricted
 sandboxes. Existing trusted-development use remains available, while restricted
 work has a first-class posture rather than a fragile collection of caller
 conventions.
+
+### full-harness-projection-trusted
+A trusted-development fleet aims to be a **full harness node**, not a minimal
+runner. The host projects its **launch parity** (model, the repo's own
+local-marketplace plugins/skills, concrete workspace cwd), the **credential
+relay**, and — as the capability matures — **multiple repositories and their
+worktrees created container-local** inside the venue, so agent-bridge drives a
+trusted container as seamlessly as any other venue. The goal is to make the
+container transport *invisible*: as much of the system as can be projected, is.
+Restricted fleets deliberately receive none of this by default (see
+`restricted-credential-boundary` / `harness-and-tool-latitude`).
 
 ### restricted-credential-boundary
 A restricted venue receives no host credential, credential relay, or ambient
@@ -158,3 +177,10 @@ only after inspecting a running process.
   trusted-development and restricted postures after identifying that host
   credential forwarding and broad tool authority are useful defaults for the
   former but unsafe foundations for the latter.
+- **2026-08-23** — Enriched the **trusted** side with `full-harness-projection`
+  intent (operator direction): a trusted fleet should project as much of the
+  harness as possible — launch parity, relay, and eventually container-local
+  worktrees + multi-repo — to become a seamless agent-bridge node, while the
+  **untrusted/restricted** mode stays a bounded substrate where the provider
+  mostly wrangles the container runtime and offers à-la-carte tools. This is the
+  container-side complement of the `venue-parity` vision.
