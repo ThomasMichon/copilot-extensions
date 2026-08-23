@@ -92,6 +92,9 @@ an explicit per-fleet `acp_command`; there is no implicit
 posture. Stopping the container clears its restricted writable state; extract or
 push work before release.
 
+Workspace and home are explicitly executable for agent runtimes/native build
+helpers; `/tmp` and `/run` remain noexec.
+
 `network: none` is the restricted default. Any named network must be a
 user-defined Docker network created with `--internal`; host/default-bridge/
 container namespace sharing is rejected.
