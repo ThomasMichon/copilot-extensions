@@ -130,7 +130,11 @@ it*), and the parent service-model invariants stated in the venue's own terms.
 ### agent-containers — a venue provider
 Does the same for **local containers**: provision and set up a container-hosted
 agent and present it to the fabric as a coordination-layer provider, so a
-containerized agent is a first-class fabric participant.
+containerized agent is a first-class fabric participant. Its per-plugin vision
+distinguishes **trusted development venues** from **restricted low-trust
+sandboxes**, making the container's effective authority explicit and enforced
+by construction:
+[`visions/plugins/agent-containers/`](../plugins/agent-containers/README.md).
 
 ### agent-logger — the memory layer
 **Recovers Copilot session data** from local and remote-dispatched agents —

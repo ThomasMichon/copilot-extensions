@@ -70,13 +70,17 @@ def _stub_agent_bridge(monkeypatch):
 
 def test_resolve_returns_wrapper_without_token(monkeypatch):
     from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
 
     _stub_agent_bridge(monkeypatch)
 
     monkeypatch.setattr(
         r, "get_container",
-        lambda config, name: types.SimpleNamespace(fleet=None),
+        lambda config, name: types.SimpleNamespace(fleet="myrepo"),
     )
+    config = ContainersConfig()
+    config.fleets["myrepo"] = FleetConfig()
+    monkeypatch.setattr(r, "load_config", lambda: config)
     monkeypatch.setattr(r, "get_lease", lambda name: None)
     # If resolve() ever called host_gh_token, this would put a token in the
     # target -- make it explode so the test fails loudly if that regresses.
@@ -105,3 +109,39 @@ def test_resolve_missing_container_raises(monkeypatch):
 
     with pytest.raises(KeyError):
         asyncio.run(ContainerResolver().resolve("missing"))
+
+
+def test_ensure_ready_restricted_validates_before_start(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(
+        image="example/agent",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    info = types.SimpleNamespace(
+        name="sandbox-1",
+        fleet="sandbox",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_container", lambda cfg, name: info)
+    monkeypatch.setattr(
+        r,
+        "restricted_policy_errors",
+        lambda *a, **k: ["root filesystem is not read-only"],
+    )
+    monkeypatch.setattr(
+        r,
+        "start_container",
+        lambda name: (_ for _ in ()).throw(
+            AssertionError("unsafe container must not start")
+        ),
+    )
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="does not satisfy"):
+        asyncio.run(ContainerResolver().ensure_ready("sandbox-1"))

@@ -62,6 +62,42 @@ fleets:
     size: 1
 ```
 
+For a lower-trust worker, use an image-based **restricted** fleet:
+
+```yaml
+fleets:
+  restricted-worker:
+    image: example/minimal-agent:latest
+    security_profile: restricted
+    workspace_folder: /workspace
+    exec_user: agent
+    acp_command: "cd /workspace && minimal-agent --stdio"
+    network: none
+    memory: 4g
+    cpus: 2
+    pids_limit: 256
+    workspace_size: 2g
+    home_size: 512m
+```
+
+`restricted` is a transport-enforced posture: no host GitHub token, no
+credential relay, no host worktree mount, read-only rootfs, size-bounded tmpfs
+workspace/home/scratch, dropped capabilities, no privilege escalation,
+CPU/memory/PID ceilings, and an explicit network. It is image-only and requires
+an explicit per-fleet `acp_command`; there is no implicit
+`--allow-all-tools` fallback. `fleet --json` reports the inspected effective
+posture. Stopping the container clears its restricted writable state; extract or
+push work before release.
+
+`network: none` is the restricted default. Any named network must be a
+user-defined Docker network created with `--internal`; host/default-bridge/
+container namespace sharing is rejected.
+
+Only containers with an exact fleet entry may be dispatched. Inventory may
+discover other devcontainers, but they never inherit global credential or launch
+defaults. Restricted venues are re-inspected before start/exec; a stale image or
+weakened Docker posture is refused.
+
 - `devcontainer_config` lets `up` build a **nested** devcontainer spec (e.g.
   a repo's local-Docker spec under `.devcontainer/docker/`) instead
   of the repo's default top-level config.
@@ -110,6 +146,9 @@ bridge venv. The resolver launches `agent-containers exec --stdio <name>`, which
 then runs `copilot --acp --stdio --allow-all-tools` inside the container,
 forwarding the host `gh auth token` as `GH_TOKEN` by environment name so the
 token is not persisted in bridge state or logs.
+
+Those are the **trusted-profile** defaults. A restricted fleet launches only its
+explicit `acp_command` and forwards neither host credential path.
 
 ## Troubleshooting
 
