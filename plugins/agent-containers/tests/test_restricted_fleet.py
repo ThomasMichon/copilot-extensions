@@ -273,3 +273,49 @@ def test_start_restricted_validates_before_start(monkeypatch):
 
     with pytest.raises(RuntimeError, match="does not satisfy"):
         fleet_mod.start(config, "sandbox")
+
+
+def test_restricted_stale_container_recreated_with_recreate_flag(monkeypatch):
+    """`up(..., recreate=True)` removes a drifted restricted member and
+    re-provisions it on the current image (same name preserves the lease)."""
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(
+        image="example/agent",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+    )
+    stale = SimpleNamespace(
+        name="sandbox-1",
+        security_profile="restricted",
+        security_policy="old-policy",
+        security_image_id="sha256:old",
+    )
+    members = {"list": [stale]}
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(
+        fleet_mod, "_fleet_members", lambda cfg, name: list(members["list"])
+    )
+    # Current image differs from the running member -> image drift.
+    monkeypatch.setattr(fleet_mod, "_image_id", lambda image: "sha256:new")
+
+    removed: list[str] = []
+
+    def fake_remove(name, force=False):
+        removed.append(name)
+        members["list"] = []  # the member is gone after removal
+
+    monkeypatch.setattr(fleet_mod, "remove_container", fake_remove)
+
+    provisioned: list[str] = []
+
+    def fake_image_run(fleet_name, fleet, name, **kwargs):
+        provisioned.append(name)
+        return name
+
+    monkeypatch.setattr(fleet_mod, "_image_run", fake_image_run)
+
+    created = fleet_mod.up(config, "sandbox", recreate=True)
+
+    assert removed == ["sandbox-1"]  # drifted member removed
+    assert provisioned == ["sandbox-1"]  # re-provisioned under the same name
+    assert created == ["sandbox-1"]
