@@ -125,6 +125,36 @@ def _balk_missing_gh(command: str) -> None:
     )
 
 
+def _normalize_remote_cmd_file(
+    parser: argparse.ArgumentParser, args: argparse.Namespace,
+) -> None:
+    """Fold ``--remote-cmd-file PATH`` into ``args.remote_cmd``.
+
+    The internal bridge dispatch passes the ACP launch payload by file path so it
+    is not subject to shell arg-parsing. Read it here, before any consumer, so
+    the rest of the CLI is unchanged. ``--remote-cmd`` stays the ad-hoc surface;
+    supplying both is ambiguous and rejected. A missing file is a hard error with
+    remediation (re-dispatch regenerates it) rather than a silent empty command.
+    """
+    path = getattr(args, "remote_cmd_file", None)
+    if not path:
+        return
+    if getattr(args, "remote_cmd", None):
+        parser.error("--remote-cmd and --remote-cmd-file are mutually exclusive")
+    try:
+        args.remote_cmd = Path(path).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        parser.error(
+            f"--remote-cmd-file {path!r} could not be read ({exc}); "
+            "re-dispatch the CodeSpace to regenerate it"
+        )
+    if not args.remote_cmd:
+        parser.error(
+            f"--remote-cmd-file {path!r} is empty; "
+            "re-dispatch the CodeSpace to regenerate it"
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -159,6 +189,14 @@ def main(argv: list[str] | None = None) -> int:
              "backgrounded process must fully detach its stdio "
              "(`nohup <cmd> >/tmp/out 2>&1 </dev/null & disown`) or it holds "
              "the channel open until --timeout.",
+    )
+    ssh_parser.add_argument(
+        "--remote-cmd-file", dest="remote_cmd_file", metavar="PATH",
+        help="Read the remote command from PATH instead of --remote-cmd. The "
+             "internal bridge dispatch uses this so the payload travels as a "
+             "clean file-path token (no shell arg-mangling), which lets the "
+             "persisted spawn route through the version-stable binstub. "
+             "Mutually exclusive with --remote-cmd.",
     )
     ssh_parser.add_argument(
         "--timeout", dest="timeout", type=float, default=60.0, metavar="SECS",
@@ -696,6 +734,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    # --remote-cmd-file: the internal bridge-dispatch path passes the ACP launch
+    # payload as a file PATH (a clean argv token) rather than a --remote-cmd
+    # string, so no shell (cmd.exe %VAR% expansion in particular) can mangle it.
+    # Fold it into args.remote_cmd so every downstream consumer is unchanged.
+    _normalize_remote_cmd_file(parser, args)
 
     # Logging setup
     level = logging.DEBUG if args.verbose else logging.INFO

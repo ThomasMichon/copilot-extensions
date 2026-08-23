@@ -19,6 +19,7 @@ from pathlib import Path
 
 _PACKAGE = "agent_codespaces"
 _VENV_DIR = Path.home() / ".agent-codespaces" / ".venv"
+_BIN_DIR = Path.home() / ".local" / "bin"
 
 
 def _venv_python() -> str:
@@ -45,3 +46,32 @@ def module_argv() -> list[str]:
     binstub -- so forwarded arguments are not subject to cmd.exe parsing.
     """
     return [_venv_python(), "-m", _PACKAGE]
+
+
+def binstub() -> str | None:
+    """Absolute path to the version-stable agent-codespaces binstub, or None.
+
+    The binstub (``~/.local/bin/agent-codespaces[.cmd]``) resolves the CURRENT
+    versioned runtime at each launch, so a persisted command that routes through
+    it survives a runtime upgrade that prunes ``versions/<ver>/`` -- unlike the
+    versioned interpreter :func:`_venv_python` pins. Only safe to spawn when no
+    shell-mangling-prone payload rides in argv (see :func:`dispatch_argv`).
+    """
+    name = "agent-codespaces.cmd" if sys.platform == "win32" else "agent-codespaces"
+    cand = _BIN_DIR / name
+    return str(cand) if cand.exists() else None
+
+
+def dispatch_argv() -> list[str]:
+    """Argv prefix for a *persisted* spawn that must survive a runtime upgrade.
+
+    Prefers the version-stable :func:`binstub` over the pinned versioned
+    interpreter of :func:`module_argv`, so a resume never launches a python.exe
+    under a ``versions/<ver>/`` slot a later upgrade pruned. Callers MUST keep
+    argv free of shell-mangling-prone tokens -- route any complex payload through
+    a file (e.g. ``ssh --remote-cmd-file``) -- because the binstub is invoked via
+    cmd.exe on Windows. Falls back to :func:`module_argv` when the binstub is
+    absent.
+    """
+    stub = binstub()
+    return [stub] if stub is not None else module_argv()

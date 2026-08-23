@@ -17,10 +17,11 @@ Usage:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
-
-from ._invoke import module_argv
+from ._invoke import dispatch_argv
 from .config import (
     _norm_repo as _config_norm_repo,
     _repo_matches_codespace as _config_repo_matches_codespace,
@@ -107,26 +108,58 @@ def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
     return _config_repo_matches_codespace(repo, cs_repository)
 
 
+_DISPATCH_DIR = Path.home() / ".agent-codespaces" / "dispatch"
+
+
+def _write_remote_cmd_file(codespace_name: str, acp_command: str) -> str:
+    """Persist the ACP launch payload to a durable, deterministic file.
+
+    Returns the path handed to ``ssh --remote-cmd-file``. Keyed by codespace + a
+    content hash so distinct payloads never collide and identical ones share a
+    file. Lives under ``~/.agent-codespaces`` -- NOT the OS temp dir, which is
+    swept and would reintroduce the "persisted path is gone on resume" failure
+    this whole approach avoids. The path is baked into the persisted
+    ``spawn_command``, so it must outlive the resolve that wrote it.
+    """
+    digest = hashlib.sha256(acp_command.encode("utf-8")).hexdigest()[:12]
+    _DISPATCH_DIR.mkdir(parents=True, exist_ok=True)
+    # The payload is a launch command, not a secret, but keep it user-only so a
+    # permissive umask can't leave it world-readable on a shared host.
+    try:
+        _DISPATCH_DIR.chmod(0o700)
+    except OSError:
+        pass
+    path = _DISPATCH_DIR / f"{codespace_name}-{digest}.remotecmd"
+    path.write_text(acp_command, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
+    return str(path)
+
+
 def _build_spawn_command(
     codespace_name: str, acp_command: str, stage_plugins: list[str] | None = None,
 ) -> list[str]:
     """Build the spawn command for a codespace agent.
 
-    The ``acp_command`` is read from ``.agent-codespaces/config.yaml`` defaults
-    and passed as ``--remote-cmd`` to ``agent-codespaces ssh --stdio``.
+    The ``acp_command`` (from ``.agent-codespaces/config.yaml`` defaults) is
+    written to a durable file and passed by PATH as ``--remote-cmd-file`` to
+    ``agent-codespaces ssh --stdio`` -- never as a ``--remote-cmd`` string.
+    Routing the payload through a file keeps argv free of shell-mangling-prone
+    tokens, which is what lets the spawn go through the version-stable
+    :func:`dispatch_argv` binstub (so a resume survives a runtime upgrade that
+    prunes ``versions/<ver>/``) without cmd.exe expanding ``%VAR%`` in the
+    payload.
 
     ``stage_plugins`` are related-repo plugin sources (from agent-bridge) that
     the ``ssh`` transport stages onto the CodeSpace and folds into the launch as
     ``--plugin-dir`` -- passed as repeatable ``--stage-plugin`` args so the
     staging (which needs the SSH connection) happens transport-side, not here.
-
-    Invokes the module directly (``python -m agent_codespaces``) rather
-    than the ``.cmd`` binstub so agent-bridge does not route the spawn
-    through cmd.exe, which would expand ``%VAR%`` tokens in the
-    ``--remote-cmd`` payload and mangle it (see ``._invoke``).
     """
+    payload_file = _write_remote_cmd_file(codespace_name, acp_command)
     cmd = [
-        *module_argv(),
+        *dispatch_argv(),
         "ssh", codespace_name, "--stdio",
         # The bridge dispatch is the authoritative transport for this CodeSpace
         # and must succeed even when a stale incumbent (e.g. a prior dispatch
@@ -137,7 +170,7 @@ def _build_spawn_command(
     ]
     for source in stage_plugins or []:
         cmd += ["--stage-plugin", source]
-    cmd += ["--remote-cmd", acp_command]
+    cmd += ["--remote-cmd-file", payload_file]
     return cmd
 
 
