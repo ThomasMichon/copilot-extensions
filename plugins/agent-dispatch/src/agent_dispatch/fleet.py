@@ -38,6 +38,7 @@ import uuid
 from collections.abc import Callable, Sequence
 
 from . import embody
+from .procutil import no_window_kwargs
 
 log = logging.getLogger("agent-dispatch.fleet")
 
@@ -94,7 +95,12 @@ def _host_has_command(host: str, command: str, *, timeout: float = 8.0) -> bool:
     ]
     try:
         result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            cmd, check=False, capture_output=True, text=True, timeout=timeout
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):
         return False
