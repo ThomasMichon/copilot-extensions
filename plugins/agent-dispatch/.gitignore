@@ -1,9 +1,29 @@
-.venv/
-build/
-dist/
-*.egg-info/
+# Per-plugin dev/test artifacts -- each plugin is self-contained and does NOT
+# rely on the repo-root .gitignore to keep these out of the tree. Runtime venvs
+# live under ~/.agent-*; test venvs (.venv-test, built by the CONTRIBUTING test
+# recipe) are throwaway. None of this is ever tracked. Patterns are unanchored,
+# so they also cover nested vendored libs/<lib>/.
+
+# Python bytecode / build / packaging
 __pycache__/
 *.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.pytmp/
+
+# Local dev + throwaway test virtualenvs
+.venv/
+.venv-test/
+.venv-tools/
+.test-venvs/
+.testvenv/
+# Plugin-specific artifacts
 *.db
 *.db-wal
 *.db-shm
