@@ -28,7 +28,7 @@ def _fake_result(stdout: str) -> reconcile.RestoreResult:
 def _patch(monkeypatch, result: reconcile.RestoreResult) -> None:
     monkeypatch.setattr(cli, "_collect_packages", lambda machine: [])
     monkeypatch.setattr(cli._reconcile, "resolve_union", lambda packages, machine: [])
-    monkeypatch.setattr(cli._validator, "validate", lambda resolved: [])
+    monkeypatch.setattr(cli._validator, "validate", lambda resolved, *a, **k: [])
     monkeypatch.setattr(cli._reconcile, "restore", lambda *a, **k: result)
 
 
