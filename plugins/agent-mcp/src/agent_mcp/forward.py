@@ -109,19 +109,18 @@ def _spawn_serve_host(handle: str) -> None:
     """
     import subprocess
 
+    from agent_procutil import detached_kwargs
+
     cmd = [sys.executable, "-m", "agent_mcp", "serve", "--socket", handle]
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
         "stderr": subprocess.DEVNULL,
     }
-    if os.name == "posix":
-        kwargs["start_new_session"] = True
-    else:  # Windows: detach from the console + this process's job/group
-        flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
-            subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        if flags:
-            kwargs["creationflags"] = flags
+    # Fully detach: own session/process group and (on Windows) no console -- so
+    # the host outlives this forwarder and never flashes a window. Routed through
+    # agent_procutil so the creation flags can't drift (headless-launch guard).
+    kwargs.update(detached_kwargs())
     subprocess.Popen(cmd, **kwargs)
 
 
