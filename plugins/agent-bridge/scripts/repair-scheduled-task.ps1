@@ -36,7 +36,11 @@
 param(
     # Internal: set on the elevated relaunch so the elevated instance does the
     # work instead of prompting again.
-    [switch]$Elevated
+    [switch]$Elevated,
+
+    # Force a re-register even when the task is already a healthy non-elevated
+    # interactive AtLogOn task (normally that is a no-op that skips UAC).
+    [switch]$Force
 )
 
 Set-StrictMode -Version 2.0
@@ -69,22 +73,52 @@ function Resolve-PwshPath {
 }
 
 # ---------------------------------------------------------------------------
-# Stage 1: not elevated -> relaunch under UAC and wait for the result.
+# Stage 0: assess -- decide whether any work (and any elevation) is needed.
 # ---------------------------------------------------------------------------
-if (-not (Test-IsAdmin)) {
-    Write-Host "agent-bridge: repairing the auto-start scheduled task '$TaskName' needs elevation." -ForegroundColor Cyan
+$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+
+function Test-HealthyInteractive($task) {
+    if (-not $task) { return $false }
+    if ($task.Principal.LogonType -ne 'Interactive') { return $false }
+    foreach ($trg in @($task.Triggers)) {
+        if ($trg.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger') { return $true }
+    }
+    return $false
+}
+
+# Already the desired state? Then there is nothing to repair -- and, crucially,
+# NO elevation/UAC is needed. "Merely using agent-bridge should never prompt for
+# UAC" -- so an already-correct (or absent) task must not trigger a prompt.
+if ((Test-HealthyInteractive $existing) -and -not $Force) {
+    Write-Host "[OK] '$TaskName' is already a healthy non-elevated interactive AtLogOn task -- nothing to repair (no elevation needed)." -ForegroundColor Green
+    exit 0
+}
+
+# Elevation is required ONLY to remove/rewrite a task whose principal the current
+# non-elevated user cannot touch -- i.e. an S4U or Password (boot/headless) task.
+# Registering the interactive AtLogOn task, or replacing an existing *interactive*
+# one, needs no elevation; nor does creating one when absent.
+$needsElevation = $existing -and ($existing.Principal.LogonType -in @('S4U', 'Password'))
+
+# ---------------------------------------------------------------------------
+# Stage 1: relaunch under UAC ONLY when elevation is actually needed.
+# ---------------------------------------------------------------------------
+if ($needsElevation -and -not (Test-IsAdmin)) {
+    Write-Host "agent-bridge: replacing the existing elevated/S4U '$TaskName' task with the default non-elevated one needs elevation." -ForegroundColor Cyan
     Write-Host "A Windows UAC prompt will appear -- approve it to continue." -ForegroundColor DarkGray
 
     $exe = (Get-Process -Id $PID).Path
     if (-not $exe) { $exe = Resolve-PwshPath }
+    $relaunchArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass',
+        '-File', $PSCommandPath, '-Elevated'
+    )
+    if ($Force) { $relaunchArgs += '-Force' }
     try {
-        $proc = Start-Process -FilePath $exe -Verb RunAs -PassThru -Wait -ArgumentList @(
-            '-NoProfile', '-ExecutionPolicy', 'Bypass',
-            '-File', $PSCommandPath, '-Elevated'
-        )
+        $proc = Start-Process -FilePath $exe -Verb RunAs -PassThru -Wait -ArgumentList $relaunchArgs
     } catch {
         Write-Warning "Elevation was declined or failed: $($_.Exception.Message.Trim())"
-        Write-Warning "No change was made. The daemon still self-heals on demand (any 'agent-bridge' command boots it); only auto-start-at-logon stays unconfigured."
+        Write-Warning "No change was made. The daemon still self-heals on demand (any 'agent-bridge' command boots it); the existing task is left as-is."
         exit 1
     }
     if ($proc.ExitCode -eq 0) {
@@ -96,9 +130,10 @@ if (-not (Test-IsAdmin)) {
 }
 
 # ---------------------------------------------------------------------------
-# Stage 2: elevated -> surgically repair the task (never start the daemon).
+# Stage 2: do the repair (elevated if we needed to be; otherwise non-elevated).
+# Never starts the daemon.
 # ---------------------------------------------------------------------------
-Write-Host "[elevated] Repairing the '$TaskName' scheduled task..." -ForegroundColor Cyan
+Write-Host "Repairing the '$TaskName' scheduled task (target: non-elevated interactive AtLogOn)..." -ForegroundColor Cyan
 
 # Capture the existing task's action so the rebuilt task keeps the exact same,
 # version-stable launch contract (only the logon mode changes).
