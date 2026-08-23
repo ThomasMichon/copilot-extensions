@@ -6,7 +6,7 @@
 
    + New worktree…     ✕ Clean     ⟳ Sync     creates on anomalous-potato Win  (this host)
 
-  ID     STATE    AGE    SESS   T     PR         TITLE
+  ID     STATE    AGE    LIVE   T     PR         TITLE
   ── Active ──────────────────────────────────────────────────────────────────────────────────────────────────────────
     (none)
   ── Recent ──────────────────────────────────────────────────────────────────────────────────────────────────────────

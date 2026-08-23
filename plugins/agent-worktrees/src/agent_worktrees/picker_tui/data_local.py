@@ -253,10 +253,10 @@ def _overlay_cached_state(raw: dict, rec) -> None:
     or the follow-up populate fills it.
     """
     try:
-        live = sessions.worktree_has_live_session(rec)
+        lock_live, stale_pids = sessions.worktree_session_lock_state(rec)
     except Exception:
-        live = False
-    live = live or (raw.get("session_bound_live") is True)
+        lock_live, stale_pids = False, []
+    live = lock_live or (raw.get("session_bound_live") is True)
 
     if rec.session_turns is not None:
         raw["turn_count"] = rec.session_turns
@@ -267,10 +267,14 @@ def _overlay_cached_state(raw: dict, rec) -> None:
 
     if live:
         # A live bound Copilot -> ACTIVE, authoritative in the fast pass (wins
-        # over a cached terminal/unknown state). Also surface the lock signal so
-        # the Sess column + Reclaim/Stop gating read it.
-        raw["session_lock_live"] = True
+        # over a cached terminal/unknown state). Keep a registered lock distinct
+        # from the broader cached bound-process hint.
+        if lock_live:
+            raw["session_lock_live"] = True
         raw["state"] = "active"
+    elif stale_pids:
+        raw["session_lock_stale"] = True
+        raw["stale_lock_pids"] = stale_pids
     elif rec.session_turns is None and not rec.git_state:
         raw["state"] = "unknown"
 
@@ -484,4 +488,3 @@ def refresh_one(worktree_id: str, machine: str | None = None,
     )
     _stamp_from_raw(rec, raw, session_ctx)
     return derive.norm(raw, machine, env)
-
