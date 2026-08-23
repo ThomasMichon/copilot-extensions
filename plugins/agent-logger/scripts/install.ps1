@@ -192,6 +192,18 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
 # once; this process-held, exclusive file handle makes those paths converge
 # instead of mutating runtime slots and deployment metadata concurrently.
 $script:InstallLockStream = $null
+$script:SkipPackageInstall = $false
+function ConvertTo-AgentLoggerVersionKey {
+    param([string]$Value)
+    if ($Value -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') { return $null }
+    $build = if ($Matches[4]) { [int]$Matches[4] } else { [int]::MaxValue }
+    return [Version]::new(
+        [int]$Matches[1],
+        [int]$Matches[2],
+        [int]$Matches[3],
+        $build
+    )
+}
 if ($Action -ne 'status') {
     $lockRoot = Join-Path $env:USERPROFILE '.agent-logger'
     New-Item -ItemType Directory -Force -Path $lockRoot | Out-Null
@@ -229,9 +241,13 @@ if ($Action -ne 'status') {
             $current = if (Test-Path $currentPath) {
                 ('' + (Get-Content $currentPath -Raw)).Trim()
             } else { '' }
-            $complete = Join-Path $lockRoot "versions\$desired\.install-complete.json"
-            if ($desired -and $deployed -eq $desired -and $current -eq $desired -and (Test-Path $complete)) {
-                exit 0
+            $deployedComplete = Join-Path $lockRoot "versions\$deployed\.install-complete.json"
+            $desiredKey = ConvertTo-AgentLoggerVersionKey $desired
+            $deployedKey = ConvertTo-AgentLoggerVersionKey $deployed
+            $notOlder = $desired -eq $deployed
+            if ($desiredKey -and $deployedKey) { $notOlder = $deployedKey -ge $desiredKey }
+            if ($desired -and $deployed -and $current -eq $deployed -and $notOlder -and (Test-Path $deployedComplete)) {
+                $script:SkipPackageInstall = $true
             }
         } catch {}
     }
@@ -914,16 +930,16 @@ switch ($Action) {
         Invoke-Stamp
     }
     'provision' {
-        Install-Package
+        if (-not $script:SkipPackageInstall) { Install-Package }
         Write-Ok "runtime provisioned"
     }
     'install' {
-        Install-Package
+        if (-not $script:SkipPackageInstall) { Install-Package }
         Register-SyncTask
         Write-Ok "install complete"
     }
     'update' {
-        Install-Package
+        if (-not $script:SkipPackageInstall) { Install-Package }
         Write-Ok "package updated (task unchanged)"
     }
     'uninstall' {

@@ -13,6 +13,7 @@
 set -euo pipefail
 
 ACTION="${1:-status}"
+SKIP_PACKAGE_INSTALL=0
 INSTALL_DIR="${HOME}/.agent-logger"
 VENV="${INSTALL_DIR}/.venv"
 LOCAL_BIN="${HOME}/.local/bin"
@@ -403,8 +404,24 @@ if [[ "$ACTION" != "status" ]]; then
         if [[ -n "$__lock_py" && -f "$INSTALL_DIR/deploy-manifest.json" ]]; then
             __deployed="$("$__lock_py" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source",{}).get("version",""))' "$INSTALL_DIR/deploy-manifest.json" 2>/dev/null || true)"
         fi
-        if [[ -n "$__desired" && "$__deployed" = "$__desired" && "$__current" = "$__desired" && -f "$INSTALL_DIR/versions/$__desired/.install-complete.json" ]]; then
-            exit 0
+        __deployed_not_older=0
+        if [[ -n "$__lock_py" && -n "$__desired" && -n "$__deployed" ]]; then
+            __deployed_not_older="$("$__lock_py" -c '
+import re, sys
+def key(value):
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", value)
+    if not match:
+        return None
+    major, minor, patch, dev = match.groups()
+    return (int(major), int(minor), int(patch), int(dev) if dev is not None else sys.maxsize)
+desired, deployed = key(sys.argv[1]), key(sys.argv[2])
+print(1 if desired is not None and deployed is not None and deployed >= desired else 0)
+' "$__desired" "$__deployed" 2>/dev/null || printf 0)"
+        elif [[ "$__desired" = "$__deployed" ]]; then
+            __deployed_not_older=1
+        fi
+        if [[ -n "$__desired" && -n "$__deployed" && "$__current" = "$__deployed" && "$__deployed_not_older" = 1 && -f "$INSTALL_DIR/versions/$__deployed/.install-complete.json" ]]; then
+            SKIP_PACKAGE_INSTALL=1
         fi
     fi
 fi
@@ -597,7 +614,7 @@ EOF
 
 case "${ACTION}" in
   install)
-    install_package
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
     write_units
     systemctl --user daemon-reload
     systemctl --user enable --now "${TIMER_NAME}.timer"
@@ -608,12 +625,12 @@ case "${ACTION}" in
     do_stamp
     ;;
   provision)
-    install_package
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
     _write_deploy_manifest
     ok "runtime provisioned"
     ;;
   update)
-    install_package
+    if [[ "$SKIP_PACKAGE_INSTALL" = 0 ]]; then install_package; fi
     write_units
     systemctl --user daemon-reload || true
     _write_deploy_manifest

@@ -45,9 +45,13 @@ def test_runtime_is_reconciled_on_every_machine() -> None:
     assert "[System.IO.FileShare]::None" in install_ps1
     assert "Timed out waiting for the agent-logger install lock" in install_ps1
     assert "$lockContended" in install_ps1
+    assert "$script:SkipPackageInstall" in install_ps1
+    assert "ConvertTo-AgentLoggerVersionKey" in install_ps1
     assert ".install-complete.json" in install_ps1
     assert 'flock -w 300 8' in install_sh
     assert "__install_lock_contended" in install_sh
+    assert "SKIP_PACKAGE_INSTALL" in install_sh
+    assert "__deployed_not_older" in install_sh
     assert ".install-complete.json" in install_sh
 
 
