@@ -98,6 +98,33 @@ def test_resolve_returns_wrapper_without_token(monkeypatch):
     assert "container" == ContainerResolver().prefix
 
 
+def test_resolve_spec_exposes_workspace_folder_and_profile(monkeypatch):
+    """namespace-resolve surfaces the venue's concrete cwd + trust posture so the
+    bridge can set the ACP session cwd and gate host->venue projection."""
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    _stub_agent_bridge(monkeypatch)
+    monkeypatch.setattr(
+        r, "get_container",
+        lambda config, name: types.SimpleNamespace(fleet="myrepo"),
+    )
+    config = ContainersConfig()
+    config.fleets["myrepo"] = FleetConfig(
+        workspace_folder="/workspaces/myrepo", security_profile="restricted",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("myrepo-1"))
+
+    assert spec["workspace_folder"] == "/workspaces/myrepo"
+    assert spec["security_profile"] == "restricted"
+    # unchanged contract fields still present
+    assert spec["type"] == "command"
+    assert spec["spawn_command"][-3:] == ["exec", "--stdio", "myrepo-1"]
+
+
 def test_resolve_missing_container_raises(monkeypatch):
     from agent_containers import resolver as r
 
