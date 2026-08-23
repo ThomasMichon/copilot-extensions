@@ -193,6 +193,7 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
 # instead of mutating runtime slots and deployment metadata concurrently.
 $script:InstallLockStream = $null
 $script:SkipPackageInstall = $false
+$script:SkipStamp = $false
 function ConvertTo-AgentLoggerVersionKey {
     param([string]$Value)
     if ($Value -notmatch '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') { return $null }
@@ -226,30 +227,70 @@ if ($Action -ne 'status') {
     if (-not $script:InstallLockStream) {
         throw "Timed out waiting for the agent-logger install lock: $lockPath"
     }
-    # If another reconciler completed while this one queued, stop here. This
-    # preserves the first run's completed slot and leaves the outer self-stage
-    # watchdog budget untouched instead of reinstalling into the active slot.
-    if ($lockContended -and $Action -in @('install', 'update', 'provision')) {
-        try {
-            $lockPluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-            $desired = '' + (Get-Content (Join-Path $lockPluginDir 'plugin.json') -Raw | ConvertFrom-Json).version
-            $manifestPath = Join-Path $lockRoot 'deploy-manifest.json'
-            $currentPath = Join-Path $lockRoot 'current-version'
-            $deployed = if (Test-Path $manifestPath) {
-                '' + (Get-Content $manifestPath -Raw | ConvertFrom-Json).source.version
-            } else { '' }
-            $current = if (Test-Path $currentPath) {
-                ('' + (Get-Content $currentPath -Raw)).Trim()
-            } else { '' }
-            $deployedComplete = Join-Path $lockRoot "versions\$deployed\.install-complete.json"
-            $desiredKey = ConvertTo-AgentLoggerVersionKey $desired
-            $deployedKey = ConvertTo-AgentLoggerVersionKey $deployed
-            $notOlder = $desired -eq $deployed
-            if ($desiredKey -and $deployedKey) { $notOlder = $deployedKey -ge $desiredKey }
-            if ($desired -and $deployed -and $current -eq $deployed -and $notOlder -and (Test-Path $deployedComplete)) {
+    # After every lock acquisition, reject stale payloads against the completed
+    # active generation. Contention is only needed to collapse equal-version
+    # duplicate work; a delayed older process may never observe contention.
+    if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+        $lockPluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+        $desired = '' + (Get-Content (Join-Path $lockPluginDir 'plugin.json') -Raw | ConvertFrom-Json).version
+        $desiredKey = ConvertTo-AgentLoggerVersionKey $desired
+        if (-not $desiredKey) { throw "Invalid agent-logger payload version: $desired" }
+        $manifestPath = Join-Path $lockRoot 'deploy-manifest.json'
+        $currentPath = Join-Path $lockRoot 'current-version'
+        $stampedPath = Join-Path $lockRoot 'stamped-version'
+        $deployed = ''
+        if (Test-Path $manifestPath) {
+            try {
+                $deployed = '' + (Get-Content $manifestPath -Raw | ConvertFrom-Json).source.version
+            } catch {
+                Write-Warning "Ignoring unreadable agent-logger deployment manifest: $($_.Exception.Message)"
+            }
+        }
+        $current = if (Test-Path $currentPath) {
+            ('' + (Get-Content $currentPath -Raw)).Trim()
+        } else { '' }
+        $stamped = if (Test-Path $stampedPath) {
+            ('' + (Get-Content $stampedPath -Raw)).Trim()
+        } else { '' }
+        $currentComplete = Join-Path $lockRoot "versions\$current\.install-complete.json"
+        $stampSnapshot = Join-Path $lockRoot "snapshots\$stamped"
+        $currentKey = ConvertTo-AgentLoggerVersionKey $current
+        $stampedKey = ConvertTo-AgentLoggerVersionKey $stamped
+        if ($current -and (Test-Path $currentComplete) -and -not $currentKey) {
+            throw "Invalid completed agent-logger runtime version: $current"
+        }
+        if ($stamped -and (Test-Path $stampSnapshot) -and -not $stampedKey) {
+            throw "Invalid stamped agent-logger payload version: $stamped"
+        }
+        if ($Action -in @('install', 'update', 'provision')) {
+            $newerActive = $currentKey -and $currentKey -gt $desiredKey
+            $duplicateAfterWait = $lockContended -and $current -eq $desired -and $deployed -eq $current
+            if ($current -and (Test-Path $currentComplete) -and ($newerActive -or $duplicateAfterWait)) {
                 $script:SkipPackageInstall = $true
             }
-        } catch {}
+            if (
+                -not $script:SkipPackageInstall -and
+                $stampedKey -and
+                (Test-Path $stampSnapshot) -and
+                $stampedKey -gt $desiredKey
+            ) {
+                throw "Refusing stale agent-logger $Action payload $desired; stamped payload $stamped is newer."
+            }
+        } elseif ($Action -eq 'stamp') {
+            $candidates = @(
+                @{ Version = $current; Key = $currentKey; Path = $currentComplete },
+                @{ Version = $stamped; Key = $stampedKey; Path = $stampSnapshot }
+            )
+            foreach ($candidate in $candidates) {
+                if (-not $candidate.Version -or -not (Test-Path $candidate.Path)) { continue }
+                $newer = $candidate.Key -gt $desiredKey
+                $duplicateAfterWait = $lockContended -and $candidate.Version -eq $desired
+                if ($newer -or $duplicateAfterWait) {
+                    $script:SkipStamp = $true
+                    break
+                }
+            }
+        }
     }
 }
 
@@ -918,8 +959,14 @@ function Invoke-Stamp {
     }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
+    $payloadPath = Join-Path $InstallDir 'payload-dir'
+    $stampedPath = Join-Path $InstallDir 'stamped-version'
+    $payloadTmp = "$payloadPath.tmp-$PID"
+    $stampedTmp = "$stampedPath.tmp-$PID"
+    [System.IO.File]::WriteAllText($payloadTmp, $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText($stampedTmp, $SrcVersion, $utf8NoBom)
+    Move-Item -LiteralPath $payloadTmp -Destination $payloadPath -Force
+    Move-Item -LiteralPath $stampedTmp -Destination $stampedPath -Force
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-logger binstub on PATH; runtime provisions on first use.'
@@ -927,7 +974,7 @@ function Invoke-Stamp {
 
 switch ($Action) {
     'stamp' {
-        Invoke-Stamp
+        if (-not $script:SkipStamp) { Invoke-Stamp }
     }
     'provision' {
         if (-not $script:SkipPackageInstall) { Install-Package }
