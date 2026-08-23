@@ -62,6 +62,13 @@ def test_borrow_same_effort_idempotent(fleet):
     assert second.acquired_at == first.acquired_at
 
 
+def test_borrow_same_effort_without_specific_container_is_idempotent(fleet):
+    first = lease_mod.borrow(fleet, "effort-a")
+    second = lease_mod.borrow(fleet, "effort-a")
+    assert second.container == first.container
+    assert second.acquired_at == first.acquired_at
+
+
 def test_release_by_container(fleet):
     lease_mod.borrow(fleet, "effort-a")
     assert lease_mod.release("myrepo-1") is True
