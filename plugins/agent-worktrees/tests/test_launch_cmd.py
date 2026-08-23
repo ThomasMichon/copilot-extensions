@@ -82,6 +82,7 @@ def _hook_config(
     *,
     setup_hook: dict[str, str] | None = None,
     session_path: dict[str, list[str]] | None = None,
+    copilot_path: dict[str, str] | None = None,
     legacy_launch: bool = False,
 ) -> cfg.Config:
     """A repo with NO launch template (so _build_launch_cmd hits the fallback
@@ -93,6 +94,7 @@ def _hook_config(
             launch={"linux": ["copilot"]} if legacy_launch else {},
             setup_hook=setup_hook or {},
             session_path=session_path or {},
+            copilot_path=copilot_path or {},
         )},
     )
 
@@ -174,6 +176,63 @@ def test_setup_hook_config_parsing_ignores_blank():
     repo = cfg._build_repo_config(data, "/a", "/w")
     assert "linux" not in repo.setup_hook
     assert repo.setup_hook["windows"] == "hook.ps1"
+
+
+def test_copilot_path_config_parsing_ignores_blank():
+    data = {
+        "copilot_path": {
+            "windows": r"C:\tools\copilot-dev.cmd",
+            "linux": "  ",
+        },
+    }
+    repo = cfg._build_repo_config(data, "/a", "/w")
+    assert repo.copilot_path["windows"].endswith("copilot-dev.cmd")
+    assert "linux" not in repo.copilot_path
+
+
+def test_copilot_path_linux_uses_normalized_launcher(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cfg_ = _hook_config(
+        copilot_path={"linux": "{home}/src/runtime/dist-bin/linux-arm64/copilot"},
+    )
+    cmd = m._build_launch_cmd(cfg_, _args(["--version"]), "/w/wt")
+    assert "default-setup.sh" in cmd[1]
+    assert "--copilot-path" in cmd
+    selected = cmd[cmd.index("--copilot-path") + 1]
+    assert selected.endswith("/src/runtime/dist-bin/linux-arm64/copilot")
+    assert "--version" in cmd
+
+
+def test_copilot_path_windows_uses_normalized_launcher(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    cfg_ = cfg.Config(
+        srcroot="/s",
+        machine="dev6",
+        platform="windows",
+        repo_name="ext",
+        repos={
+            "ext": cfg.RepoConfig(
+                anchor=r"C:\a",
+                worktree_root=r"C:\w",
+                copilot_path={"windows": r"C:\tools\copilot-dev.cmd"},
+            ),
+        },
+    )
+    cmd = m._build_launch_cmd(cfg_, _args([]), r"C:\w\wt")
+    assert any("default-setup.ps1" in c for c in cmd)
+    assert "-CopilotPath" in cmd
+    assert cmd[cmd.index("-CopilotPath") + 1] == r"C:\tools\copilot-dev.cmd"
+
+
+def test_explicit_launch_remains_authoritative_over_copilot_path(monkeypatch):
+    monkeypatch.setattr(m.platform, "system", lambda: "Linux")
+    cfg_ = _hook_config(
+        legacy_launch=True,
+        copilot_path={"linux": "/opt/copilot-dev"},
+    )
+    cmd = m._build_launch_cmd(cfg_, _args([]), "/w/wt")
+    assert cmd[0] == "copilot"
+    assert "--copilot-path" not in cmd
 
 
 def test_session_env_config_parsing():
@@ -333,6 +392,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert "--setup-hook" in text
     assert "--session-path" in text
     assert "--env-script" in text
+    assert "--copilot-path" in text
     # env_script is sourced with auto-export so its vars reach the exec
     assert "set -a" in text
     # hook is skipped in recovery
@@ -340,6 +400,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     # PATH is prepended, and Copilot is exec'd (launcher owns the exec)
     assert 'export PATH="${SESSION_PATH}:${PATH}"' in text
     assert "exec copilot" in text
+    assert 'exec "$COPILOT_PATH_OVERRIDE"' in text
     # --stdio (ACP) mode keeps human output off the JSON-RPC channel
     assert "STDIO=true" in text
     assert 'bash "$SETUP_HOOK" --machine "$MACHINE" >&2' in text
@@ -350,11 +411,12 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "$SetupHook" in text
     assert "$SessionPath" in text
     assert "$EnvScript" in text
+    assert "$CopilotPath" in text
     # env_script's captured environment is imported into the launcher process
     assert "SetEnvironmentVariable" in text
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
-    assert "copilot @CopilotArgs" in text
+    assert "& $copilotCmd.Source @CopilotArgs" in text
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text

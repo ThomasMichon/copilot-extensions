@@ -34,6 +34,9 @@ param(
     # that sets build vars + PATH). Runs even in -Recovery -- the build env is
     # always needed.
     [string]$EnvScript,
+    # Optional project-scoped Copilot executable. When set, use it instead of
+    # resolving the ambient `copilot` command from PATH.
+    [string]$CopilotPath,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
 )
@@ -134,8 +137,15 @@ Write-Host "  Path:     $PWD"
 Write-Host ''
 
 # ── Launch Copilot ───────────────────────────────────────────────────────
-$copilotCmd = Get-Command copilot -ErrorAction SilentlyContinue
-if (-not $copilotCmd) {
+$copilotCmd = if ($CopilotPath) {
+    Get-Command $CopilotPath -ErrorAction SilentlyContinue
+} else {
+    Get-Command copilot -ErrorAction SilentlyContinue
+}
+if ($CopilotPath -and -not $copilotCmd) {
+    Write-Error "Configured Copilot executable not found: $CopilotPath"
+    exit 1
+} elseif (-not $copilotCmd) {
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
         gh copilot @CopilotArgs
@@ -144,7 +154,7 @@ if (-not $copilotCmd) {
         exit 1
     }
 } else {
-    copilot @CopilotArgs
+    & $copilotCmd.Source @CopilotArgs
 }
 
 exit $LASTEXITCODE
