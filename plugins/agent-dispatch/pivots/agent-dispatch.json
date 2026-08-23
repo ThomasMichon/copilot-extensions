@@ -22,7 +22,7 @@
       "run": [
         "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
       ],
-      "when": {"awaiting_steer": true},
+      "when": {"group": "Blocked"},
       "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."
     },
     {
