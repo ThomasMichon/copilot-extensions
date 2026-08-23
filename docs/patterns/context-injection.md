@@ -123,16 +123,18 @@ invariant stays repository-owned; plugin compatibility prose remains
 plugin-attributable through its stable owner marker.
 
 A distinct case is the **ACP transport** (used by host integrations such as an
-ACP-mode bridge). It *does* create a normal session that can load plugin hooks,
-but sessions created over ACP default to **unattested folder-trust** and do not
-run an interactive trust prompt. A plugin enabled only at **repository scope**
-activates through a repository settings file whose activation is
-folder-trust-gated, so such a plugin -- and therefore its ambient kernel -- may
-not activate in an ACP session whose working directory was not trusted
-out-of-band. A repository's own `.github/hooks` are likewise not loaded over ACP.
-So a plugin whose kernel must survive the ACP transport should be enabled at
-**user scope** (which is not folder-trust-gated) and/or have its working
-directory pre-trusted; the static fail-safe above still applies.
+ACP-mode bridge). It creates a normal session that loads plugin hooks, but ACP
+sessions **do not run an interactive trust prompt** -- they honor only *persisted*
+folder-trust. A plugin enabled at **repository scope** activates through a
+folder-trust-gated repository settings file, so its ambient kernel fires over ACP
+**iff** the working directory is already persisted-trusted. In practice a worktree
+manager typically adds each worktree to the trusted-folders store on creation, so
+repo-scoped plugin hooks **do** fire over ACP for those sessions; the gap bites
+only an ACP working directory that was never trusted (enable at **user scope**,
+not folder-trust-gated, and/or pre-trust the directory for that case). A
+repository's own `.github/hooks`, by contrast, are deferred and **never load over
+ACP** regardless of trust -- keep the static fail-safe above for anything that
+must survive it.
 
 ### Keep cross-platform behavior equal
 
