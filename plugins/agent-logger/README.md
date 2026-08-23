@@ -10,8 +10,9 @@ session-to-log pipeline out of any single bespoke service:
   (`ramp-up-session`) — discover a worktree's most recent session, collate it
   ephemerally, and print a takeover brief so a fresh session can pick up the
   torch of one that can no longer be resumed.
-- **Log writer** — one voice-neutral `session-log-writer` agent that turns a
-  manifest of 1..N sessions into structured Markdown logs, plus the
+- **Log renderer** — one voice-neutral, read-only `session-log-writer` agent
+  that turns a manifest of 1..N sessions into structured Markdown artifacts
+  for its caller to validate and persist, plus the
   `log-session` (interactive) and `process-backlog` (local batch) skills
   that drive it. Personality is never built in; repository organization config
   can declaratively supply optional voice-seam instructions
@@ -28,8 +29,8 @@ session-to-log pipeline out of any single bespoke service:
   compact daily digest manifests, and reserves segment identities in SQLite so
   racing passes do not double-log. The plugin does **not** install a chronicle
   scheduler or job lease by itself; a host/runner owns scheduling and, when it
-  wants real logs rather than manifests, runs the `session-log-writer` agent and
-  applies the configured landing policy.
+  wants real logs rather than manifests, runs the `session-log-writer` agent,
+  persists its render bundle, and applies the configured landing policy.
 
 ## Design principles
 

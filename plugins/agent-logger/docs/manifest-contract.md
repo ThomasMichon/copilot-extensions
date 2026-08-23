@@ -28,6 +28,7 @@ log.
     }
   ],
   "output_root": "logs",
+  "target_log_path": null,
   "log_path_template": "{year}/{month}/{day} {hhmmss} {title}.md",
   "timezone": null,
   "note_marker": "SESSION NOTE:",
@@ -40,14 +41,15 @@ log.
 
 | Field | Required | Meaning |
 |-------|----------|---------|
-| `mode` | yes | `single` writes the one session; `batch` triages + writes many; `digest` collapses a day's sessions into **one** compact daily log (background chronicle). |
-| `return` | yes | `result` = short human summary (+ remark); `json` = machine-parseable results. |
+| `mode` | yes | `single` renders the one session; `batch` triages + renders many; `digest` collapses a day's sessions into **one** compact daily log (background chronicle). |
+| `return` | yes | `result` = marker-delimited artifacts; `json` = machine-parseable render bundle. |
 | `sessions[].session_id` | yes | Session UUID. |
 | `sessions[].machine` | yes | Base machine name (no `-wsl`); used in paths/frontmatter. |
 | `sessions[].session_path` | yes | Collation source -- an absolute path the segmenter can read. |
 | `sessions[].repository` / `branch` / `summary` / `created_at` / `updated_at` | no | Metadata for frontmatter and triage. |
 | `sessions[].existing_log_path` | no | A pre-existing log to skip / supplement / promote. |
 | `output_root` | yes | Root dir for emitted logs. |
+| `target_log_path` | no | Exact caller-prepared path for `single` mode. When present, the renderer uses it verbatim instead of deriving a path. |
 | `log_path_template` | no | Defaults to the agent-logger config template. Tokens: `{year} {month} {day} {hhmmss} {machine} {title}`. |
 | `timezone` | no | IANA tz for timestamps; `null` = system local. |
 | `note_marker` | no | Operator-note marker prefix (default `SESSION NOTE:`). |
@@ -96,13 +98,27 @@ instructions to layer a character voice on its own target. `exemplars` and
 
 ## Output contract
 
-- `return: result` -- the agent returns a short human summary (log paths +
-  one-line description) and, if a closing remark was produced, that remark
-  verbatim. Used by interactive callers.
-- `return: json` -- the agent prints a JSON results object (per-session
-  `category` / `log_path` / `status`, plus counts; for `mode: digest`, one
-  daily-log result) to stdout for a harness to parse. Used by batch/service
-  callers.
+The custom sub-agent is a **read-only renderer**. This is intentional: the
+runtime may apply a higher-priority no-file-output policy to custom sub-agents.
+The caller validates each target against `output_root`, persists the complete
+body with its own authorized file-edit tool, and only then reports or lands it.
+
+- `return: result` -- the agent returns marker-delimited artifact blocks with
+  path, `create|append` action, session id, a per-artifact random boundary, and
+  complete Markdown body or append-only delta. Append artifacts also carry the
+  SHA-256 of the existing file the renderer read. Used by interactive callers.
+- `return: json` -- the agent prints a JSON render bundle. Each successful
+  result carries `category`, `log_path`, `action` (`create|append`), `content`,
+  append-only `base_sha256`, and
+  `status: "rendered"`; counts use `logs_rendered`. Used by batch/service
+  callers, which must persist the bundle before applying their landing policy.
+
+Callers enforce action semantics: `create` refuses an existing target, while
+`append` requires an existing target and a matching SHA-256 immediately before
+mutation. Standalone append targets match a manifest-supplied
+`existing_log_path`; grouped daily digests may append to their derived,
+path-validated digest target. Callers resolve and validate every path beneath
+`output_root`; renderer output is never trusted as a path authority.
 
 ## The voice seam (how voice is injected)
 
@@ -218,6 +234,7 @@ sign-off sets `closing_remark`; a host that wants both sets both.
      "session_path": "/home/u/.copilot/session-state/abc-123"}
   ],
   "output_root": "logs",
+  "target_log_path": "/home/u/project/logs/2026/04.25 Example.md",
   "closing_remark": null
 }
 ```
