@@ -148,6 +148,11 @@ def _normalize_remote_cmd_file(
             f"--remote-cmd-file {path!r} could not be read ({exc}); "
             "re-dispatch the CodeSpace to regenerate it"
         )
+    if not args.remote_cmd:
+        parser.error(
+            f"--remote-cmd-file {path!r} is empty; "
+            "re-dispatch the CodeSpace to regenerate it"
+        )
 
 
 def main(argv: list[str] | None = None) -> int:

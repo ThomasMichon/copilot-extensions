@@ -9,6 +9,9 @@ version-stable binstub instead of ``sys.executable``.
 from __future__ import annotations
 
 import argparse
+import os
+import stat
+import sys
 
 import pytest
 
@@ -32,12 +35,18 @@ class TestDispatchArgv:
 
 
 class TestWriteRemoteCmdFile:
-    def test_durable_path_not_temp(self):
-        # The real dispatch dir lives under ~/.agent-codespaces, never the OS
-        # temp dir (which is swept -- the whole point of a durable path).
-        p = str(resolver._DISPATCH_DIR).lower()
-        assert ".agent-codespaces" in p
-        assert "temp" not in p and "\\tmp" not in p and "/tmp" not in p
+    def test_durable_path_is_under_agent_codespaces_home(self):
+        # The dispatch dir is exactly ~/.agent-codespaces/dispatch -- a durable
+        # location, never the OS temp dir (which is swept).
+        from pathlib import Path
+
+        assert resolver._DISPATCH_DIR == Path.home() / ".agent-codespaces" / "dispatch"
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+    def test_written_file_is_user_only(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
+        p = resolver._write_remote_cmd_file("cs", "payload")
+        assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
 
     def test_writes_content_and_is_deterministic(self, tmp_path, monkeypatch):
         monkeypatch.setattr(resolver, "_DISPATCH_DIR", tmp_path / "dispatch")
@@ -106,5 +115,12 @@ class TestNormalizeRemoteCmdFile:
         args = argparse.Namespace(
             remote_cmd_file=str(tmp_path / "gone.remotecmd"), remote_cmd=None
         )
+        with pytest.raises(SystemExit):
+            _normalize_remote_cmd_file(self._parser(), args)
+
+    def test_empty_payload_errors(self, tmp_path):
+        f = tmp_path / "empty.remotecmd"
+        f.write_text("   \n", encoding="utf-8")
+        args = argparse.Namespace(remote_cmd_file=str(f), remote_cmd=None)
         with pytest.raises(SystemExit):
             _normalize_remote_cmd_file(self._parser(), args)

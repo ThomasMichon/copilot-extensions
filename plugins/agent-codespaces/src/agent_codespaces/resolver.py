@@ -123,8 +123,18 @@ def _write_remote_cmd_file(codespace_name: str, acp_command: str) -> str:
     """
     digest = hashlib.sha256(acp_command.encode("utf-8")).hexdigest()[:12]
     _DISPATCH_DIR.mkdir(parents=True, exist_ok=True)
+    # The payload is a launch command, not a secret, but keep it user-only so a
+    # permissive umask can't leave it world-readable on a shared host.
+    try:
+        _DISPATCH_DIR.chmod(0o700)
+    except OSError:
+        pass
     path = _DISPATCH_DIR / f"{codespace_name}-{digest}.remotecmd"
     path.write_text(acp_command, encoding="utf-8")
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return str(path)
 
 
