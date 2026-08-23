@@ -66,16 +66,82 @@ def _pids_by_slot(root: Path) -> dict[str, set[int]]:
     return out
 
 
+def _pid_ppid(pid: int) -> int | None:
+    """Parent pid of ``pid`` from ``/proc/<pid>/stat`` (POSIX). None on failure.
+
+    Parses defensively: the ``comm`` field (2) is wrapped in parens and may
+    itself contain spaces/parens, so split on the LAST ``)`` and read ppid as
+    the second whitespace field after it (state, ppid, ...).
+    """
+    try:
+        with open(f"/proc/{pid}/stat", "rb") as fh:
+            data = fh.read()
+        rparen = data.rfind(b")")
+        if rparen == -1:
+            return None
+        after = data[rparen + 1:].split()
+        # after = [state, ppid, pgrp, ...]
+        return int(after[1])
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def _descendants(root_pid: int) -> list[int]:
+    """All descendant pids of ``root_pid`` (POSIX ``/proc``), excluding itself.
+
+    Used to reap a stale process's *own* subtree (the wrapped stdio upstream
+    child, mint helpers) WITHOUT signalling a foreign process group. Walking
+    real parent->child links can never reach the process's parent (e.g. the
+    host Copilot that spawned a bridge into its own group), so it cannot take
+    down a live session. Best-effort; returns [] off POSIX or on any error.
+    """
+    if os.name == "nt":
+        return []
+    children: dict[int, list[int]] = {}
+    try:
+        entries = [int(e) for e in os.listdir("/proc") if e.isdigit()]
+    except OSError:
+        return []
+    for pid in entries:
+        ppid = _pid_ppid(pid)
+        if ppid is not None:
+            children.setdefault(ppid, []).append(pid)
+    out: list[int] = []
+    seen: set[int] = set()
+    stack = list(children.get(root_pid, []))
+    while stack:
+        p = stack.pop()
+        if p in seen:
+            continue
+        seen.add(p)
+        out.append(p)
+        stack.extend(children.get(p, []))
+    return out
+
+
 def _terminate_tree(pid: int) -> bool:
-    """Best-effort terminate a process AND its descendants.
+    """Best-effort terminate a stale-version process AND its own descendants.
 
     A leaked bridge is a tree (the wrapped stdio upstream child, mint helpers),
     so we kill the whole tree, not just the root pid. Returns True if a terminate
     was issued (not a liveness guarantee).
+
+    **Process-group safety (prevents a mass host-session kill).**
+    A per-session agent-mcp *bridge* is spawned by its host Copilot into the
+    host's OWN process group (the bridge is a child, not the group leader, so
+    ``pgid != pid``). Signalling that group with ``killpg`` would hit the host
+    Copilot and its whole terminal/pane -- killing a live session as a side
+    effect of a version reap. So we only ever ``killpg`` a group this process's
+    target actually *leads* (``pgid == pid``, e.g. a detached ``serve`` daemon
+    or a standalone bridge that made its own group). For a stale process that is
+    NOT its group's leader, we terminate the exact pid and walk its REAL
+    descendants instead -- which can never reach the foreign parent.
     """
     if not _pid_alive(pid):
         return False
     if os.name == "nt":
+        # taskkill /T walks the child TREE (descendants), not a process group,
+        # so it already cannot reach a foreign parent -- safe as-is.
         try:
             proc = subprocess.run(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
@@ -87,8 +153,6 @@ def _terminate_tree(pid: int) -> bool:
             return False
     import signal
 
-    # Prefer the process group (reaps the upstream stdio child too), but NEVER
-    # signal our own group. SIGTERM first, SIGKILL as the backstop.
     try:
         pgid = os.getpgid(pid)
     except OSError:
@@ -97,14 +161,30 @@ def _terminate_tree(pid: int) -> bool:
         my_pgid = os.getpgid(0)
     except OSError:
         my_pgid = None
+
+    # Only group-kill a group our TARGET leads (its own detached group), and
+    # never our own group. Otherwise the target shares a foreign group (its
+    # host Copilot's) -- kill just the pid + its real descendants.
+    own_group = pgid is not None and pgid == pid and pgid != my_pgid
+    if own_group:
+        targets: list[int] = []  # unused; killpg path below
+    else:
+        # Capture the subtree ONCE, before any signal reparents it.
+        targets = [pid] + _descendants(pid)
+
     issued = False
-    for sig in (signal.SIGTERM, signal.SIGKILL):
+    for sig in (signal.SIGTERM, signal.SIGKILL):  # SIGTERM drain, SIGKILL backstop
         try:
-            if pgid is not None and pgid != my_pgid:
-                os.killpg(pgid, sig)
+            if own_group:
+                os.killpg(pgid, sig)  # type: ignore[arg-type]
+                issued = True
             else:
-                os.kill(pid, sig)
-            issued = True
+                for tp in targets:
+                    try:
+                        os.kill(tp, sig)
+                        issued = True
+                    except ProcessLookupError:
+                        pass
         except ProcessLookupError:
             break
         except OSError:
