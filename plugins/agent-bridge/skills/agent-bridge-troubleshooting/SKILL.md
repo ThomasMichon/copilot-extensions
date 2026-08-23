@@ -290,24 +290,28 @@ legacy 9280 (fixed separately) -- always confirm via the routing table.
   # then GET http://127.0.0.1:<that port>/health
   ```
 
-**Repairing a broken/never-ran auto-start task (the one elevated step).** A stale
-**S4U/boot** task that never launches (`LastTaskResult = 267011` /
+**Repairing a broken/never-ran auto-start task (one self-elevating command).** A
+stale **S4U/boot** task that never launches (`LastTaskResult = 267011` /
 `SCHED_S_TASK_HAS_NOT_RUN`) can't be rewritten by a routine non-elevated update
-(that's *why* updates leave it untouched). Fix it once, from an **elevated**
-PowerShell:
+(that's *why* updates leave it untouched). Fix it once with the self-elevating
+repair script -- it prompts for UAC, removes the stale task, and registers the
+clean **interactive AtLogOn** task, **without** starting an elevated daemon:
 
 ```pwsh
-# 1) remove the stale elevated task(s) (elevated shell)
-Unregister-ScheduledTask -TaskName 'Agent Bridge' -Confirm:$false -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName 'agent-bridge-elevated' -Confirm:$false -ErrorAction SilentlyContinue
-# 2) re-provision the clean default (interactive AtLogOn) task
-pwsh -File <plugin>/scripts/install.ps1 provision
+# from a normal (non-elevated) shell -- it raises its own UAC prompt
+pwsh -File <plugin>/scripts/repair-scheduled-task.ps1
 ```
 
-Prefer the default **interactive AtLogOn** task; only opt into headless S4U
-(`install.ps1 provision -NonInteractive`) for an always-on box reached over
-SSH/RDP with no persistent interactive session -- and know S4U can silently fail
-to acquire the logon token (the 267011 case).
+It reuses the existing task's action verbatim (the version-stable
+`start-agent-bridge.ps1` supervisor pointer), so only the logon mode changes.
+The repaired task starts the daemon at your next logon; meanwhile the daemon
+self-heals on demand (any `agent-bridge` command boots it), so there's no rush.
+Prefer the default interactive AtLogOn task; only opt into headless S4U
+(`install.ps1 provision -NonInteractive`, elevated) for an always-on box reached
+over SSH/RDP with no persistent interactive session -- and know S4U can silently
+fail to acquire the logon token (the 267011 case). (`agent-bridge-elevated` is a
+*separate* task for the elevated sub-daemon and is recreated on demand -- leave
+it alone.)
 
 ## Related skills
 

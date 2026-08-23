@@ -218,12 +218,14 @@ updates rarely — in practice never — touch it:
   what keeps a routine `update` from needing elevation and from churning or
   breaking a working auto-start (an S4U/boot task can only be modified with
   elevation; a failed rewrite used to purge a healthy task).
-- **Mode changes and repair are the explicit, elevation-aware `provision`
-  action's job.** Switching interactive ⇄ headless S4U, or repairing a
-  broken/never-ran task, happens only when an operator runs `install.ps1
-  provision` (from an **elevated** shell for an S4U/boot task) — never silently
-  during a version update. If a routine step ever does need such a change it
-  leaves the existing task intact and prints the one elevated command to run.
+- **Mode changes and repair are explicit and elevation-aware.** Switching
+  interactive ⇄ headless S4U, or repairing a broken/never-ran task, happens only
+  when an operator runs the self-elevating **`scripts/repair-scheduled-task.ps1`**
+  (it raises its own UAC prompt, removes the stale task, and registers the clean
+  interactive task — reusing the existing action verbatim, and deliberately *not*
+  starting an elevated daemon) or `install.ps1 provision` (elevated) — never
+  silently during a version update. If a routine step ever does need such a
+  change it leaves the existing task intact and prints the one command to run.
 - **Meanwhile the daemon self-heals** regardless of the task: any daemon-touching
   CLI command boots a down daemon on demand (persistence-correct detached
   spawn), and `service`/restart fall back to a direct spawn when a task can't be
