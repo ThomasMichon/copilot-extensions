@@ -1371,7 +1371,15 @@ def kill_tmux_session(worktree_id: str) -> bool:
         cmd = ["tmux", "kill-session", "-t", f"={sess_name}"]
     try:
         result = subprocess.run(cmd, capture_output=True, timeout=5)
-        return result.returncode == 0
+        killed = result.returncode == 0
+        try:
+            from . import reap_audit
+            reap_audit.record("mux-session", sess_name,
+                              reason="kill_tmux_session", killed=killed,
+                              worktree_id=worktree_id)
+        except Exception:
+            pass
+        return killed
     except (OSError, subprocess.TimeoutExpired):
         # OSError covers FileNotFoundError (mux not installed) as well as
         # spawn failures such as WinError 4551 (Application Control policy
