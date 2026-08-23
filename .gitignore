@@ -15,21 +15,14 @@ build/
 # installs on Linux (dangling-symlink copy -> os error 2).
 .pytmp/
 
-# uv materializes a lockfile on `uv run`/`uv sync`. Plugins that intentionally
-# do NOT pin a lockfile must ignore it so it never dirties a worktree and
-# blocks push-changes (#28). agent-bridge tracks its own uv.lock on purpose.
-/plugins/agent-codespaces/uv.lock
-/plugins/agent-worktrees/uv.lock
-# The ssh-manager lib (and its vendored copies) does not pin a lockfile either.
-/libs/ssh-manager/uv.lock
-/plugins/agent-bridge/libs/ssh-manager/uv.lock
-/plugins/agent-codespaces/libs/ssh-manager/uv.lock
-# The credential-relay lib (and its vendored copies) likewise pins no lockfile.
-/libs/credential-relay/uv.lock
+# uv materializes a lockfile on `uv run`/`uv sync`. This repo does NOT pin uv
+# lockfiles (they churn/reformat wholesale on `uv run` and block push-changes,
+# #28), so ignore `uv.lock` repo-globally (unanchored -> every plugin, lib, and
+# vendored copy). Each plugin ALSO ignores it in its own self-contained
+# .gitignore. (Previously only a hand-maintained allow-list was ignored, and
+# agent-bridge/dispatch/logger/machines/vault still tracked theirs.)
+uv.lock
 /libs/credential-relay/.testvenv/
-/plugins/agent-bridge/libs/credential-relay/uv.lock
-/plugins/agent-codespaces/libs/credential-relay/uv.lock
-/plugins/agent-containers/libs/credential-relay/uv.lock
 
 # Cached per-plugin dev venvs built by tools/run-plugin-tests.py
 /.test-venvs/
