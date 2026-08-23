@@ -398,11 +398,26 @@ def _image_run(
     return name
 
 
-def up(config: ContainersConfig, fleet_name: str, count: int | None = None) -> list[str]:
+def up(
+    config: ContainersConfig,
+    fleet_name: str,
+    count: int | None = None,
+    recreate: bool = False,
+) -> list[str]:
     """Provision (or top up) a fleet to ``count`` containers.
 
     Returns the names of containers created during this call. Existing
     members are left in place (warm reuse).
+
+    ``recreate`` addresses image/policy drift: a restricted fleet's containers
+    pin the image ID and security policy they were built against, so after the
+    fleet image is rebuilt (or the policy changes) a still-running member no
+    longer matches and dispatch is refused. Without ``recreate`` such drift
+    raises (the historical behavior); with it, the drifted members are removed
+    and re-provisioned fresh on the current image/policy. Container names are
+    deterministic and leases are keyed by name, so a recreated member keeps its
+    lease -- but any per-container bootstrap (e.g. credentials seeded into the
+    ephemeral rootfs) must be re-run by the caller afterward.
     """
     _check_docker()
     fleet = config.fleets.get(fleet_name)
@@ -441,11 +456,22 @@ def up(config: ContainersConfig, fleet_name: str, count: int | None = None) -> l
             or (current_image_id and c.security_image_id != current_image_id)
         ]
         if stale:
-            raise RuntimeError(
-                f"Restricted fleet '{fleet_name}' has containers with a stale "
-                f"or mismatched security policy: {', '.join(stale)}. "
-                "Recreate them before dispatch."
-            )
+            if not recreate:
+                raise RuntimeError(
+                    f"Restricted fleet '{fleet_name}' has containers with a stale "
+                    f"or mismatched security policy: {', '.join(stale)}. "
+                    "Recreate them before dispatch (pass recreate=True / "
+                    "`up --recreate`)."
+                )
+            for name in stale:
+                log.info(
+                    "Recreating drifted fleet container %s (image/policy mismatch)",
+                    name,
+                )
+                remove_container(name, force=True)
+            # Re-read membership so the removed members are re-provisioned below
+            # (deterministic names -> the same names are reused, preserving leases).
+            existing = _fleet_members(config, fleet_name)
     need = target - len(existing)
     if need <= 0:
         log.info(
