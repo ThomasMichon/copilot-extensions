@@ -23,7 +23,19 @@ import subprocess
 
 from agent_procutil import no_window_flags
 
-from .config import FLEET_LABEL, ContainersConfig, DotfilesConfig, FleetConfig, HarnessConfig
+from .config import (
+    FLEET_LABEL,
+    SECURITY_GID_LABEL,
+    SECURITY_HOME_LABEL,
+    SECURITY_IMAGE_ID_LABEL,
+    SECURITY_POLICY_LABEL,
+    SECURITY_PROFILE_LABEL,
+    SECURITY_UID_LABEL,
+    ContainersConfig,
+    DotfilesConfig,
+    FleetConfig,
+    HarnessConfig,
+)
 from .lifecycle import (
     DockerContainerInfo,
     _check_docker,
@@ -102,6 +114,7 @@ def _devcontainer_up(
         "--workspace-folder", fleet.devcontainer_path,
         "--id-label", f"{FLEET_LABEL}={fleet_name}",
         "--id-label", f"agent-containers.instance={name}",
+        "--id-label", f"{SECURITY_PROFILE_LABEL}={fleet.security_profile}",
     ]
     config_path = fleet.resolved_config()
     if config_path:
@@ -208,15 +221,173 @@ def _materialize_repo(
         log.info("Ran %s install_command in %s", label, container)
 
 
-def _image_run(fleet_name: str, fleet: FleetConfig, name: str) -> str:
+def _image_user(
+    image: str,
+    user: str,
+    *,
+    memory: str,
+    cpus: float,
+    pids_limit: int,
+) -> tuple[int, int, str]:
+    """Resolve a configured user's uid/gid/home from an image without host reach."""
+    probe = (
+        'uid=$(id -u "$1") && gid=$(id -g "$1") && '
+        'home=$(getent passwd "$1" | cut -d: -f6) && '
+        'test -n "$home" && printf "%s\\t%s\\t%s\\n" "$uid" "$gid" "$home"'
+    )
+    res = _docker(
+        [
+            "run", "--rm", "--network", "none",
+            "--read-only", "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--memory", memory,
+            "--memory-swap", memory,
+            "--cpus", str(cpus),
+            "--pids-limit", str(pids_limit),
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
+            "--entrypoint", "bash",
+            image, "-c", probe, "--", user,
+        ],
+        timeout=120,
+    )
+    if res.returncode != 0:
+        raise RuntimeError(
+            f"Restricted image '{image}' does not provide exec_user '{user}' "
+            f"with a resolvable home: {res.stderr.strip() or res.stdout.strip()}"
+        )
+    parts = res.stdout.strip().split("\t")
+    if len(parts) != 3:
+        raise RuntimeError(
+            f"Restricted image user probe returned an invalid result for '{user}'"
+        )
+    uid, gid, home = int(parts[0]), int(parts[1]), parts[2]
+    if uid <= 0 or gid <= 0:
+        raise RuntimeError(
+            f"Restricted exec_user '{user}' must have a non-root uid and gid"
+        )
+    if not home.startswith("/") or home in {"/", "/tmp", "/run"}:
+        raise RuntimeError(
+            f"Restricted exec_user '{user}' has unsafe home directory '{home}'"
+        )
+    return uid, gid, home
+
+
+def _image_id(image: str) -> str:
+    """Resolve the immutable local Docker image ID for a configured reference."""
+    res = _docker(["image", "inspect", "--format", "{{.Id}}", image], timeout=30)
+    image_id = res.stdout.strip() if res.returncode == 0 else ""
+    if not image_id:
+        raise RuntimeError(
+            f"Could not resolve immutable image ID for '{image}': "
+            f"{res.stderr.strip() or res.stdout.strip()}"
+        )
+    return image_id
+
+
+def _validate_restricted_network(network: str) -> None:
+    """Require no network or a user-defined Docker-internal network."""
+    lowered = network.lower()
+    if lowered == "none":
+        return
+    if lowered in {"host", "bridge", "default"} or lowered.startswith("container:"):
+        raise RuntimeError(
+            f"Restricted network '{network}' is not isolated; use 'none' or "
+            "a user-defined Docker internal network"
+        )
+    inspected = _docker(["network", "inspect", network], timeout=30)
+    if inspected.returncode != 0:
+        raise RuntimeError(
+            f"Restricted network '{network}' is unavailable: "
+            f"{inspected.stderr.strip() or inspected.stdout.strip()}"
+        )
+    try:
+        networks = json.loads(inspected.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Restricted network '{network}' returned invalid inspect data"
+        ) from exc
+    if not networks or not networks[0].get("Internal"):
+        raise RuntimeError(
+            f"Restricted network '{network}' must be created with --internal"
+        )
+
+
+def _image_run(
+    fleet_name: str,
+    fleet: FleetConfig,
+    name: str,
+    *,
+    workspace_folder: str,
+    exec_user: str,
+) -> str:
     """Run one warm container directly from an image; return its name."""
     args = [
         "run", "-d",
         "--name", name,
         "--label", f"{FLEET_LABEL}={fleet_name}",
-        "--add-host=host.docker.internal:host-gateway",
-        fleet.image, "sleep", "infinity",
+        "--label", f"{SECURITY_PROFILE_LABEL}={fleet.security_profile}",
     ]
+    if fleet.restricted:
+        network = fleet.effective_network()
+        _validate_restricted_network(network)
+        uid, gid, home = _image_user(
+            fleet.image,
+            exec_user,
+            memory=fleet.effective_memory(),
+            cpus=fleet.effective_cpus(),
+            pids_limit=fleet.effective_pids_limit(),
+        )
+        image_id = _image_id(fleet.image)
+        if home == workspace_folder or workspace_folder in {"/", "/tmp", "/run"}:
+            raise RuntimeError(
+                f"Restricted workspace_folder '{workspace_folder}' is unsafe"
+            )
+        policy = fleet.security_policy_fingerprint(workspace_folder, exec_user)
+        args += [
+            "--label", f"{SECURITY_POLICY_LABEL}={policy}",
+            "--label", f"{SECURITY_HOME_LABEL}={home}",
+            "--label", f"{SECURITY_UID_LABEL}={uid}",
+            "--label", f"{SECURITY_GID_LABEL}={gid}",
+            "--label", f"{SECURITY_IMAGE_ID_LABEL}={image_id}",
+        ]
+        # All writable surfaces are size-bounded tmpfs. No host path or
+        # persistent cross-tenant volume is mounted.
+        args += [
+            "--read-only",
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--network", network,
+            "--memory", fleet.effective_memory(),
+            "--memory-swap", fleet.effective_memory(),
+            "--cpus", str(fleet.effective_cpus()),
+            "--pids-limit", str(fleet.effective_pids_limit()),
+            "--env", f"HOME={home}",
+            "--tmpfs",
+            (
+                f"{workspace_folder}:rw,nosuid,nodev,"
+                f"size={fleet.effective_workspace_size()},uid={uid},gid={gid},mode=0700"
+            ),
+            "--tmpfs",
+            (
+                f"{home}:rw,nosuid,nodev,"
+                f"size={fleet.effective_home_size()},uid={uid},gid={gid},mode=0700"
+            ),
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",
+            "--tmpfs", "/run:rw,nosuid,nodev,size=64m",
+        ]
+    else:
+        # Historical trusted-development behavior: make the host gateway
+        # reachable for credential relays and local development services.
+        args += ["--add-host=host.docker.internal:host-gateway"]
+        if fleet.effective_network():
+            args += ["--network", fleet.effective_network()]
+        if fleet.effective_memory():
+            args += ["--memory", fleet.effective_memory()]
+        if fleet.effective_cpus() is not None:
+            args += ["--cpus", str(fleet.effective_cpus())]
+        if fleet.effective_pids_limit() is not None:
+            args += ["--pids-limit", str(fleet.effective_pids_limit())]
+    args += [fleet.image, "sleep", "infinity"]
     res = _docker(args, timeout=120)
     if res.returncode != 0:
         raise RuntimeError(f"docker run failed for {name}: {res.stderr.strip()}")
@@ -239,9 +410,38 @@ def up(config: ContainersConfig, fleet_name: str, count: int | None = None) -> l
         raise RuntimeError(
             f"Fleet '{fleet_name}' needs either 'devcontainer_path' or 'image'"
         )
+    if fleet.restricted and fleet.devcontainer_path:
+        raise RuntimeError(
+            f"Restricted fleet '{fleet_name}' must use the image backend; "
+            "devcontainer workspace mounts cannot provide the no-host-worktree boundary"
+        )
+    if fleet.restricted:
+        fleet.validate_restricted()
+        config.acp_command_for(fleet)
 
     target = count if count is not None else fleet.size
     existing = _fleet_members(config, fleet_name)
+    workspace_folder = fleet.workspace_folder or config.workspace_folder
+    exec_user = fleet.exec_user or config.exec_user
+    if fleet.restricted:
+        current_image_id = _image_id(fleet.image) if existing else None
+        expected_policy = fleet.security_policy_fingerprint(
+            workspace_folder,
+            exec_user,
+        )
+        stale = [
+            c.name
+            for c in existing
+            if c.security_profile != fleet.security_profile
+            or c.security_policy != expected_policy
+            or (current_image_id and c.security_image_id != current_image_id)
+        ]
+        if stale:
+            raise RuntimeError(
+                f"Restricted fleet '{fleet_name}' has containers with a stale "
+                f"or mismatched security policy: {', '.join(stale)}. "
+                "Recreate them before dispatch."
+            )
     need = target - len(existing)
     if need <= 0:
         log.info(
@@ -251,7 +451,6 @@ def up(config: ContainersConfig, fleet_name: str, count: int | None = None) -> l
 
     prefix = fleet.prefix(fleet_name)
     indices = _next_indices(existing, prefix, need)
-    exec_user = fleet.exec_user or config.exec_user
     created: list[str] = []
     for idx in indices:
         name = f"{prefix}-{idx}"
@@ -265,7 +464,15 @@ def up(config: ContainersConfig, fleet_name: str, count: int | None = None) -> l
                 )
             )
         else:
-            created.append(_image_run(fleet_name, fleet, name))
+            created.append(
+                _image_run(
+                    fleet_name,
+                    fleet,
+                    name,
+                    workspace_folder=workspace_folder,
+                    exec_user=exec_user,
+                )
+            )
     return created
 
 
@@ -281,9 +488,30 @@ def down(config: ContainersConfig, fleet_name: str) -> list[str]:
 
 def start(config: ContainersConfig, fleet_name: str) -> list[str]:
     """Start all stopped containers in a fleet."""
+    from .lifecycle import restricted_policy_errors
+
+    fleet = config.fleets.get(fleet_name)
+    if fleet is None:
+        raise RuntimeError(f"Fleet '{fleet_name}' is not defined in containers.yaml")
     started = []
     for c in _fleet_members(config, fleet_name):
         if not c.is_running:
+            if fleet.restricted or c.security_profile == "restricted":
+                if not fleet.restricted or c.security_profile != "restricted":
+                    raise RuntimeError(
+                        f"Container '{c.name}' security profile does not match its fleet"
+                    )
+                errors = restricted_policy_errors(
+                    c,
+                    fleet,
+                    workspace_folder=fleet.workspace_folder or config.workspace_folder,
+                    exec_user=fleet.exec_user or config.exec_user,
+                )
+                if errors:
+                    raise RuntimeError(
+                        f"Container '{c.name}' does not satisfy the restricted "
+                        f"security policy: {'; '.join(errors)}"
+                    )
             start_container(c.name)
             started.append(c.name)
     return started

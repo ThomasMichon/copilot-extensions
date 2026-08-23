@@ -58,3 +58,19 @@ fleets:
     image: myregistry/my-agent-image:latest
     size: 1
     exec_user: root
+
+  restricted-worker:
+    # Restricted backend: no host credentials, no relay, no host workspace
+    # mount, read-only rootfs, bounded tmpfs workspace/home, dropped
+    # capabilities, no privilege escalation, and CPU/memory/PID ceilings.
+    image: example/minimal-agent:latest
+    security_profile: restricted
+    workspace_folder: /workspace
+    exec_user: agent
+    acp_command: "cd /workspace && minimal-agent --stdio"
+    network: none                         # explicit network name/mode when needed
+    memory: 4g                            # restricted default
+    cpus: 2                               # restricted default
+    pids_limit: 256                       # restricted default
+    workspace_size: 2g                    # restricted default; cleared on stop
+    home_size: 512m                       # restricted default; cleared on stop

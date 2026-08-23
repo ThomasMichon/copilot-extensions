@@ -17,6 +17,10 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
+import json
+import math
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -34,10 +38,20 @@ CONFIG_FILENAME = "containers.yaml"
 # containers that were not created by the VS Code devcontainer flow (which
 # would otherwise carry `devcontainer.local_folder`).
 FLEET_LABEL = "agent-containers.fleet"
+SECURITY_PROFILE_LABEL = "agent-containers.security-profile"
+SECURITY_POLICY_LABEL = "agent-containers.security-policy"
+SECURITY_HOME_LABEL = "agent-containers.security-home"
+SECURITY_UID_LABEL = "agent-containers.security-uid"
+SECURITY_GID_LABEL = "agent-containers.security-gid"
+SECURITY_IMAGE_ID_LABEL = "agent-containers.security-image-id"
 
 # Default ACP launch command run inside the container. Mirrors the codespaces
 # resolver. ``--allow-all-tools`` is required for headless dispatch.
 DEFAULT_ACP_COMMAND = "copilot --acp --stdio --allow-all-tools"
+TRUSTED_PROFILE = "trusted"
+RESTRICTED_PROFILE = "restricted"
+SECURITY_PROFILES = {TRUSTED_PROFILE, RESTRICTED_PROFILE}
+RESTRICTED_POLICY_VERSION = 1
 
 
 @dataclass
@@ -126,6 +140,22 @@ class FleetConfig:
     workspace_folder: str | None = None
     exec_user: str | None = None
     acp_command: str | None = None
+    # Trusted development venues preserve the historical host-integrated
+    # behavior. Restricted venues are a fail-closed transport boundary.
+    security_profile: str = TRUSTED_PROFILE
+    # Docker network name/mode. Restricted fleets default to "none"; trusted
+    # fleets retain Docker's default network when this is unset.
+    network: str | None = None
+    # Restricted resource ceilings. Safe defaults apply when omitted.
+    memory: str | None = None
+    cpus: float | None = None
+    pids_limit: int | None = None
+    workspace_size: str | None = None
+    home_size: str | None = None
+    # Per-fleet credential overrides. Restricted fleets always resolve both
+    # capabilities false, regardless of these values.
+    forward_gh_token: bool | None = None
+    relay_enabled: bool | None = None
     # "clone" (Model A, default) or "mount" (Model B, future).
     code_model: str = "clone"
 
@@ -144,6 +174,96 @@ class FleetConfig:
         if not p.is_absolute() and self.devcontainer_path:
             p = Path(self.devcontainer_path).expanduser() / p
         return str(p)
+
+    @property
+    def restricted(self) -> bool:
+        return self.security_profile == RESTRICTED_PROFILE
+
+    def effective_network(self) -> str | None:
+        if self.network:
+            return self.network
+        return "none" if self.restricted else None
+
+    def effective_memory(self) -> str | None:
+        if self.memory:
+            return self.memory
+        return "4g" if self.restricted else None
+
+    def effective_cpus(self) -> float | None:
+        if self.cpus is not None:
+            return self.cpus
+        return 2.0 if self.restricted else None
+
+    def effective_pids_limit(self) -> int | None:
+        if self.pids_limit is not None:
+            return self.pids_limit
+        return 256 if self.restricted else None
+
+    def effective_workspace_size(self) -> str | None:
+        if self.workspace_size:
+            return self.workspace_size
+        return "2g" if self.restricted else None
+
+    def effective_home_size(self) -> str | None:
+        if self.home_size:
+            return self.home_size
+        return "512m" if self.restricted else None
+
+    def validate_restricted(self) -> None:
+        """Reject restricted settings that disable their own resource bounds."""
+        if not self.restricted:
+            return
+        if self.effective_cpus() <= 0 or not math.isfinite(self.effective_cpus()):
+            raise RuntimeError("Restricted fleet 'cpus' must be a positive finite value")
+        if self.effective_pids_limit() <= 0:
+            raise RuntimeError("Restricted fleet 'pids_limit' must be positive")
+        for field_name, value in (
+            ("memory", self.effective_memory()),
+            ("workspace_size", self.effective_workspace_size()),
+            ("home_size", self.effective_home_size()),
+        ):
+            match = re.fullmatch(
+                r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?b?)?\s*",
+                str(value).lower(),
+            )
+            if not match or float(match.group(1)) <= 0:
+                raise RuntimeError(
+                    f"Restricted fleet '{field_name}' must be a positive byte size"
+                )
+
+    def security_policy_fingerprint(
+        self,
+        workspace_folder: str,
+        exec_user: str,
+    ) -> str | None:
+        """Fingerprint the enforced restricted creation policy.
+
+        Persisted as a Docker label so a config change cannot make an old,
+        differently-provisioned container merely *look* restricted. Bump
+        ``RESTRICTED_POLICY_VERSION`` whenever the fixed hardening set changes.
+        """
+        if not self.restricted:
+            return None
+        policy = {
+            "version": RESTRICTED_POLICY_VERSION,
+            "network": self.effective_network(),
+            "memory": self.effective_memory(),
+            "memory_swap": self.effective_memory(),
+            "cpus": self.effective_cpus(),
+            "pids_limit": self.effective_pids_limit(),
+            "workspace_size": self.effective_workspace_size(),
+            "home_size": self.effective_home_size(),
+            "workspace_folder": workspace_folder,
+            "image": self.image,
+            "exec_user": exec_user,
+            "rootfs": "read-only",
+            "capabilities": "drop-all",
+            "no_new_privileges": True,
+            "host_mounts": False,
+            "writable_surfaces": "bounded-tmpfs",
+        }
+        encoded = json.dumps(policy, sort_keys=True, separators=(",", ":")).encode()
+        return hashlib.sha256(encoded).hexdigest()[:16]
 
 
 @dataclass
@@ -206,6 +326,46 @@ class ContainersConfig:
         if ws:
             return f"cd {ws} && {DEFAULT_ACP_COMMAND}"
         return DEFAULT_ACP_COMMAND
+
+    def credentials_for(self, fleet: FleetConfig | None) -> tuple[bool, bool]:
+        """Return effective (GitHub token, credential relay) forwarding.
+
+        Restricted fleets are a hard boundary: config cannot opt either host
+        credential path back in. Trusted fleets may override the global defaults.
+        """
+        if fleet and fleet.restricted:
+            return False, False
+        forward = (
+            fleet.forward_gh_token
+            if fleet and fleet.forward_gh_token is not None
+            else self.forward_gh_token
+        )
+        relay = (
+            fleet.relay_enabled
+            if fleet and fleet.relay_enabled is not None
+            else self.relay_enabled
+        )
+        return forward, relay
+
+    def acp_command_for(self, fleet: FleetConfig | None) -> str:
+        """Resolve a fleet launch command, failing closed for restricted fleets."""
+        workspace = (
+            fleet.workspace_folder if fleet and fleet.workspace_folder else None
+        ) or self.workspace_folder
+        if fleet and fleet.restricted:
+            if not fleet.acp_command:
+                raise RuntimeError(
+                    "Restricted fleet requires an explicit per-fleet "
+                    "'acp_command'; the trusted --allow-all-tools default is disabled"
+                )
+            return self.effective_acp_command(
+                workspace_folder=workspace,
+                acp_command=fleet.acp_command,
+            )
+        return self.effective_acp_command(
+            workspace_folder=workspace,
+            acp_command=(fleet.acp_command if fleet else None),
+        )
 
 
 def _knowledge_overlay_config() -> Path | None:
@@ -333,7 +493,14 @@ def load_config() -> ContainersConfig:
     fleets = data.get("fleets", {}) or {}
     for name, raw in fleets.items():
         raw = raw or {}
-        config.fleets[name] = FleetConfig(
+        security_profile = str(raw.get("security_profile", TRUSTED_PROFILE)).lower()
+        if security_profile not in SECURITY_PROFILES:
+            expected = ", ".join(sorted(SECURITY_PROFILES))
+            raise RuntimeError(
+                f"Fleet '{name}' has invalid security_profile "
+                f"'{security_profile}' (expected one of: {expected})"
+            )
+        fleet = FleetConfig(
             repo=raw.get("repo", ""),
             devcontainer_path=raw.get("devcontainer_path"),
             devcontainer_config=raw.get("devcontainer_config"),
@@ -343,8 +510,31 @@ def load_config() -> ContainersConfig:
             workspace_folder=raw.get("workspace_folder"),
             exec_user=raw.get("exec_user"),
             acp_command=raw.get("acp_command"),
+            security_profile=security_profile,
+            network=raw.get("network"),
+            memory=raw.get("memory"),
+            cpus=(float(raw["cpus"]) if raw.get("cpus") is not None else None),
+            pids_limit=(
+                int(raw["pids_limit"])
+                if raw.get("pids_limit") is not None
+                else None
+            ),
+            workspace_size=raw.get("workspace_size"),
+            home_size=raw.get("home_size"),
+            forward_gh_token=(
+                bool(raw["forward_gh_token"])
+                if "forward_gh_token" in raw
+                else None
+            ),
+            relay_enabled=(
+                bool(raw["relay_enabled"])
+                if "relay_enabled" in raw
+                else None
+            ),
             code_model=raw.get("code_model", "clone"),
         )
+        fleet.validate_restricted()
+        config.fleets[name] = fleet
 
     log.debug("Loaded containers.yaml from %s (%d fleets)", path, len(config.fleets))
     return config

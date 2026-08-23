@@ -28,7 +28,13 @@ from agent_procutil import no_window_flags
 from ._invoke import module_argv
 from .config import load_config
 from .lease import get_lease
-from .lifecycle import get_container, inspect_state, list_containers, start_container
+from .lifecycle import (
+    get_container,
+    inspect_state,
+    list_containers,
+    restricted_policy_errors,
+    start_container,
+)
 
 if TYPE_CHECKING:
     from agent_bridge.agent_registry import NamespaceAgentInfo
@@ -152,6 +158,10 @@ class ContainerResolver:
             )
 
         fleet = config.fleets.get(info.fleet or "")
+        if fleet is None:
+            raise KeyError(
+                f"Container '{name}' has no matching fleet configuration"
+            )
         user = (fleet.exec_user if fleet else None) or config.exec_user
 
         # Spawn the transport wrapper, not docker directly. The wrapper fetches
@@ -181,6 +191,7 @@ class ContainerResolver:
             repo = c.repo or (c.fleet or "")
             display = f"{c.name} ({repo})" if repo else c.name
             description = f"Local dev container: {c.image}"
+            description += f" — {c.security_profile}"
             if lease:
                 description += f" — leased by {lease.effort}"
             # Map docker state to a coarse ready/stopped signal.
@@ -196,6 +207,32 @@ class ContainerResolver:
 
     async def ensure_ready(self, name: str) -> None:
         """Ensure the container exists and is running (start if stopped)."""
+        config = load_config()
+        info = await asyncio.to_thread(get_container, config, name)
+        if info is None:
+            raise RuntimeError(f"Container '{name}' is not a discovered fleet member")
+        fleet = config.fleets.get(info.fleet or "")
+        if fleet is None:
+            raise RuntimeError(
+                f"Container '{name}' has no matching fleet configuration"
+            )
+        if fleet.restricted or info.security_profile == "restricted":
+            if not fleet.restricted or info.security_profile != "restricted":
+                raise RuntimeError(
+                    f"Container '{name}' security profile does not match its fleet"
+                )
+            errors = await asyncio.to_thread(
+                restricted_policy_errors,
+                info,
+                fleet,
+                workspace_folder=fleet.workspace_folder or config.workspace_folder,
+                exec_user=fleet.exec_user or config.exec_user,
+            )
+            if errors:
+                raise RuntimeError(
+                    f"Container '{name}' does not satisfy the restricted "
+                    f"security policy: {'; '.join(errors)}"
+                )
         state = await asyncio.to_thread(inspect_state, name)
         if state is None:
             raise RuntimeError(f"Container '{name}' not found")

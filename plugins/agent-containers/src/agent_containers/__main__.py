@@ -26,7 +26,7 @@ from pathlib import Path
 from agent_procutil import no_window_flags
 
 from . import __version__
-from .config import load_config
+from .config import RESTRICTED_PROFILE, SECURITY_PROFILE_LABEL, load_config
 from .resolver import build_spawn_command, host_gh_token
 
 log = logging.getLogger("agent-containers")
@@ -245,7 +245,7 @@ def _cmd_relay_profile() -> int:
 
 def _cmd_fleet(args: argparse.Namespace) -> int:
     from .lease import get_lease
-    from .lifecycle import list_containers
+    from .lifecycle import inspect_container, list_containers, restricted_policy_errors
     config = load_config()
     containers = list_containers(config)
     if getattr(args, "json", False):
@@ -254,6 +254,49 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
         out = []
         for c in containers:
             lease = get_lease(c.name)
+            fleet = config.fleets.get(c.fleet or "")
+            posture_errors = []
+            actual_profile = c.security_profile
+            actual_network = None
+            inspected = None
+            if fleet and fleet.restricted or actual_profile == RESTRICTED_PROFILE:
+                try:
+                    inspected = inspect_container(c.name)
+                    actual_profile = (
+                        (inspected.get("Config") or {}).get("Labels") or {}
+                    ).get(SECURITY_PROFILE_LABEL, "trusted")
+                    actual_network = (inspected.get("HostConfig") or {}).get(
+                        "NetworkMode"
+                    )
+                except RuntimeError as exc:
+                    actual_profile = "unknown"
+                    posture_errors = [str(exc)]
+            forward, relay = (
+                config.credentials_for(fleet) if fleet else (False, False)
+            )
+            workspace = (
+                fleet.workspace_folder if fleet and fleet.workspace_folder else None
+            ) or config.workspace_folder
+            exec_user = (
+                fleet.exec_user if fleet and fleet.exec_user else None
+            ) or config.exec_user
+            if fleet and fleet.restricted:
+                try:
+                    posture_errors.extend(restricted_policy_errors(
+                        c,
+                        fleet,
+                        workspace_folder=workspace,
+                        exec_user=exec_user,
+                        inspected=inspected,
+                    ))
+                except RuntimeError as exc:
+                    posture_errors.append(str(exc))
+            elif actual_profile == RESTRICTED_PROFILE:
+                posture_errors.append(
+                    "restricted container has no matching fleet configuration"
+                )
+            if actual_profile == RESTRICTED_PROFILE:
+                forward, relay = False, False
             out.append({
                 "name": c.name,
                 "container_id": c.container_id,
@@ -263,6 +306,17 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "fleet": c.fleet,
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
+                "security_profile": actual_profile,
+                "configured_security_profile": (
+                    fleet.security_profile if fleet else None
+                ),
+                "security_policy_current": not posture_errors,
+                "security_policy_errors": posture_errors,
+                "network": actual_network,
+                "host_credentials": {
+                    "github_token": forward,
+                    "relay": relay,
+                },
             })
         print(json.dumps(out, indent=2, default=str))
         return 0
@@ -406,24 +460,56 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     silently breaks the ACP channel. Without ``--stdio`` the child inherits our
     stdio for interactive/manual use.
     """
-    from .lifecycle import get_container
+    from .lifecycle import get_container, inspect_container, restricted_policy_errors
 
     config = load_config()
-    info = None
     try:
         info = get_container(config, args.name)
     except RuntimeError as exc:
-        log.warning("Container lookup failed (%s); using global defaults", exc)
+        raise RuntimeError(
+            f"Container lookup failed for '{args.name}'; refusing dispatch: {exc}"
+        ) from exc
+    if info is None:
+        raise RuntimeError(
+            f"Container '{args.name}' is not a discovered fleet member; "
+            "refusing dispatch"
+        )
+    inspected = inspect_container(args.name)
+    actual_profile = (
+        (inspected.get("Config") or {}).get("Labels") or {}
+    ).get(SECURITY_PROFILE_LABEL, "trusted")
     fleet = config.fleets.get(info.fleet or "") if info and info.fleet else None
+    if fleet is None:
+        raise RuntimeError(
+            f"Container '{args.name}' has no matching fleet configuration; "
+            "refusing dispatch"
+        )
+    if fleet and fleet.restricted:
+        workspace = fleet.workspace_folder or config.workspace_folder
+        user = fleet.exec_user or config.exec_user
+        posture_errors = restricted_policy_errors(
+            info,
+            fleet,
+            workspace_folder=workspace,
+            exec_user=user,
+        )
+        if posture_errors:
+            raise RuntimeError(
+                f"Container '{args.name}' does not satisfy the restricted "
+                f"security policy: {'; '.join(posture_errors)}"
+            )
+    elif actual_profile == RESTRICTED_PROFILE:
+        raise RuntimeError(
+            f"Container '{args.name}' is labeled restricted but its configured "
+            "fleet is not; refusing dispatch"
+        )
 
     user = (fleet.exec_user if fleet else None) or config.exec_user
-    workspace = (fleet.workspace_folder if fleet else None) or config.workspace_folder
-    acp_command = config.effective_acp_command(
-        workspace_folder=workspace,
-        acp_command=(fleet.acp_command if fleet else None),
-    )
+    acp_command = config.acp_command_for(fleet)
 
-    forward = config.forward_gh_token
+    forward, relay_enabled = config.credentials_for(fleet)
+    if actual_profile == RESTRICTED_PROFILE:
+        forward, relay_enabled = False, False
     env = os.environ.copy()
     if forward:
         token = host_gh_token()
@@ -440,7 +526,7 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     # so in-container auth (Azure storage for rush dev-deploy) is fetched from the
     # host relay over host.docker.internal.
     relay_env: list[str] = []
-    if config.relay_enabled:
+    if relay_enabled:
         try:
             from .container_shims import deploy as deploy_shims
             from .relay_provider import token_for
