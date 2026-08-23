@@ -238,12 +238,11 @@ def _overlay_cached_state(raw: dict, rec) -> None:
     cache (stamped by a prior populate / Refresh). Two exceptions are resolved
     live because they are CHEAP and must be correct immediately:
 
-    * **ACTIVE** -- a live ``inuse.<pid>.lock`` in one of this worktree's
-      registered session folders (``sessions.worktree_has_live_session`` -- a
-      targeted glob + pid-check, not a machine scan) means a running Copilot.
-      ACTIVE wins over ANY cached/terminal/unknown state, because git's own
-      ``active`` derivation needs exactly this lock scan, so a running worktree
-      would otherwise render ``?``/stale until the Pass 2 classify.
+    * **Lock state** -- ``sessions.worktree_session_lock_state`` performs a
+      targeted glob + pid-check (not a machine scan) across the worktree's
+      registered sessions. A live ``inuse.<pid>.lock`` means a running Copilot
+      and forces ACTIVE over any cached/terminal/unknown state; dead-PID residue
+      is surfaced separately as ``session_lock_stale`` for the ``LOCK`` marker.
     * The cached ``bound_live`` hint (``session_bound_live`` -- the
       cwd-independent #1416 bare-resume signal, read cache-only by
       ``_worktree_to_dict``) is the second live signal.
