@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
-import sys
 from pathlib import Path
 
 import pytest
@@ -39,13 +38,14 @@ def _staged_dirs_cleanup(*dirs: str) -> None:
 def test_spawn_stages_package_and_launches_detached(cfg, monkeypatch):
     _FakePopen.calls = []
     monkeypatch.setattr(spawn.subprocess, "Popen", _FakePopen)
+    monkeypatch.setattr(spawn, "windowless_python", lambda _python: "PYTHONW")
 
     rc = spawn.spawn_detached_sync(cfg, prune=False)
 
     assert rc == 0
     assert len(_FakePopen.calls) == 1
     cmd, kwargs = _FakePopen.calls[0]
-    assert cmd == [sys.executable, "-m", "agent_logger.sync.engine", "run"]
+    assert cmd == ["PYTHONW", "-m", "agent_logger.sync.engine", "run"]
 
     staged = kwargs["cwd"]
     # cwd is a fresh temp staging dir -- never the caller's (worktree) cwd.

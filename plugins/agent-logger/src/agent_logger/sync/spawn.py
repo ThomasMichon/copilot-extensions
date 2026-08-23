@@ -41,7 +41,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 
 from agent_logger.sync.lock import sync_lock
 
@@ -128,7 +128,7 @@ def spawn_detached_sync(cfg, *, prune: bool = False) -> int:
     else:
         env.pop(STAGED_ENV, None)
 
-    cmd = [sys.executable, "-m", "agent_logger.sync.engine", "run"]
+    cmd = [windowless_python(sys.executable), "-m", "agent_logger.sync.engine", "run"]
     if prune:
         cmd.append("--prune")
 

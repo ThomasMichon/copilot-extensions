@@ -16,12 +16,17 @@ exact creation flags) can't drift between copies:
 * :func:`detached_kwargs` -- fully detach a background child so it outlives its
   parent AND carries no console (so no window); optionally break away from a
   parent Job object.
+* :func:`windowless_python` -- select ``pythonw.exe`` for a detached Python
+  daemon on Windows so the venv launcher cannot allocate a second console.
 
 Both are no-ops off Windows (``no_window_kwargs`` -> ``{}``; ``detached_kwargs``
 -> ``start_new_session=True``), so call sites stay platform-agnostic::
 
     subprocess.run(cmd, capture_output=True, **no_window_kwargs())
-    subprocess.Popen(cmd, **detached_kwargs(breakaway=True))
+    subprocess.Popen(
+        [windowless_python(), "-m", "my_daemon"],
+        **detached_kwargs(breakaway=True),
+    )
 
 Vendored per plugin at ``plugins/<plugin>/libs/agent-procutil``; every copy's
 ``src`` tree MUST stay byte-identical (enforced by
@@ -32,6 +37,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 # Win32 process-creation flags. Read from ``subprocess`` when present (Windows)
 # and fall back to the stable ABI literals so this module imports cleanly off
@@ -41,7 +47,12 @@ _DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
-__all__ = ["no_window_flags", "no_window_kwargs", "detached_kwargs"]
+__all__ = [
+    "no_window_flags",
+    "no_window_kwargs",
+    "detached_kwargs",
+    "windowless_python",
+]
 
 
 def no_window_flags() -> int:
@@ -67,6 +78,23 @@ def no_window_kwargs() -> dict:
     if os.name == "nt":
         return {"creationflags": _CREATE_NO_WINDOW}
     return {}
+
+
+def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
+    """Return the interpreter for a fully detached Python daemon.
+
+    A Windows venv ``python.exe`` is a console-subsystem launcher. Even when it
+    starts under ``DETACHED_PROCESS``, it re-execs the base ``python.exe`` as a
+    child, which allocates a fresh console that Windows Terminal may capture.
+    Its ``pythonw.exe`` sibling is a GUI-subsystem launcher and never allocates
+    that console. Off Windows, or when no sibling exists, return the requested
+    interpreter unchanged.
+    """
+    python = os.fspath(executable) if executable is not None else sys.executable
+    if os.name != "nt":
+        return python
+    candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
+    return candidate if os.path.isfile(candidate) else python
 
 
 def detached_kwargs(*, breakaway: bool = False) -> dict:

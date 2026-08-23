@@ -9,7 +9,7 @@ import sys
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 
 from . import config, rendezvous
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
@@ -307,7 +307,7 @@ def start_service(tcp_port: int | None = None) -> bool:
             return True
         tcp_port = context.port
 
-    cmd = [sys.executable, "-m", "agent_vault.service"]
+    cmd = [windowless_python(sys.executable), "-m", "agent_vault.service"]
     if tcp_port:
         cmd.extend(["--tcp-port", str(tcp_port)])
 
