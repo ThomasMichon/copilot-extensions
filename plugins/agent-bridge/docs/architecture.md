@@ -322,7 +322,21 @@ if no cutover ever retires the daemon -- so an aborted cutover (or a diagnosis
 session that is itself 503'd by the gate it is investigating) self-heals instead
 of returning 503 forever.
 
-### 3. Active/passive cutover (installer-driven `agent-bridge deploy`)
+### 3. Active/passive cutover (internal seam -- `agent-bridge deploy`, not an operator command)
+
+> **Deploy via the normal plugin update flow, not this seam.** To ship an
+> agent-bridge build, refresh the plugin payload (`copilot plugin update
+> agent-bridge`) and let the plugin's own installer reconcile cut the daemon over
+> (`scripts/install.sh update`, run by the host's plugin-update integration or the
+> plugin's sessionStart hook). `agent-bridge deploy` is an **internal** cutover
+> seam the installer drives; running it by hand is **not** a recommended operator
+> mechanism. It stays exposed only for installer internals and `--recover`.
+>
+> Note the normal flow must reliably (a) restart the running daemon into the new
+> version -- `copilot plugin update` refreshes the payload but does not itself
+> restart the daemon -- and (b) key the plugin version off `plugin.json` (a
+> `pyproject.toml`-only bump does not advance the marketplace catalog). Keep the
+> two version fields in lockstep.
 
 `agent-bridge deploy [--drain-timeout SECONDS] [--force]` is an internal seam
 the installer invokes during `update`/activation when a live daemon exists. It

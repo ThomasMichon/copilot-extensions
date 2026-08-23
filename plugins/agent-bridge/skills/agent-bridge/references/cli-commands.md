@@ -233,9 +233,14 @@ it, and the old daemon retire -- with no client ever dialing a dead port.
 agent-bridge drain --timeout 300
 agent-bridge undrain                 # release the gate (rollback)
 
-# Active/passive cutover is installer-driven. Operators normally do NOT run this
-# seam directly; `install.* update` invokes it after building/activating the new
-# versioned runtime slot. It remains exposed for installer internals and recovery:
+# Active/passive cutover is an INTERNAL installer seam -- NOT an operator
+# command. Do NOT run `agent-bridge deploy` to ship a build. The canonical
+# deploy path is the normal plugin update flow: refresh the payload
+# (`copilot plugin update agent-bridge`) and let the plugin's installer reconcile
+# cut the daemon over (`scripts/install.sh update`, via the host's plugin-update
+# integration or the sessionStart hook). Keep `plugin.json` / `pyproject.toml`
+# versions in lockstep (the marketplace keys off `plugin.json`). `deploy` remains
+# exposed only for installer internals and recovery:
 agent-bridge deploy --recover        # heal a prior aborted cutover, then exit
 ```
 
