@@ -78,8 +78,15 @@ def _cs(name="cs-1", repo=_CS_REPO, state="Available"):
 
 
 def _remote_cmd(spawn_command):
-    """Extract the --remote-cmd payload from a spawn command list."""
-    return spawn_command[spawn_command.index("--remote-cmd") + 1]
+    """Extract the ACP payload from a spawn command's --remote-cmd-file.
+
+    The launch payload is routed through a durable file (``--remote-cmd-file
+    PATH``), not an inline ``--remote-cmd`` string (#916 / dotfiles#1724), so
+    read the payload back from that file.
+    """
+    path = spawn_command[spawn_command.index("--remote-cmd-file") + 1]
+    with open(path, encoding="utf-8") as fh:
+        return fh.read()
 
 
 @pytest.fixture
