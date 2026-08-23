@@ -11,6 +11,8 @@ description: >
   - '/handoff-continue'
   - '/resume-handoff'
   - 'resume handoff'
+  - 'resume from handoff'
+  - 'resume from a handoff'
   - 'consume handoff'
   - 'continuation prompt'
   - 'hand off and continue'
@@ -144,6 +146,39 @@ previous session produced:
    continuation. Re-running it on a consumed file returns a stop notice instead
    of replaying the brief.
 
+### Natural-language resume requests: sweep this worktree's state first
+
+When the user says "resume from handoff", "pick up from last session", or
+similar **without pasting an exact handoff id/prompt**, do not begin with a
+global agent-dispatch query or cross-session search. The current worktree's
+agent-worktrees state is the authoritative first stop:
+
+1. Resolve the local state directory with
+   `agent-worktrees get worktree-state-dir`. If the session resumed with a CWD
+   outside its worktree, retry with the current session id:
+   `agent-worktrees get worktree-state-dir --session-id <session-id>`.
+2. Sweep `<worktree-state-dir>/handoff/*.json`, newest first. Select only a
+   valid `kind: "context-handoff"` record for this worktree whose `consumed`
+   value is not `true`. Call `consume_handoff` with its exact `path`; do not
+   merely read or replay `promptText`, because the tool owns one-time
+   consumption and predecessor retirement.
+3. If no unconsumed file exists, read the worktree-local pointer history with
+   `agent-worktrees status --history --json --limit 20` (pass
+   `--worktree-id <id>` when CWD cannot resolve it). Walk newest-first for a
+   `kind: "handoff"` entry. If it names `handoff task <id>`, call
+   `consume_handoff` with that exact `task_id`.
+4. Only when local state has neither a file baton nor an exact task pointer,
+   query agent-dispatch for `proposed`, `handoff`-labeled tasks. Filter the
+   result to `target_worktree == <current-worktree-id>` before choosing the
+   newest task; never consume a task selected only by repo, title, or global
+   recency.
+5. Only after the complete worktree-local and worktree-filtered sweep finds
+   nothing, fall back to `session_store_sql` for recent-session recovery. That
+   fallback summarizes prior work; it is not a handoff consumption path.
+
+If the user supplied an exact handoff id/path or the extension already injected
+the handoff, skip discovery and consume/continue that exact baton.
+
 ### `/resume-handoff` — an injected slash command (extension-provided)
 
 When the operator runs `/resume-handoff` in the target worktree, the extension:
@@ -160,9 +195,10 @@ re-claim or re-complete a baton that `/resume-handoff` already consumed.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
-The previous session's handoff was not pasted in. Try `/resume-handoff` first;
-if nothing is pending, fall back to `session_store_sql` to identify the most
-recent session for this repo/worktree and summarize what was worked on.
+The previous session's handoff was not pasted in. Perform the state-first sweep
+above. If nothing is pending after its local-state, exact-pointer, and
+worktree-filtered task checks, fall back to `session_store_sql` to identify the
+most recent session for this repo/worktree and summarize what was worked on.
 
 ---
 
