@@ -151,6 +151,14 @@ class StartSessionRequest(BaseModel):
     # ``POST /worktrees/{id}/resume``. Distinct from ``force_new`` (which only
     # opts out of caller-affinity reuse, and does NOT bypass the head guard).
     reclaim: bool = False
+    # Per-session model / reasoning-effort override for THIS session only. Copilot
+    # ignores the ``--model`` launch flag in ``--acp`` mode, so agent-bridge sets
+    # the model per-session via ``session/set_config_option``; these fields feed
+    # that path (``agent-bridge create --model/--effort``) at highest precedence
+    # over the daemon's env / host-settings default (see
+    # ``AcpClient._apply_model_config``). None / omitted keeps the daemon default.
+    model: str | None = None
+    effort: str | None = None
     # Per-session MCP servers mounted into the ACP session at session/new, giving
     # this session a bespoke, run-bound toolset (e.g. an AI code-review
     # toolset). Each entry is an ACP MCP server spec; ``type`` selects the

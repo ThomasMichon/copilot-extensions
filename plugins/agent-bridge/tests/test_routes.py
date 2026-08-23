@@ -40,13 +40,14 @@ def _route_local_start_via_classic(monkeypatch):
     async def _fake_connect(
         self, target, *, tracker, session_id, on_acp_event,
         permission_callback=None, mcp_servers=None, spawner=None,
-        remote_child_argv=None, remote_cwd=None,
+        remote_child_argv=None, remote_cwd=None, model=None, effort=None,
     ):
         proc = await sm.spawn(
             target, tracker=tracker, connect_timeout=0, session_id=session_id,
         )
         client = sm.AcpClient(
             on_event=on_acp_event, on_permission=permission_callback,
+            model_override=model, effort_override=effort,
         )
         await client.start(proc.proc)
         acp_sid = await client.new_session(

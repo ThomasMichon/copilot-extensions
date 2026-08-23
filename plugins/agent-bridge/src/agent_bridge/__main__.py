@@ -2167,6 +2167,8 @@ def _resolve_target(
     force_new: bool = False,
     refuse_on_conflict: bool = False,
     force: bool = False,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> str:
     """Resolve a target string to a session ID.
 
@@ -2259,6 +2261,8 @@ def _resolve_target(
             force_new=force_new,
             refuse_on_conflict=refuse_on_conflict,
             force=force,
+            model=model,
+            effort=effort,
         )
 
     # Not in the cached agent list -- hand the target to the server as-is so its
@@ -2270,6 +2274,8 @@ def _resolve_target(
             force_new=force_new,
             refuse_on_conflict=refuse_on_conflict,
             force=force,
+            model=model,
+            effort=effort,
         )
     except BridgeClientError as exc:
         if exc.status != 404:
@@ -2349,6 +2355,8 @@ def _cmd_create(args: argparse.Namespace) -> None:
     try:
         session_id = _resolve_target(
             client, target, force_new=True, refuse_on_conflict=True,
+            model=getattr(args, "model", None),
+            effort=getattr(args, "effort", None),
         )
     except _AgentSessionConflict as conflict:
         sid = conflict.existing_session_id
@@ -2704,6 +2712,8 @@ def _start_agent_session(
     force_new: bool = False,
     refuse_on_conflict: bool = False,
     force: bool = False,
+    model: str | None = None,
+    effort: str | None = None,
 ) -> str:
     """Start or reuse a session for a named agent.
 
@@ -2764,6 +2774,7 @@ def _start_agent_session(
             agent=agent_name, caller_id=caller_id,
             sender_repo=_sender_repo(), force_new=force_new,
             caller_owner_ref=_worktrees_get("owner-ref"),
+            model=model, effort=effort,
         )
     except BridgeClientError as exc:
         # Session-lifecycle head guard: a create into an existing worktree whose
@@ -2800,6 +2811,7 @@ def _start_agent_session(
                 return _start_agent_session(
                     client, agent_name, force_new=force_new,
                     refuse_on_conflict=refuse_on_conflict, force=False,
+                    model=model, effort=effort,
                 )
             # Same #21 guard for a session held by *another* caller: if it is
             # mid-turn, don't silently adopt-and-block -- fail fast (or take
@@ -2826,6 +2838,7 @@ def _start_agent_session(
                 return _start_agent_session(
                     client, agent_name, force_new=force_new,
                     refuse_on_conflict=refuse_on_conflict, force=False,
+                    model=model, effort=effort,
                 )
             return _reuse_existing(client, session, agent_name)
         raise
@@ -4052,6 +4065,18 @@ def build_parser() -> argparse.ArgumentParser:
     create_p.add_argument(
         "--no-wait", action="store_true",
         help="Return immediately without waiting for response",
+    )
+    create_p.add_argument(
+        "--model", dest="model", default=None, metavar="MODEL",
+        help="Run THIS session on MODEL (e.g. gpt-5.6-sol). Copilot ignores "
+             "--model in ACP mode, so the bridge applies it per-session via "
+             "session/set_config_option, at highest precedence over the daemon "
+             "default. Omit to keep the daemon's default model.",
+    )
+    create_p.add_argument(
+        "--effort", dest="effort", default=None, metavar="EFFORT",
+        help="Reasoning-effort override for THIS session (e.g. low|medium|high), "
+             "applied the same per-session way as --model.",
     )
     _add_stream_args(create_p)
     create_p.set_defaults(func=_cmd_create)

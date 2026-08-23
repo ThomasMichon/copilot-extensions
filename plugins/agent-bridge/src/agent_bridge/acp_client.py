@@ -450,9 +450,18 @@ class AcpClient:
             ]
             | None
         ) = None,
+        model_override: str | None = None,
+        effort_override: str | None = None,
     ) -> None:
         self._on_event = on_event
         self._on_permission = on_permission
+        # Per-session model / reasoning-effort override (highest precedence over
+        # the env / host-settings resolution in ``resolve_acp_model_config``).
+        # Set from ``agent-bridge create --model/--effort`` so a single session
+        # can run a chosen model regardless of the daemon's ambient default.
+        # See ``_apply_model_config``.
+        self.model_override = model_override
+        self.effort_override = effort_override
 
         self._process: asyncio.subprocess.Process | None = None
         self._connection: ClientSideConnection | None = None
@@ -778,7 +787,16 @@ class AcpClient:
             desired = resolve_acp_model_config()
         except Exception as exc:
             log.debug("ACP model-config resolution failed: %s", exc)
-            return
+            desired = {}
+        # A per-session override (``agent-bridge create --model/--effort``) wins
+        # over the env / host-settings resolution: this session was explicitly
+        # asked to run a specific model/effort, so it must not be masked by the
+        # daemon's ambient default (dotfiles#790 gave a global default; this is
+        # the per-session dial on top of it).
+        if self.model_override:
+            desired[_ACP_MODEL_CONFIG_ID] = self.model_override
+        if self.effort_override:
+            desired[_ACP_EFFORT_CONFIG_ID] = self.effort_override
         if not desired:
             return
 
