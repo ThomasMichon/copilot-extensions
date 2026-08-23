@@ -15,9 +15,25 @@ from agent_bridge.session_manager import (
     Session,
     SessionManager,
     _default_cwd,
+    _venue_workspace_cwd,
     _STALL_AFTER_S,
 )
 from agent_bridge.transport import SpawnTarget
+
+
+def test_venue_workspace_cwd():
+    """A venue's workspace_folder becomes the ACP session cwd; absent -> None."""
+    assert _venue_workspace_cwd(
+        SpawnTarget(type="command", venue={"workspace_folder": "/workspaces/odsp-web"})
+    ) == "/workspaces/odsp-web"
+    # No venue / no workspace / blank -> None (falls back to target.cwd/default).
+    assert _venue_workspace_cwd(SpawnTarget(type="command")) is None
+    assert _venue_workspace_cwd(
+        SpawnTarget(type="command", venue={"security_profile": "trusted"})
+    ) is None
+    assert _venue_workspace_cwd(
+        SpawnTarget(type="command", venue={"workspace_folder": "  "})
+    ) is None
 
 
 def _mock_agent_proc():

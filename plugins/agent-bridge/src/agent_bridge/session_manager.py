@@ -459,6 +459,25 @@ async def _cleanup_worktree(target: SpawnTarget, turn_count: int) -> None:
         log.warning("Worktree cleanup error: %s", exc)
 
 
+def _venue_workspace_cwd(target: SpawnTarget) -> str | None:
+    """The venue's concrete workspace folder (a container fleet's repo checkout),
+    surfaced by the provider's ``namespace-resolve`` as ``venue.workspace_folder``.
+
+    Used as the ACP ``session/new`` cwd so a dispatched agent runs from the repo
+    checkout inside the venue rather than the home-dir default (the agent
+    otherwise works blind). Returns ``None`` when the provider surfaced no
+    workspace, preserving the existing default. This is the ACP *session* cwd
+    (interpreted inside the venue by the launched Copilot), NOT the host spawn
+    subprocess cwd -- ``target.cwd`` is left untouched.
+    """
+    venue = getattr(target, "venue", None)
+    if isinstance(venue, dict):
+        ws = venue.get("workspace_folder")
+        if isinstance(ws, str) and ws.strip():
+            return ws.strip()
+    return None
+
+
 def _default_cwd(target: SpawnTarget) -> str:
     """Derive a plausible default CWD for a spawn target.
 
@@ -2628,8 +2647,15 @@ class SessionManager:
                         )
                         # Create ACP session -- binstub agents resolve CWD
                         # remotely, so target.cwd may be None.  The ACP spec
-                        # requires an absolute path.  Derive a home-dir default.
-                        session_cwd = target.cwd or _default_cwd(target)
+                        # requires an absolute path.  Prefer the venue's concrete
+                        # workspace folder (container fleets surface it) so the
+                        # agent runs from the repo checkout, not the home default;
+                        # else derive a home-dir default.
+                        session_cwd = (
+                            _venue_workspace_cwd(target)
+                            or target.cwd
+                            or _default_cwd(target)
+                        )
                         acp_sid = await asyncio.wait_for(
                             client.new_session(
                                 cwd=session_cwd, mcp_servers=mcp_servers,
@@ -2947,7 +2973,11 @@ class SessionManager:
                     )
                     new_acp = await asyncio.wait_for(
                         recreate_client.new_session(
-                            cwd=session.target.cwd or _default_cwd(session.target),
+                            cwd=(
+                                _venue_workspace_cwd(session.target)
+                                or session.target.cwd
+                                or _default_cwd(session.target)
+                            ),
                         ),
                         timeout=self._timeouts.session_new,
                     )

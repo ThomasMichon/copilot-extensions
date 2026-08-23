@@ -117,6 +117,45 @@ async def test_resolve_builds_spawn_target_and_argv():
 
 
 @pytest.mark.asyncio
+async def test_resolve_carries_venue_metadata():
+    """workspace_folder + security_profile from namespace-resolve land on
+    SpawnTarget.venue (container fleets surface them for cwd + trust gating)."""
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["c", "exec", "--stdio", "odsp-web-1"],
+            "user": "vscode",
+            "workspace_folder": "/workspaces/odsp-web",
+            "security_profile": "trusted",
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await CliNamespaceResolver("container", "agent-containers", fb).resolve(
+            "odsp-web-1",
+        )
+    assert t.venue == {
+        "workspace_folder": "/workspaces/odsp-web",
+        "security_profile": "trusted",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_venue_none_when_absent():
+    """A spec without workspace_folder/security_profile leaves venue None."""
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps(
+            {"type": "command", "spawn_command": ["ssh", "x"], "user": "me"}))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        t = await CliNamespaceResolver("codespace", "agent-codespaces", fb).resolve("cs-a")
+    assert t.venue is None
+
+
+@pytest.mark.asyncio
 async def test_resolve_not_found_maps_to_keyerror():
     fb = _Fallback()
     with patch("shutil.which", _which), patch("subprocess.run", return_value=_cp(3, "", "no such cs")):
