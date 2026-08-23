@@ -24,6 +24,11 @@ actions) and per-machine data stay in the consuming repo.
   single current repo.
 - **Restore is on-demand.** Session start reconciles the **agent-machines
   runtime** only; it never applies machine state.
+- **Declarative resources.** Beyond Copilot settings, a package can declare typed
+  `resources:` -- package-manager packages and canonical config files -- that the
+  engine installs/pins/writes itself (with cross-package collision detection),
+  instead of hiding them in per-repo scripts. See
+  [`docs/resources.md`](docs/resources.md).
 
 For implementation details, see [`docs/architecture.md`](docs/architecture.md).
 
@@ -112,12 +117,28 @@ modules:
     windows:
       command: ["pwsh", "-File", "tools/restore/Restore-MachineState.ps1", "-Section", "SSH"]
       dry_run_args: ["-DryRun"]
+resources:
+  - type: package                      # install + pin a package-manager package
+    id: marlocarlo.psmux
+    manager: winget
+    version: "3.3.5"
+    pin: true
+  - type: file                         # converge a canonical config file
+    path: "$HOME/.psmux.conf"
+    strategy: ensure-present
+    content: |
+      set -g mouse on
 ```
 
 Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
 `ignore`, `exclude`, `prune`, and `prerequisite-check`. Current restore applies
 `enforce` and `ensure-present`; `capture` and `prune` are placeholder CLI verbs
 today.
+
+The top-level `resources:` list declares typed, identity-bearing machine state
+(package-manager packages and canonical config files) that the engine converges
+itself, with cross-package collision detection. See
+[`docs/resources.md`](docs/resources.md) for the full schema and adopter guide.
 
 ## Troubleshooting
 

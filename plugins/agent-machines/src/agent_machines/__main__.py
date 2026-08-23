@@ -59,21 +59,24 @@ def _cmd_plan(args: argparse.Namespace) -> int:
         print(json.dumps(_reconcile.plan_to_dict(plan), indent=2))
         return 0
     print(f"plan for {machine}  (drift-key {plan.drift_key})")
-    if not plan.surfaces and not plan.modules:
-        print("  no managed surfaces or modules (no requirement packages apply)")
+    if not plan.surfaces and not plan.modules and not plan.resources:
+        print("  no managed surfaces, resources, or modules (no requirement packages apply)")
         return 0
     for surface in plan.surfaces:
         owners = ", ".join(surface.contributing_packages)
         print(f"  surface {surface.key}  [{surface.disposition}]  <- {owners}")
     for mod in plan.modules:
         print(f"  module  {mod['name']}  <- {mod['source_repo']}")
+    for res in plan.resources:
+        owners = ", ".join(res.get("contributors", []))
+        print(f"  resource {res['type']}:{res['id']}  [{res['summary']}]  <- {owners}")
     return 0
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     machine = args.machine or _discover.current_machine()
     resolved = _reconcile.resolve_union(_collect_packages(machine), machine)
-    findings = _validator.validate(resolved)
+    findings = _validator.validate(resolved, machine)
     if args.json:
         print(json.dumps([f.__dict__ for f in findings], indent=2))
     else:
@@ -94,7 +97,7 @@ def _cmd_restore(args: argparse.Namespace) -> int:
     dry_run = not args.apply
     packages = _collect_packages(machine)
     resolved = _reconcile.resolve_union(packages, machine)
-    findings = _validator.validate(resolved)
+    findings = _validator.validate(resolved, machine)
     if _validator.has_errors(findings):
         print("restore refused: validator reported errors:", file=sys.stderr)
         for f in findings:
@@ -127,6 +130,25 @@ def _cmd_restore(args: argparse.Namespace) -> int:
                     print(f"      ~ {ch['key']}: {before} -> {after}")
         else:
             print(f"  surface {s.surface} [{s.file}]: up-to-date")
+
+    if not result.resource_results:
+        print("  resources: none")
+    for r in result.resource_results:
+        label = f"{r.type}:{r.id}"
+        if r.skipped_reason:
+            print(f"  resource {label}: skipped ({r.skipped_reason})")
+        elif r.changed:
+            verb = "would" if r.dry_run else "did"
+            backup = f"  (backup {r.backup_path})" if r.backup_path else ""
+            print(f"  resource {label}: {verb} {r.action}{backup}")
+            if r.detail:
+                print(f"      {r.detail}")
+            for cmd in r.commands:
+                print(f"      $ {' '.join(cmd)}")
+        elif r.action == "error":
+            print(f"  resource {label}: ERROR {r.detail}", file=sys.stderr)
+        else:
+            print(f"  resource {label}: up-to-date")
 
     if not result.module_results:
         print("  modules: none")

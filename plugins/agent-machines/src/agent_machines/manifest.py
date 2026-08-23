@@ -41,6 +41,24 @@ DISPOSITIONS = (
 BOOTSTRAP_CRITICAL_PLUGINS = ("agent-worktrees", "agent-machines")
 BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 
+#: Declarative-resource types the schema recognizes. ``package`` and ``file``
+#: have handlers today; ``registry`` and ``feature`` are reserved extension
+#: points (accepted, planned, and validated, but not yet applied). See
+#: ``resources.py`` for the handler registry.
+KNOWN_RESOURCE_TYPES = ("package", "file", "registry", "feature")
+
+#: Minimal required identity fields per resource type (checked at load).
+REQUIRED_FIELDS = {
+    "package": ("id", "manager"),
+    "file": ("path",),
+    "registry": ("path",),
+    "feature": ("id",),
+}
+
+#: Accepted values for a resource's ``state`` / ``strategy`` selectors.
+RESOURCE_STATES = ("present", "absent")
+RESOURCE_STRATEGIES = ("enforce", "ensure-present")
+
 
 class ManifestError(ValueError):
     """A requirement package is malformed or uses an unsupported schema."""
@@ -59,6 +77,7 @@ class RequirementPackage:
     bootstrap_floor: dict[str, Any] = field(default_factory=dict)
     exclude: list[str] = field(default_factory=list)
     modules: list[dict[str, Any]] = field(default_factory=list)
+    resources: list[dict[str, Any]] = field(default_factory=list)
     source_repo: str = ""
     source_path: Path | None = None
 
@@ -132,6 +151,33 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
         if not isinstance(mod, dict) or not mod.get("name"):
             raise ManifestError(f"{path}: each module must be a mapping with a 'name'")
 
+    resources = raw.get("resources") or []
+    if not isinstance(resources, list):
+        raise ManifestError(f"{path}: 'resources' must be a list")
+    for res in resources:
+        if not isinstance(res, dict):
+            raise ManifestError(f"{path}: each resource must be a mapping")
+        rtype = res.get("type")
+        if rtype not in KNOWN_RESOURCE_TYPES:
+            raise ManifestError(
+                f"{path}: resource type {rtype!r} is not one of {KNOWN_RESOURCE_TYPES}"
+            )
+        for req_key in REQUIRED_FIELDS.get(rtype, ()):
+            if not res.get(req_key):
+                raise ManifestError(
+                    f"{path}: resource type {rtype!r} is missing required field '{req_key}'"
+                )
+        state = res.get("state")
+        if state is not None and state not in RESOURCE_STATES:
+            raise ManifestError(
+                f"{path}: resource state {state!r} must be one of {RESOURCE_STATES}"
+            )
+        strategy = res.get("strategy")
+        if strategy is not None and strategy not in RESOURCE_STRATEGIES:
+            raise ManifestError(
+                f"{path}: resource strategy {strategy!r} must be one of {RESOURCE_STRATEGIES}"
+            )
+
     return RequirementPackage(
         name=name,
         schema_version=schema,
@@ -142,6 +188,7 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
         bootstrap_floor=raw.get("bootstrap-floor") or raw.get("bootstrap_floor") or {},
         exclude=list(raw.get("exclude") or []),
         modules=modules,
+        resources=resources,
         source_repo=source_repo,
         source_path=path,
     )
@@ -183,6 +230,7 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
         bootstrap_floor=copy.deepcopy(pkg.bootstrap_floor),
         exclude=list(pkg.exclude),
         modules=copy.deepcopy(pkg.modules),
+        resources=copy.deepcopy(pkg.resources),
         source_repo=pkg.source_repo,
         source_path=pkg.source_path,
     )

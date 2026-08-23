@@ -51,8 +51,9 @@ keys are:
 - `package: <name>`
 
 Optional keys include `gate`, `aliases`, `manage`, `per-machine` /
-`per_machine`, `bootstrap-floor` / `bootstrap_floor`, `exclude`, and `modules`.
-`per-machine.<machine>` is deep-merged onto `manage`; a `null` leaf unsets a key.
+`per_machine`, `bootstrap-floor` / `bootstrap_floor`, `exclude`, `modules`, and
+`resources`. `per-machine.<machine>` is deep-merged onto `manage`; a `null` leaf
+unsets a key.
 
 The accepted dispositions are:
 
@@ -73,7 +74,8 @@ The accepted dispositions are:
 1. Resolve each package for the target machine.
 2. Compute a drift key from the resolved package union.
 3. Apply Copilot surfaces first.
-4. Run repo-local modules second.
+4. Apply declarative resources second (packages/files; see below).
+5. Run repo-local modules third.
 
 `agent-machines restore` runs the validator before both dry-runs and applies. If
 the validator reports any error, restore refuses to continue.
@@ -104,6 +106,34 @@ running.
 
 The public plugin does not ship OS-mutating modules. Those stay repo-local.
 
+## Declarative resources
+
+`src\agent_machines\resources.py` sits between surfaces (which converge
+`~/.copilot/`) and modules (the arbitrary-mutation escape hatch): typed,
+identity-bearing declarations of *common* machine state the generic engine can
+converge itself, so facts like "this package must be installed and pinned" or
+"this config file must exist" move out of opaque per-repo scripts and into
+reviewable data. A package declares them under a top-level `resources:` list.
+
+Two types are fully handled today:
+
+| Type | Identity | Behavior |
+| --- | --- | --- |
+| `package` | `(manager, id)` | Install / pin / remove via a package manager (`winget`, `apt`, `pipx`, `uv-tool`, `pip`). |
+| `file` | normalized `path` | Converge a canonical config file (`text`/`json`, `enforce`/`ensure-present`). |
+
+`registry` and `feature` are **reserved** identities: the schema recognizes and
+validates them so a package can declare them ahead of the engine, but they have
+no handler yet, so apply reports "no handler" and skips. Adding a type is a new
+`ResourceHandler` subclass registered in `HANDLERS` -- nothing else in the engine
+changes.
+
+Apply is dry-run-safe throughout: package operations run through an injectable
+runner (default `subprocess`, argv lists only, `shutil.which` guarded, skipped on
+unsupported platform/manager), and file operations reuse the surfaces' atomic
+backup-before-write helpers. See `docs/resources.md` for the full schema, the
+collision rules, and the adopter guide.
+
 ## Conflict validation
 
 `src\agent_machines\validator.py` is detect-not-arbitrate:
@@ -114,5 +144,13 @@ The public plugin does not ship OS-mutating modules. Those stay repo-local.
 - explicitly disabling a bootstrap-critical plugin is an error;
 - if any package manages marketplaces, omitting the bootstrap-critical
   `copilot-extensions` marketplace is an error.
+
+For `resources:`, cross-package collisions on the same identity are reported
+(delegated to `resources.detect_conflicts`): incompatible `present`/`absent`
+states, disagreeing version pins, and conflicting `enforce` file content or
+formats are errors; enforce-over-ensure-present precedence and differing
+ensure-present content are advisories. Compatible declarations merge
+deterministically (pins OR together; the deterministic pick is stable across
+package order).
 
 The validator reads only manifests, not live `~/.copilot/` state.

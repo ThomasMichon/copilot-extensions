@@ -17,9 +17,11 @@ import dataclasses
 import hashlib
 import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from . import modules as _modules
+from . import resources as _resources
 from .discover import current_platform
 from .manifest import RequirementPackage, resolve_for_machine
 from .surfaces import SurfaceResult, apply_surfaces
@@ -43,6 +45,17 @@ class Plan:
     drift_key: str
     package_names: list[str]
     modules: list[dict[str, str]] = field(default_factory=list)
+    resources: list[dict[str, Any]] = field(default_factory=list)
+
+
+def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
+    """Map each contributing repo name to its checkout root (``$REPO(<name>)``)."""
+    paths: dict[str, Path] = {}
+    for pkg in resolved:
+        root = pkg.repo_root()
+        if root is not None:
+            paths.setdefault(pkg.source_repo, root)
+    return paths
 
 
 def resolve_union(
@@ -82,12 +95,23 @@ def plan(packages: list[RequirementPackage], machine: str, plat: str | None = No
         {"name": str(mod.get("name")), "source_repo": pkg.source_repo}
         for pkg, mod in _modules.resolve_modules(resolved, machine, plat)
     ]
+    resolved_resources, _ = _resources.resolve_resources(resolved, machine, plat)
+    resource_list = [
+        {
+            "type": res.type,
+            "id": res.id,
+            "summary": res.summary(),
+            "contributors": res.contributors,
+        }
+        for res in resolved_resources
+    ]
     return Plan(
         machine=machine,
         surfaces=sorted(surfaces.values(), key=lambda s: s.key),
         drift_key=manifest_hash(resolved),
         package_names=sorted(pkg.name for pkg in resolved),
         modules=module_list,
+        resources=resource_list,
     )
 
 
@@ -98,15 +122,17 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "packages": p.package_names,
         "surfaces": [dataclasses.asdict(s) for s in p.surfaces],
         "modules": p.modules,
+        "resources": p.resources,
     }
 
 
 @dataclass
 class RestoreResult:
-    """The outcome of a restore: the plan, surface results, and module results."""
+    """The outcome of a restore: the plan, surface, resource, and module results."""
 
     plan: Plan
     surface_results: list[SurfaceResult] = field(default_factory=list)
+    resource_results: list[_resources.ResourceResult] = field(default_factory=list)
     module_results: list[_modules.ModuleResult] = field(default_factory=list)
 
     @property
@@ -115,7 +141,9 @@ class RestoreResult:
 
     @property
     def ok(self) -> bool:
-        return all(r.ok for r in self.module_results)
+        return all(r.ok for r in self.resource_results) and all(
+            r.ok for r in self.module_results
+        )
 
 
 def restore(
@@ -128,29 +156,59 @@ def restore(
 ) -> RestoreResult:
     """Converge ``machine`` to the package union.
 
-    Applies the Copilot **surfaces** (by disposition, backup-before-write) and
-    runs the repo-local **modules**, both honoring the dry-run safety rules.
-    ``only`` restricts the run to named surfaces/modules -- the "review a section,
-    then apply just that section" flow.
+    Applies the Copilot **surfaces** (by disposition, backup-before-write), the
+    declarative **resources** (packages/files), then runs the repo-local
+    **modules**, all honoring the dry-run safety rules. ``only`` restricts the
+    run to named surfaces/resources/modules -- the "review a section, then apply
+    just that section" flow.
     """
     plat = plat or current_platform()
     p = plan(packages, machine, plat)
     resolved = resolve_union(packages, machine)
     surfaces = apply_surfaces(resolved, home=home, dry_run=dry_run, only=only)
+
+    resource_names = _resources.resource_only_names(resolved, machine, plat)
+    resource_results: list[_resources.ResourceResult] = []
+    if _want_resources(only, resource_names):
+        home_path = Path(home) if home is not None else Path.home()
+        ctx = _resources.ResourceContext(
+            home=home_path, repo_paths=_repo_paths(resolved), platform=plat
+        )
+        resource_results = _resources.apply_resources(
+            resolved, machine, plat, ctx, dry_run=dry_run, only=only
+        )
+
     all_modules: list[_modules.ModuleResult] = []
-    if _want_modules(only):
+    if _want_modules(only, resource_names):
         all_modules = _modules.run_modules(resolved, machine, plat, dry_run=dry_run)
     results = [r for r in all_modules if not only or r.name in only]
-    return RestoreResult(plan=p, surface_results=surfaces, module_results=results)
+    return RestoreResult(
+        plan=p,
+        surface_results=surfaces,
+        resource_results=resource_results,
+        module_results=results,
+    )
 
 
-def _want_modules(only: list[str] | None) -> bool:
-    """Skip running modules entirely when ``only`` names surfaces exclusively."""
+_SURFACE_ONLY_NAMES = {
+    "copilot.settings", "copilot.permissions", "copilot.trustedFolders",
+    "settings", "permissions", "trustedFolders",
+}
+
+
+def _want_resources(only: list[str] | None, resource_names: set[str]) -> bool:
+    """Run resources unless ``only`` selects surfaces/modules exclusively."""
     if not only:
         return True
-    surface_names = {"copilot.settings", "copilot.permissions", "copilot.trustedFolders",
-                     "settings", "permissions", "trustedFolders"}
-    return any(name not in surface_names for name in only)
+    return any(name in resource_names for name in only)
+
+
+def _want_modules(only: list[str] | None, resource_names: set[str] | None = None) -> bool:
+    """Skip modules when ``only`` names surfaces/resources exclusively."""
+    if not only:
+        return True
+    known = _SURFACE_ONLY_NAMES | (resource_names or set())
+    return any(name not in known for name in only)
 
 
 def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
@@ -162,6 +220,7 @@ def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
     return {
         "plan": plan_to_dict(result.plan),
         "surfaces": [dataclasses.asdict(s) for s in result.surface_results],
+        "resources": [dataclasses.asdict(r) for r in result.resource_results],
         "modules": [dataclasses.asdict(m) for m in result.module_results],
         "ok": result.ok,
     }
