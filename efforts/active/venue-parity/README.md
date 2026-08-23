@@ -43,24 +43,45 @@ relay back-channel — is **shared**, owned by agent-bridge.
 - **Consequence:** launch-parity fixes built inside agent-codespaces would be
   **rebuilt** for containers unless the logic is shared.
 
+## Trust segmentation (scopes every workstream)
+
+Container fleets are **trust-profiled** (owned by the agent-containers vision), and
+parity targets the **trusted** class only:
+
+- **Trusted fleets** — project **full harness capabilities** into the container
+  (launch parity, the repo's own local-marketplace plugins, the credential relay,
+  and eventually **container-local worktrees + multi-repo**) so a trusted
+  container is a **seamless agent-bridge node** on par with a CodeSpace. All WS
+  below apply here.
+- **Untrusted/restricted fleets** — the provider mostly **wrangles the container
+  runtime** (docker/nerdctl/…) and offers an **à-la-carte** tool surface; the host
+  agent + scenario decide what to use. They receive **no** automatic launch/plugin
+  projection, relay, or host identity. Out of parity scope by construction.
+
+Every injection/projection this effort adds MUST be **gated on the fleet's trust
+posture** (`observable-security-posture`) — a restricted fleet is never silently
+upgraded.
+
 ## The venue transport contract (target)
 
 A small, symmetric interface every venue provider implements; agent-bridge drives
 the rest:
 
 - **lifecycle** — provision / start / stop / remove.
+- **trust posture** — trusted vs restricted (gates what the core projects).
 - **ssh endpoint** — an address the core reaches over one SSH transport.
 - **token bootstrap** — surface (codespace) or bootstrap (container) a `GITHUB_TOKEN`.
 - **boot semantics** — the wait the core should tolerate (cold-boot vs. start).
 
 ## Workstreams
 
-- **WS1 — launch-parity → agent-bridge core.** Relocate the venue-agnostic launch
-  concerns into agent-bridge's dispatch core so both venues inherit them:
-  model/effort/context propagation (fail-loud), in-repo `.ai`/`--plugin-dir`
-  resolution against the **venue's** repo cwd, concrete-cwd resolution. Venue
-  providers keep only venue-in-context plugin injection. Validate via a
-  **container repro**.
+- **WS1 — launch-parity → agent-bridge core (trusted fleets).** Relocate the
+  venue-agnostic launch concerns into agent-bridge's dispatch core so both venues
+  inherit them: model/effort/context propagation (fail-loud), the repo's own
+  local-marketplace (`.ai`/`.claude`/any `directory` marketplace) `--plugin-dir`
+  resolution against the **venue's** repo cwd, concrete-cwd resolution. **Gated to
+  trusted fleets** (a restricted fleet gets none of it). Venue providers keep only
+  venue-in-context plugin injection. Validate via a **container repro**.
 - **WS-A — single SSH transport for containers.** Give a fleet container an SSH
   endpoint; drive dispatch/staging/interactive reach over SSH exactly as
   codespaces do (retire bespoke `docker exec` dispatch paths where SSH suffices).
