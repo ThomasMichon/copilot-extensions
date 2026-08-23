@@ -479,7 +479,7 @@ def test_spawn_status_updater_spawns_detached_when_session_live(monkeypatch):
 
     assert m._spawn_status_updater("x", "/w/x") is True
     argv = captured["argv"]
-    assert argv[0] == sys.executable
+    assert argv[0] == m._windowless_python()
     assert argv[1:4] == ["-m", "agent_worktrees", "status-updater"]
     assert argv[argv.index("--session") + 1] == "wt-x"
     assert argv[argv.index("--mux") + 1] == "psmux"

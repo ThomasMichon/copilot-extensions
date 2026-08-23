@@ -109,9 +109,9 @@ def _spawn_serve_host(handle: str) -> None:
     """
     import subprocess
 
-    from agent_procutil import detached_kwargs
+    from agent_procutil import detached_kwargs, windowless_python
 
-    cmd = [sys.executable, "-m", "agent_mcp", "serve", "--socket", handle]
+    cmd = [windowless_python(sys.executable), "-m", "agent_mcp", "serve", "--socket", handle]
     kwargs: dict = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,

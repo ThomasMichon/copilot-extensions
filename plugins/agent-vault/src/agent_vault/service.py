@@ -14,7 +14,7 @@ import threading
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 
 from .config import (
     DEFAULT_TCP_PORT,
@@ -1028,7 +1028,7 @@ def daemonize_unix() -> bool:
 
 def daemonize_windows(argv: list[str]) -> None:
     """Start a detached background process (Windows)."""
-    cmd = [sys.executable, *argv, "--foreground"]
+    cmd = [windowless_python(sys.executable), *argv, "--foreground"]
     subprocess.Popen(
         cmd,
         # Neutral cwd: the detached daemon must not inherit (and pin) the

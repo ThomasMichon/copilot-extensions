@@ -15,7 +15,7 @@ import time
 import urllib.request
 from typing import Any
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 import httpx
 
 from . import __version__
@@ -519,7 +519,7 @@ def cmd_deploy(args: argparse.Namespace) -> int:
 
     def spawn_passive(port: int):
         cmd = [
-            sys.executable,
+            windowless_python(sys.executable),
             "-m",
             "agent_index",
             "start",
@@ -529,7 +529,11 @@ def cmd_deploy(args: argparse.Namespace) -> int:
             str(port),
             "--passive",
         ]
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, Any] = {
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
         kwargs.update(detached_kwargs())
         return subprocess.Popen(cmd, **kwargs)  # noqa: S603
 

@@ -21,7 +21,7 @@ def test_launch_argv_uses_interpreter_not_bare_name():
     # Never the bare, shim-routed command name that trips WinError 2.
     assert argv != ["agent-bridge", "start"]
     # Runs the daemon as a module through a resolved interpreter.
-    assert argv[0] == sys.executable
+    assert argv[0] == m.windowless_python(sys.executable)
     assert argv[1:] == ["-m", "agent_bridge", "start"]
 
 
@@ -37,6 +37,12 @@ def test_launch_argv_falls_back_to_venv_python(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
     argv = m._daemon_launch_argv()
     assert argv == [str(py), "-m", "agent_bridge", "start"]
+
+
+def test_launch_argv_uses_windowless_interpreter(monkeypatch):
+    monkeypatch.setattr(m, "windowless_python", lambda _python: "PYTHONW")
+    argv = m._daemon_launch_argv()
+    assert argv == ["PYTHONW", "-m", "agent_bridge", "start"]
 
 
 def test_launch_argv_falls_back_to_binstub_on_path(monkeypatch, tmp_path):

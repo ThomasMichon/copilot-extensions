@@ -99,3 +99,16 @@ def test_lazy_start_spawns_when_absent(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_spawn_coordinator_process", lambda: spawned.append(True))
     assert m._lazy_start_coordinator(timeout=0.5) is False
     assert spawned == [True]
+
+
+def test_coordinator_spawn_uses_windowless_interpreter(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(m.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(
+        "agent_dispatch.procutil.windowless_python", lambda _python: "PYTHONW"
+    )
+    monkeypatch.setattr(m.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
+
+    m._spawn_coordinator_process()
+
+    assert calls[0][0] == ["PYTHONW", "-m", "agent_dispatch", "serve"]

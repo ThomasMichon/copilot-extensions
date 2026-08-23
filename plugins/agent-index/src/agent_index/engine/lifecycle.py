@@ -37,7 +37,7 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 
 from agent_index.engine.client import EngineUnavailableError
 
@@ -136,7 +136,7 @@ def _spawn_engine(profile: ModelProfile) -> subprocess.Popen:
     ends it explicitly when the indexer is done.
     """
     cmd = [
-        sys.executable,
+        windowless_python(sys.executable),
         "-m",
         "agent_index.engine.app",
         "--host",
