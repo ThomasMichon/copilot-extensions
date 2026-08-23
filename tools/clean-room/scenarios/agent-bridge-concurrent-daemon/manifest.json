@@ -1,0 +1,27 @@
+{
+  "name": "agent-bridge-concurrent-daemon",
+  "description": "Tier-P F1 single-instance daemon-guard scenario: install + provision agent-bridge on a fresh box, then drive the REAL single-instance guard (agent_bridge.singleton.SingleInstance over the shared single_instance_lease OS byte-range lock) under concurrent start and assert the guard that prevents the duplicate-daemon failure mode at its root -- when a second daemon races the first (the classic case is a concurrent sessionStart-hook reinstall spawning a second daemon while one is live), the guard must REFUSE the duplicate instead of standing a colliding daemon up beside it. Complements agent-bridge-concurrent-relay (which proves the relay recovers if a duplicate slips through); this one proves the duplicate is refused before it can bind at all. Checks: (duplicate-refused) a live holder owns the lease for a config dir + port, a second acquire raises AlreadyRunningError naming the holder pid; (dead-holder-reclaimed) a holder acquires then is KILLED, a fresh acquire SUCCEEDS -- the OS frees the lock on death so a stale lock never wedges startup; (passive-coexist-by-port) a holder on port A + a second instance on the SAME config dir but port B coexist (active/passive cutover keys on the port). FIDELITY: a fully live 'two installed daemons race the installer end-to-end' assertion is a Tier-E concern; this Tier-P probe proves the guard MECHANISM. The probe is portable stdlib-only (drives the real guard with cross-process holders), so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "single-instance-daemon-guard",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_GUARD_CHECKS": "comma-separated subset of: duplicate-refused,dead-holder-reclaimed,passive-coexist-by-port"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-bridge",
+    "~/.agent-bridge/versions/<ver>/bin/python (built slot with agent_bridge.singleton)",
+    "~/.local/bin/agent-bridge (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-bridge" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "single-instance daemon guard under concurrent start" }
+  ]
+}
