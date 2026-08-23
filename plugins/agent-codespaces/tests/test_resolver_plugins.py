@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_codespaces.lifecycle import CodespaceInfo
@@ -18,7 +20,9 @@ def _cs(name="cs-1", repo="example-org/example-web-codespaces"):
 def test_build_spawn_command_no_plugins():
     cmd = _build_spawn_command("cs-1", "cd /w && copilot --acp --stdio")
     assert "--stage-plugin" not in cmd
-    assert cmd[-2:] == ["--remote-cmd", "cd /w && copilot --acp --stdio"]
+    # The payload is routed through a durable file, not an inline string.
+    assert cmd[-2] == "--remote-cmd-file"
+    assert Path(cmd[-1]).read_text(encoding="utf-8") == "cd /w && copilot --acp --stdio"
 
 
 def test_build_spawn_command_with_stage_plugins():
@@ -26,11 +30,11 @@ def test_build_spawn_command_with_stage_plugins():
         "cs-1", "cd /w && copilot --acp --stdio",
         stage_plugins=["a@m", "b@m"],
     )
-    # --stage-plugin args precede --remote-cmd, one per source.
+    # --stage-plugin args precede --remote-cmd-file, one per source.
     assert cmd.count("--stage-plugin") == 2
     i = cmd.index("--stage-plugin")
     assert cmd[i:i + 4] == ["--stage-plugin", "a@m", "--stage-plugin", "b@m"]
-    assert cmd[-2] == "--remote-cmd"
+    assert cmd[-2] == "--remote-cmd-file"
 
 
 @pytest.mark.asyncio

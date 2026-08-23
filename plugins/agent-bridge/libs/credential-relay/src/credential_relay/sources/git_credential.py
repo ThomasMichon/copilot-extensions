@@ -140,6 +140,25 @@ class GitCredentialSource:
                 "fill", filtered_input, timeout=max(timeout, 60.0),
             )
 
+            # A `fill` result without a password line is not a usable credential.
+            # It happens when GCM produced no token non-interactively -- e.g. an
+            # expired/lapsed ADO (Entra) login it cannot silently refresh under
+            # GCM_INTERACTIVE=never. Treat it as UNRESOLVED (return None) so the
+            # relay sends a clean quit=1 fail-fast and git aborts with a clear
+            # error, instead of forwarding a password-less partial credential
+            # that makes git fail with a bare, undiagnosable exit 128 (the
+            # "relay serves nothing" symptom, dotfiles #1659). Log it so the
+            # cause is visible in the daemon log next time.
+            if result is not None and "password=" not in result:
+                log.warning(
+                    "git-credential fill for %s returned no password -- GCM "
+                    "produced no credential (likely an expired/lapsed login "
+                    "with no silent refresh under non-interactive mode); "
+                    "returning unresolved so the relay fails fast",
+                    fields.get("host", "?"),
+                )
+                result = None
+
             # Cache successful responses
             if result and "password=" in result:
                 async with self._lock:

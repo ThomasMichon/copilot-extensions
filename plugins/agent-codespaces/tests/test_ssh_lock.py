@@ -20,9 +20,9 @@ class TestSpawnCommandForce:
     def test_bridge_spawn_uses_force(self):
         cmd = _build_spawn_command("cs-alpha", "copilot --acp --stdio")
         assert "--force" in cmd
-        # --force must precede the --remote-cmd payload so it is parsed as a
-        # flag, not swallowed into the remote command string.
-        assert cmd.index("--force") < cmd.index("--remote-cmd")
+        # --force must precede the --remote-cmd-file payload so it is parsed as
+        # a flag, not swallowed into the remote command reference.
+        assert cmd.index("--force") < cmd.index("--remote-cmd-file")
         assert "--stdio" in cmd
 
 
