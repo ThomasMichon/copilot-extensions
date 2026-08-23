@@ -24,7 +24,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .procutil import no_window_kwargs
+from .procutil import no_window_kwargs, resolve_runtime_python
 
 DEFAULT_DRIVER = "agent-dispatch"
 
@@ -98,16 +98,21 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
     of bug. Invoking the interpreter directly (``python -m agent_worktrees``)
     bypasses ``cmd.exe`` entirely, so the seed is delivered verbatim.
 
-    Prefer the agent-worktrees runtime venv interpreter; fall back to the
-    ``agent-worktrees`` binstub on PATH when that venv isn't present (POSIX
-    shims are plain exec scripts and do not re-parse, so they are unaffected).
-    Returns ``None`` when neither is resolvable."""
-    venv = Path.home() / ".agent-worktrees" / ".venv"
-    py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if py.is_file():
+    Resolve the agent-worktrees runtime interpreter via the **standardized spawn
+    flow** (:func:`~agent_dispatch.procutil.resolve_runtime_python` -- the
+    canonical versioned-runtime resolver the binstubs use), **not** a hard-coded
+    ``.venv`` path (which misses the ``versions/<ver>`` slot layout and then falls
+    back to a ``.ps1`` ``subprocess`` cannot exec on Windows). Fall back to the
+    ``agent-worktrees`` binstub on PATH only on POSIX (its shims are plain exec
+    scripts and do not re-parse). Returns ``None`` when neither is resolvable."""
+    py = resolve_runtime_python(Path.home() / ".agent-worktrees")
+    if py is not None:
         return [str(py), "-m", "agent_worktrees"]
-    exe = shutil.which("agent-worktrees")
-    return [exe] if exe else None
+    if os.name != "nt":
+        exe = shutil.which("agent-worktrees")
+        if exe:
+            return [exe]
+    return None
 
 
 def embody_available() -> bool:

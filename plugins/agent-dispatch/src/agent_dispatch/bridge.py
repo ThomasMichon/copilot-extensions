@@ -16,7 +16,7 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
-from .procutil import no_window_kwargs
+from .procutil import no_window_kwargs, resolve_runtime_python
 
 DEFAULT_WORKER_AGENT = "task-worker"
 
@@ -41,16 +41,21 @@ def _agent_bridge_launch_prefix() -> list[str] | None:
     (``python -m agent_bridge``) bypasses ``cmd.exe`` entirely, so the argument is
     delivered verbatim.
 
-    Prefer the agent-bridge runtime venv interpreter; fall back to the
-    ``agent-bridge`` binstub on PATH when that venv isn't present (POSIX shims are
-    plain exec scripts and do not re-parse, so they are unaffected). Returns
-    ``None`` when neither is resolvable."""
-    venv = Path.home() / ".agent-bridge" / "venv"
-    py = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if py.is_file():
+    Resolve the agent-bridge runtime interpreter via the **standardized spawn
+    flow** (:func:`~agent_dispatch.procutil.resolve_runtime_python` -- the
+    canonical versioned-runtime resolver the binstubs use), **not** a hard-coded
+    ``venv`` path (which misses the ``versions/<ver>`` slot layout and then falls
+    back to a ``.ps1`` ``subprocess`` cannot exec on Windows). Fall back to the
+    ``agent-bridge`` binstub on PATH only on POSIX (its shims are plain exec
+    scripts and do not re-parse). Returns ``None`` when neither is resolvable."""
+    py = resolve_runtime_python(Path.home() / ".agent-bridge")
+    if py is not None:
         return [str(py), "-m", "agent_bridge"]
-    exe = shutil.which("agent-bridge")
-    return [exe] if exe else None
+    if os.name != "nt":
+        exe = shutil.which("agent-bridge")
+        if exe:
+            return [exe]
+    return None
 
 
 def bridge_available() -> bool:

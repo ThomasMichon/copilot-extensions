@@ -16,6 +16,7 @@ which fully detaches). It is a no-op off Windows.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 # Re-exported so existing callers keep using ``from .procutil import
@@ -26,10 +27,91 @@ from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 __all__ = [
     "detached_kwargs",
     "no_window_kwargs",
-    "windowless_python",
-    "runtime_root",
     "relocate_off_payload",
+    "resolve_runtime_python",
+    "runtime_root",
+    "windowless_python",
 ]
+
+#: Slot-interpreter subpaths, POSIX then Windows (matches
+#: ``versioned_runtime.SLOT_PYTHON_SUBPATHS`` / ``resolve-runtime.ps1``).
+_SLOT_PYTHON_SUBPATHS = ("bin/python", "Scripts/python.exe")
+
+
+def _slot_python(root: Path, version: str) -> Path | None:
+    """The interpreter inside ``<root>/versions/<version>``, or ``None``."""
+    if not version:
+        return None
+    vdir = root / "versions" / version
+    for sub in _SLOT_PYTHON_SUBPATHS:
+        p = vdir / sub
+        if p.is_file():
+            return p
+    return None
+
+
+def _read_marker(root: Path, name: str) -> str | None:
+    """Read a plain-text marker file (``current-version`` / ``last-known-good``)."""
+    try:
+        return (root / name).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _version_sort_key(version: str) -> str:
+    """Version-aware sort key: zero-pad each numeric run so ``dev185 > dev50``
+    (not lexicographic). Matches the shell resolver ``resolve-runtime.ps1`` (the
+    resolver the binstubs use), which zero-pads numeric runs -- deliberately
+    format-agnostic for the ``X.Y.Z-devN`` slot names here (not the
+    ``packaging.version``/PEP 440 ordering ``versioned_runtime._version_key``
+    uses). Only the tier-3 first-run fallback consults this ordering."""
+    return re.sub(r"\d+", lambda m: m.group().zfill(10), version)
+
+
+def _list_versions(root: Path) -> list[str]:
+    """Installed version slot names, sorted oldest -> newest (newest last)."""
+    try:
+        names = [d.name for d in (root / "versions").iterdir() if d.is_dir()]
+    except OSError:
+        return []
+    return sorted(names, key=_version_sort_key)
+
+
+def resolve_runtime_python(root: Path) -> Path | None:
+    """Canonically resolve a sibling plugin runtime's interpreter under ``root``.
+
+    The **standardized spawn flow**: resolve a versioned-runtime interpreter the
+    same way the binstubs, hooks, and service launchers do (``resolve-runtime.ps1``
+    / ``versioned_runtime.resolve_python``) instead of hard-coding a ``venv`` path.
+    ``root`` is a runtime root such as ``~/.agent-bridge`` or ``~/.agent-worktrees``.
+
+    Three tiers, matching the canonical resolver:
+
+    1. the ``current-version`` marker (source of truth, written atomically);
+    2. ``last-known-good`` when the marker is missing/unresolvable;
+    3. the newest **complete** installed slot, then any newest slot.
+
+    Never resolves through a ``venv``/``.venv`` link (a reparse point Windows'
+    RedirectionGuard blocks) and **never** falls back to a PATH python -- returns
+    ``None`` when no runtime is installed so the caller degrades deliberately.
+    """
+    p = _slot_python(root, _read_marker(root, "current-version") or "")
+    if p is not None:
+        return p
+    p = _slot_python(root, _read_marker(root, "last-known-good") or "")
+    if p is not None:
+        return p
+    versions = _list_versions(root)  # newest last
+    for ver in reversed(versions):
+        if (root / "versions" / ver / ".install-complete.json").is_file():
+            p = _slot_python(root, ver)
+            if p is not None:
+                return p
+    for ver in reversed(versions):
+        p = _slot_python(root, ver)
+        if p is not None:
+            return p
+    return None
 
 
 def runtime_root() -> Path:
