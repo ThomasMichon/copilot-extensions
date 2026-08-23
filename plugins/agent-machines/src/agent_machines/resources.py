@@ -24,18 +24,24 @@ A requirement package declares resources under a top-level ``resources:`` list::
         content: |
           set -g mouse on
 
-Two kinds are fully handled today -- ``package`` and ``file``. ``registry`` and
-``feature`` are *reserved* identities (recognized by the schema) with no handler
-yet: they plan and validate, but apply reports "no handler" so a package can be
-authored against them ahead of the engine catching up. Adding a type is a new
+Four kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
+``file`` (whole-file *enforce*/*ensure-present* plus a *managed-block* strategy
+that owns only a marked block inside an otherwise user-owned file),
+``registry`` (Windows registry values, via ``reg.exe``), and ``feature``
+(Windows optional features/capabilities via DISM and Linux/WSL units via
+``systemctl``, selected by a ``manager`` field). Adding a type is a new
 ``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
 the engine changes.
 
 **Collision handling mirrors the validator's stance: detect-and-report, resolve
 only the unambiguously-compatible.** When two packages target the same resource
-identity (same ``(manager, id)`` for a package, same path for a file), compatible
-declarations are merged deterministically; incompatible desired values, version
-pins, ownership, or strategies raise an ``error`` (or ``advisory``) finding.
+identity -- ``(manager, id)`` for a package; ``(path, block)`` for a file (the
+block is empty for whole-file strategies); ``(key, value-name)`` for a registry
+value; ``(manager, id)`` for a feature -- compatible declarations are merged
+deterministically; incompatible desired values, version pins, ownership, or
+strategies raise an ``error`` (or ``advisory``) finding. Distinct managed blocks
+in one file are compatible; a whole-file owner and a block on the same path are
+not.
 """
 
 from __future__ import annotations
@@ -107,7 +113,13 @@ class ResolvedResource:
             pinned = " pinned" if self.desired.get("pin") else ""
             return f"{state}{('@' + ver) if ver else ''}{pinned}"
         if self.type == "file":
-            return str(self.desired.get("strategy", "enforce"))
+            strategy = str(self.desired.get("strategy", "enforce"))
+            if strategy == "managed-block":
+                return f"managed-block[{self.desired.get('block', '')}]"
+            return strategy
+        if self.type == "feature":
+            mgr = self.desired.get("manager", "")
+            return f"{self.desired.get('state', 'present')} ({mgr})"
         return self.desired.get("state", "present")
 
 
@@ -161,6 +173,52 @@ def resolve_file_path(spec: str, home: Path, repo_paths: dict[str, Path]) -> Pat
     if base is None:
         return None
     return base / tail if tail else base
+
+
+# --------------------------------------------------------------------------- #
+# Managed-block rendering (text file, engine-owned marked block)
+# --------------------------------------------------------------------------- #
+def _block_present(text: str, begin: str, end: str) -> bool:
+    """True when both markers are present as their own lines in ``text``."""
+    if not text:
+        return False
+    lines = text.splitlines()
+    return begin in lines and end in lines
+
+
+def _render_managed_block(current: str, begin: str, end: str, body: str,
+                          present: bool) -> str:
+    """Return ``current`` with the engine-owned block dropped, then re-appended.
+
+    Preserves all non-block content verbatim, trims trailing blank lines so
+    repeated runs never accumulate them, and (when ``present``) re-appends the
+    block after a single blank separator. When ``present`` is False the block is
+    simply removed. Output always ends in a trailing newline when non-empty.
+    """
+    kept: list[str] = []
+    skip = False
+    for line in (current.splitlines() if current else []):
+        if line == begin:
+            skip = True
+            continue
+        if line == end:
+            skip = False
+            continue
+        if not skip:
+            kept.append(line)
+    while kept and not kept[-1].strip():
+        kept.pop()
+
+    if not present:
+        return ("\n".join(kept) + "\n") if kept else ""
+
+    out = list(kept)
+    if kept:
+        out.append("")  # one blank separator between prior content and the block
+    out.append(begin)
+    out.extend(body.splitlines())
+    out.append(end)
+    return "\n".join(out) + "\n"
 
 
 # --------------------------------------------------------------------------- #
@@ -305,8 +363,24 @@ class PackageResourceHandler(ResourceHandler):
 class FileResourceHandler(ResourceHandler):
     TYPE = "file"
 
+    @staticmethod
+    def _marker_begin(decl: dict[str, Any]) -> str:
+        override = decl.get("begin")
+        return str(override) if override else f"# >>> {decl.get('block')} >>>"
+
+    @staticmethod
+    def _marker_end(decl: dict[str, Any]) -> str:
+        override = decl.get("end")
+        return str(override) if override else f"# <<< {decl.get('block')} <<<"
+
     def identity(self, decl: dict[str, Any]) -> tuple:
-        return ("file", normalize_path_spec(str(decl.get("path"))))
+        # A managed-block declaration owns only its marked block, so its identity
+        # carries the block id -- distinct blocks in one file are separate
+        # (compatible) identities, while whole-file strategies use the empty id.
+        block = ""
+        if str(decl.get("strategy")) == "managed-block":
+            block = str(decl.get("block") or "")
+        return ("file", normalize_path_spec(str(decl.get("path"))), block)
 
     def display_id(self, decl: dict[str, Any]) -> str:
         return str(decl.get("id") or decl.get("path"))
@@ -314,6 +388,8 @@ class FileResourceHandler(ResourceHandler):
     def merge(
         self, decls: list[dict[str, Any]], owners: list[str]
     ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        if str(decls[0].get("strategy")) == "managed-block":
+            return self._merge_managed_block(decls, owners)
         findings: list[ResourceFinding] = []
         path = str(decls[0].get("path"))
         who = ", ".join(sorted(set(owners)))
@@ -370,6 +446,51 @@ class FileResourceHandler(ResourceHandler):
                    "content": chosen[0].get("content", "")}
         return desired, findings
 
+    def _merge_managed_block(
+        self, decls: list[dict[str, Any]], owners: list[str]
+    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        """Resolve a group that all target the *same* ``(path, block)`` identity."""
+        findings: list[ResourceFinding] = []
+        path = str(decls[0].get("path"))
+        block = str(decls[0].get("block"))
+        who = ", ".join(sorted(set(owners)))
+
+        marker_sets = {(self._marker_begin(d), self._marker_end(d)) for d in decls}
+        begin, end = sorted(marker_sets)[0]
+        if len(marker_sets) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"managed block '{block}' in '{path}' has conflicting begin/end markers "
+                f"across packages: {who}.",
+            ))
+
+        states = {str(d.get("state", "present")) for d in decls}
+        state = "absent" if states == {"absent"} else "present"
+        if len(states) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"managed block '{block}' in '{path}' is declared both present and absent "
+                f"across packages: {who}.",
+            ))
+
+        contents = {str(d.get("content", "")) for d in decls}
+        if len(contents) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"managed block '{block}' in '{path}' has conflicting content across "
+                f"packages: {who}.",
+            ))
+
+        ordered = sorted(
+            zip(decls, owners, strict=False),
+            key=lambda t: (t[1], str(t[0].get("content", ""))),
+        )
+        chosen = ordered[0][0]
+        desired = {"path": path, "format": "text", "strategy": "managed-block",
+                   "block": block, "begin": begin, "end": end, "state": state,
+                   "content": chosen.get("content", "")}
+        return desired, findings
+
     def apply(
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
     ) -> ResourceResult:
@@ -379,13 +500,48 @@ class FileResourceHandler(ResourceHandler):
             return ResourceResult(self.TYPE, resolved.id, False, dry_run, "skip",
                                   skipped_reason=f"could not resolve path '{d['path']}' "
                                                  f"(unknown repo anchor)")
-        fmt = d.get("format", "text")
         strategy = d.get("strategy", "enforce")
         exists = target.exists()
 
+        if strategy == "managed-block":
+            return self._apply_managed_block(resolved, target, exists, dry_run)
+        fmt = d.get("format", "text")
         if fmt == "json":
             return self._apply_json(resolved, target, exists, strategy, dry_run)
         return self._apply_text(resolved, target, exists, strategy, dry_run)
+
+    def _apply_managed_block(self, resolved, target: Path, exists: bool,
+                             dry_run: bool) -> ResourceResult:
+        d = resolved.desired
+        begin, end = str(d["begin"]), str(d["end"])
+        body = str(d.get("content", ""))
+        present = d.get("state", "present") != "absent"
+        current = target.read_text(encoding="utf-8") if exists else ""
+
+        if not present:
+            if not _block_present(current, begin, end):
+                return ResourceResult(self.TYPE, resolved.id, False, dry_run, "none",
+                                      detail="block already absent")
+            desired_text = _render_managed_block(current, begin, end, body, present=False)
+            action = "remove-block"
+        else:
+            desired_text = _render_managed_block(current, begin, end, body, present=True)
+            if exists and current == desired_text:
+                return ResourceResult(self.TYPE, resolved.id, False, dry_run, "none",
+                                      detail="up-to-date")
+            action = "write-block"
+
+        if dry_run:
+            return ResourceResult(self.TYPE, resolved.id, True, True, action,
+                                  detail=f"would update block '{d.get('block')}' in {target}")
+        backup = backup_file(target) if exists else None
+        target.parent.mkdir(parents=True, exist_ok=True)
+        tmp = target.with_name(target.name + ".tmp")
+        tmp.write_text(desired_text, encoding="utf-8")
+        tmp.replace(target)
+        return ResourceResult(self.TYPE, resolved.id, True, False, action,
+                              detail=f"wrote block '{d.get('block')}' in {target}",
+                              backup_path=str(backup) if backup else None)
 
     def _apply_text(self, resolved, target: Path, exists: bool, strategy: str,
                     dry_run: bool) -> ResourceResult:
@@ -438,6 +594,309 @@ class FileResourceHandler(ResourceHandler):
         return ResourceResult(self.TYPE, resolved.id, True, False, "write",
                               detail=f"wrote {target}",
                               backup_path=str(backup) if backup else None)
+
+
+# --------------------------------------------------------------------------- #
+# Registry handler (Windows, via reg.exe through the injectable runner)
+# --------------------------------------------------------------------------- #
+#: Hive short-name aliases -> canonical ``HKEY_*`` names.
+_HIVE_ALIASES = {
+    "HKCU": "HKEY_CURRENT_USER",
+    "HKLM": "HKEY_LOCAL_MACHINE",
+    "HKCR": "HKEY_CLASSES_ROOT",
+    "HKU": "HKEY_USERS",
+    "HKCC": "HKEY_CURRENT_CONFIG",
+}
+
+#: Friendly ``value_type`` -> ``reg.exe`` ``REG_*`` type.
+REGISTRY_TYPE_MAP = {
+    "String": "REG_SZ",
+    "ExpandString": "REG_EXPAND_SZ",
+    "MultiString": "REG_MULTI_SZ",
+    "DWord": "REG_DWORD",
+    "QWord": "REG_QWORD",
+    "Binary": "REG_BINARY",
+}
+_REG_VALUE_RE = re.compile(r"\s(REG_[A-Z_]+)\s+(.*)$")
+
+
+def canonical_reg_key(path: str) -> str:
+    """A stable ``HKEY_*\\Sub\\Key`` form (drops any PSDrive colon, expands hive)."""
+    raw = str(path).replace("/", "\\").strip().strip("\\")
+    parts = raw.split("\\", 1)
+    hive = parts[0].rstrip(":").upper()
+    hive = _HIVE_ALIASES.get(hive, hive)
+    rest = parts[1] if len(parts) > 1 else ""
+    return f"{hive}\\{rest}" if rest else hive
+
+
+def _parse_reg_query(stdout: str, name: str) -> tuple[str | None, str | None]:
+    """Extract ``(data, REG_type)`` for ``name`` (``""`` = the default value)."""
+    target = name.lower() if name else "(default)"
+    for line in stdout.splitlines():
+        m = _REG_VALUE_RE.search(line)
+        if not m:
+            continue
+        vname = line[: m.start()].strip()
+        if vname.lower() == target:
+            return m.group(2).strip(), m.group(1)
+    return None, None
+
+
+class RegistryResourceHandler(ResourceHandler):
+    TYPE = "registry"
+
+    def identity(self, decl: dict[str, Any]) -> tuple:
+        # Registry keys and value names are case-insensitive, so identity folds
+        # case; the concrete (cased) key is carried in ``desired`` for reg.exe.
+        key = canonical_reg_key(str(decl.get("path"))).lower()
+        name = str(decl.get("name") or "").lower()
+        return ("registry", key, name)
+
+    def display_id(self, decl: dict[str, Any]) -> str:
+        return str(decl.get("id") or decl.get("path"))
+
+    def applies_on(self, decl: dict[str, Any], plat: str) -> bool:
+        if not super().applies_on(decl, plat):
+            return False
+        return plat == "windows"
+
+    def merge(
+        self, decls: list[dict[str, Any]], owners: list[str]
+    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        findings: list[ResourceFinding] = []
+        key = canonical_reg_key(str(decls[0].get("path")))
+        name = str(decls[0].get("name") or "")
+        who = ", ".join(sorted(set(owners)))
+        label = f"{key}\\{name or '(Default)'}"
+
+        states = {str(d.get("state", "present")) for d in decls}
+        state = "absent" if states == {"absent"} else "present"
+        if len(states) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"registry value '{label}' is declared both present and absent across "
+                f"packages: {who}.",
+            ))
+        values = {str(d.get("value")) for d in decls if d.get("value") is not None}
+        value = sorted(values)[0] if values else None
+        if len(values) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"registry value '{label}' is set to conflicting values {sorted(values)} "
+                f"across packages: {who}.",
+            ))
+        vtypes = {str(d.get("value_type", "String")) for d in decls}
+        vtype = sorted(vtypes)[0]
+        if len(vtypes) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"registry value '{label}' has conflicting value types {sorted(vtypes)} "
+                f"across packages: {who}.",
+            ))
+        desired = {"key": key, "name": name, "value": value,
+                   "value_type": vtype, "state": state}
+        return desired, findings
+
+    def _detect(self, ctx: ResourceContext, key: str, name: str) -> dict[str, Any]:
+        argv = ["reg", "query", key] + (["/v", name] if name else ["/ve"])
+        try:
+            out = ctx.runner(argv)
+        except (OSError, subprocess.SubprocessError):
+            return {"present": False, "value": None, "reg_type": None}
+        if out.returncode != 0:
+            return {"present": False, "value": None, "reg_type": None}
+        value, reg_type = _parse_reg_query(out.stdout, name)
+        return {"present": True, "value": value, "reg_type": reg_type}
+
+    def apply(
+        self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
+    ) -> ResourceResult:
+        d = resolved.desired
+        if ctx.platform != "windows":
+            return ResourceResult(self.TYPE, resolved.id, False, dry_run, "skip",
+                                  skipped_reason="registry resources apply on Windows only")
+        if shutil.which("reg") is None:
+            return ResourceResult(self.TYPE, resolved.id, False, dry_run, "skip",
+                                  skipped_reason="'reg' not on PATH")
+        key, name = d["key"], d.get("name", "")
+        live = self._detect(ctx, key, name)
+        commands: list[list[str]] = []
+
+        if d.get("state") == "absent":
+            if not live["present"]:
+                return ResourceResult(self.TYPE, resolved.id, False, dry_run, "none",
+                                      detail="already absent")
+            commands.append(["reg", "delete", key]
+                            + (["/v", name] if name else ["/ve"]) + ["/f"])
+            action = "delete"
+        else:
+            reg_type = REGISTRY_TYPE_MAP.get(str(d.get("value_type", "String")), "REG_SZ")
+            value = "" if d.get("value") is None else str(d.get("value"))
+            needs = ((not live["present"])
+                     or live.get("value") != value
+                     or (live.get("reg_type") not in (None, reg_type)))
+            if not needs:
+                return ResourceResult(self.TYPE, resolved.id, False, dry_run, "none",
+                                      detail="up-to-date")
+            commands.append(["reg", "add", key] + (["/v", name] if name else ["/ve"])
+                            + ["/t", reg_type, "/d", value, "/f"])
+            action = "write"
+
+        if dry_run:
+            return ResourceResult(self.TYPE, resolved.id, True, True, action,
+                                  detail=" ; ".join(" ".join(c) for c in commands),
+                                  commands=commands)
+        for argv in commands:
+            out = ctx.runner(argv)
+            if out.returncode != 0:
+                return ResourceResult(
+                    self.TYPE, resolved.id, True, False, "error", commands=commands,
+                    detail=f"`{' '.join(argv)}` exited {out.returncode}: "
+                           f"{(out.stderr or out.stdout).strip()[:200]}")
+        return ResourceResult(self.TYPE, resolved.id, True, False, action,
+                              detail="applied", commands=commands)
+
+
+# --------------------------------------------------------------------------- #
+# Feature handler (Windows optional features / capabilities; Linux/WSL units)
+# --------------------------------------------------------------------------- #
+def _parse_dism_feature(out: RunOutcome, fid: str) -> dict[str, Any]:
+    present = out.returncode == 0 and bool(
+        re.search(r"State\s*:\s*Enabled", out.stdout, re.IGNORECASE))
+    return {"present": present}
+
+
+def _parse_dism_capability(out: RunOutcome, fid: str) -> dict[str, Any]:
+    present = out.returncode == 0 and bool(
+        re.search(r"State\s*:\s*Installed", out.stdout, re.IGNORECASE))
+    return {"present": present}
+
+
+def _parse_systemctl(out: RunOutcome, fid: str) -> dict[str, Any]:
+    first = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else ""
+    return {"present": out.returncode == 0 and first in ("enabled", "enabled-runtime")}
+
+
+FEATURE_MANAGERS: dict[str, dict[str, Any]] = {
+    "windows-optional-feature": {
+        "platforms": {"windows"},
+        "bin": "dism",
+        "parse_detect": _parse_dism_feature,
+        "detect": lambda i: ["dism", "/online", "/get-featureinfo", f"/featurename:{i}"],
+        "enable": lambda i: ["dism", "/online", "/enable-feature",
+                             f"/featurename:{i}", "/norestart"],
+        "disable": lambda i: ["dism", "/online", "/disable-feature",
+                              f"/featurename:{i}", "/norestart"],
+    },
+    "windows-capability": {
+        "platforms": {"windows"},
+        "bin": "dism",
+        "parse_detect": _parse_dism_capability,
+        "detect": lambda i: ["dism", "/online", "/get-capabilityinfo",
+                             f"/capabilityname:{i}"],
+        "enable": lambda i: ["dism", "/online", "/add-capability",
+                             f"/capabilityname:{i}"],
+        "disable": lambda i: ["dism", "/online", "/remove-capability",
+                              f"/capabilityname:{i}"],
+    },
+    "linux-systemd": {
+        "platforms": {"linux", "wsl"},
+        "bin": "systemctl",
+        "parse_detect": _parse_systemctl,
+        "detect": lambda i: ["systemctl", "is-enabled", i],
+        "enable": lambda i: ["systemctl", "enable", i],
+        "disable": lambda i: ["systemctl", "disable", i],
+    },
+}
+
+
+class FeatureResourceHandler(ResourceHandler):
+    TYPE = "feature"
+
+    def identity(self, decl: dict[str, Any]) -> tuple:
+        return ("feature", str(decl.get("manager")), str(decl.get("id")).lower())
+
+    def display_id(self, decl: dict[str, Any]) -> str:
+        return str(decl.get("id"))
+
+    def applies_on(self, decl: dict[str, Any], plat: str) -> bool:
+        if not super().applies_on(decl, plat):
+            return False
+        mgr = FEATURE_MANAGERS.get(str(decl.get("manager")))
+        # An unknown manager still 'applies' (skip reported at apply); a known
+        # manager filters by the platforms it supports.
+        return mgr is None or plat in mgr["platforms"]
+
+    def merge(
+        self, decls: list[dict[str, Any]], owners: list[str]
+    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        findings: list[ResourceFinding] = []
+        ident = self.identity(decls[0])
+        who = ", ".join(sorted(set(owners)))
+        states = {str(d.get("state", "present")) for d in decls}
+        state = "absent" if states == {"absent"} else "present"
+        if len(states) > 1:
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"feature '{ident[2]}' ({ident[1]}) is declared both present and absent "
+                f"across packages: {who}.",
+            ))
+        desired = {"manager": ident[1], "id": str(decls[0].get("id")), "state": state}
+        return desired, findings
+
+    def _detect(self, ctx: ResourceContext, mgr: dict, fid: str) -> dict[str, Any]:
+        try:
+            out = ctx.runner(mgr["detect"](fid))
+        except (OSError, subprocess.SubprocessError):
+            return {"present": False}
+        return mgr["parse_detect"](out, fid)
+
+    def apply(
+        self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
+    ) -> ResourceResult:
+        d = resolved.desired
+        manager, fid = d["manager"], d["id"]
+        mgr = FEATURE_MANAGERS.get(manager)
+        if mgr is None:
+            return ResourceResult(self.TYPE, fid, False, dry_run, "skip",
+                                  skipped_reason=f"no handler for feature manager '{manager}'")
+        if ctx.platform not in mgr["platforms"]:
+            return ResourceResult(self.TYPE, fid, False, dry_run, "skip",
+                                  skipped_reason=f"manager '{manager}' not supported on "
+                                                 f"'{ctx.platform}'")
+        if shutil.which(mgr["bin"]) is None:
+            return ResourceResult(self.TYPE, fid, False, dry_run, "skip",
+                                  skipped_reason=f"manager binary '{mgr['bin']}' not on PATH")
+
+        live = self._detect(ctx, mgr, fid)
+        commands: list[list[str]] = []
+        if d.get("state") == "absent":
+            if not live["present"]:
+                return ResourceResult(self.TYPE, fid, False, dry_run, "none",
+                                      detail="already absent")
+            commands.append(mgr["disable"](fid))
+            action = "disable"
+        else:
+            if live["present"]:
+                return ResourceResult(self.TYPE, fid, False, dry_run, "none",
+                                      detail="already present")
+            commands.append(mgr["enable"](fid))
+            action = "enable"
+
+        if dry_run:
+            return ResourceResult(self.TYPE, fid, True, True, action,
+                                  detail=" ; ".join(" ".join(c) for c in commands),
+                                  commands=commands)
+        for argv in commands:
+            out = ctx.runner(argv)
+            if out.returncode != 0:
+                return ResourceResult(
+                    self.TYPE, fid, True, False, "error", commands=commands,
+                    detail=f"`{' '.join(argv)}` exited {out.returncode}: "
+                           f"{(out.stderr or out.stdout).strip()[:200]}")
+        return ResourceResult(self.TYPE, fid, True, False, action,
+                              detail="applied", commands=commands)
 
 
 # --------------------------------------------------------------------------- #
@@ -527,6 +986,8 @@ MANAGERS: dict[str, dict[str, Any]] = {
 HANDLERS: dict[str, ResourceHandler] = {
     "package": PackageResourceHandler(),
     "file": FileResourceHandler(),
+    "registry": RegistryResourceHandler(),
+    "feature": FeatureResourceHandler(),
 }
 
 
@@ -584,7 +1045,33 @@ def resolve_resources(
         findings.extend(fnd)
         resolved.append(ResolvedResource(
             rtype, handler.display_id(decls[0]), ident, desired, sorted(set(owners))))
+    findings.extend(_file_ownership_findings(resolved))
     return resolved, findings
+
+
+def _file_ownership_findings(resolved: list[ResolvedResource]) -> list[ResourceFinding]:
+    """Flag a path claimed by *both* a whole-file owner and a managed block.
+
+    Distinct managed blocks in one file are compatible (that is the point of the
+    strategy); a whole-file ``enforce``/``ensure-present`` owner and any block on
+    the same path are not -- the file is either wholly owned or block-owned.
+    """
+    findings: list[ResourceFinding] = []
+    by_path: dict[str, list[ResolvedResource]] = {}
+    for res in resolved:
+        if res.type == "file":
+            by_path.setdefault(res.identity[1], []).append(res)
+    for path, group in sorted(by_path.items()):
+        blocks = {res.identity[2] for res in group}
+        if "" in blocks and any(b != "" for b in blocks):
+            owners = sorted({o for res in group for o in res.contributors})
+            findings.append(ResourceFinding(
+                "error", "resource-conflict",
+                f"file '{path}' has both whole-file and managed-block declarations "
+                f"across packages: {', '.join(owners)}; a file is either wholly owned "
+                f"or block-owned, not both.",
+            ))
+    return findings
 
 
 def detect_conflicts(

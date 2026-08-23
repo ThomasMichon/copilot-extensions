@@ -371,32 +371,349 @@ def test_file_apply_unknown_repo_anchor_skips(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
-# Reserved types (registry / feature) -- recognized, planned, not applied
+# managed-block file strategy
 # --------------------------------------------------------------------------- #
-def test_reserved_type_plans_but_skips_apply(tmp_path):
-    pkg = _pkg(tmp_path, "acme/a",
-               [{"type": "registry", "path": "HKCU:/Software/X", "id": "x"}])
-    resolved, findings = resolve_resources([pkg], "box-1", "windows")
-    assert not findings
-    assert any(r.type == "registry" for r in resolved)
+_PSMUX_BLOCK = "agent-worktrees mux keybinds (opt-in)"
+_PSMUX_BODY = (
+    "set -g prefix C-b\n"
+    "unbind-key -a -T root\n"
+    "bind-key -T root WheelUpPane   send-keys -M\n"
+    "bind-key -T root WheelDownPane send-keys -M\n"
+    "set -g paste-detection off"
+)
+
+
+def _managed_block_decl(**over):
+    decl = {"type": "file", "path": "$HOME/.psmux.conf", "strategy": "managed-block",
+            "block": _PSMUX_BLOCK, "content": _PSMUX_BODY}
+    decl.update(over)
+    return decl
+
+
+def test_managed_block_requires_block(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a",
+             [{"type": "file", "path": "$HOME/.f", "strategy": "managed-block",
+               "content": "x"}])
+
+
+def test_managed_block_rejects_json_format(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a",
+             [_managed_block_decl(format="json")])
+
+
+def test_managed_block_creates_file_with_markers(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [_managed_block_decl()])
+    results = apply_resources([pkg], "box-1", "windows",
+                              _ctx(tmp_path, FakeRunner()), dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert res.changed
+    text = (tmp_path / ".psmux.conf").read_text(encoding="utf-8")
+    assert "# >>> agent-worktrees mux keybinds (opt-in) >>>" in text
+    assert "# <<< agent-worktrees mux keybinds (opt-in) <<<" in text
+    assert "set -g prefix C-b" in text
+    assert text.endswith("\n")
+
+
+def test_managed_block_preserves_unrelated_content_and_backs_up(tmp_path):
+    target = tmp_path / ".psmux.conf"
+    target.write_text("set -g mouse on\n# my own tweak\n", encoding="utf-8")
+    pkg = _pkg(tmp_path, "acme/a", [_managed_block_decl()])
+    results = apply_resources([pkg], "box-1", "windows",
+                              _ctx(tmp_path, FakeRunner()), dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert res.changed and res.backup_path
+    text = target.read_text(encoding="utf-8")
+    assert text.startswith("set -g mouse on\n# my own tweak\n")
+    assert "# >>> agent-worktrees mux keybinds (opt-in) >>>" in text
+
+
+def test_managed_block_idempotent_refresh(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [_managed_block_decl()])
+    ctx = _ctx(tmp_path, FakeRunner())
+    apply_resources([pkg], "box-1", "windows", ctx, dry_run=False)
+    first = (tmp_path / ".psmux.conf").read_text(encoding="utf-8")
+    results = apply_resources([pkg], "box-1", "windows", ctx, dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert not res.changed and res.action == "none"
+    assert (tmp_path / ".psmux.conf").read_text(encoding="utf-8") == first
+
+
+def test_managed_block_refresh_does_not_accumulate_blank_lines(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [_managed_block_decl()])
+    ctx = _ctx(tmp_path, FakeRunner())
+    for _ in range(3):
+        apply_resources([pkg], "box-1", "windows", ctx, dry_run=False)
+    text = (tmp_path / ".psmux.conf").read_text(encoding="utf-8")
+    assert text.count("# >>> agent-worktrees mux keybinds (opt-in) >>>") == 1
+
+
+def test_managed_block_absent_removes_only_the_block(tmp_path):
+    target = tmp_path / ".psmux.conf"
+    pkg_present = _pkg(tmp_path, "acme/a", [_managed_block_decl()])
+    ctx = _ctx(tmp_path, FakeRunner())
+    # Seed the file with the block plus a user line.
+    target.write_text("keep me\n", encoding="utf-8")
+    apply_resources([pkg_present], "box-1", "windows", ctx, dry_run=False)
+    assert "# >>> agent-worktrees" in target.read_text(encoding="utf-8")
+
+    pkg_absent = _pkg(tmp_path, "acme/b", [_managed_block_decl(state="absent")])
+    results = apply_resources([pkg_absent], "box-1", "windows", ctx, dry_run=False)
+    res = next(r for r in results if r.type == "file")
+    assert res.changed and res.action == "remove-block"
+    text = target.read_text(encoding="utf-8")
+    assert "# >>> agent-worktrees" not in text
+    assert "keep me" in text
+
+
+def test_managed_block_dry_run_does_not_write(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [_managed_block_decl()])
     results = apply_resources([pkg], "box-1", "windows",
                               _ctx(tmp_path, FakeRunner()), dry_run=True)
+    res = next(r for r in results if r.type == "file")
+    assert res.changed and res.dry_run
+    assert not (tmp_path / ".psmux.conf").exists()
+
+
+def test_managed_block_distinct_blocks_same_file_compatible(tmp_path):
+    a = _pkg(tmp_path, "acme/a",
+             [_managed_block_decl(block="block-one", content="a")])
+    b = _pkg(tmp_path, "acme/b",
+             [_managed_block_decl(block="block-two", content="b")])
+    resolved, findings = resolve_resources([a, b], "box-1", "windows")
+    assert not findings  # two distinct blocks in one file coexist
+    assert len([r for r in resolved if r.type == "file"]) == 2
+
+
+def test_managed_block_same_block_conflicting_content_errors(tmp_path):
+    a = _pkg(tmp_path, "acme/a", [_managed_block_decl(content="a")])
+    b = _pkg(tmp_path, "acme/b", [_managed_block_decl(content="b")])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(f.level == "error" and "conflicting content" in f.message
+               for f in findings)
+
+
+def test_managed_block_vs_whole_file_same_path_errors(tmp_path):
+    a = _pkg(tmp_path, "acme/a",
+             [{"type": "file", "path": "$HOME/.psmux.conf", "strategy": "enforce",
+               "content": "whole"}])
+    b = _pkg(tmp_path, "acme/b", [_managed_block_decl()])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(f.level == "error" and "whole-file and managed-block" in f.message
+               for f in findings)
+
+
+# --------------------------------------------------------------------------- #
+# registry handler (Windows, driven through the injected runner)
+# --------------------------------------------------------------------------- #
+def test_registry_bad_value_type_rejected(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a",
+             [{"type": "registry", "path": "HKCU:/Software/X", "name": "n",
+               "value_type": "Nonsense"}])
+
+
+def test_registry_identity_canonicalizes_hive_and_case(tmp_path):
+    a = _pkg(tmp_path, "acme/a",
+             [{"type": "registry", "path": "HKCU:/Software/App", "name": "Flag",
+               "value": "1", "value_type": "DWord"}])
+    b = _pkg(tmp_path, "acme/b",
+             [{"type": "registry", "path": "HKEY_CURRENT_USER\\software\\app",
+               "name": "flag", "value": "0", "value_type": "DWord"}])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(f.level == "error" and "conflicting values" in f.message
+               for f in findings)
+
+
+def test_registry_apply_writes_value(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/Windows/System32/reg.exe")
+    runner = FakeRunner(script={("reg", "query"): RunOutcome(1, "", "not found")})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "registry", "path": "HKCU:/Software/App", "name": "Flag",
+                 "value": "1", "value_type": "DWord"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
     res = next(r for r in results if r.type == "registry")
-    assert res.skipped_reason and "no handler" in res.skipped_reason
+    assert res.changed and res.ok and res.action == "write"
+    add = next(c for c in runner.calls if c[:2] == ["reg", "add"])
+    assert "HKEY_CURRENT_USER\\Software\\App" in add
+    assert "/t" in add and "REG_DWORD" in add
+
+
+def test_registry_apply_already_correct_no_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/reg.exe")
+    query_out = RunOutcome(0, "HKEY_CURRENT_USER\\Software\\App\n"
+                              "    Flag    REG_DWORD    1\n", "")
+    runner = FakeRunner(script={("reg", "query"): query_out})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "registry", "path": "HKCU:/Software/App", "name": "Flag",
+                 "value": "1", "value_type": "DWord"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
+    res = next(r for r in results if r.type == "registry")
+    assert not res.changed and res.action == "none"
+    assert not any(c[:2] == ["reg", "add"] for c in runner.calls)
+
+
+def test_registry_apply_absent_deletes(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/reg.exe")
+    query_out = RunOutcome(0, "    Flag    REG_SZ    x\n", "")
+    runner = FakeRunner(script={("reg", "query"): query_out})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "registry", "path": "HKCU:/Software/App", "name": "Flag",
+                 "state": "absent"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
+    res = next(r for r in results if r.type == "registry")
+    assert res.changed and res.action == "delete"
+    assert any(c[:2] == ["reg", "delete"] for c in runner.calls)
+
+
+def test_registry_present_absent_conflict(tmp_path):
+    a = _pkg(tmp_path, "acme/a",
+             [{"type": "registry", "path": "HKCU:/Software/App", "name": "Flag",
+               "value": "1"}])
+    b = _pkg(tmp_path, "acme/b",
+             [{"type": "registry", "path": "HKCU:/Software/App", "name": "Flag",
+               "state": "absent"}])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(f.level == "error" and "present and absent" in f.message
+               for f in findings)
+
+
+def test_registry_filtered_on_linux(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "registry", "path": "HKCU:/Software/App", "name": "n",
+                 "value": "1"}])
+    results = apply_resources([pkg], "box-1", "linux",
+                              _ctx(tmp_path, FakeRunner(), plat="linux"), dry_run=True)
+    assert not [r for r in results if r.type == "registry"]
+
+
+# --------------------------------------------------------------------------- #
+# feature handler (Windows optional-feature / capability; Linux systemd)
+# --------------------------------------------------------------------------- #
+def test_feature_requires_manager(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a", [{"type": "feature", "id": "Microsoft-Hyper-V"}])
+
+
+def test_feature_bad_manager_rejected(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a",
+             [{"type": "feature", "id": "x", "manager": "chocolatey"}])
+
+
+def test_feature_windows_optional_feature_enables(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/Windows/System32/dism.exe")
+    runner = FakeRunner(script={
+        ("dism", "/online", "/get-featureinfo"):
+            RunOutcome(0, "Feature Name : Microsoft-Hyper-V\nState : Disabled\n", "")})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "feature", "id": "Microsoft-Hyper-V",
+                 "manager": "windows-optional-feature"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
+    res = next(r for r in results if r.type == "feature")
+    assert res.changed and res.action == "enable" and res.ok
+    assert any(c[:3] == ["dism", "/online", "/enable-feature"] for c in runner.calls)
+
+
+def test_feature_already_enabled_no_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/dism.exe")
+    runner = FakeRunner(script={
+        ("dism", "/online", "/get-featureinfo"):
+            RunOutcome(0, "State : Enabled\n", "")})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "feature", "id": "Microsoft-Hyper-V",
+                 "manager": "windows-optional-feature"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
+    res = next(r for r in results if r.type == "feature")
+    assert not res.changed and res.action == "none"
+
+
+def test_feature_capability_absent_removes(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/dism.exe")
+    runner = FakeRunner(script={
+        ("dism", "/online", "/get-capabilityinfo"):
+            RunOutcome(0, "State : Installed\n", "")})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "feature", "id": "OpenSSH.Client~~~~0.0.1.0",
+                 "manager": "windows-capability", "state": "absent"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
+    res = next(r for r in results if r.type == "feature")
+    assert res.changed and res.action == "disable"
+    assert any(c[:3] == ["dism", "/online", "/remove-capability"] for c in runner.calls)
+
+
+def test_feature_linux_systemd_enables(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "/usr/bin/systemctl")
+    runner = FakeRunner(script={("systemctl", "is-enabled"): RunOutcome(1, "disabled\n", "")})
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "feature", "id": "docker", "manager": "linux-systemd"}])
+    results = apply_resources([pkg], "box-1", "linux",
+                              _ctx(tmp_path, runner, plat="linux"), dry_run=False)
+    res = next(r for r in results if r.type == "feature")
+    assert res.changed and res.action == "enable"
+    assert any(c[:2] == ["systemctl", "enable"] for c in runner.calls)
+
+
+def test_feature_windows_manager_filtered_on_linux(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "feature", "id": "Microsoft-Hyper-V",
+                 "manager": "windows-optional-feature"}])
+    results = apply_resources([pkg], "box-1", "linux",
+                              _ctx(tmp_path, FakeRunner(), plat="linux"), dry_run=True)
+    assert not [r for r in results if r.type == "feature"]
+
+
+def test_feature_present_absent_conflict(tmp_path):
+    a = _pkg(tmp_path, "acme/a",
+             [{"type": "feature", "id": "X", "manager": "windows-optional-feature"}])
+    b = _pkg(tmp_path, "acme/b",
+             [{"type": "feature", "id": "X", "manager": "windows-optional-feature",
+               "state": "absent"}])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(f.level == "error" and "present and absent" in f.message
+               for f in findings)
+
+
+def test_feature_missing_binary_skips(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: None)
+    runner = FakeRunner()
+    pkg = _pkg(tmp_path, "acme/a",
+               [{"type": "feature", "id": "X", "manager": "windows-optional-feature"}])
+    results = apply_resources([pkg], "box-1", "windows", _ctx(tmp_path, runner),
+                              dry_run=False)
+    res = next(r for r in results if r.type == "feature")
+    assert res.skipped_reason and "PATH" in res.skipped_reason
+    assert runner.calls == []
 
 
 # --------------------------------------------------------------------------- #
 # PSMux acceptance case -- the exact adopter fixture
 # --------------------------------------------------------------------------- #
 def test_psmux_acceptance_fixture(tmp_path, monkeypatch):
-    """PSMux installed + pinned at 3.3.5, plus its local ``~/.psmux.conf``."""
+    """PSMux installed + pinned at 3.3.5, plus the opt-in keybind managed block.
+
+    This mirrors what a downstream repo declares to replace a custom
+    ``~/.psmux.conf`` persistence script: a pinned package resource and a
+    ``managed-block`` file resource whose derived markers match the existing
+    agent-worktrees opt-in block, so the block is engine-owned while the rest of
+    the user's config is preserved.
+    """
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
     runner = FakeRunner(default=RunOutcome(0, "no installed package found", ""))
+    # A pre-existing user config: the block must slot in without clobbering it.
+    (tmp_path / ".psmux.conf").write_text("set -g mouse on\n", encoding="utf-8")
     pkg = _pkg(tmp_path, "acme/psmux", [
         {"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
          "version": "3.3.5", "state": "present", "pin": True},
-        {"type": "file", "id": "psmux-settings", "path": "$HOME/.psmux.conf",
-         "format": "text", "strategy": "ensure-present", "content": "set -g mouse on\n"},
+        {"type": "file", "id": "psmux-keybinds", "path": "$HOME/.psmux.conf",
+         "strategy": "managed-block", "block": _PSMUX_BLOCK, "content": _PSMUX_BODY},
     ])
     # No collisions in the canonical fixture.
     assert detect_conflicts([pkg], "box-1", "windows") == []
@@ -407,5 +724,9 @@ def test_psmux_acceptance_fixture(tmp_path, monkeypatch):
     file_res = next(r for r in results if r.type == "file")
     assert pkg_res.action == "install" and pkg_res.ok
     assert ["winget", "pin"] in [c[:2] for c in runner.calls]
-    assert file_res.changed
-    assert (tmp_path / ".psmux.conf").read_text(encoding="utf-8") == "set -g mouse on\n"
+    assert file_res.changed and file_res.action == "write-block"
+    text = (tmp_path / ".psmux.conf").read_text(encoding="utf-8")
+    assert text.startswith("set -g mouse on\n")  # user content preserved
+    assert "# >>> agent-worktrees mux keybinds (opt-in) >>>" in text
+    assert "unbind-key -a -T root" in text
+    assert "set -g paste-detection off" in text

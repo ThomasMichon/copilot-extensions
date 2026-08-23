@@ -25,7 +25,8 @@ actions) and per-machine data stay in the consuming repo.
 - **Restore is on-demand.** Session start reconciles the **agent-machines
   runtime** only; it never applies machine state.
 - **Declarative resources.** Beyond Copilot settings, a package can declare typed
-  `resources:` -- package-manager packages and canonical config files -- that the
+  `resources:` -- package-manager packages, config files (whole-file or a marked
+  `managed-block`), Windows registry values, and OS features -- that the
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
   [`docs/resources.md`](docs/resources.md).
@@ -123,11 +124,13 @@ resources:
     manager: winget
     version: "3.3.5"
     pin: true
-  - type: file                         # converge a canonical config file
+  - type: file                         # own a marked block inside a user-owned file
     path: "$HOME/.psmux.conf"
-    strategy: ensure-present
+    strategy: managed-block
+    block: "agent-worktrees mux keybinds (opt-in)"
     content: |
-      set -g mouse on
+      set -g prefix C-b
+      set -g paste-detection off
 ```
 
 Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
@@ -136,8 +139,10 @@ Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
 today.
 
 The top-level `resources:` list declares typed, identity-bearing machine state
-(package-manager packages and canonical config files) that the engine converges
-itself, with cross-package collision detection. See
+-- package-manager packages, canonical config files (whole-file or a marked
+`managed-block`), Windows registry values, and OS features (Windows optional
+features/capabilities and Linux/WSL units) -- that the engine converges itself,
+with cross-package collision detection. See
 [`docs/resources.md`](docs/resources.md) for the full schema and adopter guide.
 
 ## Troubleshooting
