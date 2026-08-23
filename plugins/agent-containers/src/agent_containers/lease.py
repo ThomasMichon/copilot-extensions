@@ -189,15 +189,25 @@ def borrow(
                 )
             chosen = container
         else:
-            # Prefer running, then startable; skip those already leased.
-            free = [c for c in members if c.name not in leases]
-            if not free:
-                raise RuntimeError(
-                    "All fleet containers are currently leased. "
-                    "Release one or grow the fleet."
-                )
-            free.sort(key=lambda c: (not c.is_running, c.name))
-            chosen = free[0].name
+            # Effort-level idempotency: a normal fleet-scoped re-borrow should
+            # refresh the effort's existing member, not report the fleet full.
+            held_by_effort = sorted(
+                lease.container
+                for lease in leases.values()
+                if lease.effort == effort and lease.container in by_name
+            )
+            if held_by_effort:
+                chosen = held_by_effort[0]
+            else:
+                # Prefer running, then startable; skip those already leased.
+                free = [c for c in members if c.name not in leases]
+                if not free:
+                    raise RuntimeError(
+                        "All fleet containers are currently leased. "
+                        "Release one or grow the fleet."
+                    )
+                free.sort(key=lambda c: (not c.is_running, c.name))
+                chosen = free[0].name
 
         now = time.time()
         lease = Lease(
