@@ -385,6 +385,16 @@ Two consequences shape how a plugin author writes them:
   existence check so a partial install fails open. Keep it under the perf budget
   below; do expensive work in a background process and have the hook read a cheap
   state file.
+- **The ACP transport gates repo-scoped hooks on folder-trust.** A host that
+  drives the agent over **ACP** (for example an ACP-mode bridge) creates a real
+  session that *can* load plugin hooks, but ACP sessions default to **unattested
+  folder-trust** and never run the interactive trust prompt. A plugin enabled only
+  at **repository scope** activates through a folder-trust-gated repo settings
+  file, so its hooks may not run over ACP unless the session's `cwd` was trusted
+  out-of-band -- and a repository's own `.github/hooks` are **not loaded over ACP
+  at all**. If a plugin's hooks *must* run over ACP, enable it at **user scope**
+  (which is not folder-trust-gated) and/or ensure the working directory is
+  trusted, and keep the static `AGENTS.md` fail-safe.
 
 ### sessionStart context injection
 

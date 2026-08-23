@@ -109,6 +109,18 @@ A repo's `.github/copilot/settings.json` is merged with the user
 > alone. Skills/payload are unaffected; repo-scoped activation of *session
 > extensions* is a known limitation.
 
+> **Hooks over the ACP transport — a second scoping caveat.** The line above
+> ("reliably governs ... hooks ... for sessions in that repo") holds for ordinary
+> interactive sessions. A session created over **ACP** (e.g. an ACP-mode bridge)
+> is different: it defaults to **unattested folder-trust** and does not run the
+> interactive trust prompt, and repository-scoped activation is folder-trust-gated.
+> So a plugin enabled only via a repo's `.github/copilot/settings.json` may not
+> activate — and its **hooks won't run** — in an ACP session whose `cwd` wasn't
+> trusted out-of-band; a repository's own `.github/hooks` are not loaded over ACP
+> at all. A plugin whose **hooks must run over ACP** should be enabled at the
+> **user level** (not folder-trust-gated), or its working directory pre-trusted.
+> Interactive-session skills/payload are unaffected.
+
 ## Preferred for modular in-repo capability: the `.ai` local marketplace
 
 When a repo's **own** skills/agents should be **modular, individually

@@ -122,6 +122,18 @@ minimal and is not a second full copy of plugin policy. A repository-owned
 invariant stays repository-owned; plugin compatibility prose remains
 plugin-attributable through its stable owner marker.
 
+A distinct case is the **ACP transport** (used by host integrations such as an
+ACP-mode bridge). It *does* create a normal session that can load plugin hooks,
+but sessions created over ACP default to **unattested folder-trust** and do not
+run an interactive trust prompt. A plugin enabled only at **repository scope**
+activates through a repository settings file whose activation is
+folder-trust-gated, so such a plugin -- and therefore its ambient kernel -- may
+not activate in an ACP session whose working directory was not trusted
+out-of-band. A repository's own `.github/hooks` are likewise not loaded over ACP.
+So a plugin whose kernel must survive the ACP transport should be enabled at
+**user scope** (which is not folder-trust-gated) and/or have its working
+directory pre-trusted; the static fail-safe above still applies.
+
 ### Keep cross-platform behavior equal
 
 Provide equivalent Bash and PowerShell hook paths. They must implement the same

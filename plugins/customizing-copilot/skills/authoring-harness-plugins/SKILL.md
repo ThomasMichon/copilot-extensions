@@ -89,8 +89,10 @@ status). Substance in the plugin; keep the narrative thin.
    Hard-gate the hook by resolved cwd/config applicability, treat source as
    allow-by-default with documented exclusions, preserve bounded
    operator-versus-repo precedence, provide Bash/PowerShell parity, and fail open. Some
-   headless/cloud paths do not load plugin hooks, so do not remove the static
-   fail-safe. Follow `customizing-copilot:authoring-skills` § *sessionStart
+   launch paths do not load plugin hooks, and the **ACP transport gates
+   repo-scoped hooks on folder-trust** (enable at user scope, or pre-trust the
+   working directory, if the kernel must survive ACP) -- so do not remove the
+   static fail-safe. Follow `customizing-copilot:authoring-skills` § *sessionStart
    context injection*.
 
 ## README & documentation standard (every plugin)
