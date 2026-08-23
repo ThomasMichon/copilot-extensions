@@ -52,6 +52,13 @@ def main(argv: list[str] | None = None) -> int:
     up_p = sub.add_parser("up", help="Provision/top-up a fleet")
     up_p.add_argument("fleet", help="Fleet name (from containers.yaml)")
     up_p.add_argument("--count", type=int, default=None, help="Target size")
+    up_p.add_argument(
+        "--recreate",
+        action="store_true",
+        help="Recreate restricted members that drifted from the fleet's current "
+        "image/policy (instead of refusing). Removes and re-provisions them on "
+        "the current image; the deterministic name preserves the lease.",
+    )
 
     for name, helptext in (
         ("down", "Stop (keep warm) all containers in a fleet"),
@@ -337,7 +344,9 @@ def _cmd_up(args: argparse.Namespace) -> int:
     from . import fleet as fleet_mod
 
     config = load_config()
-    created = fleet_mod.up(config, args.fleet, count=args.count)
+    created = fleet_mod.up(
+        config, args.fleet, count=args.count, recreate=args.recreate,
+    )
     if created:
         print(f"Created: {', '.join(created)}")
     else:
