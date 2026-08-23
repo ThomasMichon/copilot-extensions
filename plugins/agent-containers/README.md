@@ -119,6 +119,9 @@ fleets:
     pids_limit: 256
     workspace_size: 2g
     home_size: 512m
+    environment:
+      MODEL_BASE_URL: http://model-proxy:8080/v1
+      MODEL_NAME: local-model
 ```
 
 The restricted defaults are transport enforcement, not prompt policy. Even if a
@@ -134,6 +137,13 @@ re-inspects the live Docker posture before every start/exec and refuses drift in
 capabilities, security options, mounts, devices, namespace sharing, published
 ports, network isolation, resource limits, writable surfaces, or immutable image
 identity.
+
+`environment` is an explicit **non-secret** key/value allowlist baked into the
+container. Restricted configuration rejects credential-shaped names (`*_TOKEN`,
+`*_SECRET`, `*_PASSWORD`, `*_API_KEY`, and related forms), and dispatch rejects
+an image/runtime environment that contains one. Use this surface for model
+endpoint/name/offline settings, never identity. `fleet --json` reports names
+only, not values.
 
 Restricted fleets deliberately reject the `devcontainer_path` backend because
 its workspace-mount contract cannot guarantee that no host worktree is visible.

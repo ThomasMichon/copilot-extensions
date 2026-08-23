@@ -37,6 +37,7 @@ def test_restricted_image_run_applies_boundary_flags(monkeypatch):
         memory="6g",
         cpus=3,
         pids_limit=128,
+        environment={"MODEL_NAME": "local-model"},
     )
 
     name = fleet_mod._image_run(
@@ -70,6 +71,7 @@ def test_restricted_image_run_applies_boundary_flags(monkeypatch):
     assert any(value.startswith("/workspace:") for value in tmpfs)
     assert any(value.startswith("/home/vscode:") for value in tmpfs)
     assert "HOME=/home/vscode" in run
+    assert "MODEL_NAME=local-model" in run
     assert "--add-host=host.docker.internal:host-gateway" not in run
 
 

@@ -74,3 +74,6 @@ fleets:
     pids_limit: 256                       # restricted default
     workspace_size: 2g                    # restricted default; cleared on stop
     home_size: 512m                       # restricted default; cleared on stop
+    environment:                          # explicit non-secret values only
+      MODEL_BASE_URL: http://model-proxy:8080/v1
+      MODEL_NAME: local-model
