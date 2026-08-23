@@ -140,3 +140,11 @@ The plugin remains useful in a plain Copilot CLI session with only
 - `/resume-handoff` first tries a pinned agent-dispatch handoff task when that
   stack is available; otherwise it falls back to the newest unconsumed
   worktree-state handoff file for the current CWD.
+
+For a **natural-language** resume request handled by the skill (for example,
+"resume from handoff" without an exact id), discovery is deliberately
+worktree-local first: resolve `agent-worktrees get worktree-state-dir`, consume
+the newest valid unconsumed file under its `handoff/` directory, then inspect
+the worktree's local disposition history for an exact task-backed handoff
+pointer. A broader agent-dispatch list is only a fallback and must be filtered
+to the current worktree before selecting a task; cross-session history is last.
