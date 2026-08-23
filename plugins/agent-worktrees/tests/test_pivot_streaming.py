@@ -256,14 +256,30 @@ def test_repoll_refetches_in_place_without_flicker(tmp_path):
     assert [r["id"] for r in rows] == ["a", "b"]
 
 
-def test_repoll_is_noop_on_stream_pivot(tmp_path):
-    # A streaming/subscribe pivot is already live; repoll() must not kick a
-    # redundant fetch (it returns without scheduling one).
-    rt = tasks.RegisteredPivotRuntime(_make_pivot(tmp_path, "ndjson", stream=True))
+def test_repoll_is_noop_on_subscribe_pivot(tmp_path):
+    # A held ``subscribe`` stream is already live (its channel applies deltas in
+    # place); repoll() must NOT kick a redundant fetch.
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "subscribe", subscribe=True))
+    calls = []
+    rt._run_list = lambda *a, **k: calls.append(a)
     rt.repoll(None)
-    state, rows, _err = rt.get(None)
-    assert state == "idle"        # no fetch was scheduled
-    assert rows == []
+    time.sleep(0.05)
+    assert calls == []            # no fetch scheduled
+    assert rt.get(None)[0] == "idle"
+
+
+def test_repoll_reschedules_on_oneshot_stream_pivot(tmp_path):
+    # A one-shot ``stream`` pivot (stream, but NOT subscribe) is not already-live,
+    # so repoll() must still schedule a refetch -- only a held subscribe stream is
+    # skipped. (Regression for the review nit: don't no-op ALL stream pivots.)
+    rt = tasks.RegisteredPivotRuntime(
+        _make_pivot(tmp_path, "ndjson", stream=True, subscribe=False))
+    calls = []
+    rt._run_list = lambda *a, **k: calls.append(a)
+    rt.repoll(None)
+    time.sleep(0.05)
+    assert calls, "repoll must schedule a refetch for a one-shot stream pivot"
 
 
 def test_repoll_coalesces_with_inflight_fetch(tmp_path):

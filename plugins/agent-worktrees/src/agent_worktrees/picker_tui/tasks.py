@@ -210,10 +210,12 @@ class RegisteredPivotRuntime:
         Tasks pivot pick up tasks/cards created by *another* session (e.g. a
         claimer posting a steer card) without a manual reload or a restart.
 
-        No-op for a ``stream`` pivot -- a streaming/``subscribe`` provider is
-        already live (its held child applies deltas), so a forced refetch would
-        just spawn a redundant stream."""
-        if self._closed.is_set() or self.pivot.stream:
+        No-op only for a ``subscribe`` pivot -- its held child channel is already
+        live (it applies deltas in place), so a forced refetch would spawn a
+        redundant second channel. A one-shot ``stream`` pivot (streams once then
+        exits) is NOT already-live, so it is repolled like any other -- the
+        streaming runner re-runs and swaps rows in via :meth:`_finish`."""
+        if self._closed.is_set() or self.pivot.subscribe:
             return
         with self._lock:
             if machine in self._inflight:
