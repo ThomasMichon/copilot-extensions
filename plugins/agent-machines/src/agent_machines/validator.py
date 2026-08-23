@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from . import resources as _resources
+from .discover import current_platform
 from .manifest import (
     BOOTSTRAP_CRITICAL_MARKETPLACES,
     BOOTSTRAP_CRITICAL_PLUGINS,
@@ -153,11 +155,31 @@ def check_bootstrap_floor(packages: list[RequirementPackage]) -> list[Finding]:
     return findings
 
 
-def validate(packages: list[RequirementPackage]) -> list[Finding]:
+def check_resource_conflicts(
+    packages: list[RequirementPackage], machine: str = "", plat: str | None = None
+) -> list[Finding]:
+    """Detect cross-package collisions among declarative ``resources:``.
+
+    Delegated to :func:`agent_machines.resources.detect_conflicts` (which owns
+    the per-type merge rules); its :class:`~agent_machines.resources.ResourceFinding`
+    results are mapped onto the validator's :class:`Finding` shape so resource
+    collisions surface alongside surface/bootstrap findings.
+    """
+    plat = plat or current_platform()
+    return [
+        Finding(rf.level, rf.code, rf.message)
+        for rf in _resources.detect_conflicts(packages, machine, plat)
+    ]
+
+
+def validate(
+    packages: list[RequirementPackage], machine: str = "", plat: str | None = None
+) -> list[Finding]:
     """Run every manifest-only validation rule over the resolved package union."""
     findings: list[Finding] = []
     findings.extend(check_scalar_conflicts(packages))
     findings.extend(check_bootstrap_floor(packages))
+    findings.extend(check_resource_conflicts(packages, machine, plat))
     return findings
 
 
