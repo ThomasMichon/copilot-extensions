@@ -61,7 +61,8 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
         "name", "container_id", "image", "state", "status",
         "fleet", "local_folder", "lease", "security_profile",
         "configured_security_profile", "security_policy_current",
-        "security_policy_errors", "network", "host_credentials",
+        "security_policy_errors", "network", "environment_names",
+        "host_credentials",
     }
     assert row["name"] == "aperture-1"
     assert row["state"] == "running"
@@ -94,6 +95,7 @@ def test_fleet_json_reports_restricted_posture(monkeypatch, capsys):
     config.fleets["myrepo"] = FleetConfig(
         security_profile="restricted",
         network="model-only",
+        environment={"MODEL_NAME": "local-model"},
     )
     monkeypatch.setattr(cli, "load_config", lambda: config)
     import agent_containers.lifecycle as lifecycle
@@ -132,6 +134,7 @@ def test_fleet_json_reports_restricted_posture(monkeypatch, capsys):
     assert row["configured_security_profile"] == "restricted"
     assert row["security_policy_current"] is True
     assert row["network"] == "model-only"
+    assert row["environment_names"] == ["MODEL_NAME"]
     assert row["host_credentials"] == {
         "github_token": False,
         "relay": False,

@@ -52,6 +52,14 @@ TRUSTED_PROFILE = "trusted"
 RESTRICTED_PROFILE = "restricted"
 SECURITY_PROFILES = {TRUSTED_PROFILE, RESTRICTED_PROFILE}
 RESTRICTED_POLICY_VERSION = 1
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SENSITIVE_ENV_RE = re.compile(
+    r"(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIALS?)($|_)"
+)
+
+
+def is_sensitive_environment_name(name: str) -> bool:
+    return bool(_SENSITIVE_ENV_RE.search(name.upper()))
 
 
 @dataclass
@@ -152,6 +160,8 @@ class FleetConfig:
     pids_limit: int | None = None
     workspace_size: str | None = None
     home_size: str | None = None
+    # Explicit non-secret values baked into the container environment.
+    environment: dict[str, str] = field(default_factory=dict)
     # Per-fleet credential overrides. Restricted fleets always resolve both
     # capabilities false, regardless of these values.
     forward_gh_token: bool | None = None
@@ -230,6 +240,14 @@ class FleetConfig:
                 raise RuntimeError(
                     f"Restricted fleet '{field_name}' must be a positive byte size"
                 )
+        for name in self.environment:
+            if not _ENV_NAME_RE.fullmatch(name):
+                raise RuntimeError(f"Restricted environment name '{name}' is invalid")
+            if is_sensitive_environment_name(name):
+                raise RuntimeError(
+                    f"Restricted environment '{name}' looks credential-bearing; "
+                    "use a dedicated least-privilege identity channel instead"
+                )
 
     def security_policy_fingerprint(
         self,
@@ -256,6 +274,7 @@ class FleetConfig:
             "workspace_folder": workspace_folder,
             "image": self.image,
             "exec_user": exec_user,
+            "environment": dict(sorted(self.environment.items())),
             "rootfs": "read-only",
             "capabilities": "drop-all",
             "no_new_privileges": True,
@@ -500,6 +519,11 @@ def load_config() -> ContainersConfig:
                 f"Fleet '{name}' has invalid security_profile "
                 f"'{security_profile}' (expected one of: {expected})"
             )
+        raw_environment = raw.get("environment") or {}
+        if not isinstance(raw_environment, dict):
+            raise RuntimeError(
+                f"Fleet '{name}' environment must be a key/value mapping"
+            )
         fleet = FleetConfig(
             repo=raw.get("repo", ""),
             devcontainer_path=raw.get("devcontainer_path"),
@@ -521,6 +545,10 @@ def load_config() -> ContainersConfig:
             ),
             workspace_size=raw.get("workspace_size"),
             home_size=raw.get("home_size"),
+            environment={
+                str(k): str(v)
+                for k, v in raw_environment.items()
+            },
             forward_gh_token=(
                 bool(raw["forward_gh_token"])
                 if "forward_gh_token" in raw

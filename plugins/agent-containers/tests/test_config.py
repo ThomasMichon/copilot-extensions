@@ -123,6 +123,9 @@ def test_load_restricted_fleet_config(tmp_path, monkeypatch):
                 pids_limit: 128
                 workspace_size: 3g
                 home_size: 256m
+                environment:
+                  MODEL_BASE_URL: http://model-proxy:8080/v1
+                  MODEL_NAME: local-model
                 acp_command: minimal-agent --stdio
                 forward_gh_token: true
                 relay_enabled: true
@@ -140,6 +143,10 @@ def test_load_restricted_fleet_config(tmp_path, monkeypatch):
     assert fleet.effective_pids_limit() == 128
     assert fleet.effective_workspace_size() == "3g"
     assert fleet.effective_home_size() == "256m"
+    assert fleet.environment == {
+        "MODEL_BASE_URL": "http://model-proxy:8080/v1",
+        "MODEL_NAME": "local-model",
+    }
     assert c.credentials_for(fleet) == (False, False)
 
 
@@ -166,6 +173,20 @@ def test_restricted_resource_limits_must_be_positive(tmp_path, monkeypatch):
     )
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
     with pytest.raises(RuntimeError, match="'pids_limit' must be positive"):
+        load_config()
+
+
+def test_restricted_environment_rejects_credentials(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        "fleets:\n  sandbox:\n    image: example/agent\n"
+        "    security_profile: restricted\n"
+        "    acp_command: minimal-agent --stdio\n"
+        "    environment:\n      MODEL_API_KEY: not-allowed\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    with pytest.raises(RuntimeError, match="looks credential-bearing"):
         load_config()
 
 

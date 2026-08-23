@@ -78,6 +78,9 @@ fleets:
     pids_limit: 256
     workspace_size: 2g
     home_size: 512m
+    environment:
+      MODEL_BASE_URL: http://model-proxy:8080/v1
+      MODEL_NAME: local-model
 ```
 
 `restricted` is a transport-enforced posture: no host GitHub token, no
@@ -97,6 +100,10 @@ Only containers with an exact fleet entry may be dispatched. Inventory may
 discover other devcontainers, but they never inherit global credential or launch
 defaults. Restricted venues are re-inspected before start/exec; a stale image or
 weakened Docker posture is refused.
+
+Use `environment` only for explicit **non-secret** model/harness settings.
+Credential-shaped names are refused at config load and again if an image
+contains them; machine-readable output reports names only.
 
 - `devcontainer_config` lets `up` build a **nested** devcontainer spec (e.g.
   a repo's local-Docker spec under `.devcontainer/docker/`) instead

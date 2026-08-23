@@ -387,6 +387,8 @@ def _image_run(
             args += ["--cpus", str(fleet.effective_cpus())]
         if fleet.effective_pids_limit() is not None:
             args += ["--pids-limit", str(fleet.effective_pids_limit())]
+    for key, value in sorted(fleet.environment.items()):
+        args += ["--env", f"{key}={value}"]
     args += [fleet.image, "sleep", "infinity"]
     res = _docker(args, timeout=120)
     if res.returncode != 0:
