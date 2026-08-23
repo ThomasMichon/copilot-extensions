@@ -317,3 +317,80 @@ def test_installers_invoke_monitor_restart_at_cutover():
         assert "status-monitor-restart" in text, (
             f"{name} must invoke `status-monitor-restart` after activating the "
             "new runtime slot (consolidated-status-daemon Phase 1, dotfiles#1696)")
+
+
+# --- windowless daemon spawn (the "headed status-monitor" DefTerm bug) --------
+
+
+def test_windowless_python_prefers_pythonw_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.os, "name", "nt")
+    (tmp_path / "python.exe").write_text("")
+    pyw = tmp_path / "pythonw.exe"
+    pyw.write_text("")
+    monkeypatch.setattr(m.sys, "executable", str(tmp_path / "python.exe"))
+    assert m._windowless_python() == str(pyw)
+
+
+def test_windowless_python_falls_back_without_pythonw(monkeypatch, tmp_path):
+    monkeypatch.setattr(m.os, "name", "nt")
+    py = tmp_path / "python.exe"
+    py.write_text("")
+    monkeypatch.setattr(m.sys, "executable", str(py))
+    assert m._windowless_python() == str(py)  # no pythonw sibling -> fall back
+
+
+def test_windowless_python_noop_off_windows(monkeypatch):
+    monkeypatch.setattr(m.os, "name", "posix")
+    monkeypatch.setattr(m.sys, "executable", "/usr/bin/python3")
+    assert m._windowless_python() == "/usr/bin/python3"
+
+
+def test_spawn_detached_swaps_in_windowless_python(monkeypatch):
+    seen: dict = {}
+
+    def _fake_popen(argv, **kwargs):
+        seen["argv"] = argv
+        return object()
+
+    monkeypatch.setattr(m.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(m, "_windowless_python", lambda: "PYTHONW")
+    assert m._spawn_detached(
+        [m.sys.executable, "-m", "agent_worktrees", "status-monitor"]) is True
+    assert seen["argv"][0] == "PYTHONW"
+    assert seen["argv"][1:] == ["-m", "agent_worktrees", "status-monitor"]
+
+
+def test_headless_child_guard_ors_no_window(monkeypatch):
+    import subprocess as _sp
+    orig = _sp.Popen.__init__
+    try:
+        monkeypatch.setattr(m, "no_window_flags", lambda: 0x08000000)
+        seen: dict = {}
+        monkeypatch.setattr(
+            _sp.Popen, "__init__",
+            lambda self, *a, **k: seen.__setitem__(
+                "flags", k.get("creationflags", 0)))
+        m._install_headless_child_guard()
+        _sp.Popen(["x"])
+        assert seen["flags"] & 0x08000000  # CREATE_NO_WINDOW OR'd in
+    finally:
+        _sp.Popen.__init__ = orig
+
+
+def test_headless_child_guard_respects_explicit_new_console(monkeypatch):
+    import subprocess as _sp
+    orig = _sp.Popen.__init__
+    try:
+        monkeypatch.setattr(m, "no_window_flags", lambda: 0x08000000)
+        seen: dict = {}
+        monkeypatch.setattr(
+            _sp.Popen, "__init__",
+            lambda self, *a, **k: seen.__setitem__(
+                "flags", k.get("creationflags", 0)))
+        m._install_headless_child_guard()
+        _sp.Popen(["x"], creationflags=m._CREATE_NEW_CONSOLE)
+        # An explicit new-console request is passed through, not silenced.
+        assert not (seen["flags"] & 0x08000000)
+        assert seen["flags"] & m._CREATE_NEW_CONSOLE
+    finally:
+        _sp.Popen.__init__ = orig
