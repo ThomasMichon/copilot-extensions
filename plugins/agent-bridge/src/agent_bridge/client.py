@@ -691,6 +691,8 @@ class BridgeClient:
         worktree_id: str | None = None,
         reclaim: bool = False,
         env: dict[str, str] | None = None,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -723,6 +725,10 @@ class BridgeClient:
             body["reclaim"] = True
         if env:
             body["env"] = env
+        if model:
+            body["model"] = model
+        if effort:
+            body["effort"] = effort
         # Always declare this client's HTTP contract version so a (cross-host)
         # receiver can gate capability across version skew (dotfiles #632).
         from .protocol import HTTP_PROTOCOL_VERSION
