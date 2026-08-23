@@ -78,6 +78,18 @@ def test_restricted_container_is_writable_only_on_bounded_tmpfs():
         )
         assert writable.returncode == 0, writable.stderr
 
+        executable = subprocess.run(
+            [
+                "docker", "exec", "-u", "node", name, "bash", "-lc",
+                "cp /bin/true /workspace/tool && chmod 700 /workspace/tool "
+                "&& /workspace/tool",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert executable.returncode == 0, executable.stderr
+
         rootfs = subprocess.run(
             [
                 "docker", "exec", "-u", "node", name,

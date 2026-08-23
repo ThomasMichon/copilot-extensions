@@ -105,6 +105,11 @@ CPU/memory/PID ceilings, and default to `network: none`. They must provide an
 explicit per-fleet `acp_command`; there is no implicit
 `--allow-all-tools` fallback.
 
+Workspace and home are explicitly executable because agent runtimes and build
+tools load native helpers there; `/tmp` and `/run` remain noexec. Execution is
+still bounded by the container's dropped capabilities, immutable rootfs,
+network policy, and resource limits.
+
 ```yaml
 fleets:
   restricted-worker:

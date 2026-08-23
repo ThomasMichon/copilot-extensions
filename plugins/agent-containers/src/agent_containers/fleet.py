@@ -365,12 +365,14 @@ def _image_run(
             "--tmpfs",
             (
                 f"{workspace_folder}:rw,nosuid,nodev,"
-                f"size={fleet.effective_workspace_size()},uid={uid},gid={gid},mode=0700"
+                f"exec,size={fleet.effective_workspace_size()},"
+                f"uid={uid},gid={gid},mode=0700"
             ),
             "--tmpfs",
             (
                 f"{home}:rw,nosuid,nodev,"
-                f"size={fleet.effective_home_size()},uid={uid},gid={gid},mode=0700"
+                f"exec,size={fleet.effective_home_size()},"
+                f"uid={uid},gid={gid},mode=0700"
             ),
             "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",
             "--tmpfs", "/run:rw,nosuid,nodev,size=64m",

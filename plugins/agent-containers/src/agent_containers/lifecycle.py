@@ -382,12 +382,12 @@ def restricted_policy_errors(
         errors.append("writable tmpfs surfaces differ from restricted policy")
     expected_options = {
         workspace_folder: {
-            "rw", "nosuid", "nodev",
+            "rw", "nosuid", "nodev", "exec",
             f"size={fleet.effective_workspace_size()}",
             f"uid={uid}", f"gid={gid}", "mode=0700",
         },
         home: {
-            "rw", "nosuid", "nodev",
+            "rw", "nosuid", "nodev", "exec",
             f"size={fleet.effective_home_size()}",
             f"uid={uid}", f"gid={gid}", "mode=0700",
         },
