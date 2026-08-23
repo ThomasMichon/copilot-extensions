@@ -22,7 +22,7 @@
         "agent-dispatch", "steer", "submit", "{task_id}", "{fields}"
       ],
       "when": {"awaiting_steer": true},
-      "description": "Read the card prose and answer its questions (any shape), then wake the worker. Never a verdict — the operator's steer, not an ADO vote."
+      "description": "Read the card prose and answer its form, then wake the worker. The agent acts on your answer only — including casting a PR verdict solely when a card's form asks for one and you pick it (review cards), never autonomously."
     },
     {
       "key": "open-cli",
