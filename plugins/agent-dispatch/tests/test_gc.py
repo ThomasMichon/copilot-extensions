@@ -217,3 +217,115 @@ def test_backlog_health_breaks_out_held_by_liveness(q):
     assert h["oldest_queued_age"] == pytest.approx(100.0)  # 1100 - 1000
     # stuck-but-alive signal: age since the live-held task last progressed (1004)
     assert h["oldest_held_live_age"] == pytest.approx(96.0)
+
+
+# -- orphaned-pin reaper: unowned tasks whose target worktree is gone ---------
+
+
+class TestReapOrphanedTargets:
+    def _pinned(self, q, title, *, wt, machine="m", now, status=Status.PROPOSED):
+        return q.create(
+            title, status=status, target_machine=machine, target_worktree=wt,
+            source="context-handoff", labels=["handoff"], now=now,
+        )
+
+    def test_reaps_orphaned_proposed(self, q):
+        t = self._pinned(q, "h1", wt="wt-gone", now=100)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert counts["reaped"] == 1 and counts["orphaned"] == 1
+        assert q.get(t.id).status == Status.ABANDONED
+
+    def test_reaps_orphaned_queued(self, q):
+        t = self._pinned(q, "h2", wt="wt-gone", now=100, status=Status.QUEUED)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert counts["reaped"] == 1
+        assert q.get(t.id).status == Status.ABANDONED
+
+    def test_keeps_task_for_live_worktree(self, q):
+        t = self._pinned(q, "h3", wt="wt-live", now=100)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert counts["reaped"] == 0
+        assert q.get(t.id).status == Status.PROPOSED
+
+    def test_respects_grace_window(self, q):
+        # 10s old at now=200; a 1h grace keeps it even though the worktree is gone.
+        t = self._pinned(q, "h4", wt="wt-gone", now=190)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=3600, now=200)
+        assert counts["reaped"] == 0
+        assert q.get(t.id).status == Status.PROPOSED
+
+    def test_degrade_safe_when_probe_none(self, q):
+        # An unresolved live-worktree probe reaps nothing (never act on ignorance).
+        t = self._pinned(q, "h5", wt="wt-gone", now=100)
+        counts = q.reap_orphaned_targets(None, machine="m", grace_secs=0, now=200)
+        assert counts == {"checked": 0, "orphaned": 0, "reaped": 0}
+        assert q.get(t.id).status == Status.PROPOSED
+
+    def test_only_local_machine_tasks(self, q):
+        # A task targeting another machine is that coordinator's to reap.
+        t = self._pinned(q, "h6", wt="wt-gone", machine="other", now=100)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert counts["checked"] == 0
+        assert q.get(t.id).status == Status.PROPOSED
+
+    def test_machine_match_is_case_insensitive(self, q):
+        self._pinned(q, "h7", wt="wt-gone", machine="Tmichon-Cloud1", now=100)
+        counts = q.reap_orphaned_targets(
+            {"wt-live"}, machine="tmichon-cloud1", grace_secs=0, now=200)
+        assert counts["reaped"] == 1
+
+    def test_ignores_owned_held_tasks(self, q):
+        # An owned (claimed/started) task is reconcile_liveness's job, not this.
+        t = q.create("owned", status=Status.QUEUED, target_machine="m",
+                     target_worktree="wt-gone", now=100)
+        _claim_and_start(q, t.id, wt="wt-gone", session="S1", now=100)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert counts["reaped"] == 0
+        assert q.get(t.id).status == Status.STARTED
+
+    def test_ignores_untargeted_tasks(self, q):
+        # No target_worktree -> not a pinned task -> never reaped.
+        t = q.create("floating", status=Status.QUEUED, target_machine="m", now=100)
+        counts = q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert counts["checked"] == 0
+        assert q.get(t.id).status == Status.QUEUED
+
+    def test_abandon_stamps_completed_at(self, q):
+        t = self._pinned(q, "h8", wt="wt-gone", now=100)
+        q.reap_orphaned_targets({"wt-live"}, machine="m", grace_secs=0, now=200)
+        assert q.get(t.id).completed_at == pytest.approx(200.0)
+
+
+class TestLiveWorktrees:
+    def test_returns_id_set(self, monkeypatch):
+        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+        monkeypatch.setattr(
+            tracking.subprocess, "run",
+            _fake_run(0, '{"worktrees":[{"id":"wt-a"},{"id":"wt-b"}]}'))
+        assert tracking.live_worktrees() == {"wt-a", "wt-b"}
+
+    def test_supports_bare_array(self, monkeypatch):
+        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
+        monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, '[{"id":"w1"}]'))
+        assert tracking.live_worktrees() == {"w1"}
+
+    def test_none_when_cli_absent(self, monkeypatch):
+        monkeypatch.setattr(tracking.shutil, "which", lambda _n: None)
+        assert tracking.live_worktrees() is None
+
+    def test_none_on_nonzero_exit(self, monkeypatch):
+        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
+        monkeypatch.setattr(tracking.subprocess, "run", _fake_run(2, ""))
+        assert tracking.live_worktrees() is None
+
+    def test_none_on_unparseable(self, monkeypatch):
+        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
+        monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, "not json"))
+        assert tracking.live_worktrees() is None
+
+    def test_none_on_timeout(self, monkeypatch):
+        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
+        monkeypatch.setattr(
+            tracking.subprocess, "run",
+            _fake_run(raises=subprocess.TimeoutExpired("agent-worktrees", 5)))
+        assert tracking.live_worktrees() is None

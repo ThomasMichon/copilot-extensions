@@ -38,6 +38,13 @@ DEFAULT_PORT = 9847
 DEFAULT_DB = Path.home() / ".agent-dispatch" / "tasks.db"
 DEFAULT_SWEEP_INTERVAL = 60.0
 
+#: Minimum age (seconds) before an UNOWNED proposed/queued task pinned to a
+#: no-longer-live target worktree is reaped by the liveness GC (see
+#: ``TaskQueue.reap_orphaned_targets``). Generous by default so a freshly-stored
+#: handoff whose successor hasn't started is never reaped; ``0`` reaps as soon as
+#: the worktree is gone. Env override: ``AGENT_DISPATCH_ORPHAN_GRACE``.
+DEFAULT_ORPHAN_GRACE = 86400.0  # 24h
+
 # Discovery: the coordinator advertises its bound endpoint in a rendezvous file
 # under this runtime dir; clients resolve it there (env override -> file -> the
 # legacy fixed port). Honors overrides so a branded/side-by-side deployment keeps
@@ -130,6 +137,7 @@ class Config:
     db_path: str = str(DEFAULT_DB)
     token: str | None = None
     sweep_interval: float = DEFAULT_SWEEP_INTERVAL
+    orphan_grace: float = DEFAULT_ORPHAN_GRACE
 
     @property
     def url(self) -> str:
@@ -147,6 +155,9 @@ def load_config() -> Config:
             os.environ.get("AGENT_DISPATCH_GC_INTERVAL")
             or os.environ.get("AGENT_DISPATCH_SWEEP_INTERVAL")
             or str(DEFAULT_SWEEP_INTERVAL)
+        ),
+        orphan_grace=float(
+            os.environ.get("AGENT_DISPATCH_ORPHAN_GRACE") or str(DEFAULT_ORPHAN_GRACE)
         ),
     )
 

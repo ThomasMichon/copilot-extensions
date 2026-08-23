@@ -262,6 +262,50 @@ def liveness_verdict(
     return LIVE if current == owner_session_id else GONE
 
 
+def live_worktrees(*, timeout: float = 5.0) -> set[str] | None:
+    """The set of worktree ids currently **live** on this machine.
+
+    Shells ``agent-worktrees list --json --tracking-status active`` -- the
+    active-tracking, directory-present worktrees (a pruned/finalized/orphaned
+    worktree is excluded). Used by the liveness GC to reap **unowned**
+    proposed/queued tasks pinned to a worktree that no longer exists (see
+    :meth:`agent_dispatch.queue.TaskQueue.reap_orphaned_targets`).
+
+    Returns ``None`` on **any** failure (no CLI, non-zero exit, timeout, empty or
+    unparseable output) so the caller degrades safe -- an unresolved probe reaps
+    nothing, never on ignorance. Never raises.
+    """
+    exe = shutil.which("agent-worktrees")
+    if exe is None:
+        return None
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            [exe, "list", "--json", "--tracking-status", "active"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    out = (proc.stdout or "").strip()
+    if not out:
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    wts = data.get("worktrees", data) if isinstance(data, dict) else data
+    if not isinstance(wts, list):
+        return None
+    return {
+        str(w["id"]) for w in wts
+        if isinstance(w, dict) and w.get("id")
+    }
+
+
 def enrich_task(
     task: Any,
     *,
