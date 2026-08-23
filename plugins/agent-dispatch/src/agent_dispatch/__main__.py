@@ -1438,6 +1438,64 @@ def _cmd_list(args: argparse.Namespace) -> int:
     return _emit(tracking.enrich_tasks(_enrich(tasks)))
 
 
+#: The picker Tasks-pivot **board** groups, in the operator's priority order:
+#: what needs your attention first (a task blocked awaiting your steer), then the
+#: pickable/in-flight lifecycle, then recently-finished tasks. The tuple index is
+#: the sort key; the string is the pivot section header. ``--board`` tags each
+#: task with its group and orders by this sequence so the picker's first-seen
+#: grouping renders the sections in exactly this order.
+_BOARD_GROUPS = ("Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned")
+_BOARD_TERMINAL = frozenset({"Completed", "Abandoned"})
+
+
+def _board_group(task: dict) -> str:
+    """The display group for a task on the picker board (see ``_BOARD_GROUPS``).
+
+    A **terminal** status (completed / abandoned / dead_letter) wins first -- a
+    task can carry a stale ``awaiting_steer`` flag after being abandoned while
+    blocked, and a finished task is never "Blocked". Otherwise ``awaiting_steer``
+    (a live task needing the operator's steer) wins over the raw lifecycle state,
+    then proposed/queued, else any other owned in-flight state reads as
+    *Started*."""
+    st = task.get("status")
+    if st == "completed":
+        return "Completed"
+    if st in ("abandoned", "dead_letter"):
+        return "Abandoned"
+    if task.get("awaiting_steer"):
+        return "Blocked"
+    if st == "proposed":
+        return "Proposed"
+    if st == "queued":
+        return "Queued"
+    return "Started"
+
+
+def _board_sort_key(task: dict) -> tuple:
+    grp = _board_group(task)
+    prio = _BOARD_GROUPS.index(grp) if grp in _BOARD_GROUPS else len(_BOARD_GROUPS)
+    # Within a group, surface the most recent activity first.
+    ts = task.get("updated_at") or task.get("created_at") or 0
+    try:
+        ts = float(ts)
+    except (TypeError, ValueError):
+        ts = 0.0
+    return (prio, -ts)
+
+
+def _board_keep(task: dict, cutoff: float) -> bool:
+    """Keep an active task always; keep a terminal (completed/abandoned) task only
+    when its terminal timestamp is at/after ``cutoff`` (the recency window), so the
+    board shows *recently* finished work without unbounded growth."""
+    if _board_group(task) not in _BOARD_TERMINAL:
+        return True
+    ts = task.get("completed_at") or task.get("updated_at") or 0
+    try:
+        return float(ts) >= cutoff
+    except (TypeError, ValueError):
+        return False
+
+
 def _cmd_inbox(args: argparse.Namespace) -> int:
     """Machine-scoped, cross-lane view of pickable tasks.
 
@@ -1469,6 +1527,26 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    # --board: the status-grouped picker board. Widens the fetch across the whole
+    # visible lifecycle (proposed -> in-flight -> recently terminal), tags each
+    # task with a display `group`, drops terminal tasks older than the recency
+    # window, and orders by group priority so the picker renders the sections
+    # Blocked -> Proposed -> Queued -> Started -> Completed -> Abandoned. Overrides
+    # --awaiting-steer / --status.
+    if getattr(args, "board", False):
+        import time as _time
+
+        from .queue import machine_matches
+
+        status = "proposed,queued,claimed,started,completed,abandoned,dead_letter"
+        with _client(args) as c:
+            tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
+        inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
+        cutoff = _time.time() - max(0, getattr(args, "recent_mins", 120)) * 60
+        inbox = [t for t in inbox if _board_keep(t, cutoff)]
+        inbox.sort(key=_board_sort_key)
+        inbox = [{**t, "group": _board_group(t)} for t in inbox]
+        return _emit(_enrich(inbox))
     # --awaiting-steer widens the fetch to the owned states (a task blocked on
     # operator steering is `claimed`/`started`, not a filterable "held" -- HELD
     # is a derived category), then keeps only the *pickable* (`proposed`) rows
@@ -3380,6 +3458,19 @@ def build_parser() -> argparse.ArgumentParser:
              "task blocked on operator steering (a posted card's request_input, "
              "in claimed/started), and nothing else of the owned queue. Overrides "
              "--status.",
+    )
+    p.add_argument(
+        "--board", action="store_true",
+        help="status-grouped board for the picker Tasks pivot: tasks across "
+             "proposed/queued/claimed/started PLUS recently completed/abandoned, "
+             "each tagged with a display `group` (Blocked/Proposed/Queued/Started/"
+             "Completed/Abandoned) and ordered by that priority. Overrides "
+             "--status and --awaiting-steer.",
+    )
+    p.add_argument(
+        "--recent-mins", dest="recent_mins", type=int, default=120,
+        help="with --board: include completed/abandoned tasks whose terminal time "
+             "is within this many minutes (default: 120).",
     )
     p.add_argument("--label")
     p.add_argument("--limit", type=int, default=200)

@@ -5033,6 +5033,63 @@ def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_registered_pivot_groups_by_status_group(tmp_path, monkeypatch):
+    """When the manifest declares ``entry.group`` (the agent-dispatch board's
+    status group), the Tasks pivot groups by that field instead of the worktree
+    field, and renders the group sections in the provider's first-seen order --
+    so ``inbox --board``'s priority ordering (Blocked -> Proposed -> Queued ->
+    Started -> Completed -> Abandoned) becomes the section order, and a steered
+    task moves from Blocked to Started rather than vanishing."""
+    import json as _json
+
+    from agent_worktrees.picker_tui import pivots as pivots_mod
+
+    d = tmp_path / "pivots"
+    d.mkdir()
+    manifest = {
+        "label": "Tasks", "after": "Worktrees", "list": ["true"],
+        "entry": {
+            "id": "id", "title": "title", "worktree": "target_worktree",
+            "subtitle": "repo_name", "group": "group", "badges": ["labels"],
+        },
+        "empty_hint": "No tasks.",
+        "actions": [{"key": "open", "label": "Open", "run": ["echo", "{id}"]}],
+    }
+    (d / "agent-dispatch.json").write_text(_json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
+
+    # Rows arrive already ordered by group priority (as --board emits them), each
+    # tagged with its status group; two share a group to prove membership.
+    rows = [
+        {"id": "b1", "title": "blocked one", "group": "Blocked", "target_worktree": "wt-x"},
+        {"id": "p1", "title": "proposed one", "group": "Proposed", "target_worktree": None},
+        {"id": "s1", "title": "started one", "group": "Started", "target_worktree": "wt-x"},
+        {"id": "s2", "title": "started two", "group": "Started", "target_worktree": "wt-y"},
+    ]
+    src = _fixture_source()
+
+    async def run():
+        app = PickerApp(src, live=False)
+        async with app.run_test(size=(118, 36)) as pilot:
+            scr = app.query_one(PickerScreen)
+            scr.machine_idx = scr.local_index()
+            _seed_fake_tasks(scr, rows)
+            scr.htab = scr.htabs.index("Tasks")
+            scr.sel = scr.default_sel()
+            scr.refresh()
+            await pilot.pause()
+
+            groups = scr._task_groups()
+            # Grouped by status, NOT worktree, in first-seen (priority) order.
+            assert [g for g, _ in groups] == ["Blocked", "Proposed", "Started"]
+            members = {g: [r["id"] for _, r in items] for g, items in groups}
+            assert members["Blocked"] == ["b1"]
+            assert members["Proposed"] == ["p1"]
+            assert members["Started"] == ["s1", "s2"]
+
+    asyncio.run(run())
+
+
 def test_tasks_view_component_renders_body(tmp_path, monkeypatch):
     """F5 slice 6: the registered-pivot (Tasks) body is rendered by an
     encapsulated ``TasksView`` component, not inlined in ``build_body``. Assert

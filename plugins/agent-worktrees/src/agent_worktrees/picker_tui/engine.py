@@ -1938,17 +1938,25 @@ class PickerScreen(Widget):
             rec["worktree_title"] = titles.get(str(wt).strip().lower(), "") if wt else ""
 
     def _task_groups(self):
-        """Task rows grouped by the pivot's worktree field for display. Returns
-        ``[(group_label, [(row_index, entry), ...]), ...]`` in first-seen order."""
+        """Task rows grouped for display. Groups by the pivot's ``group`` entry
+        field (``group_field``) when the manifest declares one -- e.g. the
+        agent-dispatch board's status group (Blocked/Proposed/Queued/Started/
+        Completed/Abandoned) -- otherwise by the worktree field (the default
+        pin-based grouping). Returns ``[(group_label, [(row_index, entry), ...]),
+        ...]`` in first-seen order, so a ``list`` provider that already emits its
+        rows in the intended section order (as ``--board`` does) controls the
+        section order too."""
         reg = self._reg_pivot()
         rows = self._task_rows()
         if reg is None:
             return []
+        group_key = reg.group_field or reg.worktree_field
+        default_label = "· ungrouped" if reg.group_field else "· unpinned"
         groups: dict[str, list] = {}
         order: list[str] = []
         for i, r in enumerate(rows):
-            wt = r.get(reg.worktree_field) if reg.worktree_field else None
-            key = wt or "· unpinned"
+            gv = r.get(group_key) if group_key else None
+            key = gv or default_label
             if key not in groups:
                 groups[key] = []
                 order.append(key)

@@ -55,6 +55,7 @@ def test_parse_full_manifest(tmp_path):
                 "title": "title",
                 "worktree": "target_worktree",
                 "subtitle": "repo_name",
+                "group": "group",
                 "badges": ["labels"],
             },
             "empty_hint": "No proposed tasks.",
@@ -67,6 +68,7 @@ def test_parse_full_manifest(tmp_path):
     [p] = pivots.discover_pivots(tmp_path)
     assert p.list_cmd == ("agent-dispatch", "inbox", "--machine", "{machine}")
     assert p.subtitle_field == "repo_name"
+    assert p.group_field == "group"
     assert p.badge_fields == ("labels",)
     assert p.empty_hint == "No proposed tasks."
     assert [a.key for a in p.actions] == ["open", "action1"]
