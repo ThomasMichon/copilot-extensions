@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -556,3 +557,116 @@ def test_cli_activate_replace_nonlink(tmp_path, capsys):
     capsys.readouterr()
     assert vr.main(["--root", str(tmp_path), "--link-name", "venv", "current"]) == 0
     assert capsys.readouterr().out.strip() == "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# gc: legacy Windows junction slots (#846)
+# ---------------------------------------------------------------------------
+
+def _make_junction(target: Path, junction: Path) -> None:
+    import _winapi
+    junction.parent.mkdir(parents=True, exist_ok=True)
+    _winapi.CreateJunction(str(target), str(junction))
+
+
+def test_junction_slot_names_empty_on_posix_and_realdirs(tmp_path):
+    """No junction slots -> the GC candidate set equals list_versions (both OS)."""
+    _install(tmp_path, "1.0.0")
+    _install(tmp_path, "2.0.0")
+    assert vr._junction_slot_names(tmp_path) == []
+    assert vr._gc_candidate_versions(tmp_path) == vr.list_versions(tmp_path)
+
+
+def test_gc_ordinary_dirs_unchanged_by_junction_path(tmp_path):
+    """Junction-safe GC must not regress the normal real-directory behavior."""
+    stale = _install(tmp_path, "1.0.0")
+    kept = _install(tmp_path, "2.0.0")
+    current = _install(tmp_path, "3.0.0")
+    vr.activate(tmp_path, "3.0.0")
+    assert vr.gc(tmp_path, keep=["2.0.0"]) == ["1.0.0"]
+    assert not stale.exists()
+    assert kept.is_dir()
+    assert current.is_dir()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junction behavior is Windows-only")
+def test_windows_gc_removes_live_target_junction_slot_without_deleting_target(tmp_path):
+    """A live-target junction slot is reclaimed as its reparse-point entry; the
+    junction's target dir and contents are never traversed or deleted (#846).
+
+    ``list_versions`` *does* include a live-target junction (its ``is_dir()``
+    traverses the reparse point to a real dir) -- so pre-fix GC would
+    ``shutil.rmtree`` it and delete the target's contents. The fix routes every
+    junction slot through :func:`_remove_slot` (``os.rmdir``), never a traversal.
+    """
+    target = tmp_path / "legacy-target"
+    target.mkdir()
+    sentinel = target / "keep.txt"
+    sentinel.write_text("keep", encoding="utf-8")
+
+    junction = vr.version_dir(tmp_path, "1.0.0")
+    _make_junction(target, junction)
+    assert vr._is_link(junction)
+    _install(tmp_path, "2.0.0")
+    vr.activate(tmp_path, "2.0.0")
+
+    assert "1.0.0" in vr._gc_candidate_versions(tmp_path)
+    assert vr.gc(tmp_path) == ["1.0.0"]
+    assert not os.path.lexists(junction)          # junction entry unlinked
+    assert target.is_dir()                        # target dir NOT traversed/deleted
+    assert sentinel.read_text(encoding="utf-8") == "keep"
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junction behavior is Windows-only")
+def test_windows_gc_removes_broken_target_junction_slot(tmp_path):
+    """A broken-target junction slot (which list_versions drops because is_dir()
+    traverses to a missing target) is still enumerated and reclaimed (#846)."""
+    target = tmp_path / "legacy-target"
+    target.mkdir()
+    junction = vr.version_dir(tmp_path, "1.0.0")
+    _make_junction(target, junction)
+    shutil.rmtree(target)
+    assert os.path.lexists(junction)
+    assert not junction.exists()          # broken target
+    assert "1.0.0" not in vr.list_versions(tmp_path)
+
+    _install(tmp_path, "2.0.0")
+    vr.activate(tmp_path, "2.0.0")
+
+    assert vr.gc(tmp_path) == ["1.0.0"]
+    assert not os.path.lexists(junction)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junction behavior is Windows-only")
+def test_windows_gc_keeps_current_junction_free_slots_when_junction_present(tmp_path):
+    """The junction path must not disturb protection of current/kept real slots."""
+    target = tmp_path / "legacy-target"
+    target.mkdir()
+    junction = vr.version_dir(tmp_path, "1.0.0")
+    _make_junction(target, junction)
+    _install(tmp_path, "2.0.0")           # kept
+    current = _install(tmp_path, "3.0.0")
+    vr.activate(tmp_path, "3.0.0")
+
+    assert vr.gc(tmp_path, keep=["2.0.0"]) == ["1.0.0"]
+    assert not os.path.lexists(junction)
+    assert vr.version_dir(tmp_path, "2.0.0").is_dir()
+    assert current.is_dir()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junction behavior is Windows-only")
+def test_windows_gc_reclaims_junction_slot_under_nonzero_min_age(tmp_path):
+    """A junction slot must stay reclaimable even under a positive min_age_days
+    floor: its ``stat()`` traverses to a possibly-young target, which would
+    otherwise shield the legacy junction indefinitely (#846)."""
+    target = tmp_path / "legacy-target"
+    target.mkdir()                        # fresh target -> young mtime
+    junction = vr.version_dir(tmp_path, "1.0.0")
+    _make_junction(target, junction)
+    _install(tmp_path, "2.0.0")
+    vr.activate(tmp_path, "2.0.0")
+
+    # A large floor would shield a young *real* slot -- but never a junction slot.
+    assert vr.gc(tmp_path, min_age_days=3650) == ["1.0.0"]
+    assert not os.path.lexists(junction)
+    assert target.is_dir()

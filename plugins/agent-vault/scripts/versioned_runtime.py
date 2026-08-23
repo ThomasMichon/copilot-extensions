@@ -704,6 +704,62 @@ def _slot_age_days(root: Path, version: str) -> float:
     return max(0.0, (time.time() - mtime) / 86400.0)
 
 
+def _junction_slot_names(root: Path) -> list[str]:
+    """Legacy version slots that are directory *junctions* (Windows only, #846).
+
+    :func:`list_versions` lists only real directories (``is_dir()``), which on
+    Windows *traverses* a reparse point -- so a **broken-target** junction slot
+    reports ``is_dir() == False`` and is dropped entirely (it can never be
+    reclaimed), and even a **live-target** junction is a reparse point GC must
+    remove as its exact entry, never by recursing into its target. Legacy
+    layouts can leave such junction slots under ``versions/``; GC must still see
+    them to reclaim them. Detect them with :func:`_is_link` (lstat, never
+    traverses -- so RedirectionGuard's WinError 448 can't hide them). Always
+    empty on POSIX and whenever no junction slots exist.
+    """
+    if os.name != "nt":
+        return []
+    vroot = versions_root(root)
+    if not vroot.is_dir():
+        return []
+    try:
+        entries = list(vroot.iterdir())
+    except OSError:
+        return []
+    return [p.name for p in entries if _is_link(p)]
+
+
+def _gc_candidate_versions(root: Path) -> list[str]:
+    """Version slot names GC may reclaim: the normal real-directory slots plus
+    any legacy Windows junction slots that :func:`list_versions` omits (#846).
+
+    The shared :func:`list_versions` deliberately keeps a junction-free view for
+    non-GC callers (current-version resolution, last-known-good, live-process
+    attribution); the junction slots are surfaced *only* to GC, here.
+    """
+    names = set(list_versions(root))
+    names.update(_junction_slot_names(root))
+    return sorted(names, key=_version_key)
+
+
+def _remove_slot(d: Path, *, label: str) -> bool:
+    """Remove a version slot, junction-safe. Returns True iff removed (#846).
+
+    A legacy Windows junction slot is a reparse point: remove it as its exact
+    entry via :func:`_remove_link` (``os.rmdir`` / ``unlink``) so GC never
+    traverses into -- or deletes the contents of -- the junction's target. A
+    real directory is removed with the AV-tolerant :func:`_rmtree_deferrable`.
+    """
+    if _is_link(d):
+        try:
+            _remove_link(d)
+            return True
+        except OSError as exc:
+            print(f"{label}: could not remove junction slot {d}: {exc}", file=sys.stderr)
+            return False
+    return _rmtree_deferrable(d, label=label)
+
+
 def gc(root: Path, keep: list[str] | None = None,
        protect_pids: bool = False, link_name: str = CURRENT_LINK,
        min_age_days: float = DEFAULT_GC_MIN_AGE_DAYS) -> list[str]:
@@ -722,6 +778,11 @@ def gc(root: Path, keep: list[str] | None = None,
     live (a platform where process enumeration/image-path lookup is blocked), it
     falls back to the older conservative rule -- keep the newest non-current slot
     too -- so GC is never *less* safe than before.
+
+    Legacy Windows junction slots (#846) are also reclaimed: they are enumerated
+    via :func:`_gc_candidate_versions` (which :func:`list_versions` omits) and
+    removed via :func:`_remove_slot` as the exact reparse-point entry, never
+    traversing the junction target.
     """
     keep_set = set(keep or [])
     cur = current_version(root, link_name)
@@ -741,16 +802,20 @@ def gc(root: Path, keep: list[str] | None = None,
                 keep_set.add(non_current[-1])
 
     removed: list[str] = []
-    for v in list_versions(root):
+    for v in _gc_candidate_versions(root):
         if v in keep_set:
             continue
+        d = version_dir(root, v)
         # Optional recency backstop (default off): active-process usage is the
         # primary gate, but a caller may pass a floor to hold just-superseded
-        # slots for a stored (not-running) pinned reference to age out.
-        if min_age_days > 0 and _slot_age_days(root, v) < min_age_days:
+        # slots for a stored (not-running) pinned reference to age out. Never
+        # applies to a legacy junction slot (#846): its ``stat()`` would traverse
+        # the reparse point and report the *target's* mtime (possibly young),
+        # shielding the junction indefinitely -- junction slots must always be
+        # reclaimable, and ``_remove_slot`` only unlinks the entry anyway.
+        if min_age_days > 0 and not _is_link(d) and _slot_age_days(root, v) < min_age_days:
             continue
-        d = version_dir(root, v)
-        if _rmtree_deferrable(d, label="gc"):
+        if _remove_slot(d, label="gc"):
             removed.append(v)
     return removed
 
