@@ -62,30 +62,90 @@ manager binary, the resource is skipped with a reason (never a hard failure).
 
 ### `file`
 
-Converge a canonical config file. Identity is the normalized `path`.
+Converge a canonical config file. Identity is the normalized `path` plus a
+`block` id (empty for whole-file strategies), so distinct managed blocks in one
+file are separate, compatible resources.
 
 | Field | Required | Meaning |
 | --- | --- | --- |
 | `type` | yes | `file` |
 | `path` | yes | `$HOME/...`, `$REPO(<name>)/...`, or an absolute path. |
 | `id` | no | Display id (defaults to the path). |
-| `format` | no | `text` (default) or `json`. |
-| `strategy` | no | `enforce` (default) or `ensure-present`. |
-| `content` | no | The desired content (a JSON object literal string for `format: json`). |
+| `format` | no | `text` (default) or `json` (not valid with `managed-block`). |
+| `strategy` | no | `enforce` (default), `ensure-present`, or `managed-block`. |
+| `block` | managed-block only | Stable block identity; also derives the markers. |
+| `begin` / `end` | no | Explicit marker override (default derived from `block`). |
+| `state` | managed-block only | `present` (default) or `absent` (remove the block). |
+| `content` | no | The desired content (whole file, or just the block body for `managed-block`). |
 
 Strategy semantics:
 
 - **text / enforce** -- the file content is made exactly `content`.
 - **text / ensure-present** -- the file is created with `content` only if it is
   missing; an existing file is left untouched.
+- **text / managed-block** -- the engine owns *only* a marked block inside an
+  otherwise user-owned file. It refreshes the block to `content` (the block
+  body), preserves all other lines verbatim, trims trailing blank lines so
+  repeats never accumulate them, and re-appends the block after a single blank
+  separator. `state: absent` removes the block and leaves the rest untouched.
 - **json / enforce** -- `content` is deep-merged authoritatively over the live
   JSON (declared keys win, siblings preserved).
 - **json / ensure-present** -- `content` is applied as a floor (only fills in
   keys that are absent).
 
+The `managed-block` markers default to `# >>> <block> >>>` / `# <<< <block> <<<`
+(comment-style `#`), matching the convention used by opt-in keybind blocks. Set
+`begin`/`end` explicitly to interoperate with an existing block that uses
+different markers.
+
 Writes are atomic and back up any existing file under
 `~/.agent-machines/backups/` before mutating. A `$REPO(<name>)` anchor that does
 not resolve to a known repo is skipped with a reason rather than guessed.
+
+### `registry`
+
+Converge a single Windows registry **value**. Identity is
+`(canonical key, value name)`, folded case-insensitively (hive short names like
+`HKCU` expand to `HKEY_CURRENT_USER`). Windows-only; filtered out on other
+platforms.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `registry` |
+| `path` | yes | The key, e.g. `HKCU:\Software\App` or `HKEY_CURRENT_USER\Software\App`. |
+| `name` | no | Value name (defaults to `""`, the key's default value). |
+| `id` | no | Display id (defaults to the path). |
+| `value` | no | Desired data. |
+| `value_type` | no | `String` (default), `ExpandString`, `MultiString`, `DWord`, `QWord`, `Binary`. |
+| `state` | no | `present` (default) or `absent` (delete the value). |
+
+Apply queries the current value first via `reg.exe`, then writes
+(`reg add ... /f`) only when the value or type differs, or deletes
+(`reg delete ... /f`) for `state: absent`. If `reg` is not on PATH the resource
+is skipped with a reason.
+
+### `feature`
+
+Converge an OS feature via a named `manager`. Identity is `(manager, id)`.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `feature` |
+| `manager` | yes | `windows-optional-feature`, `windows-capability`, or `linux-systemd`. |
+| `id` | yes | Feature / capability / unit name. |
+| `state` | no | `present` (default) or `absent`. |
+
+Manager matrix:
+
+| Manager | Platforms | Backend | present / absent |
+| --- | --- | --- | --- |
+| `windows-optional-feature` | windows | DISM `/get-featureinfo`, `/enable-feature`, `/disable-feature` | Enabled / Disabled |
+| `windows-capability` | windows | DISM `/get-capabilityinfo`, `/add-capability`, `/remove-capability` | Installed / removed |
+| `linux-systemd` | linux, wsl | `systemctl is-enabled` / `enable` / `disable` | enabled / disabled |
+
+Apply detects current state first and acts only when it differs. On an
+unsupported platform, an unknown manager, or a missing backend binary, the
+resource is skipped with a reason (never a hard failure).
 
 ## Path anchors
 
@@ -110,6 +170,12 @@ compatible**:
 | file conflicting `format` | error |
 | file `enforce` + `ensure-present` | enforce wins (advisory) |
 | file two `ensure-present` with different content | deterministic pick (advisory) |
+| file same `(path, block)` with different content | error |
+| file distinct `block` ids in one file | compatible (coexist) |
+| file whole-file owner + managed block on one path | error |
+| registry `present` + `absent` | error |
+| registry conflicting `value` or `value_type` | error |
+| feature `present` + `absent` | error |
 
 The deterministic pick is stable regardless of package order, so plans and drift
 keys are reproducible. Errors block `restore`; advisories do not.
@@ -148,7 +214,9 @@ list, and existing `manage` / `modules` behavior is unchanged.
 ### PSMux acceptance case
 
 PSMux (the `psmux` terminal multiplexer) is the canonical first adopter. Its
-desired state on a Windows box is exactly two resources:
+desired state on a Windows box is exactly two resources: the pinned package, and
+a `managed-block` file that owns *only* the opt-in keystroke-passthrough keybind
+block inside the user-owned `~/.psmux.conf`.
 
 ```yaml
 resources:
@@ -159,31 +227,30 @@ resources:
     state: present
     pin: true
   - type: file
-    id: psmux-settings
+    id: psmux-keybinds
     path: "$HOME/.psmux.conf"
-    format: text
-    strategy: ensure-present   # seed the user's config without clobbering edits
+    strategy: managed-block
+    block: "agent-worktrees mux keybinds (opt-in)"
     content: |
-      set -g mouse on
+      # Opt-in intercept: every unprefixed key/mouse event passes straight
+      # through to the inner application; only the prefix (Ctrl+B) is intercepted.
+      set -g prefix C-b
+      unbind-key -a -T root
+      # Re-add mouse-wheel passthrough (cleared by the unbind above).
+      bind-key -T root WheelUpPane   send-keys -M
+      bind-key -T root WheelDownPane send-keys -M
+      # Disable Windows Ctrl+V paste interception.
+      set -g paste-detection off
 ```
 
-This is the exact schema a downstream repo should add to the requirement package
-that owns PSMux provisioning. `ensure-present` is deliberate: the per-session
-model treats `~/.psmux.conf` as user-owned, so the resource seeds it once and
-never overwrites later hand edits. A future `managed-block` file strategy (write
-only a marked, engine-owned block within an otherwise user-owned file) is the
-natural next step for opt-in keybind blocks; it is not implemented yet.
+This is the exact schema a downstream repo adds to the requirement package that
+owns PSMux provisioning. The `managed-block` strategy derives its markers from
+`block` as `# >>> agent-worktrees mux keybinds (opt-in) >>>` /
+`# <<< agent-worktrees mux keybinds (opt-in) <<<`, which match the block a prior
+imperative `apply-mux-keybinds` script wrote by hand -- so adopting the resource
+takes over the existing block seamlessly and the custom persistence script can
+be deleted. The rest of `~/.psmux.conf` (the user's own `set -g mouse on` and
+any hand edits) is preserved; only the marked block is engine-owned, and it is
+refreshed idempotently on every restore. Setting `state: absent` on the same
+resource removes the block cleanly.
 
-## Reserved types (roadmap)
-
-`registry` and `feature` are recognized and validated by the schema but have no
-handler yet -- apply reports "no handler" and skips, so a package can declare
-them ahead of the engine. They are the clean next extension points:
-
-- **`registry`** -- Windows registry values (identity `(type, path)`), for
-  machine settings currently poked by `reg`/`Set-ItemProperty` in scripts.
-- **`feature`** -- Windows optional features / capabilities and Linux
-  distro features (identity `(type, id)`).
-
-Adding either is a new `ResourceHandler` subclass registered in `HANDLERS`; the
-engine, CLI, and validator wiring already carry them through.

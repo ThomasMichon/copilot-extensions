@@ -41,10 +41,10 @@ DISPOSITIONS = (
 BOOTSTRAP_CRITICAL_PLUGINS = ("agent-worktrees", "agent-machines")
 BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 
-#: Declarative-resource types the schema recognizes. ``package`` and ``file``
-#: have handlers today; ``registry`` and ``feature`` are reserved extension
-#: points (accepted, planned, and validated, but not yet applied). See
-#: ``resources.py`` for the handler registry.
+#: Declarative-resource types the schema recognizes. All four are fully
+#: handled today -- ``package``, ``file`` (whole-file and managed-block),
+#: ``registry`` (Windows), and ``feature`` (Windows optional features /
+#: capabilities and Linux/WSL units). See ``resources.py`` for the handlers.
 KNOWN_RESOURCE_TYPES = ("package", "file", "registry", "feature")
 
 #: Minimal required identity fields per resource type (checked at load).
@@ -52,12 +52,25 @@ REQUIRED_FIELDS = {
     "package": ("id", "manager"),
     "file": ("path",),
     "registry": ("path",),
-    "feature": ("id",),
+    "feature": ("id", "manager"),
 }
 
 #: Accepted values for a resource's ``state`` / ``strategy`` selectors.
 RESOURCE_STATES = ("present", "absent")
-RESOURCE_STRATEGIES = ("enforce", "ensure-present")
+RESOURCE_STRATEGIES = ("enforce", "ensure-present", "managed-block")
+
+#: Registry value types accepted by the ``registry`` resource (friendly names
+#: mapped to ``reg.exe`` ``REG_*`` types in ``resources.py``). Kept here for
+#: load-time validation; ``manifest`` must not import ``resources`` (cycle).
+REGISTRY_VALUE_TYPES = (
+    "String", "ExpandString", "MultiString", "DWord", "QWord", "Binary",
+)
+
+#: Feature managers accepted by the ``feature`` resource. Mirrors the
+#: ``FEATURE_MANAGERS`` table in ``resources.py`` (duplicated to avoid a cycle).
+FEATURE_MANAGER_NAMES = (
+    "windows-optional-feature", "windows-capability", "linux-systemd",
+)
 
 
 class ManifestError(ValueError):
@@ -177,6 +190,33 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
             raise ManifestError(
                 f"{path}: resource strategy {strategy!r} must be one of {RESOURCE_STRATEGIES}"
             )
+        if strategy == "managed-block":
+            if rtype != "file":
+                raise ManifestError(
+                    f"{path}: strategy 'managed-block' is only valid for file resources"
+                )
+            if not res.get("block"):
+                raise ManifestError(
+                    f"{path}: file resource with strategy 'managed-block' requires a "
+                    f"non-empty 'block' identity"
+                )
+            if res.get("format") == "json":
+                raise ManifestError(
+                    f"{path}: managed-block is text-only; 'format: json' is not allowed"
+                )
+        if rtype == "registry":
+            vtype = res.get("value_type")
+            if vtype is not None and vtype not in REGISTRY_VALUE_TYPES:
+                raise ManifestError(
+                    f"{path}: registry value_type {vtype!r} must be one of "
+                    f"{REGISTRY_VALUE_TYPES}"
+                )
+        if rtype == "feature":
+            mgr = res.get("manager")
+            if mgr not in FEATURE_MANAGER_NAMES:
+                raise ManifestError(
+                    f"{path}: feature manager {mgr!r} must be one of {FEATURE_MANAGER_NAMES}"
+                )
 
     return RequirementPackage(
         name=name,

@@ -115,24 +115,28 @@ converge itself, so facts like "this package must be installed and pinned" or
 "this config file must exist" move out of opaque per-repo scripts and into
 reviewable data. A package declares them under a top-level `resources:` list.
 
-Two types are fully handled today:
+Four types are fully handled:
 
 | Type | Identity | Behavior |
 | --- | --- | --- |
 | `package` | `(manager, id)` | Install / pin / remove via a package manager (`winget`, `apt`, `pipx`, `uv-tool`, `pip`). |
-| `file` | normalized `path` | Converge a canonical config file (`text`/`json`, `enforce`/`ensure-present`). |
+| `file` | `(path, block)` | Converge a config file: whole-file `enforce`/`ensure-present` (`text`/`json`) or a `managed-block` that owns only a marked block. |
+| `registry` | `(key, value-name)` | Converge a Windows registry value via `reg.exe` (typed value/state). |
+| `feature` | `(manager, id)` | Enable/disable a Windows optional feature/capability (DISM) or a Linux/WSL unit (`systemctl`), selected by a `manager` field. |
 
-`registry` and `feature` are **reserved** identities: the schema recognizes and
-validates them so a package can declare them ahead of the engine, but they have
-no handler yet, so apply reports "no handler" and skips. Adding a type is a new
-`ResourceHandler` subclass registered in `HANDLERS` -- nothing else in the engine
-changes.
+Identity for a `file` carries a `block` id (empty for whole-file strategies), so
+distinct managed blocks in one file are separate, compatible resources while a
+whole-file owner and a block on the same path conflict. `registry` folds key and
+value-name case-insensitively and expands hive short names (`HKCU` ->
+`HKEY_CURRENT_USER`). Adding a type is a new `ResourceHandler` subclass
+registered in `HANDLERS` -- nothing else in the engine changes.
 
-Apply is dry-run-safe throughout: package operations run through an injectable
-runner (default `subprocess`, argv lists only, `shutil.which` guarded, skipped on
-unsupported platform/manager), and file operations reuse the surfaces' atomic
-backup-before-write helpers. See `docs/resources.md` for the full schema, the
-collision rules, and the adopter guide.
+Apply is dry-run-safe throughout: package, registry, and feature operations run
+through an injectable runner (default `subprocess`, argv lists only,
+`shutil.which` guarded, skipped on unsupported platform/manager/backend), and
+file operations reuse the surfaces' atomic backup-before-write helpers. See
+`docs/resources.md` for the full schema, the collision rules, and the adopter
+guide.
 
 ## Conflict validation
 
