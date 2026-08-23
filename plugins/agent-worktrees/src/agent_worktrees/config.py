@@ -245,6 +245,13 @@ class RepoConfig:
     remote: str = "origin"
     launch: dict[str, list[str]] = field(default_factory=dict)
     launch_recovery: dict[str, list[str]] = field(default_factory=dict)
+    copilot_path: dict[str, str] = field(default_factory=dict)
+    """Optional Copilot executable, keyed by platform ("windows" / "linux").
+    The normalized launcher uses this instead of the ``copilot`` command on
+    PATH. Values may use the standard launch placeholders. Declaring it forces
+    the normalized launcher so the selection composes with setup hooks,
+    environment priming, profiles, resume, and ACP launches. An explicit
+    ``launch`` template remains authoritative and ignores this setting."""
     setup_hook: dict[str, str] = field(default_factory=dict)
     """Optional repo **session setup hook**, keyed by platform ("windows" /
     "linux"). The value is a path to a script (relative to ``anchor`` unless
@@ -1147,6 +1154,11 @@ def _build_repo_config(
         if isinstance(cmd_list, list):
             launch_recovery[plat_key] = [str(c) for c in cmd_list]
 
+    copilot_path: dict[str, str] = {}
+    for plat_key, executable in (data.get("copilot_path") or {}).items():
+        if isinstance(executable, str) and executable.strip():
+            copilot_path[plat_key] = executable.strip()
+
     setup_hook: dict[str, str] = {}
     for plat_key, hook_path in (data.get("setup_hook") or {}).items():
         if isinstance(hook_path, str) and hook_path.strip():
@@ -1194,6 +1206,7 @@ def _build_repo_config(
         remote=data.get("remote", "origin"),
         launch=launch,
         launch_recovery=launch_recovery,
+        copilot_path=copilot_path,
         setup_hook=setup_hook,
         env_script=env_script,
         session_path=session_path,

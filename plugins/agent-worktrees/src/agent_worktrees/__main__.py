@@ -1277,7 +1277,8 @@ def _build_launch_cmd(
 
     If the repo config has ``launch`` / ``launch_recovery`` entries for
     the current platform, those are used with variable substitution.
-    Otherwise, in precedence order: a repo ``setup_hook`` selects the
+    Otherwise, in precedence order: a repo ``setup_hook`` or ``copilot_path``
+    selects the
     **normalized** launch (the default-setup launcher runs the repo hook, then
     execs Copilot); else a legacy ``tools/setup/setup.{ps1,sh}`` is run as the
     session command; else the plugin's ``default-setup.{ps1,sh}``.
@@ -1297,6 +1298,7 @@ def _build_launch_cmd(
             "anchor": anchor,
             "machine": config.machine,
             "repo_name": config.repo_name,
+            "home": os.path.expanduser("~"),
         }
         cmd = [arg.format(**variables) for arg in template]
     else:
@@ -1315,6 +1317,7 @@ def _build_launch_cmd(
             "anchor": anchor,
             "machine": config.machine,
             "repo_name": config.repo_name,
+            "home": os.path.expanduser("~"),
         }
         session_dirs = [
             d.format(**variables) for d in repo.session_path.get(plat_key, [])
@@ -1331,6 +1334,10 @@ def _build_launch_cmd(
             resolved_env_script = env_script_path.format(**variables)
             if not os.path.isabs(resolved_env_script):
                 resolved_env_script = str(Path(anchor) / resolved_env_script)
+        copilot_path = repo.copilot_path.get(plat_key)
+        resolved_copilot_path = (
+            copilot_path.format(**variables) if copilot_path else ""
+        )
         is_windows = platform.system() == "Windows"
 
         if hook_path:
@@ -1349,6 +1356,8 @@ def _build_launch_cmd(
                     cmd += ["-SessionPath", session_path_arg]
                 if resolved_env_script:
                     cmd += ["-EnvScript", resolved_env_script]
+                if resolved_copilot_path:
+                    cmd += ["-CopilotPath", resolved_copilot_path]
                 if recovery:
                     cmd.append("-Recovery")
             else:
@@ -1361,11 +1370,17 @@ def _build_launch_cmd(
                     cmd += ["--session-path", session_path_arg]
                 if resolved_env_script:
                     cmd += ["--env-script", resolved_env_script]
+                if resolved_copilot_path:
+                    cmd += ["--copilot-path", resolved_copilot_path]
                 if recovery:
                     cmd.append("--recovery")
         elif is_windows:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.ps1")
-            legacy = Path(setup_path).is_file() and not resolved_env_script
+            legacy = (
+                Path(setup_path).is_file()
+                and not resolved_env_script
+                and not resolved_copilot_path
+            )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.ps1")
             cmd = [
@@ -1379,11 +1394,17 @@ def _build_launch_cmd(
                 cmd += ["-SessionPath", session_path_arg]
             if resolved_env_script:
                 cmd += ["-EnvScript", resolved_env_script]
+            if resolved_copilot_path:
+                cmd += ["-CopilotPath", resolved_copilot_path]
             if recovery:
                 cmd.append("-Recovery")
         else:
             setup_path = str(Path(anchor) / "tools" / "setup" / "setup.sh")
-            legacy = Path(setup_path).is_file() and not resolved_env_script
+            legacy = (
+                Path(setup_path).is_file()
+                and not resolved_env_script
+                and not resolved_copilot_path
+            )
             if not legacy:
                 setup_path = str(inst.install_dir() / "scripts" / "default-setup.sh")
             cmd = ["bash", setup_path, "--machine", config.machine]
@@ -1391,6 +1412,8 @@ def _build_launch_cmd(
                 cmd += ["--session-path", session_path_arg]
             if resolved_env_script:
                 cmd += ["--env-script", resolved_env_script]
+            if resolved_copilot_path:
+                cmd += ["--copilot-path", resolved_copilot_path]
             if recovery:
                 cmd.append("--recovery")
 

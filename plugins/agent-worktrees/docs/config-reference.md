@@ -58,6 +58,8 @@ repos:
     anchor: C:\Data\Src\my-project          # machine path (or omit → from repos.yaml)
     worktree_root: C:\Data\Src\.worktrees\my-project   # only if non-default
     # default_branch / remote / pr / ... may live in-repo instead (below)
+    copilot_path:
+      windows: C:\src\copilot-runtime\dist-bin\win32-arm64\copilot.exe
 ```
 
 > **Keep the overlay minimal — don't restate registry-owned facts.**
@@ -141,6 +143,7 @@ agent-worktrees ≥ 1.5.3-dev113.)
 | `remote` | string | `origin` | Git remote name. |
 | `launch` | map(platform→list) | `{}` | Config-driven launch command per platform. Overrides the repo convention and built-in default. |
 | `launch_recovery` | map(platform→list) | `{}` | Launch command used in recovery mode (`-Recovery`). |
+| `copilot_path` | map(platform→string) | `{}` | Project-scoped Copilot executable. Uses `windows` or `linux` (`wsl` maps to `linux`) and supports `{work_dir}`, `{anchor}`, `{machine}`, `{repo_name}`, and `{home}` placeholders. The normalized launcher uses it for interactive, resume, recovery, and agent-bridge project launches without changing global `PATH`. An explicit `launch`/`launch_recovery` template remains authoritative. |
 | `setup_hook` | map(platform→**path**) | `{}` | Repo session setup hook (a script path, relative to `anchor`). Declaring it opts the repo into the **normalized launch**: agent-worktrees' launcher runs the hook (context by argument — `-Machine`/`-Recovery` — not ambient env), then execs Copilot. The hook does repo-specific setup (vault, MCP) and returns; it must NOT launch Copilot. Skipped in recovery. |
 | `env_script` | map(platform→**path**) | `{}` | Repo **environment-priming** script (a script path, relative to `anchor`). Unlike `setup_hook` (a child process whose env is discarded), the launcher runs this **in its own shell and captures the resulting environment** so the Copilot exec inherits it (Windows: `call <script>` then snapshot `set`; POSIX: `source` with `set -a`). For **Windows enlistment-style repos** whose build tooling only works inside a dynamically-established env (e.g. an Office/SPO `OpenEnlistment.bat` setting OTOOLS/VC++/SDK vars + PATH): a plain `copilot` there can read code but not build. Also opts the repo into the normalized launch; runs **even in recovery** (the build env is always needed). Ignored when an explicit `launch` template is set. |
 | `session_path` | map(platform→list) | `{}` | Directories the normalized launcher prepends to `PATH` before launch (templated: `{work_dir}`, `{anchor}`, `{machine}`, `{repo_name}`) — e.g. `["{work_dir}/tools/bin"]`. The generic mechanism for a repo to expose its tool binstubs without an ambient PATH export. |
@@ -173,6 +176,21 @@ session_path:
   windows: ["{work_dir}\\tools\\bin"]
   linux:   ["{work_dir}/tools/bin"]
 ```
+
+Select a local Copilot build for one project without replacing the ambient
+`copilot` command:
+
+```yaml
+repos:
+  my-project:
+    copilot_path:
+      windows: "C:\\src\\copilot-runtime\\dist-bin\\win32-arm64\\copilot.exe"
+      linux: "{home}/src/copilot-runtime/dist-bin/linux-arm64/copilot"
+```
+
+The selected file must be directly executable. For a source build that is
+started through another interpreter, point this setting at a small executable
+wrapper or at the build's standalone executable.
 
 `env_script` is likewise a **path** (relative to `anchor` unless absolute). It
 suits a Windows base-repo enlistment whose build env is established by a setup
