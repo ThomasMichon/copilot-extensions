@@ -1161,6 +1161,7 @@ class PickerScreen(Widget):
         # no self.cfgmenu / cfgmenu_idx state attrs -- see CfgMenuScreen and
         # _open_cfgmenu. (The overlay left the manual registry entirely.)
         self._pivot_runtimes = {}     # pivot name -> RegisteredPivotRuntime (lazy)
+        self._last_pivot_poll = 0.0   # registered-pivot repoll gate (#staleness)
         self._load_pivots()
         self.machine_idx = 0          # selected machine sub-pivot (Worktrees/Maint)
         self.sel = ("N", 0)           # (zone, index) -> default New Worktree
@@ -1548,6 +1549,31 @@ class PickerScreen(Widget):
         m, e = self.cur_machine()[:2]
         return {(m, e)}
 
+    def _maybe_repoll_pivot(self):
+        """Keep an open registered pivot (Tasks) live without a keypress.
+
+        The registered-pivot runtime caches its ``list`` per scope with no TTL and
+        is only invalidated by the pivot's *own* actions -- so a task/card created
+        by **another** session (e.g. a claimer posting a steer card) never appears
+        in an already-open Tasks pivot. On the same conservative cadence as the
+        worktree repoll (``POLL_SECS``; ``<=0`` disables), force a background,
+        swap-in-place refetch of the current pivot scope. Skips while a modal /
+        progress dialog is up. Cheap: one ``list`` subprocess per interval, and
+        the runtime's own in-flight guard coalesces overlapping polls."""
+        if POLL_SECS <= 0 or self.progress is not None:
+            return
+        reg = self._reg_pivot()
+        if reg is None:
+            return
+        now = time.monotonic()
+        if now - self._last_pivot_poll < POLL_SECS:
+            return
+        self._last_pivot_poll = now
+        try:
+            self._pivot_runtime(reg).repoll(self._pivot_scope_key())
+        except Exception:
+            pass
+
     def _tick(self):
         self.frame += 1
         self.pulse = (self.frame // 5) % 2
@@ -1564,6 +1590,10 @@ class PickerScreen(Widget):
             self._maybe_repoll()
             if self._wt_reconcile_after is not None:
                 self._process_pending_wt_reconcile()
+        # Keep an open registered pivot (Tasks) live too -- independent of the
+        # worktree loader / live mode, so a card posted by another session shows
+        # up without a manual reload (#staleness).
+        self._maybe_repoll_pivot()
         # Poll the launcher's update stage ~twice a second (#1430). While a
         # stage is in flight the spinner should animate, so keep the tick busy.
         if self.frame % 5 == 0:
@@ -1630,6 +1660,15 @@ class PickerScreen(Widget):
         # Re-scan the pivot registry so a refresh ('r') picks up a newly
         # installed (or removed) contributed pivot without a picker restart.
         self._load_pivots()
+        # A manual reload ('r') must also refresh the registered Tasks pivot, not
+        # just the worktree lists (the pivot runtime is separate + has no TTL):
+        # clear each pivot runtime's cache so the next frame's ensure() refetches,
+        # so a task/card created by another session appears on demand.
+        for _rt in getattr(self, "_pivot_runtimes", {}).values():
+            try:
+                _rt.invalidate()
+            except Exception:
+                pass
         # Machine tabs gain a leading "All" entry that interleaves every machine.
         self.machines = [("All", None, None, True)] + self.src.machines()
         self.machine_idx = self.local_index()
@@ -1639,6 +1678,7 @@ class PickerScreen(Widget):
         # _reconcile_wt_sel() at the end of setup, once the reloaded records are
         # available.
         self._last_poll = time.monotonic()   # first background poll is POLL_SECS out
+        self._last_pivot_poll = time.monotonic()  # registered-pivot repoll (#staleness)
         if self.live:
             # Real background SSH loads: one daemon thread per machine,
             # spinner -> ✓/✗. Every source -- local included -- streams in on a

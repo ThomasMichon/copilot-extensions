@@ -198,6 +198,34 @@ class RegisteredPivotRuntime:
                 self._cache.pop(machine, None)
                 self._summaries.pop(machine, None)
 
+    def repoll(self, machine: object) -> None:
+        """Force a background, swap-in-place refetch for ``machine``.
+
+        Unlike :meth:`ensure` it refetches even when ``machine`` is already
+        cached; unlike :meth:`invalidate` + :meth:`ensure` it does **not** clear
+        the cache first, so the current rows stay visible (no ``loading``
+        flicker) until the fresh result lands and swaps in. A fetch already in
+        flight is left to finish (idempotent). This is the registered-pivot
+        analogue of the worktree loader's silent repoll (#1421): it lets an open
+        Tasks pivot pick up tasks/cards created by *another* session (e.g. a
+        claimer posting a steer card) without a manual reload or a restart.
+
+        No-op only for a ``subscribe`` pivot -- its held child channel is already
+        live (it applies deltas in place), so a forced refetch would spawn a
+        redundant second channel. A one-shot ``stream`` pivot (streams once then
+        exits) is NOT already-live, so it is repolled like any other -- the
+        streaming runner re-runs and swaps rows in via :meth:`_finish`."""
+        if self._closed.is_set() or self.pivot.subscribe:
+            return
+        with self._lock:
+            if machine in self._inflight:
+                return
+            self._inflight.add(machine)
+            gen = self._gen
+        threading.Thread(
+            target=self._run_list, args=(machine, gen), daemon=True
+        ).start()
+
     def close(self) -> None:
         """Tear down every tracked streaming child (picker exit). Idempotent --
         a held ``subscribe`` stream reader unblocks when its pipe closes, so no
