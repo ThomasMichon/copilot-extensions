@@ -31,6 +31,8 @@ import subprocess
 import time
 from dataclasses import dataclass
 
+from .procutil import no_window_kwargs
+
 
 class TunnelUnavailable(RuntimeError):
     """Raised when the SSH failover tunnel cannot be established."""
@@ -100,7 +102,12 @@ def _ssh_capture(exe: str, alias: str, remote_cmd: str, timeout: float) -> str:
     cmd = [exe, "-o", "BatchMode=yes", alias, remote_cmd]
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            cmd, check=False, capture_output=True, text=True, timeout=timeout
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise TunnelUnavailable(f"ssh to {alias!r} failed: {exc}") from exc
@@ -206,6 +213,7 @@ def _open_forward_once(
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
+        **no_window_kwargs(),
     )
     deadline = time.monotonic() + ready_timeout
     while time.monotonic() < deadline:
@@ -244,4 +252,3 @@ def _coordinator_reachable(base_url: str, *, timeout: float = 4.0) -> bool:
             return 200 <= resp.status < 300
     except (urllib.error.URLError, OSError):
         return False
-

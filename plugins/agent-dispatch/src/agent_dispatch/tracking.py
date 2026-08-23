@@ -36,6 +36,7 @@ import time
 from typing import Any
 
 from . import remote_dispatch
+from .procutil import no_window_kwargs
 
 #: Sentinel distinguishing "local machine not yet computed" from a resolved
 #: ``None`` (an unresolvable local identity is a valid, meaningful value).
@@ -131,6 +132,18 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     return [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", machine, remote_cmd]
 
 
+def _run_capture(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """Run a non-interactive probe without allocating a Windows console."""
+    return subprocess.run(  # noqa: S603 -- fixed argv, executable resolved by caller
+        argv,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        **no_window_kwargs(),
+    )
+
+
 def resolve_live_session(
     worktree: str, *, machine: str | None = None, timeout: float | None = None
 ) -> dict[str, Any] | None:
@@ -153,13 +166,7 @@ def resolve_live_session(
         # A remote resolve adds an SSH round-trip, so allow a little more headroom.
         timeout = 6.0 if machine else 3.0
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        proc = _run_capture(argv, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError):
         return None
     if proc.returncode != 0 or not proc.stdout.strip():
@@ -230,13 +237,7 @@ def liveness_verdict(
     if timeout is None:
         timeout = 6.0 if machine else 3.0
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            argv,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        proc = _run_capture(argv, timeout=timeout)
     except (subprocess.TimeoutExpired, OSError):
         return UNKNOWN
     if proc.returncode != 0:
@@ -279,11 +280,8 @@ def live_worktrees(*, timeout: float = 5.0) -> set[str] | None:
     if exe is None:
         return None
     try:
-        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+        proc = _run_capture(
             [exe, "list", "--json", "--tracking-status", "active"],
-            check=False,
-            capture_output=True,
-            text=True,
             timeout=timeout,
         )
     except (subprocess.TimeoutExpired, OSError):

@@ -26,6 +26,8 @@ import shlex
 import shutil
 import subprocess
 
+from .procutil import no_window_kwargs
+
 
 class RemoteDispatchUnavailable(RuntimeError):
     """Raised when the cross-machine dispatch transport (ssh) is unavailable."""
@@ -182,6 +184,7 @@ def dispatch_to_remote(
         capture_output=True,
         text=True,
         timeout=timeout,
+        **no_window_kwargs(),
     )
 
 
@@ -274,6 +277,7 @@ def browse_remote(
         capture_output=True,
         text=True,
         timeout=timeout,
+        **no_window_kwargs(),
     )
 
 

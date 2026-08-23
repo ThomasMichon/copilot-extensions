@@ -95,6 +95,22 @@ def test_resolve_peer_no_ssh_binary(monkeypatch):
         ssh_tunnel.resolve_peer_endpoint("peer-host")
 
 
+def test_ssh_capture_uses_no_window_kwargs(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["kwargs"] = kwargs
+        return type("Result", (), {"returncode": 0, "stdout": "ok", "stderr": ""})()
+
+    monkeypatch.setattr(ssh_tunnel.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        ssh_tunnel, "no_window_kwargs", lambda: {"creationflags": 123}
+    )
+
+    assert ssh_tunnel._ssh_capture("ssh", "peer", "true", 3) == "ok"
+    assert captured["kwargs"]["creationflags"] == 123
+
+
 # -- open_coordinator_tunnel: readiness + early-exit handling ----------------
 
 
@@ -124,13 +140,23 @@ def test_open_tunnel_returns_when_port_ready(monkeypatch):
     monkeypatch.setattr(ssh_tunnel, "resolve_peer_endpoint", lambda m, **k: ("127.0.0.1", 9000))
     monkeypatch.setattr(ssh_tunnel, "_pick_local_port", lambda: 51999)
     proc = _FakeProc(alive=True)
-    monkeypatch.setattr(ssh_tunnel.subprocess, "Popen", lambda *a, **k: proc)
+    captured = {}
+
+    def fake_popen(*args, **kwargs):
+        captured["kwargs"] = kwargs
+        return proc
+
+    monkeypatch.setattr(ssh_tunnel.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        ssh_tunnel, "no_window_kwargs", lambda: {"creationflags": 123}
+    )
     monkeypatch.setattr(ssh_tunnel, "_port_accepts", lambda port, **k: True)
     monkeypatch.setattr(ssh_tunnel, "_coordinator_reachable", lambda url, **k: True)
     tun = ssh_tunnel.open_coordinator_tunnel("peer-host")
     assert tun.base_url == "http://127.0.0.1:51999"
     tun.close()
     assert proc.terminated
+    assert captured["kwargs"]["creationflags"] == 123
 
 
 def test_open_tunnel_retries_on_stale_port(monkeypatch):

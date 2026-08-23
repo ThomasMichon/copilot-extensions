@@ -50,6 +50,7 @@ def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
         return types.SimpleNamespace(
             returncode=0,
             stdout=json.dumps({"session_id": "s9", "worktree_id": "wt-x"}),
@@ -58,6 +59,7 @@ def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
 
     monkeypatch.setattr(tracking.shutil, "which", fake_which)
     monkeypatch.setattr(tracking.subprocess, "run", fake_run)
+    monkeypatch.setattr(tracking, "no_window_kwargs", lambda: {"creationflags": 123})
 
     got = tracking.resolve_live_session("wt-x")
     assert got == {"session_id": "s9", "worktree_id": "wt-x"}
@@ -66,6 +68,7 @@ def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
     assert "--json" in cmd
     assert cmd[cmd.index("--handle") + 1] == "wt-x"
     assert "live-sessions" in cmd and "resolve" in cmd
+    assert captured["kwargs"]["creationflags"] == 123
 
 
 def test_resolve_live_session_none_without_cli(monkeypatch):
@@ -173,9 +176,11 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(tracking, "no_window_kwargs", lambda: {"creationflags": 123})
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
         return types.SimpleNamespace(
             returncode=0,
             stdout=json.dumps({"session_id": "s-remote", "worktree_id": "wt-x"}),
@@ -188,6 +193,7 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
     assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}
     assert captured["cmd"][0] == "/usr/bin/ssh"
     assert "emancipation-cube" in captured["cmd"]
+    assert captured["kwargs"]["creationflags"] == 123
 
 
 def test_enrich_task_resolves_remote_owner_over_mesh(monkeypatch):
