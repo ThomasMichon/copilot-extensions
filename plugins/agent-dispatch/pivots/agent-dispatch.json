@@ -1,15 +1,16 @@
 {
   "label": "Tasks",
   "after": "Worktrees",
-  "list": ["agent-dispatch", "inbox", "--machine", "{machine}", "--awaiting-steer"],
+  "list": ["agent-dispatch", "inbox", "--machine", "{machine}", "--board"],
   "entry": {
     "id": "id",
     "title": "title",
     "worktree": "target_worktree",
     "subtitle": "repo_name",
+    "group": "group",
     "badges": ["labels"]
   },
-  "empty_hint": "No proposed or awaiting-steer tasks for this machine.",
+  "empty_hint": "No active or recently-finished tasks for this machine.",
   "actions": [
     {
       "key": "steer",
@@ -35,14 +36,16 @@
       "key": "kick",
       "label": "Kick to a headless bridge agent",
       "run": ["agent-bridge", "create", "{machine}", "{title}", "--no-wait"],
+      "when": {"group": ["Proposed", "Queued"]},
       "description": "Spawn a background bridge agent on this machine to work the task."
     },
     {
       "key": "abandon",
       "label": "Abandon the task",
       "run": ["agent-dispatch", "abandon", "{task_id}", "--permit", "--reason", "abandoned from picker"],
+      "when": {"group": ["Blocked", "Proposed", "Queued", "Started"]},
       "confirm": true,
-      "description": "Terminally abandon this proposed task."
+      "description": "Terminally abandon this task (active tasks only)."
     }
   ]
 }
