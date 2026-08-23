@@ -99,7 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     ns_resolve_p = sub.add_parser(
         "namespace-resolve",
-        help="Print JSON {type,spawn_command,user} resolving a container name "
+        help="Print JSON {type,spawn_command,user,workspace_folder,"
+        "security_profile} resolving a container name "
         "(not-found -> exit 3).",
     )
     ns_resolve_p.add_argument("name", help="Container name")

@@ -134,10 +134,14 @@ class ContainerResolver:
         """Resolve a container name to a **plain-dict** spawn spec.
 
         The agent_bridge-free core of :meth:`resolve` -- returns
-        ``{"type","spawn_command","user"}`` using only agent-containers + stdlib,
-        so the ``agent-containers namespace-resolve`` CLI can emit it as JSON and
+        ``{"type","spawn_command","user","workspace_folder","security_profile"}``
+        using only agent-containers + stdlib, so the
+        ``agent-containers namespace-resolve`` CLI can emit it as JSON and
         agent-bridge reconstructs the ``SpawnTarget`` across a process boundary
-        (#892 Inc 3b). Raises ``KeyError`` when the container is not in the fleet.
+        (#892 Inc 3b). ``workspace_folder`` is the container's concrete repo
+        checkout (for the ACP session cwd); ``security_profile`` is the fleet's
+        trust posture (``trusted``/``restricted``) that gates any host->venue
+        projection. Raises ``KeyError`` when the container is not in the fleet.
         """
         config = load_config()
         info = await asyncio.to_thread(get_container, config, name)
@@ -168,7 +172,19 @@ class ContainerResolver:
         # the gh token at spawn time, keeping it out of the persisted SpawnTarget.
         spawn_cmd = build_wrapper_command(name)
         log.info("Resolved container:%s -> %s", name, " ".join(spawn_cmd))
-        return {"type": "command", "spawn_command": spawn_cmd, "user": user}
+        # Surface the venue's concrete workspace folder + trust posture so the
+        # bridge can (a) set the ACP session cwd to the repo checkout instead of
+        # the home-dir default, and (b) gate any host->venue projection (repo-own
+        # plugins, etc.) on the fleet's trust posture -- a `restricted` fleet is a
+        # fail-closed boundary and must never be silently upgraded (venue-parity).
+        workspace_folder = fleet.workspace_folder or config.workspace_folder
+        return {
+            "type": "command",
+            "spawn_command": spawn_cmd,
+            "user": user,
+            "workspace_folder": workspace_folder,
+            "security_profile": fleet.security_profile,
+        }
 
     async def list(self) -> list[NamespaceAgentInfo]:
         """List fleet containers as namespace agent info (in-process path)."""
