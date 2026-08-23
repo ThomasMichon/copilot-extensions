@@ -4,7 +4,14 @@ from __future__ import annotations
 
 import textwrap
 
-from agent_containers.config import DEFAULT_ACP_COMMAND, ContainersConfig, load_config
+import pytest
+
+from agent_containers.config import (
+    DEFAULT_ACP_COMMAND,
+    ContainersConfig,
+    FleetConfig,
+    load_config,
+)
 
 
 def test_defaults():
@@ -30,6 +37,42 @@ def test_effective_acp_command_custom_workspace():
     c = ContainersConfig()
     cmd = c.effective_acp_command(workspace_folder="/work/x")
     assert cmd == f"cd /work/x && {DEFAULT_ACP_COMMAND}"
+
+
+def test_restricted_profile_defaults_fail_closed():
+    c = ContainersConfig()
+    fleet = FleetConfig(security_profile="restricted")
+    assert fleet.restricted
+    assert fleet.effective_network() == "none"
+    assert fleet.effective_memory() == "4g"
+    assert fleet.effective_cpus() == 2.0
+    assert fleet.effective_pids_limit() == 256
+    assert c.credentials_for(fleet) == (False, False)
+    with pytest.raises(RuntimeError, match="explicit per-fleet 'acp_command'"):
+        c.acp_command_for(fleet)
+
+
+def test_restricted_profile_explicit_command_and_credentials_stay_isolated():
+    c = ContainersConfig()
+    fleet = FleetConfig(
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+        forward_gh_token=True,
+        relay_enabled=True,
+    )
+    assert c.acp_command_for(fleet) == "minimal-agent --stdio"
+    assert c.credentials_for(fleet) == (False, False)
+
+
+def test_trusted_profile_preserves_global_defaults():
+    c = ContainersConfig()
+    fleet = FleetConfig()
+    assert not fleet.restricted
+    assert fleet.effective_network() is None
+    assert c.credentials_for(fleet) == (True, True)
+    assert c.acp_command_for(fleet) == (
+        f"cd /workspace && {DEFAULT_ACP_COMMAND}"
+    )
 
 
 def test_load_config_from_file(tmp_path, monkeypatch):
@@ -63,6 +106,67 @@ def test_load_config_from_file(tmp_path, monkeypatch):
     assert fleet.size == 3
     assert fleet.prefix("myrepo") == "myrepo"
     assert fleet.devcontainer_path == "/src/myrepo-devcontainer"
+
+
+def test_load_restricted_fleet_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        textwrap.dedent(
+            """
+            fleets:
+              sandbox:
+                image: example/agent:latest
+                security_profile: restricted
+                network: model-only
+                memory: 6g
+                cpus: 3
+                pids_limit: 128
+                workspace_size: 3g
+                home_size: 256m
+                acp_command: minimal-agent --stdio
+                forward_gh_token: true
+                relay_enabled: true
+            """
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    c = load_config()
+    fleet = c.fleets["sandbox"]
+    assert fleet.restricted
+    assert fleet.effective_network() == "model-only"
+    assert fleet.effective_memory() == "6g"
+    assert fleet.effective_cpus() == 3.0
+    assert fleet.effective_pids_limit() == 128
+    assert fleet.effective_workspace_size() == "3g"
+    assert fleet.effective_home_size() == "256m"
+    assert c.credentials_for(fleet) == (False, False)
+
+
+def test_invalid_security_profile_fails_loud(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        "fleets:\n  sandbox:\n    image: example/agent\n"
+        "    security_profile: maybe\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    with pytest.raises(RuntimeError, match="invalid security_profile"):
+        load_config()
+
+
+def test_restricted_resource_limits_must_be_positive(tmp_path, monkeypatch):
+    cfg = tmp_path / "containers.yaml"
+    cfg.write_text(
+        "fleets:\n  sandbox:\n    image: example/agent\n"
+        "    security_profile: restricted\n"
+        "    acp_command: minimal-agent --stdio\n"
+        "    pids_limit: -1\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(cfg))
+    with pytest.raises(RuntimeError, match="'pids_limit' must be positive"):
+        load_config()
 
 
 def test_devcontainer_config_resolved_relative_to_path():

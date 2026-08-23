@@ -91,6 +91,63 @@ fleets:
     code_model: clone   # Model A: repo cloned inside the container
 ```
 
+### Security profiles
+
+Fleets default to `security_profile: trusted`, preserving the existing
+development-container behavior (host GitHub token forwarding, credential relay,
+and the default broad Copilot launch command).
+
+Use `security_profile: restricted` for lower-trust agents. Restricted fleets
+are image-based, receive no host GitHub token or credential relay, use an
+immutable root filesystem with size-bounded tmpfs workspace/home/scratch
+surfaces, drop all Linux capabilities, disable privilege escalation, apply
+CPU/memory/PID ceilings, and default to `network: none`. They must provide an
+explicit per-fleet `acp_command`; there is no implicit
+`--allow-all-tools` fallback.
+
+```yaml
+fleets:
+  restricted-worker:
+    image: example/minimal-agent:latest
+    security_profile: restricted
+    workspace_folder: /workspace
+    exec_user: agent
+    acp_command: "cd /workspace && minimal-agent --stdio"
+    network: model-only
+    memory: 4g
+    cpus: 2
+    pids_limit: 256
+    workspace_size: 2g
+    home_size: 512m
+```
+
+The restricted defaults are transport enforcement, not prompt policy. Even if a
+configuration sets `forward_gh_token: true` or `relay_enabled: true` on a
+restricted fleet, both resolve false. `agent-containers fleet --json` reports
+the effective `security_profile`, `network`, and `host_credentials` posture so a
+dispatcher can verify the venue before launch.
+
+Dispatch is defined only for containers with an exact fleet entry in the active
+configuration. An unmanaged/discovered container is visible for inventory but
+cannot inherit global launch or credential defaults. Restricted dispatch also
+re-inspects the live Docker posture before every start/exec and refuses drift in
+capabilities, security options, mounts, devices, namespace sharing, published
+ports, network isolation, resource limits, writable surfaces, or immutable image
+identity.
+
+Restricted fleets deliberately reject the `devcontainer_path` backend because
+its workspace-mount contract cannot guarantee that no host worktree is visible.
+Use an image with the required harness preinstalled; repository materialization
+inside the bounded workspace is owned by the higher-level workflow. Restricted
+writable state is intentionally ephemeral: stopping or removing the container
+clears it, so the higher-level workflow must extract or push the work before
+release.
+
+An explicit restricted network must be a user-defined Docker network created
+with `--internal`; `host`, the default `bridge`, and `container:<name>` sharing
+are rejected. This lets a higher-level workflow attach a narrow proxy (for
+example, one model endpoint) without granting ambient host or internet reach.
+
 ## Discovery
 
 Containers are recognised as fleet members (in priority order) by:
