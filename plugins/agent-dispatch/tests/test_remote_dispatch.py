@@ -88,10 +88,14 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["input"] = kwargs.get("input")
+        captured["kwargs"] = kwargs
         return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        remote_dispatch, "no_window_kwargs", lambda: {"creationflags": 123}
+    )
 
     remote_dispatch.dispatch_to_remote(
         "emancipation-cube", _args(prompt="go"), repo="gitea/x", payload="the brief"
@@ -106,6 +110,7 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
     assert "--spawn-backend embody" in remote_cmd
     assert "'do X'" in remote_cmd  # title is shell-quoted
     assert captured["input"] == "the brief"  # payload streamed over stdin
+    assert captured["kwargs"]["creationflags"] == 123
 
 
 def test_dispatch_to_remote_unavailable_without_ssh(monkeypatch):
@@ -202,10 +207,14 @@ def test_browse_remote_builds_ssh_command(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
         return types.SimpleNamespace(returncode=0, stdout="[]", stderr="")
 
     monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
     monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        remote_dispatch, "no_window_kwargs", lambda: {"creationflags": 123}
+    )
 
     out = remote_dispatch.browse_remote("emancipation-cube", ["agent-dispatch", "list"])
     cmd = captured["cmd"]
@@ -215,6 +224,7 @@ def test_browse_remote_builds_ssh_command(monkeypatch):
     assert "ConnectTimeout=5" in cmd
     assert cmd[-1] == "agent-dispatch list"
     assert out.stdout == "[]"
+    assert captured["kwargs"]["creationflags"] == 123
 
 
 def test_browse_remote_unavailable_without_ssh(monkeypatch):

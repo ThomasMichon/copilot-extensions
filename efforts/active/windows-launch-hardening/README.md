@@ -96,3 +96,12 @@ against real behavior.
   shared `agent-procutil` and applies it to fully detached Python daemons across
   the runtime plugins. Interactive and pipe-captured children remain on
   `python.exe`.
+
+### 2026-08-23 - Consoleless-parent SSH residual
+- On-box process monitoring after #973 captured periodic agent-dispatch
+  embodiment probes launching `ssh.exe` from the new `pythonw.exe` coordinator;
+  each unguarded child allocated `conhost.exe` plus `OpenConsole.exe -Embedding`
+  and stole focus.
+- Follow-up #982 applies shared `no_window_kwargs()` to tracking probes and the
+  remaining dispatch-owned SSH transports. The children remain owned and
+  pipe-captured; only new-console allocation is suppressed.
