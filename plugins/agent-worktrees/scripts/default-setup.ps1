@@ -137,14 +137,14 @@ Write-Host "  Path:     $PWD"
 Write-Host ''
 
 # ── Launch Copilot ───────────────────────────────────────────────────────
-$copilotCmd = if ($CopilotPath) {
-    Get-Command $CopilotPath -ErrorAction SilentlyContinue
-} else {
-    Get-Command copilot -ErrorAction SilentlyContinue
-}
-if ($CopilotPath -and -not $copilotCmd) {
-    Write-Error "Configured Copilot executable not found: $CopilotPath"
-    exit 1
+$copilotCmd = Get-Command copilot -ErrorAction SilentlyContinue
+if ($CopilotPath) {
+    $overrideCmd = Get-Command $CopilotPath -ErrorAction SilentlyContinue
+    if (-not $overrideCmd) {
+        Write-Error "Configured Copilot executable not found: $CopilotPath"
+        exit 1
+    }
+    & $overrideCmd.Source @CopilotArgs
 } elseif (-not $copilotCmd) {
     $ghCmd = Get-Command gh -ErrorAction SilentlyContinue
     if ($ghCmd) {
@@ -154,7 +154,7 @@ if ($CopilotPath -and -not $copilotCmd) {
         exit 1
     }
 } else {
-    & $copilotCmd.Source @CopilotArgs
+    copilot @CopilotArgs
 }
 
 exit $LASTEXITCODE

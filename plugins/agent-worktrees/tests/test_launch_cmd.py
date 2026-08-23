@@ -416,7 +416,8 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "SetEnvironmentVariable" in text
     assert "-not $Recovery" in text  # hook skipped in recovery
     assert "$env:PATH" in text
-    assert "& $copilotCmd.Source @CopilotArgs" in text
+    assert "& $overrideCmd.Source @CopilotArgs" in text
+    assert "copilot @CopilotArgs" in text
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text
