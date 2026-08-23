@@ -6140,6 +6140,56 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
     return 0
 
 
+def _cmd_list_glance(records) -> int:
+    """Render a compact "at a glance" digest of ACTIVE worktrees for agent /
+    sub-agent consumption (situational awareness).
+
+    Title + agent-asserted disposition summary only, ranked by disposition
+    recency. Worktrees with no recorded disposition are **named, not hidden** --
+    honesty about coverage matters more than a tidy list (a blank worktree is a
+    real gap, not an absence). Machine-local by design; a fleet view unions this
+    across machines (agent-bridge's cross-machine ``list`` crawl).
+    """
+    active = [r for r in records if r.status == "active"]
+
+    def _has_disp(r) -> bool:
+        return bool((r.title and r.title != "null") or r.summary)
+
+    disposed = [r for r in active if _has_disp(r)]
+    blank = [r for r in active if not _has_disp(r)]
+    # Rank by disposition recency (status_note_at desc); undated sort last.
+    disposed.sort(key=lambda r: r.status_note_at or "", reverse=True)
+
+    try:
+        proj = cfg.project_name() or "?"
+    except Exception:
+        proj = "?"
+    print(
+        f"Active worktrees on this machine ({proj}): {len(active)} "
+        f"-- {len(disposed)} with a recorded disposition, {len(blank)} without"
+    )
+    if disposed:
+        print()
+    for r in disposed:
+        sid = r.worktree_id[-8:]
+        age = _activity_age_str(r.status_note_at) or "?"
+        title = (r.title if (r.title and r.title != "null") else "").strip()
+        summ = (r.summary or "").strip().replace("\n", " ")
+        if len(summ) > 220:
+            summ = summ[:217] + "..."
+        line = f"  {sid}  {age:>7}  {title or '(untitled)'}"
+        if summ:
+            line += f" -- {summ}"
+        if r.follow_up:
+            line += "  [follow-up]"
+        print(line)
+    if blank:
+        print()
+        ids = ", ".join(r.worktree_id[-8:] for r in blank)
+        print(f"  No recorded disposition ({len(blank)}): {ids}")
+    return 0
+
+
 def cmd_list(args: argparse.Namespace) -> int:
     """List worktrees from tracking records.
 
@@ -6172,6 +6222,11 @@ def cmd_list(args: argparse.Namespace) -> int:
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
+
+    if getattr(args, "glance", False):
+        # Compact situational-awareness digest -- active worktrees only, title +
+        # disposition summary, ranked by recency; consumed by agents/sub-agents.
+        return _cmd_list_glance(records)
 
     if getattr(args, "stream", False):
         # NDJSON streaming path (implies --json): the Picker's streaming SSH
@@ -14489,6 +14544,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "short-TTL cache so concurrent/repeated calls coalesce "
                         "onto one scan (tune via AGENT_WORKTREES_LIST_CACHE_TTL, "
                         "0 disables).")
+    p.add_argument("--glance", action="store_true",
+                   help="Compact, agent-digestible 'at a glance' digest of "
+                        "ACTIVE worktrees: one line each (id, disposition age, "
+                        "title -- summary), ranked by recency, with "
+                        "no-disposition worktrees named rather than hidden. For "
+                        "situational awareness / sub-agent consumption -- far "
+                        "cheaper to read than --json.")
 
     # claims (a worktree's full claim ledger: outbound resources + inbound tasks)
     p = sub.add_parser(
