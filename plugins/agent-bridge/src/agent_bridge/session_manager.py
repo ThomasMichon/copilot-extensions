@@ -2662,6 +2662,7 @@ class SessionManager:
                 with contextlib.suppress(Exception):
                     worktree_lineage.register_session(
                         target.worktree_id, acp_sid, pid=session.pid,
+                        worktree_dir=target.cwd,
                     )
         except ConnectError as exc:
             # Structured failure: we know exactly which stage failed and
@@ -4147,15 +4148,21 @@ class SessionManager:
         #     layer lives on its own machine); best-effort / fail-open.
         gl_worktree = getattr(session.target, "worktree_id", None)
         gl_local = getattr(session.target, "type", None) == "local"
+        gl_dir = getattr(session.target, "cwd", None)
         pred_acp = session.acp_session_id
         succ_acp = successor.acp_session_id
         if gl_local and gl_worktree and pred_acp and succ_acp:
             from . import worktree_lineage
+            # The successor's own start_session already registered it into the
+            # ground layer (4a, synchronous), so link-succession finds it tracked.
             with contextlib.suppress(Exception):
-                worktree_lineage.link_succession(gl_worktree, pred_acp, succ_acp)
+                worktree_lineage.link_succession(
+                    gl_worktree, pred_acp, succ_acp, worktree_dir=gl_dir,
+                )
             with contextlib.suppress(Exception):
                 worktree_lineage.note_handoff(
                     gl_worktree, pred_acp, title=(reason or "context-pressure"),
+                    worktree_dir=gl_dir,
                 )
 
         # 4. Announce the changeover on BOTH event streams.
@@ -4184,8 +4191,12 @@ class SessionManager:
             if gl_local and gl_worktree and succ_acp:
                 from . import worktree_lineage
                 with contextlib.suppress(Exception):
-                    role = worktree_lineage.session_role(gl_worktree, succ_acp)
-                    digest = worktree_lineage.history_digest(gl_worktree, succ_acp)
+                    role = worktree_lineage.session_role(
+                        gl_worktree, succ_acp, worktree_dir=gl_dir,
+                    )
+                    digest = worktree_lineage.history_digest(
+                        gl_worktree, succ_acp, worktree_dir=gl_dir,
+                    )
                     header = worktree_lineage.build_succession_seed_header(
                         role, digest, predecessor=pred_acp,
                     )

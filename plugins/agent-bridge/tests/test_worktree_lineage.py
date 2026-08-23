@@ -83,19 +83,27 @@ def _patch_run(monkeypatch, *, captured, returncode=0, stdout="", raise_exc=None
 def test_register_session_argv(monkeypatch):
     captured: dict = {}
     _patch_run(monkeypatch, captured=captured)
-    ok = wl.register_session("wt-a", "acp-1", pid=42)
+    ok = wl.register_session("wt-a", "acp-1", pid=42, worktree_dir="/wt/a")
     assert ok is True
     argv = captured["argv"]
     assert argv[1:] == [
-        "register-session", "--worktree-id", "wt-a", "--session-id", "acp-1",
-        "--pid", "42",
+        "register-session", "--session-id", "acp-1", "--cwd", "/wt/a", "--pid", "42",
+    ]
+
+
+def test_register_session_argv_no_dir_fallback(monkeypatch):
+    captured: dict = {}
+    _patch_run(monkeypatch, captured=captured)
+    wl.register_session("wt-a", "acp-1")
+    assert captured["argv"][1:] == [
+        "register-session", "--session-id", "acp-1", "--worktree-id", "wt-a",
     ]
 
 
 def test_link_succession_argv(monkeypatch):
     captured: dict = {}
     _patch_run(monkeypatch, captured=captured, stdout="{}")
-    ok = wl.link_succession("wt-a", "acp-1", "acp-2")
+    ok = wl.link_succession("wt-a", "acp-1", "acp-2", worktree_dir="/wt/a")
     assert ok is True
     assert captured["argv"][1:] == [
         "link-succession", "--worktree", "wt-a",
@@ -106,28 +114,31 @@ def test_link_succession_argv(monkeypatch):
 def test_note_handoff_argv(monkeypatch):
     captured: dict = {}
     _patch_run(monkeypatch, captured=captured)
-    ok = wl.note_handoff("wt-a", "acp-1", title="context-pressure")
+    ok = wl.note_handoff("wt-a", "acp-1", title="context-pressure", worktree_dir="/wt/a")
     assert ok is True
     assert captured["argv"][1:] == [
-        "note-handoff", "--worktree-id", "wt-a", "--session-id", "acp-1",
+        "note-handoff", "--session-id", "acp-1", "--worktree-dir", "/wt/a",
         "--title", "context-pressure",
     ]
 
 
-def test_session_role_parses_json(monkeypatch):
+def test_session_role_uses_worktree_dir(monkeypatch):
     captured: dict = {}
     _patch_run(
         monkeypatch, captured=captured,
         stdout='{"role": "head", "head_session": "acp-2", "is_head": true}',
     )
-    role = wl.session_role("wt-a", "acp-2")
+    role = wl.session_role("wt-a", "acp-2", worktree_dir="/wt/a")
     assert role == {"role": "head", "head_session": "acp-2", "is_head": True}
+    assert "--worktree-dir" in captured["argv"] and "/wt/a" in captured["argv"]
+    assert "--worktree-id" not in captured["argv"]
 
 
 def test_history_digest_returns_text(monkeypatch):
     captured: dict = {}
     _patch_run(monkeypatch, captured=captured, stdout="  focus: x\n")
-    assert wl.history_digest("wt-a", "acp-2") == "focus: x"
+    assert wl.history_digest("wt-a", "acp-2", worktree_dir="/wt/a") == "focus: x"
+    assert "--worktree-dir" in captured["argv"]
 
 
 def test_missing_binstub_fails_open(monkeypatch):

@@ -61,13 +61,22 @@ def _child_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in _SCRUB}
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess[str] | None:
+def _run(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str] | None:
     """Shell ``agent-worktrees <args>`` fail-open; return the completed process
-    or ``None`` when the binstub is missing / the call could not run."""
+    or ``None`` when the binstub is missing / the call could not run.
+
+    ``cwd`` (the worktree checkout) is where agent-worktrees resolves its project
+    context from -- pass it so verbs work outside a repo cwd."""
     exe = _agent_worktrees_bin()
     if not exe:
         log.debug("agent-worktrees binstub not found -- lineage write skipped")
         return None
+    # Run from the worktree checkout when known: agent-worktrees resolves its
+    # project context from cwd "like git", and several verbs don't honor an
+    # ``--worktree-id`` alone -- so a neutral cwd (the systemd daemon's) makes
+    # them return "untracked" / "no active project". A valid cwd is the reliable
+    # resolver; fall back to the daemon's cwd when the dir is unknown.
+    run_cwd = cwd if (cwd and os.path.isdir(cwd)) else None
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
             [exe, *args],
@@ -77,6 +86,7 @@ def _run(args: list[str]) -> subprocess.CompletedProcess[str] | None:
             check=False,
             creationflags=no_window_flags(),
             env=_child_env(),
+            cwd=run_cwd,
         )
     except Exception as exc:  # broad by design -- fail-open contract
         log.warning("agent-worktrees %s failed: %s", args[0] if args else "?", exc)
@@ -98,27 +108,40 @@ def register_session(
     *,
     pid: int | None = None,
     pane: str | None = None,
+    worktree_dir: str | None = None,
 ) -> bool:
     """Register an ACP session into the ground layer (idempotent; fail-open).
 
     ``session_id`` is the **ACP** session id -- the durable Copilot session id
     that matches ``~/.copilot/session-state`` and agent-worktrees tracking.
-    Returns True on a zero-exit write, else False.
+    Resolution is by ``--cwd``/cwd (the worktree checkout) because
+    ``register-session`` does not resolve a bare ``--worktree-id``. Returns True
+    on a zero-exit write, else False.
     """
     if not worktree_id or not session_id:
         return False
-    args = ["register-session", "--worktree-id", worktree_id, "--session-id", session_id]
+    args = ["register-session", "--session-id", session_id]
+    if worktree_dir:
+        args += ["--cwd", worktree_dir]
+    else:
+        args += ["--worktree-id", worktree_id]
     if pid is not None:
         args += ["--pid", str(pid)]
     if pane:
         args += ["--pane", pane]
-    proc = _run(args)
+    proc = _run(args, cwd=worktree_dir)
     return bool(proc and proc.returncode == 0)
 
 
-def link_succession(worktree_id: str, predecessor: str, successor: str) -> bool:
+def link_succession(
+    worktree_id: str, predecessor: str, successor: str, *, worktree_dir: str | None = None,
+) -> bool:
     """Record a handoff in the ground layer: predecessor ``handed-off`` +
-    successor becomes the derived head, in one atomic write (fail-open)."""
+    successor becomes the derived head, in one atomic write (fail-open).
+
+    Requires the successor to already be registered on the worktree -- the
+    caller must have run :func:`register_session` for it first (synchronously),
+    or ``link-succession`` fails with "successor not tracked"."""
     if not worktree_id or not predecessor or not successor:
         return False
     proc = _run([
@@ -127,7 +150,7 @@ def link_succession(worktree_id: str, predecessor: str, successor: str) -> bool:
         "--predecessor", predecessor,
         "--successor", successor,
         "--json",
-    ])
+    ], cwd=worktree_dir)
     return bool(proc and proc.returncode == 0)
 
 
@@ -136,36 +159,47 @@ def note_handoff(
     session_id: str,
     title: str | None = None,
     task: str | None = None,
+    *,
+    worktree_dir: str | None = None,
 ) -> bool:
     """Mirror a handoff into the worktree record's session-tagged history
     (``kind=handoff``); ``session_id`` is the predecessor. Fail-open."""
     if not worktree_id or not session_id:
         return False
-    args = ["note-handoff", "--worktree-id", worktree_id, "--session-id", session_id]
+    args = ["note-handoff", "--session-id", session_id]
+    if worktree_dir:
+        args += ["--worktree-dir", worktree_dir]
+    else:
+        args += ["--worktree-id", worktree_id]
     if title:
         args += ["--title", title]
     if task:
         args += ["--task", task]
-    proc = _run(args)
+    proc = _run(args, cwd=worktree_dir)
     return bool(proc and proc.returncode == 0)
 
 
 # -- reads (for seeding a successor's lineage awareness) --------------------
 
 
-def session_role(worktree_id: str, session_id: str) -> dict | None:
+def session_role(
+    worktree_id: str, session_id: str, *, worktree_dir: str | None = None,
+) -> dict | None:
     """Return the ground-layer role envelope for ``session_id`` (fail-open).
 
     ``{role, head_session, head_state, is_head, registered,
     pending_handoff_predecessor}`` or ``None`` on any failure / non-JSON.
+    Resolution is by ``--worktree-dir``/cwd -- ``session-role`` returns
+    ``untracked`` for a bare ``--worktree-id``.
     """
     if not worktree_id or not session_id:
         return None
-    proc = _run([
-        "session-role",
-        "--worktree-id", worktree_id,
-        "--session-id", session_id,
-    ])
+    args = ["session-role", "--session-id", session_id]
+    if worktree_dir:
+        args += ["--worktree-dir", worktree_dir]
+    else:
+        args += ["--worktree-id", worktree_id]
+    proc = _run(args, cwd=worktree_dir)
     if not proc or proc.returncode != 0:
         return None
     try:
@@ -175,14 +209,24 @@ def session_role(worktree_id: str, session_id: str) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
-def history_digest(worktree_id: str, session_id: str | None = None, limit: int = 8) -> str | None:
+def history_digest(
+    worktree_id: str,
+    session_id: str | None = None,
+    limit: int = 8,
+    *,
+    worktree_dir: str | None = None,
+) -> str | None:
     """Return the worktree's recent session-tagged history digest (fail-open)."""
     if not worktree_id:
         return None
-    args = ["history-digest", "--worktree-id", worktree_id, "--limit", str(limit)]
+    args = ["history-digest", "--limit", str(limit)]
+    if worktree_dir:
+        args += ["--worktree-dir", worktree_dir]
+    else:
+        args += ["--worktree-id", worktree_id]
     if session_id:
         args += ["--session-id", session_id]
-    proc = _run(args)
+    proc = _run(args, cwd=worktree_dir)
     if not proc or proc.returncode != 0:
         return None
     text = (proc.stdout or "").strip()
