@@ -456,7 +456,10 @@ left, right = key(sys.argv[1]), key(sys.argv[2])
 print((left > right) - (left < right) if left is not None and right is not None else -1)
 ' "$left" "$right" 2>/dev/null || printf '%s' -1
         }
-        __stamped="$(tr -d '[:space:]' < "$INSTALL_DIR/stamped-version" 2>/dev/null || true)"
+        __stamped=""
+        if [[ -f "$INSTALL_DIR/stamped-version" ]]; then
+            __stamped="$(tr -d '[:space:]' < "$INSTALL_DIR/stamped-version")"
+        fi
         if [[ "$ACTION" =~ ^(install|update|provision)$ && -n "$__desired" ]]; then
             if [[ -n "$__current" && -f "$INSTALL_DIR/versions/$__current/.install-complete.json" ]]; then
                 __active_cmp="$(__version_cmp "$__current" "$__desired")"
@@ -523,6 +526,10 @@ deploy_binstub() {
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "${SCRIPT_DIR}/$r" ] && cp -f "${SCRIPT_DIR}/$r" "${INSTALL_DIR}/bin/$r"
     done
+    # A pre-versioned install may leave this as a symlink into the retired
+    # .venv tree. Remove the path itself so the redirect creates a regular file
+    # instead of following a dangling legacy target.
+    rm -f "${LOCAL_BIN}/agent-logger"
     cat > "${LOCAL_BIN}/agent-logger" << 'STUBEOF'
 #!/usr/bin/env bash
 # agent-logger binstub -- self-provisioning (install-on-first-use).
