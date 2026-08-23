@@ -191,8 +191,8 @@ def test_restricted_policy_inspects_effective_docker_boundary(monkeypatch):
             "NanoCpus": 2_000_000_000,
             "PidsLimit": 256,
             "Tmpfs": {
-                "/workspace": "rw,nosuid,nodev,size=2g,uid=1000,gid=1000,mode=0700",
-                "/home/agent": "rw,nosuid,nodev,size=512m,uid=1000,gid=1000,mode=0700",
+                "/workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
+                "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
                 "/tmp": "rw,nosuid,nodev,size=512m",
                 "/run": "rw,nosuid,nodev,size=64m",
             },
