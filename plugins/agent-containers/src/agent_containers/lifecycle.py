@@ -25,6 +25,7 @@ from .config import (
     TRUSTED_PROFILE,
     ContainersConfig,
     FleetConfig,
+    is_sensitive_environment_name,
 )
 
 log = logging.getLogger("agent-containers")
@@ -288,8 +289,24 @@ def restricted_policy_errors(
         uid = gid = -1
         errors.append("restricted exec user must have non-root uid and gid")
     env = container.get("Env") or []
+    env_map = {
+        item.split("=", 1)[0]: item.split("=", 1)[1]
+        for item in env
+        if "=" in item
+    }
     if home and f"HOME={home}" not in env:
         errors.append("HOME does not target the restricted writable home")
+    for name, expected in fleet.environment.items():
+        if env_map.get(name) != expected:
+            errors.append(f"explicit environment '{name}' differs from configuration")
+    sensitive = sorted(
+        name for name in env_map if is_sensitive_environment_name(name)
+    )
+    if sensitive:
+        errors.append(
+            "credential-shaped environment values are present: "
+            + ", ".join(sensitive)
+        )
 
     if host.get("ReadonlyRootfs") is not True:
         errors.append("root filesystem is not read-only")

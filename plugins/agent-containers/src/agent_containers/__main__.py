@@ -313,6 +313,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "security_policy_current": not posture_errors,
                 "security_policy_errors": posture_errors,
                 "network": actual_network,
+                "environment_names": sorted(fleet.environment) if fleet else [],
                 "host_credentials": {
                     "github_token": forward,
                     "relay": relay,
