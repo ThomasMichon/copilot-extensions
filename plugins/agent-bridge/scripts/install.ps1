@@ -1364,8 +1364,13 @@ Set-Content -Path `$pidFile -Value `$proc.Id
             }
         } else {
             Write-Warn "Scheduled task write failed ($($_.Exception.Message.Trim())) -- the existing task was left intact."
-            Write-Warn "This change (e.g. switching an elevated/S4U task to interactive, or repairing a broken one) needs elevation. Re-run the task step ONCE from an elevated PowerShell:"
-            Write-Warn "    pwsh -File `"$PSCommandPath`" provision"
+            $__repair = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+                Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'scripts\repair-scheduled-task.ps1'
+            } else {
+                Join-Path $PSScriptRoot 'repair-scheduled-task.ps1'
+            }
+            Write-Warn "This change (switching an elevated/S4U task to interactive, or repairing a broken one) needs elevation. Run the self-elevating repair ONCE (it prompts for UAC and fixes the task without starting an elevated daemon):"
+            Write-Warn "    pwsh -File `"$__repair`""
             Write-Warn "Routine updates do not touch the task; the daemon self-heals on demand meanwhile ('agent-bridge start' or any daemon-touching command)."
         }
     }
