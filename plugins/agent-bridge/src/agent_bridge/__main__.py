@@ -19,7 +19,7 @@ import urllib.error
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, no_window_kwargs
 
 from . import __version__
 
@@ -969,6 +969,54 @@ def _daemon_launch_argv() -> list[str]:
     return ["agent-bridge", "start"]
 
 
+def _spawn_via_wmi_broker(argv: list[str]) -> bool:
+    """Launch the daemon through WMI ``Win32_Process.Create`` so it is owned by
+    the WMI provider host (``WmiPrvSE``) -- fully OUTSIDE the caller's Job object
+    and login/SSH session, hence never reaped when the CLI call or host SSH
+    session exits.
+
+    This is the guaranteed-escape path used ONLY when
+    ``CREATE_BREAKAWAY_FROM_JOB`` is refused (a kill-on-close job without
+    ``JOB_OBJECT_LIMIT_BREAKAWAY_OK`` -- e.g. some SSH-session jobs): a plain
+    detached child there stays in the job and dies with the caller. WMI Create
+    runs as the **current user with no elevation** (verified: it does not prompt
+    UAC), and re-parents the new process to ``WmiPrvSE``.
+
+    WMI Create cannot inherit/redirect stdio handles, and the daemon relies on
+    its launcher to send stdout/stderr to the log files, so the process is
+    wrapped in ``cmd /c "<py> ... >> log 2>> err"``. The command is handed to
+    PowerShell via ``-EncodedCommand`` (base64 UTF-16LE) to sidestep multi-layer
+    quoting. Returns True when Create reports success (ReturnValue 0); the
+    caller's own health-wait then confirms the daemon actually came up.
+    """
+    import base64
+    import subprocess as _sp
+
+    log = os.path.join(_INSTALL_DIR, "agent-bridge.log")
+    err = os.path.join(_INSTALL_DIR, "agent-bridge-err.log")
+    inner = " ".join(f'"{a}"' for a in argv) + f' >> "{log}" 2>> "{err}"'
+    cmdline = f'cmd.exe /c "{inner}"'
+    # Single-quote for the PowerShell string literal (double any embedded quote).
+    ps_cmdline = cmdline.replace("'", "''")
+    ps_cwd = _INSTALL_DIR.replace("'", "''")
+    ps = (
+        "$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create "
+        f"-Arguments @{{ CommandLine = '{ps_cmdline}'; "
+        f"CurrentDirectory = '{ps_cwd}' }}; exit [int]$r.ReturnValue"
+    )
+    encoded = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
+    try:
+        out = _sp.run(
+            ["powershell", "-NoProfile", "-NonInteractive",
+             "-EncodedCommand", encoded],
+            capture_output=True, text=True, timeout=30,
+            **no_window_kwargs(),
+        )
+        return out.returncode == 0
+    except (OSError, _sp.TimeoutExpired):
+        return False
+
+
 def _spawn_detached_daemon() -> None:
     """Spawn ``agent-bridge start`` as a detached, job-surviving daemon.
 
@@ -977,27 +1025,41 @@ def _spawn_detached_daemon() -> None:
     gotcha behind dotfiles#227/#1713: a daemon spawned as a plain child (or a
     non-breakaway detached child) dies when an SSH/CLI/agent-session caller in a
     kill-on-close job exits, leaving the bridge down with nothing to restart it.
+
     ``CREATE_BREAKAWAY_FROM_JOB`` fails with ``OSError`` when the caller's job
-    lacks ``JOB_OBJECT_LIMIT_BREAKAWAY_OK`` (a job that forbids escape), so fall
-    back to a plain detached spawn -- best effort from inside a restrictive job,
-    correct (job-surviving) everywhere else.
+    lacks ``JOB_OBJECT_LIMIT_BREAKAWAY_OK`` (a job that forbids escape). Rather
+    than fall back to a plain detached child that STAYS in the job (and is reaped
+    when the CLI call / SSH session exits -- the "the CLI accidentally owns it"
+    hazard), escalate on Windows to a **WMI broker** launch
+    (:func:`_spawn_via_wmi_broker`) that re-parents the daemon to ``WmiPrvSE``,
+    fully outside the caller's job/session, with no elevation. Only if that too
+    fails do we last-resort to a plain detached spawn.
     """
     import subprocess as _sp
 
     argv = _daemon_launch_argv()
-    logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
-    errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
     try:
+        logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
+        errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
         _sp.Popen(
             argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
             **detached_kwargs(breakaway=True),
         )
+        return
     except OSError:
-        # Caller's job forbids breakaway -> plain detached spawn.
+        # Caller's job forbids breakaway. On Windows, escape via the WMI broker
+        # so the daemon is not owned by (and reaped with) the caller.
+        if sys.platform == "win32" and _spawn_via_wmi_broker(argv):
+            return
+        # Last resort: plain detached (may not survive a kill-on-close job, but
+        # better than not starting at all -- a later CLI call re-boots it).
+        logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
+        errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
         _sp.Popen(
             argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
             **detached_kwargs(),
         )
+
 
 
 # On-demand daemon ensure (dotfiles#1713 Slice 3): a daemon-touching CLI command
