@@ -882,13 +882,23 @@ def _agent_worktrees_bin() -> str | None:
     found), then a ``$HOME/.local/bin`` fallback -- the same resolution order the
     remote ``agent-ssh explore`` probe uses, so local and remote introspection
     agree on what "installed" means.
+
+    The fallback is **platform-ordered**: on POSIX the extension-less binstub
+    only, on Windows the ``.cmd`` shim first. ``~/.local/bin`` carries *all* of
+    ``agent-worktrees`` (POSIX shell), ``agent-worktrees.cmd`` (DOS batch), and
+    ``agent-worktrees.ps1`` side by side, so a naive ``.cmd``-first fallback
+    hands a Linux caller the Windows batch file -> ``Exec format error`` when it
+    is run. This bit the daemon specifically: a systemd user service whose PATH
+    omits ``~/.local/bin`` misses on ``shutil.which`` and falls through here.
     """
     import shutil
     exe = shutil.which("agent-worktrees")
     if exe:
         return exe
     base = Path.home() / ".local" / "bin"
-    for cand in ("agent-worktrees.cmd", "agent-worktrees"):
+    cands = ("agent-worktrees.cmd", "agent-worktrees") if os.name == "nt" \
+        else ("agent-worktrees",)
+    for cand in cands:
         p = base / cand
         if p.exists():
             return str(p)

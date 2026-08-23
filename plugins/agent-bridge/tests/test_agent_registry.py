@@ -2023,3 +2023,53 @@ class TestWorktreeDiscoveryEligibility:
         assert "pool-body-agent" not in crawled
         # an agent without a project is ineligible regardless.
         assert "lambda-agent" not in crawled
+
+
+class TestAgentWorktreesBinResolution:
+    """`_agent_worktrees_bin` must not hand a POSIX caller the Windows `.cmd`
+    shim when `shutil.which` misses (the daemon's systemd PATH omits
+    ~/.local/bin). Regression for the 'Exec format error: agent-worktrees.cmd'
+    that silently broke the ground-layer lineage writes."""
+
+    def test_posix_fallback_prefers_extensionless_binstub(self, tmp_path, monkeypatch):
+        import agent_bridge.agent_registry as ar
+
+        # ~/.local/bin carries all three side by side, as on WSL.
+        bindir = tmp_path / ".local" / "bin"
+        bindir.mkdir(parents=True)
+        (bindir / "agent-worktrees").write_text("#!/bin/sh\n")
+        (bindir / "agent-worktrees.cmd").write_text("@echo off\n")
+        (bindir / "agent-worktrees.ps1").write_text("# ps\n")
+
+        import shutil as _sh
+        monkeypatch.setattr(_sh, "which", lambda _n: None)  # daemon: not on PATH
+        monkeypatch.setattr(ar.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(ar.os, "name", "posix")
+
+        got = ar._agent_worktrees_bin()
+        assert got is not None
+        assert got.endswith("agent-worktrees")
+        assert not got.endswith(".cmd")
+
+    def test_windows_fallback_prefers_cmd(self, tmp_path, monkeypatch):
+        import agent_bridge.agent_registry as ar
+
+        bindir = tmp_path / ".local" / "bin"
+        bindir.mkdir(parents=True)
+        (bindir / "agent-worktrees").write_text("#!/bin/sh\n")
+        (bindir / "agent-worktrees.cmd").write_text("@echo off\n")
+
+        import shutil as _sh
+        monkeypatch.setattr(_sh, "which", lambda _n: None)
+        monkeypatch.setattr(ar.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setattr(ar.os, "name", "nt")
+
+        got = ar._agent_worktrees_bin()
+        assert got is not None
+        assert got.endswith("agent-worktrees.cmd")
+
+    def test_which_hit_is_used_directly(self, monkeypatch):
+        import agent_bridge.agent_registry as ar
+        import shutil as _sh
+        monkeypatch.setattr(_sh, "which", lambda _n: "/usr/bin/agent-worktrees")
+        assert ar._agent_worktrees_bin() == "/usr/bin/agent-worktrees"
