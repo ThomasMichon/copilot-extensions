@@ -294,8 +294,12 @@ legacy 9280 (fixed separately) -- always confirm via the routing table.
 stale **S4U/boot** task that never launches (`LastTaskResult = 267011` /
 `SCHED_S_TASK_HAS_NOT_RUN`) can't be rewritten by a routine non-elevated update
 (that's *why* updates leave it untouched). Fix it once with the self-elevating
-repair script -- it prompts for UAC, removes the stale task, and registers the
-clean **interactive AtLogOn** task, **without** starting an elevated daemon:
+repair script -- it removes the stale task and registers the clean
+**interactive AtLogOn** task, **without** starting an elevated daemon. It
+prompts for UAC **only when actually needed** (i.e. an existing **S4U/boot**
+task must be removed -- that requires admin); if the task is already a healthy
+non-elevated interactive one (or absent), it does its work with **no UAC** and,
+when nothing needs fixing, no-ops:
 
 ```pwsh
 # from a normal (non-elevated) shell -- it raises its own UAC prompt
