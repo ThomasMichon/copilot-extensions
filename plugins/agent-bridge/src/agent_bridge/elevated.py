@@ -184,10 +184,18 @@ def _write_bootstrap(ed: Path, launcher: Path, *, action: str) -> Path:
     it with no further prompt (see ``_run_task`` / ``_end_task``).
     """
     if action == "start":
+        # Route the task action through ``conhost.exe --headless`` so the
+        # elevated daemon's launcher.cmd never surfaces a cmd console in the
+        # interactive session. A bare ``.cmd`` task action (or -WindowStyle
+        # Hidden) is ignored by the DefTerm handoff and flashes a window when the
+        # /RL HIGHEST task fires; ``conhost --headless`` gives ``cmd /c`` its own
+        # windowless console. Same idiom as the agent-dispatch/agent-bridge boot
+        # tasks and the #872 at-logon launcher fix (#933).
         body = (
             "@echo off\r\n"
             f'schtasks /create /tn "{TASK_NAME}" '
-            f'/tr "{launcher}" /sc ONCE /st 00:00 /RL HIGHEST /f\r\n'
+            f'/tr "conhost.exe --headless cmd.exe /c \\"{launcher}\\"" '
+            f"/sc ONCE /st 00:00 /RL HIGHEST /f\r\n"
             f'schtasks /run /tn "{TASK_NAME}"\r\n'
         )
         name = "bootstrap-start.cmd"
@@ -211,6 +219,28 @@ def _task_registered() -> bool:
             capture_output=True, text=True,
         )
         return out.returncode == 0
+    except OSError:
+        return False
+
+
+def _task_headless() -> bool:
+    """True if the registered elevated task routes its action through ``conhost``.
+
+    A task registered before the #933 headless fix runs ``launcher.cmd``
+    directly, so when the interactive-session ``/RL HIGHEST`` task fires it
+    flashes a ``cmd`` console window (a bare ``.cmd`` task action is not
+    suppressed by the DefTerm handoff). Such a stale task is re-registered by
+    ``ensure_running``. Detected via the task XML, which is locale-independent
+    (unlike the ``/fo LIST`` "Task To Run" label).
+    """
+    try:
+        out = subprocess.run(
+            ["schtasks", "/query", "/tn", TASK_NAME, "/xml", "ONE"],
+            capture_output=True, text=True,
+        )
+        if out.returncode != 0:
+            return False
+        return "conhost" in (out.stdout or "").lower()
     except OSError:
         return False
 
@@ -423,7 +453,7 @@ def ensure_running(*, wait: float = 60.0) -> str:
     ed = _seed_config(0)
     launcher = _write_launcher(ed, 0)
 
-    if _task_registered():
+    if _task_registered() and _task_headless():
         # The task may be a zombie: schtasks reports the instance "Running"
         # while the daemon has actually idle-shut-down or died, leaving the
         # port dead. `schtasks /run` refuses to start a second instance, so
@@ -440,6 +470,17 @@ def ensure_running(*, wait: float = 60.0) -> str:
         )
         _run_task()
     else:
+        # No task yet, OR a task registered before the #933 fix whose action runs
+        # launcher.cmd directly and flashes a cmd console in the interactive
+        # session. Either way (re)register through the elevated bootstrap:
+        # `/create /f` force-overwrites a stale task with the conhost --headless
+        # action. Overwriting a /RL HIGHEST task needs elevation, so a one-time
+        # migration of an old task costs one UAC prompt (the same as the very
+        # first registration); every subsequent start is headless.
+        if _task_registered():
+            # Clear any running stale instance before the force-overwrite.
+            _end_task()
+            time.sleep(0.5)
         bootstrap = _write_bootstrap(ed, launcher, action="start")
         log.info(
             "Registering elevated sub-daemon task (dynamic loopback port; "

@@ -116,6 +116,7 @@ def _stub_start(monkeypatch, tmp_path):
         elevated, "_write_launcher", lambda ed, port: tmp_path / "launcher.cmd"
     )
     monkeypatch.setattr(elevated, "_end_task", lambda: 0)
+    monkeypatch.setattr(elevated, "_task_headless", lambda: True)
     return state
 
 
@@ -214,6 +215,7 @@ def test_ensure_running_seeds_dynamic_port(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(elevated, "_end_task", lambda: 0)
     monkeypatch.setattr(elevated, "_task_registered", lambda: True)
+    monkeypatch.setattr(elevated, "_task_headless", lambda: True)
 
     def _run():
         state["up"] = True
@@ -223,6 +225,45 @@ def test_ensure_running_seeds_dynamic_port(monkeypatch, tmp_path):
     tok = elevated.ensure_running(wait=2.0)
     assert tok == "subtok"
     assert seen == {"seed": 0, "launch": 0}
+
+
+def test_ensure_running_reregisters_stale_non_headless_task(monkeypatch, tmp_path):
+    # A task registered before the #933 headless fix runs launcher.cmd directly
+    # (flashes a cmd window). ensure_running must re-register it via the elevated
+    # bootstrap -- ending any stale instance first -- instead of just /run.
+    state = _stub_start(monkeypatch, tmp_path)
+    monkeypatch.setattr(elevated, "_task_registered", lambda: True)
+    monkeypatch.setattr(elevated, "_task_headless", lambda: False)
+    order = []
+    monkeypatch.setattr(elevated, "_end_task", lambda: order.append("end") or 0)
+    monkeypatch.setattr(elevated, "_run_task", lambda: order.append("run") or 0)
+    monkeypatch.setattr(
+        elevated, "_write_bootstrap",
+        lambda ed, launcher, action: tmp_path / "bootstrap.cmd",
+    )
+
+    def _elev(s):
+        order.append("elevated")
+        state["up"] = True
+        return 0
+
+    monkeypatch.setattr(elevated, "_run_elevated", _elev)
+    tok = elevated.ensure_running(wait=2.0)
+    assert tok == "subtok"
+    # Re-register (no bare /run of the stale task); stale instance ended first.
+    assert order == ["end", "elevated"]
+
+
+def test_bootstrap_start_action_is_headless(monkeypatch, tmp_path):
+    # The registration bootstrap must wrap the launcher in conhost --headless so
+    # the /RL HIGHEST task never flashes a cmd console (#933).
+    launcher = tmp_path / "launcher.cmd"
+    bootstrap = elevated._write_bootstrap(tmp_path, launcher, action="start")
+    body = bootstrap.read_text()
+    assert "conhost.exe --headless cmd.exe /c" in body
+    assert str(launcher) in body
+    # The task action must NOT point straight at the bare .cmd.
+    assert f'/tr "{launcher}"' not in body
 
 
 def test_stop_is_headless_by_default(monkeypatch):
