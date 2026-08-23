@@ -12,7 +12,7 @@
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev580",
+      "version": "1.5.3-dev581",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -36,7 +36,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev67",
+      "version": "0.2.0-dev68",
       "source": "plugins/agent-mcp"
     },
     {

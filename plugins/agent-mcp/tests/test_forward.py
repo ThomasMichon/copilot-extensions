@@ -237,6 +237,77 @@ def test_forward_falls_back_when_attach_refused(tmp_path, monkeypatch, capsys):
     assert json.loads(replies[0]["result"]["content"][0]["text"]) == {"fb": True}
 
 
+def test_forward_resurrects_dead_host_on_unreachable(tmp_path, monkeypatch):
+    """A stale handle whose host is GONE is reclaimed and a fresh host respawned,
+    instead of degrading to the in-process bridge forever."""
+    bridge = _write_bridge_config(tmp_path)
+    stale = tmp_path / "serve.sock"
+    calls = {"discarded": [], "ensure": 0, "attach": 0, "pumped": 0, "direct": 0}
+
+    monkeypatch.setattr(forward.sockio, "serve_socket_if_available",
+                        lambda *_a, **_k: stale)
+
+    def _attach(_handle, _bref):
+        calls["attach"] += 1
+        if calls["attach"] == 1:
+            raise forward.sockio.HostUnreachableError("dead host, stale socket")
+        return object()  # a live connection after the respawn
+
+    monkeypatch.setattr(forward.sockio, "attach", _attach)
+    monkeypatch.setattr(forward.sockio, "discard_stale_handle",
+                        lambda *a, **_k: calls["discarded"].append(a))
+
+    def _ensure(_sp):
+        calls["ensure"] += 1
+        return tmp_path / "serve.sock"
+
+    monkeypatch.setattr(forward, "_ensure_serve", _ensure)
+    monkeypatch.setattr(forward.sockio, "pump",
+                        lambda _c: calls.__setitem__("pumped", calls["pumped"] + 1))
+    monkeypatch.setattr(forward, "_run_direct",
+                        lambda _b: (calls.__setitem__("direct", calls["direct"] + 1) or 0))
+    monkeypatch.delenv("AGENT_MCP_NO_MULTIPLEX", raising=False)
+    monkeypatch.delenv("AGENT_MCP_NO_ENSURE_SERVE", raising=False)
+    monkeypatch.setenv("AGENT_MCP_PARENT_WATCHDOG", "0")
+
+    rc = forward.run(str(bridge))
+    assert rc == 0
+    assert calls["discarded"], "the stale handle was reclaimed"
+    assert calls["ensure"] == 1, "a fresh host was respawned"
+    assert calls["attach"] == 2, "re-attached to the respawned host"
+    assert calls["pumped"] == 1, "pumped the live session"
+    assert calls["direct"] == 0, "did NOT degrade to the in-process bridge"
+
+
+def test_forward_falls_back_when_respawn_fails_after_unreachable(tmp_path, monkeypatch):
+    """A dead host is reclaimed; if the respawn can't come up, the forwarder
+    still falls back to the direct bridge (graceful, not wedged)."""
+    bridge = _write_bridge_config(tmp_path)
+    stale = tmp_path / "serve.sock"
+    calls = {"discarded": 0, "direct": 0}
+
+    monkeypatch.setattr(forward.sockio, "serve_socket_if_available",
+                        lambda *_a, **_k: stale)
+
+    def _unreachable(*_a, **_k):
+        raise forward.sockio.HostUnreachableError("dead host")
+
+    monkeypatch.setattr(forward.sockio, "attach", _unreachable)
+    monkeypatch.setattr(forward.sockio, "discard_stale_handle",
+                        lambda *_a, **_k: calls.__setitem__("discarded", calls["discarded"] + 1))
+    monkeypatch.setattr(forward, "_ensure_serve", lambda _sp: None)  # respawn fails
+    monkeypatch.setattr(forward, "_run_direct",
+                        lambda _b: (calls.__setitem__("direct", calls["direct"] + 1) or 0))
+    monkeypatch.delenv("AGENT_MCP_NO_MULTIPLEX", raising=False)
+    monkeypatch.delenv("AGENT_MCP_NO_ENSURE_SERVE", raising=False)
+    monkeypatch.setenv("AGENT_MCP_PARENT_WATCHDOG", "0")
+
+    rc = forward.run(str(bridge))
+    assert rc == 0
+    assert calls["discarded"] == 1, "the stale handle was reclaimed"
+    assert calls["direct"] == 1, "fell back to the direct bridge after a failed respawn"
+
+
 def test_forward_config_error_reports_nonzero(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AGENT_MCP_NO_MULTIPLEX", "1")
     monkeypatch.setenv("AGENT_MCP_PARENT_WATCHDOG", "0")

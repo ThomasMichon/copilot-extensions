@@ -157,23 +157,52 @@ def run(bridge: str, socket_path: str | None = None) -> int:
 
     Returns a process exit code. The direct fallback is taken (with the heavy
     bridge tree imported lazily) whenever multiplexing is disabled, no host can
-    be reached or spawned, or the attach is refused.
+    be reached or spawned, or a live host refuses the attach.
     """
     if not _multiplex_enabled():
         return _run_direct(bridge)
-    sock_handle = sockio.serve_socket_if_available(socket_path)
-    if sock_handle is None and _ensure_serve_enabled():
-        sock_handle = _ensure_serve(socket_path)
-    if sock_handle is None:
-        return _run_direct(bridge)
-    try:
-        conn = sockio.attach(sock_handle, _abs_bridge_ref(bridge))
-    except OSError:
-        # Attach refused/unreachable before any MCP traffic -> safe to fall back
-        # to a direct in-process bridge with no lost session state.
+    conn = _attach_or_spawn(bridge, socket_path)
+    if conn is None:
         return _run_direct(bridge)
     sockio.pump(conn)
     return 0
+
+
+def _attach_or_spawn(bridge: str, socket_path: str | None):
+    """Return a live attached socket, resurrecting a dead host; ``None`` to fall back.
+
+    The order of events:
+
+    1. If a host handle is advertised, try to attach. A successful attach returns
+       the live socket.
+    2. If that attach fails because the host is **unreachable** -- a crashed host
+       left a stale handle behind -- reclaim the orphaned handle and fall through
+       to spawn a fresh host, instead of degrading to the in-process path forever. If a *live* host merely **refuses** the attach, return ``None`` so
+       the caller falls back without disturbing it.
+    3. Spawn (or converge on a racing spawn of) a resident host and attach to it.
+       Any failure here yields ``None`` -> direct fallback.
+    """
+    bref = _abs_bridge_ref(bridge)
+    handle = sockio.serve_socket_if_available(socket_path)
+    if handle is not None:
+        try:
+            return sockio.attach(handle, bref)
+        except sockio.HostUnreachableError:
+            # The advertised host is gone but left its handle behind; reclaim it
+            # so _ensure_serve spawns a fresh host below.
+            sockio.discard_stale_handle(str(handle))
+        except OSError:
+            # A live host refused this attach -> fall back, do not respawn.
+            return None
+    if not _ensure_serve_enabled():
+        return None
+    handle = _ensure_serve(socket_path)
+    if handle is None:
+        return None
+    try:
+        return sockio.attach(handle, bref)
+    except OSError:
+        return None
 
 
 def _run_direct(bridge: str) -> int:
