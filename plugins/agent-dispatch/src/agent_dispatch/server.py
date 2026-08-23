@@ -58,7 +58,10 @@ def build_app(cfg: Config | None = None):
         telemetry.load_sink_from_env()
     Path(cfg.db_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
     queue = TaskQueue(Path(cfg.db_path).expanduser())
-    return create_app(queue, token=cfg.token, sweep_interval=cfg.sweep_interval)
+    return create_app(
+        queue, token=cfg.token, sweep_interval=cfg.sweep_interval,
+        orphan_grace=cfg.orphan_grace,
+    )
 
 
 def advertise_endpoint(cfg: Config):

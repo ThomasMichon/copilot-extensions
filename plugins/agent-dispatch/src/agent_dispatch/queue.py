@@ -1587,6 +1587,89 @@ class TaskQueue:
             conn.execute("COMMIT")
         return counts
 
+    def reap_orphaned_targets(
+        self,
+        live_worktrees: set[str] | None,
+        *,
+        machine: str,
+        grace_secs: float,
+        now: float | None = None,
+    ) -> dict[str, int]:
+        """Abandon **unowned** (proposed/queued) tasks pinned to a target worktree
+        on ``machine`` that is no longer live.
+
+        :meth:`reconcile_liveness` only recovers *owned* held tasks against their
+        owner's session liveness; an **unowned** proposed/queued task has no owner,
+        so nothing ever reaps it -- pinned (``--target-worktree``) to a worktree
+        that was later pruned, it lingers forever. That is the context-handoff
+        leak: a stored handoff whose live-cutover never completed (or a fallback
+        the operator never resumed) accumulates one dead task per session. This
+        closes it.
+
+        ``live_worktrees`` is the set of worktree ids currently **live** on
+        ``machine`` (e.g. ``agent-worktrees list --tracking-status active``). A
+        task is reaped iff ALL hold:
+
+        - status is ``proposed`` or ``queued`` (unowned -- no worker holds it);
+        - ``target_machine`` case-insensitively equals ``machine`` (we only judge
+          against a live-worktree set we actually have -- a task targeting another
+          machine is that coordinator's to reap);
+        - ``target_worktree`` is set and **not** in ``live_worktrees``;
+        - it is older than ``grace_secs`` (a just-created handoff whose successor
+          hasn't started yet is never reaped -- mirrors the liveness GC's refusal
+          to act on a claim/register race).
+
+        **Degrade safe:** ``live_worktrees is None`` (the caller's probe failed)
+        reaps nothing -- never act on ignorance, exactly like the ``unknown``
+        liveness verdict. **Fenced:** each abandon is conditional on ``(id,
+        status, generation)``, so a task claimed/consumed between the read and the
+        write no-ops (no clobber of freshly-picked-up work).
+
+        Returns counts: ``checked`` / ``orphaned`` / ``reaped``.
+        """
+        counts = {"checked": 0, "orphaned": 0, "reaped": 0}
+        if live_worktrees is None:
+            return counts
+        ts = self._now(now)
+        cutoff = ts - max(0.0, grace_secs)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, target_worktree, generation, status FROM tasks"
+                " WHERE status IN (?, ?)"
+                "  AND target_worktree IS NOT NULL"
+                "  AND target_machine IS NOT NULL"
+                "  AND lower(target_machine) = lower(?)"
+                "  AND created_at < ?",
+                (Status.PROPOSED, Status.QUEUED, machine, cutoff),
+            ).fetchall()
+        victims: list[tuple[str, int, str]] = []
+        for row in rows:
+            counts["checked"] += 1
+            if row["target_worktree"] in live_worktrees:
+                continue
+            counts["orphaned"] += 1
+            victims.append((row["id"], row["generation"], row["status"]))
+        if not victims:
+            return counts
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            for task_id, generation, status in victims:
+                cur = conn.execute(
+                    "UPDATE tasks SET status = ?, updated_at = ?, completed_at = ?,"
+                    " owner = NULL, lease_expires_at = NULL"
+                    " WHERE id = ? AND status = ? AND generation = ?",
+                    (Status.ABANDONED, ts, ts, task_id, status, generation),
+                )
+                if cur.rowcount:
+                    self._audit(
+                        conn, task_id, ts=ts,
+                        from_status=status, to_status=Status.ABANDONED,
+                        note="orphaned: target worktree no longer live",
+                    )
+                    counts["reaped"] += 1
+            conn.execute("COMMIT")
+        return counts
+
     def backlog_health(
         self, *, repo: str | None = None, now: float | None = None
     ) -> dict[str, float | int | None]:

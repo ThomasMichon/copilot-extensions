@@ -42,6 +42,7 @@ import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { leadFrom, buildCutoverSeed } from "./cutover-seed.mjs";
+import { supersededHandoffIds } from "./handoff-tasks.mjs";
 
 // --- Configuration ---
 // Context utilization thresholds (0.0-1.0)
@@ -483,6 +484,13 @@ function dispatchHandoff(promptText, sid, cwd, title) {
       timeout: 15000,
     });
     const task = JSON.parse(out);
+    if (task?.id) {
+      // Supersede: a newer handoff for THIS worktree makes any older pending
+      // handoff for it moot -- abandon them so a re-handoffed worktree doesn't
+      // pile up one stale task per session (dedup is per-session, so different
+      // sessions on one worktree each file their own).
+      abandonSupersededHandoffs(cwd, worktree, task.id);
+    }
     return task?.id ? { id: task.id, metadata: { ...metadata, taskId: task.id } } : null;
   } catch {
     return null;
@@ -501,6 +509,33 @@ function agentDispatchJson(argv, cwd) {
     return JSON.parse(out);
   } catch {
     return null;
+  }
+}
+
+// Abandon this worktree's OTHER pending context-handoff tasks (proposed/queued),
+// superseded by the just-stored handoff `keepId`. Dedup is per-session
+// (`handoff-<sid>`), so different sessions on one worktree each file their own
+// task; without this, a re-handoffed worktree accumulates one stale task per
+// session. Best-effort: a cleanup failure must never break the handoff store (the
+// coordinator's orphan reaper is the backstop for anything left behind).
+function abandonSupersededHandoffs(cwd, worktree, keepId) {
+  const tasks = agentDispatchJson(
+    ["list", "--status", "proposed,queued", "--label", "handoff"],
+    cwd,
+  );
+  for (const id of supersededHandoffIds(tasks, worktree, keepId)) {
+    try {
+      runCli(
+        "agent-dispatch",
+        [
+          "abandon", id, "--permit",
+          "--reason", "superseded by a newer handoff for this worktree",
+        ],
+        { cwd, timeout: 15000 },
+      );
+    } catch {
+      /* best-effort -- anything left behind is reaped by the GC orphan pass */
+    }
   }
 }
 

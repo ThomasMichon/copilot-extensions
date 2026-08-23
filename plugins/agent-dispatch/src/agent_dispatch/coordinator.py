@@ -23,6 +23,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from . import __version__, telemetry
+from .config import DEFAULT_ORPHAN_GRACE
 from .events import EventBus, sse_format
 from .queue import SpawnReservation, Task, TaskError, TaskQueue, worker_id_for
 from .satellites import (
@@ -165,15 +166,51 @@ def _resolve_owner_session_id(worker_id: str | None) -> str | None:
     return session.get("session_id") or session.get("id")
 
 
-async def _gc_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
-    """Periodically garbage-collect held tasks by **worker liveness**.
+def _reap_orphans(queue: TaskQueue, grace: float) -> int:
+    """Reap unowned proposed/queued tasks pinned to a no-longer-live worktree.
 
-    Replaces the old lease-expiry sweep: a held task is requeued only when its
-    owner worktree is *confirmed gone* (not because a wall-clock lease elapsed),
-    so long-running live work is never disturbed and a bridge blip (verdict
-    ``unknown``) leaves a task alone. Runs the (synchronous, subprocess-shelling)
-    reconcile off the event loop via a worker thread. Cancelled cleanly on
-    shutdown.
+    Resolves this machine + its live worktrees (both shell ``agent-worktrees``),
+    then delegates the fenced abandon to
+    :meth:`TaskQueue.reap_orphaned_targets`. Degrade-safe: an unresolved machine
+    or worktree probe reaps nothing. Runs off the event loop (subprocess-shelling)
+    via a worker thread. Returns the reaped count.
+    """
+    from . import tracking
+    from .identity import resolve_identity
+
+    machine = resolve_identity()[0]
+    if not machine:
+        return 0
+    live = tracking.live_worktrees()
+    if live is None:
+        return 0
+    counts = queue.reap_orphaned_targets(live, machine=machine, grace_secs=grace)
+    return counts.get("reaped", 0)
+
+
+async def _gc_loop(
+    queue: TaskQueue,
+    interval: float,
+    bus: EventBus,
+    *,
+    orphan_grace: float = DEFAULT_ORPHAN_GRACE,
+) -> None:
+    """Periodically garbage-collect tasks by **liveness**.
+
+    Two passes each interval, both degrade-safe (a probe that can't answer acts on
+    nothing):
+
+    1. **Held-task recovery** (:meth:`reconcile_liveness`) -- a ``claimed``/
+       ``started`` task is requeued only when its owner worktree is *confirmed
+       gone* (not on elapsed time), so long-running live work is never disturbed
+       and a bridge blip leaves a task alone.
+    2. **Orphaned-pin reap** (:func:`_reap_orphans`) -- an **unowned**
+       proposed/queued task pinned to a no-longer-live target worktree (the
+       context-handoff leak) is abandoned once past its grace window; the held
+       recovery never touches unowned tasks, so without this they linger forever.
+
+    Runs the synchronous, subprocess-shelling passes off the event loop via worker
+    threads. Cancelled cleanly on shutdown.
     """
     while True:
         await asyncio.sleep(interval)
@@ -181,7 +218,7 @@ async def _gc_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
             counts = await asyncio.to_thread(queue.reconcile_liveness)
         except Exception:  # pragma: no cover -- never let the loop die on a blip
             log.exception("liveness GC pass failed")
-            continue
+            counts = {}
         requeued = counts.get("requeued", 0)
         if requeued:
             log.info(
@@ -190,6 +227,17 @@ async def _gc_loop(queue: TaskQueue, interval: float, bus: EventBus) -> None:
                 counts.get("checked", 0),
             )
             bus.publish({"type": "task.reconciled", "requeued": requeued, **counts})
+        try:
+            reaped = await asyncio.to_thread(_reap_orphans, queue, orphan_grace)
+        except Exception:  # pragma: no cover -- never let the loop die on a blip
+            log.exception("orphan reap pass failed")
+            reaped = 0
+        if reaped:
+            log.info(
+                "liveness GC reaped %d orphaned task(s) (target worktree gone)",
+                reaped,
+            )
+            bus.publish({"type": "task.reaped", "reaped": reaped})
 
 
 class CreateBody(BaseModel):
@@ -381,6 +429,7 @@ def create_app(
     *,
     token: str | None = None,
     sweep_interval: float = 0.0,
+    orphan_grace: float = DEFAULT_ORPHAN_GRACE,
     enable_mcp: bool = True,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
@@ -420,7 +469,7 @@ def create_app(
     async def lifespan(_app: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
         sweeper = (
-            asyncio.create_task(_gc_loop(queue, sweep_interval, bus))
+            asyncio.create_task(_gc_loop(queue, sweep_interval, bus, orphan_grace=orphan_grace))
             if sweep_interval and sweep_interval > 0
             else None
         )
