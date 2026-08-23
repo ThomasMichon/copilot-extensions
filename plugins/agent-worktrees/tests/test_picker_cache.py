@@ -71,8 +71,8 @@ class TestOverlayCachedState:
         # The cheap lock-file scan is the primary first-paint ACTIVE signal: a
         # running Copilot in a never-cached worktree must render ACTIVE, not "?".
         monkeypatch.setattr(
-            data_local.sessions, "worktree_has_live_session",
-            lambda rec: True)
+            data_local.sessions, "worktree_session_lock_state",
+            lambda rec: (True, []))
         raw: dict = {}
         data_local._overlay_cached_state(raw, _rec())  # no cache at all
         assert raw["state"] == "active"
@@ -81,8 +81,8 @@ class TestOverlayCachedState:
 
     def test_live_lock_beats_cached_terminal(self, monkeypatch):
         monkeypatch.setattr(
-            data_local.sessions, "worktree_has_live_session",
-            lambda rec: True)
+            data_local.sessions, "worktree_session_lock_state",
+            lambda rec: (True, []))
         raw: dict = {}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=9, git_state="completed"))
@@ -90,12 +90,26 @@ class TestOverlayCachedState:
 
     def test_no_live_signal_keeps_cached_state(self, monkeypatch):
         monkeypatch.setattr(
-            data_local.sessions, "worktree_has_live_session",
-            lambda rec: False)
+            data_local.sessions, "worktree_session_lock_state",
+            lambda rec: (False, []))
         raw: dict = {}
         data_local._overlay_cached_state(
             raw, _rec(session_turns=2, git_state="wip"))
         assert raw["state"] == "wip"
+
+    def test_stale_lock_is_visible_without_forcing_active(self, monkeypatch):
+        monkeypatch.setattr(
+            data_local.sessions, "worktree_session_lock_state",
+            lambda rec: (False, [999]))
+        raw: dict = {"id": "stale-lock"}
+        data_local._overlay_cached_state(
+            raw, _rec(session_turns=9, git_state="completed"))
+        assert raw["state"] == "completed"
+        assert raw["session_lock_stale"] is True
+        assert raw["stale_lock_pids"] == [999]
+        normalized = derive.norm(raw, "m", "win")
+        assert normalized["state"] == "FINAL"
+        assert normalized["sess"] == "LOCK"
 
 
 class TestRefreshOneGuard:
@@ -139,6 +153,8 @@ class TestWorktreeHasLiveSession:
         (sdir / "inuse.999.lock").write_text("")
         assert sessions.worktree_has_live_session(
             self._rec_with_sessions("sess-B")) is False
+        assert sessions.worktree_session_lock_state(
+            self._rec_with_sessions("sess-B")) == (False, [999])
 
     def test_detached_session_skipped(self, tmp_path, monkeypatch):
         from agent_worktrees import sessions
@@ -158,6 +174,22 @@ class TestWorktreeHasLiveSession:
         sdir.mkdir()
         assert sessions.worktree_has_live_session(
             self._rec_with_sessions("sess-D")) is False
+
+
+def test_live_process_signals_override_explicit_wip_or_final_state():
+    for signal in (
+        "session_lock_live",
+        "session_bound_live",
+        "session_bridge_live",
+        "session_bare_orphan",
+    ):
+        for state in ("wip", "completed"):
+            row = derive.norm(
+                {"id": state, "state": state, signal: True},
+                "m", "win",
+            )
+            assert row["state"] == "ACTIVE"
+            assert row["sess"] == "PROC"
 
 
 

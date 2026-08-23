@@ -137,6 +137,17 @@ def _state(w):
     git access exists, incl. per remote machine). Falls back to an approximation
     from tracking fields when classification is absent.
     """
+    # A live process owns the worktree regardless of a cached or concurrently
+    # derived git/tracking state. Check this before the explicit ``state`` field
+    # so a first-paint WIP/FINAL cannot hide a live PID lock.
+    # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
+    # before any git status/PR consideration). A live mux, a live
+    # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
+    # bridge-lock means a live Copilot session.
+    if (w.get("mux_session") or w.get("mux_attached")
+            or w.get("session_lock_live") or w.get("session_bound_live")
+            or w.get("session_bridge_live") or w.get("session_bare_orphan")):
+        return "ACTIVE"
     st = (w.get("state") or "").lower()
     if st:
         # Conversation-only refinement: an UNUSED worktree whose session held
@@ -146,22 +157,6 @@ def _state(w):
         return _STATE_LABEL.get(st, st.upper()[:6])
     pr = w.get("pr") or {}
     status = w.get("status")
-    # Classification absent (the fast Phase-1 populate pass). A live session ->
-    # ACTIVE, PERIOD -- checked before PR/finalized, mirroring
-    # ``git_ops.classify_worktree``'s active_paths precedence (it returns ACTIVE
-    # before any git status/PR consideration). A live mux, a live
-    # ``inuse.<pid>.lock`` binding, the cached bound-Copilot hint, OR a live
-    # bridge-lock (#1416: a bare-resumed / bridge-owned session, cwd=home, that
-    # the mux/lock scans miss) means a live Copilot session, so surface it in the
-    # Active section IMMEDIATELY instead of
-    # waiting for the per-worktree git classify -- the ONLY other path to ACTIVE,
-    # seconds across the fleet. Doing this FIRST is what avoids flicker: a live
-    # worktree that ALSO has a merged PR (just-merged, session still running)
-    # must not render FINAL here and ACTIVE after Phase 2.
-    if (w.get("mux_session") or w.get("mux_attached")
-            or w.get("session_lock_live") or w.get("session_bound_live")
-            or w.get("session_bridge_live")):
-        return "ACTIVE"
     if pr.get("state") == "merged":
         return "FINAL"
     if status == "finalized":
@@ -176,6 +171,11 @@ def _sess(w):
         return f"●{w.get('mux_clients', 1)}"
     if w.get("mux_session"):
         return "○"
+    if (w.get("session_lock_live") or w.get("session_bound_live")
+            or w.get("session_bridge_live") or w.get("session_bare_orphan")):
+        return "PROC"
+    if w.get("session_lock_stale"):
+        return "LOCK"
     return "·"
 
 
