@@ -30,6 +30,18 @@ from pathlib import Path
 _TCP_HOST = "127.0.0.1"
 
 
+class HostUnreachableError(OSError):
+    """A serve handle is advertised but no live host answers the connect.
+
+    Distinct from a live host that *refuses* an attach: unreachable means the
+    resident host is gone (crashed, leaving a stale handle behind), so the caller
+    should reclaim the handle and respawn a fresh host rather than degrade to the
+    in-process path forever. A plain :class:`OSError` from the attach
+    *handshake* keeps the old fall-back-to-direct behavior (a live host declined
+    this particular attach).
+    """
+
+
 def default_socket_path() -> Path:
     """The default serve socket handle: ``$AGENT_MCP_HOME/serve.sock``."""
     home = Path(os.environ.get("AGENT_MCP_HOME", Path.home() / ".agent-mcp"))
@@ -75,8 +87,10 @@ def serve_socket_if_available(explicit: str | None = None) -> Path | None:
     ``AGENT_MCP_SERVE_SOCKET`` (override the path). Transport-agnostic: a handle
     counts if *either* a parseable ``.endpoint`` sidecar (loopback-TCP host) or an
     actual AF_UNIX socket file is present. A stale handle (crashed host) still
-    yields a path, but the subsequent connect fails and the caller falls back --
-    the same self-healing the socket file always had.
+    yields a path -- but the subsequent connect raises
+    :class:`HostUnreachableError`, and the caller then reclaims the handle (via
+    :func:`discard_stale_handle`) and respawns a fresh host, rather than
+    being wedged on the in-process path by the orphaned file.
     """
     if os.environ.get("AGENT_MCP_NO_SERVE"):
         return None
@@ -87,20 +101,52 @@ def serve_socket_if_available(explicit: str | None = None) -> Path | None:
     return path if _is_socket_file(path) else None
 
 
+def discard_stale_handle(explicit: str | None = None) -> None:
+    """Remove a dead host's on-disk handle (AF_UNIX socket + endpoint sidecar).
+
+    Called after a connect to an *advertised* handle proves the host is gone
+    (:class:`HostUnreachableError`): a crashed host leaves its socket/sidecar
+    behind, which keeps :func:`serve_socket_if_available` reporting it as
+    available and wedges respawn -- so the forwarder would degrade to the
+    in-process path forever instead of resurrecting the resident host.
+    Removing the orphaned handle lets a fresh host be spawned, which re-creates
+    it. Best-effort; the winning host re-creates its handle on bind (and holds the
+    single-instance lease), so this never disturbs a live host.
+    """
+    raw = explicit or os.environ.get("AGENT_MCP_SERVE_SOCKET")
+    path = Path(raw) if raw else default_socket_path()
+    for p in (path, _endpoint_path(path)):
+        try:
+            Path(p).unlink()
+        except OSError:
+            pass
+
+
 def _connect(path: str | Path) -> tuple[socket.socket, str | None]:
     """Open a blocking client connection; return ``(sock, token)``.
 
     Dials loopback TCP when an endpoint sidecar is present (token from it), else
-    an AF_UNIX socket. Raises ``OSError`` when the host can't be reached.
+    an AF_UNIX socket. Raises :class:`HostUnreachableError` when no live host
+    answers the connect (a crashed host that left a stale handle), so the caller
+    can reclaim the handle and respawn rather than degrade to the in-process path.
     """
     ep = _read_endpoint(path)
     if ep is not None:
-        sock = socket.create_connection((_TCP_HOST, ep["port"]))
+        try:
+            sock = socket.create_connection((_TCP_HOST, ep["port"]))
+        except OSError as exc:
+            raise HostUnreachableError(
+                f"serve host unreachable at {_TCP_HOST}:{ep['port']}: {exc}") from exc
         return sock, ep.get("token")
     if not hasattr(socket, "AF_UNIX"):
-        raise OSError(f"no serve endpoint for {path}")
+        raise HostUnreachableError(f"no serve endpoint for {path}")
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    sock.connect(str(path))
+    try:
+        sock.connect(str(path))
+    except OSError as exc:
+        _close(sock)
+        raise HostUnreachableError(
+            f"serve host unreachable at unix:{path}: {exc}") from exc
     return sock, None
 
 
@@ -128,9 +174,11 @@ def attach(path: str | Path, bridge: str | Path) -> socket.socket:
 
     Sends the ``attach`` op and verifies the ack; thereafter the caller speaks
     line-delimited MCP JSON-RPC directly over the socket while the host runs that
-    session's upstream + decorator pipeline. Raises ``OSError`` if the host can't
-    be reached or refuses the attach (so the forwarder falls back to a direct
-    in-process bridge).
+    session's upstream + decorator pipeline. Raises :class:`HostUnreachableError`
+    (an ``OSError`` subclass) if no live host answers the connect -- the caller
+    reclaims the stale handle and respawns; raises a plain ``OSError`` if a *live*
+    host refuses the attach handshake -- the caller falls back to a direct
+    in-process bridge without respawning.
     """
     sock, token = _connect(path)
     req: dict = {"op": "attach", "bridge": str(bridge)}
