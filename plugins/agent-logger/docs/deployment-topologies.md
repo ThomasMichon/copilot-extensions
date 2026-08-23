@@ -53,7 +53,8 @@ paths:
 - configure the optional chronicle core and run `agent-logger chronicle tick`
   from an external scheduler/runner. The built-in tick writes daily digest
   manifests by default; the runner is responsible for spawning the
-  `session-log-writer` agent and landing produced logs.
+  read-only `session-log-writer` renderer, validating and persisting its render
+  bundle under the configured output root, and landing those files.
 
 ### Example: OneDrive hub
 
@@ -76,4 +77,5 @@ OneDrive/(Copilot)/sessions/<machine>/
 ```
 
 A hub machine that has the folder synced locally then reads
-`(Copilot)/sessions/<machine>/...` for every machine and writes logs.
+`(Copilot)/sessions/<machine>/...` for every machine, persists validated render
+bundles, and lands the resulting logs.

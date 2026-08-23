@@ -31,6 +31,37 @@ def test_version_matches_build_info() -> None:
     assert __version__ == match.group(1)
 
 
+def test_log_writer_is_a_read_only_renderer() -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    agent = (plugin_root / "agents" / "session-log-writer.agent.md").read_text(
+        encoding="utf-8"
+    )
+    log_skill = (plugin_root / "skills" / "log-session" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    backlog_skill = (
+        plugin_root / "skills" / "process-backlog" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    backlog_manifest = (
+        plugin_root / "skills" / "process-backlog" / "references" / "manifest.json"
+    ).read_text(encoding="utf-8")
+
+    assert "Remain read-only." in agent
+    assert "agent-logger:artifact" in agent
+    assert "action: create|append" in agent
+    assert "boundary: <16 lowercase hex characters>" in agent
+    assert "base_sha256: <64 lowercase hex characters; append only>" in agent
+    assert '"status": "rendered"' in agent
+    assert '"target_log_path": "<prep.log_path>"' in log_skill
+    assert "`create` -- the path must equal `target_log_path`" in log_skill
+    assert "`append` -- the target must exist" in log_skill
+    assert "Recompute its SHA-256 immediately before" in log_skill
+    assert '"return": "json"' in backlog_skill
+    assert json.loads(backlog_manifest)["return"] == "json"
+    assert "Reject non-`.md` targets" in backlog_skill
+    assert "recompute SHA-256" in backlog_skill
+
+
 def test_config_defaults_and_home(tmp_path: Path) -> None:
     cfg = load_config(home=tmp_path)
     assert cfg.home == tmp_path

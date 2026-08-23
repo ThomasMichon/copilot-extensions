@@ -1,6 +1,6 @@
 {
   "mode": "batch",
-  "return": "result",
+  "return": "json",
   "sessions": [
     {
       "session_id": "<id>",

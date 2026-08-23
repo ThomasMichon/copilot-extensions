@@ -129,6 +129,7 @@ example: [`references/manifest.json`](references/manifest.json)):
     { "session_id": "<session_id>", "machine": "<machine>", "session_path": "<session_dir>" }
   ],
   "output_root": "<prep.output_root>",
+  "target_log_path": "<prep.log_path>",
   "log_path_template": "<prep.log_path_template>",
   "timezone": "<prep.timezone>",
   "note_marker": "<prep.note_marker>",
@@ -142,21 +143,43 @@ example: [`references/manifest.json`](references/manifest.json)):
 Use the prep output verbatim for the organization fields. `log_template` may
 be `null`; when non-null it is the repo's requested Markdown structure and the
 writer must preserve it. Voice fields remain null unless repository config
-deliberately supplies them.
+deliberately supplies them. If `prep.log_path` already exists, add that exact
+path as `sessions[0].existing_log_path` so the renderer may evaluate whether it
+is thorough or should receive an append-only supplement.
 
 ### 3. Delegate
 
 Spawn the **session-log-writer** agent (`agent_type:
 "agent-logger:session-log-writer"`) synchronously with the manifest file path in
-the prompt. The agent collates, reads the digest, writes the log, and returns a
-short result.
+the prompt. The agent is intentionally read-only: it collates, reads the digest,
+and returns a complete artifact block for the exact `target_log_path`.
 
-### 4. Present
+### 4. Persist and present
 
-Relay the agent's result to the user (the log path and a one-line summary).
-If repository config supplied a `narration_style` or `closing_remark` and the
-agent produced styled output, present it verbatim. Then commit the log per the
-host repo's git policy.
+Require the artifact path to remain under `output_root`. Reject a prepared path
+that still contains `<Title>`. Verify that the boundary is 16 lowercase
+hexadecimal characters, the closing marker carries the same boundary exactly
+once, and the body does not contain that marker.
+
+Enforce the action before writing:
+
+- `create` -- the path must equal `target_log_path` and the target must not
+  exist. If it does, write nothing and surface the conflict rather than
+  overwriting it.
+- `append` -- the target must exist and equal the manifest's
+  `sessions[0].existing_log_path`. Recompute its SHA-256 immediately before the
+  edit and require it to equal the artifact's `base_sha256`; otherwise write
+  nothing because the file changed after rendering. Append only the returned
+  delta.
+
+Write the body with the caller's normal file-edit tool (`apply_patch`, `create`,
+or `edit`); never use shell redirection. If the agent returns no artifact,
+surface its exact skip/failure.
+
+Relay the persisted log path and a one-line summary to the user. If repository
+config supplied a `closing_remark`, quote only the rendered sign-off section
+verbatim; do not dump the full log into chat. Then commit the log per the host
+repo's git policy.
 
 ## Why sync
 

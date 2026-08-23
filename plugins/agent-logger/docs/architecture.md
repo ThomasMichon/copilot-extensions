@@ -126,12 +126,13 @@ does not contain an agent-dispatch dependency or lease. A host that wants
 fleet-wide automation runs `agent-logger chronicle tick` on its elected machine
 (or wraps `Chronicler.run_once`) and owns schedule/lease semantics externally.
 Out of the box, the CLI's default writer persists manifest JSON files; a runner
-then invokes the `session-log-writer` agent and, if it returns produced log
-paths, the sink landing policy can commit or push them.
+then invokes the read-only `session-log-writer` renderer, validates and persists
+its render bundle beneath the sink's output root, and only then lets the sink
+landing policy commit or push those files.
 
 One `Chronicler.run_once` pass is `scan → digest (daily) → reserve → manifest →
-writer → land-if-log-paths`, running between two pluggable seams so a consumer
-can adopt the core without re-implementing scan/digest:
+renderer → validate-and-persist → land`, running between two pluggable seams so
+a consumer can adopt the core without re-implementing scan/digest:
 
 **Session-source seam** (`chronicle.source`) — discovers loggable units and
 enforces the idempotency locks:
