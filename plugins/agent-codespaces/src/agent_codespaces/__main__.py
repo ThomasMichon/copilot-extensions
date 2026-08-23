@@ -153,6 +153,18 @@ def _normalize_remote_cmd_file(
             f"--remote-cmd-file {path!r} is empty; "
             "re-dispatch the CodeSpace to regenerate it"
         )
+    # mtime = last-launch time, so the dispatch-file GC keeps only files whose
+    # session still resumes (see resolver.prune_stale_dispatch_files). Scope this
+    # to OUR payload files under ~/.agent-codespaces/dispatch -- never mutate the
+    # metadata of an arbitrary user-supplied --remote-cmd-file.
+    try:
+        from . import resolver
+
+        resolved = Path(path).resolve()
+        if resolved.parent == resolver._DISPATCH_DIR.resolve():
+            os.utime(resolved, None)
+    except OSError:
+        pass
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -3363,6 +3375,11 @@ def _cmd_prune(args: argparse.Namespace) -> int:
     destructive path). ``recovered`` and unmarked boxes are never touched.
     """
     from .status import STATE_PRUNABLE, clear_status, list_by_state
+    from . import resolver
+
+    stale_payloads = resolver.prune_stale_dispatch_files()
+    if stale_payloads:
+        print(f"[--] pruned {stale_payloads} stale dispatch payload file(s)")
 
     prunable = list_by_state(STATE_PRUNABLE)
     if not prunable:

@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 from ._invoke import dispatch_argv
@@ -109,6 +110,34 @@ def _repo_matches_codespace(repo: str, cs_repository: str | None) -> bool:
 
 
 _DISPATCH_DIR = Path.home() / ".agent-codespaces" / "dispatch"
+# A dispatch payload file is kept alive by use: its mtime is refreshed on every
+# launch that reads it (see the CLI's --remote-cmd-file handler), so mtime is the
+# LAST-LAUNCH time. One untouched past this window belongs to a session that is
+# gone and is safe to reclaim -- a wrongly-pruned file self-heals (the next
+# resume fails fast with a re-dispatch hint that regenerates it).
+_DISPATCH_MAX_AGE_S = 30 * 24 * 3600  # 30 days
+
+
+def prune_stale_dispatch_files(max_age_s: float = _DISPATCH_MAX_AGE_S) -> int:
+    """Delete dispatch payload files not launched within ``max_age_s`` seconds.
+
+    Best-effort; returns the number removed. Called opportunistically on each
+    write (so the dir stays bounded during active use) and from ``prune``.
+    """
+    removed = 0
+    now = time.time()
+    try:
+        entries = list(_DISPATCH_DIR.glob("*.remotecmd"))
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if now - entry.stat().st_mtime > max_age_s:
+                entry.unlink(missing_ok=True)
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def _write_remote_cmd_file(codespace_name: str, acp_command: str) -> str:
@@ -135,6 +164,8 @@ def _write_remote_cmd_file(codespace_name: str, acp_command: str) -> str:
         path.chmod(0o600)
     except OSError:
         pass
+    # Opportunistic GC: keep the dispatch dir bounded during active use.
+    prune_stale_dispatch_files()
     return str(path)
 
 
