@@ -457,10 +457,22 @@ class CliNamespaceResolver(NamespaceResolver):
             if rc == 0:
                 try:
                     spec = json.loads(out)
+                    # Structured venue metadata (container fleets surface a
+                    # concrete workspace_folder + trust posture via
+                    # namespace-resolve) -- carried so the daemon can set the ACP
+                    # session cwd to the repo checkout and gate host->venue
+                    # projection on the fleet's trust posture.
+                    ws = spec.get("workspace_folder")
+                    prof = spec.get("security_profile")
+                    venue = (
+                        {"workspace_folder": ws, "security_profile": prof}
+                        if (ws or prof) else None
+                    )
                     return SpawnTarget(
                         type=spec.get("type", "command"),
                         spawn_command=spec["spawn_command"],
                         user=spec.get("user"),
+                        venue=venue,
                     )
                 except Exception:
                     log.warning(

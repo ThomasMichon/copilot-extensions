@@ -115,6 +115,13 @@ class SpawnTarget:
     #                                repo, acp_command, workspace_folder} -- lets
     #                                the daemon route a CS agent through the
     #                                CodeSpaceSpawner without parsing spawn_command
+    venue: dict | None = None  # structured venue metadata for provider agents
+    #                            (e.g. container fleets): {workspace_folder,
+    #                            security_profile} from the provider's
+    #                            namespace-resolve -- lets the daemon set the ACP
+    #                            session cwd to the repo checkout and gate any
+    #                            host->venue projection on the fleet's trust
+    #                            posture, without parsing spawn_command.
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
 
     def to_json(self) -> str:
