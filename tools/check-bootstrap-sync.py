@@ -52,12 +52,10 @@ FAMILIES: dict[str, list[str]] = {
         "agent-containers",
         "agent-dispatch",
         "agent-index",
+        "agent-logger",
         "agent-mcp",
         "agent-vault",
     ],
-    # Universal reconcile is authoritative when agent-worktrees is present;
-    # the hook remains a standalone-host fallback and must not race it.
-    "versioned-venv/agent-logger-universal": ["agent-logger"],
     # agent-bridge reference: the psscriptroot model plus reconcile observability
     # (reconcile.log / reconcile-status.json) and a venv-or-.venv guard (its
     # stable link is 'venv', not '.venv'). Kept distinct until the observability

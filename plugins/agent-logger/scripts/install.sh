@@ -375,6 +375,40 @@ PY
     return 1
 }
 
+# Serialize the complete mutating installer. The session-start reconciler and
+# agent-worktrees universal reconciler may discover the same version drift at
+# once; flock is process-held and released automatically on every exit path.
+if [[ "$ACTION" != "status" ]]; then
+    mkdir -p "$INSTALL_DIR"
+    if ! command -v flock >/dev/null 2>&1; then
+        printf 'ERROR: flock is required to serialize agent-logger installation\n' >&2
+        exit 1
+    fi
+    exec 8>"$INSTALL_DIR/.install.lock"
+    __install_lock_contended=0
+    if ! flock -n 8; then
+        __install_lock_contended=1
+    fi
+    if [[ "$__install_lock_contended" = 1 ]] && ! flock -w 300 8; then
+        printf 'ERROR: timed out waiting for agent-logger install lock\n' >&2
+        exit 1
+    fi
+    # If another reconciler completed while this one queued, stop here rather
+    # than reinstalling into the active slot under the outer watchdog.
+    if [[ "$__install_lock_contended" = 1 && "$ACTION" =~ ^(install|update|provision)$ ]]; then
+        __desired="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/plugin.json" | head -1)"
+        __current="$(tr -d '[:space:]' < "$INSTALL_DIR/current-version" 2>/dev/null || true)"
+        __deployed=""
+        __lock_py="$(command -v python3 || command -v python || true)"
+        if [[ -n "$__lock_py" && -f "$INSTALL_DIR/deploy-manifest.json" ]]; then
+            __deployed="$("$__lock_py" -c 'import json,sys; print(json.load(open(sys.argv[1])).get("source",{}).get("version",""))' "$INSTALL_DIR/deploy-manifest.json" 2>/dev/null || true)"
+        fi
+        if [[ -n "$__desired" && "$__deployed" = "$__desired" && "$__current" = "$__desired" && -f "$INSTALL_DIR/versions/$__desired/.install-complete.json" ]]; then
+            exit 0
+        fi
+    fi
+fi
+
 # Mirror pip's configured index to uv on a governed box (public PyPI TLS-blocked):
 # uv does not read pip.conf, so derive index-url from pip config / the pip.conf
 # files and export it. No-op where pip has no index (e.g. pristine -- the index

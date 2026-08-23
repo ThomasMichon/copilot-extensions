@@ -187,6 +187,56 @@ if ($env:COPILOT_PLUGIN_INSTALL_SMOKE) {
 }
 # === end install-contract:v4 smoke seam ===
 
+# Serialize the complete mutating installer. The session-start reconciler and
+# agent-worktrees universal reconciler may discover the same version drift at
+# once; this process-held, exclusive file handle makes those paths converge
+# instead of mutating runtime slots and deployment metadata concurrently.
+$script:InstallLockStream = $null
+if ($Action -ne 'status') {
+    $lockRoot = Join-Path $env:USERPROFILE '.agent-logger'
+    New-Item -ItemType Directory -Force -Path $lockRoot | Out-Null
+    $lockPath = Join-Path $lockRoot '.install.lock'
+    $lockContended = $false
+    $deadline = [DateTime]::UtcNow.AddMinutes(5)
+    while (-not $script:InstallLockStream -and [DateTime]::UtcNow -lt $deadline) {
+        try {
+            $script:InstallLockStream = [System.IO.File]::Open(
+                $lockPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+        } catch [System.IO.IOException] {
+            $lockContended = $true
+            Start-Sleep -Milliseconds 250
+        }
+    }
+    if (-not $script:InstallLockStream) {
+        throw "Timed out waiting for the agent-logger install lock: $lockPath"
+    }
+    # If another reconciler completed while this one queued, stop here. This
+    # preserves the first run's completed slot and leaves the outer self-stage
+    # watchdog budget untouched instead of reinstalling into the active slot.
+    if ($lockContended -and $Action -in @('install', 'update', 'provision')) {
+        try {
+            $lockPluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+            $desired = '' + (Get-Content (Join-Path $lockPluginDir 'plugin.json') -Raw | ConvertFrom-Json).version
+            $manifestPath = Join-Path $lockRoot 'deploy-manifest.json'
+            $currentPath = Join-Path $lockRoot 'current-version'
+            $deployed = if (Test-Path $manifestPath) {
+                '' + (Get-Content $manifestPath -Raw | ConvertFrom-Json).source.version
+            } else { '' }
+            $current = if (Test-Path $currentPath) {
+                ('' + (Get-Content $currentPath -Raw)).Trim()
+            } else { '' }
+            $complete = Join-Path $lockRoot "versions\$desired\.install-complete.json"
+            if ($desired -and $deployed -eq $desired -and $current -eq $desired -and (Test-Path $complete)) {
+                exit 0
+            }
+        } catch {}
+    }
+}
+
 # #935: bound uv's per-request network wait so a hung index/download degrades to
 # "failed + retryable" rather than wedging the install; the self-stage watchdog
 # is the authoritative TOTAL bound, this just shortens single-request stalls.

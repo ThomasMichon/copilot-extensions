@@ -12,7 +12,6 @@ ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
 name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
-scope="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("runtimeScope",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0
 InstallDir="$HOME/.$name"
 Manifest="$InstallDir/deploy-manifest.json"
@@ -24,12 +23,6 @@ if [ ! -f "$Manifest" ]; then
   if [ -f "$installer" ] && grep -qE '^[[:space:]]*stamp\)' "$installer" 2>/dev/null; then
     bash "$installer" stamp >/dev/null 2>&1 || true
   fi
-  exit 0
-fi
-# A universal runtime is reconciled synchronously by agent-worktrees before
-# Copilot starts. Keep this hook as the standalone-host fallback, but never race
-# a second background installer against the authoritative reconciler.
-if [ "$scope" = "universal" ] && command -v agent-worktrees >/dev/null 2>&1; then
   exit 0
 fi
 deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
