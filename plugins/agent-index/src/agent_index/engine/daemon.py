@@ -23,7 +23,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 
 
 def engine_home() -> Path:
@@ -109,7 +109,15 @@ def engine_command(home: Path | None = None) -> list[str]:
     """The argv that launches the engine from the durable venv (host/port bound)."""
     host, port = engine_endpoint()
     py = engine_venv_python(home)
-    return [str(py), "-m", "agent_index.engine.app", "--host", host, "--port", str(port)]
+    return [
+        windowless_python(py),
+        "-m",
+        "agent_index.engine.app",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
 
 
 def start(home: Path | None = None, *, wait_timeout: float = 90.0) -> str:

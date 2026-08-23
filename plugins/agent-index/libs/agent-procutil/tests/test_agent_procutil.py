@@ -24,6 +24,27 @@ def test_no_window_flags(monkeypatch):
     assert pu.no_window_flags() == 0
 
 
+def test_windowless_python_prefers_pythonw_on_windows(monkeypatch, tmp_path):
+    python = tmp_path / "python.exe"
+    python.write_text("")
+    pythonw = tmp_path / "pythonw.exe"
+    pythonw.write_text("")
+    monkeypatch.setattr(os, "name", "nt")
+    assert pu.windowless_python(python) == str(pythonw)
+
+
+def test_windowless_python_falls_back_without_pythonw(monkeypatch, tmp_path):
+    python = tmp_path / "python.exe"
+    python.write_text("")
+    monkeypatch.setattr(os, "name", "nt")
+    assert pu.windowless_python(python) == str(python)
+
+
+def test_windowless_python_noop_off_windows(monkeypatch):
+    monkeypatch.setattr(os, "name", "posix")
+    assert pu.windowless_python("/usr/bin/python3") == "/usr/bin/python3"
+
+
 def test_detached_kwargs_windows_plain(monkeypatch):
     monkeypatch.setattr(os, "name", "nt")
     flags = pu.detached_kwargs()["creationflags"]

@@ -21,11 +21,12 @@ from pathlib import Path
 # Re-exported so existing callers keep using ``from .procutil import
 # no_window_kwargs`` while the implementation is single-sourced in the shared
 # ``agent_procutil`` lib.
-from agent_procutil import detached_kwargs, no_window_kwargs
+from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 __all__ = [
     "detached_kwargs",
     "no_window_kwargs",
+    "windowless_python",
     "runtime_root",
     "relocate_off_payload",
 ]

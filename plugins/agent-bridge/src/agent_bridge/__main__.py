@@ -19,7 +19,7 @@ import urllib.error
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
-from agent_procutil import detached_kwargs, no_window_kwargs
+from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 from . import __version__
 
@@ -954,7 +954,7 @@ def _daemon_launch_argv() -> list[str]:
     ``agent-bridge`` binstub on PATH (POSIX shims are plain exec scripts and are
     unaffected). Falls back to the bare name only when nothing else resolves."""
     if sys.executable:
-        return [sys.executable, "-m", "agent_bridge", "start"]
+        return [windowless_python(sys.executable), "-m", "agent_bridge", "start"]
     venv = os.path.join(_INSTALL_DIR, "venv")
     py = (
         os.path.join(venv, "Scripts", "python.exe")
@@ -962,7 +962,7 @@ def _daemon_launch_argv() -> list[str]:
         else os.path.join(venv, "bin", "python")
     )
     if os.path.isfile(py):
-        return [py, "-m", "agent_bridge", "start"]
+        return [windowless_python(py), "-m", "agent_bridge", "start"]
     exe = shutil.which("agent-bridge")
     if exe:
         return [exe, "start"]
@@ -1546,7 +1546,7 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
         # startup and the cutover rolls back. Also keeps the daemon from
         # inheriting THIS deploy process's console handle (which would keep it
         # alive / visible).
-        cmd = [sys.executable, "-m", "agent_bridge", "start",
+        cmd = [windowless_python(sys.executable), "-m", "agent_bridge", "start",
                "--port", str(port), "--passive"]
         kwargs: dict = {}
         if sys.platform == "win32":

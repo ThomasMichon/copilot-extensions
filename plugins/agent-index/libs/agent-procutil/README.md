@@ -6,18 +6,23 @@ the same way, without each reinventing the creation flags.
 
 ```python
 import subprocess
-from agent_procutil import no_window_kwargs, detached_kwargs
+from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 # Non-interactive child, output captured, no console window on Windows:
 subprocess.run(cmd, capture_output=True, text=True, **no_window_kwargs())
 
 # Fully detached background daemon (no console, survives the parent):
-subprocess.Popen(cmd, **detached_kwargs(breakaway=True))
+subprocess.Popen(
+    [windowless_python(), "-m", "my_daemon"],
+    **detached_kwargs(breakaway=True),
+)
 ```
 
-Both helpers are no-ops off Windows (`no_window_kwargs()` -> `{}`;
+The helpers are no-ops off Windows (`no_window_kwargs()` -> `{}`;
 `detached_kwargs()` -> `{"start_new_session": True}`), so call sites stay
-platform-agnostic.
+platform-agnostic. `windowless_python()` selects the sibling `pythonw.exe` on
+Windows because a detached venv `python.exe` launcher can re-exec a base console
+interpreter that allocates a new DefTerm console.
 
 ## Vendoring
 

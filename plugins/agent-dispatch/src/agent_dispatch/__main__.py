@@ -219,21 +219,18 @@ def _spawn_coordinator_process() -> None:
     so no rendezvous was written and discovery never converged). Running the
     interpreter directly is the reliable path.
 
-    NB (Windows/venv): the venv ``python.exe`` is a launcher *stub* that re-execs
-    the *base* interpreter, so the running coordinator shows up as a
-    base-``python.exe`` **child** of an otherwise-idle venv-launcher process. That
-    child still runs with the venv environment (``sys.executable`` is the venv, via
-    ``__PYVENV_LAUNCHER__``) -- the pair is **expected and benign**, NOT a duplicate
-    coordinator. (``-c`` vs ``-m`` makes no difference; both exhibit it. Teardown
-    matches ``\bserve\b`` + ``agent_dispatch`` on the command line, so it reaps both
-    the stub and the base child.)
+    On Windows the windowless ``pythonw.exe`` sibling is required in addition to
+    ``DETACHED_PROCESS``: a detached venv ``python.exe`` launcher re-execs a base
+    console interpreter that allocates a fresh DefTerm console.
     """
     install_dir = Path.home() / ".agent-dispatch"
     if os.name == "nt":
         venv_py = install_dir / ".venv" / "Scripts" / "python.exe"
     else:
         venv_py = install_dir / ".venv" / "bin" / "python"
-    python = str(venv_py) if venv_py.is_file() else sys.executable
+    from .procutil import detached_kwargs, windowless_python
+
+    python = windowless_python(str(venv_py) if venv_py.is_file() else sys.executable)
 
     # Honor service.env (token, host/port pins) if present -- parity with the
     # installed launcher, which loads it before running `serve`.
@@ -264,10 +261,7 @@ def _spawn_coordinator_process() -> None:
         # daemon also relocates itself (procutil.relocate_off_payload) as a belt.
         cwd=str(install_dir),
     )
-    if os.name == "nt":
-        kwargs["creationflags"] = 0x00000008  # DETACHED_PROCESS
-    else:
-        kwargs["start_new_session"] = True
+    kwargs.update(detached_kwargs())
     try:
         subprocess.Popen([python, "-m", "agent_dispatch", "serve"], **kwargs)  # noqa: S603
     finally:
@@ -498,8 +492,10 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
             return int(sock.getsockname()[1])
 
     def spawn_passive(port: int):
+        from agent_procutil import detached_kwargs, windowless_python
+
         cmd = [
-            _sys.executable, "-m", "agent_dispatch", "serve",
+            windowless_python(_sys.executable), "-m", "agent_dispatch", "serve",
             "--host", cfg.host, "--port", str(port), "--passive",
         ]
         # The coordinator binds AGENT_DISPATCH_PORT (Stage C: else an ephemeral
@@ -508,14 +504,13 @@ def _cmd_cutover(args: argparse.Namespace) -> int:
         # binds EXACTLY that port and the health-gate/flip target the right one.
         child_env = dict(os.environ)
         child_env["AGENT_DISPATCH_PORT"] = str(port)
-        kwargs: dict[str, Any] = {"env": child_env}
-        if _sys.platform == "win32":
-            kwargs["creationflags"] = (
-                _subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]  # headless-guard: allow: coordinator self-spawn uses the CREATE_NO_WINDOW|DETACHED_PROCESS combo
-                | _subprocess.DETACHED_PROCESS  # type: ignore[attr-defined]  # headless-guard: allow: (paired with the CREATE_NO_WINDOW above)
-            )
-        else:
-            kwargs["start_new_session"] = True
+        kwargs: dict[str, Any] = {
+            "env": child_env,
+            "stdin": _subprocess.DEVNULL,
+            "stdout": _subprocess.DEVNULL,
+            "stderr": _subprocess.DEVNULL,
+        }
+        kwargs.update(detached_kwargs())
         return _subprocess.Popen(cmd, **kwargs)  # noqa: S603
 
     def health_check(check_host: str, port: int) -> bool:
@@ -2062,9 +2057,9 @@ def _spawn_supervisor_daemon_detached(machine: str | None, env: str) -> bool:
     single-instance election stands it down cleanly (pin-not-failover), so a double
     launch is self-correcting. Returns whether the spawn was issued.
     """
-    from .procutil import detached_kwargs, runtime_root
+    from .procutil import detached_kwargs, runtime_root, windowless_python
 
-    argv = [sys.executable, "-m", "agent_dispatch", "supervise", "serve"]
+    argv = [windowless_python(sys.executable), "-m", "agent_dispatch", "supervise", "serve"]
     if machine:
         argv += ["--machine", machine]
     if env:
@@ -2585,9 +2580,9 @@ def _spawn_detached_waiter(spec: Any) -> dict:
     waiter that outlives this process, so the kicking worker can be torn down
     while a cheap OS-level process owns the wait and fires the resume."""
     from . import hibernation
-    from .procutil import detached_kwargs
+    from .procutil import detached_kwargs, windowless_python
 
-    argv = hibernation.detached_run_argv(spec, python=sys.executable)
+    argv = hibernation.detached_run_argv(spec, python=windowless_python(sys.executable))
     proc = subprocess.Popen(  # noqa: S603 -- fixed argv (interpreter + our own module)
         argv,
         stdin=subprocess.DEVNULL,

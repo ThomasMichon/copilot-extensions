@@ -20,7 +20,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
-from agent_procutil import detached_kwargs
+from agent_procutil import detached_kwargs, windowless_python
 
 from agent_index.indexing.task_store import TERMINAL, TaskStatus
 
@@ -417,7 +417,14 @@ class TaskRunner:
             pass
         logf = open(log_path, "ab", buffering=0)  # child inherits this handle
         try:
-            cmd = [sys.executable, "-m", "agent_index", "index-worker", "--task", task_id]
+            cmd = [
+                windowless_python(sys.executable),
+                "-m",
+                "agent_index",
+                "index-worker",
+                "--task",
+                task_id,
+            ]
             kwargs: dict[str, Any] = {
                 "stdout": logf,
                 "stderr": logf,

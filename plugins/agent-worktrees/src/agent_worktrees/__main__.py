@@ -64,7 +64,7 @@ from pathlib import Path
 
 import yaml
 
-from agent_procutil import detached_kwargs, no_window_flags
+from agent_procutil import detached_kwargs, windowless_python, no_window_flags
 
 from . import (
     activity,
@@ -5821,10 +5821,7 @@ def _windowless_python() -> str:
     windowless through the trampoline. Falls back to ``sys.executable`` when no
     sibling ``pythonw`` exists (non-standard layout) or off Windows.
     """
-    if os.name != "nt":
-        return sys.executable
-    cand = Path(sys.executable).with_name("pythonw.exe")
-    return str(cand) if cand.exists() else sys.executable
+    return windowless_python(sys.executable)
 
 
 def _install_headless_child_guard() -> None:

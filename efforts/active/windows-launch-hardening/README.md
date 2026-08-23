@@ -84,3 +84,15 @@ against real behavior.
 - **Consolidated** the remaining Windows-side launch work here (renamed from
   `headless-launch`); confirmed SAC signed-python is already uniform and is not
   a gap. Umbrella issue #786.
+
+### 2026-08-23 - Detached venv trampoline residual
+- On-box validation found persistent DefTerm tabs for current agent-bridge and
+  agent-dispatch daemons even though their outer spawns used the intended
+  detached/headless flags.
+- Root-caused the residual to the Windows venv `python.exe` trampoline: the
+  detached launcher re-execed a base console interpreter that allocated a new
+  console, which DefTerm captured as `OpenConsole.exe`.
+- Follow-up #973 moves the proven agent-worktrees `pythonw.exe` selection into
+  shared `agent-procutil` and applies it to fully detached Python daemons across
+  the runtime plugins. Interactive and pipe-captured children remain on
+  `python.exe`.
