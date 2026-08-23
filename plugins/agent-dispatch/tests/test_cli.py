@@ -1419,3 +1419,79 @@ def test_bind_host_resilient_reads_env_defaults(monkeypatch):
     with pytest.raises(RuntimeError):
         _resolve_bind_host_resilient(resolver, sleep=lambda s: None, log=lambda m: None)
     assert attempts["n"] == 2       # honored AGENT_DISPATCH_BIND_RETRIES=2
+
+
+# -- inbox --board: status-grouped picker board ------------------------------
+
+
+class TestInboxBoard:
+    def _grp(self, **kw):
+        from agent_dispatch import __main__ as m
+        return m._board_group(kw)
+
+    def test_group_mapping(self):
+        assert self._grp(status="proposed") == "Proposed"
+        assert self._grp(status="queued") == "Queued"
+        assert self._grp(status="claimed") == "Started"
+        assert self._grp(status="started") == "Started"
+        assert self._grp(status="completed") == "Completed"
+        assert self._grp(status="abandoned") == "Abandoned"
+        assert self._grp(status="dead_letter") == "Abandoned"
+
+    def test_awaiting_steer_is_blocked(self):
+        # A live task blocked on the operator's steer reads as Blocked, whatever
+        # its underlying lifecycle state.
+        assert self._grp(status="started", awaiting_steer=True) == "Blocked"
+        assert self._grp(status="claimed", awaiting_steer=True) == "Blocked"
+
+    def test_terminal_wins_over_stale_awaiting_steer(self):
+        # A task abandoned/completed WHILE awaiting-steer keeps a stale flag; it
+        # must group as terminal, never Blocked.
+        assert self._grp(status="abandoned", awaiting_steer=True) == "Abandoned"
+        assert self._grp(status="completed", awaiting_steer=True) == "Completed"
+
+    def test_sort_orders_by_group_priority(self):
+        from agent_dispatch import __main__ as m
+        tasks = [
+            {"status": "completed", "updated_at": 100},
+            {"status": "started", "awaiting_steer": True, "updated_at": 100},
+            {"status": "queued", "updated_at": 100},
+            {"status": "proposed", "updated_at": 100},
+            {"status": "abandoned", "updated_at": 100},
+            {"status": "started", "updated_at": 100},
+        ]
+        tasks.sort(key=m._board_sort_key)
+        assert [m._board_group(t) for t in tasks] == [
+            "Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned",
+        ]
+
+    def test_sort_within_group_is_recent_first(self):
+        from agent_dispatch import __main__ as m
+        older = {"status": "started", "updated_at": 100}
+        newer = {"status": "started", "updated_at": 200}
+        got = sorted([older, newer], key=m._board_sort_key)
+        assert got == [newer, older]
+
+    def test_recency_keep_active_always_terminal_windowed(self):
+        from agent_dispatch import __main__ as m
+        cutoff = 1000.0
+        # Active tasks are always kept regardless of age.
+        assert m._board_keep({"status": "started", "updated_at": 0}, cutoff) is True
+        assert m._board_keep({"status": "proposed"}, cutoff) is True
+        # Terminal tasks: kept only when their terminal time is at/after cutoff.
+        assert m._board_keep(
+            {"status": "completed", "completed_at": 1500}, cutoff) is True
+        assert m._board_keep(
+            {"status": "abandoned", "completed_at": 500}, cutoff) is False
+        # Missing terminal timestamp -> dropped (can't prove it's recent).
+        assert m._board_keep({"status": "completed"}, cutoff) is False
+
+    def test_parser_accepts_board_flags(self):
+        args = _args(["inbox", "--machine", "m1", "--board", "--recent-mins", "30"])
+        assert args.board is True
+        assert args.recent_mins == 30
+
+    def test_board_defaults(self):
+        args = _args(["inbox", "--board"])
+        assert args.board is True
+        assert args.recent_mins == 120     # documented default
