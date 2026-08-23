@@ -1,0 +1,27 @@
+{
+  "name": "agent-bridge-concurrent-relay",
+  "description": "Tier-P F1 relay-resilience scenario: install + provision agent-bridge on a fresh box, then drive the REAL credential-relay server through port CONTENTION and assert the binding guarantee behind the duplicate-daemon relay bug -- when a second party contends for the relay's port (the classic case is a racing daemon spawned by a concurrent sessionStart-hook reinstall), the relay must still come up (reclaim the port, or fall back to an OS-assigned ephemeral one) and publish the port it actually bound; a relay left silently unbound breaks all credential forwarding over the SSH tunnel. Checks: (dynamic-default-bind) port 0 -> OS-assigned ephemeral, running, publishes the real port; (live-occupant-ephemeral-fallback) a live, unevictable occupant holds a pinned port -> the relay falls back to an ephemeral port, comes up, and publishes a DIFFERENT real port, never left silently unbound. FIDELITY: a fully live 'two real daemons race the installer and CodeSpace auth keeps working end-to-end' assertion needs two installed daemons + an SSH -R relay + a remote git op (a Tier-E, box-in-the-loop concern for the wider chaos rig); this Tier-P probe proves the relay-bind RESILIENCE the auth-survives guarantee is built on. The probe is portable stdlib-only (drives the real credential_relay server), so it is verifiable off-Docker too. Name-free / public.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "prereqs": { "present": ["git", "python3", "node", "uv"], "provisioned_by_flow": [] },
+  "auth": { "copilot": "required", "gh": "optional", "ado": "none" },
+  "validates": "credential-relay-bind-resilience",
+  "config": {
+    "CR_MARKETPLACE_REPO": "ThomasMichon/copilot-extensions",
+    "CR_MARKETPLACE_NAME": "copilot-extensions",
+    "CR_UV_INDEX": "(opt-in uv-index fixture)",
+    "CR_RELAY_CHECKS": "comma-separated subset of: dynamic-default-bind,live-occupant-ephemeral-fallback"
+  },
+  "expected_artifacts": [
+    "~/.copilot/installed-plugins/<marketplace>/agent-bridge",
+    "~/.agent-bridge/versions/<ver>/bin/python (built slot vendoring credential_relay)",
+    "~/.local/bin/agent-bridge (self-provisioning binstub)"
+  ],
+  "stages": [
+    { "n": 0, "title": "environment (fresh machine)" },
+    { "n": 1, "title": "install agent-bridge" },
+    { "n": 2, "title": "runtime provisions on first session" },
+    { "n": 3, "title": "relay resilience under port contention" }
+  ]
+}
