@@ -10,7 +10,8 @@
 $ErrorActionPreference = 'SilentlyContinue'
 $PluginDir = Split-Path -Parent $PSScriptRoot
 try {
-    $name = (Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json).name
+    $plugin = Get-Content (Join-Path $PluginDir 'plugin.json') -Raw | ConvertFrom-Json
+    $name = $plugin.name
     if (-not $name) { exit 0 }
     $InstallDir = Join-Path $env:USERPROFILE ".$name"
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
@@ -27,6 +28,12 @@ try {
             $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
             & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
         }
+        exit 0
+    }
+    # A universal runtime is reconciled synchronously by agent-worktrees before
+    # Copilot starts. Keep this hook as the standalone-host fallback, but never
+    # race a second background installer against the authoritative reconciler.
+    if ($plugin.runtimeScope -eq 'universal' -and (Get-Command agent-worktrees -ErrorAction SilentlyContinue)) {
         exit 0
     }
     $deployed = "" + (Get-Content $Manifest -Raw | ConvertFrom-Json).source.version

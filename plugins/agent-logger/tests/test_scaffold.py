@@ -34,8 +34,18 @@ def test_version_matches_build_info() -> None:
 def test_runtime_is_reconciled_on_every_machine() -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     manifest = json.loads((plugin_root / "plugin.json").read_text(encoding="utf-8"))
+    bootstrap_ps1 = (plugin_root / "scripts" / "bootstrap-check.ps1").read_text(
+        encoding="utf-8"
+    )
+    bootstrap_sh = (plugin_root / "scripts" / "bootstrap-check.sh").read_text(
+        encoding="utf-8"
+    )
 
     assert manifest["runtimeScope"] == "universal"
+    assert "$plugin.runtimeScope -eq 'universal'" in bootstrap_ps1
+    assert "Get-Command agent-worktrees" in bootstrap_ps1
+    assert '[ "$scope" = "universal" ]' in bootstrap_sh
+    assert "command -v agent-worktrees" in bootstrap_sh
 
 
 def test_log_writer_is_a_read_only_renderer() -> None:
