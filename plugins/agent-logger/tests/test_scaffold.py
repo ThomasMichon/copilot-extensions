@@ -31,6 +31,13 @@ def test_version_matches_build_info() -> None:
     assert __version__ == match.group(1)
 
 
+def test_runtime_is_reconciled_on_every_machine() -> None:
+    plugin_root = Path(__file__).resolve().parents[1]
+    manifest = json.loads((plugin_root / "plugin.json").read_text(encoding="utf-8"))
+
+    assert manifest["runtimeScope"] == "universal"
+
+
 def test_log_writer_is_a_read_only_renderer() -> None:
     plugin_root = Path(__file__).resolve().parents[1]
     agent = (plugin_root / "agents" / "session-log-writer.agent.md").read_text(
