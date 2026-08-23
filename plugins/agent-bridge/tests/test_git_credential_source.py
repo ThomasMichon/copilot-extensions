@@ -3,9 +3,9 @@
 Regression guard. When GCM produces no token non-interactively (e.g. an
 expired/lapsed ADO login it cannot silently refresh under
 ``GCM_INTERACTIVE=never``), ``git credential fill`` can exit 0 with a body that
-carries NO ``password=`` line. The relay must treat that as UNRESOLVED (return
+carries NO password line. The relay must treat that as UNRESOLVED (return
 ``None``) so it sends a clean ``quit=1`` fail-fast, instead of forwarding a
-password-less partial credential that makes git abort with a bare, undiagnosable
+credential with no password that makes git abort with a bare, undiagnosable
 ``exit 128`` -- the "relay serves nothing" symptom (#1659).
 """
 
@@ -56,8 +56,16 @@ def test_fill_with_password_is_returned_and_cached(monkeypatch):
         return good
 
     monkeypatch.setattr(src, "_run_git_credential", fake_run)
-    r1 = _resolve(src, "get", {"protocol": "https", "host": "example.com"})
-    r2 = _resolve(src, "get", {"protocol": "https", "host": "example.com"})
+
+    async def _resolve_twice():
+        # Both awaits share one event loop so the instance's loop-bound
+        # primitives (lock, in-flight futures) and its cache behave as in prod.
+        fields = {"protocol": "https", "host": "example.com"}
+        first = await src.resolve("get", dict(fields))
+        second = await src.resolve("get", dict(fields))
+        return first, second
+
+    r1, r2 = asyncio.run(_resolve_twice())
 
     assert r1 == good
     assert r2 == r1  # served from cache
