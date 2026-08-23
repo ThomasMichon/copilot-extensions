@@ -512,6 +512,12 @@ class Session:
         self.context_size: int | None = None
         self.context_used: int | None = None
         self.usage_model: str | None = None
+        # Per-session model / reasoning-effort override (agent-bridge create
+        # --model/--effort), re-applied to the ACP client on within-daemon
+        # resume / reattach. In-memory only (a survivable child already holds the
+        # value it was given at session/new; not persisted across daemon restart).
+        self.model_override: str | None = None
+        self.effort_override: str | None = None
         self.last_usage_at: float | None = None
         self._crossed_thresholds: set[str] = set()
         self.created_at = time.time()
@@ -1322,6 +1328,8 @@ class SessionManager:
         spawner: Any | None = None,
         remote_child_argv: list[str] | None = None,
         remote_cwd: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).
@@ -1399,6 +1407,8 @@ class SessionManager:
             client = AcpClient(
                 on_event=on_acp_event,
                 on_permission=permission_callback,
+                model_override=model,
+                effort_override=effort,
             )
             # Surface a mid-session transport drop (loopback socket down, host +
             # child alive) as ``disconnected`` so the reattach driver fires (P1).
@@ -1743,7 +1753,11 @@ class SessionManager:
                 await _streams.aclose()
                 await _sock.close()
 
-            client = AcpClient(on_event=_on_acp_event)
+            client = AcpClient(
+                on_event=_on_acp_event,
+                model_override=session.model_override,
+                effort_override=session.effort_override,
+            )
             streams.on_transport_lost = client.mark_transport_lost
             # Retain the host control channel so the manager can push STATUS
             # (reapable) / DETACH (graceful) for host self-reap (#51).
@@ -2314,6 +2328,8 @@ class SessionManager:
         mcp_servers: list[dict[str, Any]] | None = None,
         copilot_args: list[str] | None = None,
         caller_owner_ref: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -2381,6 +2397,13 @@ class SessionManager:
                 )
 
         session = Session(session_id, name, target, agent_name, caller_id=caller_id)
+        # Per-session model / reasoning-effort override (agent-bridge create
+        # --model/--effort). Retained on the Session so within-daemon resume /
+        # reattach re-applies it (copilot ignores --model under --acp; the model
+        # is set per-session via session/set_config_option -- see
+        # AcpClient._apply_model_config).
+        session.model_override = model
+        session.effort_override = effort
         session.event_log = EventLog(db=self._db, session_id=session_id)
 
         # Wire ACP events into the session's event log
@@ -2438,6 +2461,8 @@ class SessionManager:
                     on_acp_event=on_acp_event,
                     permission_callback=permission_callback,
                     mcp_servers=mcp_servers,
+                    model=model,
+                    effort=effort,
                 )
             elif cs_target is not None:
                 # CodeSpace Session-Host mode (#177): bootstrap the Host inside
@@ -2547,6 +2572,8 @@ class SessionManager:
                     spawner=cs_spawner,
                     remote_child_argv=remote_argv,
                     remote_cwd=remote_cwd,
+                    model=model,
+                    effort=effort,
                 )
             elif self._is_codespace_target(target):
                 # A CodeSpace target MUST run under a Session Host: only then does
@@ -2589,6 +2616,8 @@ class SessionManager:
                     client = AcpClient(
                         on_event=on_acp_event,
                         on_permission=permission_callback,
+                        model_override=model,
+                        effort_override=effort,
                     )
                     if permission_callback:
                         client.auto_approve = False
@@ -2795,6 +2824,8 @@ class SessionManager:
                     client = AcpClient(
                         on_event=on_acp_event,
                         on_permission=permission_callback,
+                        model_override=session.model_override,
+                        effort_override=session.effort_override,
                     )
                     if permission_callback:
                         client.auto_approve = False
@@ -2905,6 +2936,8 @@ class SessionManager:
                     recreate_client = AcpClient(
                         on_event=on_acp_event,
                         on_permission=permission_callback,
+                        model_override=session.model_override,
+                        effort_override=session.effort_override,
                     )
                     if permission_callback:
                         recreate_client.auto_approve = False
@@ -3056,7 +3089,11 @@ class SessionManager:
             client: AcpClient | None = None
             try:
                 agent_proc = await spawn(session.target)
-                client = AcpClient(on_event=on_capture)
+                client = AcpClient(
+                    on_event=on_capture,
+                    model_override=session.model_override,
+                    effort_override=session.effort_override,
+                )
                 await client.start(agent_proc.proc)
                 # suppress_replay=False -> the replayed history is captured.
                 await client.load_session(

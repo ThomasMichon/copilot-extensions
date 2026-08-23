@@ -821,6 +821,43 @@ def test_apply_model_config_sets_model_and_effort(monkeypatch) -> None:
         assert c.kwargs["session_id"] == "sess-1"
 
 
+def test_apply_model_config_per_session_override_wins(monkeypatch) -> None:
+    # The daemon's ambient resolution points one way; an explicit per-session
+    # override (agent-bridge create --model/--effort) must win over it.
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config",
+        lambda: {"model": "gpt-5.6-sol", "reasoning_effort": "high"},
+    )
+    client = AcpClient(model_override="claude-opus-4.8", effort_override="max")
+    client._connection = MagicMock()
+    client._connection.set_config_option = AsyncMock()
+    client._acp_session_id = "sess-1"
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    calls = {
+        c.kwargs["config_id"]: c.kwargs["value"]
+        for c in client._connection.set_config_option.call_args_list
+    }
+    assert calls == {"model": "claude-opus-4.8", "reasoning_effort": "max"}
+
+
+def test_apply_model_config_override_applies_without_ambient(monkeypatch) -> None:
+    # Even when the ambient env/host-settings resolution is empty, an explicit
+    # per-session model override still applies.
+    monkeypatch.setattr(
+        "agent_bridge.acp_client.resolve_acp_model_config", lambda: {},
+    )
+    client = AcpClient(model_override="claude-opus-4.8")
+    client._connection = MagicMock()
+    client._connection.set_config_option = AsyncMock()
+    client._acp_session_id = "sess-1"
+    asyncio.run(client._apply_model_config(_model_config_options()))
+    calls = {
+        c.kwargs["config_id"]: c.kwargs["value"]
+        for c in client._connection.set_config_option.call_args_list
+    }
+    assert calls == {"model": "claude-opus-4.8"}
+
+
 def test_apply_model_config_skips_when_already_current(monkeypatch) -> None:
     monkeypatch.setattr(
         "agent_bridge.acp_client.resolve_acp_model_config",
