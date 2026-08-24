@@ -1450,6 +1450,48 @@ class TestInboxBoard:
         assert self._grp(status="abandoned", awaiting_steer=True) == "Abandoned"
         assert self._grp(status="completed", awaiting_steer=True) == "Completed"
 
+    def test_activity_is_independent_from_lifecycle_phase(self):
+        from agent_dispatch import __main__ as m
+
+        active = {
+            "status": "started",
+            "awaiting_steer": False,
+            "embodiment": {"turn_state": "running", "liveness": "active"},
+        }
+        blocked_but_active = {**active, "awaiting_steer": True}
+        idle = {
+            "status": "started",
+            "embodiment": {"turn_state": "idle", "liveness": "idle"},
+        }
+        stale_owner = {"status": "started", "last_liveness": "live"}
+
+        assert m._board_group(active) == "Started"
+        assert m._board_activity(active) == "ACTIVE"
+        assert m._board_group(blocked_but_active) == "Blocked"
+        assert m._board_activity(blocked_but_active) == "ACTIVE"
+        assert m._board_activity(idle) is None
+        assert m._board_activity(stale_owner) is None
+
+    def test_stalled_turn_is_not_reported_active(self):
+        from agent_dispatch import __main__ as m
+
+        task = {
+            "status": "started",
+            "embodiment": {"turn_state": "running", "liveness": "stalled"},
+        }
+        assert m._board_activity(task) == "STALLED"
+
+    def test_picker_manifest_badges_activity_separately_from_group(self):
+        import json
+        from pathlib import Path
+
+        manifest = json.loads(
+            (Path(__file__).parents[1] / "pivots" / "agent-dispatch.json")
+            .read_text(encoding="utf-8")
+        )
+        assert manifest["entry"]["group"] == "group"
+        assert manifest["entry"]["badges"] == ["activity", "labels"]
+
     def test_sort_orders_by_group_priority(self):
         from agent_dispatch import __main__ as m
         tasks = [

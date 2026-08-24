@@ -31,6 +31,7 @@ re-spawn) and surfaced for a human, which is the safe default.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 import uuid
@@ -83,6 +84,39 @@ def _default_liveness(worktree: str, machine: str | None) -> dict | None:
     from . import tracking
 
     return tracking.resolve_live_session(worktree, machine=machine)
+
+
+def _reservation_made_progress(reservation: dict, task: dict) -> bool:
+    """Whether this spawned body durably advanced the task after reservation.
+
+    A headless body commonly ends its one turn after posting a card/progress beat.
+    That is a successful embodiment round, not a failed spawn attempt. Compare the
+    durable activity timestamps to this reservation so stale progress from an
+    earlier body cannot mask a newly crashing replacement.
+    """
+    try:
+        reserved_at = float(reservation.get("reserved_at") or 0)
+    except (TypeError, ValueError):
+        reserved_at = 0.0
+    timestamps: list[object] = []
+    card = task.get("card")
+    if isinstance(card, dict):
+        timestamps.append(card.get("ts"))
+    progress = task.get("latest_progress")
+    if isinstance(progress, str):
+        try:
+            progress = json.loads(progress)
+        except json.JSONDecodeError:
+            progress = None
+    if isinstance(progress, dict):
+        timestamps.append(progress.get("ts"))
+    for value in timestamps:
+        try:
+            if float(value) > reserved_at:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
 
 
 def _default_verdict(
@@ -503,6 +537,8 @@ class Supervisor:
         for t in tasks:
             if (t.get("not_before") or 0) > now:
                 continue  # deferred: not due yet
+            if t.get("awaiting_steer"):
+                continue  # blocked on the operator; Confirm clears this to wake
             if self.labels is not None and not (self.labels & set(t.get("labels") or [])):
                 continue  # not opted in
             out.append(t)
@@ -677,10 +713,11 @@ class Supervisor:
           ignorance (the safety guarantee behind liveness-not-lease).
 
         A terminal task is settled by :meth:`reconcile`; a dead-lettered one is
-        settled here (held, not re-spawned). Releasing via ``fail_spawn`` counts
-        toward the per-task dead-letter bound, so an embody that keeps dying is
-        eventually held for a human rather than re-embodied forever. Returns the
-        count recovered.
+        settled here (held, not re-spawned). A body that posted a card/progress
+        beat after its reservation is also settled: its turn succeeded, so its
+        normal exit must not consume the failed-*spawn* budget. An unproductive
+        disappearance uses ``fail_spawn`` and still counts toward dead-lettering.
+        Returns the count recovered.
         """
         from . import tracking
 
@@ -730,10 +767,14 @@ class Supervisor:
                         except DispatchError:
                             pass  # lease-expiry GC is the backstop requeue
                     try:
-                        self.client.fail_spawn(
-                            res["key"],
-                            detail=f"fleet body confirmed gone ({host}:{bridge_sid})",
-                        )
+                        detail = f"fleet body confirmed gone ({host}:{bridge_sid})"
+                        if _reservation_made_progress(res, task):
+                            self.client.settle_spawn(
+                                res["key"],
+                                detail=f"{detail}; productive turn completed",
+                            )
+                        else:
+                            self.client.fail_spawn(res["key"], detail=detail)
                         recovered += 1
                         log.info(
                             "recovered gone fleet body for task %s (%s); reservation "
@@ -773,10 +814,14 @@ class Supervisor:
                         except DispatchError:
                             pass  # lease-expiry GC is the backstop requeue
                     try:
-                        self.client.fail_spawn(
-                            res["key"],
-                            detail=f"local body confirmed gone ({local_sid})",
-                        )
+                        detail = f"local body confirmed gone ({local_sid})"
+                        if _reservation_made_progress(res, task):
+                            self.client.settle_spawn(
+                                res["key"],
+                                detail=f"{detail}; productive turn completed",
+                            )
+                        else:
+                            self.client.fail_spawn(res["key"], detail=detail)
                         recovered += 1
                         log.info(
                             "recovered gone local body for task %s (%s); reservation "
@@ -816,9 +861,14 @@ class Supervisor:
                         )
                     except DispatchError:
                         pass  # lease-expiry GC is the backstop requeue
-                self.client.fail_spawn(
-                    res["key"], detail=f"owner confirmed gone ({worktree})"
-                )
+                detail = f"owner confirmed gone ({worktree})"
+                if _reservation_made_progress(res, task):
+                    self.client.settle_spawn(
+                        res["key"],
+                        detail=f"{detail}; productive turn completed",
+                    )
+                else:
+                    self.client.fail_spawn(res["key"], detail=detail)
                 recovered += 1
                 log.info(
                     "recovered gone embody for task %s (%s); reservation released "

@@ -1466,6 +1466,25 @@ def _board_group(task: dict) -> str:
     return "Started"
 
 
+def _board_activity(task: dict) -> str | None:
+    """Independent live-execution badge for the picker task board.
+
+    Lifecycle ``group`` answers where the task is (Blocked/Queued/Started/etc.).
+    This badge answers whether its assigned embodiment is executing a turn now.
+    It deliberately does not infer activity from ``status == started``.
+    """
+    embodiment = task.get("embodiment")
+    if not isinstance(embodiment, dict):
+        return None
+    liveness = str(embodiment.get("liveness") or "").lower()
+    turn_state = str(embodiment.get("turn_state") or "").lower()
+    if liveness == "stalled":
+        return "STALLED"
+    if liveness == "active" or turn_state == "running":
+        return "ACTIVE"
+    return None
+
+
 def _board_sort_key(task: dict) -> tuple:
     grp = _board_group(task)
     prio = _BOARD_GROUPS.index(grp) if grp in _BOARD_GROUPS else len(_BOARD_GROUPS)
@@ -1540,8 +1559,18 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         cutoff = _time.time() - max(0, getattr(args, "recent_mins", 120)) * 60
         inbox = [t for t in inbox if _board_keep(t, cutoff)]
         inbox.sort(key=_board_sort_key)
-        inbox = [{**t, "group": _board_group(t)} for t in inbox]
-        return _emit(_enrich(inbox))
+        from . import tracking
+
+        inbox = tracking.enrich_tasks(_enrich(inbox))
+        inbox = [
+            {
+                **t,
+                "group": _board_group(t),
+                "activity": _board_activity(t),
+            }
+            for t in inbox
+        ]
+        return _emit(inbox)
     # --awaiting-steer widens the fetch to the owned states (a task blocked on
     # operator steering is `claimed`/`started`, not a filterable "held" -- HELD
     # is a derived category), then keeps only the *pickable* (`proposed`) rows

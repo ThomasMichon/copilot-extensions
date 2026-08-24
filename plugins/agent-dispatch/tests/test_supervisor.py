@@ -1144,6 +1144,81 @@ def test_recover_gone_local_body_started_requeues_then_reembodies(q, client):
     assert q.latest_reservation(t.id).attempt == 2
 
 
+def test_productive_gone_local_body_does_not_burn_spawn_failure_budget(q, client):
+    """A one-turn body that durably posted progress ended successfully. Its gone
+    reservation is settled, not failed, so a later steer can re-embody even when
+    max_attempts=1."""
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-productive")
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        max_attempts=1,
+        local_body_verdict_fn=lambda sid: "gone",
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    first = q.latest_reservation(t.id)
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+    q.record_progress(
+        t.id,
+        "local-o",
+        phase="awaiting steer",
+        summary="posted review card",
+        now=first.reserved_at + 1,
+    )
+
+    assert sup.recover_gone() == 1
+    assert q.get(t.id).status == Status.QUEUED
+    first = q.list_reservations(task_id=t.id)[0]
+    assert first.state == SpawnState.SETTLED
+    assert q.list_reservations(task_id=t.id, state=SpawnState.FAILED) == []
+
+    # max_attempts=1 applies to failed spawns, not successful one-turn rounds.
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id, t.id]
+
+
+def test_queued_awaiting_steer_spawns_only_after_operator_submit(q, client):
+    """A productive one-turn reviewer parks without respawn while its card is
+    blocked. Confirm clears awaiting_steer, making the queued task eligible for
+    the next supervisor cycle."""
+    from agent_dispatch import steering
+
+    t = q.create("review")
+    q.claim_one("reviewer", task_id=t.id)
+    q.start(t.id, "reviewer")
+    q.set_card(
+        t.id,
+        "reviewer",
+        card=steering.build_card(
+            request_input=steering.parse_request_input("feedback:textarea")
+        ),
+    )
+    q.yield_task(t.id, "reviewer")
+    spawn = _ok_spawn({"session": "replacement", "worktree": None})
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        nudge=False,
+    )
+
+    assert q.get(t.id).status == Status.QUEUED
+    assert q.get(t.id).awaiting_steer is True
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+
+    q.submit_steer(t.id, fields={"feedback": ""}, sender="operator")
+    assert q.get(t.id).awaiting_steer is False
+    assert sup.poll_once() == [t.id]
+    assert spawn.calls == [t.id]
+
+
 @pytest.mark.parametrize("verdict", ["live", "unknown"])
 def test_recover_local_body_leaves_live_or_unknown(q, client, verdict):
     """A local body that is live or can't-tell is never recovered (no double-spawn
