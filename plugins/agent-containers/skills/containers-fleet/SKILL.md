@@ -27,10 +27,13 @@ description: >-
 
 `agent-containers` manages a persistent fleet of local Docker dev containers
 and brokers exclusive *leases* so an effort can borrow one without two parallel
-worktrees driving the same container. Containers are reached over `docker exec`
-(Docker Desktop WSL2 backend) and run a Copilot ACP agent addressable via
-agent-bridge as `container:<name>` when agent-bridge is installed. Without
-agent-bridge, the fleet/lease CLI still works; only bridge dispatch is absent.
+worktrees driving the same container. Trusted containers are reached over
+OpenSSH, with `docker exec` used only as the local `ProxyCommand` bootstrap
+(Docker Desktop WSL2 backend), and run a Copilot ACP agent addressable via
+agent-bridge as `container:<name>` when agent-bridge is installed. Restricted
+fleets retain their direct, deny-by-construction `docker exec` boundary and
+receive no SSH key. Without agent-bridge, the fleet/lease CLI still works; only
+bridge dispatch is absent.
 
 ## Provision a fleet
 
@@ -153,9 +156,9 @@ agent-bridge send container:myrepo-1 "run the unit tests in packages/foo"
 The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`
 lets agent-bridge discover `container:` without importing this package into the
 bridge venv. The resolver launches `agent-containers exec --stdio <name>`, which
-then runs `copilot --acp --stdio --allow-all-tools` inside the container,
-forwarding the host `gh auth token` as `GH_TOKEN` by environment name so the
-token is not persisted in bridge state or logs.
+then reaches a trusted container through OpenSSH and runs
+`copilot --acp --stdio --allow-all-tools`, staging the host `gh auth token`
+through stdin so the token is not persisted in bridge state, argv, or logs.
 
 Those are the **trusted-profile** defaults. A restricted fleet launches only its
 explicit `acp_command` and forwards neither host credential path.

@@ -15,11 +15,11 @@ repo by writing a ``containers.yaml`` (see the README / containers-fleet skill).
 
 from __future__ import annotations
 
-import logging
-import os
 import hashlib
 import json
+import logging
 import math
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path

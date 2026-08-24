@@ -4,7 +4,7 @@ Manages a persistent fleet of local dev containers (Docker Desktop WSL2
 backend), brokers exclusive *leases* so an effort can borrow a container
 without two parallel worktrees driving the same one, and exposes a
 ``container:<name>`` namespace resolver to agent-bridge that dispatches a
-Copilot agent into the container over ``docker exec``.
+Copilot agent through a trust-profiled venue transport.
 """
 
 from importlib.metadata import PackageNotFoundError

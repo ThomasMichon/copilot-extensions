@@ -377,7 +377,7 @@ def restricted_policy_errors(
         errors.append("PID limit differs from configured limit")
 
     tmpfs = host.get("Tmpfs") or {}
-    required_tmpfs = {workspace_folder, home, "/tmp", "/run"}
+    required_tmpfs = {workspace_folder, home, "/tmp", "/run"}  # noqa: S108
     if set(tmpfs) != required_tmpfs:
         errors.append("writable tmpfs surfaces differ from restricted policy")
     expected_options = {
@@ -391,7 +391,7 @@ def restricted_policy_errors(
             f"size={fleet.effective_home_size()}",
             f"uid={uid}", f"gid={gid}", "mode=0700",
         },
-        "/tmp": {"rw", "nosuid", "nodev", "size=512m"},
+        "/tmp": {"rw", "nosuid", "nodev", "size=512m"},  # noqa: S108
         "/run": {"rw", "nosuid", "nodev", "size=64m"},
     }
     for path, expected in expected_options.items():

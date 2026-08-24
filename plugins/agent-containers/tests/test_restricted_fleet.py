@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers import fleet as fleet_mod
+from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.lifecycle import DockerContainerInfo, restricted_policy_errors
 
 
@@ -108,7 +108,7 @@ def test_restricted_network_defaults_to_none(monkeypatch):
 def test_restricted_devcontainer_backend_is_refused(monkeypatch):
     config = ContainersConfig()
     config.fleets["sandbox"] = FleetConfig(
-        devcontainer_path="/tmp/spec",
+        devcontainer_path="/tmp/spec",  # noqa: S108
         security_profile="restricted",
     )
     monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
@@ -193,7 +193,7 @@ def test_restricted_policy_inspects_effective_docker_boundary(monkeypatch):
             "Tmpfs": {
                 "/workspace": "rw,nosuid,nodev,exec,size=2g,uid=1000,gid=1000,mode=0700",
                 "/home/agent": "rw,nosuid,nodev,exec,size=512m,uid=1000,gid=1000,mode=0700",
-                "/tmp": "rw,nosuid,nodev,size=512m",
+                "/tmp": "rw,nosuid,nodev,size=512m",  # noqa: S108
                 "/run": "rw,nosuid,nodev,size=64m",
             },
         },

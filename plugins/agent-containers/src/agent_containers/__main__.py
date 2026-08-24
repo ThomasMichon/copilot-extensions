@@ -9,7 +9,7 @@ Subcommands:
   borrow <effort>       Lease a free container to an effort
   release <target>      Release a lease (by container or effort name)
   leases                Show active leases
-  exec <name>           Run the ACP launch command in a container (testing)
+  exec <name>           Run the ACP launch command through the venue transport
   version               Show version
 """
 
@@ -28,6 +28,14 @@ from agent_procutil import no_window_flags
 from . import __version__
 from .config import RESTRICTED_PROFILE, SECURITY_PROFILE_LABEL, load_config
 from .resolver import build_spawn_command, host_gh_token
+from .ssh_transport import (
+    build_remote_command,
+    build_ssh_command,
+    cleanup_remote_env,
+    container_environment,
+    prepare_ssh_config,
+    write_remote_env,
+)
 
 log = logging.getLogger("agent-containers")
 
@@ -267,7 +275,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
             actual_profile = c.security_profile
             actual_network = None
             inspected = None
-            if fleet and fleet.restricted or actual_profile == RESTRICTED_PROFILE:
+            if (fleet and fleet.restricted) or actual_profile == RESTRICTED_PROFILE:
                 try:
                     inspected = inspect_container(c.name)
                     actual_profile = (
@@ -457,19 +465,19 @@ def _resolve_relay_port(default: int) -> int:
 
 
 def _cmd_exec(args: argparse.Namespace) -> int:
-    """Transport wrapper: exec a Copilot ACP agent into a container.
+    """Transport wrapper: launch a Copilot ACP agent in a container.
 
     This is what agent-bridge spawns for a ``container:`` agent. It resolves the
     container's per-fleet settings, fetches the host ``gh`` token at spawn time
-    (so it is never persisted in a SpawnTarget), and runs ``docker exec -i``
-    with the token injected via the process environment.
+    (so it is never persisted in a SpawnTarget), and selects the transport from
+    the fleet's trust posture.
 
-    With ``--stdio`` the wrapper explicitly *pumps* bytes between its own
-    stdin/stdout and the child's pipes (threaded ``os.read``/``write``). We do
-    NOT rely on fd inheritance: under ``CREATE_NO_WINDOW`` on Windows a child
-    spawned with inherited pipe handles does not reliably receive them, which
-    silently breaks the ACP channel. Without ``--stdio`` the child inherits our
-    stdio for interactive/manual use.
+    Trusted fleets use OpenSSH, with ``docker exec`` only as the SSH
+    ``ProxyCommand`` bootstrap. Restricted fleets retain the direct
+    deny-by-construction ``docker exec`` path and receive no SSH key projection.
+    With ``--stdio`` the wrapper explicitly pumps bytes between its own stdio
+    and the child because inherited pipes are unreliable under
+    ``CREATE_NO_WINDOW`` on Windows.
     """
     from .lifecycle import get_container, inspect_container, restricted_policy_errors
 
@@ -554,19 +562,44 @@ def _cmd_exec(args: argparse.Namespace) -> int:
         except Exception as exc:
             log.warning("Credential relay setup failed for %s: %s", args.name, exc)
 
-    spawn_cmd = build_spawn_command(args.name, user, acp_command, forward, relay_env)
-    log.info("exec: %s", " ".join(spawn_cmd))
+    if actual_profile == RESTRICTED_PROFILE:
+        spawn_cmd = build_spawn_command(
+            args.name, user, acp_command, forward, relay_env
+        )
+        log.info("exec transport=docker target=%s", args.name)
+        if not args.stdio:
+            proc = subprocess.run(
+                spawn_cmd, env=env, creationflags=_creation_flags()
+            )
+            return proc.returncode
+        return _exec_stdio(spawn_cmd, env)
 
-    if not args.stdio:
-        # Interactive / manual: inherit our stdio directly.
-        proc = subprocess.run(spawn_cmd, env=env, creationflags=_creation_flags())
-        return proc.returncode
-
-    return _exec_stdio(spawn_cmd, env)
+    launch_env = container_environment(args.name, user)
+    if forward and "GH_TOKEN" in env:
+        launch_env["GH_TOKEN"] = env["GH_TOKEN"]
+    launch_env.update({
+        name: env[name]
+        for name in relay_env
+        if name in env
+    })
+    remote_env = write_remote_env(args.name, user, launch_env)
+    try:
+        ssh_config = prepare_ssh_config(args.name, user)
+        remote_command = build_remote_command(acp_command, remote_env)
+        spawn_cmd = build_ssh_command(ssh_config, remote_command)
+        log.info("exec transport=ssh target=%s", args.name)
+        if not args.stdio:
+            proc = subprocess.run(
+                spawn_cmd, env=env, creationflags=_creation_flags()
+            )
+            return proc.returncode
+        return _exec_stdio(spawn_cmd, env)
+    finally:
+        cleanup_remote_env(args.name, user, remote_env)
 
 
 def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
-    """Run the docker exec command, pumping stdio over explicit pipes."""
+    """Run a transport command, pumping stdio over explicit pipes."""
     import threading
 
     proc = subprocess.Popen(
@@ -587,8 +620,8 @@ def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
                     break
                 proc.stdin.write(data)
                 proc.stdin.flush()
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            log.error("transport stdin forwarding failed: %s", exc)
         finally:
             try:
                 proc.stdin.close()
@@ -604,8 +637,8 @@ def _exec_stdio(spawn_cmd: list[str], env: dict[str, str]) -> int:
                     break
                 dst.write(data)
                 dst.flush()
-        except (OSError, ValueError):
-            pass
+        except (OSError, ValueError) as exc:
+            log.error("transport output forwarding failed: %s", exc)
 
     threads = [
         threading.Thread(target=_forward_in, daemon=True),

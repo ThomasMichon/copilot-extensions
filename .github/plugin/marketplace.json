@@ -29,8 +29,8 @@
     },
     {
       "name": "agent-containers",
-      "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver",
-      "version": "0.1.2-dev72",
+      "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted-fleet OpenSSH transport",
+      "version": "0.1.2-dev74",
       "source": "plugins/agent-containers"
     },
     {

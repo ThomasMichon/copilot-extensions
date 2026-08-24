@@ -4,7 +4,9 @@
 - **Repo:** copilot-extensions (plugin code: agent-bridge, agent-codespaces, agent-containers; PR-required `main`, self-merge)
 - **Branch(es):** per-slice `pr/<slug>` worktrees → landed to `main`
 - **Created:** 2026-08-22
-- **Status:** Active — **program/index effort** (steers the architecture + owns net-new symmetry pieces).
+- **Status:** Active — **program/index effort** (steers the architecture + owns
+  net-new symmetry pieces). WS-A's trusted-container dispatch/manual path now
+  uses OpenSSH; the shared `-R` relay path remains WS-C.
 - **Umbrella issue:** [#954](https://github.com/ThomasMichon/copilot-extensions/issues/954)
 - **Vision:** [`visions/venue-parity`](../../../visions/venue-parity/README.md) (child of [`visions/agent-fabric`](../../../visions/agent-fabric/README.md))
 
@@ -85,6 +87,10 @@ the rest:
 - **WS-A — single SSH transport for containers.** Give a fleet container an SSH
   endpoint; drive dispatch/staging/interactive reach over SSH exactly as
   codespaces do (retire bespoke `docker exec` dispatch paths where SSH suffices).
+  **Dispatch/manual transport complete:** trusted fleets use OpenSSH with
+  `docker exec ... sshd -i` only as the local `ProxyCommand`, so no host port is
+  published. Restricted fleets retain their direct deny-by-construction path
+  and receive no SSH key projection.
 - **WS-B — GitHub-token bootstrap seam.** A uniform token-bootstrap interface;
   codespaces surface the issued token, containers bootstrap one; the core never
   branches on venue to obtain a token.
@@ -131,3 +137,20 @@ the rest:
   PR-required, self-merge.
 - Vendored-lib sync guard applies if shared logic lands in a `libs/<lib>` used by
   ≥2 plugins (bump every consumer).
+
+## Journal
+
+- **2026-08-23 — WS-A trusted-container SSH dispatch.** Replaced the trusted
+  fleet's raw ACP `docker exec` carrier with OpenSSH while preserving the
+  provider process boundary: `agent-bridge` still persists only
+  `agent-containers exec --stdio <name>`, and the wrapper creates a machine-local
+  key/config then runs SSH through `docker exec -i <container> /usr/sbin/sshd -i
+  -e` as its `ProxyCommand`. No container port is published. Launch-only
+  credentials are staged through a mode-0700 user runtime directory over stdin,
+  never argv. Restricted fleets remain on their original transport and receive
+  no key. A live trusted dev-container dispatch completed an ACP turn through
+  the new path. During validation, bootstrap `docker exec -i` was found to
+  inherit and drain ACP stdin before SSH started; bootstrap subprocesses now use
+  `DEVNULL` unless explicitly given staged input. **Next:** WS-C carries the
+  bridge relay over SSH `-R`, then the container parity corpus can exercise the
+  same relay/reaper failure modes as CodeSpaces.

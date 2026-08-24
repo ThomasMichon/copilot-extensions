@@ -28,8 +28,8 @@ def _patch(monkeypatch, containers, lease_effort=None):
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig()
     monkeypatch.setattr(cli, "load_config", lambda: config)
-    import agent_containers.lifecycle as lifecycle
     import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(lifecycle, "list_containers", lambda cfg: containers)
     monkeypatch.setattr(
@@ -98,8 +98,8 @@ def test_fleet_json_reports_restricted_posture(monkeypatch, capsys):
         environment={"MODEL_NAME": "local-model"},
     )
     monkeypatch.setattr(cli, "load_config", lambda: config)
-    import agent_containers.lifecycle as lifecycle
     import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(
         lifecycle,
@@ -145,8 +145,8 @@ def test_fleet_json_exposes_stale_restricted_policy(monkeypatch, capsys):
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig(security_profile="restricted")
     monkeypatch.setattr(cli, "load_config", lambda: config)
-    import agent_containers.lifecycle as lifecycle
     import agent_containers.lease as lease
+    import agent_containers.lifecycle as lifecycle
 
     monkeypatch.setattr(
         lifecycle,
