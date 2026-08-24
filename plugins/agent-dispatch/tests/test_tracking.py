@@ -74,6 +74,14 @@ def test_enrich_local_body_tasks_joins_spawned_reservation(monkeypatch):
     assert "embodiment" not in out[1]
 
 
+def test_list_local_body_sessions_degrades_when_passive_probe_detaches(monkeypatch):
+    monkeypatch.setattr(
+        tracking, "agent_bridge_launch_prefix", lambda: ["python", "-m", "agent_bridge"]
+    )
+    monkeypatch.setattr(tracking, "_run_capture", lambda *_a, **_k: None)
+    assert tracking.list_local_body_sessions() is None
+
+
 def test_enrich_local_body_tasks_ignores_nonlocal_handles(monkeypatch):
     monkeypatch.setattr(
         tracking,

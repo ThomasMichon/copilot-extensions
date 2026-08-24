@@ -180,12 +180,11 @@ def resolve_live_session(
 
 def list_local_body_sessions(*, timeout: float = 3.0) -> list[dict[str, Any]] | None:
     """List local agent-bridge ACP sessions for headless-body enrichment."""
-    exe = shutil.which("agent-bridge")
-    if exe is None:
+    prefix = agent_bridge_launch_prefix()
+    if prefix is None:
         return None
-    try:
-        proc = _run_capture([exe, "--json", "sessions"], timeout=timeout)
-    except (subprocess.TimeoutExpired, OSError):
+    proc = _run_capture([*prefix, "--json", "sessions"], timeout=timeout)
+    if proc is None:
         return None
     if proc.returncode != 0 or not proc.stdout.strip():
         return None
