@@ -2060,8 +2060,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # ``_heal_stale_anchor_if_self_missing``.
         config = _heal_stale_anchor_if_self_missing(config)
         repo = config.default_repo
+        picker_root = _start_picker_monitor_root()
         if picker_tui.new_picker_enabled(config) and not _new_picker_blocked_by_ssh():
-            return _run_new_picker(config, args)
+            try:
+                return _run_new_picker(config, args)
+            finally:
+                if picker_root is not None:
+                    picker_root.close()
 
         # Picker loop -- re-enters after system menu actions
         while True:
@@ -3311,7 +3316,6 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
             return 1
         record = tracking.load_record(yaml_path)
         return _resolve_resume(record, config, args, profile=profile)
-
     if action == "new":
         opts = decision.get("options") or {}
         if opts.get("no_mux"):
@@ -3323,6 +3327,26 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
 
     output.err(f"Picker returned an unsupported decision: {action!r}")
     return 1
+
+
+def _start_picker_monitor_root():
+    """Register either Picker implementation as a resident liveness root."""
+    if not _status_monitor_enabled():
+        return None
+    try:
+        import atexit
+        from . import monitor_roots
+
+        root = monitor_roots.PickerHeartbeat(
+            cfg.project_name(), ensure_monitor=_ensure_status_monitor)
+        if not root.start():
+            return None
+        # The legacy picker has many direct return paths; process teardown is
+        # its shared lifecycle boundary. The Textual path also closes eagerly.
+        atexit.register(root.close)
+        return root
+    except Exception:
+        return None
 
 
 def _resolve_resume(
@@ -5716,8 +5740,9 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
 # session*.  With many concurrent worktree sessions that is N interpreters, each
 # polling its own bar.  ``status-monitor`` consolidates them into the
 # work-coalescing-singleton service tier: a single resident process refreshes
-# every ``wt-*`` session's bar in one coalesced sweep, lives only while at least
-# one session is registered, and idle-exits when the last one goes.  It is
+# every ``wt-*`` session's bar in one coalesced sweep, lives while at least one
+# managed session, Picker, or active list consumer needs it, and idle-exits when
+# every root goes away.  It is
 # **default-on (opt-out** via ``AGENT_WORKTREES_STATUS_MONITOR=0``) -- when
 # disabled, each session runs its own per-session updater (a-la-carte: the inline
 # path stays correct with no daemon).  Single-active on the host via a liveness
@@ -5740,7 +5765,7 @@ def _status_monitor_enabled() -> bool:
 
 def _aw_runtime_home() -> Path:
     """The shared runtime root (``~/.agent-worktrees``)."""
-    return Path(os.path.expanduser("~")) / ".agent-worktrees"
+    return cfg.install_dir()
 
 
 def _monitor_lock_path() -> Path:
@@ -5900,7 +5925,11 @@ def _ensure_status_monitor() -> bool:
         if _locks.lock_is_live(data) and isinstance(data, dict):
             other_prefix = data.get("prefix")
             if not other_prefix or not _runtime_superseded(prefix=other_prefix):
-                return True
+                import shutil
+                caller_has_mux = bool(
+                    shutil.which("psmux") or shutil.which("tmux"))
+                if data.get("mux") is not False or not caller_has_mux:
+                    return True
     except Exception:
         pass
     return _spawn_detached(
@@ -6023,8 +6052,9 @@ def _monitor_list_sessions(mux_bin: str) -> dict[str, int] | None:
 
 
 def _monitor_sweep(
-    mux_bin: str, token: str, prefix: str, ctx_done: set[str],
+    mux_bin: str | None, token: str, prefix: str, ctx_done: set[str],
     interval: float = 15,
+    picker_projects: set[str] | None = None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -6036,18 +6066,22 @@ def _monitor_sweep(
     coalesced into one process.  Registry entries whose session is definitively
     gone are pruned.
     """
-    live = _monitor_list_sessions(mux_bin)
-    if live is None:
-        return -1
-    live_wt = {n for n in live if n.startswith("wt-")}
     reg_dir = _monitor_registry_dir()
     registry = _read_monitor_registry(reg_dir)
-    for sess in [s for s in registry if s not in live_wt]:
-        _remove_monitor_entry(reg_dir, sess)
-        registry.pop(sess, None)
-        ctx_done.discard(sess)
-    served = [(s, p) for s, p in registry.items() if s in live_wt and p]
-    warm_projects: dict[str, str] = {}
+    served: list[tuple[str, str]] = []
+    if mux_bin:
+        live = _monitor_list_sessions(mux_bin)
+        if live is None:
+            return -1
+        live_wt = {n for n in live if n.startswith("wt-")}
+        for sess in [s for s in registry if s not in live_wt]:
+            _remove_monitor_entry(reg_dir, sess)
+            registry.pop(sess, None)
+            ctx_done.discard(sess)
+        served = [(s, p) for s, p in registry.items() if s in live_wt and p]
+    warm_projects: dict[str, str | None] = {
+        project: None for project in (picker_projects or set())
+    }
     for sess, path in served:
         try:
             _activate_project_for_path(path, force=True)
@@ -6074,9 +6108,12 @@ def _monitor_sweep(
         except Exception:
             seg = ""
         _monitor_mux_set(mux_bin, sess, "@aw_seg", seg)
-    for path in warm_projects.values():
+    for project, path in warm_projects.items():
         try:
-            _activate_project_for_path(path, force=True)
+            if path:
+                _activate_project_for_path(path, force=True)
+            else:
+                cfg.set_active_project(project)
             _warm_list_cache_for_active_project(interval=interval)
         except Exception:
             pass
@@ -6087,21 +6124,20 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     """One resident, coalescing tracker for every ``wt-*`` session's status bar.
 
     Replaces N per-session ``status-updater`` loops with a single sweep on the
-    interval.  Single-active on the host via a liveness lock; idle-exits after a
-    short run of empty sweeps (the last session left -- a new session start
-    re-spawns it); self-retires when a newer runtime supersedes it.
+    interval. Single-active on the host via a liveness lock; idle-exits after a
+    short run of sweeps with no managed session, Picker heartbeat, or recent
+    list demand; self-retires when a newer runtime supersedes it.
     """
     import shutil
     import time
     from . import locks as _locks
+    from . import monitor_roots
 
     _install_headless_child_guard()
 
     mux = ("psmux" if shutil.which("psmux") else
            ("tmux" if shutil.which("tmux") else None))
-    if not mux:
-        return 0
-    mux_bin = shutil.which(mux) or mux
+    mux_bin = (shutil.which(mux) or mux) if mux else None
     interval = args.interval if getattr(args, "interval", None) \
         and args.interval >= 2 else 15
 
@@ -6116,13 +6152,16 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             return False
         if d.get("pid") == os.getpid():
             return False
+        if d.get("mux") is False and mux_bin:
+            return False
         op = d.get("prefix")
         return not (op and _runtime_superseded(prefix=op))
 
     # Single-active: stand down if a current monitor already owns the host.
     if _other_current_monitor():
         return 0
-    _locks.write_lock(lock, extra={"prefix": my_prefix})
+    _locks.write_lock(
+        lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
 
     ctx_done: set[str] = set()
     empty_strikes = 0
@@ -6133,17 +6172,28 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 break  # a newer runtime took over -> retire; it re-spawns current
             if _other_current_monitor():
                 return 0  # a current successor claimed the lock -> stand down
-            _locks.write_lock(lock, extra={"prefix": my_prefix})
+            _locks.write_lock(
+                lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
 
+            picker_projects = monitor_roots.live_picker_projects()
+            demand_projects = list_cache.recent_demand_projects()
+            external_projects = picker_projects | demand_projects
             served = _monitor_sweep(
-                mux_bin, token, my_prefix, ctx_done, interval=interval)
+                mux_bin, token, my_prefix, ctx_done,
+                interval=interval, picker_projects=external_projects)
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
-            if served == 0:
+            if served == 0 and not external_projects:
                 empty_strikes += 1
                 if empty_strikes >= _MAX_EMPTY_STRIKES:
-                    break  # idle-exit: no sessions remain
+                    # Close the root-vs-idle race: a Picker/list caller can
+                    # register after this sweep but before the break.
+                    if (monitor_roots.live_picker_projects()
+                            or list_cache.recent_demand_projects()):
+                        empty_strikes = 0
+                    else:
+                        break
             else:
                 empty_strikes = 0
             time.sleep(interval)
@@ -6455,6 +6505,8 @@ def cmd_list(args: argparse.Namespace) -> int:
                 project=_project,
                 tracking_status=getattr(args, "tracking_status", "all"),
             )
+            if _status_monitor_enabled():
+                _ensure_status_monitor()
         if _lc_key and not getattr(args, "fresh", False):
             _cached = list_cache.read_fresh(_lc_key)
             if isinstance(_cached, dict) and "worktrees" in _cached:
@@ -15621,6 +15673,11 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     if not session_id:
         return 0  # nothing to register -- silent no-op
+    # Start the resident owner from every Copilot session, even if this session
+    # is outside a tracked worktree. Later daemon phases catalog all sessions;
+    # today an untracked start simply retires on the normal empty-root cadence.
+    if _status_monitor_enabled():
+        _ensure_status_monitor()
 
     if not wt_id:
         wt_id = _activate_session_binding(session_id)

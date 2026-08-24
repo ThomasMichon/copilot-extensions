@@ -153,6 +153,37 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
     assert warmed == ["p1", "p2"]
 
 
+def test_sweep_picker_root_keeps_project_warm_without_sessions(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: tmp_path / "reg")
+    monkeypatch.setattr(m, "_monitor_list_sessions", lambda mux_bin: {})
+    warmed: list[str] = []
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project",
+        lambda **kw: warmed.append(m.cfg.project_name()) or 1,
+    )
+
+    served = m._monitor_sweep(
+        "tmux", "T", "P", set(), picker_projects={"picker-project"})
+
+    assert served == 0
+    assert warmed == ["picker-project"]
+
+
+def test_sweep_without_mux_preserves_registered_sessions(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+
+    assert m._monitor_sweep(None, "T", "P", set()) == 0
+    assert (reg / "wt-a").exists()
+
+
 def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
@@ -183,6 +214,27 @@ def test_ensure_monitor_noop_when_live(tmp_path, monkeypatch):
     locks.remove_lock(lock)
     m._ensure_status_monitor()
     assert len(spawned) == 1                             # spawned when absent
+
+
+def test_ensure_replaces_muxless_owner_when_mux_is_available(
+    tmp_path, monkeypatch
+):
+    from agent_worktrees import locks
+    import shutil
+
+    lock = tmp_path / "status-monitor.lock"
+    monkeypatch.setattr(m, "_monitor_lock_path", lambda: lock)
+    locks.write_lock(
+        lock,
+        extra={"prefix": m.os.path.realpath(m.sys.prefix), "mux": False},
+    )
+    monkeypatch.setattr(
+        shutil, "which", lambda name: "psmux" if name == "psmux" else None)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(m, "_spawn_detached", lambda argv: spawned.append(argv) or True)
+
+    assert m._ensure_status_monitor() is True
+    assert len(spawned) == 1
 
 
 def test_status_updater_delegates_when_enabled(monkeypatch):
