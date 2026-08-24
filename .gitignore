@@ -10,6 +10,9 @@ build/
 .venv/
 .pytest_cache/
 .ruff_cache/
+# PowerShell writes this binary cache below the current HOME when tests
+# sandbox profile state inside a plugin directory.
+ModuleAnalysisCache
 # pytest tmp_path artifacts (some suites symlink into a .pytmp working dir);
 # never track these -- committed symlinks with absolute targets break plugin
 # installs on Linux (dangling-symlink copy -> os error 2).
