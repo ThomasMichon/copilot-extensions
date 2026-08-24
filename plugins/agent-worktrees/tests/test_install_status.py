@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import platform
 import subprocess
 
-from agent_worktrees import installer
+from agent_worktrees import config, installer
 
 
 def _configure_status(tmp_path, monkeypatch):
@@ -62,3 +63,23 @@ def test_install_status_rejects_stale_legacy_package(tmp_path, monkeypatch, caps
     assert "Stale legacy package present" in output
     assert "Package missing: active runtime cannot import agent_worktrees" in output
     assert "Package deployed" not in output
+
+
+def test_venv_python_prefers_last_known_good_over_newest_slot(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "install_dir", lambda: tmp_path)
+    subdir, name = (
+        ("Scripts", "python.exe") if platform.system() == "Windows" else ("bin", "python")
+    )
+
+    def make_slot(version):
+        python = tmp_path / "versions" / version / subdir / name
+        python.parent.mkdir(parents=True)
+        python.touch()
+        return python
+
+    lkg_python = make_slot("1.5.3-dev595")
+    make_slot("1.5.3-dev597")
+    (tmp_path / "current-version").write_text("1.5.3-dev596", encoding="utf-8")
+    (tmp_path / "last-known-good").write_text("1.5.3-dev595", encoding="utf-8")
+
+    assert config.venv_python() == lkg_python
