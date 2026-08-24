@@ -1522,18 +1522,23 @@ async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
             continue
         dest = dest_dir(source)
         try:
-            command = build_stage_command(payload, dest)
-            result = await manager.exec_command(name, command, timeout=60.0)
+            command, payload_b64 = build_stage_command(payload, dest)
+            result = await manager.exec_command(
+                name, command, timeout=60.0, input_bytes=payload_b64
+            )
             if result.exit_code == 0:
                 dirs.append(dest)
                 log.info("Staged plugin %s -> %s on %s", source, dest, name)
             else:
                 log.warning(
-                    "Staging %s on %s exited %s: %s",
+                    "Staging %s on %s exited %s (venue will run WITHOUT it): %s",
                     source, name, result.exit_code, result.stderr.strip(),
                 )
         except Exception as exc:
-            log.warning("Staging %s on %s failed: %s", source, name, exc)
+            log.warning(
+                "Staging %s on %s failed (venue will run WITHOUT it): %s",
+                source, name, exc,
+            )
     return dirs
 
 
