@@ -10,13 +10,10 @@ remains a standalone plugin usable where no bridge exists.
 from __future__ import annotations
 
 import json
-import os
-import shutil
 import subprocess
 from collections.abc import Sequence
-from pathlib import Path
 
-from .procutil import no_window_kwargs, resolve_runtime_python
+from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 
 DEFAULT_WORKER_AGENT = "task-worker"
 
@@ -48,14 +45,7 @@ def _agent_bridge_launch_prefix() -> list[str] | None:
     back to a ``.ps1`` ``subprocess`` cannot exec on Windows). Fall back to the
     ``agent-bridge`` binstub on PATH only on POSIX (its shims are plain exec
     scripts and do not re-parse). Returns ``None`` when neither is resolvable."""
-    py = resolve_runtime_python(Path.home() / ".agent-bridge")
-    if py is not None:
-        return [str(py), "-m", "agent_bridge"]
-    if os.name != "nt":
-        exe = shutil.which("agent-bridge")
-        if exe:
-            return [exe]
-    return None
+    return agent_bridge_launch_prefix()
 
 
 def bridge_available() -> bool:

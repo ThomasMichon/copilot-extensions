@@ -8,7 +8,7 @@ import types
 
 import pytest
 
-from agent_dispatch import embody
+from agent_dispatch import embody, procutil
 
 
 def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
@@ -82,9 +82,11 @@ def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(monkeypatch, tmp_
     slot_py.parent.mkdir(parents=True)
     slot_py.write_text("")  # only needs to exist as a file
     (tmp_path / ".agent-worktrees" / "current-version").write_text("1.5.3-dev9")
-    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
     # Even with a .cmd binstub on PATH, the versioned interpreter wins.
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.cmd")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.cmd"
+    )
     prefix = embody._agent_worktrees_launch_prefix()
     assert prefix == [str(slot_py), "-m", "agent_worktrees"]
     # The launcher is a real interpreter, never a shell shim that re-parses args.
@@ -95,9 +97,11 @@ def test_launch_prefix_falls_back_to_binstub_on_posix(monkeypatch, tmp_path):
     """Without an installed versioned runtime, fall back to the ``agent-worktrees``
     binstub on PATH **on POSIX only** (its shims are plain exec scripts -- no
     cmd.exe re-parse)."""
-    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(embody.os, "name", "posix")
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "posix")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: "/usr/bin/agent-worktrees"
+    )
     assert embody._agent_worktrees_launch_prefix() == ["/usr/bin/agent-worktrees"]
 
 
@@ -105,16 +109,18 @@ def test_launch_prefix_no_ps1_fallback_on_windows(monkeypatch, tmp_path):
     """On Windows, with no versioned runtime, do NOT fall back to the ``.ps1``
     binstub (``subprocess`` cannot exec it -> WinError 2). Return ``None`` so the
     caller degrades deliberately (the #974 fix)."""
-    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(embody.os, "name", "nt")
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.ps1")
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "nt")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.ps1"
+    )
     assert embody._agent_worktrees_launch_prefix() is None
 
 
 def test_launch_prefix_none_when_unresolvable(monkeypatch, tmp_path):
-    monkeypatch.setattr(embody.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(embody.os, "name", "posix")
-    monkeypatch.setattr(embody.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "posix")
+    monkeypatch.setattr(procutil.shutil, "which", lambda _n: None)
     assert embody._agent_worktrees_launch_prefix() is None
 
 
