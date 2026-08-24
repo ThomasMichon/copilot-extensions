@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parents[3]
 _PLUGINS = _ROOT / "plugins"
 _NESTED_POWERSHELL_MARKERS = (
@@ -26,6 +28,7 @@ def _powershell_hooks() -> list[tuple[Path, str, int, str]]:
     return hooks
 
 
+@pytest.mark.guard
 def test_powershell_hooks_do_not_spawn_nested_interpreters():
     violations: list[str] = []
     for path, event, index, command in _powershell_hooks():
@@ -44,6 +47,7 @@ def test_powershell_hooks_do_not_spawn_nested_interpreters():
     )
 
 
+@pytest.mark.guard
 def test_agent_worktrees_project_hook_runner_stays_in_process():
     runner = (
         _PLUGINS / "agent-worktrees" / "scripts" / "project-hooks.ps1"
@@ -57,6 +61,7 @@ def test_agent_worktrees_project_hook_runner_stays_in_process():
     )
 
 
+@pytest.mark.guard
 def test_powershell_module_analysis_cache_is_ignored():
     ignore_rules = (_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "ModuleAnalysisCache" in ignore_rules
