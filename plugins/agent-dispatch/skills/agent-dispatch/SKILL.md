@@ -498,8 +498,11 @@ agent-dispatch focus --list     # every worktree's focus (this machine)
 > `agent-worktrees status` verb, and `--list` / show *derive* from
 > `agent-worktrees list --json` — there is no separate focus store
 > (single-owning-layer / derive-don't-duplicate). It is the operator/task-less
-> analogue of a dispatched worker's `progress` (which is keyed to a task). See
-> AGENTS.md § Worktree Focus for when to post.
+> analogue of a dispatched worker's `progress` (which is keyed to a task).
+> The concise posting cadence is injected at session start when the repository
+> opts into `.agent-dispatch/session-guidance.json` →
+> `session_guidance.focus`; this
+> section retains the detailed CLI mechanics.
 
 > **`progress` is a *status beat*, not a chat log.** Emit **one** short line only
 > at real transitions -- a plan settled, implementation done, a PR opened, a
