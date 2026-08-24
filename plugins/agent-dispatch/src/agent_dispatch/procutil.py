@@ -11,12 +11,19 @@ window for the child, which **flashes on screen once per worker spawn**.
 launcher (and its inherited process tree) runs without a console window, while
 still allowing captured stdout/stderr over pipes (unlike ``DETACHED_PROCESS``,
 which fully detaches). It is a no-op off Windows.
+
+Captured probes launched by a passive daemon use the sibling runtime's
+``pythonw.exe`` plus ``DETACHED_PROCESS`` instead: Windows Default Terminal can
+surface ``CREATE_NO_WINDOW``, and the venv ``python.exe`` launcher can re-exec a
+console-subsystem interpreter after the initial process is detached.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 # Re-exported so existing callers keep using ``from .procutil import
@@ -25,10 +32,13 @@ from pathlib import Path
 from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 __all__ = [
+    "agent_bridge_launch_prefix",
+    "agent_worktrees_launch_prefix",
     "detached_kwargs",
     "no_window_kwargs",
     "relocate_off_payload",
     "resolve_runtime_python",
+    "run_agent_worktrees_capture",
     "runtime_root",
     "windowless_python",
 ]
@@ -112,6 +122,68 @@ def resolve_runtime_python(root: Path) -> Path | None:
         if p is not None:
             return p
     return None
+
+
+def agent_worktrees_launch_prefix() -> list[str] | None:
+    """Resolve ``agent-worktrees`` without a Windows shell shim.
+
+    The installed runtime interpreter is authoritative and bypasses the
+    ``.cmd``/``.bat`` dispatch that would otherwise involve ``cmd.exe``. POSIX
+    may fall back to its executable shim because it is a plain exec script.
+    Windows deliberately has no PATH fallback.
+    """
+    return _sibling_runtime_launch_prefix(
+        ".agent-worktrees", "agent_worktrees", "agent-worktrees"
+    )
+
+
+def agent_bridge_launch_prefix() -> list[str] | None:
+    """Resolve ``agent-bridge`` without a Windows shell shim."""
+    return _sibling_runtime_launch_prefix(
+        ".agent-bridge", "agent_bridge", "agent-bridge"
+    )
+
+
+def _sibling_runtime_launch_prefix(
+    runtime_dir: str, module: str, path_command: str
+) -> list[str] | None:
+    """Resolve a sibling's module launcher, with a POSIX-only PATH fallback."""
+    py = resolve_runtime_python(Path.home() / runtime_dir)
+    if py is not None:
+        executable = windowless_python(py) if os.name == "nt" else str(py)
+        return [executable, "-m", module]
+    if os.name != "nt":
+        exe = shutil.which(path_command)
+        if exe:
+            return [exe]
+    return None
+
+
+def run_agent_worktrees_capture(
+    *args: str, timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a captured ``agent-worktrees`` probe without a headed Windows console.
+
+    Passive Windows services use ``DETACHED_PROCESS`` rather than
+    ``CREATE_NO_WINDOW`` because Default Terminal can surface the latter. POSIX
+    keeps its existing process-group behavior.
+    """
+    prefix = agent_worktrees_launch_prefix()
+    if prefix is None:
+        return None
+    creation_kwargs = detached_kwargs() if os.name == "nt" else {}
+    try:
+        return subprocess.run(  # noqa: S603 -- fixed module argv
+            [*prefix, *args],
+            check=False,
+            capture_output=True,
+            stdin=subprocess.DEVNULL,
+            text=True,
+            timeout=timeout,
+            **creation_kwargs,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 def runtime_root() -> Path:
