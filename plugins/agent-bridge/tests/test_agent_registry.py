@@ -366,6 +366,16 @@ class TestAgentResolver:
         listing = resolver.list_agents()
         assert listing[0]["aliases"] == ["stable-name"]
 
+    def test_alias_collision_is_warning_not_topology_error(self):
+        agents = {
+            "short": AgentConfig(name="short", aliases=["stable"]),
+            "stable": AgentConfig(name="stable"),
+        }
+        resolver = AgentResolver(agents, {})
+        assert resolver.topology_errors == []
+        assert len(resolver.topology_warnings) == 1
+        assert resolver.canonical_agent_name("stable") == "stable"
+
 
     def test_resolve_loopback_returns_local(self):
         """SSH agent targeting the local machine should resolve as local."""

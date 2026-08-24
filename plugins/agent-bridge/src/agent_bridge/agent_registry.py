@@ -1689,10 +1689,12 @@ class AgentResolver:
         machines: dict[str, MachineConfig],
         *,
         topology_errors: list[str] | None = None,
+        topology_warnings: list[str] | None = None,
     ) -> None:
         self._agents = agents
         self._machines = machines
         self._topology_errors = list(topology_errors or [])
+        self._topology_warnings = list(topology_warnings or [])
         self._namespace_resolvers: dict[str, NamespaceResolver] = {}
         # Throttle for the declarative providers.d re-scan (monotonic seconds).
         self._provider_scan_ts: float = 0.0
@@ -1720,10 +1722,12 @@ class AgentResolver:
                     continue
                 if existing is not None and existing != canonical:
                     self._agent_alias_index[key] = None
-                    self._topology_errors.append(
+                    warning = (
                         f"agent alias {alias!r} is ambiguous between "
                         f"{existing!r} and {canonical!r}"
                     )
+                    self._topology_warnings.append(warning)
+                    log.warning(warning)
                 else:
                     self._agent_alias_index[key] = canonical
 
@@ -1743,6 +1747,10 @@ class AgentResolver:
     @property
     def topology_errors(self) -> list[str]:
         return list(self._topology_errors)
+
+    @property
+    def topology_warnings(self) -> list[str]:
+        return list(self._topology_warnings)
 
     def canonical_agent_name(self, name: str) -> str | None:
         """Resolve an exact, case-insensitive, or declared static alias."""
