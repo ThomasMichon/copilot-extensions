@@ -181,6 +181,25 @@ def test_omitted_enforce_values_do_not_create_shape_conflict(tmp_path):
     assert not any(f.code == "enforce-shape-conflict" for f in findings)
 
 
+def test_unhandled_enforce_surface_is_not_settings_conflict_domain(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "custom.unhandled": {
+            "disposition": "enforce",
+            "values": {"nested": {"value": 1}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "custom.unhandled": {
+            "disposition": "enforce",
+            "values": {"nested": {"value": 2}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code.startswith("enforce-") for f in findings)
+
+
 def test_bootstrap_floor_disable_is_error(tmp_path):
     data = base_package("a/x", gate=["*"])
     data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {
@@ -215,6 +234,18 @@ def test_bootstrap_floor_marketplace_union(tmp_path):
     a = _pkg(tmp_path, "a", data)
     findings = validate([a])
     assert any(f.code == "bootstrap-floor" for f in findings)
+
+
+def test_ignored_grouped_settings_do_not_affect_bootstrap_floor(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"] = {
+        "copilot.settings.plugins": {
+            "disposition": "ignore",
+            "values": {"extraKnownMarketplaces": {"some-other-market": {}}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", data)])
+    assert not any(f.code == "bootstrap-floor" for f in findings)
 
 
 def test_plan_and_drift_key_stable(tmp_path):

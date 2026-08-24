@@ -52,7 +52,9 @@ class Finding:
 def _managed_values_under(pkg: RequirementPackage, prefix: str):
     """Yield values from the root surface and every grouping below it."""
     for key, spec in pkg.manage.items():
-        if key == prefix or key.startswith(prefix + "."):
+        if (
+            key == prefix or key.startswith(prefix + ".")
+        ) and spec.get("disposition") in {"enforce", "ensure-present"}:
             yield spec.get("values", spec.get("value"))
 
 
@@ -137,6 +139,8 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
     for pkg in packages:
         for key, spec in pkg.manage.items():
             if spec.get("disposition") != "enforce":
+                continue
+            if key != "copilot.settings" and not key.startswith("copilot.settings."):
                 continue
             values = spec.get("values", spec.get("value"))
             if values is None:
