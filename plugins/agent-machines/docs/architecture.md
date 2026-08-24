@@ -143,8 +143,17 @@ guide.
 `src\agent_machines\validator.py` is detect-not-arbitrate:
 
 - conflicting scalar `enforce` values for the same leaf are errors;
-- map/list leaves under `enforce` are shape advisories because they should be
-  `ensure-present` unions;
+- nested maps under `enforce` are traversed because settings restore deep-merges
+  them; their scalar leaves participate in normal conflict detection;
+- grouping suffixes such as `copilot.settings.sandbox` normalize to the physical
+  `copilot.settings` root, and incompatible scalar/map/list shapes at one path
+  are errors;
+- setting identity preserves raw JSON path components (a dotted key never aliases
+  a nested path), and scalar equality includes the JSON/Python type;
+- known union maps (`enabledPlugins`, `extraKnownMarketplaces`) stay opaque and
+  retain the collection-shape advisory under `enforce`;
+- list/opaque collection leaves under `enforce` are shape advisories because
+  they should be `ensure-present` unions;
 - explicitly disabling a bootstrap-critical plugin is an error;
 - if any package manages marketplaces, omitting the bootstrap-critical
   `copilot-extensions` marketplace is an error.
