@@ -96,6 +96,30 @@ def test_bad_state_and_strategy_rejected(tmp_path):
              [{"type": "file", "path": "/x", "strategy": "obliterate"}])
 
 
+def test_package_process_guard_schema(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "package",
+        "id": "example.tool",
+        "manager": "winget",
+        "process_guard": {"names": ["example.exe"]},
+    }])
+    assert pkg.resources[0]["process_guard"]["names"] == ["example.exe"]
+
+    invalid = [
+        {"type": "package", "id": "x", "manager": "winget",
+         "process_guard": ["x.exe"]},
+        {"type": "package", "id": "x", "manager": "winget",
+         "process_guard": {"names": []}},
+        {"type": "package", "id": "x", "manager": "winget",
+         "process_guard": {"names": ["x.exe"], "mode": "kill"}},
+        {"type": "file", "path": "/x",
+         "process_guard": {"names": ["x.exe"]}},
+    ]
+    for index, resource in enumerate(invalid):
+        with pytest.raises(ManifestError):
+            _pkg(tmp_path, f"acme/invalid-{index}", [resource])
+
+
 def test_resources_must_be_list(tmp_path):
     data = base_package(name="acme/a")
     data["resources"] = {"not": "a list"}
@@ -149,6 +173,23 @@ def test_package_pin_ored_and_compatible_merge(tmp_path):
     pkg_res = next(r for r in resolved if r.type == "package")
     assert pkg_res.desired["pin"] is True  # OR of pins
     assert pkg_res.desired["version"] == "3.3.5"
+
+
+def test_package_process_guards_merge_by_casefolded_union(tmp_path):
+    a = _pkg(tmp_path, "acme/a", [{
+        "type": "package", "id": "z", "manager": "winget", "version": "3.3.5",
+        "process_guard": {"names": ["PSMUX.EXE"]},
+    }])
+    b = _pkg(tmp_path, "acme/b", [{
+        "type": "package", "id": "z", "manager": "winget", "version": "3.3.5",
+        "process_guard": {"names": ["psmux.exe", "helper.exe"]},
+    }])
+    r1, f1 = resolve_resources([a, b], "box-1", "windows")
+    r2, f2 = resolve_resources([b, a], "box-1", "windows")
+    assert not f1 and not f2
+    g1 = next(r for r in r1 if r.type == "package").desired["process_guard"]
+    g2 = next(r for r in r2 if r.type == "package").desired["process_guard"]
+    assert g1 == g2 == {"names": ["helper.exe", "psmux.exe"]}
 
 
 def test_different_managers_are_distinct_identities(tmp_path):
@@ -330,6 +371,158 @@ def test_package_apply_exact_package_and_pin_are_noop(tmp_path, monkeypatch):
     ]
 
 
+def test_winget_present_wrong_version_uses_verified_exact_upgrade(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
+
+    class UpgradeRunner:
+        def __init__(self):
+            self.version = "3.3.3"
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                return RunOutcome(
+                    0,
+                    "Name  Id               Version Available Source\n"
+                    "------------------------------------------------\n"
+                    f"psmux marlocarlo.psmux {self.version}   3.3.7     winget\n",
+                    "",
+                )
+            if argv[:3] == ["winget", "pin", "list"]:
+                return RunOutcome(
+                    0,
+                    "Name  Id               Version Source Pin type Pinned version\n"
+                    "-------------------------------------------------------------\n"
+                    f"psmux marlocarlo.psmux {self.version}   winget Gating   3.3.5\n",
+                    "",
+                )
+            if argv[:2] == ["winget", "upgrade"]:
+                self.version = "3.3.5"
+                return RunOutcome(0, "Successfully installed", "")
+            return RunOutcome(0, "", "")
+
+    runner = UpgradeRunner()
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+        "version": "3.3.5", "pin": True,
+    }])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert res.ok and res.action == "update"
+    upgrade = next(call for call in runner.calls if call[:2] == ["winget", "upgrade"])
+    assert "--exact" in upgrade
+    assert "--include-pinned" in upgrade
+    assert upgrade[upgrade.index("--version") + 1] == "3.3.5"
+    assert not any(call[:2] == ["winget", "install"] for call in runner.calls)
+    assert sum(call[:2] == ["winget", "list"] for call in runner.calls) == 2
+    assert not any(call[:3] == ["winget", "pin", "add"] for call in runner.calls)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_package_process_guard_defers_live_wrong_version(
+    tmp_path, monkeypatch, dry_run
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.3 3.3.7 winget", ""
+        ),
+        ("winget", "pin", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.3 winget Gating 3.3.5", ""
+        ),
+        ("tasklist",): RunOutcome(
+            0, '"psmux.exe","123","Console","1","10,000 K"\n'
+               '"other.exe","456","Console","1","2,000 K"\n', ""
+        ),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+        "version": "3.3.5", "pin": True,
+        "process_guard": {"names": ["psmux.exe"]},
+    }])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=dry_run
+    )[0]
+    assert res.ok and res.status == "deferred" and res.action == "defer"
+    assert res.changed is False
+    assert res.deferred_reason == "process guard matched running: psmux.exe"
+    assert "deferred update from 3.3.3 to 3.3.5" == res.detail
+    assert res.commands[0][:2] == ["winget", "upgrade"]
+    assert not any(call[:2] == ["winget", "upgrade"] for call in runner.calls)
+
+
+def test_package_process_guard_defers_when_probe_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.3 3.3.7 winget", ""
+        ),
+        ("tasklist",): RunOutcome(1, "", "access denied"),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+        "version": "3.3.5",
+        "process_guard": {"names": ["psmux.exe"]},
+    }])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert res.status == "deferred"
+    assert "state is unknown" in (res.deferred_reason or "")
+    assert "access denied" in (res.deferred_reason or "")
+
+
+def test_package_process_guard_defers_when_package_probe_fails(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(1, "", "source unavailable"),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+        "version": "3.3.5",
+        "process_guard": {"names": ["psmux.exe"]},
+    }])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert res.status == "deferred"
+    assert "installed state is unknown" in res.detail
+    assert not any(call[0] in {"tasklist"} for call in runner.calls)
+    assert not any(
+        len(call) > 1 and call[:2] in (
+            ["winget", "install"], ["winget", "upgrade"]
+        )
+        for call in runner.calls
+    )
+
+
+def test_package_process_guard_does_not_block_first_install(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/tool.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(
+            -1978335212,
+            "No installed package found matching input criteria.",
+            "",
+        ),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "package", "id": "example.tool", "manager": "winget",
+        "version": "1.0.0",
+        "process_guard": {"names": ["example.exe"]},
+    }])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True
+    )[0]
+    assert res.action == "install"
+    assert not any(call[0] == "tasklist" for call in runner.calls)
+
+
 def test_package_apply_force_replaces_wrong_winget_pin(tmp_path, monkeypatch):
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
 
@@ -406,7 +599,7 @@ def test_winget_nonzero_install_is_ok_only_after_exact_postcondition(
     assert "verified package postcondition" in res.detail
 
 
-def test_winget_nonzero_install_fails_when_postcondition_is_wrong(
+def test_winget_nonzero_upgrade_fails_when_postcondition_is_wrong(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
@@ -414,7 +607,7 @@ def test_winget_nonzero_install_fails_when_postcondition_is_wrong(
         ("winget", "list"): RunOutcome(
             0, "psmux marlocarlo.psmux 3.3.3 winget", ""
         ),
-        ("winget", "install"): RunOutcome(
+        ("winget", "upgrade"): RunOutcome(
             2316632146, "", "An existing package is already installed."
         ),
     })
@@ -430,10 +623,48 @@ def test_winget_nonzero_install_fails_when_postcondition_is_wrong(
     assert "2316632146" in res.detail
 
 
+def test_winget_uninstall_requires_verified_absence(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.5 winget", ""
+        ),
+        ("winget", "uninstall"): RunOutcome(0, "Successfully uninstalled", ""),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [
+        {"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+         "state": "absent"},
+    ])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert not res.ok
+    assert res.status == "error"
+    assert "without satisfying the exact postcondition" in res.detail
+    assert sum(call[:2] == ["winget", "list"] for call in runner.calls) == 2
+
+
 def test_package_apply_absent_uninstalls(tmp_path, monkeypatch):
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
-    runner = FakeRunner(
-        script={("winget", "list"): RunOutcome(0, "marlocarlo.psmux 3.3.5", "")})
+
+    class UninstallRunner:
+        def __init__(self):
+            self.present = True
+
+        def __call__(self, argv):
+            if argv[:2] == ["winget", "list"]:
+                if self.present:
+                    return RunOutcome(0, "marlocarlo.psmux 3.3.5", "")
+                return RunOutcome(
+                    2316632084,
+                    "No installed package found matching input criteria.",
+                    "",
+                )
+            if argv[:2] == ["winget", "uninstall"]:
+                self.present = False
+            return RunOutcome(0, "", "")
+
+    runner = UninstallRunner()
     pkg = _pkg(tmp_path, "acme/a",
                [{"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
                  "state": "absent"}])

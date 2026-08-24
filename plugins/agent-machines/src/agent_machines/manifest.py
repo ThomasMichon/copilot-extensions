@@ -217,6 +217,31 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
                 raise ManifestError(
                     f"{path}: feature manager {mgr!r} must be one of {FEATURE_MANAGER_NAMES}"
                 )
+        process_guard = res.get("process_guard")
+        if process_guard is not None:
+            if rtype != "package":
+                raise ManifestError(
+                    f"{path}: process_guard is only valid for package resources"
+                )
+            if not isinstance(process_guard, dict):
+                raise ManifestError(
+                    f"{path}: package process_guard must be a mapping"
+                )
+            unknown = sorted(set(process_guard) - {"names"})
+            if unknown:
+                raise ManifestError(
+                    f"{path}: package process_guard has unsupported fields {unknown}"
+                )
+            names = process_guard.get("names")
+            if (
+                not isinstance(names, list)
+                or not names
+                or any(not isinstance(name, str) or not name.strip() for name in names)
+            ):
+                raise ManifestError(
+                    f"{path}: package process_guard.names must be a non-empty list "
+                    f"of process names"
+                )
 
     return RequirementPackage(
         name=name,

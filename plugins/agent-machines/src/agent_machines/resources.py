@@ -46,6 +46,8 @@ not.
 
 from __future__ import annotations
 
+import csv
+import io
 import re
 import shutil
 import subprocess
@@ -134,6 +136,7 @@ class ResourceResult:
     action: str  # install | pin | write | uninstall | none | skip
     detail: str = ""
     skipped_reason: str | None = None
+    deferred_reason: str | None = None
     backup_path: str | None = None
     commands: list[list[str]] = field(default_factory=list)
 
@@ -142,6 +145,8 @@ class ResourceResult:
         """Stable machine-readable outcome independent of display wording."""
         if self.action == "error":
             return "error"
+        if self.deferred_reason is not None:
+            return "deferred"
         if self.skipped_reason is not None:
             return "skipped"
         return "changed" if self.changed else "ok"
@@ -301,8 +306,14 @@ class PackageResourceHandler(ResourceHandler):
                 f"versions {sorted(versions)} across packages: {who}.",
             ))
         pin = any(bool(d.get("pin")) for d in decls)
+        guard_names = sorted({
+            str(name).strip().casefold()
+            for d in decls
+            for name in (d.get("process_guard") or {}).get("names", [])
+        })
         desired = {"manager": ident[1], "id": ident[2], "state": state,
-                   "version": version, "pin": pin}
+                   "version": version, "pin": pin,
+                   "process_guard": {"names": guard_names} if guard_names else None}
         return desired, findings
 
     # -- detect / apply -----------------------------------------------------
@@ -311,8 +322,16 @@ class PackageResourceHandler(ResourceHandler):
         try:
             out = ctx.runner(argv)
         except (OSError, subprocess.SubprocessError):
-            return {"present": False, "version": None}
-        return mgr["parse_detect"](out, pkg_id)
+            return {"known": False, "present": False, "version": None}
+        detected = mgr["parse_detect"](out, pkg_id)
+        detected["known"] = (
+            out.returncode == 0
+            or (
+                not detected["present"]
+                and out.returncode in mgr.get("absent_returncodes", set())
+            )
+        )
+        return detected
 
     def _detect_pin(
         self, ctx: ResourceContext, mgr: dict, pkg_id: str
@@ -320,16 +339,54 @@ class PackageResourceHandler(ResourceHandler):
         detect_pin = mgr.get("detect_pin")
         parse_pin = mgr.get("parse_pin")
         if not detect_pin or not parse_pin:
-            return {"present": False, "version": None}
+            return {"known": True, "present": False, "version": None}
         try:
             out = ctx.runner(detect_pin(pkg_id))
         except (OSError, subprocess.SubprocessError):
-            return {"present": False, "version": None}
-        return parse_pin(out, pkg_id)
+            return {"known": False, "present": False, "version": None}
+        detected = parse_pin(out, pkg_id)
+        detected["known"] = (
+            out.returncode == 0
+            or (
+                not detected["present"]
+                and out.returncode in mgr.get("absent_returncodes", set())
+            )
+        )
+        return detected
 
     @staticmethod
     def _matches_desired(live: dict[str, Any], version: str | None) -> bool:
-        return bool(live["present"] and (not version or live.get("version") == version))
+        return bool(
+            live.get("known", True)
+            and live["present"]
+            and (not version or live.get("version") == version)
+        )
+
+    @staticmethod
+    def _process_guard(
+        ctx: ResourceContext, names: list[str]
+    ) -> tuple[bool, list[str], str | None]:
+        """Return guard-known, matching process names, and an unknown reason."""
+        if not names:
+            return True, [], None
+        probe = PROCESS_GUARD_PROBES.get(ctx.platform)
+        if probe is None:
+            return False, [], f"process guards are not supported on '{ctx.platform}'"
+        if shutil.which(probe["bin"]) is None:
+            return False, [], f"process guard binary '{probe['bin']}' is not on PATH"
+        try:
+            out = ctx.runner(probe["command"]())
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, [], f"process guard probe failed: {exc}"
+        if out.returncode != 0:
+            detail = (out.stderr or out.stdout).strip()[:200]
+            return False, [], (
+                f"process guard probe exited {out.returncode}"
+                + (f": {detail}" if detail else "")
+            )
+        running = probe["parse"](out)
+        wanted = {name.casefold() for name in names}
+        return True, sorted(wanted & running), None
 
     def apply(
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
@@ -352,6 +409,17 @@ class PackageResourceHandler(ResourceHandler):
         ver = d.get("version")
         want_absent = d.get("state") == "absent"
         commands: list[list[str]] = []
+        guard = d.get("process_guard") or {}
+
+        if guard.get("names") and not live.get("known", True):
+            return ResourceResult(
+                self.TYPE, pkg_id, False, dry_run, "defer",
+                detail="deferred package mutation because installed state is unknown",
+                deferred_reason=(
+                    f"package probe `{' '.join(mgr['detect'](pkg_id, None))}` "
+                    "did not establish installed state"
+                ),
+            )
 
         if want_absent:
             if not live["present"]:
@@ -360,9 +428,12 @@ class PackageResourceHandler(ResourceHandler):
             commands.append(mgr["uninstall"](pkg_id, ver))
             action = "uninstall"
         else:
-            needs_install = not self._matches_desired(live, ver)
+            needs_install = not live["present"]
+            needs_update = bool(live["present"] and ver and live.get("version") != ver)
             if needs_install:
                 commands.append(mgr["install"](pkg_id, ver))
+            elif needs_update:
+                commands.append(mgr["update"](pkg_id, ver))
             if d.get("pin") and mgr.get("pin"):
                 pin = self._detect_pin(ctx, mgr, pkg_id)
                 if not self._matches_desired(pin, ver):
@@ -370,7 +441,25 @@ class PackageResourceHandler(ResourceHandler):
             if not commands:
                 return ResourceResult(self.TYPE, pkg_id, False, dry_run, "none",
                                       detail=f"present{('@' + ver) if ver else ''}")
-            action = "install" if needs_install else "pin"
+            action = "install" if needs_install else ("update" if needs_update else "pin")
+
+        guarded_replacement = action in {"update", "uninstall"}
+        if guarded_replacement and guard.get("names"):
+            known, running, unknown_reason = self._process_guard(ctx, guard["names"])
+            if not known or running:
+                if running:
+                    reason = f"process guard matched running: {', '.join(running)}"
+                else:
+                    reason = f"process guard state is unknown: {unknown_reason}"
+                return ResourceResult(
+                    self.TYPE, pkg_id, False, dry_run, "defer",
+                    detail=(
+                        f"deferred {action} from {live.get('version') or 'present'}"
+                        f"{(' to ' + ver) if ver else ''}"
+                    ),
+                    deferred_reason=reason,
+                    commands=commands,
+                )
 
         if dry_run:
             detail = " ; ".join(" ".join(c) for c in commands)
@@ -380,14 +469,25 @@ class PackageResourceHandler(ResourceHandler):
         verified_nonzero: list[str] = []
         for argv in commands:
             out = ctx.runner(argv)
-            if manager == "winget" and len(argv) > 1 and argv[1] in {"install", "pin"}:
-                label = "package" if argv[1] == "install" else "pin"
+            if manager == "winget" and len(argv) > 1 and argv[1] in {
+                "install", "upgrade", "uninstall", "pin"
+            }:
+                operation = argv[1]
+                label = "pin" if operation == "pin" else "package"
                 postcondition = (
-                    self._detect(ctx, mgr, pkg_id)
-                    if label == "package"
-                    else self._detect_pin(ctx, mgr, pkg_id)
+                    self._detect_pin(ctx, mgr, pkg_id)
+                    if label == "pin"
+                    else self._detect(ctx, mgr, pkg_id)
                 )
-                if self._matches_desired(postcondition, ver):
+                satisfied = (
+                    bool(
+                        postcondition.get("known", True)
+                        and not postcondition["present"]
+                    )
+                    if operation == "uninstall"
+                    else self._matches_desired(postcondition, ver)
+                )
+                if satisfied:
                     if out.returncode != 0:
                         verified_nonzero.append(label)
                     continue
@@ -1000,10 +1100,36 @@ def _parse_line_list(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
     return {"present": present, "version": version}
 
 
+def _parse_tasklist(out: RunOutcome) -> set[str]:
+    """Parse Windows ``tasklist /FO CSV /NH`` output to folded image names."""
+    running: set[str] = set()
+    for row in csv.reader(io.StringIO(out.stdout)):
+        if row and row[0].strip():
+            running.add(row[0].strip().casefold())
+    return running
+
+
+PROCESS_GUARD_PROBES: dict[str, dict[str, Any]] = {
+    "windows": {
+        "bin": "tasklist",
+        "command": lambda: ["tasklist", "/FO", "CSV", "/NH"],
+        "parse": _parse_tasklist,
+    },
+}
+
+
+_WINGET_NO_APPLICATIONS_FOUND = 0x8A150014
+_WINGET_ABSENT_RETURN_CODES = {
+    _WINGET_NO_APPLICATIONS_FOUND,
+    _WINGET_NO_APPLICATIONS_FOUND - (1 << 32),
+}
+
+
 MANAGERS: dict[str, dict[str, Any]] = {
     "winget": {
         "platforms": {"windows"},
         "bin": "winget",
+        "absent_returncodes": _WINGET_ABSENT_RETURN_CODES,
         "parse_detect": _parse_winget,
         "detect": lambda i, v: ["winget", "list", "--id", i, "--exact",
                                 "--accept-source-agreements"],
@@ -1012,6 +1138,10 @@ MANAGERS: dict[str, dict[str, Any]] = {
         "install": lambda i, v: ["winget", "install", "--id", i, "--exact",
                                  *(["--version", v] if v else []),
                                  "--accept-source-agreements", "--accept-package-agreements"],
+        "update": lambda i, v: ["winget", "upgrade", "--id", i, "--exact",
+                                *(["--version", v] if v else []), "--include-pinned",
+                                "--accept-source-agreements",
+                                "--accept-package-agreements"],
         "pin": lambda i, v: ["winget", "pin", "add", "--id", i, "--exact",
                              *(["--version", v] if v else []), "--force"],
         "uninstall": lambda i, v: ["winget", "uninstall", "--id", i, "--exact"],
@@ -1023,6 +1153,8 @@ MANAGERS: dict[str, dict[str, Any]] = {
         "detect": lambda i, v: ["dpkg-query", "-W", "-f=${Version}", i],
         "install": lambda i, v: ["apt-get", "install", "-y",
                                  f"{i}={v}" if v else i],
+        "update": lambda i, v: ["apt-get", "install", "-y",
+                                f"{i}={v}" if v else i],
         "pin": lambda i, v: ["apt-mark", "hold", i],
         "uninstall": lambda i, v: ["apt-get", "remove", "-y", i],
     },
@@ -1032,6 +1164,8 @@ MANAGERS: dict[str, dict[str, Any]] = {
         "parse_detect": _parse_line_list,
         "detect": lambda i, v: ["pipx", "list", "--short"],
         "install": lambda i, v: ["pipx", "install", f"{i}=={v}" if v else i],
+        "update": lambda i, v: ["pipx", "install", "--force",
+                                f"{i}=={v}" if v else i],
         "pin": None,
         "uninstall": lambda i, v: ["pipx", "uninstall", i],
     },
@@ -1041,6 +1175,8 @@ MANAGERS: dict[str, dict[str, Any]] = {
         "parse_detect": _parse_line_list,
         "detect": lambda i, v: ["uv", "tool", "list"],
         "install": lambda i, v: ["uv", "tool", "install", f"{i}=={v}" if v else i],
+        "update": lambda i, v: ["uv", "tool", "install", "--force",
+                                f"{i}=={v}" if v else i],
         "pin": None,
         "uninstall": lambda i, v: ["uv", "tool", "uninstall", i],
     },
@@ -1050,6 +1186,8 @@ MANAGERS: dict[str, dict[str, Any]] = {
         "parse_detect": _parse_line_list,
         "detect": lambda i, v: ["pip", "show", i],
         "install": lambda i, v: ["pip", "install", f"{i}=={v}" if v else i],
+        "update": lambda i, v: ["pip", "install", "--upgrade",
+                                f"{i}=={v}" if v else i],
         "pin": None,
         "uninstall": lambda i, v: ["pip", "uninstall", "-y", i],
     },

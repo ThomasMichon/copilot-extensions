@@ -18,6 +18,8 @@ resources:
     version: "3.3.5"           # exact pin (optional)
     state: present              # present (default) | absent
     pin: true                   # hold at version where the manager supports it
+    process_guard:              # defer replacement/removal while live
+      names: ["psmux.exe"]
   - type: file
     id: psmux-settings          # display id (optional; defaults to path)
     path: "$HOME/.psmux.conf"  # $HOME / $REPO(<name>) anchored, or absolute
@@ -42,6 +44,7 @@ Converge a package-manager package. Identity is `(manager, id)`, so the same
 | `version` | no | Exact version pin. |
 | `state` | no | `present` (default) or `absent`. |
 | `pin` | no | Hold at `version` where the manager supports pinning (`winget pin`, `apt-mark hold`). |
+| `process_guard.names` | no | Exact process image names that defer replacement/removal while running. Windows process probing is supported now; an unavailable/unsupported probe defers safely. |
 | `platforms` | no | Restrict to a subset of `windows` / `linux` / `wsl`. |
 | `gate` | no | Restrict to specific machines (defaults to the package gate). |
 | `owner` | no | Override the collision owner label (defaults to the package name). |
@@ -56,9 +59,15 @@ Manager support matrix:
 | `uv-tool` | windows, linux, wsl | no |
 | `pip` | windows, linux, wsl | no |
 
-Apply detects current state first, then installs/upgrades only when needed, and
-pins when asked. On an unsupported platform, an unknown manager, or a missing
-manager binary, the resource is skipped with a reason (never a hard failure).
+Apply detects current state first. An absent package uses the manager's install
+operation; a present package at the wrong version uses its native update/upgrade
+operation; both verify the exact desired postcondition where supported. Pinning
+is reconciled separately. A `process_guard` applies only to replacement/removal,
+not first install or pin metadata. A matching process, failed probe, unsupported
+probe platform, or missing probe binary returns `status: deferred` without
+mutation, and reports the reason plus the command that remains pending. If
+installed package state cannot be established, guarded mutation also defers
+instead of assuming that the package is absent.
 
 ### `file`
 
@@ -166,6 +175,7 @@ compatible**:
 | package `present` + `absent` | error |
 | package two different `version` pins | error |
 | package `pin` flags differ | OR'd to pinned (compatible) |
+| package `process_guard.names` differ | names are case-folded and unioned (conservative, compatible) |
 | file two `enforce` with different `content` | error |
 | file conflicting `format` | error |
 | file `enforce` + `ensure-present` | enforce wins (advisory) |
@@ -193,7 +203,7 @@ Resources appear in every verb:
   performs them, and `--only <id|type|type:id>` restricts the run to a resource
   (and skips modules when nothing else is selected).
 - `agent-machines restore --json` includes a `resources` list (each result has
-  `status: ok|changed|skipped|error`) and a `plan.resources` list. Any resource
+  `status: ok|changed|deferred|skipped|error`) and a `plan.resources` list. Any resource
   error makes the top-level `ok` false and the command exit nonzero.
 
 ## Adopter guide
@@ -227,6 +237,8 @@ resources:
     version: "3.3.5"           # pinned: a later build regressed session attach
     state: present
     pin: true
+    process_guard:
+      names: ["psmux.exe"]     # defer version replacement while sessions are live
   - type: file
     id: psmux-keybinds
     path: "$HOME/.psmux.conf"
