@@ -26,7 +26,13 @@ from pathlib import Path
 from agent_procutil import no_window_flags
 
 from . import __version__
-from .config import RESTRICTED_PROFILE, SECURITY_PROFILE_LABEL, load_config
+from .config import (
+    RESTRICTED_PROFILE,
+    SECURITY_PROFILE_LABEL,
+    ContainersConfig,
+    FleetConfig,
+    load_config,
+)
 from .resolver import build_spawn_command, host_gh_token
 from .ssh_transport import (
     build_remote_command,
@@ -38,6 +44,7 @@ from .ssh_transport import (
 )
 
 log = logging.getLogger("agent-containers")
+_BUSY_EXIT = 75
 
 
 def _creation_flags() -> int:
@@ -93,6 +100,10 @@ def main(argv: list[str] | None = None) -> int:
     exec_p.add_argument(
         "--stdio", action="store_true",
         help="Attach stdio (ACP transport) instead of a one-shot probe",
+    )
+    exec_p.add_argument(
+        "--force", action="store_true",
+        help="Terminate a live SSH holder and take over this trusted container",
     )
 
     sub.add_parser("version", help="Show version")
@@ -450,18 +461,40 @@ def _resolve_relay_port(default: int) -> int:
     is not importable. Falls back to ``default`` (the configured/legacy port)
     when the file is absent, empty, or unreadable -- preserving prior behavior.
     """
+    return _published_relay_port() or default
+
+
+def _published_relay_port() -> int | None:
+    """Read agent-bridge's published live relay port, or ``None``."""
     try:
         txt = _live_relay_port_file().read_text(encoding="utf-8").strip()
-        if txt:
-            port = int(txt)
-            # agent-bridge treats 0/falsy as "no live port" (it unlinks the file);
-            # guard the valid TCP range so a stale/edge value can't yield a bogus
-            # connect port -- fall back to the configured default instead.
-            if 1 <= port <= 65535:
-                return port
+        port = int(txt)
+        return port if 1 <= port <= 65535 else None
     except (OSError, ValueError):
-        log.debug("live relay port unavailable; using configured port %s", default)
-    return default
+        return None
+
+
+def _require_live_relay_port() -> int:
+    port = _published_relay_port()
+    if port is None:
+        raise RuntimeError(
+            "agent-bridge has not published a live credential-relay port; "
+            "start agent-bridge or set relay.enabled: false in containers.yaml"
+        )
+    return port
+
+
+def _relay_healthy(port: int, timeout: float = 0.5) -> bool:
+    """Verify the published endpoint speaks the credential-relay protocol."""
+    import socket
+
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(b"ping\n\n")
+            return sock.recv(32) == b"pong\n\n"
+    except OSError:
+        return False
 
 
 def _cmd_exec(args: argparse.Namespace) -> int:
@@ -526,6 +559,37 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     user = (fleet.exec_user if fleet else None) or config.exec_user
     acp_command = config.acp_command_for(fleet)
 
+    if actual_profile == RESTRICTED_PROFILE:
+        return _launch_container_agent(
+            args, config, fleet, actual_profile, user, acp_command
+        )
+
+    from ssh_manager import TargetBusyError, TargetLock
+
+    op = "stdio" if args.stdio else "exec"
+    target_lock = TargetLock(f"container:{args.name}", op=op)
+    try:
+        target_lock.acquire(force=getattr(args, "force", False))
+    except TargetBusyError as busy:
+        print(busy.user_message(), file=sys.stderr)
+        return _BUSY_EXIT
+    try:
+        return _launch_container_agent(
+            args, config, fleet, actual_profile, user, acp_command
+        )
+    finally:
+        target_lock.release()
+
+
+def _launch_container_agent(
+    args: argparse.Namespace,
+    config: ContainersConfig,
+    fleet: FleetConfig,
+    actual_profile: str,
+    user: str,
+    acp_command: str,
+) -> int:
+    """Launch through the trust-profiled transport while holding its lock."""
     forward, relay_enabled = config.credentials_for(fleet)
     if actual_profile == RESTRICTED_PROFILE:
         forward, relay_enabled = False, False
@@ -541,26 +605,35 @@ def _cmd_exec(args: argparse.Namespace) -> int:
                 "the in-container Copilot CLI may be unauthenticated."
             )
 
-    # On-demand credential relay: deploy shims + inject the relay endpoint/token
-    # so in-container auth (Azure storage for rush dev-deploy) is fetched from the
-    # host relay over host.docker.internal.
+    # On-demand credential relay. Trusted SSH carries a reverse forward from the
+    # container's loopback relay port to agent-bridge's live host-loopback port;
+    # restricted fleets cannot enable this path.
     relay_env: list[str] = []
+    reverse_forwards: list[str] = []
     if relay_enabled:
-        try:
-            from .container_shims import deploy as deploy_shims
-            from .relay_provider import token_for
+        from .container_shims import deploy as deploy_shims
+        from .relay_provider import token_for
 
-            deploy_shims(args.name, ado=config.relay_deploy_ado)
-            env["LC_GIT_CREDENTIAL_RELAY_HOST"] = config.relay_host
-            env["LC_GIT_CREDENTIAL_RELAY"] = str(_resolve_relay_port(config.relay_port))
-            env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
-            relay_env = [
-                "LC_GIT_CREDENTIAL_RELAY_HOST",
-                "LC_GIT_CREDENTIAL_RELAY",
-                "LC_GIT_CREDENTIAL_RELAY_TOKEN",
-            ]
-        except Exception as exc:
-            log.warning("Credential relay setup failed for %s: %s", args.name, exc)
+        host_relay_port = _require_live_relay_port()
+        if not _relay_healthy(host_relay_port):
+            raise RuntimeError(
+                "Published credential relay at "
+                f"127.0.0.1:{host_relay_port} failed its ping probe; "
+                "restart agent-bridge or set relay.enabled: false in "
+                "containers.yaml"
+            )
+        deploy_shims(args.name, ado=config.relay_deploy_ado)
+        env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
+        env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
+        env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
+        relay_env = [
+            "LC_GIT_CREDENTIAL_RELAY_HOST",
+            "LC_GIT_CREDENTIAL_RELAY",
+            "LC_GIT_CREDENTIAL_RELAY_TOKEN",
+        ]
+        reverse_forwards = [
+            f"127.0.0.1:{config.relay_port}:127.0.0.1:{host_relay_port}"
+        ]
 
     if actual_profile == RESTRICTED_PROFILE:
         spawn_cmd = build_spawn_command(
@@ -586,7 +659,11 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     try:
         ssh_config = prepare_ssh_config(args.name, user)
         remote_command = build_remote_command(acp_command, remote_env)
-        spawn_cmd = build_ssh_command(ssh_config, remote_command)
+        spawn_cmd = build_ssh_command(
+            ssh_config,
+            remote_command,
+            reverse_forwards=reverse_forwards,
+        )
         log.info("exec transport=ssh target=%s", args.name)
         if not args.stdio:
             proc = subprocess.run(
