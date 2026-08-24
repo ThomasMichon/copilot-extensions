@@ -1457,7 +1457,11 @@ function Ensure-PsmuxSshSafe {
     }
     $env:Path = $repair.ProcessPath
 
-    $resolved = Get-Command psmux -CommandType Application -ErrorAction SilentlyContinue
+    # PATH can expose the selected package binary plus a WinGet link/older
+    # package. Get-Command then returns an array; select the actual winner before
+    # passing Source to scalar -Path parameters.
+    $resolved = Get-Command psmux -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
     $resolvedVersion = if ($resolved) {
         Get-AwPsmuxBinaryVersion -Path $resolved.Source
     } else {

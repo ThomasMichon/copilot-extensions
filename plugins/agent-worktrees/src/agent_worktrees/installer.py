@@ -848,8 +848,7 @@ def show_install_status() -> None:
     base = install_dir()
     project = cfg.project_name()
     proj_dir = cfg.project_dir()
-    venv = venv_dir()
-    python = _venv_python(venv)
+    python = cfg.venv_python()
     lib = lib_dir() / "agent_worktrees"
 
     print(f"  Runtime:  {base}")
@@ -862,11 +861,9 @@ def show_install_status() -> None:
     else:
         output.err(f"Venv Python missing: {python}")
 
-    # Package: verify the venv can import the agent_worktrees package. This is
-    # mode-agnostic -- it works whether the package is pip-installed into the
-    # venv (current runtime mode) or file-copied into lib/ (legacy) -- and it
-    # reflects whether future invocations will actually resolve the package,
-    # rather than assuming one physical layout.
+    # Package: verify the marker-selected runtime can import agent_worktrees.
+    # cfg.venv_python() uses the same current-version -> completed-slot fallback
+    # as the binstubs, rather than the retired stable .venv path.
     pkg_loc = ""
     if python.exists():
         try:
@@ -886,8 +883,8 @@ def show_install_status() -> None:
         output.ok(f"Package deployed: {lib}")
     else:
         output.err(
-            "Package missing: venv cannot import agent_worktrees "
-            f"(checked venv site-packages and {lib})"
+            "Package missing: active runtime cannot import agent_worktrees "
+            f"(checked {python} and {lib})"
         )
 
     # Wrappers
