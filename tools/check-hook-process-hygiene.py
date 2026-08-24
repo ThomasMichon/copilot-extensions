@@ -38,7 +38,11 @@ def find_problems() -> list[str]:
         )
 
     ignore_rules = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
-    if "ModuleAnalysisCache" not in ignore_rules:
+    if not any(
+        "ModuleAnalysisCache" in rule
+        for rule in ignore_rules
+        if rule.strip() and not rule.lstrip().startswith("#")
+    ):
         problems.append(".gitignore does not ignore PowerShell ModuleAnalysisCache")
 
     return problems

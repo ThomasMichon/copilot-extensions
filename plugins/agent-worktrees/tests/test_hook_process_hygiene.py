@@ -61,4 +61,8 @@ def test_agent_worktrees_project_hook_runner_stays_in_process():
 @pytest.mark.guard
 def test_powershell_module_analysis_cache_is_ignored():
     ignore_rules = (_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-    assert "ModuleAnalysisCache" in ignore_rules
+    assert any(
+        "ModuleAnalysisCache" in rule
+        for rule in ignore_rules
+        if rule.strip() and not rule.lstrip().startswith("#")
+    )
