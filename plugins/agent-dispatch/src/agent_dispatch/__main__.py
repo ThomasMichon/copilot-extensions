@@ -1555,6 +1555,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         status = "proposed,queued,claimed,started,completed,abandoned,dead_letter"
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
+            reservations = c.list_reservations(state="spawned", limit=500)
         inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
         cutoff = _time.time() - max(0, getattr(args, "recent_mins", 120)) * 60
         inbox = [t for t in inbox if _board_keep(t, cutoff)]
@@ -1562,6 +1563,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         from . import tracking
 
         inbox = tracking.enrich_tasks(_enrich(inbox))
+        inbox = tracking.enrich_local_body_tasks(inbox, reservations)
         inbox = [
             {
                 **t,
