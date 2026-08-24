@@ -202,6 +202,15 @@ def test_build_remote_browse_argv_inbox_forwards_awaiting_steer():
         "list", _browse_args(status="proposed", awaiting_steer=True), repo="x")
 
 
+def test_build_remote_browse_argv_inbox_forwards_board_without_status():
+    args = _browse_args(status="proposed", board=True, recent_mins=45)
+    argv = remote_dispatch.build_remote_browse_argv("inbox", args)
+    assert "--board" in argv
+    assert argv[argv.index("--recent-mins") + 1] == "45"
+    assert "--status" not in argv
+    assert "--awaiting-steer" not in argv
+
+
 def test_browse_remote_builds_ssh_command(monkeypatch):
     captured = {}
 

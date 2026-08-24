@@ -234,12 +234,18 @@ def build_remote_browse_argv(
     argv = ["agent-dispatch", subcommand]
     if subcommand == "inbox" and getattr(args, "machine", None):
         argv += ["--machine", args.machine]
-    if subcommand == "inbox" and getattr(args, "awaiting_steer", False):
+    board = subcommand == "inbox" and getattr(args, "board", False)
+    if board:
+        argv += ["--board"]
+        recent_mins = getattr(args, "recent_mins", None)
+        if recent_mins is not None:
+            argv += ["--recent-mins", str(recent_mins)]
+    elif subcommand == "inbox" and getattr(args, "awaiting_steer", False):
         # Forward the steer-surface filter so a remote machine tab shows the
         # peer's awaiting-steer tasks too (needs the peer on a build that knows
         # --awaiting-steer; older peers degrade to their default inbox).
         argv += ["--awaiting-steer"]
-    if getattr(args, "status", None):
+    if not board and getattr(args, "status", None):
         argv += ["--status", args.status]
     if getattr(args, "label", None):
         argv += ["--label", args.label]
