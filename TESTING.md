@@ -39,6 +39,11 @@ python tools/check-version-consistency.py      # plugin.json / pyproject / marke
 - **agent-bridge:** transport, sessions, config, CLI, and the **Session Host**
   (framing, reattach/ack/buffering, reap logic, protocol-aware turn boundaries,
   version-mux, host-index persistence).
+- **agent-dispatch:** queue/coordinator/supervisor behavior plus the opt-in
+  worktree-focus `sessionStart` kernel (payload cwd authority, Git/config and
+  agent-worktrees status-core gates, strict bounded input, exact config shape,
+  symlink/reparse and contaminated-Git-environment rejection, exact output,
+  process-cwd isolation, and live platform-aware Bash/PowerShell parity).
 - **agent-codespaces:** config, lifecycle, resolver, and the credential relay.
 - **agent-containers:** config, lifecycle, the lease broker, and the resolver.
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the

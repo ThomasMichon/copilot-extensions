@@ -6,7 +6,7 @@
   version-control remote or minting an account per agent.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-07
+- **Last revised:** 2026-08-24
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) ·
   the plugin's `plugins/agent-dispatch/` (skill `agent-dispatch`, `pick-and-claim`)
 
@@ -218,6 +218,15 @@ the live transcript (the coordination layer's *summary-status-is-first-class*,
 seen from the delegation side). A caller or operator surveys the fleet's progress
 at a glance without reading each session.
 
+### worktree-focus-before-collision
+When substantial operator-led or task-less work begins, or changes direction,
+the current worktree advertises a concise focus early enough that other agents
+and operators can see it before choosing overlapping work. Before picking work
+likely to collide, an agent checks the current focus advertisements. Where the
+ground layer's status core is available, agent-dispatch reads and writes these
+early signals through that existing worktree record; it never creates a
+parallel focus store.
+
 ### resumable-goal
 A task may be a **durable goal an agent works toward across turns — and across
 embodiments** — not only a one-shot instruction. The record can carry the
@@ -385,6 +394,12 @@ exactly as it would a declaration authored by any other means. The declaration
 the files (*no-second-store*, applied to supervision).
 
 ## Behaviors
+
+### focus-is-an-early-signal-not-a-heartbeat
+Worktree focus is advertised and checked at the start of substantial work and
+advertised again at genuine direction changes. It is not a per-turn timer, an
+ongoing status heartbeat, or a replacement for the ground layer's authoritative
+ongoing disposition and its update cadence.
 
 ### propose-then-queue
 Putting work on the queue is **two acts, not one**. To **propose** is to author a

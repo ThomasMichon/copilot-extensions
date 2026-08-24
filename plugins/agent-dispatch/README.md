@@ -38,6 +38,43 @@ bash "$(copilot plugin path agent-dispatch)/scripts/install.sh" install    # Lin
 # Windows:  pwsh -File <plugin>\scripts\install.ps1 -Action install
 ```
 
+### Opt-in worktree focus guidance
+
+Repositories can opt into a concise `sessionStart` context kernel that asks an
+agent to record substantial operator-led or task-less work before another agent
+chooses overlapping work. The project-owned configuration is
+`.agent-dispatch/session-guidance.json` at the Git root:
+
+```json
+{
+  "session_guidance": {
+    "focus": true
+  }
+}
+```
+
+`session_guidance.focus` is repository-owned because collision posture is a
+project choice. This exact object is the complete schema: unknown keys and
+values other than the literal JSON boolean `true` disable the guidance. Missing,
+malformed, oversized, non-UTF-8, NUL-containing, symlink/reparse-point, or
+out-of-root configuration also fails open. The hook reads the authoritative
+`cwd` from a bounded `sessionStart` payload, resolves its Git root in an isolated
+Git environment, and emits only when `agent-worktrees` identifies a managed
+project and exposes its status core. If agent-worktrees is absent, the plugin
+remains fully standalone and the hook emits `{}`.
+
+The guidance asks agents to check `agent-dispatch focus --list` before choosing
+likely-overlapping work and advertise their own focus early.
+`agent-dispatch focus` is shorthand for writing the same agent-worktrees
+status-core summary; agent-worktrees conduct and regular
+`agent-worktrees status --summary` remain authoritative for ongoing disposition
+and retain their normal cadence. Agent-dispatch maintains no parallel store.
+
+When an adopting repository enables this opt-in, remove any superseded
+hand-written **Worktree Focus** prose from its instructions. This coordination
+hint is not a safety policy, so it needs no static fallback on launch paths that
+do not load hooks, and adopters should not create a duplicate marked block.
+
 `scripts/install.{sh,ps1}` is a lifecycle manager --
 `stamp | provision | install | update | status | start | stop | uninstall`
 (`init.{sh,ps1}` is a thin alias for `install`). `stamp` only writes the
