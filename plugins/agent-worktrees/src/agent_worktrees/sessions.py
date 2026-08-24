@@ -11,6 +11,7 @@ The only sanctioned full walk of the state root is the explicit
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import platform
@@ -1545,6 +1546,19 @@ def _stamp_mux_live_quiet(worktree_id: str, live: bool) -> None:
 # of the ``env -u`` prefix in launch-session.sh.
 _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 
+# Space-free transport flags for a native Copilot
+# ``--interactive <prompt>`` launch. psmux flattens the pane command argv before
+# CreateProcess, so the multi-word prompt travels as base64 to the pane wrapper.
+# A receipt token lets the parent verify that the wrapper decoded and appended
+# the real argument before declaring the successor seeded.
+_INITIAL_PROMPT_B64_FLAG = "--aw-prompt-b64"
+_INITIAL_PROMPT_RECEIPT_B64_FLAG = "--aw-prompt-receipt-b64"
+
+
+def _initial_prompt_receipt_path(token: str) -> Path:
+    """Return the wrapper receipt path for one generated prompt token."""
+    return Path.home() / ".agent-worktrees" / "handoff-prompt-receipts" / token
+
 
 def _mux_bin(mux: str | None = None) -> str:
     """Resolve the multiplexer binary name (psmux on Windows, tmux elsewhere)."""
@@ -1561,31 +1575,91 @@ def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
 
 
 def _mux_pane_cmd(
-    cmd: list[str], *, is_tmux: bool, pane_wrapper: str | None = None
+    worktree_id: str,
+    cmd: list[str],
+    *,
+    is_tmux: bool,
+    pane_wrapper: str | None = None,
+    initial_prompt: str | None = None,
+    prompt_receipt: str | None = None,
 ) -> list[str]:
     """Build the in-pane command vector shared by new-window and new-session.
 
     On Linux/WSL (tmux) the command is prefixed with ``env -u <identity vars>``
-    and wrapped by the pane-wrapper (when present); on Windows (psmux) the server
-    env is already identity-clean and the command runs VERBATIM (a
-    ``pwsh -File <script> … --allow-all`` pane: psmux wraps it in its own
-    ``pwsh -Command`` shell, but the -File child receives its args literally so
-    ``--allow-all`` reaches Copilot -- do NOT collapse to ``& '<script>' …``,
-    which breaks ``--`` passthrough binding, #102). Every element stays a single
-    token (psmux cannot carry a spaces-containing pane arg -- see
-    :func:`build_mux_new_window_argv`).
+    and wrapped by ``pane-wrapper.sh`` (when present). On Windows (psmux) the
+    server env is already identity-clean; ``pane-wrapper.ps1`` preserves the
+    verbatim ``pwsh -File <script> … --allow-all`` child argv while decoding a
+    space-free base64 control argument after psmux's lossy argv reconstruction.
+    Every pane-command element remains a single token (psmux cannot carry an
+    element containing spaces -- see :func:`build_mux_new_window_argv`).
+
+    Native interactive handoff seeding requires the wrapper: without it there is
+    no safe place after psmux to reconstruct the multi-word prompt, so failing
+    the spawn is safer than opening an unseeded successor.
     """
-    if not is_tmux:
-        # psmux: run verbatim; keep every element single-token.
-        return list(cmd)
-    clean: list[str] = ["env"]
-    for var in _IDENTITY_ENV_VARS:
-        clean += ["-u", var]
+    controls: list[str] = []
+    if initial_prompt is not None:
+        if not prompt_receipt:
+            raise RuntimeError(
+                "initial prompt transport requires a receipt token"
+            )
+        encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
+        receipt_encoded = base64.b64encode(
+            prompt_receipt.encode("utf-8")
+        ).decode("ascii")
+        controls = [
+            _INITIAL_PROMPT_B64_FLAG, encoded,
+            _INITIAL_PROMPT_RECEIPT_B64_FLAG, receipt_encoded,
+        ]
     wrapper = pane_wrapper
     if wrapper is None:
-        wrapper = os.path.expanduser("~/.agent-worktrees/bin/pane-wrapper.sh")
+        name = "pane-wrapper.sh" if is_tmux else "pane-wrapper.ps1"
+        wrapper = os.path.expanduser(f"~/.agent-worktrees/bin/{name}")
     if wrapper and os.path.isfile(wrapper) and os.access(wrapper, os.R_OK):
-        return clean + ["bash", wrapper] + list(cmd)
+        if is_tmux:
+            clean: list[str] = ["env"]
+            for var in _IDENTITY_ENV_VARS:
+                clean += ["-u", var]
+            return clean + [
+                "bash", wrapper, "--aw-wt", worktree_id, *controls, *cmd,
+            ]
+        # psmux space-joins pane argv, so even the wrapper path itself cannot be
+        # passed literally when a Windows profile contains spaces. Carry the
+        # wrapper path + its complete argv inside PowerShell's space-free
+        # UTF-16LE EncodedCommand payload instead.
+        wrapper_args = ["-AwWt", worktree_id, *controls, *cmd]
+        wrapper_b64 = base64.b64encode(
+            wrapper.encode("utf-8")
+        ).decode("ascii")
+        args_b64 = base64.b64encode(
+            json.dumps(wrapper_args).encode("utf-8")
+        ).decode("ascii")
+        script = (
+            "$w=[Text.Encoding]::UTF8.GetString("
+            f"[Convert]::FromBase64String('{wrapper_b64}'));"
+            "$j=[Text.Encoding]::UTF8.GetString("
+            f"[Convert]::FromBase64String('{args_b64}'));"
+            "$a=@(ConvertFrom-Json -InputObject $j);"
+            "& $w @a;"
+            "exit $LASTEXITCODE"
+        )
+        encoded_command = base64.b64encode(
+            script.encode("utf-16-le")
+        ).decode("ascii")
+        return [
+            "pwsh.exe", "-NoProfile", "-NoLogo",
+            "-EncodedCommand", encoded_command,
+        ]
+    if initial_prompt is not None:
+        raise RuntimeError(
+            "pane wrapper is required for native interactive prompt transport"
+        )
+    if not is_tmux:
+        # psmux fallback: run verbatim; keep every element single-token.
+        return list(cmd)
+    clean = ["env"]
+    for var in _IDENTITY_ENV_VARS:
+        clean += ["-u", var]
     return clean + list(cmd)
 
 
@@ -1597,15 +1671,15 @@ def build_mux_new_window_argv(
     *,
     mux: str | None = None,
     pane_wrapper: str | None = None,
+    initial_prompt: str | None = None,
+    prompt_receipt: str | None = None,
 ) -> list[str]:
     """Build the argv to open a new window in ``wt-<id>`` running ``cmd``.
 
-    Mirrors the launcher's pane construction: on Linux/WSL the command is
-    prefixed with ``env -u <identity vars>`` and wrapped by the pane-wrapper
-    (when present); on Windows the psmux server env is already identity-clean so
-    the command runs directly. Profile env is re-propagated with ``-e`` for
-    parity regardless of session-env inheritance. ``-P -F '#{pane_id}'`` makes
-    the mux print the new pane id.
+    Mirrors the launcher's pane construction: the command is wrapped by the
+    platform pane-wrapper when present; Linux/WSL additionally strips ambient
+    identity vars. Profile env is re-propagated with ``-e`` for parity regardless
+    of session-env inheritance. ``-P -F '#{pane_id}'`` prints the new pane id.
     """
     mux_bin = _mux_bin(mux)
     is_tmux = mux_bin != "psmux"
@@ -1617,7 +1691,14 @@ def build_mux_new_window_argv(
     for key, val in (env or {}).items():
         argv += ["-e", f"{key}={val}"]
 
-    pane_cmd = _mux_pane_cmd(cmd, is_tmux=is_tmux, pane_wrapper=pane_wrapper)
+    pane_cmd = _mux_pane_cmd(
+        worktree_id,
+        cmd,
+        is_tmux=is_tmux,
+        pane_wrapper=pane_wrapper,
+        initial_prompt=initial_prompt,
+        prompt_receipt=prompt_receipt,
+    )
 
     # No ``--`` separator: mux option parsing stops at the first non-option
     # token (``env`` / the launcher binary), so the rest is taken as the
@@ -1654,7 +1735,12 @@ def build_mux_new_session_argv(
     for key, val in (env or {}).items():
         argv += ["-e", f"{key}={val}"]
 
-    argv += _mux_pane_cmd(cmd, is_tmux=is_tmux, pane_wrapper=pane_wrapper)
+    argv += _mux_pane_cmd(
+        worktree_id,
+        cmd,
+        is_tmux=is_tmux,
+        pane_wrapper=pane_wrapper,
+    )
     return argv
 
 
@@ -1675,10 +1761,12 @@ def mux_new_session(
     import subprocess
 
     sess = f"wt-{worktree_id}"
-    argv = build_mux_new_session_argv(worktree_id, work_dir, cmd, env, mux=mux)
     try:
+        argv = build_mux_new_session_argv(
+            worktree_id, work_dir, cmd, env, mux=mux,
+        )
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "session": sess, "new_pane": None, "error": str(e)}
     if r.returncode != 0:
         return {
@@ -1894,6 +1982,9 @@ def mux_new_window(
     env: dict[str, str] | None = None,
     *,
     mux: str | None = None,
+    initial_prompt: str | None = None,
+    prompt_receipt_timeout: float = 8.0,
+    prompt_startup_grace: float = 3.5,
 ) -> dict:
     """Open + select a new window in ``wt-<id>`` running ``cmd``.
 
@@ -1901,19 +1992,202 @@ def mux_new_window(
     operator is cut over to the successor immediately. Returns
     ``{ok, new_pane, error}``.
     """
+    import secrets
     import subprocess
+    import time
 
-    argv = build_mux_new_window_argv(worktree_id, work_dir, cmd, env, mux=mux)
+    receipt_token = secrets.token_hex(16) if initial_prompt is not None else None
+    receipt_path = (
+        _initial_prompt_receipt_path(receipt_token) if receipt_token else None
+    )
+    if receipt_path:
+        receipt_path.unlink(missing_ok=True)
     try:
+        argv = build_mux_new_window_argv(
+            worktree_id,
+            work_dir,
+            cmd,
+            env,
+            mux=mux,
+            initial_prompt=initial_prompt,
+            prompt_receipt=str(receipt_path) if receipt_path else None,
+        )
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
         return {"ok": False, "new_pane": None, "error": str(e)}
     if r.returncode != 0:
         return {
             "ok": False, "new_pane": None,
             "error": r.stderr.strip() or f"exit {r.returncode}",
         }
-    return {"ok": True, "new_pane": r.stdout.strip() or None, "error": None}
+    new_pane = r.stdout.strip() or None
+    prompt_received = initial_prompt is None
+    prompt_status = None
+    if receipt_path:
+        deadline = time.monotonic() + prompt_receipt_timeout
+        while time.monotonic() < deadline:
+            if receipt_path.exists():
+                try:
+                    candidate = receipt_path.read_text("utf-8").strip()
+                except OSError:
+                    candidate = ""
+                if candidate == "launching" or candidate.startswith("failed:"):
+                    prompt_status = candidate
+                    break
+            time.sleep(0.05)
+        if prompt_status == "launching":
+            startup_deadline = time.monotonic() + prompt_startup_grace
+            mux_bin = _mux_bin(mux)
+            while time.monotonic() < startup_deadline:
+                try:
+                    prompt_status = receipt_path.read_text("utf-8").strip()
+                except OSError:
+                    prompt_status = None
+                if prompt_status != "launching":
+                    break
+                if not new_pane or not _mux_pane_alive(new_pane, mux_bin):
+                    prompt_status = "failed:pane-exited"
+                    break
+                time.sleep(0.05)
+            prompt_received = bool(
+                prompt_status == "launching"
+                and new_pane
+                and _mux_pane_alive(new_pane, mux_bin)
+            )
+            if prompt_status == "launching" and not prompt_received:
+                prompt_status = "failed:pane-exited"
+        receipt_path.unlink(missing_ok=True)
+        if not prompt_received:
+            # Snapshot at the failure boundary, not immediately after new-window:
+            # the wrapper starts Copilot after writing its provisional receipt,
+            # so only the late tree is guaranteed to include the real child.
+            process_tree = _mux_pane_process_tree(new_pane, mux=mux)
+            cleanup = _retire_failed_successor(
+                new_pane,
+                process_tree,
+                mux=mux,
+            )
+            return {
+                "ok": False,
+                "new_pane": new_pane,
+                "prompt_received": False,
+                "prompt_status": prompt_status,
+                "cleanup": cleanup,
+                "error": (
+                    "successor did not confirm a stable native interactive "
+                    f"prompt launch (status: {prompt_status or 'no-receipt'})"
+                ),
+            }
+    return {
+        "ok": True,
+        "new_pane": new_pane,
+        "prompt_received": prompt_received,
+        "prompt_status": prompt_status,
+        "error": None,
+    }
+
+
+def _mux_pane_pid(pane_id: str | None, *, mux: str | None = None) -> int | None:
+    """Return the root pid of one mux pane, or ``None`` when unavailable."""
+    if not pane_id:
+        return None
+    import subprocess
+
+    mux_bin = _mux_bin(mux)
+    try:
+        r = subprocess.run(
+            [
+                mux_bin, "display-message", "-p", "-t", pane_id,
+                "#{pane_pid}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if r.returncode != 0:
+            return None
+        pid = int(r.stdout.strip())
+        return pid if pid > 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
+
+
+def _mux_pane_process_tree(
+    pane_id: str | None, *, mux: str | None = None,
+) -> set[int]:
+    """Snapshot the exact process tree rooted at ``pane_id`` before teardown."""
+    pane_pid = _mux_pane_pid(pane_id, mux=mux)
+    if not pane_pid:
+        return set()
+    try:
+        from . import reclaim
+
+        table = reclaim.build_process_table()
+        return {pane_pid, *reclaim.descendants_of(pane_pid, table)}
+    except OSError:
+        return {pane_pid}
+
+
+def _retire_failed_successor(
+    pane_id: str | None,
+    process_tree: set[int],
+    *,
+    mux: str | None = None,
+) -> dict:
+    """Retire a failed successor pane and terminate its exact surviving tree."""
+    import platform
+    import signal
+    import time
+
+    retire = (
+        mux_retire_pane(pane_id, mux=mux)
+        if pane_id else {"ok": True, "gone": True, "method": "no-pane"}
+    )
+    terminated: list[int] = []
+    survivors: list[int] = []
+    try:
+        from . import locks, procs
+
+        # Children first, pane root last. The snapshot is pane-specific, so this
+        # cannot splash onto the predecessor or another pane in the same worktree.
+        for pid in sorted(process_tree, reverse=True):
+            if not locks.pid_alive(pid):
+                continue
+            if procs.terminate_pid(pid):
+                terminated.append(pid)
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            survivors = [
+                pid for pid in sorted(process_tree) if locks.pid_alive(pid)
+            ]
+            if not survivors:
+                break
+            time.sleep(0.05)
+        # procs.terminate_pid is SIGTERM on POSIX. Escalate the exact pane tree
+        # after the bounded grace period; Windows already uses TerminateProcess.
+        if survivors and platform.system() != "Windows":
+            for pid in survivors:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                survivors = [
+                    pid for pid in survivors if locks.pid_alive(pid)
+                ]
+                if not survivors:
+                    break
+                time.sleep(0.05)
+    except OSError:
+        survivors = sorted(process_tree)
+    return {
+        "retire": retire,
+        "process_tree": sorted(process_tree),
+        "terminated": terminated,
+        "survivors": survivors,
+        "ok": bool(retire.get("gone")) and not survivors,
+    }
 
 
 def _mux_pane_alive(pane_id: str, mux_bin: str) -> bool:

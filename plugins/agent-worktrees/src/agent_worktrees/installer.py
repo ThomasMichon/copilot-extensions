@@ -346,7 +346,9 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     scripts = Path(repo_dir) / "plugins" / "agent-worktrees" / "scripts"
 
     if platform.system() == "Windows":
-        for name in ("launch-session.cmd", "launch-session.ps1"):
+        for name in (
+            "launch-session.cmd", "launch-session.ps1", "pane-wrapper.ps1",
+        ):
             src = assets / name
             if not src.exists():
                 output.err(f"{name} not found in {assets}")
@@ -354,13 +356,14 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
             shutil.copy2(src, bd / name)
             output.ok(f"Wrapper: {bd / name}")
     else:
-        src = assets / "launch-session.sh"
-        if not src.exists():
-            output.err(f"launch-session.sh not found in {assets}")
-            return False
-        shutil.copy2(src, bd / "launch-session.sh")
-        (bd / "launch-session.sh").chmod(0o755)
-        output.ok(f"Wrapper: {bd / 'launch-session.sh'}")
+        for name in ("launch-session.sh", "pane-wrapper.sh"):
+            src = assets / name
+            if not src.exists():
+                output.err(f"{name} not found in {assets}")
+                return False
+            shutil.copy2(src, bd / name)
+            (bd / name).chmod(0o755)
+            output.ok(f"Wrapper: {bd / name}")
 
     # Deploy bootstrap-check scripts (called by sessionStart hook) + the
     # session-conduct injector (sessionStart additionalContext) + the preToolUse

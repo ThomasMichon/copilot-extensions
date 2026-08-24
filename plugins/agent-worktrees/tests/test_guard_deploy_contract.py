@@ -67,3 +67,23 @@ def test_all_installers_deploy_every_py_hook():
         "python hook(s) wired in hooks.json but not deployed by an "
         "installer (they would silently no-op):\n  " + "\n  ".join(missing))
 
+
+def test_all_installers_deploy_platform_pane_wrapper():
+    installers = {
+        "install.ps1": _INSTALL_PS1.read_text("utf-8"),
+        "install.sh": _INSTALL_SH.read_text("utf-8"),
+        "installer.py": _INSTALLER_PY.read_text("utf-8"),
+    }
+    required = {
+        "install.ps1": "pane-wrapper.ps1",
+        "install.sh": "pane-wrapper.sh",
+        "installer.py": ("pane-wrapper.ps1", "pane-wrapper.sh"),
+    }
+    missing: list[str] = []
+    for name, expected in required.items():
+        for wrapper in (
+            (expected,) if isinstance(expected, str) else expected
+        ):
+            if wrapper not in installers[name]:
+                missing.append(f"{name} does not deploy {wrapper}")
+    assert not missing, "\n".join(missing)
