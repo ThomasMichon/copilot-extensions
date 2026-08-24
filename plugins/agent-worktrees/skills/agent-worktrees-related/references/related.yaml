@@ -24,6 +24,11 @@ related:
                    workspace_folder: /workspaces/example-web,
                    machines: [dev6] }
     delegate: { via: agent-codespaces }   # agent-bridge | agent-codespaces | agent-containers | none
+    # Related-repo plugins are copied from the dispatch host's installed
+    # payload and passed to the destination as --plugin-dir. Git-backed and
+    # repo-local marketplaces both work when installed on the dispatch host.
+    plugins:
+      - { source: example-web-agent@example-marketplace }
     # Ownership posture (drives e.g. the AI-attribution decision). Derived ONCE
     # at registration from the operator's own gh account logins + the remote,
     # then authoritative; an explicit value always wins over the derivation.

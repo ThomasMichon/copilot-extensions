@@ -68,6 +68,8 @@ related:
                    workspace_folder: /workspaces/example-web,
                    machines: [dev6] }                         # local fleet: dev6 only
     delegate: { via: agent-codespaces }
+    plugins:
+      - { source: example-web-agent@example-marketplace }
 ```
 
 - **`role`** -- what the repo is to this one (free-form; common values above).
@@ -85,6 +87,12 @@ related:
     (often *not* the venue `repo` name).
 - **`delegate.via`** -- how to hand work to the agent that owns the repo:
   `agent-bridge`, `agent-codespaces`, `agent-containers`, or `none`.
+- **`plugins`** -- plugins staged into the related repo's dispatched agent.
+  For CodeSpace/container venues, the dispatch path copies each plugin from the
+  host's installed payload and passes the extracted destination as
+  `--plugin-dir` (no marketplace fetch in the venue). Git-backed and repo-local
+  directory marketplaces are both supported, but every listed source must be
+  enabled and installed on the machine that dispatches the work.
 - **`ownership`** -- the operator's ownership posture toward the repo:
   `owned` (the operator wholly owns it -- their own gh namespace, or explicitly
   marked), `internal` (org-internal, not owned -- e.g. an enterprise ADO org repo),
@@ -113,7 +121,16 @@ related primary [<name>]                 Show or set the primary
 related resolve [<name>]                 How to work on it from here (see working-cross-repo)
 related classify [<name>|--all] [--overwrite]   Derive ownership + persist (unset only)
 related owners [--json]                  List wholly-owned targets (ownership=owned)
+related --conduct                        Emit merged session-start guidance
 ```
+
+`related --conduct` is the dynamic source used by the `session-conduct` hook.
+It combines all configured repos from the normal config loader (committed
+in-repo settings, machine-side overrides, and `config.d/` injections) with the
+grafted related index (installed plugins, harness, and knowledge overlay). It
+reports the derived PR-flow profile separately from the post-`create-pr`
+disposition, so `pr-self-merge`/`pr-human-merge` is never confused with
+`keep-alive`/`detach`.
 
 `add` options: `--role R`, `--summary S`, `--doc PATH`, `--delegate D`,
 `--ownership owned|internal|external`, `--owner ACCOUNT`,
