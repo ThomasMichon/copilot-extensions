@@ -126,6 +126,33 @@ def test_sweep_ctx_rendered_once(tmp_path, monkeypatch):
     assert len(seg_sets) == 2                            # disposition: every pass
 
 
+def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/p1/a")
+    m._register_session_for_monitor("wt-b", "/p1/b")
+    m._register_session_for_monitor("wt-c", "/p2/c")
+    monkeypatch.setattr(
+        m, "_monitor_list_sessions",
+        lambda mux_bin: {"wt-a": 1, "wt-b": 1, "wt-c": 1})
+
+    project_by_path = {"/p1/a": "p1", "/p1/b": "p1", "/p2/c": "p2"}
+
+    def _activate(path, *, force):
+        m.cfg.set_active_project(project_by_path[path])
+
+    warmed: list[str] = []
+    monkeypatch.setattr(m, "_activate_project_for_path", _activate)
+    monkeypatch.setattr(m, "_warm_list_cache_for_active_project",
+                        lambda **kw: warmed.append(m.cfg.project_name()) or 1)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    _capture_set(monkeypatch)
+
+    assert m._monitor_sweep("tmux", "T", "P", set()) == 3
+    assert warmed == ["p1", "p2"]
+
+
 def test_sweep_transient_mux_failure_holds(tmp_path, monkeypatch):
     reg = tmp_path / "reg"
     monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
