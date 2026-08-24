@@ -164,8 +164,10 @@ running (`agent-bridge start`). The essential one is **send**:
 
 ```bash
 agent-bridge send <agent|machine|codespace:name|container:name> "<prompt>"
-agent-bridge agents          # list registered agents (--json)
-agent-bridge machines        # list machines + SSH readiness (--json)
+agent-bridge agents          # list cwd-project agents (--json)
+agent-bridge machines        # list cwd-project machines + SSH readiness (--json)
+agent-bridge --project <repo> agents
+agent-bridge agents --all-projects
 ```
 
 Core service setup is standalone. Optional sibling providers compose through
@@ -568,7 +570,12 @@ auto-discovered from `projects.yaml`. (`acp-agents.json` is retired; an explicit
 `agents_config` is still honored as a deprecated override.) Use
 `agent-bridge agents` to list available agents.
 
-Run `agent-bridge agents` to see the full list for your deployment.
+Inside an adopted repo, `agent-bridge agents` and `agent-bridge machines` show
+that CWD project's catalog. Use top-level `--project <repo>` to address another
+project without changing directories, or `--all-projects` for the full
+deployment. Derived machine agents also advertise stable SSH aliases; alias
+matching is case-insensitive, so presentation-oriented `display_name` casing is
+not part of the addressing contract.
 
 ### Addressing: `<repo>@<venue>` (repo × venue)
 
@@ -755,6 +762,8 @@ takes the work over (see the `context-handoff:context-handoff` and `agent-dispat
   routing/log evidence from the guidebook and file a bug; do not manually
   restart the shared daemon unless the operator directs it.
 - **"Agent not found"** -- check `agent-bridge agents` for available names.
+  Use `agent-bridge agents --all-projects` if the target belongs to another
+  topology profile.
   The topology config may not include the agent you're looking for.
 - **Session stuck in RUNNING** -- the downstream agent may be waiting for
   permission or processing a long tool call. Inspect with

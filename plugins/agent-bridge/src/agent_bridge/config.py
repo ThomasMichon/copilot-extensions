@@ -212,6 +212,64 @@ def _state_root_machines_yaml(repo: Path) -> str | None:
     return None
 
 
+def _canonical_repo_root(repo: Path) -> Path:
+    """Return a linked worktree's stable anchor, or ``repo`` unchanged.
+
+    Topology profiles outlive individual worktrees. Persisting a path beneath a
+    linked worktree therefore guarantees a stale profile once that worktree is
+    removed. Git's common directory identifies the anchor without requiring
+    agent-worktrees to be installed.
+    """
+    import shutil
+    import subprocess
+
+    git = shutil.which("git")
+    if not git:
+        return repo
+    try:
+        top_proc = subprocess.run(
+            [git, "-C", str(repo), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if top_proc.returncode != 0 or not (top_proc.stdout or "").strip():
+            return repo
+        if Path(top_proc.stdout.strip()).resolve() != repo:
+            return repo
+        common_proc = subprocess.run(
+            [git, "-C", str(repo), "rev-parse", "--git-common-dir"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return repo
+    if common_proc.returncode != 0 or not (common_proc.stdout or "").strip():
+        return repo
+
+    common = Path(common_proc.stdout.strip())
+    if not common.is_absolute():
+        common = repo / common
+    common = common.resolve()
+    if common.name != ".git":
+        return repo
+
+    anchor = common.parent.resolve()
+    if anchor == repo:
+        return repo
+    try:
+        root_proc = subprocess.run(
+            [git, "-C", str(anchor), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return repo
+    if root_proc.returncode != 0 or not (root_proc.stdout or "").strip():
+        return repo
+    if Path(root_proc.stdout.strip()).resolve() != anchor:
+        return repo
+
+    log.info("Canonicalized linked worktree %s to anchor %s", repo, anchor)
+    return anchor
+
+
 def adopt_topology(
     profile_name: str,
     repo_path: str,
@@ -229,9 +287,10 @@ def adopt_topology(
     """
     from .models import TopologyProfile
 
-    repo = Path(repo_path).resolve()
-    if not repo.is_dir():
-        raise FileNotFoundError(f"Repo path does not exist: {repo}")
+    requested_repo = Path(repo_path).resolve()
+    if not requested_repo.is_dir():
+        raise FileNotFoundError(f"Repo path does not exist: {requested_repo}")
+    repo = _canonical_repo_root(requested_repo)
 
     # Auto-discover machines.yaml -- conventional in-repo locations first, then
     # the knowledge overlay (a stateless harness carries no machines.yaml of its
@@ -262,8 +321,13 @@ def adopt_topology(
     # (deprecated back-compat) but never auto-discovered.
 
     if not machines_yaml:
+        canonical_note = (
+            f" (canonicalized from linked worktree {requested_repo})"
+            if repo != requested_repo
+            else ""
+        )
         raise FileNotFoundError(
-            f"No machines.yaml found in {repo}. "
+            f"No machines.yaml found in {repo}{canonical_note}. "
             "Specify it explicitly with --machines-yaml."
         )
 

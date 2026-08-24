@@ -186,6 +186,98 @@ class TestAdoptTopology:
         if profile.machines_yaml:
             assert "\\" not in profile.machines_yaml
 
+    def test_linked_worktree_persists_anchor_path(
+        self, config_home, tmp_path, monkeypatch,
+    ):
+        import types
+
+        anchor = tmp_path / "repo"
+        anchor.mkdir()
+        (anchor / "machines.yaml").write_text("machines: {}")
+        worktree = tmp_path / "repo.worktrees" / "feature"
+        worktree.mkdir(parents=True)
+        (worktree / "machines.yaml").write_text("machines: {temporary: {}}")
+
+        monkeypatch.setattr("shutil.which", lambda name: "git")
+
+        def fake_run(args, **kwargs):
+            if args[-1] == "--show-toplevel":
+                root = worktree if Path(args[2]) == worktree else anchor
+                return types.SimpleNamespace(
+                    returncode=0, stdout=str(root), stderr="",
+                )
+            if args[-1] == "--git-common-dir":
+                return types.SimpleNamespace(
+                    returncode=0, stdout=str(anchor / ".git"), stderr="",
+                )
+            raise AssertionError(args)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        cfg = adopt_topology("linked", str(worktree))
+        assert cfg.topologies["linked"].machines_yaml == (
+            str(anchor / "machines.yaml").replace("\\", "/")
+        )
+
+    def test_explicit_worktree_path_is_not_remapped(
+        self, config_home, tmp_path, monkeypatch,
+    ):
+        import types
+
+        anchor = tmp_path / "repo"
+        anchor.mkdir()
+        (anchor / "machines.yaml").write_text("machines: {}")
+        worktree = tmp_path / "repo.worktrees" / "feature"
+        worktree.mkdir(parents=True)
+        explicit = worktree / "machines.yaml"
+        explicit.write_text("machines: {temporary: {}}")
+
+        monkeypatch.setattr("shutil.which", lambda name: "git")
+
+        def fake_run(args, **kwargs):
+            if args[-1] == "--show-toplevel":
+                root = worktree if Path(args[2]) == worktree else anchor
+                return types.SimpleNamespace(
+                    returncode=0, stdout=str(root), stderr="",
+                )
+            if args[-1] == "--git-common-dir":
+                return types.SimpleNamespace(
+                    returncode=0, stdout=str(anchor / ".git"), stderr="",
+                )
+            raise AssertionError(args)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        cfg = adopt_topology(
+            "explicit-linked", str(worktree), machines_yaml=str(explicit),
+        )
+        assert cfg.topologies["explicit-linked"].machines_yaml == (
+            str(explicit).replace("\\", "/")
+        )
+
+    def test_repo_subdirectory_is_not_canonicalized(
+        self, config_home, tmp_path, monkeypatch,
+    ):
+        import types
+
+        root = tmp_path / "repo"
+        nested = root / "config"
+        nested.mkdir(parents=True)
+        (nested / "machines.yaml").write_text("machines: {nested: {}}")
+        (root / "machines.yaml").write_text("machines: {root: {}}")
+        monkeypatch.setattr("shutil.which", lambda name: "git")
+
+        def fake_run(args, **kwargs):
+            if args[-1] == "--show-toplevel":
+                return types.SimpleNamespace(
+                    returncode=0, stdout=str(root), stderr="",
+                )
+            raise AssertionError(args)
+
+        monkeypatch.setattr("subprocess.run", fake_run)
+        cfg = adopt_topology("nested", str(nested))
+        assert cfg.topologies["nested"].machines_yaml == (
+            str(nested / "machines.yaml").replace("\\", "/")
+        )
+
 
 class TestStateRootMachinesYaml:
     """_state_root_machines_yaml -- the E1e knowledge-overlay resolver (#947)."""

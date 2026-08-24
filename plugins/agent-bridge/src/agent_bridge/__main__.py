@@ -1296,33 +1296,83 @@ def _cmd_service(args: argparse.Namespace) -> None:
 def _cmd_agents(args: argparse.Namespace) -> None:
     """List registered agents."""
     client = _get_client()
-    agents = client.list_agents()
+    agents, topology_errors = client.list_agents_with_diagnostics()
+    project = _listing_project(args)
+    total = len(agents)
+    if project:
+        project_key = project.casefold()
+        agents = [
+            agent for agent in agents
+            if (
+                agent.get("project") is None
+                or str(agent.get("project")).casefold() == project_key
+            )
+        ]
     if args.json:
         _json_out(agents)
+    elif not agents:
+        if project and total:
+            print(f"(no agents in project {project!r}; use --all-projects)")
+        else:
+            print("(no agents registered)")
+    else:
+        for i, a in enumerate(agents):
+            name = a.get("name", "")
+            display = a.get("display_name", "")
+            target_type = a.get("target_type", "")
+            host = a.get("host", "")
+            aliases = a.get("aliases") or []
+            managed = a.get("managed", False)
+            # Use display name as heading when available, otherwise raw name
+            heading = display or name
+            print(heading)
+            # Show raw name when it differs from display (e.g. codespace agents)
+            if display and name != display:
+                print(f"  Name:     {name}")
+            if aliases:
+                print(f"  Aliases:  {', '.join(aliases)}")
+            if target_type:
+                print(f"  Type:     {target_type}")
+            if host:
+                print(f"  Host:     {host}")
+            if managed:
+                print(f"  Managed:  {managed}")
+            if i < len(agents) - 1:
+                print()
+    if project and total > len(agents) and not args.json and agents:
+        print(
+            f"\n({total - len(agents)} other-project agent(s) hidden; "
+            "use --all-projects)"
+        )
+    _report_topology_errors(topology_errors)
+
+
+def _report_topology_errors(errors: list[str]) -> None:
+    """Print invalid-profile diagnostics after any valid partial results."""
+    if not errors:
         return
-    if not agents:
-        print("(no agents registered)")
-        return
-    for i, a in enumerate(agents):
-        name = a.get("name", "")
-        display = a.get("display_name", "")
-        target_type = a.get("target_type", "")
-        host = a.get("host", "")
-        managed = a.get("managed", False)
-        # Use display name as heading when available, otherwise raw name
-        heading = display or name
-        print(heading)
-        # Show raw name when it differs from display (e.g. codespace agents)
-        if display and name != display:
-            print(f"  Name:     {name}")
-        if target_type:
-            print(f"  Type:     {target_type}")
-        if host:
-            print(f"  Host:     {host}")
-        if managed:
-            print(f"  Managed:  {managed}")
-        if i < len(agents) - 1:
-            print()
+    print(
+        f"[FAIL] {len(errors)} topology profile error(s):",
+        file=sys.stderr,
+    )
+    for error in errors:
+        print(f"  - {error}", file=sys.stderr)
+    sys.exit(2)
+
+
+def _listing_project(args: argparse.Namespace) -> str | None:
+    """Resolve list scope and reject contradictory explicit flags."""
+    if args.all_projects:
+        if _PROJECT_OVERRIDE and not _PROJECT_ROUTED:
+            print(
+                "[FAIL] --project and --all-projects are mutually exclusive",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        return None
+    if args.json and not _PROJECT_OVERRIDE:
+        return None
+    return _sender_repo()
 
 
 def _live_session_summary_line(s: dict[str, Any]) -> str:
@@ -1423,22 +1473,49 @@ def _cmd_machines(args: argparse.Namespace) -> None:
 
     client = _get_client()
     try:
-        machines = client.list_machines()
+        machines, topology_errors = client.list_machines_with_diagnostics()
     except BridgeClientError as exc:
         if exc.status == 404:
             print("[>] Machines endpoint not available (service may need restart)")
             return
         raise
+    project = _listing_project(args)
+    total = len(machines)
+    if project:
+        project_key = project.casefold()
+        agents, agent_errors = client.list_agents_with_diagnostics()
+        topology_errors = list(dict.fromkeys([*topology_errors, *agent_errors]))
+        project_hosts = {
+            str(agent.get("machine_key"))
+            for agent in agents
+            if (
+                (
+                    agent.get("project") is None
+                    or str(agent.get("project")).casefold() == project_key
+                )
+                and agent.get("machine_key")
+            )
+        }
+        machines = [
+            machine for machine in machines
+            if machine.get("key") in project_hosts
+        ]
     if args.json:
         _json_out(machines)
-        return
-    _table(machines, [
-        ("key", "MACHINE", 20),
-        ("display_name", "NAME", 24),
-        ("environment", "ENV", 16),
-        ("role", "ROLE", 30),
-        ("ssh_ready", "SSH", 5),
-    ])
+    else:
+        _table(machines, [
+            ("key", "MACHINE", 20),
+            ("display_name", "NAME", 24),
+            ("environment", "ENV", 16),
+            ("role", "ROLE", 30),
+            ("ssh_ready", "SSH", 5),
+        ])
+        if project and total > len(machines):
+            print(
+                f"\n({total - len(machines)} other-project machine(s) hidden; "
+                "use --all-projects)"
+            )
+    _report_topology_errors(topology_errors)
 
 
 def _cmd_drain(args: argparse.Namespace) -> None:
@@ -2300,12 +2377,13 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
     """
     matches: list[str] = []
     bare = ":" not in target
+    target_key = target.casefold()
     for a in agents:
         name = a.get("name", "")
         if not name:
             continue
         forms = {name, *(a.get("aliases") or [])}
-        if target in forms:
+        if target_key in {form.casefold() for form in forms}:
             if name not in matches:
                 matches.append(name)
             continue
@@ -2315,8 +2393,10 @@ def _match_agents(target: str, agents: list[dict]) -> list[str]:
             # or every local agent collides with its own elevated twin.
             if a.get("bare_addressable", True) is False:
                 continue
-            bare_forms = {f.split(":", 1)[1] for f in forms if ":" in f}
-            if target in bare_forms and name not in matches:
+            bare_forms = {
+                f.split(":", 1)[1].casefold() for f in forms if ":" in f
+            }
+            if target_key in bare_forms and name not in matches:
                 matches.append(name)
     return matches
 
@@ -2459,9 +2539,10 @@ def _worktrees_get(key: str) -> str | None:
 
 # Explicit target project set by a top-level ``--project``/`-p` (e.g. injected by
 # the `<repo> <slug>` router). Overrides the caller-cwd-derived project in
-# ``_sender_repo()`` for the project-addressed verbs (send/create); left None for
-# a bare cwd-addressed invocation. Fleet-global verbs ignore it.
+# ``_sender_repo()`` for project-addressed verbs; left None for a bare
+# cwd-addressed invocation outside an adopted project.
 _PROJECT_OVERRIDE: str | None = None
+_PROJECT_ROUTED = False
 
 
 def _set_project_override(project: str | None) -> None:
@@ -2470,29 +2551,26 @@ def _set_project_override(project: str | None) -> None:
     _PROJECT_OVERRIDE = project.strip() if project and project.strip() else None
 
 
-# Verbs that actually consume the top-level ``--project`` (they feed it into the
-# remote worktree resolve via ``_sender_repo()``). Every other verb is
-# fleet-global and ignores ``--project`` -- see ``_guard_project_scope``.
-_PROJECT_CONSUMING_VERBS = frozenset({"send", "create"})
+# Verbs that consume the top-level ``--project``. ``send``/``create`` feed it
+# into remote worktree resolution; ``agents``/``machines`` use it to scope the
+# displayed catalog. Other verbs remain fleet-global.
+_PROJECT_CONSUMING_VERBS = frozenset({"agents", "create", "machines", "send"})
 
 
 def _guard_project_scope(parser: argparse.ArgumentParser,
                          args: argparse.Namespace) -> None:
     """Fail loud on an *explicit* ``--project`` for a verb that won't use it.
 
-    ``--project`` is meaningful only for the project-addressed verbs
-    (``send``/``create``); on a fleet-global verb (``agents``/``machines``/
-    ``sessions``/…) it is a no-op. Silently swallowing an explicitly-passed
-    ``--project`` is a foot-gun for agentic callers, so we bounce instead
-    (#1080) -- but ONLY when the flag was user-typed.
+    Silently swallowing an explicitly-passed ``--project`` is a foot-gun for
+    agentic callers, so verbs that do not consume it bounce (#1080).
 
-    The ``<repo> <slug>`` router injects ``--project`` *uniformly* for the
-    project-consuming slugs (incl. on their fleet-global verbs) and marks it
-    ``AGENT_WORKTREES_PROJECT_ROUTED=1``; a *routed* no-op stays silent so the
-    uniform ``<repo> <slug>`` surface (e.g. ``<repo> bridge agents``) keeps
-    working. The marker is consumed here so it never leaks to child processes.
+    The ``<repo> <slug>`` router marks its injected flag with
+    ``AGENT_WORKTREES_PROJECT_ROUTED=1``. The marker is consumed here so it
+    never leaks to child processes.
     """
+    global _PROJECT_ROUTED
     routed = os.environ.pop("AGENT_WORKTREES_PROJECT_ROUTED", None) == "1"
+    _PROJECT_ROUTED = routed
     if getattr(args, "project", None) is None:
         return
     if routed:
@@ -3526,14 +3604,17 @@ def _cmd_agent(args: argparse.Namespace) -> None:
         print("[FAIL] --agent is required for agent mode", file=sys.stderr)
         sys.exit(1)
 
-    # Validate agent exists
-    if resolver and agent_name not in resolver.agents:
+    # Validate agent exists and normalize aliases to the canonical identity.
+    canonical_agent = resolver.canonical_agent_name(agent_name) if resolver else None
+    if resolver and canonical_agent is None:
         available = list(resolver.agents.keys())
         print(
             f"[FAIL] Agent '{agent_name}' not found. Available: {available}",
             file=sys.stderr,
         )
         sys.exit(1)
+    if canonical_agent:
+        agent_name = canonical_agent
 
     bridge_agent = BridgeAgent(
         sm, resolver=resolver, default_agent=agent_name,
@@ -3674,11 +3755,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--project", "-p", dest="project", default=None, metavar="REPO",
-        help="Scope project-addressed verbs (send/create) to REPO instead of "
-             "the caller's cwd project: the remote worktree resolve targets "
-             "REPO. Injected by the `<repo> <slug>` router (e.g. `<repo> "
-             "bridge send <machine>`). Passing it explicitly on a fleet-global "
-             "verb (agents/machines/sessions) is an error, not a silent no-op.",
+        help="Scope project-addressed verbs to REPO instead of the caller's cwd "
+             "project. For send/create the remote worktree resolve targets REPO; "
+             "for agents/machines the displayed catalog is filtered to REPO. "
+             "Injected by the `<repo> <slug>` router.",
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -3812,9 +3892,17 @@ def build_parser() -> argparse.ArgumentParser:
     # -- Client commands --
 
     agents_p = sub.add_parser("agents", help="List registered agents")
+    agents_p.add_argument(
+        "--all-projects", action="store_true",
+        help="Show the fleet-wide catalog instead of the cwd/--project scope",
+    )
     agents_p.set_defaults(func=_cmd_agents)
 
     machines_p = sub.add_parser("machines", help="List topology machines")
+    machines_p.add_argument(
+        "--all-projects", action="store_true",
+        help="Show every topology machine instead of the cwd/--project scope",
+    )
     machines_p.set_defaults(func=_cmd_machines)
 
     live_p = sub.add_parser(

@@ -9,7 +9,9 @@ import pytest
 
 from agent_bridge.agent_registry import (
     AgentConfig,
+    AgentRegistryLoadError,
     AgentResolver,
+    build_resolver,
     discover_local_agents,
     load_agent_registry,
     load_elevated_projects,
@@ -350,6 +352,20 @@ class TestAgentResolver:
         assert managed["spawnable"] is False
         assert managed["managed"] is True
 
+    def test_static_aliases_are_case_insensitive(self):
+        agents = {
+            "Pretty Name": AgentConfig(
+                name="Pretty Name",
+                aliases=["stable-name"],
+                project="my-project",
+            ),
+        }
+        resolver = AgentResolver(agents, {})
+        assert resolver.resolve("pretty name").project == "my-project"
+        assert resolver.resolve("STABLE-NAME").project == "my-project"
+        listing = resolver.list_agents()
+        assert listing[0]["aliases"] == ["stable-name"]
+
 
     def test_resolve_loopback_returns_local(self):
         """SSH agent targeting the local machine should resolve as local."""
@@ -498,6 +514,20 @@ class TestLoadAgentRegistry:
         reg_path.write_text("{invalid json")
         registry = load_agent_registry(reg_path)
         assert isinstance(registry, dict)
+
+    def test_strict_invalid_json_raises(self, tmp_path: Path):
+        reg_path = tmp_path / "agents.json"
+        reg_path.write_text("{invalid json")
+        with pytest.raises(AgentRegistryLoadError, match="failed to parse"):
+            load_agent_registry(reg_path, strict=True)
+
+    def test_aliases_must_be_list_of_strings(self, tmp_path: Path):
+        reg_path = tmp_path / "agents.json"
+        reg_path.write_text(json.dumps({
+            "target": {"aliases": "stable-name"},
+        }))
+        with pytest.raises(AgentRegistryLoadError, match="list of strings"):
+            load_agent_registry(reg_path, strict=True)
 
 
 class TestDiscoverLocalAgents:
@@ -1297,6 +1327,8 @@ class TestControlPlaneMachineAgents:
         assert agents["dev6"].derived is True
         assert agents["dev6-wsl"].ssh_environment == "wsl"
         assert agents["cloud1"].host == "host-cloud1"
+        assert agents["dev6"].aliases == ["host-dev6"]
+        assert agents["dev6-wsl"].aliases == ["host-dev6-wsl"]
 
     def test_book2_has_no_agent(self):
         # No ssh environments -> no control-plane agent.
@@ -1306,6 +1338,61 @@ class TestControlPlaneMachineAgents:
     def test_no_project_no_control_plane_agents(self):
         agents = derive_topology_agents(_topo_machines(), None, [], None)
         assert agents == {}
+
+
+class TestTopologyDiagnostics:
+
+    def test_missing_profile_is_reported_without_hiding_valid_profile(
+        self, tmp_path, monkeypatch,
+    ):
+        valid = tmp_path / "valid-machines.yaml"
+        valid.write_text(textwrap.dedent("""
+            control_plane:
+              project: valid-project
+            machines:
+              host-a:
+                display_name: host-a
+                ssh:
+                  ready: true
+                  environments:
+                    - name: linux
+                      alias: host-a
+                      shell: bash
+        """))
+        monkeypatch.setenv(
+            "AGENT_WORKTREES_PROJECTS_YAML",
+            str(tmp_path / "no-projects.yaml"),
+        )
+        cfg = type("Cfg", (), {
+            "topologies": {
+                "valid": TopologyProfile(machines_yaml=str(valid)),
+                "stale": TopologyProfile(
+                    machines_yaml=str(tmp_path / "gone" / "machines.yaml"),
+                ),
+            },
+        })()
+        resolver = build_resolver(cfg)
+        assert resolver is not None
+        assert "host-a" in resolver.agents
+        assert any("stale:" in error for error in resolver.topology_errors)
+
+    def test_malformed_explicit_registry_is_reported(
+        self, tmp_path, monkeypatch,
+    ):
+        invalid = tmp_path / "agents.json"
+        invalid.write_text("{invalid json")
+        monkeypatch.setenv(
+            "AGENT_WORKTREES_PROJECTS_YAML",
+            str(tmp_path / "no-projects.yaml"),
+        )
+        cfg = type("Cfg", (), {
+            "topologies": {
+                "invalid": TopologyProfile(agents_config=str(invalid)),
+            },
+        })()
+        resolver = build_resolver(cfg)
+        assert resolver is not None
+        assert any("failed to parse" in error for error in resolver.topology_errors)
 
 
 class TestDerivedAgentDefaults:

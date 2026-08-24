@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 from agent_bridge.topology import (
+    TopologyLoadError,
     load_machines_yaml,
     parse_machines_yaml,
 )
@@ -167,3 +170,13 @@ class TestLoadMachinesYaml:
         machines = load_machines_yaml(yaml_path)
         # Should return empty on parse error, not crash
         assert isinstance(machines, dict)
+
+    def test_strict_missing_file_raises(self, tmp_path: Path):
+        with pytest.raises(TopologyLoadError, match="not found"):
+            load_machines_yaml(tmp_path / "nonexistent.yaml", strict=True)
+
+    def test_strict_invalid_yaml_raises(self, tmp_path: Path):
+        yaml_path = tmp_path / "machines.yaml"
+        yaml_path.write_text(": : invalid yaml {{{")
+        with pytest.raises(TopologyLoadError, match="failed to parse"):
+            load_machines_yaml(yaml_path, strict=True)

@@ -23,6 +23,8 @@ be running (`agent-bridge start`) for client commands to work.
 ```bash
 agent-bridge agents
 agent-bridge agents --json
+agent-bridge --project <repo> agents
+agent-bridge agents --all-projects
 ```
 
 Shows all registered agents from the topology config (name, type, host,
@@ -33,7 +35,18 @@ spawnable status).
 ```bash
 agent-bridge machines
 agent-bridge machines --json
+agent-bridge --project <repo> machines
+agent-bridge machines --all-projects
 ```
+
+`agents` and `machines` infer their project from CWD. Top-level `--project`
+selects a different project; `--all-projects` shows the fleet-wide catalog. A
+neutral CWD with no adopted project also falls back to the fleet-wide view.
+For compatibility with machine consumers, bare `--json` listing is fleet-wide;
+combine `--json` with explicit top-level `--project` for filtered structured
+output.
+Invalid topology profiles are reported on stderr after valid partial results and
+make the command exit with status 2.
 
 Shows all machines in the topology with SSH readiness and environment
 details.

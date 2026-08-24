@@ -215,7 +215,12 @@ class AdminResolver:
         """Verify the inner agent exists, opted into admin, and tools exist."""
         # Verify agent exists and opted into elevation. Namespace agents
         # (e.g. codespaces) are remote and never admin-eligible here.
-        config = self._parent.agents.get(name)
+        lookup = getattr(self._parent, "get_agent_config", None)
+        config = (
+            lookup(name)
+            if callable(lookup)
+            else self._parent.agents.get(name)
+        )
         if config is None:
             raise RuntimeError(
                 f"Agent '{name}' not found for admin elevation"

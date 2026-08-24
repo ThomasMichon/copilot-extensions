@@ -37,14 +37,29 @@ and local repo registry data when available). A legacy `acp-agents.json` is **no
 auto-discovered** anymore; pass `--agents-config` explicitly if you need that
 deprecated override.
 
+When `/path/to/repo` is a linked Git worktree, adoption resolves its common Git
+directory and persists the stable anchor checkout's `machines.yaml`. Removing
+the temporary worktree therefore does not strand the profile. An explicit
+`--machines-yaml` or `--agents-config` path is never remapped.
+
 ### Verify
 
 ```bash
 agent-bridge config show       # show config with resolved paths
 agent-bridge config validate   # check file existence and structure
-agent-bridge machines          # list discovered machines
-agent-bridge agents            # list available agents
+agent-bridge machines          # list machines for the cwd project
+agent-bridge agents            # list agents for the cwd project
+agent-bridge --project my-project agents
+agent-bridge agents --all-projects
 ```
+
+Inside an adopted project, `agents` and `machines` use that CWD project by
+default. Top-level `--project` selects another project without changing
+directories; `--all-projects` restores the fleet-wide catalog. From a neutral
+directory where no project resolves, the fleet-wide catalog remains the
+default. Bare `--json` listing is also fleet-wide for machine-consumer
+compatibility; pair `--json` with explicit `--project` when structured output
+must be filtered.
 
 ---
 
@@ -541,6 +556,10 @@ agent-bridge agents
 ### "Agent not found"
 
 - Run `agent-bridge agents` to see available agents
+- Use `agent-bridge agents --all-projects` when comparing multiple profiles
+- Invalid profiles are printed after any valid partial roster and make the
+  listing command exit non-zero; run `agent-bridge config validate` for the
+  stored path and re-adopt from a stable repo anchor
 - For derived agents, check `control_plane.project`, related repo entries, and
   the local repo registry/projects data that feed the roster
 - For a deprecated explicit override, check that the agent's `host` in

@@ -512,8 +512,18 @@ class BridgeClient:
 
     def list_agents(self) -> list[dict[str, Any]]:
         """GET /api/v1/agents"""
+        agents, _errors = self.list_agents_with_diagnostics()
+        return agents
+
+    def list_agents_with_diagnostics(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """GET /api/v1/agents, including invalid-topology diagnostics."""
         resp = self._request("GET", "/api/v1/agents")
-        return resp.get("agents", []) if resp else []
+        if not resp:
+            return [], []
+        errors = [str(e) for e in resp.get("topology_errors", [])]
+        return resp.get("agents", []), errors
 
     def get_agent(self, name: str) -> dict[str, Any]:
         """GET /api/v1/agents/{name}"""
@@ -521,8 +531,18 @@ class BridgeClient:
 
     def list_machines(self) -> list[dict[str, Any]]:
         """GET /api/v1/machines"""
+        machines, _errors = self.list_machines_with_diagnostics()
+        return machines
+
+    def list_machines_with_diagnostics(
+        self,
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """GET /api/v1/machines, including invalid-topology diagnostics."""
         resp = self._request("GET", "/api/v1/machines")
-        return resp.get("machines", []) if resp else []
+        if not resp:
+            return [], []
+        errors = [str(e) for e in resp.get("topology_errors", [])]
+        return resp.get("machines", []), errors
 
     def list_sessions(self, *, status: str | None = None) -> list[dict[str, Any]]:
         """GET /api/v1/sessions"""

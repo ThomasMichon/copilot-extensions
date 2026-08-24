@@ -143,10 +143,16 @@ async def _run_bridge_ws(
             return
 
     # --- Validate target before accepting for a clean rejection -------------
-    if agent_name is not None and resolver and agent_name not in resolver.agents:
-        log.warning("ACP WS unknown agent '%s'", agent_name)
-        await ws.close(code=1011)
-        return
+    if agent_name is not None and resolver:
+        canonicalize = getattr(resolver, "canonical_agent_name", None)
+        canonical = canonicalize(agent_name) if callable(canonicalize) else (
+            agent_name if agent_name in resolver.agents else None
+        )
+        if not isinstance(canonical, str) or not canonical:
+            log.warning("ACP WS unknown agent '%s'", agent_name)
+            await ws.close(code=1011)
+            return
+        agent_name = canonical
     if adopt_session_id is not None and mgr.get_session(adopt_session_id) is None:
         log.warning("ACP WS unknown session '%s'", adopt_session_id)
         await ws.close(code=1011)
