@@ -7,6 +7,7 @@ $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
 $script:MaxCustomDirsLength = 65536
 $script:MaxCustomDirsEntries = 128
+$script:MaxJsonDepth = 64
 $script:Disclosure = 'third-party'
 $script:OwnedAccounts = @()
 $script:ContributionGuides = @()
@@ -90,14 +91,14 @@ function Test-ContributionGuide([string] $Value) {
 function Read-PolicyConfig([string] $Path, [string] $Authority) {
     if (-not (Test-Path -LiteralPath $Path) -and -not (Test-PathContainsReparsePoint $Path)) { return }
     if ((Test-PathContainsReparsePoint $Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        Write-Diagnostic "$Path`: could not safely read config; safe defaults remain active"
+        Write-Diagnostic 'could not safely read config; safe defaults remain active'
         return
     }
 
     try {
         $File = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
         if ($File.Length -gt $script:MaxConfigBytes) {
-            Write-Diagnostic "$Path`: config exceeds the 65536-byte limit; safe defaults remain active"
+            Write-Diagnostic 'config exceeds the 65536-byte limit; safe defaults remain active'
             return
         }
         $Stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
@@ -113,18 +114,22 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
             $Stream.Dispose()
         }
         if ($Count -gt $script:MaxConfigBytes) {
-            Write-Diagnostic "$Path`: config exceeds the 65536-byte limit; safe defaults remain active"
+            Write-Diagnostic 'config exceeds the 65536-byte limit; safe defaults remain active'
             return
         }
         $Utf8 = New-Object Text.UTF8Encoding($false, $true)
         $Content = $Utf8.GetString($Buffer, 0, $Count)
+        if ($Content.Contains([char]0)) {
+            Write-Diagnostic 'could not safely read config; safe defaults remain active'
+            return
+        }
         $Lines = $Content -split '\r\n|\n|\r'
     } catch {
-        Write-Diagnostic "$Path`: could not safely read config; safe defaults remain active"
+        Write-Diagnostic 'could not safely read config; safe defaults remain active'
         return
     }
     if ($Lines.Count -gt $script:MaxConfigLines) {
-        Write-Diagnostic "$Path`: config exceeds the 200-line limit; safe defaults remain active"
+        Write-Diagnostic 'config exceeds the 200-line limit; safe defaults remain active'
         return
     }
 
@@ -133,52 +138,52 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
         if (-not $Line -or $Line.StartsWith('#')) { continue }
         $Equals = $Line.IndexOf('=')
         if ($Equals -lt 0) {
-            Write-Diagnostic "$Path`: ignored malformed line (expected key=value)"
+            Write-Diagnostic 'ignored malformed line (expected key=value)'
             continue
         }
         $Key = $Line.Substring(0, $Equals).Trim()
         $Value = $Line.Substring($Equals + 1).Trim()
         if (-not $Key -or -not $Value) {
-            Write-Diagnostic "$Path`: ignored malformed line (key and value are required)"
+            Write-Diagnostic 'ignored malformed line (key and value are required)'
             continue
         }
 
         switch -CaseSensitive ($Key) {
             'disclosure' {
-                if ($Authority -eq 'repo') {
-                    Write-Diagnostic "$Path`: ignored non-repo-delegable key 'disclosure'"
-                } elseif ($Value -eq 'always') {
+                if ($Authority -ceq 'repo') {
+                    Write-Diagnostic "ignored non-repo-delegable key 'disclosure'"
+                } elseif ($Value -ceq 'always') {
                     $script:Disclosure = 'always'
-                } elseif ($Value -eq 'third-party') {
-                    if ($script:Disclosure -eq 'always') {
-                        Write-Diagnostic "$Path`: ignored disclosure=third-party because earlier policy requires always"
+                } elseif ($Value -ceq 'third-party') {
+                    if ($script:Disclosure -ceq 'always') {
+                        Write-Diagnostic 'ignored disclosure=third-party because earlier policy requires always'
                     }
                 } else {
-                    Write-Diagnostic "$Path`: ignored invalid disclosure value"
+                    Write-Diagnostic 'ignored invalid disclosure value'
                 }
             }
             'owned_account' {
-                if ($Authority -eq 'repo') {
-                    Write-Diagnostic "$Path`: ignored non-repo-delegable key 'owned_account'"
+                if ($Authority -ceq 'repo') {
+                    Write-Diagnostic "ignored non-repo-delegable key 'owned_account'"
                 } elseif (Test-Account $Value) {
                     $script:OwnedAccounts += $Value
                 } else {
-                    Write-Diagnostic "$Path`: ignored invalid owned_account value"
+                    Write-Diagnostic 'ignored invalid owned_account value'
                 }
             }
             'contribution_guide' {
-                if ($Authority -ne 'repo') {
-                    Write-Diagnostic "$Path`: ignored repo-only key 'contribution_guide'"
+                if ($Authority -cne 'repo') {
+                    Write-Diagnostic "ignored repo-only key 'contribution_guide'"
                 } elseif (-not (Test-ContributionGuide $Value)) {
-                    Write-Diagnostic "$Path`: ignored invalid contribution_guide path"
+                    Write-Diagnostic 'ignored invalid contribution_guide path'
                 } elseif ($script:ContributionGuides.Count -ge 4) {
-                    Write-Diagnostic "$Path`: ignored contribution_guide beyond the four-entry limit"
+                    Write-Diagnostic 'ignored contribution_guide beyond the four-entry limit'
                 } else {
                     $script:ContributionGuides += $Value
                 }
             }
             default {
-                Write-Diagnostic "$Path`: ignored unknown config key"
+                Write-Diagnostic 'ignored unknown config key'
             }
         }
     }
@@ -258,6 +263,7 @@ function Resolve-ConfigDirectory([string] $Configured) {
     } elseif ($Value.StartsWith('~/') -or $Value.StartsWith('~\')) {
         $Value = Join-Path $HOME $Value.Substring(2)
     }
+    if (-not (Test-AbsolutePath $Value)) { return '' }
     try {
         $Full = [IO.Path]::GetFullPath($Value)
         if (Test-PathContainsReparsePoint $Full) { return '' }
@@ -267,6 +273,70 @@ function Resolve-ConfigDirectory([string] $Configured) {
     } catch {
         return ''
     }
+}
+
+function Test-PayloadLexicalSafety([string] $PayloadText) {
+    $Depth = 0
+    $CwdCount = 0
+    for ($Index = 0; $Index -lt $PayloadText.Length; $Index++) {
+        $Character = $PayloadText[$Index]
+        if ($Character -eq [char]0) { return $false }
+        if ($Character -eq '"') {
+            $StringDepth = $Depth
+            $Builder = New-Object Text.StringBuilder
+            $Closed = $false
+            for ($Index += 1; $Index -lt $PayloadText.Length; $Index++) {
+                $Character = $PayloadText[$Index]
+                if ($Character -eq [char]0 -or [int]$Character -lt 32) {
+                    return $false
+                }
+                if ($Character -eq '"') {
+                    $Closed = $true
+                    break
+                }
+                if ($Character -ne '\') {
+                    [void]$Builder.Append($Character)
+                    continue
+                }
+                $Index += 1
+                if ($Index -ge $PayloadText.Length) { return $false }
+                $Escape = $PayloadText[$Index]
+                if ($Escape -eq 'u') {
+                    if ($Index + 4 -ge $PayloadText.Length) { return $false }
+                    $Hex = $PayloadText.Substring($Index + 1, 4)
+                    if ($Hex -cnotmatch '^[0-9A-Fa-f]{4}$') { return $false }
+                    $Code = [Convert]::ToInt32($Hex, 16)
+                    if ($Code -eq 0) { return $false }
+                    [void]$Builder.Append([char]$Code)
+                    $Index += 4
+                } else {
+                    [void]$Builder.Append($Escape)
+                }
+            }
+            if (-not $Closed) { return $false }
+            $Lookahead = $Index + 1
+            while ($Lookahead -lt $PayloadText.Length -and
+                [char]::IsWhiteSpace($PayloadText[$Lookahead])) {
+                $Lookahead += 1
+            }
+            if ($StringDepth -eq 1 -and
+                $Lookahead -lt $PayloadText.Length -and
+                $PayloadText[$Lookahead] -eq ':' -and
+                $Builder.ToString() -ceq 'cwd') {
+                $CwdCount += 1
+                if ($CwdCount -gt 1) { return $false }
+            }
+            continue
+        }
+        if ($Character -eq '{' -or $Character -eq '[') {
+            $Depth += 1
+            if ($Depth -gt $script:MaxJsonDepth) { return $false }
+        } elseif ($Character -eq '}' -or $Character -eq ']') {
+            $Depth -= 1
+            if ($Depth -lt 0) { return $false }
+        }
+    }
+    return $true
 }
 
 function Test-PathAtOrBelow([string] $Candidate, [string] $Root) {
@@ -332,7 +402,7 @@ function Invoke-Policy {
         $Utf8 = New-Object Text.UTF8Encoding($false, $true)
         $PayloadText = $Utf8.GetString($Buffer, 0, $Count)
         if ($PayloadText.Length -gt $script:MaxPayloadBytes -or
-            $PayloadText.Contains([char]0)) {
+            -not (Test-PayloadLexicalSafety $PayloadText)) {
             throw 'oversized or nul payload'
         }
         if (-not $PayloadText.Trim()) { throw 'missing payload' }
@@ -342,6 +412,11 @@ function Invoke-Policy {
             $Payload.cwd -isnot [string] -or
             -not $Payload.cwd) {
             throw 'missing cwd'
+        }
+        if ($Payload.cwd.Contains([char]0) -or
+            $Payload.cwd.Contains("`r") -or
+            $Payload.cwd.Contains("`n")) {
+            throw 'invalid cwd control'
         }
         if (-not (Test-AbsolutePath $Payload.cwd)) {
             throw 'relative cwd'

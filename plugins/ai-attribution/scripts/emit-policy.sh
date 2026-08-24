@@ -9,6 +9,7 @@ max_config_bytes=65536
 max_config_lines=200
 max_custom_dirs_length=65536
 max_custom_dirs_entries=128
+max_json_depth=64
 disclosure="third-party"
 owned_accounts=""
 contribution_guides=""
@@ -107,28 +108,73 @@ path_contains_symlink() {
     return 1
 }
 
+utf8_is_valid() {
+    local value="$1"
+    local index=0 length byte lead continuation_count continuation
+    local LC_ALL=C
+    length=${#value}
+    while (( index < length )); do
+        printf -v lead '%d' "'${value:index:1}"
+        if (( lead <= 0x7F )); then
+            ((index += 1))
+            continue
+        fi
+        if (( lead >= 0xC2 && lead <= 0xDF )); then
+            continuation_count=1
+        elif (( lead >= 0xE0 && lead <= 0xEF )); then
+            continuation_count=2
+        elif (( lead >= 0xF0 && lead <= 0xF4 )); then
+            continuation_count=3
+        else
+            return 1
+        fi
+        (( index + continuation_count < length )) || return 1
+        if (( lead == 0xE0 )); then
+            printf -v byte '%d' "'${value:index+1:1}"
+            (( byte >= 0xA0 && byte <= 0xBF )) || return 1
+        elif (( lead == 0xED )); then
+            printf -v byte '%d' "'${value:index+1:1}"
+            (( byte >= 0x80 && byte <= 0x9F )) || return 1
+        elif (( lead == 0xF0 )); then
+            printf -v byte '%d' "'${value:index+1:1}"
+            (( byte >= 0x90 && byte <= 0xBF )) || return 1
+        elif (( lead == 0xF4 )); then
+            printf -v byte '%d' "'${value:index+1:1}"
+            (( byte >= 0x80 && byte <= 0x8F )) || return 1
+        else
+            printf -v byte '%d' "'${value:index+1:1}"
+            (( byte >= 0x80 && byte <= 0xBF )) || return 1
+        fi
+        for ((continuation = 2; continuation <= continuation_count; continuation += 1)); do
+            printf -v byte '%d' "'${value:index+continuation:1}"
+            (( byte >= 0x80 && byte <= 0xBF )) || return 1
+        done
+        ((index += continuation_count + 1))
+    done
+}
+
 read_config() {
     local path="$1"
     local authority="$2"
-    local content="" raw line key value line_count newline_free nul_found=0
+    local content="" raw line key value line_count=0 newline_free nul_found=0
     [[ -e "$path" || -L "$path" ]] || return 0
     if path_contains_symlink "$path" || [[ ! -f "$path" || ! -r "$path" ]]; then
-        diag "$path: could not safely read config; safe defaults remain active"
+        diag "could not safely read config; safe defaults remain active"
         return 0
     fi
     local byte_count
     if ! byte_count="$(LC_ALL=C wc -c < "$path" 2>/dev/null)"; then
-        diag "$path: could not safely read config; safe defaults remain active"
+        diag "could not safely read config; safe defaults remain active"
         return 0
     fi
     byte_count="${byte_count//[[:space:]]/}"
     if [[ ! "$byte_count" =~ ^[0-9]+$ ]] || (( byte_count > max_config_bytes )); then
-        diag "$path: config exceeds the 65536-byte limit; safe defaults remain active"
+        diag "config exceeds the 65536-byte limit; safe defaults remain active"
         return 0
     fi
     IFS= LC_ALL=C read -r -d '' content < "$path" && nul_found=1
-    if (( nul_found )); then
-        diag "$path: could not safely read config; safe defaults remain active"
+    if (( nul_found )) || ! utf8_is_valid "$content"; then
+        diag "could not safely read config; safe defaults remain active"
         return 0
     fi
     content="${content//$'\r\n'/$'\n'}"
@@ -138,7 +184,7 @@ read_config() {
         line_count=$(( ${#content} - ${#newline_free} + 1 ))
     fi
     if (( line_count > max_config_lines )); then
-        diag "$path: config exceeds the 200-line limit; safe defaults remain active"
+        diag "config exceeds the 200-line limit; safe defaults remain active"
         return 0
     fi
 
@@ -146,53 +192,53 @@ read_config() {
         line="$(trim "$raw")"
         [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
         if [[ "$line" != *"="* ]]; then
-            diag "$path: ignored malformed line (expected key=value)"
+            diag "ignored malformed line (expected key=value)"
             continue
         fi
         key="$(trim "${line%%=*}")"
         value="$(trim "${line#*=}")"
         if [[ -z "$key" || -z "$value" ]]; then
-            diag "$path: ignored malformed line (key and value are required)"
+            diag "ignored malformed line (key and value are required)"
             continue
         fi
 
         case "$key" in
             disclosure)
                 if [[ "$authority" == "repo" ]]; then
-                    diag "$path: ignored non-repo-delegable key 'disclosure'"
+                    diag "ignored non-repo-delegable key 'disclosure'"
                 elif [[ "$value" == "always" ]]; then
                     disclosure="always"
                 elif [[ "$value" == "third-party" ]]; then
                     if [[ "$disclosure" == "always" ]]; then
-                        diag "$path: ignored disclosure=third-party because earlier policy requires always"
+                        diag "ignored disclosure=third-party because earlier policy requires always"
                     fi
                 else
-                    diag "$path: ignored invalid disclosure value"
+                    diag "ignored invalid disclosure value"
                 fi
                 ;;
             owned_account)
                 if [[ "$authority" == "repo" ]]; then
-                    diag "$path: ignored non-repo-delegable key 'owned_account'"
+                    diag "ignored non-repo-delegable key 'owned_account'"
                 elif account_is_valid "$value"; then
                     owned_accounts="$(append_line "$owned_accounts" "$value")"
                 else
-                    diag "$path: ignored invalid owned_account value"
+                    diag "ignored invalid owned_account value"
                 fi
                 ;;
             contribution_guide)
                 if [[ "$authority" != "repo" ]]; then
-                    diag "$path: ignored repo-only key 'contribution_guide'"
+                    diag "ignored repo-only key 'contribution_guide'"
                 elif ! contribution_guide_is_valid "$value"; then
-                    diag "$path: ignored invalid contribution_guide path"
+                    diag "ignored invalid contribution_guide path"
                 elif (( contribution_guide_count >= 4 )); then
-                    diag "$path: ignored contribution_guide beyond the four-entry limit"
+                    diag "ignored contribution_guide beyond the four-entry limit"
                 else
                     contribution_guides="$(append_line "$contribution_guides" "$value")"
                     ((contribution_guide_count += 1))
                 fi
                 ;;
             *)
-                diag "$path: ignored unknown config key"
+                diag "ignored unknown config key"
                 ;;
         esac
     done < <(printf '%s' "$content")
@@ -344,7 +390,9 @@ json_read_string() {
 }
 
 json_skip_value() {
+    local depth="${1:-0}"
     local character token
+    (( depth <= max_json_depth )) || return 1
     json_skip_space
     character="${json_text:json_pos:1}"
     if [[ "$character" == '"' ]]; then
@@ -363,7 +411,7 @@ json_skip_value() {
             json_skip_space
             [[ "${json_text:json_pos:1}" == ':' ]] || return 1
             ((json_pos += 1))
-            json_skip_value || return 1
+            json_skip_value $((depth + 1)) || return 1
             json_skip_space
             if [[ "${json_text:json_pos:1}" == ',' ]]; then
                 ((json_pos += 1))
@@ -384,7 +432,7 @@ json_skip_value() {
             return 0
         fi
         while :; do
-            json_skip_value || return 1
+            json_skip_value $((depth + 1)) || return 1
             json_skip_space
             if [[ "${json_text:json_pos:1}" == ',' ]]; then
                 ((json_pos += 1))
@@ -435,7 +483,7 @@ extract_payload_cwd() {
             cwd="$json_string"
             found=1
         else
-            json_skip_value || return 1
+            json_skip_value 1 || return 1
         fi
         json_skip_space
         if [[ "${json_text:json_pos:1}" == ',' ]]; then
@@ -460,13 +508,14 @@ resolve_config_dir() {
         '~') configured="${HOME:-}" ;;
         '~/'*|'~\'*) configured="${HOME:-}/${configured:2}" ;;
     esac
+    [[ "$configured" == /* ]] || return 1
     [[ -d "$configured" ]] || return 1
     path_contains_symlink "$configured" && return 1
     (cd -P -- "$configured" 2>/dev/null && pwd -P)
 }
 
 path_at_or_below() {
-    [[ "$1" == "$2" || "$1" == "$2/"* ]]
+    [[ "$1" == "$2" || "$2" == "/" && "$1" == /* || "$1" == "$2/"* ]]
 }
 
 read_operator_config() {
@@ -529,7 +578,9 @@ main() {
         diag "missing or malformed sessionStart payload; no policy context emitted"
         emit_empty
     fi
-    [[ "$payload_cwd" == /* ]] || {
+    [[ "$payload_cwd" == /* &&
+        "$payload_cwd" != *$'\r'* &&
+        "$payload_cwd" != *$'\n'* ]] || {
         diag "missing or malformed sessionStart payload; no policy context emitted"
         emit_empty
     }

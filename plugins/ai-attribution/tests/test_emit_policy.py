@@ -288,6 +288,36 @@ def test_canonical_personal_config_tightens_disclosure(tmp_path: Path) -> None:
     assert "every contribution" in context
 
 
+@pytest.mark.parametrize(("nested_arrays", "accepted"), [(63, True), (64, False)])
+def test_payload_depth_limit_has_shell_parity(
+    tmp_path: Path,
+    nested_arrays: int,
+    accepted: bool,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    nested = "[" * nested_arrays + "0" + "]" * nested_arrays
+    payload = f'{{"extra":{nested},"cwd":{json.dumps(str(repo))}}}'
+    hooks = [BASH_HOOK]
+    if shutil.which("pwsh"):
+        hooks.append(POWERSHELL_HOOK)
+
+    results = [
+        _run(hook, repo, tmp_path / "home", payload=payload) for hook in hooks
+    ]
+
+    for result in results:
+        if accepted:
+            assert _context(result).startswith(
+                "[owner: ai-attribution@0.1.0-dev1]"
+            )
+        else:
+            assert result.stdout == "{}"
+            assert "missing or malformed sessionStart payload" in result.stderr
+    if len(results) == 2:
+        assert results[1].stdout == results[0].stdout
+        assert results[1].stderr == results[0].stderr
+
+
 def test_operator_config_home_tightens_disclosure_and_classifies_owner(
     tmp_path: Path,
 ) -> None:
