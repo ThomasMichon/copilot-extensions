@@ -44,20 +44,24 @@ class Finding:
     message: str
 
 
-def _managed_values(pkg: RequirementPackage, key: str) -> Any:
-    spec = pkg.manage.get(key) or {}
-    return spec.get("values", spec.get("value"))
+def _managed_values_under(pkg: RequirementPackage, prefix: str):
+    """Yield values from the root surface and every grouping below it."""
+    for key, spec in pkg.manage.items():
+        if key == prefix or key.startswith(prefix + "."):
+            yield spec.get("values", spec.get("value"))
 
 
 def _enabled_plugins_union(packages: list[RequirementPackage]) -> dict[str, bool]:
     """Union of ``manage.copilot.settings.values.enabledPlugins`` across packages."""
     union: dict[str, bool] = {}
     for pkg in packages:
-        values = _managed_values(pkg, "copilot.settings") or {}
-        for name, on in (values.get("enabledPlugins") or {}).items():
-            base = str(name).split("@", 1)[0]
-            # An explicit ``false`` anywhere is recorded so the floor check can catch it.
-            union[base] = bool(on) and union.get(base, True)
+        for values in _managed_values_under(pkg, "copilot.settings"):
+            if not isinstance(values, dict):
+                continue
+            for name, on in (values.get("enabledPlugins") or {}).items():
+                base = str(name).split("@", 1)[0]
+                # Record an explicit false anywhere so the floor check catches it.
+                union[base] = bool(on) and union.get(base, True)
         for name in pkg.bootstrap_floor.get("plugins") or []:
             union.setdefault(str(name).split("@", 1)[0], True)
     return union
@@ -66,15 +70,16 @@ def _enabled_plugins_union(packages: list[RequirementPackage]) -> dict[str, bool
 def _marketplace_union(packages: list[RequirementPackage]) -> set[str]:
     out: set[str] = set()
     for pkg in packages:
-        values = _managed_values(pkg, "copilot.settings") or {}
-        out.update((values.get("extraKnownMarketplaces") or {}).keys())
+        for values in _managed_values_under(pkg, "copilot.settings"):
+            if isinstance(values, dict):
+                out.update((values.get("extraKnownMarketplaces") or {}).keys())
         out.update(pkg.bootstrap_floor.get("marketplaces") or [])
     return out
 
 
 def _enforced_leaves(prefix: str, value: Any):
     """Yield fully-qualified leaves, traversing maps that restore deep-merges."""
-    if isinstance(value, dict) and value:
+    if isinstance(value, dict):
         for key, child in value.items():
             yield from _enforced_leaves(f"{prefix}.{key}", child)
         return

@@ -39,6 +39,13 @@ def test_list_enforced_is_advisory_not_error(tmp_path):
     assert not any(f.code == "shape-mismatch" and f.level == "error" for f in findings)
 
 
+def test_empty_enforced_map_has_no_leaves_or_advisory(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"] = {}
+    findings = validate([_pkg(tmp_path, "a", data)])
+    assert not any(f.code == "shape-mismatch" for f in findings)
+
+
 def test_nested_enforced_scalars_agree_without_shape_advisory(tmp_path):
     a_data = base_package("a/x", gate=["*"])
     a_data["manage"] = {
@@ -87,6 +94,21 @@ def test_bootstrap_floor_disable_is_error(tmp_path):
     }
     a = _pkg(tmp_path, "a", data)
     findings = validate([a])
+    assert has_errors(findings)
+    assert any(f.code == "bootstrap-floor" for f in findings)
+
+
+def test_bootstrap_floor_disable_in_grouped_settings_is_error(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"] = {
+        "copilot.settings.plugins": {
+            "disposition": "enforce",
+            "values": {
+                "enabledPlugins": {"agent-worktrees@copilot-extensions": False}
+            },
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", data)])
     assert has_errors(findings)
     assert any(f.code == "bootstrap-floor" for f in findings)
 
