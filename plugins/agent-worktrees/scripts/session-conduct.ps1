@@ -39,7 +39,7 @@ $defn = (& $python -m agent_worktrees state-root --conduct 2>$null | Out-String)
 if ($defn) { $parts += $defn }
 
 # Dynamic: complete related-repo guidance from the merged project corpus.
-$related = (& $python -m agent_worktrees related --conduct 2>$null | Out-String).Trim()
+$related = (& $python -m agent_worktrees --project $project related --conduct 2>$null | Out-String).Trim()
 if ($related) { $parts += $related }
 
 $dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'

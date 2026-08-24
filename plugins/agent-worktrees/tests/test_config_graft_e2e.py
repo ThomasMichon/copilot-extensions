@@ -193,6 +193,18 @@ def test_related_conduct_merges_configured_and_related_corpora(
     assert "installed payload" in out
 
 
+def test_session_conduct_forwards_discovered_project():
+    """Each dynamic command is a fresh process, so related needs the cwd-gated
+    project discovered by the hook rather than relying on ambient activation."""
+    plugin = Path(__file__).parents[1]
+    ps1 = (plugin / "scripts" / "session-conduct.ps1").read_text(
+        encoding="utf-8"
+    )
+    sh = (plugin / "scripts" / "session-conduct.sh").read_text(encoding="utf-8")
+    assert "-m agent_worktrees --project $project related --conduct" in ps1
+    assert '-m agent_worktrees --project "$project" related --conduct' in sh
+
+
 # ---------------------------------------------------------------------------
 # machines.yaml redirect end-to-end.
 # ---------------------------------------------------------------------------
