@@ -6056,6 +6056,7 @@ def _monitor_sweep(
     interval: float = 15,
     picker_projects: set[str] | None = None,
     catalog_observer=None,
+    pane_observer=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -6086,6 +6087,8 @@ def _monitor_sweep(
         project: None for project in (picker_projects or set())
     }
     for sess, path in served:
+        if pane_observer is not None:
+            pane_observer(sess, path)
         try:
             _activate_project_for_path(path, force=True)
             warm_projects.setdefault(cfg.project_name(), path)
@@ -6135,6 +6138,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     import time
     from . import locks as _locks
     from . import monitor_roots
+    from . import pane_reaper
     from . import session_catalog
 
     _install_headless_child_guard()
@@ -6170,6 +6174,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     ctx_done: set[str] = set()
     reconciler = session_catalog.ResidentSessionReconciler(
         register_monitor_session=_register_session_for_monitor)
+    pane_reconciler = pane_reaper.ResidentPaneReconciler(
+        activate_project=_activate_project_for_path)
     empty_strikes = 0
     _MAX_EMPTY_STRIKES = 3
     try:
@@ -6187,9 +6193,14 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             served = _monitor_sweep(
                 mux_bin, token, my_prefix, ctx_done,
                 interval=interval, picker_projects=external_projects,
-                catalog_observer=reconciler.observe_mux)
+                catalog_observer=reconciler.observe_mux,
+                pane_observer=pane_reconciler.observe)
             try:
                 reconciler.step()
+            except Exception:
+                pass
+            try:
+                pane_reconciler.step(mux_bin)
             except Exception:
                 pass
             if served < 0:
