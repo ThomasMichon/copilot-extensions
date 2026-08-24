@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[3]
 _PLUGINS = _ROOT / "plugins"
-_NESTED_POWERSHELL_MARKERS = (
-    "Get-Command pwsh",
-    "& $p.Source -NoProfile -File",
-    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File",
+_NESTED_POWERSHELL = re.compile(
+    r"(?im)(?:^|[;{}]\s*)(?:&\s*)?"
+    r"(?P<interpreter>\$p\.Source|pwsh(?:\.exe)?|powershell(?:\.exe)?)\b"
 )
 
 
@@ -32,12 +32,11 @@ def _powershell_hooks() -> list[tuple[Path, str, int, str]]:
 def test_powershell_hooks_do_not_spawn_nested_interpreters():
     violations: list[str] = []
     for path, event, index, command in _powershell_hooks():
-        markers = [
-            marker for marker in _NESTED_POWERSHELL_MARKERS if marker in command
-        ]
-        if markers:
+        match = _NESTED_POWERSHELL.search(command)
+        if match:
             violations.append(
-                f"{path.relative_to(_ROOT)} {event}[{index}]: {', '.join(markers)}"
+                f"{path.relative_to(_ROOT)} {event}[{index}]: "
+                f"{match.group('interpreter')}"
             )
 
     assert not violations, (
@@ -52,12 +51,10 @@ def test_agent_worktrees_project_hook_runner_stays_in_process():
     runner = (
         _PLUGINS / "agent-worktrees" / "scripts" / "project-hooks.ps1"
     ).read_text(encoding="utf-8")
-    markers = [
-        marker for marker in _NESTED_POWERSHELL_MARKERS if marker in runner
-    ]
-    assert not markers, (
+    match = _NESTED_POWERSHELL.search(runner)
+    assert match is None, (
         "project-hooks.ps1 must invoke the project hook in its current PowerShell "
-        f"process; found: {', '.join(markers)}"
+        f"process; found: {match.group('interpreter') if match else ''}"
     )
 
 
