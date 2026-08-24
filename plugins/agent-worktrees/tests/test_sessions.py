@@ -1131,3 +1131,11 @@ def test_session_state_sweep_confined_to_backfill():
         "session-state sweep found outside backfill_sessions -- resolve by "
         f"exact session id instead: {sorted(set(offenders))}"
     )
+
+    # The second sanctioned choke point is the resident reconciler's bounded
+    # cursor. Pin its single state-root scandir so another unbounded cursor
+    # cannot appear elsewhere in that module unnoticed.
+    import agent_worktrees.session_catalog as catalog_mod
+
+    catalog_src = Path(catalog_mod.__file__).read_text(encoding="utf-8")
+    assert catalog_src.count("os.scandir(session_dir)") == 1
