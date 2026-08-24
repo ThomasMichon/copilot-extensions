@@ -8,8 +8,6 @@ signal broken out by liveness.
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from agent_dispatch import tracking
@@ -53,7 +51,9 @@ def _claim_and_start(q, task_id, *, wt, session, now):
 
 def test_verdict_live_when_current_session_matches_owner(monkeypatch):
     _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, '{"session_id": "S1"}'))
+    monkeypatch.setattr(
+        tracking, "run_background_capture", _fake_run(0, '{"session_id": "S1"}')
+    )
     assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.LIVE
 
 
@@ -61,14 +61,16 @@ def test_verdict_gone_when_worktree_reused_by_different_session(monkeypatch):
     # A DIFFERENT session now occupies the worktree -> our owner is gone (the
     # reused-worktree false-negative the design closes).
     _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, '{"session_id": "S2"}'))
+    monkeypatch.setattr(
+        tracking, "run_background_capture", _fake_run(0, '{"session_id": "S2"}')
+    )
     assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.GONE
 
 
 def test_verdict_gone_when_worktree_empty(monkeypatch):
     # `{}` (CLI 404): no session occupies the worktree at all -> owner gone.
     _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, "{}"))
+    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
     assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.GONE
 
 
@@ -76,9 +78,11 @@ def test_verdict_unknown_when_owner_identity_not_captured(monkeypatch):
     # Even with a live session present, no captured owner identity means we can't
     # attribute it -> unknown (the claim-before-registration false-positive guard).
     _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, '{"session_id": "S1"}'))
+    monkeypatch.setattr(
+        tracking, "run_background_capture", _fake_run(0, '{"session_id": "S1"}')
+    )
     assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
-    monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, "{}"))
+    monkeypatch.setattr(tracking, "run_background_capture", _fake_run(0, "{}"))
     assert tracking.liveness_verdict("wt", owner_session_id=None) == tracking.UNKNOWN
 
 
@@ -89,13 +93,12 @@ def test_verdict_unknown_when_owner_identity_not_captured(monkeypatch):
         _fake_run(0, ""),                    # exit 0 but silent -> ambiguous
         _fake_run(0, "not json"),            # unparseable
         _fake_run(0, "[]"),                  # valid JSON but not an object
-        _fake_run(raises=OSError("boom")),   # cannot spawn
-        _fake_run(raises=subprocess.TimeoutExpired("cmd", 3)),
+        lambda *_a, **_k: None,               # spawn error/timeout translated
     ],
 )
 def test_verdict_unknown_on_any_resolver_failure(monkeypatch, run):
     _bridge_ok(monkeypatch)
-    monkeypatch.setattr(tracking.subprocess, "run", run)
+    monkeypatch.setattr(tracking, "run_background_capture", run)
     assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.UNKNOWN
 
 
