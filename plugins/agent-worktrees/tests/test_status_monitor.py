@@ -153,6 +153,33 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
     assert warmed == ["p1", "p2"]
 
 
+def test_sweep_publishes_each_served_session_to_pane_reconciler(
+    tmp_path, monkeypatch
+):
+    reg = tmp_path / "reg"
+    monkeypatch.setattr(m, "_monitor_registry_dir", lambda: reg)
+    m._register_session_for_monitor("wt-a", "/w/a")
+    m._register_session_for_monitor("wt-b", "/w/b")
+    monkeypatch.setattr(
+        m, "_monitor_list_sessions", lambda mux: {"wt-a": 1, "wt-b": 1})
+    monkeypatch.setattr(m, "_activate_project_for_path", lambda *a, **k: None)
+    monkeypatch.setattr(m, "_render_status_context", lambda *a, **k: "CTX")
+    monkeypatch.setattr(m, "_render_status_segment", lambda *a, **k: "SEG")
+    monkeypatch.setattr(
+        m, "_warm_list_cache_for_active_project", lambda **kw: 0)
+    _capture_set(monkeypatch)
+    observed: list[tuple[str, str]] = []
+
+    assert m._monitor_sweep(
+        "tmux",
+        "T",
+        "P",
+        set(),
+        pane_observer=lambda session, path: observed.append((session, path)),
+    ) == 2
+    assert observed == [("wt-a", "/w/a"), ("wt-b", "/w/b")]
+
+
 def test_sweep_picker_root_keeps_project_warm_without_sessions(
     tmp_path, monkeypatch
 ):
