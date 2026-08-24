@@ -120,6 +120,14 @@ def test_installer_and_launcher_use_exact_version_helper():
     assert "Find-AwPsmuxPackageBinary" in installer
     assert "Repair-AwPsmuxPath" in installer
     assert "NoProfile/SSH-style verification" in installer
+    assert (
+        "Get-Command psmux -CommandType Application -ErrorAction SilentlyContinue |"
+        in installer
+    )
+    assert (
+        "Get-Command psmux -CommandType Application -ErrorAction Stop | "
+        "Select-Object -First 1"
+    ) in installer
     assert "Find-AwPsmuxPackageBinary" in launcher
     assert "-DesiredVersion '3.3.5'" in launcher
 
