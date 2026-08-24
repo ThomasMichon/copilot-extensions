@@ -148,3 +148,36 @@ the newest valid unconsumed file under its `handoff/` directory, then inspect
 the worktree's local disposition history for an exact task-backed handoff
 pointer. A broader agent-dispatch list is only a fallback and must be filtered
 to the current worktree before selecting a task; cross-session history is last.
+
+### The `handoff-cli.mjs` fallback (extension didn't load at all)
+
+Everything above assumes the **extension is loaded** so its tools exist. When it
+is **not** — most importantly a **Bare-resumed session**, where the CLI loads no
+extensions at all (`extensions list` shows nothing, so there are no
+`*_handoff` tools) — the plugin's **payload files are still on disk**, so an
+agent can drive the identical store + live-cutover through a standalone Node CLI:
+
+```bash
+CH="$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/context-handoff/handoff-cli.mjs"
+node "$CH" cutover  --title "<topic>" --prompt-file <handoff.md>   # store + live cutover
+node "$CH" save     --title "<topic>" --prompt-file <handoff.md>   # store + paste prompt (no cutover)
+node "$CH" continue --seed "<HANDOFF_SEED>"                         # trigger a cutover for a seed
+node "$CH" consume  --handoff-id <id>                               # load a file handoff + mark consumed
+```
+
+The CLI is a thin wrapper over **`handoff-core.mjs`** — the SDK-free store/trigger
+core (same on-disk format, same `agent-worktrees handoff-cutover` trigger, same
+issue-#853 bash-first seed shape from `cutover-seed.mjs`). A handoff it stores is
+therefore byte-compatible with `consume_handoff` / `/resume-handoff`. Session id
+defaults to `$COPILOT_AGENT_SESSION_ID`; `--session-id`/`--cwd` override; `--no-task`
+forces the file store; `--json` emits a machine-readable result. The agent
+composes the handoff markdown itself (the extension's in-memory session facts —
+token counts, per-turn edits — are unavailable out-of-band).
+
+> **Module layout.** `cutover-seed.mjs` (pure seed builders) and
+> `handoff-core.mjs` (SDK-free store/trigger) are both importable without loading
+> the session extension. `extension.mjs` and `handoff-cli.mjs` are the two
+> front-ends; the extension is the live-monitor + tool surface, the CLI is the
+> extension-free fallback. (`extension.mjs` still carries its own copies of the
+> store helpers today; folding it onto `handoff-core.mjs` to retire the
+> duplication is a test-guarded follow-up.)
