@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import io
-import re
 import tarfile
 from pathlib import Path
 
@@ -75,16 +74,35 @@ def test_host_payload_dir_claude_layout_scan_fallback(tmp_path: Path):
 def test_build_stage_command_roundtrips(tmp_path: Path):
     payload = _make_payload(tmp_path, "mkt", "p")
     dest = ps.dest_dir("p@mkt")
-    cmd = ps.build_stage_command(payload, dest)
-    # Command shape: recreate dest, then decode+extract the embedded tarball.
+    cmd, payload_b64 = ps.build_stage_command(payload, dest)
+    # Command shape: recreate dest, then decode+extract the tarball read from STDIN.
     assert cmd.startswith(f'rm -rf "{dest}" && mkdir -p "{dest}" && ')
-    assert 'base64 -d | tar -xzf - -C' in cmd
-    # Extract the embedded base64 tar and confirm the payload is faithfully
-    # reproduced (arcname='.').
-    m = re.search(r"printf %s (\S+) \| base64 -d", cmd)
-    assert m
-    raw = base64.b64decode(m.group(1))
+    assert cmd.endswith(f'base64 -d | tar -xzf - -C "{dest}"')
+    # The payload travels on stdin, NOT embedded in the command string (so a large
+    # plugin never overruns the Windows ~32 KB command-line limit / WinError 206).
+    assert "printf" not in cmd
+    assert payload_b64.decode("ascii").isprintable()
+    # Confirm the stdin payload faithfully reproduces the tree (arcname='.').
+    raw = base64.b64decode(payload_b64)
     with tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as tf:
         names = set(tf.getnames())
     assert "./plugin.json" in names
     assert "./skills/demo/SKILL.md" in names
+
+
+def test_build_stage_command_large_payload_keeps_command_tiny(tmp_path: Path):
+    """A large plugin must NOT bloat the command string -- the payload rides on
+    stdin, so the command stays far below the Windows ~32 KB command-line limit
+    (the cause of the ``[WinError 206]`` staging failures)."""
+    payload = _make_payload(tmp_path, "mkt", "big")
+    # ~1.5 MB of incompressible data across several files.
+    import os
+
+    for i in range(6):
+        (payload / f"blob{i}.bin").write_bytes(os.urandom(256 * 1024))
+    dest = ps.dest_dir("big@mkt")
+    cmd, payload_b64 = ps.build_stage_command(payload, dest)
+    # The command carries none of the payload -- only the fixed extract pipeline.
+    assert len(cmd) < 1024
+    # The payload (on stdin) is large; that's fine because it never hits argv.
+    assert len(payload_b64) > 200_000

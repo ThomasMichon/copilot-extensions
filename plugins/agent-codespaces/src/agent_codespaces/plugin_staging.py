@@ -107,18 +107,25 @@ def dest_dir(source: str) -> str:
     return f"{STAGE_ROOT}/{_leaf(source)}"
 
 
-def build_stage_command(payload_dir: Path, dest: str) -> str:
-    """Bash to recreate ``payload_dir`` at remote ``dest`` (egress-free).
+def build_stage_command(payload_dir: Path, dest: str) -> tuple[str, bytes]:
+    """Bash to recreate ``payload_dir`` at remote ``dest`` (egress-free), plus the
+    payload to feed on **stdin**.
 
-    Tars+gzips the payload in memory, base64-encodes it, and emits a command
-    that decodes+extracts it into a freshly-created ``dest``. ``dest`` may
-    contain ``$HOME`` (expanded by the remote shell).
+    Tars+gzips the payload in memory and base64-encodes it. Returns
+    ``(command, stdin_bytes)`` where ``command`` decodes+extracts the base64 read
+    from **stdin** (``base64 -d | tar -xzf -``) and ``stdin_bytes`` is that base64
+    text. Piping the payload over stdin -- rather than embedding it in the command
+    string -- keeps the SSH command line tiny, so a large plugin no longer overruns
+    the Windows ~32 KB ``CreateProcess`` command-line limit (which surfaces as
+    ``[WinError 206] The filename or extension is too long``). ``dest`` may contain
+    ``$HOME`` (expanded by the remote shell).
     """
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
         tf.add(str(payload_dir), arcname=".")
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return (
+    b64 = base64.b64encode(buf.getvalue())
+    command = (
         f'rm -rf "{dest}" && mkdir -p "{dest}" && '
-        f'printf %s {b64} | base64 -d | tar -xzf - -C "{dest}"'
+        f'base64 -d | tar -xzf - -C "{dest}"'
     )
+    return command, b64
