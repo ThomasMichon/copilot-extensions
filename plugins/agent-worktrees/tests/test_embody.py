@@ -54,7 +54,7 @@ class TestBuildMuxNewSessionArgv:
         )
         b = argv.index("bash")
         assert argv[b + 1] == str(wrapper)
-        assert argv[b + 2:] == ["copilot"]
+        assert argv[b + 2:] == ["--aw-wt", "id1", "copilot"]
 
     def test_psmux_runs_command_directly_no_identity_prefix(self):
         argv = sessions.build_mux_new_session_argv(
