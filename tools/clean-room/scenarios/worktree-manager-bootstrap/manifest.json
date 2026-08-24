@@ -8,7 +8,8 @@
   "auth": { "copilot": "none", "gh": "none", "ado": "none" },
   "config": {
     "CR_MANAGER_REPO": "ThomasMichon/copilot-extensions",
-    "CR_MANAGER_REF": "main"
+    "CR_MANAGER_REF": "main",
+    "CR_UV_INDEX": "(opt-in uv-index fixture; REQUIRED on a governed box whose public PyPI is TLS-blocked -- the bootstrap's payload `uv pip install` uses it)"
   },
   "expected_artifacts": [
     "~/.worktree-manager/versions/<ver> + ~/.worktree-manager/current-version",
