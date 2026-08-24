@@ -26,6 +26,7 @@ project="$(PYTHONPATH="" "$PY" -m agent_worktrees get project 2>/dev/null || tru
 # Dynamic: the "the user's state repo" definition (binds the term to the
 # resolved checkout so downstream plugins can refer to it in plain prose).
 defn="$(PYTHONPATH="" "$PY" -m agent_worktrees state-root --conduct 2>/dev/null || true)"
+related="$(PYTHONPATH="" "$PY" -m agent_worktrees related --conduct 2>/dev/null || true)"
 dir="$HOME/.agent-worktrees/bin/conduct"
 
 # Dynamic: the worktree's own recent-history recovery digest (record-first
@@ -33,15 +34,18 @@ dir="$HOME/.agent-worktrees/bin/conduct"
 # inherits it even if a live handoff never completed). Empty when no history.
 digest="$(PYTHONPATH="" "$PY" -m agent_worktrees history-digest 2>/dev/null || true)"
 
-PYTHONPATH="" "$PY" - "$dir" "$defn" "$digest" <<'PYEOF'
+PYTHONPATH="" "$PY" - "$dir" "$defn" "$related" "$digest" <<'PYEOF'
 import json, os, sys
 
 d = sys.argv[1]
 defn = sys.argv[2] if len(sys.argv) > 2 else ""
-digest = sys.argv[3] if len(sys.argv) > 3 else ""
+related = sys.argv[3] if len(sys.argv) > 3 else ""
+digest = sys.argv[4] if len(sys.argv) > 4 else ""
 parts = []
 if defn.strip():
     parts.append(defn.strip())
+if related.strip():
+    parts.append(related.strip())
 if os.path.isdir(d):
     for name in sorted(os.listdir(d)):
         if not name.endswith(".md"):

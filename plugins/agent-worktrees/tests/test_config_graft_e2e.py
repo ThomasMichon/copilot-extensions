@@ -144,6 +144,55 @@ def test_related_resolve_grafted_entry(split, capfd):
     assert out["name"] == "example-web"
 
 
+def test_related_conduct_merges_configured_and_related_corpora(
+    split, monkeypatch, capfd
+):
+    from agent_worktrees import __main__ as cli
+    from agent_worktrees import repos
+
+    harness, _ = split
+    configured = _stateless_config(harness)
+    configured.repos["injected-tool"] = cfg.RepoConfig(
+        anchor="/injected",
+        worktree_root="/injected.wt",
+        pr=cfg.PRConfig(
+            enabled=True,
+            provider="github",
+            strategy="keep-alive",
+            merge_actor="submitter-direct",
+        ),
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: configured)
+    monkeypatch.setattr(
+        repos,
+        "read_registry",
+        lambda: repos.ReposRegistry(repos={
+            "harness": repos.RepoEntry(
+                name="harness", repo_class="worktree"
+            ),
+            "injected-tool": repos.RepoEntry(
+                name="injected-tool", repo_class="worktree"
+            ),
+            "example-web": repos.RepoEntry(
+                name="example-web", repo_class="reference"
+            ),
+        }),
+    )
+
+    assert cli.cmd_related_dispatch(
+        ["--conduct", "--repo", str(harness)]
+    ) == 0
+    out = capfd.readouterr().out
+    assert "`harness` (current)" in out
+    assert "`injected-tool`" in out
+    assert "pr=pr-self-merge/optional/github" in out
+    assert "after-create=keep-alive" in out
+    assert "`example-web` (primary)" in out
+    assert "delegate=agent-codespaces" in out
+    assert "config.d/" in out
+    assert "installed payload" in out
+
+
 # ---------------------------------------------------------------------------
 # machines.yaml redirect end-to-end.
 # ---------------------------------------------------------------------------

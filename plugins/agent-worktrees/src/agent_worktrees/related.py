@@ -75,7 +75,9 @@ RELATED_DOCS_DIRNAME = "related"       # <anchor>/.agent-worktrees/related/<name
 VALID_ROLES = ("product", "dependency", "consumer", "tooling", "docs", "sibling")
 
 # How work is handed off to the agent that owns a related repo.
-VALID_DELEGATES = ("agent-bridge", "agent-codespaces", "none")
+VALID_DELEGATES = (
+    "agent-bridge", "agent-codespaces", "agent-containers", "none",
+)
 
 # Ownership relationship of a related repo, from the operator's POV. This is
 # **expected-behavior metadata** (e.g. it drives the AI-attribution decision:
