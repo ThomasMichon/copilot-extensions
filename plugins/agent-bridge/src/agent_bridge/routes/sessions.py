@@ -339,6 +339,14 @@ def _enforce_worktree_head_guard(worktree_id: str) -> None:
 @router.post("", response_model=StartSessionResponse, status_code=201)
 async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
+    resolver = getattr(request.app.state, "resolver", None)
+    agent_name = req.agent
+    if agent_name and resolver:
+        canonicalize = getattr(resolver, "canonical_agent_name", None)
+        if callable(canonicalize):
+            canonical = canonicalize(agent_name)
+            if isinstance(canonical, str) and canonical:
+                agent_name = canonical
 
     # Refuse new sessions fast while draining -- before any agent resolution or
     # spawn work -- so a zero-downtime redeploy stops growing the daemon it is
@@ -357,7 +365,7 @@ async def start_session(req: StartSessionRequest, request: Request):
     # from a reload or double-click resolves to the same session/worktree
     # rather than creating a second one.  Pass force_new to opt out.
     if req.caller_id and not req.force_new:
-        existing = _find_reusable_session(mgr, req.agent, req.caller_id)
+        existing = _find_reusable_session(mgr, agent_name, req.caller_id)
         if existing is not None:
             return StartSessionResponse(
                 session_id=existing.session_id,
@@ -384,9 +392,8 @@ async def start_session(req: StartSessionRequest, request: Request):
     if req.worktree_id and not req.reclaim:
         _enforce_worktree_head_guard(req.worktree_id)
 
-    if req.agent:
+    if agent_name:
         # Resolve agent via registry
-        resolver = getattr(request.app.state, "resolver", None)
         if not resolver:
             raise HTTPException(
                 status_code=500,
@@ -394,7 +401,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             )
         try:
             target = await resolver.resolve_async(
-                req.agent, sender_repo=req.sender_repo,
+                agent_name, sender_repo=req.sender_repo,
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
@@ -427,7 +434,7 @@ async def start_session(req: StartSessionRequest, request: Request):
 
     try:
         session = await mgr.start_session(
-            target, agent_name=req.agent, caller_id=req.caller_id,
+            target, agent_name=agent_name, caller_id=req.caller_id,
             mcp_servers=req.mcp_servers,
             copilot_args=req.copilot_args,
             caller_owner_ref=req.caller_owner_ref,

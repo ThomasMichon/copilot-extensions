@@ -79,3 +79,18 @@ def test_stale_table_falls_back_to_config(cfg_dir: Path, monkeypatch):
     routing.publish_active(cfg_dir, bind="127.0.0.1", port=9290)
     client = BridgeClient.from_config()
     assert client._base == "http://127.0.0.1:9281"
+
+
+def test_list_agents_preserves_topology_diagnostics(cfg_dir: Path, monkeypatch):
+    client = BridgeClient.from_config()
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda *args, **kwargs: {
+            "agents": [{"name": "valid"}],
+            "topology_errors": ["stale: machines.yaml not found"],
+        },
+    )
+    agents, errors = client.list_agents_with_diagnostics()
+    assert agents == [{"name": "valid"}]
+    assert errors == ["stale: machines.yaml not found"]

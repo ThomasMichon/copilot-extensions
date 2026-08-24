@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.app import create_app
+from agent_bridge.agent_registry import AgentConfig, AgentResolver
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
@@ -87,6 +88,7 @@ class TestHealthEndpoint:
             resp = c.get("/health")
             assert resp.status_code == 200
             assert resp.json()["status"] == "ok"
+            assert resp.json()["topology_error_count"] == 0
 
 
 class TestAuthMiddleware:
@@ -754,6 +756,37 @@ class TestAgentRoutes:
         resp = client.get("/api/v1/agents")
         assert resp.status_code == 200
         assert resp.json()["agents"] == []
+        assert resp.json()["topology_errors"] == []
+
+    def test_session_alias_reuses_canonical_identity(
+        self, client, app,
+    ) -> None:
+        app.state.resolver = AgentResolver(
+            {
+                "Pretty Name": AgentConfig(
+                    name="Pretty Name",
+                    aliases=["stable-name"],
+                    project="project-a",
+                ),
+            },
+            {},
+        )
+        manager: SessionManager = app.state.session_manager
+        session = Session(
+            "session-alias", "alias-session",
+            SpawnTarget(type="local", cwd="/repo"),
+            "Pretty Name", caller_id="caller-a",
+        )
+        session.status = SessionStatus.IDLE
+        manager._sessions[session.session_id] = session
+
+        resp = client.post(
+            "/api/v1/sessions",
+            json={"agent": "STABLE-NAME", "caller_id": "caller-a"},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["session_id"] == "session-alias"
+        assert len(manager._sessions) == 1
 
 
 class TestWorktreeRoutes:

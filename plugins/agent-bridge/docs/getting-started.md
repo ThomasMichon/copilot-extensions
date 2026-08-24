@@ -133,6 +133,9 @@ registry data when available). See
 [Machine Configuration](machine-config.md) for the full guide on the
 `machines.yaml` format and the derived roster.
 
+Linked Git worktrees are canonicalized to their stable anchor before an
+auto-discovered topology path is stored. Explicit config paths remain exact.
+
 ### Option B: Manual config
 
 Edit `~/.agent-bridge/config.yaml` directly:

@@ -16,6 +16,10 @@ import yaml
 log = logging.getLogger("agent-bridge")
 
 
+class TopologyLoadError(ValueError):
+    """A configured topology file is missing or invalid."""
+
+
 @dataclass
 class AuthHook:
     """A connection-time auth forwarding hook.
@@ -156,19 +160,27 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
     return machines
 
 
-def load_machines_yaml(path: str | Path) -> dict[str, MachineConfig]:
+def load_machines_yaml(
+    path: str | Path, *, strict: bool = False,
+) -> dict[str, MachineConfig]:
     """Load and parse a machines.yaml file."""
     p = Path(path).expanduser()
     if not p.exists():
-        log.warning("machines.yaml not found at %s", p)
+        message = f"machines.yaml not found at {p}"
+        if strict:
+            raise TopologyLoadError(message)
+        log.warning(message)
         return {}
     try:
         data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         machines = parse_machines_yaml(data)
         log.info("Loaded %d machines from %s", len(machines), p)
         return machines
-    except Exception as exc:
-        log.error("Failed to parse machines.yaml at %s: %s", p, exc)
+    except (OSError, yaml.YAMLError, AttributeError, TypeError, ValueError) as exc:
+        message = f"failed to parse machines.yaml at {p}: {exc}"
+        if strict:
+            raise TopologyLoadError(message) from exc
+        log.error(message)
         return {}
 
 
