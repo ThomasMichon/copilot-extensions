@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
-from agent_containers.relay_provider import relay_profile, register_relay
 from agent_containers.__main__ import main
+from agent_containers.relay_provider import register_relay, relay_profile
 
 
 class _FakeBuilder:

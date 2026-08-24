@@ -16,7 +16,6 @@ from agent_containers.lifecycle import (
     restricted_policy_errors,
 )
 
-
 pytestmark = pytest.mark.skipif(
     os.environ.get("AGENT_CONTAINERS_E2E") != "1",
     reason="set AGENT_CONTAINERS_E2E=1 to run real-Docker smoke",

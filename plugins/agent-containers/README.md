@@ -6,10 +6,11 @@ optional agent-bridge **`container:` namespace provider**.
 Manages a persistent fleet of local dev containers (Docker Desktop WSL2
 backend), brokers *advisory* exclusive leases so an effort can borrow a
 container without two parallel worktrees driving the same one, and lets
-agent-bridge dispatch a Copilot agent into a container over `docker exec` when
-agent-bridge is installed. The CLI and binstub are owned by this plugin and work
-standalone; without agent-bridge only bridge addressing (`container:<name>`) is
-unavailable.
+agent-bridge dispatch a Copilot agent into a trusted container over OpenSSH when
+agent-bridge is installed. Docker remains the lifecycle/bootstrap boundary and
+the SSH `ProxyCommand`, so no container port is published. The CLI and binstub
+are owned by this plugin and work standalone; without agent-bridge only bridge
+addressing (`container:<name>`) is unavailable.
 
 ## Usage path
 
@@ -40,11 +41,13 @@ unavailable.
   `namespace-resolve`, `namespace-ensure-ready`, and `relay-profile`; bridge
   shells out to those commands rather than requiring this package in the bridge
   venv. Resolution spawns `agent-containers exec --stdio <name>`, whose wrapper
-  runs `docker exec -i -e GH_TOKEN -u <user> <name> bash -lc "copilot --acp ..."`.
-  The wrapper fetches the host `gh auth token` at spawn time and injects it via
-  the process environment (referenced by name in argv). Because the token is
-  fetched inside the wrapper, it is **never** placed in the SpawnTarget that
-  agent-bridge persists to its SQLite DB, nor in any log.
+  provisions a machine-local SSH key for trusted fleets and opens OpenSSH with
+  `docker exec -i <name> /usr/sbin/sshd -i -e` as its `ProxyCommand`. The
+  wrapper fetches the host `gh auth token` at spawn time and stages launch-only
+  environment values through stdin, never argv. Because the token is fetched
+  inside the wrapper, it is **never** placed in the SpawnTarget that
+  agent-bridge persists to its SQLite DB, nor in any log. Restricted fleets keep
+  the direct `docker exec` boundary and receive no SSH key projection.
 
 ## CLI
 
@@ -95,7 +98,7 @@ fleets:
 
 Fleets default to `security_profile: trusted`, preserving the existing
 development-container behavior (host GitHub token forwarding, credential relay,
-and the default broad Copilot launch command).
+the default broad Copilot launch command, and OpenSSH transport).
 
 Use `security_profile: restricted` for lower-trust agents. Restricted fleets
 are image-based, receive no host GitHub token or credential relay, use an
@@ -198,6 +201,8 @@ not for stamping the binstub.
   lock file; corrupt/unreadable state is treated as empty.
 - `~/.agent-containers/relay-tokens.json` — per-container credential-relay
   secrets used by the bridge-owned relay.
+- `~/.agent-containers/ssh/` — machine-local trusted-fleet SSH key, generated
+  configs, and container-identity-keyed known-host records.
 - `~/.agent-containers/containers.yaml` — optional machine-local config; only
   this copy is eagerly schema-stamped/migrated by `config-migrate`.
 - `~/.agent-containers/deploy-manifest.json`, `current-version`, `versions/` —
