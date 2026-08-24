@@ -178,12 +178,74 @@ def resolve_live_session(
     return data
 
 
+def list_local_body_sessions(*, timeout: float = 3.0) -> list[dict[str, Any]] | None:
+    """List local agent-bridge ACP sessions for headless-body enrichment."""
+    exe = shutil.which("agent-bridge")
+    if exe is None:
+        return None
+    try:
+        proc = _run_capture([exe, "--json", "sessions"], timeout=timeout)
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0 or not proc.stdout.strip():
+        return None
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, list):
+        return None
+    return [row for row in data if isinstance(row, dict)]
+
+
 def embodiment_overlay(session: dict[str, Any] | None) -> dict[str, Any] | None:
     """Build a compact read-only overlay from a live-session dict, or None."""
     if not session:
         return None
     overlay = {k: session[k] for k in _OVERLAY_KEYS if session.get(k) is not None}
     return overlay or None
+
+
+def enrich_local_body_tasks(tasks: Any, reservations: Any) -> Any:
+    """Overlay local headless ACP sessions using spawned reservation handles.
+
+    Headless bodies register in ``agent-bridge sessions``, not the interactive
+    ``live-sessions`` registry used by :func:`enrich_tasks`. The coordinator's
+    spawned reservation is the authoritative task -> ``local-body:<session-id>``
+    join. One bridge list call enriches the whole board batch.
+    """
+    if not isinstance(tasks, list) or not isinstance(reservations, list):
+        return tasks
+    task_to_session: dict[str, str] = {}
+    for res in reservations:
+        if not isinstance(res, dict) or res.get("state") != "spawned":
+            continue
+        handle = str(res.get("session_handle") or "")
+        if not handle.startswith("local-body:"):
+            continue
+        session_id = handle.removeprefix("local-body:")
+        task_id = str(res.get("task_id") or "")
+        if task_id and session_id:
+            task_to_session[task_id] = session_id
+    if not task_to_session:
+        return tasks
+    sessions = list_local_body_sessions()
+    if sessions is None:
+        return tasks
+    by_id = {
+        str(row.get("session_id")): row
+        for row in sessions
+        if row.get("session_id")
+    }
+    out = []
+    for task in tasks:
+        if not isinstance(task, dict) or task.get("embodiment"):
+            out.append(task)
+            continue
+        session = by_id.get(task_to_session.get(str(task.get("id")), ""))
+        overlay = embodiment_overlay(session)
+        out.append({**task, "embodiment": overlay} if overlay else task)
+    return out
 
 
 #: The three liveness verdicts a GC reconcile acts on. ``LIVE`` and ``GONE`` are

@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import types
 
+import pytest
+
 from agent_dispatch import tracking
 
 
@@ -40,6 +42,51 @@ def test_embodiment_overlay_keeps_only_present_keys():
 def test_embodiment_overlay_none_for_empty():
     assert tracking.embodiment_overlay(None) is None
     assert tracking.embodiment_overlay({}) is None
+
+
+def test_enrich_local_body_tasks_joins_spawned_reservation(monkeypatch):
+    monkeypatch.setattr(
+        tracking,
+        "list_local_body_sessions",
+        lambda: [
+            {
+                "session_id": "brg-1",
+                "worktree_id": "wt-headless",
+                "status": "running",
+                "liveness": "active",
+            }
+        ],
+    )
+    tasks = [
+        {"id": "t1", "status": "started"},
+        {"id": "t2", "status": "queued"},
+    ]
+    reservations = [
+        {
+            "task_id": "t1",
+            "state": "spawned",
+            "session_handle": "local-body:brg-1",
+        }
+    ]
+    out = tracking.enrich_local_body_tasks(tasks, reservations)
+    assert out[0]["embodiment"]["session_id"] == "brg-1"
+    assert out[0]["embodiment"]["liveness"] == "active"
+    assert "embodiment" not in out[1]
+
+
+def test_enrich_local_body_tasks_ignores_nonlocal_handles(monkeypatch):
+    monkeypatch.setattr(
+        tracking,
+        "list_local_body_sessions",
+        lambda: pytest.fail("bridge sessions should not be listed"),
+    )
+    tasks = [{"id": "t1", "status": "started"}]
+    reservations = [{
+        "task_id": "t1",
+        "state": "spawned",
+        "session_handle": "fleet-body:peer:brg-1",
+    }]
+    assert tracking.enrich_local_body_tasks(tasks, reservations) is tasks
 
 
 def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
