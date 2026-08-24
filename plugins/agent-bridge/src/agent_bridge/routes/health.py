@@ -30,6 +30,10 @@ async def health(request: Request) -> dict:
     # never judged "clean" while live hosts it must preserve go unaccounted for.
     if mgr is not None and hasattr(mgr, "live_host_count"):
         body["live_host_count"] = mgr.live_host_count
+    resolver = getattr(request.app.state, "resolver", None)
+    if resolver is not None:
+        errors = getattr(resolver, "topology_errors", [])
+        body["topology_error_count"] = len(errors) if isinstance(errors, list) else 0
     # When drained, surface *how long* and *why* so a stuck/aborted drain is
     # visible to monitoring without grepping logs (#1757).
     if draining and mgr is not None:

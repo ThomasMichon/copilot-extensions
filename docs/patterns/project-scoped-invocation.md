@@ -117,7 +117,8 @@ one keeps *where* an agent runs from changing how it is reached; this one keeps
   agent-dispatch embody supervisor now spawns `agent-worktrees --project <repo>
   embody …`, deriving the project from the task's lane — the fix that motivated
   this pattern.
-- **Target (not yet built):** the per-project `<repo>` binstub as a full
-  namespace dispatcher across the agent-* fleet (a change to the binstub
-  generator, with Windows `.ps1`/`.cmd` parity and the reserved-word set). Tracked
-  as a follow-on; this guide is the design it will realize.
+- **Realized (bridge catalog):** agent-bridge `send`, `create`, `agents`, and
+  `machines` resolve explicit `--project` identically to CWD discovery. The list
+  verbs retain an explicit `--all-projects` cross-project view.
+- **Realized (dispatcher):** per-project `<repo>` binstubs dispatch the core
+  agent-* layers on Windows and POSIX while preserving legacy worktree verbs.

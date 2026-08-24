@@ -13,7 +13,13 @@ async def list_agents(request: Request):
     resolver = getattr(request.app.state, "resolver", None)
     if not resolver:
         return {"agents": []}
-    return {"agents": await resolver.list_agents_async()}
+    list_async = getattr(resolver, "list_agents_async", None)
+    agents = await list_async() if callable(list_async) else []
+    errors = getattr(resolver, "topology_errors", [])
+    return {
+        "agents": agents,
+        "topology_errors": errors if isinstance(errors, list) else [],
+    }
 
 
 @router.get("/api/v1/agents/{agent_name}")
@@ -23,13 +29,19 @@ async def get_agent(agent_name: str, request: Request):
     if not resolver:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
 
-    config = resolver.agents.get(agent_name)
+    lookup = getattr(resolver, "get_agent_config", None)
+    config = (
+        lookup(agent_name)
+        if callable(lookup)
+        else getattr(resolver, "agents", {}).get(agent_name)
+    )
     if not config:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
 
     return {
         "name": config.name,
         "display_name": config.display_name or config.name,
+        "aliases": list(config.aliases),
         "description": config.description or "",
         "icon": config.icon,
         "managed": config.managed,
@@ -40,6 +52,11 @@ async def get_agent(agent_name: str, request: Request):
             else "ssh"
         ),
         "host": config.host or "",
+        "machine_key": (
+            resolver.machine_key_for_agent(config)
+            if callable(getattr(resolver, "machine_key_for_agent", None))
+            else None
+        ),
         "ssh_user": config.ssh_user,
         "ssh_environment": config.ssh_environment,
         "cwd": config.cwd,
@@ -79,7 +96,11 @@ async def list_machines(request: Request):
                 for e in mc.ssh_environments
             ],
         })
-    return {"machines": machines}
+    errors = getattr(resolver, "topology_errors", [])
+    return {
+        "machines": machines,
+        "topology_errors": errors if isinstance(errors, list) else [],
+    }
 
 
 @router.get("/api/v1/machines/{machine_key}")

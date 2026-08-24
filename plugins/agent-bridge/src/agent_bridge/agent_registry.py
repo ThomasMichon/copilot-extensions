@@ -126,6 +126,7 @@ class AgentConfig:
     managed: bool = False
     description: str | None = None
     display_name: str | None = None
+    aliases: list[str] = field(default_factory=list)
     icon: str | None = None
     worktree_root: str | None = None
     env: dict[str, str] = field(default_factory=dict)
@@ -182,6 +183,10 @@ class AmbiguousAgentError(Exception):
             "Qualify it with a namespace (e.g. 'codespace:<name>') or use the "
             "exact name to disambiguate."
         )
+
+
+class AgentRegistryLoadError(ValueError):
+    """A configured explicit agent registry is missing or invalid."""
 
 
 class NamespaceResolver(ABC):
@@ -525,6 +530,14 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
     """Parse raw acp-agents.json data into typed AgentConfig objects."""
     registry: dict[str, AgentConfig] = {}
     for name, config in data.items():
+        raw_aliases = config.get("aliases", [])
+        if (
+            not isinstance(raw_aliases, list)
+            or any(not isinstance(alias, str) for alias in raw_aliases)
+        ):
+            raise ValueError(
+                f"agent {name!r} aliases must be a list of strings"
+            )
         registry[name] = AgentConfig(
             name=name,
             host=config.get("host"),
@@ -536,6 +549,7 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
             managed=bool(config.get("managed")),
             description=config.get("description"),
             display_name=config.get("display_name"),
+            aliases=list(raw_aliases),
             icon=config.get("icon"),
             worktree_root=config.get("worktree_root"),
             env={str(k): str(v) for k, v in config.get("env", {}).items()},
@@ -547,19 +561,27 @@ def parse_agent_registry(data: dict[str, Any]) -> dict[str, AgentConfig]:
     return registry
 
 
-def load_agent_registry(path: str | Path) -> dict[str, AgentConfig]:
+def load_agent_registry(
+    path: str | Path, *, strict: bool = False,
+) -> dict[str, AgentConfig]:
     """Load and parse an agent registry file (acp-agents.json)."""
     p = Path(path).expanduser()
     if not p.exists():
-        log.warning("Agent registry not found at %s", p)
+        message = f"agent registry not found at {p}"
+        if strict:
+            raise AgentRegistryLoadError(message)
+        log.warning(message)
         return {}
     try:
         data = json.loads(p.read_text(encoding="utf-8")) or {}
         registry = parse_agent_registry(data)
         log.info("Loaded %d agents from %s", len(registry), p)
         return registry
-    except Exception as exc:
-        log.error("Failed to parse agent registry at %s: %s", p, exc)
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError, ValueError) as exc:
+        message = f"failed to parse agent registry at {p}: {exc}"
+        if strict:
+            raise AgentRegistryLoadError(message) from exc
+        log.error(message)
         return {}
 
 
@@ -1088,6 +1110,11 @@ def derive_topology_agents(
                     project=control_plane_project,
                     derived=True,
                     display_name=f"{machine.display_name} [{env.name}]",
+                    aliases=(
+                        [env.alias]
+                        if env.alias and env.alias != name
+                        else []
+                    ),
                     description=(
                         f"Control-plane '{control_plane_project}' on "
                         f"{machine.display_name} ({env.name}) [derived from topology]"
@@ -1105,12 +1132,14 @@ def derive_topology_agents(
                 continue  # local related repo -> covered by projects.yaml discovery
             if not machine.ssh_ready:
                 continue  # remote + not SSH-ready -> unreachable (skip)
-            name = f"{repo}@{machine.display_name}"
-            if name in out:
-                continue
             env = machine.get_spawnable_ssh_env() or (
                 machine.ssh_environments[0] if machine.ssh_environments else None
             )
+            name = f"{repo}@{machine.display_name}"
+            if name in out:
+                continue
+            stable_venue = env.alias if env and env.alias else machine.key
+            stable_name = f"{repo}@{stable_venue}"
             out[name] = AgentConfig(
                 name=name,
                 host=machine.key,
@@ -1118,6 +1147,7 @@ def derive_topology_agents(
                 project=repo,
                 derived=True,
                 display_name=name,
+                aliases=[stable_name] if stable_name != name else [],
                 description=(
                     f"'{repo}' on {machine.display_name} [derived from related.yaml]"
                 ),
@@ -1136,8 +1166,13 @@ def derive_topology_agents(
             (env and _is_loopback(local_machine, env)) or local_machine.ssh_ready
         )
         if reachable:
-            venue = local_machine.display_name or local_machine.key
             spawn_env = env or local_machine.get_spawnable_ssh_env()
+            venue = local_machine.display_name or local_machine.key
+            stable_venue = (
+                spawn_env.alias
+                if spawn_env and spawn_env.alias
+                else local_machine.key
+            )
             env_name = spawn_env.name if spawn_env else None
             for entry in repos:
                 if not isinstance(entry, dict) or not entry.get("agent"):
@@ -1155,6 +1190,11 @@ def derive_topology_agents(
                     project=repo,
                     derived=True,
                     display_name=name,
+                    aliases=(
+                        [f"{repo}@{stable_venue}"]
+                        if stable_venue != venue
+                        else []
+                    ),
                     # Elevation is intrinsic to the repo (e.g. a base-repo
                     # enlistment needing an admin shell): a repo adopted
                     # ``elevated`` in projects.yaml is born ``requires_admin``
@@ -1229,23 +1269,48 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
     Returns:
         AgentResolver if any agents or machines were found, else None.
     """
-    from .topology import load_control_plane_project, load_machines_yaml
+    from .topology import (
+        TopologyLoadError,
+        load_control_plane_project,
+        load_machines_yaml,
+    )
 
     all_machines: dict[str, MachineConfig] = {}
     all_agents: dict[str, AgentConfig] = {}
+    topology_errors: list[str] = []
 
-    for _profile_name, profile in cfg.topologies.items():
+    for profile_name, profile in cfg.topologies.items():
         if not profile.machines_yaml:
             # No machines.yaml -- only an explicit (deprecated) agents_config.
             if profile.agents_config:
-                all_agents.update(load_agent_registry(profile.agents_config))
+                agents_path = Path(profile.agents_config).expanduser()
+                try:
+                    all_agents.update(load_agent_registry(agents_path, strict=True))
+                except AgentRegistryLoadError as exc:
+                    topology_errors.append(
+                        f"{profile_name}: {exc}"
+                    )
+            else:
+                topology_errors.append(
+                    f"{profile_name}: no machines_yaml or agents_config configured"
+                )
             continue
-        machines = load_machines_yaml(profile.machines_yaml)
+        try:
+            machines = load_machines_yaml(profile.machines_yaml, strict=True)
+        except TopologyLoadError as exc:
+            topology_errors.append(f"{profile_name}: {exc}")
+            continue
         all_machines.update(machines)
         # Deprecated back-compat: honor an explicit acp-agents.json if still set;
         # explicit entries win over derived ones below.
         if profile.agents_config:
-            all_agents.update(load_agent_registry(profile.agents_config))
+            agents_path = Path(profile.agents_config).expanduser()
+            try:
+                all_agents.update(load_agent_registry(agents_path, strict=True))
+            except AgentRegistryLoadError as exc:
+                topology_errors.append(
+                    f"{profile_name}: {exc}"
+                )
         # Derive the roster from topology (replaces acp-agents.json). The local
         # per-machine repo registry (agent flag + checkout paths) is live-queried
         # once and reused for both control-plane inference and the per-repo
@@ -1310,8 +1375,10 @@ def build_resolver(cfg) -> AgentResolver | None:  # noqa: ANN001
         else:
             all_agents[name] = agent
 
-    if all_machines or all_agents:
-        resolver = AgentResolver(all_agents, all_machines)
+    if all_machines or all_agents or topology_errors:
+        resolver = AgentResolver(
+            all_agents, all_machines, topology_errors=topology_errors,
+        )
         log.info(
             "Resolver built: %d machines, %d agents "
             "(%d derived, %d auto-discovered)",
@@ -1620,9 +1687,12 @@ class AgentResolver:
         self,
         agents: dict[str, AgentConfig],
         machines: dict[str, MachineConfig],
+        *,
+        topology_errors: list[str] | None = None,
     ) -> None:
         self._agents = agents
         self._machines = machines
+        self._topology_errors = list(topology_errors or [])
         self._namespace_resolvers: dict[str, NamespaceResolver] = {}
         # Throttle for the declarative providers.d re-scan (monotonic seconds).
         self._provider_scan_ts: float = 0.0
@@ -1641,6 +1711,22 @@ class AgentResolver:
                 else:
                     self._alias_index[env.alias] = (machine, env)
 
+        self._agent_alias_index: dict[str, str | None] = {}
+        for canonical, config in agents.items():
+            for alias in [canonical, *config.aliases]:
+                key = alias.casefold()
+                existing = self._agent_alias_index.get(key)
+                if existing is None and key in self._agent_alias_index:
+                    continue
+                if existing is not None and existing != canonical:
+                    self._agent_alias_index[key] = None
+                    self._topology_errors.append(
+                        f"agent alias {alias!r} is ambiguous between "
+                        f"{existing!r} and {canonical!r}"
+                    )
+                else:
+                    self._agent_alias_index[key] = canonical
+
         # Cache local identity for loopback detection
         self._local_machine, self._local_platform = _detect_local_machine(
             machines,
@@ -1653,6 +1739,34 @@ class AgentResolver:
     @property
     def machines(self) -> dict[str, MachineConfig]:
         return self._machines
+
+    @property
+    def topology_errors(self) -> list[str]:
+        return list(self._topology_errors)
+
+    def canonical_agent_name(self, name: str) -> str | None:
+        """Resolve an exact, case-insensitive, or declared static alias."""
+        if name in self._agents:
+            return name
+        return self._agent_alias_index.get(name.casefold())
+
+    def get_agent_config(self, name: str) -> AgentConfig | None:
+        canonical = self.canonical_agent_name(name)
+        return self._agents.get(canonical) if canonical else None
+
+    def machine_key_for_agent(self, config: AgentConfig) -> str | None:
+        """Return the normalized topology key hosting ``config``."""
+        if config.host:
+            try:
+                machine, _env = self._resolve_machine(
+                    config.host, config.ssh_environment,
+                )
+                return machine.key
+            except ValueError:
+                return None
+        if config.auto_discovered and self._local_machine:
+            return self._local_machine.key
+        return None
 
     # --- Namespace resolver management ---
 
@@ -1852,8 +1966,9 @@ class AgentResolver:
         # resolve the venue and run <repo> there instead of the venue's default.
         repo, venue = _split_repo_venue(agent_name)
         if repo is not None:
-            if agent_name in self._agents:
-                return await self._resolve_bare(agent_name)
+            static_name = self.canonical_agent_name(agent_name)
+            if static_name:
+                return await self._resolve_bare(static_name)
             return await self._resolve_venue_bound(repo, venue)
 
         # Bare name (no prefix): search static/provider agents AND every
@@ -2051,11 +2166,12 @@ class AgentResolver:
         (Capability 2) when this daemon is non-elevated; otherwise it falls
         through to normal static resolution.
         """
-        relay = await self._maybe_elevated_relay(agent_name)
+        canonical = self.canonical_agent_name(agent_name) or agent_name
+        relay = await self._maybe_elevated_relay(canonical)
         if relay is not None:
             return relay
-        target = self._resolve_static(agent_name)
-        config = self._agents.get(agent_name)
+        target = self._resolve_static(canonical)
+        config = self._agents.get(canonical)
         if config is not None and config.requires_admin:
             from . import elevated
 
@@ -2111,8 +2227,9 @@ class AgentResolver:
         candidates: list[tuple[str, "NamespaceResolver | None", str]] = []
 
         # Static agents have no namespace prefix.
-        if name in self._agents:
-            candidates.append((name, None, name))
+        static_name = self.canonical_agent_name(name)
+        if static_name:
+            candidates.append((static_name, None, static_name))
 
         lname = name.lower()
         for prefix, resolver in self._namespace_resolvers.items():
@@ -2165,7 +2282,8 @@ class AgentResolver:
 
     def _resolve_static(self, agent_name: str) -> SpawnTarget:
         """Resolve via the static / auto-discovered registry."""
-        config = self._agents.get(agent_name)
+        canonical = self.canonical_agent_name(agent_name)
+        config = self._agents.get(canonical) if canonical else None
         if not config:
             raise KeyError(f"Agent '{agent_name}' not found in registry")
 
@@ -2330,12 +2448,14 @@ class AgentResolver:
         return {
             "name": config.name,
             "display_name": config.display_name or config.name,
+            "aliases": list(config.aliases),
             "description": config.description or "",
             "icon": config.icon,
             "managed": config.managed,
             "spawnable": spawnable,
             "target_type": target_type,
             "host": config.host or "",
+            "machine_key": self.machine_key_for_agent(config),
             "ssh_user": config.ssh_user,
             "ssh_environment": config.ssh_environment,
             "cwd": config.cwd,
