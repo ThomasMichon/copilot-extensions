@@ -38,7 +38,7 @@ from typing import Any
 from . import remote_dispatch
 from .procutil import (
     agent_bridge_launch_prefix,
-    detached_kwargs,
+    run_background_capture,
     run_agent_worktrees_capture,
 )
 
@@ -136,18 +136,11 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     return [ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", machine, remote_cmd]
 
 
-def _run_capture(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+def _run_capture(
+    argv: list[str], *, timeout: float
+) -> subprocess.CompletedProcess[str] | None:
     """Run a passive probe without allocating a headed Windows console."""
-    creation_kwargs = detached_kwargs() if os.name == "nt" else {}
-    return subprocess.run(  # noqa: S603 -- fixed argv, executable resolved by caller
-        argv,
-        check=False,
-        capture_output=True,
-        stdin=subprocess.DEVNULL,
-        text=True,
-        timeout=timeout,
-        **creation_kwargs,
-    )
+    return run_background_capture(argv, timeout=timeout)
 
 
 def resolve_live_session(
@@ -171,9 +164,8 @@ def resolve_live_session(
     if timeout is None:
         # A remote resolve adds an SSH round-trip, so allow a little more headroom.
         timeout = 6.0 if machine else 3.0
-    try:
-        proc = _run_capture(argv, timeout=timeout)
-    except (subprocess.TimeoutExpired, OSError):
+    proc = _run_capture(argv, timeout=timeout)
+    if proc is None:
         return None
     if proc.returncode != 0 or not proc.stdout.strip():
         return None
@@ -242,9 +234,8 @@ def liveness_verdict(
         return UNKNOWN
     if timeout is None:
         timeout = 6.0 if machine else 3.0
-    try:
-        proc = _run_capture(argv, timeout=timeout)
-    except (subprocess.TimeoutExpired, OSError):
+    proc = _run_capture(argv, timeout=timeout)
+    if proc is None:
         return UNKNOWN
     if proc.returncode != 0:
         return UNKNOWN  # bridge/ssh errored -- can't tell, not "gone"

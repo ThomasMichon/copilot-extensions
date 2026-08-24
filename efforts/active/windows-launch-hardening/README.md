@@ -17,16 +17,20 @@
 Every agent-* background launch on Windows must be **headless** — no window ever
 surfaces, Windows Terminal / the DefTerm handoff included — and it must use **one
 uniform mechanism**, not per-plugin variants. `-WindowStyle Hidden` alone does
-not achieve this (DefTerm ignores it); `CREATE_NO_WINDOW` *creates a console
-DefTerm then shows*; so the correct mechanism differs by launch kind:
+not achieve this (DefTerm ignores it); the correct mechanism differs by launch
+kind:
 
 - **pwsh/powershell launches** (session-start reconcile, scheduled tasks): wrap
   in `conhost.exe --headless <interp> …` (proven: agent-bridge/vault/dispatch).
 - **Long-lived detached daemons**: `DETACHED_PROCESS` (no console at all), stdio
-  redirected to files — not `CREATE_NO_WINDOW`. See
-  `agent_bridge._passive_daemon_creationflags`.
-- **Short-lived / piped child subprocesses**: `CREATE_NO_WINDOW` on win32
-  (`agent_bridge.agent_registry` pattern; the shared `_exec.no_window_creationflags`).
+  redirected to files and a GUI-subsystem root such as `pythonw.exe`. Every
+  console child they spawn must use the short-lived captured-tree primitive.
+- **Short-lived / piped process trees**: launch a console-subsystem root with
+  `CREATE_NO_WINDOW` on win32. Do not combine it with `DETACHED_PROCESS` or use
+  a GUI-subsystem root (`pythonw.exe`) — Windows ignores the flag in both cases,
+  leaving console descendants free to invoke Default Terminal. The shared
+  `run_background_capture` primitive preserves stdout/stderr and timeout/error
+  behavior while keeping descendants on the windowless tree.
 
 ## Progress
 
@@ -105,3 +109,21 @@ against real behavior.
 - Follow-up #982 applies shared `no_window_kwargs()` to tracking probes and the
   remaining dispatch-owned SSH transports. The children remain owned and
   pipe-captured; only new-console allocation is suppressed.
+
+### 2026-08-24 - Descendant-console inheritance
+- Issue #1015 / PR #1018 removed the Windows batch shim from agent-dispatch
+  sibling discovery and launched the versioned runtime directly. Live
+  verification showed that the first fix's `pythonw.exe + DETACHED_PROCESS`
+  combination still left console descendants free to allocate Default Terminal
+  consoles: one identity probe produced four `OpenConsole` processes and four
+  foreground-title transitions as its `git.exe` children ran.
+- A controlled comparison against the exact identity command established the
+  durable short-lived-tree primitive: console `python.exe +
+  CREATE_NO_WINDOW` preserved captured stdout/stderr while producing zero
+  `OpenConsole` processes and zero foreground transitions. `conhost --headless`
+  also contained descendants but consumed the captured stream; a hidden new
+  console worked but was unnecessary.
+- The follow-up centralizes capture semantics in `run_background_capture`, uses
+  it for both identity discovery and bridge liveness, and adds a Windows
+  integration regression whose helper child repeatedly launches real
+  `git.exe` while observing process and foreground state.
