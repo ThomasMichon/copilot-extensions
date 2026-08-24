@@ -8,14 +8,19 @@ subprocess boundary mocked -- no real tmux/psmux is invoked.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
+import os
+import platform
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from agent_worktrees import __main__ as m
-from agent_worktrees import activity
-from agent_worktrees import reclaim
-from agent_worktrees import sessions
+from agent_worktrees import activity, locks, procs, reclaim, sessions
 
 
 # â”€â”€ build_mux_new_window_argv (pure) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -57,16 +62,16 @@ class TestBuildMuxNewWindowArgv:
             "id1", "/w", ["copilot", "-i", "hi"], None,
             mux="tmux", pane_wrapper=str(wrapper),
         )
-        # env -u ... bash <wrapper> copilot -i hi
+        # env -u ... bash <wrapper> --aw-wt <id> copilot -i hi
         assert "bash" in argv
         b = argv.index("bash")
         assert argv[b + 1] == str(wrapper)
-        assert argv[b + 2:] == ["copilot", "-i", "hi"]
+        assert argv[b + 2:] == ["--aw-wt", "id1", "copilot", "-i", "hi"]
 
     def test_psmux_runs_command_directly_no_identity_prefix(self):
         argv = sessions.build_mux_new_window_argv(
             "id2", "C:/w", ["pwsh.exe", "-File", "s.ps1", "-i", "seed"], None,
-            mux="psmux",
+            mux="psmux", pane_wrapper="/does/not/exist",
         )
         assert argv[:2] == ["psmux", "new-window"]
         # psmux target has NO '=' prefix
@@ -80,13 +85,50 @@ class TestBuildMuxNewWindowArgv:
         assert argv[-5:] == ["pwsh.exe", "-File", "s.ps1", "-i", "seed"]
 
     def test_psmux_runs_command_verbatim_no_quoting(self):
-        # The seed is NOT a launch arg (it is send-keys'd), so the psmux branch
-        # runs the command verbatim -- no quoting layer that could break the spawn.
+        # Without an initial-prompt transport or wrapper, the psmux branch runs
+        # the command verbatim -- no quoting layer that could break the spawn.
         argv = sessions.build_mux_new_window_argv(
             "id2", "C:/w",
             ["pwsh.exe", "--allow-all-tools"], None, mux="psmux",
+            pane_wrapper="/does/not/exist",
         )
         assert argv[-2:] == ["pwsh.exe", "--allow-all-tools"]
+
+    def test_psmux_prompt_transport_requires_and_uses_wrapper(self, tmp_path):
+        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper.write_text("# test wrapper\n")
+        argv = sessions.build_mux_new_window_argv(
+            "id2",
+            "C:/w",
+            ["pwsh.exe", "-File", "s.ps1"],
+            None,
+            mux="psmux",
+            pane_wrapper=str(wrapper),
+            initial_prompt="three word seed",
+            prompt_receipt="receipt123",
+        )
+        flag = argv.index("--aw-prompt-b64")
+        transport = argv[flag + 1]
+        assert base64.b64decode(transport).decode("utf-8") == "three word seed"
+        assert "three word seed" not in argv
+        assert argv[flag + 2:flag + 4] == [
+            "--aw-prompt-receipt", "receipt123",
+        ]
+        p = argv.index("pwsh.exe")
+        assert argv[p:p + 7] == [
+            "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(wrapper),
+            "-AwWt", "id2",
+        ]
+        assert argv[flag + 4:flag + 7] == ["pwsh.exe", "-File", "s.ps1"]
+
+    def test_prompt_transport_fails_closed_without_wrapper(self):
+        with pytest.raises(RuntimeError, match="pane wrapper is required"):
+            sessions.build_mux_new_window_argv(
+                "id2", "C:/w", ["copilot"], None,
+                mux="psmux", pane_wrapper="/does/not/exist",
+                initial_prompt="three word seed",
+                prompt_receipt="receipt123",
+            )
 
     def test_empty_work_dir_omits_c_flag(self):
         argv = sessions.build_mux_new_window_argv(
@@ -120,6 +162,187 @@ class TestMuxNewWindow:
         out = sessions.mux_new_window("id", "/w", ["copilot"], None, mux="tmux")
         assert out["ok"] is False
         assert "no such session" in out["error"]
+
+    def test_required_prompt_wrapper_failure_is_structured(self, monkeypatch):
+        monkeypatch.setattr(
+            sessions,
+            "build_mux_new_window_argv",
+            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("wrapper missing")),
+        )
+        out = sessions.mux_new_window(
+            "id", "/w", ["copilot"], None,
+            mux="psmux", initial_prompt="continue",
+        )
+        assert out == {
+            "ok": False,
+            "new_pane": None,
+            "error": "wrapper missing",
+        }
+
+    def test_missing_prompt_receipt_retires_successor(self, monkeypatch, tmp_path):
+        class R:
+            returncode = 0
+            stdout = "%9\n"
+            stderr = ""
+
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        monkeypatch.setattr(
+            sessions, "_initial_prompt_receipt_path",
+            lambda token: tmp_path / token,
+        )
+        retired = {}
+        monkeypatch.setattr(
+            sessions,
+            "mux_retire_pane",
+            lambda pane, **k: retired.update(pane=pane)
+            or {"ok": True, "method": "test-retire"},
+        )
+        monkeypatch.setattr(
+            sessions,
+            "build_mux_new_window_argv",
+            lambda *a, **k: ["psmux", "new-window"],
+        )
+
+        out = sessions.mux_new_window(
+            "id", "/w", ["copilot"], None,
+            mux="psmux", initial_prompt="continue",
+            prompt_receipt_timeout=0,
+        )
+
+        assert out["ok"] is False
+        assert out["prompt_received"] is False
+        assert retired["pane"] == "%9"
+
+    def test_failed_prompt_receipt_rejects_successor(self, monkeypatch, tmp_path):
+        receipt = tmp_path / "receipt"
+
+        class R:
+            returncode = 0
+            stdout = "%9\n"
+            stderr = ""
+
+        def _spawn(*args, **kwargs):
+            receipt.write_text("failed:2", encoding="utf-8")
+            return R()
+
+        monkeypatch.setattr(subprocess, "run", _spawn)
+        monkeypatch.setattr(
+            sessions, "_initial_prompt_receipt_path", lambda token: receipt,
+        )
+        monkeypatch.setattr(
+            sessions, "_mux_pane_process_tree", lambda *a, **k: {100, 101},
+        )
+        cleaned = {}
+        monkeypatch.setattr(
+            sessions,
+            "_retire_failed_successor",
+            lambda pane, tree, **k: cleaned.update(pane=pane, tree=tree)
+            or {"ok": True},
+        )
+        monkeypatch.setattr(
+            sessions,
+            "build_mux_new_window_argv",
+            lambda *a, **k: ["psmux", "new-window"],
+        )
+
+        out = sessions.mux_new_window(
+            "id", "/w", ["copilot"], None,
+            mux="psmux", initial_prompt="continue",
+            prompt_startup_grace=0,
+        )
+
+        assert out["ok"] is False
+        assert out["prompt_status"] == "failed:2"
+        assert cleaned == {"pane": "%9", "tree": {100, 101}}
+
+    def test_failed_successor_cleanup_terminates_exact_tree(self, monkeypatch):
+        alive = {100, 101, 102}
+        monkeypatch.setattr(
+            sessions,
+            "mux_retire_pane",
+            lambda pane, **k: {"ok": True, "gone": True, "method": "hard"},
+        )
+        monkeypatch.setattr(locks, "pid_alive", lambda pid: pid in alive)
+
+        def _terminate(pid):
+            alive.discard(pid)
+            return True
+
+        monkeypatch.setattr(procs, "terminate_pid", _terminate)
+
+        out = sessions._retire_failed_successor(
+            "%9", {100, 101, 102}, mux="psmux",
+        )
+
+        assert out["ok"] is True
+        assert out["process_tree"] == [100, 101, 102]
+        assert out["terminated"] == [102, 101, 100]
+        assert out["survivors"] == []
+
+
+class TestPaneWrapperInitialPrompt:
+    def test_wrapper_appends_native_interactive_prompt(self, tmp_path):
+        root = Path(__file__).resolve().parents[1]
+        capture = tmp_path / "capture.py"
+        output = tmp_path / "args.json"
+        capture.write_text(
+            "import json, os, sys\n"
+            "with open(os.environ['PROMPT_ARGS_OUT'], 'w', encoding='utf-8') as f:\n"
+            "    json.dump(sys.argv[1:], f)\n",
+            encoding="utf-8",
+        )
+        prompt = 'continue the "multi word" work'
+        env = os.environ.copy()
+        env["PROMPT_ARGS_OUT"] = str(output)
+        env["WORKTREE_PANE_MIN_RUNTIME"] = "0"
+        env["WORKTREE_PANE_WAIT_TIMEOUT"] = "0"
+        env["WORKTREE_PROMPT_STARTUP_GRACE"] = "0"
+        env["USERPROFILE"] = str(tmp_path)
+        env["HOME"] = str(tmp_path)
+
+        if platform.system() == "Windows":
+            pwsh = shutil.which("pwsh")
+            if not pwsh:
+                pytest.skip("pwsh is required for the Windows pane wrapper")
+            wrapper = root / "bin" / "pane-wrapper.ps1"
+            cmd = [
+                pwsh, "-NoProfile", "-NoLogo", "-File", str(wrapper),
+                "--aw-prompt-b64",
+                base64.b64encode(prompt.encode("utf-8")).decode("ascii"),
+                "--aw-prompt-receipt", "wrappertest",
+                sys.executable, str(capture),
+            ]
+            receipt = (
+                tmp_path / ".agent-worktrees" /
+                "handoff-prompt-receipts" / "wrappertest"
+            )
+        else:
+            bash = shutil.which("bash")
+            if not bash:
+                pytest.skip("bash is required for the Unix pane wrapper")
+            wrapper = root / "bin" / "pane-wrapper.sh"
+            cmd = [
+                bash, str(wrapper),
+                "--aw-prompt-b64",
+                base64.b64encode(prompt.encode("utf-8")).decode("ascii"),
+                "--aw-prompt-receipt", "wrappertest",
+                sys.executable, str(capture),
+            ]
+            receipt = (
+                tmp_path / ".agent-worktrees" /
+                "handoff-prompt-receipts" / "wrappertest"
+            )
+
+        receipt.unlink(missing_ok=True)
+        result = subprocess.run(
+            cmd, env=env, capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(output.read_text("utf-8")) == [
+            "--interactive", prompt,
+        ]
+        assert receipt.read_text("utf-8") == "launching"
+        receipt.unlink()
 
 
 class TestMuxRetirePane:
@@ -438,17 +661,16 @@ class TestCmdHandoffCutover:
 
         def _fake_new_window(wt, wd, cmd, env, **k):
             captured["cmd"] = cmd
-            return {"ok": True, "new_pane": "%5", "error": None}
+            captured["env"] = env
+            captured["kwargs"] = k
+            return {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+                "error": None,
+            }
 
         monkeypatch.setattr(sessions, "mux_new_window", _fake_new_window)
-        # The seed is injected via send-keys, not a launch arg -- capture it.
-        seeded = {}
-        monkeypatch.setattr(
-            sessions, "mux_seed_pane",
-            lambda pane, seed, **k: seeded.update(pane=pane, seed=seed)
-            or {"ok": True, "pane": pane, "ready": True, "sent": True},
-        )
-
         rc = m.cmd_handoff_cutover(_ns(seed="resume the multi word work", old_pane="%2"))
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
@@ -457,7 +679,10 @@ class TestCmdHandoffCutover:
         assert out["new_pane"] == "%5"
         assert out["seed_len"] == len("resume the multi word work")
         assert out["seeded"] is True
-        # The launch cmd carries NO seed arg; the seed is send-keys'd to the pane.
+        # The launch cmd carries NO seed arg; the wrapper receives base64 through
+        # the mux window environment and appends native --interactive afterward.
         assert captured["cmd"] == ["copilot"]
-        assert seeded["pane"] == "%5"
-        assert seeded["seed"] == "resume the multi word work"
+        assert captured["kwargs"]["initial_prompt"] == (
+            "resume the multi word work"
+        )
+        assert out["seed_method"] == "interactive-argv"

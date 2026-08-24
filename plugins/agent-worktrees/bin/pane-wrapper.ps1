@@ -19,6 +19,7 @@ try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}
 
 $minRuntime = if ($env:WORKTREE_PANE_MIN_RUNTIME) { [int]$env:WORKTREE_PANE_MIN_RUNTIME } else { 3 }
 $waitTimeout = if ($env:WORKTREE_PANE_WAIT_TIMEOUT) { [int]$env:WORKTREE_PANE_WAIT_TIMEOUT } else { 60 }
+$promptStartupGrace = if ($env:WORKTREE_PROMPT_STARTUP_GRACE) { [int]$env:WORKTREE_PROMPT_STARTUP_GRACE } else { 3 }
 
 # --- Owner-tether: reap the whole pane subtree when this pane exits (#1433) ----
 # This wrapper is the pane's root process; the Copilot session (and its node /
@@ -92,18 +93,64 @@ Set-AwPaneKillOnCloseJob
 
 $rest = @($args)
 $awWt = ''
-if ($rest.Count -ge 2 -and $rest[0] -eq '-AwWt') {
-    $awWt = [string]$rest[1]
+$initialPromptB64 = ''
+$initialPromptReceipt = ''
+while ($rest.Count -ge 2) {
+    $key = [string]$rest[0]
+    if ($key -eq '-AwWt') {
+        $awWt = [string]$rest[1]
+    } elseif ($key -eq '--aw-prompt-b64') {
+        $initialPromptB64 = [string]$rest[1]
+    } elseif ($key -eq '--aw-prompt-receipt') {
+        $initialPromptReceipt = [string]$rest[1]
+    } else {
+        break
+    }
     $rest = if ($rest.Count -gt 2) { @($rest[2..($rest.Count - 1)]) } else { @() }
 }
 
 if ($rest.Count -eq 0) { exit 0 }
+
+# Native interactive handoff seed. psmux cannot preserve a multi-word pane argv
+# element, so handoff-cutover sends UTF-8 base64 + a receipt token as space-free
+# wrapper control arguments. Decode after psmux has reconstructed this argv,
+# append the real Copilot flag as a PowerShell array element, then acknowledge
+# before the child starts.
+if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
+    try {
+        if ($initialPromptReceipt -notmatch '^[A-Za-z0-9_-]+$') {
+            throw 'invalid initial-prompt receipt token'
+        }
+        $initialPrompt = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($initialPromptB64)
+        )
+        $rest += @('--interactive', $initialPrompt)
+        $receiptDir = Join-Path $env:USERPROFILE '.agent-worktrees\handoff-prompt-receipts'
+        New-Item -ItemType Directory -Path $receiptDir -Force -ErrorAction Stop | Out-Null
+        $receiptPath = Join-Path $receiptDir $initialPromptReceipt
+        [IO.File]::WriteAllText($receiptPath, 'launching')
+    } catch {
+        [Console]::Error.WriteLine(
+            "[agent-worktrees] invalid initial-prompt transport: $($_.Exception.Message)"
+        )
+        exit 2
+    }
+}
 
 $start = Get-Date
 & $rest[0] @($rest[1..($rest.Count - 1)])
 $exitCode = $LASTEXITCODE
 if ($null -eq $exitCode) { $exitCode = 0 }
 $runtime = [int]((Get-Date) - $start).TotalSeconds
+
+# A prompt receipt is provisional until the child survives startup. If native
+# --interactive is rejected or the launcher fails immediately, overwrite it so
+# the parent keeps the predecessor and reaps this failed successor.
+if ($initialPromptReceipt -and (
+        $exitCode -ne 0 -or $runtime -lt $promptStartupGrace
+    )) {
+    try { [IO.File]::WriteAllText($receiptPath, "failed:$exitCode") } catch {}
+}
 
 # Durable pane-exit mark (Tier-A): the only place the psmux pane's real exit code
 # is observable. Best-effort, detached, fail-silent -- must never delay pane

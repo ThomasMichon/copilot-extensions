@@ -16,13 +16,44 @@ set +e
 
 MIN_RUNTIME="${WORKTREE_PANE_MIN_RUNTIME:-3}"
 WAIT_TIMEOUT="${WORKTREE_PANE_WAIT_TIMEOUT:-60}"
+PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 
 # Optional leading `--aw-wt <id>`: the worktree id for the pane_exited activity
 # mark. Consumed here so it is never forwarded to the wrapped command.
 AW_WT=""
-if [[ "${1:-}" == "--aw-wt" ]]; then
-    AW_WT="${2:-}"
+INITIAL_PROMPT_B64=""
+INITIAL_PROMPT_RECEIPT=""
+while [[ $# -ge 2 ]]; do
+    case "$1" in
+        --aw-wt) AW_WT="$2" ;;
+        --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
+        --aw-prompt-receipt) INITIAL_PROMPT_RECEIPT="$2" ;;
+        *) break ;;
+    esac
     shift 2
+done
+
+# Native interactive handoff seed. UTF-8 base64 keeps every wrapper control
+# argument space-free so psmux never sees a multi-word pane argument. Decode
+# after mux argv handling, append a real Copilot argument, and write the receipt
+# before exec.
+if [[ -n "$INITIAL_PROMPT_B64" ]]; then
+    if [[ ! "$INITIAL_PROMPT_RECEIPT" =~ ^[A-Za-z0-9_-]+$ ]]; then
+        echo "[agent-worktrees] invalid initial-prompt receipt token" >&2
+        exit 2
+    fi
+    if INITIAL_PROMPT="$(printf '%s' "$INITIAL_PROMPT_B64" | base64 --decode 2>/dev/null)"; then
+        :
+    elif INITIAL_PROMPT="$(printf '%s' "$INITIAL_PROMPT_B64" | base64 -D 2>/dev/null)"; then
+        :
+    else
+        echo "[agent-worktrees] invalid initial-prompt transport" >&2
+        exit 2
+    fi
+    set -- "$@" --interactive "$INITIAL_PROMPT"
+    RECEIPT_DIR="$HOME/.agent-worktrees/handoff-prompt-receipts"
+    mkdir -p "$RECEIPT_DIR" || exit 2
+    printf 'launching' > "$RECEIPT_DIR/$INITIAL_PROMPT_RECEIPT" || exit 2
 fi
 
 START_TIME=$(date +%s)
@@ -30,6 +61,14 @@ START_TIME=$(date +%s)
 EXIT_CODE=$?
 END_TIME=$(date +%s)
 RUNTIME=$((END_TIME - START_TIME))
+
+# A prompt receipt is provisional until the child survives startup. If native
+# --interactive is rejected or the launcher fails immediately, overwrite it so
+# the parent keeps the predecessor and reaps this failed successor.
+if [[ -n "$INITIAL_PROMPT_RECEIPT" ]] \
+    && { [[ $EXIT_CODE -ne 0 ]] || [[ $RUNTIME -lt $PROMPT_STARTUP_GRACE ]]; }; then
+    printf 'failed:%s' "$EXIT_CODE" > "$RECEIPT_DIR/$INITIAL_PROMPT_RECEIPT" || true
+fi
 
 # Durable pane-exit mark (Tier-A): the only place the mux pane's real exit code
 # is observable (the launcher can't see it -- the child ran inside the pane).
