@@ -7,15 +7,13 @@ launcher -- the ``agent-bridge`` / ``agent-worktrees`` ``.cmd`` binstubs (which
 re-exec ``python.exe``) or ``ssh.exe`` -- Windows allocates a fresh console
 window for the child, which **flashes on screen once per worker spawn**.
 
-:func:`no_window_kwargs` supplies the ``CREATE_NO_WINDOW`` creation flag so the
-launcher (and its inherited process tree) runs without a console window, while
-still allowing captured stdout/stderr over pipes (unlike ``DETACHED_PROCESS``,
-which fully detaches). It is a no-op off Windows.
-
-Captured probes launched by a passive daemon use the sibling runtime's
-``pythonw.exe`` plus ``DETACHED_PROCESS`` instead: Windows Default Terminal can
-surface ``CREATE_NO_WINDOW``, and the venv ``python.exe`` launcher can re-exec a
-console-subsystem interpreter after the initial process is detached.
+:func:`run_background_capture` launches a short-lived process tree with captured
+stdio. On Windows its root must be a console-subsystem executable and receives
+``CREATE_NO_WINDOW``. That mode keeps descendant console programs on the same
+windowless process tree instead of letting each invoke Windows Default Terminal.
+Do not substitute ``pythonw.exe``: Windows ignores ``CREATE_NO_WINDOW`` for GUI
+applications, and a detached GUI parent leaves console descendants free to
+allocate their own consoles.
 """
 
 from __future__ import annotations
@@ -24,6 +22,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 # Re-exported so existing callers keep using ``from .procutil import
@@ -38,6 +37,7 @@ __all__ = [
     "no_window_kwargs",
     "relocate_off_payload",
     "resolve_runtime_python",
+    "run_background_capture",
     "run_agent_worktrees_capture",
     "runtime_root",
     "windowless_python",
@@ -150,8 +150,7 @@ def _sibling_runtime_launch_prefix(
     """Resolve a sibling's module launcher, with a POSIX-only PATH fallback."""
     py = resolve_runtime_python(Path.home() / runtime_dir)
     if py is not None:
-        executable = windowless_python(py) if os.name == "nt" else str(py)
-        return [executable, "-m", module]
+        return [str(py), "-m", module]
     if os.name != "nt":
         exe = shutil.which(path_command)
         if exe:
@@ -162,19 +161,29 @@ def _sibling_runtime_launch_prefix(
 def run_agent_worktrees_capture(
     *args: str, timeout: float
 ) -> subprocess.CompletedProcess[str] | None:
-    """Run a captured ``agent-worktrees`` probe without a headed Windows console.
-
-    Passive Windows services use ``DETACHED_PROCESS`` rather than
-    ``CREATE_NO_WINDOW`` because Default Terminal can surface the latter. POSIX
-    keeps its existing process-group behavior.
-    """
+    """Run a captured ``agent-worktrees`` probe without Windows Default Terminal."""
     prefix = agent_worktrees_launch_prefix()
     if prefix is None:
         return None
-    creation_kwargs = detached_kwargs() if os.name == "nt" else {}
+    return run_background_capture([*prefix, *args], timeout=timeout)
+
+
+def run_background_capture(
+    argv: Sequence[str | os.PathLike[str]], *, timeout: float
+) -> subprocess.CompletedProcess[str] | None:
+    """Run a short-lived captured process tree without a headed Windows console.
+
+    ``CREATE_NO_WINDOW`` is intentionally applied to the console-subsystem root,
+    not to ``pythonw.exe`` and not combined with ``DETACHED_PROCESS``. This keeps
+    later console descendants (for example ``git.exe``) from allocating a new
+    Default Terminal console while preserving stdout/stderr pipes and normal
+    ``subprocess.run`` timeout handling. POSIX receives no creation flags, so its
+    process behavior is unchanged.
+    """
+    creation_kwargs = no_window_kwargs() if os.name == "nt" else {}
     try:
         return subprocess.run(  # noqa: S603 -- fixed module argv
-            [*prefix, *args],
+            [os.fspath(arg) for arg in argv],
             check=False,
             capture_output=True,
             stdin=subprocess.DEVNULL,
