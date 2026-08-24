@@ -33,6 +33,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 | [plugin-services](plugin-services/README.md) | branch | The plugin **service model** — how installer-deployed plugin runtimes expose, coordinate, and are reached as local services, à la carte and without shared infrastructure. |
 | [installer](installer/README.md) | leaf | The **Installer & Configurator** — the standalone, out-of-plugin, self-updating app that bootstraps a bare machine into a working harness (one-line bootstrap → prereqs → core install → first harness repo), remains the non-agentic surface for doctoring, config, plugin-prerequisite validation, **plugin updating + cross-plugin alignment**, repo discovery, and Git-referenced presets, and serves as the **optional worktree/agent control-plane** (the Worktree Picker, session management, terminal muxing, launch) — never a dependency of the self-sufficient plugins. |
 | [agent-fabric](agent-fabric/README.md) | branch | The layered **agent coordination fabric** — how many Copilot agents across worktrees, machines, CodeSpaces, and containers are spun up, discovered, delegated to, communicated with, and recovered as one legible whole. |
+| [native-convergence](native-convergence/README.md) | branch | **Native-construct convergence** — how the harness converges onto Copilot CLI's *own* native constructs (worktrees, workspaces, session boundary, catalogued projects, source/worktree roots, cloud steering over the agent-host protocol): delegate the primitive, align vocabulary + layout, ride native identity/steering, keep the durable value the CLI lacks — never regressing a capability, never hard-depending on an unreleased construct. |
 | [plugins/agent-worktrees](plugins/agent-worktrees/README.md) | leaf | The **isolation & session ground layer's tracking authority** — worktree + session state as a single-owner **live store**, live tracking derived from agent-worktrees' own transports (session state/mux/process/lock/SSH) with an **extension-free polling backbone**, an optional losable warm-cache accelerator, and **optional, non-load-bearing** event producers (its own native-session-event extension — source of the crisp rest/idle signal — and agent-bridge's ACP tool/message eventing) (child of agent-fabric). |
 | [picker](picker/README.md) | leaf | The **Worktree Picker** — the interactive terminal *front door* for viewing, joining, and creating a project's worktree-backed agents, and the fabric's unified presentation surface; **delivered by the optional Installer & Configurator control-plane** (child of agent-fabric). |
 | [plugins/agent-bridge](plugins/agent-bridge/README.md) | leaf | The **coordination layer** — hosts, addresses, observes, messages, resumes, and hands off live Copilot sessions across projects, worktrees, machines, and venue providers (child of agent-fabric). |
@@ -83,11 +84,11 @@ Provenance). No repo-specific renames or additions.
   e.g. *"advances Vision plugin-services §Behaviors/collision-free-endpoints"*.
 - **Public-artifact rule:** issues and commits are world-readable — keep them
   generic (no downstream-private names or context), per `AGENTS.md`.
-- **Efforts:** this repo has not adopted an in-repo `efforts/` tree; the
-  vision→reality delta is carved into **GitHub issues** here, and (where a
-  private driver runs the work) into that **driver/control repo's** efforts,
-  which link back to the public issue. If an in-repo `efforts/` tree is later
-  adopted, deltas carve efforts there instead.
+- **Efforts:** this repo has adopted an in-repo `efforts/active/<slug>/` tree
+  (see [`efforts/active/`](../efforts/active/)); the vision→reality delta is
+  carved into **GitHub issues** here and grouped into an in-repo **effort** that
+  cites the vision item it closes. Where a private driver additionally runs the
+  work, that driver's plan may **link back** to the public issue/effort.
 - **Reality docs:** a vision's *See Also* points at the architecture/README that
   records what *is* (chiefly [`docs/architecture.md`](../docs/architecture.md),
   [`docs/install-contract.md`](../docs/install-contract.md), and per-plugin

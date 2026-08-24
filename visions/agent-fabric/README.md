@@ -538,6 +538,12 @@ opt-in, pressure changes nothing and the session behaves exactly as before.
 - Sibling vision: [plugin-services](../plugin-services/README.md) — the per-host
   service model the fabric's layers deploy as (it defers cross-host agent reach
   to this fabric).
+- Cross-cutting vision: [native-convergence](../native-convergence/README.md) —
+  how the fabric's constructs (worktree isolation, session identity, roots,
+  projects, live-session steering) converge onto Copilot CLI's *own* native
+  constructs: delegate the primitive, align vocabulary + layout, keep the durable
+  value the CLI lacks, without regressing a capability or hard-depending on an
+  unreleased construct.
 - Child visions: [agent-ssh](../plugins/agent-ssh/README.md) — the connectivity /
   transport layer the fabric's cross-machine reach rides on;
   [agent-dispatch](../plugins/agent-dispatch/README.md) — the delegation layer's
