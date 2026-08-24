@@ -1266,6 +1266,7 @@ class TaskQueue:
         **never** a verdict or a terminal transition.
         """
         ts = self._now(now)
+        card = {**card, "ts": ts}
         payload = json.dumps(card, separators=(",", ":"))
         awaiting = 1 if card.get("request_input") else 0
         with self._connect() as conn:

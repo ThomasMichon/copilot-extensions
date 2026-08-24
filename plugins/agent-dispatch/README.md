@@ -68,12 +68,15 @@ for the full supervisor/profile contract.
 
 The installer drops a pivot manifest at
 `~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
-picker grows a **Tasks** pivot (between Worktrees and Maintenance). It lists this
-machine's `proposed` tasks (via `agent-dispatch inbox`, grouped by target
-worktree, handoffs badged) and Enter opens a per-task action sub-menu (kick to a
-bridge agent / abandon). The seam is a filesystem manifest registry, not a Python
-import -- the plugins live in separate venvs -- so a stale or absent picker simply
-ignores it. Source: `pivots/agent-dispatch.json`.
+picker grows a **Tasks** pivot (between Worktrees and Maintenance). It renders the
+status-grouped board from `agent-dispatch inbox --board` (Blocked / Proposed /
+Queued / Started / recently terminal). A separate **ACTIVE** badge appears only
+when embodiment tracking reports an assigned agent executing a turn; **STALLED**
+marks a running turn with no recent activity. That execution badge is independent
+from lifecycle phase -- `Started` alone never implies a live agent. Enter opens a
+per-task action sub-menu. The seam is a filesystem manifest registry, not a
+Python import -- the plugins live in separate venvs -- so a stale or absent picker
+simply ignores it. Source: `pivots/agent-dispatch.json`.
 
 ### Running the coordinator as a service
 
@@ -559,6 +562,7 @@ agent-dispatch serve                     # binds loopback on an OS-assigned port
 agent-dispatch create "Add narration track" --require logger --dedup-key seg42
 agent-dispatch worktree-status           # this worktree's inbox: tasks assigned to + owned by it
 agent-dispatch inbox                      # machine-scoped, cross-lane pickable tasks (default: proposed)
+agent-dispatch inbox --board              # lifecycle groups + independent ACTIVE/STALLED execution badge
 agent-dispatch claim                     # lease my assigned/eligible task (identity auto-resolved)
 agent-dispatch claim  <task-id>          # claim THAT specific task (positional = task id, like the verbs below)
 agent-dispatch claim  <task-id> --worker <owner>   # ...as an explicit owner (rarely needed; default: CWD identity)

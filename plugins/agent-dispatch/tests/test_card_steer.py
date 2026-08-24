@@ -152,9 +152,10 @@ def test_set_card_with_form_marks_awaiting_steer(q):
     t = _held(q)
     form = steering.parse_request_input("feedback:textarea")
     card = steering.build_card(title="Recommend Approve", status="4 comments", request_input=form)
-    task = q.set_card(t.id, "w1", card=card)
+    task = q.set_card(t.id, "w1", card=card, now=1234.0)
     assert task.awaiting_steer is True
     assert task.card["title"] == "Recommend Approve"
+    assert task.card["ts"] == 1234.0
     assert task.card["request_input"] == form
     assert task.status == Status.STARTED  # never a verdict/terminal transition
 

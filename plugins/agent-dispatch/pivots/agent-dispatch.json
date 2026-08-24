@@ -8,7 +8,7 @@
     "worktree": "target_worktree",
     "subtitle": "repo_name",
     "group": "group",
-    "badges": ["labels"]
+    "badges": ["activity", "labels"]
   },
   "empty_hint": "No active or recently-finished tasks for this machine.",
   "actions": [
