@@ -8,11 +8,12 @@ clashes so they can fix their packages.
 Two rules, plus one advisory, all computable from manifests alone (no live
 ``~/.copilot/`` read required):
 
-* **Value-shape rule** -- conflict-proneness follows value shape. A *scalar*
-  ``enforce`` value is a singleton (``model``, ``effortLevel``); two packages
-  enforcing the same key to *different* scalars is a hard **conflict**. A
-  *map/list* ``enforce`` value should instead be ``ensure-present`` (union), so
-  declaring one ``enforce`` is a shape **advisory**, never a conflict.
+* **Value-shape rule** -- conflict-proneness follows leaf value shape. Nested
+  maps are traversed because the settings surface deep-merges them; their scalar
+  leaves are authoritative singletons just like top-level ``model``. Two
+  packages enforcing the same scalar leaf to different values is a hard
+  **conflict**. A list/opaque collection leaf under ``enforce`` should instead
+  be ``ensure-present`` (union), so declaring one is a shape **advisory**.
 * **Bootstrap-floor assertion** -- the union of enabled plugins/marketplaces must
   contain the stack-critical set, and no package may set one ``false``; otherwise
   restore could disable its own trigger (a fleet-wide self-heal outage).
@@ -20,6 +21,7 @@ Two rules, plus one advisory, all computable from manifests alone (no live
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +34,10 @@ from .manifest import (
 )
 
 _SCALAR = (str, int, float, bool)
+_OPAQUE_SETTING_MAPS = {
+    ("copilot.settings", "enabledPlugins"),
+    ("copilot.settings", "extraKnownMarketplaces"),
+}
 
 
 @dataclass
@@ -43,20 +49,29 @@ class Finding:
     message: str
 
 
-def _managed_values(pkg: RequirementPackage, key: str) -> Any:
-    spec = pkg.manage.get(key) or {}
-    return spec.get("values", spec.get("value"))
+def _managed_values_under(pkg: RequirementPackage, prefix: str):
+    """Yield values from the root surface and every grouping below it."""
+    for key, spec in pkg.manage.items():
+        if (
+            key == prefix or key.startswith(prefix + ".")
+        ) and spec.get("disposition") in {"enforce", "ensure-present"}:
+            yield spec.get("values", spec.get("value"))
 
 
 def _enabled_plugins_union(packages: list[RequirementPackage]) -> dict[str, bool]:
     """Union of ``manage.copilot.settings.values.enabledPlugins`` across packages."""
     union: dict[str, bool] = {}
     for pkg in packages:
-        values = _managed_values(pkg, "copilot.settings") or {}
-        for name, on in (values.get("enabledPlugins") or {}).items():
-            base = str(name).split("@", 1)[0]
-            # An explicit ``false`` anywhere is recorded so the floor check can catch it.
-            union[base] = bool(on) and union.get(base, True)
+        for values in _managed_values_under(pkg, "copilot.settings"):
+            if not isinstance(values, dict):
+                continue
+            enabled_plugins = values.get("enabledPlugins") or {}
+            if not isinstance(enabled_plugins, dict):
+                continue
+            for name, on in enabled_plugins.items():
+                base = str(name).split("@", 1)[0]
+                # Record an explicit false anywhere so the floor check catches it.
+                union[base] = bool(on) and union.get(base, True)
         for name in pkg.bootstrap_floor.get("plugins") or []:
             union.setdefault(str(name).split("@", 1)[0], True)
     return union
@@ -65,57 +80,121 @@ def _enabled_plugins_union(packages: list[RequirementPackage]) -> dict[str, bool
 def _marketplace_union(packages: list[RequirementPackage]) -> set[str]:
     out: set[str] = set()
     for pkg in packages:
-        values = _managed_values(pkg, "copilot.settings") or {}
-        out.update((values.get("extraKnownMarketplaces") or {}).keys())
+        for values in _managed_values_under(pkg, "copilot.settings"):
+            if isinstance(values, dict):
+                marketplaces = values.get("extraKnownMarketplaces") or {}
+                if isinstance(marketplaces, dict):
+                    out.update(marketplaces.keys())
         out.update(pkg.bootstrap_floor.get("marketplaces") or [])
     return out
+
+
+def _enforced_nodes(prefix: tuple[str, ...], value: Any):
+    """Yield every value node, including maps that restore deep-merges."""
+    yield prefix, value
+    if isinstance(value, dict) and prefix not in _OPAQUE_SETTING_MAPS:
+        for key, child in value.items():
+            yield from _enforced_nodes((*prefix, str(key)), child)
+
+
+def _format_path(path: tuple[str, ...]) -> str:
+    """Render an unambiguous setting path without conflating dotted JSON keys."""
+    rendered = path[0]
+    for component in path[1:]:
+        rendered += (
+            f".{component}"
+            if component.isidentifier()
+            else f"[{json.dumps(component)}]"
+        )
+    return rendered
+
+
+def _shape(value: Any) -> str:
+    if isinstance(value, dict):
+        return "map"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, _SCALAR):
+        return "scalar"
+    if value is None:
+        return "null"
+    return type(value).__name__
 
 
 def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
     """Detect cross-package ``enforce`` disagreements (value-shape rule).
 
     The disposition is declared per *surface* (``copilot.settings``), but the
-    value-shape rule applies per *leaf setting* inside its ``values`` (``model``
-    is a scalar singleton; ``enabledPlugins`` is a map). So we descend into
-    ``values``: scalar leaves are the conflict domain (differing values across
-    packages => error); a map/list leaf under an ``enforce`` surface is a shape
-    advisory (it belongs under ``ensure-present`` union).
+    value-shape rule applies per *leaf setting* inside its ``values``. We recurse
+    through dictionaries because the settings surface deep-merges them: nested
+    scalar leaves are the conflict domain (differing values across packages =>
+    error). A list or opaque collection leaf under an ``enforce`` surface is a
+    shape advisory (it belongs under ``ensure-present`` union).
     """
     findings: list[Finding] = []
-    enforced_scalar: dict[str, list[tuple[str, Any]]] = {}
-    map_leaf_owners: dict[str, set[str]] = {}
+    enforced_scalar: dict[tuple[str, ...], list[tuple[str, Any]]] = {}
+    collection_leaf_owners: dict[tuple[str, ...], set[str]] = {}
+    enforced_shapes: dict[tuple[str, ...], list[tuple[str, str]]] = {}
 
     for pkg in packages:
         for key, spec in pkg.manage.items():
             if spec.get("disposition") != "enforce":
                 continue
+            if key != "copilot.settings" and not key.startswith("copilot.settings."):
+                continue
             values = spec.get("values", spec.get("value"))
-            leaves = values.items() if isinstance(values, dict) else [(None, values)]
-            for leaf, val in leaves:
-                leaf_key = key if leaf is None else f"{key}.{leaf}"
+            if values is None:
+                continue
+            # copilot.settings.* suffixes group contributions but do not change
+            # their physical settings.json root.
+            root = (
+                "copilot.settings"
+                if key == "copilot.settings" or key.startswith("copilot.settings.")
+                else key
+            )
+            for leaf_key, val in _enforced_nodes((root,), values):
+                enforced_shapes.setdefault(leaf_key, []).append((pkg.name, _shape(val)))
                 if isinstance(val, _SCALAR):
                     enforced_scalar.setdefault(leaf_key, []).append((pkg.name, val))
-                elif val is not None:
-                    map_leaf_owners.setdefault(leaf_key, set()).add(pkg.name)
+                elif (
+                    val is not None
+                    and (
+                        not isinstance(val, dict)
+                        or leaf_key in _OPAQUE_SETTING_MAPS
+                    )
+                ):
+                    collection_leaf_owners.setdefault(leaf_key, set()).add(pkg.name)
 
-    for leaf_key, owners in sorted(map_leaf_owners.items()):
+    for leaf_key, entries in sorted(enforced_shapes.items()):
+        shapes = {shape for _, shape in entries}
+        if len(shapes) > 1:
+            detail = "; ".join(f"{name}={shape}" for name, shape in entries)
+            findings.append(
+                Finding(
+                    "error",
+                    "enforce-shape-conflict",
+                    f"'{_format_path(leaf_key)}' is enforced with incompatible value shapes "
+                    f"across packages: {detail}",
+                )
+            )
+    for leaf_key, owners in sorted(collection_leaf_owners.items()):
         findings.append(
             Finding(
                 "advisory",
                 "shape-mismatch",
-                f"'{leaf_key}' is enforced with a map/list value by "
-                f"{', '.join(sorted(owners))}; map/list keys should be "
+                f"'{_format_path(leaf_key)}' is enforced with a list/collection value by "
+                f"{', '.join(sorted(owners))}; collection keys should be "
                 f"'ensure-present' (union), not 'enforce'.",
             )
         )
     for leaf_key, entries in sorted(enforced_scalar.items()):
-        if len({v for _, v in entries}) > 1:
+        if len({(type(value), value) for _, value in entries}) > 1:
             detail = "; ".join(f"{name}={value!r}" for name, value in entries)
             findings.append(
                 Finding(
                     "error",
                     "enforce-conflict",
-                    f"'{leaf_key}' is enforced to conflicting scalar values "
+                    f"'{_format_path(leaf_key)}' is enforced to conflicting scalar values "
                     f"across packages: {detail}",
                 )
             )

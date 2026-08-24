@@ -30,17 +30,174 @@ def test_scalar_conflict_is_error(tmp_path):
     assert any(f.code == "enforce-conflict" for f in findings)
 
 
-def test_map_enforced_is_advisory_not_error(tmp_path):
+def test_list_enforced_is_advisory_not_error(tmp_path):
     data = base_package("a/x", gate=["*"])
-    # A map leaf (enabledPlugins) under an enforce surface -> shape advisory.
-    data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {
-        "agent-worktrees@copilot-extensions": True,
-        "agent-machines@copilot-extensions": True,
-    }
+    data["manage"]["copilot.settings"]["values"]["tabs"] = ["sessions", "agents"]
     a = _pkg(tmp_path, "a", data)
     findings = validate([a])
     assert any(f.code == "shape-mismatch" and f.level == "advisory" for f in findings)
     assert not any(f.code == "shape-mismatch" and f.level == "error" for f in findings)
+
+
+def test_empty_enforced_map_has_no_leaves_or_advisory(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"] = {}
+    findings = validate([_pkg(tmp_path, "a", data)])
+    assert not any(f.code == "shape-mismatch" for f in findings)
+
+
+def test_nested_enforced_scalars_agree_without_shape_advisory(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code == "shape-mismatch" for f in findings)
+    assert not has_errors(findings)
+
+
+def test_nested_enforced_scalar_conflict_is_error(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": True}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    conflict = next(f for f in findings if f.code == "enforce-conflict")
+    assert "'copilot.settings.sandbox.enabled'" in conflict.message
+    assert has_errors(findings)
+
+
+def test_grouped_and_root_settings_share_conflict_identity(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": True}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    conflict = next(f for f in findings if f.code == "enforce-conflict")
+    assert "'copilot.settings.sandbox.enabled'" in conflict.message
+
+
+def test_scalar_map_shape_conflict_is_error(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings": {
+            "disposition": "enforce",
+            "values": {"sandbox": False},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": True}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    conflict = next(f for f in findings if f.code == "enforce-shape-conflict")
+    assert "'copilot.settings.sandbox'" in conflict.message
+    assert has_errors(findings)
+
+
+def test_dotted_json_key_does_not_alias_nested_path(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"]["copilot.settings"]["values"] = {"a.b": 1}
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"]["copilot.settings"]["values"] = {"a": {"b": 2}}
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code == "enforce-conflict" for f in findings)
+
+
+def test_known_collection_map_stays_opaque_and_advisory(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {
+        "optional@example": True
+    }
+    findings = validate([_pkg(tmp_path, "a", data)])
+    advisory = next(f for f in findings if f.code == "shape-mismatch")
+    assert "'copilot.settings.enabledPlugins'" in advisory.message
+    assert not any(f.code == "enforce-conflict" for f in findings)
+
+
+def test_bool_and_numeric_scalar_values_conflict(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"]["copilot.settings"]["values"]["enabled"] = True
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"]["copilot.settings"]["values"]["enabled"] = 1
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert any(f.code == "enforce-conflict" for f in findings)
+
+
+def test_malformed_bootstrap_collections_report_shape_without_crashing(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"].update(
+        {
+            "enabledPlugins": ["agent-worktrees@copilot-extensions"],
+            "extraKnownMarketplaces": ["copilot-extensions"],
+        }
+    )
+    findings = validate([_pkg(tmp_path, "a", data)])
+    shape_paths = {f.message.split("'", 2)[1] for f in findings if f.code == "shape-mismatch"}
+    assert shape_paths == {
+        "copilot.settings.enabledPlugins",
+        "copilot.settings.extraKnownMarketplaces",
+    }
+
+
+def test_omitted_enforce_values_do_not_create_shape_conflict(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {"copilot.settings.empty": {"disposition": "enforce"}}
+    b_data = base_package("b/x", gate=["*"])
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code == "enforce-shape-conflict" for f in findings)
+
+
+def test_unhandled_enforce_surface_is_not_settings_conflict_domain(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "custom.unhandled": {
+            "disposition": "enforce",
+            "values": {"nested": {"value": 1}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "custom.unhandled": {
+            "disposition": "enforce",
+            "values": {"nested": {"value": 2}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code.startswith("enforce-") for f in findings)
 
 
 def test_bootstrap_floor_disable_is_error(tmp_path):
@@ -54,6 +211,21 @@ def test_bootstrap_floor_disable_is_error(tmp_path):
     assert any(f.code == "bootstrap-floor" for f in findings)
 
 
+def test_bootstrap_floor_disable_in_grouped_settings_is_error(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"] = {
+        "copilot.settings.plugins": {
+            "disposition": "enforce",
+            "values": {
+                "enabledPlugins": {"agent-worktrees@copilot-extensions": False}
+            },
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", data)])
+    assert has_errors(findings)
+    assert any(f.code == "bootstrap-floor" for f in findings)
+
+
 def test_bootstrap_floor_marketplace_union(tmp_path):
     data = base_package("a/x", gate=["*"])
     data["manage"]["copilot.settings"]["values"]["extraKnownMarketplaces"] = {
@@ -62,6 +234,18 @@ def test_bootstrap_floor_marketplace_union(tmp_path):
     a = _pkg(tmp_path, "a", data)
     findings = validate([a])
     assert any(f.code == "bootstrap-floor" for f in findings)
+
+
+def test_ignored_grouped_settings_do_not_affect_bootstrap_floor(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"] = {
+        "copilot.settings.plugins": {
+            "disposition": "ignore",
+            "values": {"extraKnownMarketplaces": {"some-other-market": {}}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", data)])
+    assert not any(f.code == "bootstrap-floor" for f in findings)
 
 
 def test_plan_and_drift_key_stable(tmp_path):
