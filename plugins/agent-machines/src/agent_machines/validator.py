@@ -8,11 +8,12 @@ clashes so they can fix their packages.
 Two rules, plus one advisory, all computable from manifests alone (no live
 ``~/.copilot/`` read required):
 
-* **Value-shape rule** -- conflict-proneness follows value shape. A *scalar*
-  ``enforce`` value is a singleton (``model``, ``effortLevel``); two packages
-  enforcing the same key to *different* scalars is a hard **conflict**. A
-  *map/list* ``enforce`` value should instead be ``ensure-present`` (union), so
-  declaring one ``enforce`` is a shape **advisory**, never a conflict.
+* **Value-shape rule** -- conflict-proneness follows leaf value shape. Nested
+  maps are traversed because the settings surface deep-merges them; their scalar
+  leaves are authoritative singletons just like top-level ``model``. Two
+  packages enforcing the same scalar leaf to different values is a hard
+  **conflict**. A list/opaque collection leaf under ``enforce`` should instead
+  be ``ensure-present`` (union), so declaring one is a shape **advisory**.
 * **Bootstrap-floor assertion** -- the union of enabled plugins/marketplaces must
   contain the stack-critical set, and no package may set one ``false``; otherwise
   restore could disable its own trigger (a fleet-wide self-heal outage).
@@ -71,15 +72,24 @@ def _marketplace_union(packages: list[RequirementPackage]) -> set[str]:
     return out
 
 
+def _enforced_leaves(prefix: str, value: Any):
+    """Yield fully-qualified leaves, traversing maps that restore deep-merges."""
+    if isinstance(value, dict) and value:
+        for key, child in value.items():
+            yield from _enforced_leaves(f"{prefix}.{key}", child)
+        return
+    yield prefix, value
+
+
 def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
     """Detect cross-package ``enforce`` disagreements (value-shape rule).
 
     The disposition is declared per *surface* (``copilot.settings``), but the
-    value-shape rule applies per *leaf setting* inside its ``values`` (``model``
-    is a scalar singleton; ``enabledPlugins`` is a map). So we descend into
-    ``values``: scalar leaves are the conflict domain (differing values across
-    packages => error); a map/list leaf under an ``enforce`` surface is a shape
-    advisory (it belongs under ``ensure-present`` union).
+    value-shape rule applies per *leaf setting* inside its ``values``. We recurse
+    through dictionaries because the settings surface deep-merges them: nested
+    scalar leaves are the conflict domain (differing values across packages =>
+    error). A list or opaque collection leaf under an ``enforce`` surface is a
+    shape advisory (it belongs under ``ensure-present`` union).
     """
     findings: list[Finding] = []
     enforced_scalar: dict[str, list[tuple[str, Any]]] = {}
@@ -90,9 +100,7 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
             if spec.get("disposition") != "enforce":
                 continue
             values = spec.get("values", spec.get("value"))
-            leaves = values.items() if isinstance(values, dict) else [(None, values)]
-            for leaf, val in leaves:
-                leaf_key = key if leaf is None else f"{key}.{leaf}"
+            for leaf_key, val in _enforced_leaves(key, values):
                 if isinstance(val, _SCALAR):
                     enforced_scalar.setdefault(leaf_key, []).append((pkg.name, val))
                 elif val is not None:
@@ -103,8 +111,8 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
             Finding(
                 "advisory",
                 "shape-mismatch",
-                f"'{leaf_key}' is enforced with a map/list value by "
-                f"{', '.join(sorted(owners))}; map/list keys should be "
+                f"'{leaf_key}' is enforced with a list/collection value by "
+                f"{', '.join(sorted(owners))}; collection keys should be "
                 f"'ensure-present' (union), not 'enforce'.",
             )
         )

@@ -30,17 +30,54 @@ def test_scalar_conflict_is_error(tmp_path):
     assert any(f.code == "enforce-conflict" for f in findings)
 
 
-def test_map_enforced_is_advisory_not_error(tmp_path):
+def test_list_enforced_is_advisory_not_error(tmp_path):
     data = base_package("a/x", gate=["*"])
-    # A map leaf (enabledPlugins) under an enforce surface -> shape advisory.
-    data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {
-        "agent-worktrees@copilot-extensions": True,
-        "agent-machines@copilot-extensions": True,
-    }
+    data["manage"]["copilot.settings"]["values"]["tabs"] = ["sessions", "agents"]
     a = _pkg(tmp_path, "a", data)
     findings = validate([a])
     assert any(f.code == "shape-mismatch" and f.level == "advisory" for f in findings)
     assert not any(f.code == "shape-mismatch" and f.level == "error" for f in findings)
+
+
+def test_nested_enforced_scalars_agree_without_shape_advisory(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code == "shape-mismatch" for f in findings)
+    assert not has_errors(findings)
+
+
+def test_nested_enforced_scalar_conflict_is_error(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": True}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    conflict = next(f for f in findings if f.code == "enforce-conflict")
+    assert "'copilot.settings.sandbox.sandbox.enabled'" in conflict.message
+    assert has_errors(findings)
 
 
 def test_bootstrap_floor_disable_is_error(tmp_path):
