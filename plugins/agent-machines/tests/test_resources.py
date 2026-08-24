@@ -236,7 +236,31 @@ def test_package_apply_dry_run_plans_install(tmp_path, monkeypatch):
 
 def test_package_apply_installs_and_pins(tmp_path, monkeypatch):
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
-    runner = FakeRunner(default=RunOutcome(0, "no results", ""))
+
+    class InstallingRunner:
+        def __init__(self):
+            self.installed = False
+            self.pinned = False
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                text = "psmux marlocarlo.psmux 3.3.5 winget" if self.installed else ""
+                return RunOutcome(0, text, "")
+            if argv[:3] == ["winget", "pin", "list"]:
+                text = (
+                    "psmux marlocarlo.psmux 3.3.5 winget Gating 3.3.5"
+                    if self.pinned else ""
+                )
+                return RunOutcome(0, text, "")
+            if argv[:2] == ["winget", "install"]:
+                self.installed = True
+            if argv[:3] == ["winget", "pin", "add"]:
+                self.pinned = True
+            return RunOutcome(0, "", "")
+
+    runner = InstallingRunner()
     pkg = _pkg(tmp_path, "acme/a",
                [{"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
                  "version": "3.3.5", "pin": True}])
@@ -260,6 +284,150 @@ def test_package_apply_already_present_no_change(tmp_path, monkeypatch):
                               dry_run=False)
     res = next(r for r in results if r.type == "package")
     assert not res.changed and res.action == "none"
+
+
+def test_winget_parser_requires_exact_id_and_reads_version_column():
+    out = RunOutcome(
+        0,
+        "Name        Id                       Version Available Source\n"
+        "-----------------------------------------------------------\n"
+        "Other       prefix.marlocarlo.psmux  9.9.9             winget\n"
+        "psmux beta  marlocarlo.psmux         3.3.5   3.3.7     winget\n",
+        "",
+    )
+    assert R._parse_winget(out, "marlocarlo.psmux") == {
+        "present": True,
+        "version": "3.3.5",
+    }
+    assert R._parse_winget(out, "missing.psmux") == {
+        "present": False,
+        "version": None,
+    }
+
+
+def test_package_apply_exact_package_and_pin_are_noop(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.5 3.3.7 winget", ""
+        ),
+        ("winget", "pin", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.5 winget Gating 3.3.5", ""
+        ),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [
+        {"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+         "version": "3.3.5", "pin": True},
+    ])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert res.status == "ok"
+    assert res.action == "none"
+    assert [call[:3] for call in runner.calls] == [
+        ["winget", "list", "--id"],
+        ["winget", "pin", "list"],
+    ]
+
+
+def test_package_apply_force_replaces_wrong_winget_pin(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+
+    class ReplacingPinRunner:
+        def __init__(self):
+            self.pin = "3.3.7"
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                return RunOutcome(
+                    0, "psmux marlocarlo.psmux 3.3.5 3.3.7 winget", ""
+                )
+            if argv[:3] == ["winget", "pin", "list"]:
+                return RunOutcome(
+                    0,
+                    f"psmux marlocarlo.psmux 3.3.5 winget Gating {self.pin}",
+                    "",
+                )
+            if argv[:3] == ["winget", "pin", "add"]:
+                self.pin = "3.3.5"
+            return RunOutcome(0, "", "")
+
+    runner = ReplacingPinRunner()
+    pkg = _pkg(tmp_path, "acme/a", [
+        {"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+         "version": "3.3.5", "pin": True},
+    ])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert res.ok
+    pin_add = next(call for call in runner.calls if call[:3] == ["winget", "pin", "add"])
+    assert "--exact" in pin_add
+    assert "--force" in pin_add
+    assert pin_add[pin_add.index("--version") + 1] == "3.3.5"
+    assert sum(call[:3] == ["winget", "pin", "list"] for call in runner.calls) == 2
+
+
+def test_winget_nonzero_install_is_ok_only_after_exact_postcondition(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+
+    class PostconditionRunner:
+        def __init__(self):
+            self.list_calls = 0
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                self.list_calls += 1
+                if self.list_calls == 1:
+                    return RunOutcome(0, "No installed package found.", "")
+                return RunOutcome(0, "psmux marlocarlo.psmux 3.3.5 winget", "")
+            if argv[:2] == ["winget", "install"]:
+                return RunOutcome(
+                    2316632146, "", "An existing package is already installed."
+                )
+            return RunOutcome(0, "", "")
+
+    runner = PostconditionRunner()
+    pkg = _pkg(tmp_path, "acme/a", [
+        {"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+         "version": "3.3.5"},
+    ])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert res.ok
+    assert res.status == "changed"
+    assert "verified package postcondition" in res.detail
+
+
+def test_winget_nonzero_install_fails_when_postcondition_is_wrong(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
+    runner = FakeRunner(script={
+        ("winget", "list"): RunOutcome(
+            0, "psmux marlocarlo.psmux 3.3.3 winget", ""
+        ),
+        ("winget", "install"): RunOutcome(
+            2316632146, "", "An existing package is already installed."
+        ),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [
+        {"type": "package", "id": "marlocarlo.psmux", "manager": "winget",
+         "version": "3.3.5"},
+    ])
+    res = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )[0]
+    assert not res.ok
+    assert res.status == "error"
+    assert "2316632146" in res.detail
 
 
 def test_package_apply_absent_uninstalls(tmp_path, monkeypatch):
@@ -706,7 +874,31 @@ def test_psmux_acceptance_fixture(tmp_path, monkeypatch):
     the user's config is preserved.
     """
     monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/winget.exe")
-    runner = FakeRunner(default=RunOutcome(0, "no installed package found", ""))
+
+    class AcceptanceRunner:
+        def __init__(self):
+            self.installed = False
+            self.pinned = False
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[:2] == ["winget", "list"]:
+                text = "psmux marlocarlo.psmux 3.3.5 winget" if self.installed else ""
+                return RunOutcome(0, text, "")
+            if argv[:3] == ["winget", "pin", "list"]:
+                text = (
+                    "psmux marlocarlo.psmux 3.3.5 winget Gating 3.3.5"
+                    if self.pinned else ""
+                )
+                return RunOutcome(0, text, "")
+            if argv[:2] == ["winget", "install"]:
+                self.installed = True
+            if argv[:3] == ["winget", "pin", "add"]:
+                self.pinned = True
+            return RunOutcome(0, "", "")
+
+    runner = AcceptanceRunner()
     # A pre-existing user config: the block must slot in without clobbering it.
     (tmp_path / ".psmux.conf").write_text("set -g mouse on\n", encoding="utf-8")
     pkg = _pkg(tmp_path, "acme/psmux", [
