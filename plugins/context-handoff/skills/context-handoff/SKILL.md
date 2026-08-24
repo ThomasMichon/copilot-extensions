@@ -109,10 +109,39 @@ recovery.
 > live cutover uses `consume_handoff` with `defer_complete: true`; the successor
 > later runs `agent-dispatch complete <id>` only when it reaches the handoff goal.
 
-If `generate_handoff_prompt` / `save_handoff_prompt` are unavailable, compose the
-handoff manually and prefer the same storage rules: task when a coordinator and
-worktree are resolvable, otherwise a one-time file under the worktree state
-directory outside the checkout. Do not write handoffs into the repo.
+### Fallback when the extension's tools are unavailable — the CLI
+
+The tools above are provided by the context-handoff **extension**. When the
+extension does not resolve or fails to load, they are simply absent — most
+notably in a **Bare-resumed session**, where *no* extensions load at all
+(`extensions list` shows nothing). The plugin's **payload files are still on
+disk**, so an agent can drive the same store + live-cutover directly through a
+standalone Node CLI — no extension runtime required:
+
+```bash
+CH="$HOME/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/context-handoff/handoff-cli.mjs"
+
+# Store the handoff AND start the live cutover (the save_handoff_prompt +
+# continue_handoff equivalent). Compose the markdown yourself (the extension's
+# in-memory session facts are unavailable out-of-band) and pass it in:
+node "$CH" cutover --title "<topic>" --prompt-file <handoff.md>
+
+# Store only + print the paste prompt (no cutover):
+node "$CH" save --title "<topic>" --prompt-file <handoff.md>
+# Trigger a cutover for an existing seed:   node "$CH" continue --seed "<HANDOFF_SEED>"
+# Consume a file-backed handoff:            node "$CH" consume --handoff-id <id>
+```
+
+It reuses the SDK-free `handoff-core.mjs` (same store format + `agent-worktrees
+handoff-cutover` trigger + issue-#853 bash-first seed), so a handoff it stores is
+byte-compatible with `consume_handoff` / `/resume-handoff`. Session id defaults
+to `$COPILOT_AGENT_SESSION_ID`; pass `--session-id` / `--cwd` when running from
+outside the worktree. `--no-task` forces the file store.
+
+If even `node` is unavailable, compose the handoff manually and follow the same
+storage rules: a task when a coordinator and worktree are resolvable, otherwise a
+one-time file under the worktree state directory outside the checkout. Do not
+write handoffs into the repo.
 
 ---
 
