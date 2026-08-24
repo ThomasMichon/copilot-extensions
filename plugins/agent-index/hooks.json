@@ -4,19 +4,19 @@
     "sessionStart": [
       {
         "type": "command",
-        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\bootstrap-check.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\bootstrap-check.ps1'); if (Test-Path $s) { & $s }",
         "bash": "s=\"$PWD/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 15
       },
       {
         "type": "command",
-        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\ensure-service.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\ensure-service.ps1'); if (Test-Path $s) { & $s }",
         "bash": "s=\"$PWD/scripts/ensure-service.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\emit-scope-binding.ps1'); if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\emit-scope-binding.ps1'); if (Test-Path $s) { & $s }",
         "bash": "s=\"$PWD/scripts/emit-scope-binding.sh\"; [ -f \"$s\" ] && bash \"$s\"",
         "timeoutSec": 10
       }
