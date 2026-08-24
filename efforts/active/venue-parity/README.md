@@ -6,7 +6,7 @@
 - **Created:** 2026-08-22
 - **Status:** Active — **program/index effort** (steers the architecture + owns
   net-new symmetry pieces). WS-A's trusted-container dispatch/manual path now
-  uses OpenSSH; the shared `-R` relay path remains WS-C.
+  uses OpenSSH and WS-C's credential relay now uses the same `-R` back-channel.
 - **Umbrella issue:** [#954](https://github.com/ThomasMichon/copilot-extensions/issues/954)
 - **Vision:** [`visions/venue-parity`](../../../visions/venue-parity/README.md) (child of [`visions/agent-fabric`](../../../visions/agent-fabric/README.md))
 
@@ -94,9 +94,12 @@ the rest:
 - **WS-B — GitHub-token bootstrap seam.** A uniform token-bootstrap interface;
   codespaces surface the issued token, containers bootstrap one; the core never
   branches on venue to obtain a token.
-- **WS-C — unified auth-relay back-channel over SSH `-R`.** Reach the host relay
-  over the SSH reverse-forward for containers too; retire the host-gateway TCP hop
-  + per-container network token gate. (Gated on WS-A.)
+- ✅ **WS-C — unified auth-relay back-channel over SSH `-R`.** Trusted containers
+  reach agent-bridge's published live relay through
+  `-R 127.0.0.1:<container-port>:127.0.0.1:<host-port>` on the ACP SSH process.
+  The host-gateway TCP hop is retired. The per-container token remains
+  request-scoped authorization for the shared relay's Azure action, but no
+  longer protects a host-network-exposed endpoint.
 - **WS-D — session/status/coordination parity.** Container dispatch gets the same
   monitoring/coordination core codespaces use.
 - **WS-E — container-as-parity-harness.** Codify "reproduce the venue flow in a
@@ -154,3 +157,14 @@ the rest:
   `DEVNULL` unless explicitly given staged input. **Next:** WS-C carries the
   bridge relay over SSH `-R`, then the container parity corpus can exercise the
   same relay/reaper failure modes as CodeSpaces.
+- **2026-08-24 — WS-C SSH relay back-channel.** The trusted container's ACP SSH
+  process now owns an explicit loopback-only `-R` from stable container port
+  `9857` to agent-bridge's dynamically published host relay port. Launch refuses
+  a missing/stale publication, verifies relay identity with `ping/pong`, and
+  requires the far-side bind via `ExitOnForwardFailure=yes`. A namespaced
+  lifetime target lock prevents concurrent bind collisions. Windows staging
+  also moved to byte-exact stdin after validation exposed CRLF translation
+  appending `\r` to relay tokens. A live trusted-container agent successfully
+  fetched an Azure Storage token through container loopback without exposing
+  the token. **Next:** exercise the #1763 forced-timeout/reaper case through this
+  now-shared SSH process shape, then continue WS1 shared launch policy.

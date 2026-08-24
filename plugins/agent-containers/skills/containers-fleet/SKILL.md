@@ -159,6 +159,11 @@ bridge venv. The resolver launches `agent-containers exec --stdio <name>`, which
 then reaches a trusted container through OpenSSH and runs
 `copilot --acp --stdio --allow-all-tools`, staging the host `gh auth token`
 through stdin so the token is not persisted in bridge state, argv, or logs.
+That SSH process also carries the credential relay over an explicit loopback
+reverse forward (`-R 127.0.0.1:<container-port>:127.0.0.1:<live-host-port>`).
+The launch fails rather than degrading when agent-bridge has not published a
+healthy relay or the far-side port cannot bind. Set `relay.enabled: false` only
+for a trusted fleet that intentionally needs no host credential path.
 
 Those are the **trusted-profile** defaults. A restricted fleet launches only its
 explicit `acp_command` and forwards neither host credential path.

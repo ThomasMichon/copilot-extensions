@@ -1,16 +1,20 @@
-"""Tests for credential-relay port resolution in the container exec wrapper.
+"""Tests for host credential-relay destination resolution.
 
-Covers dotfiles #1631: the container wrapper must inject the agent-bridge daemon's
-*live* relay port (published to ``<config_dir>/relay-port``), not a stale static
-default, so in-container ADO/git + build-cache auth keeps working after the relay
-binds an ephemeral port. Reads the published file **directly** (the wrapper runs
-in agent-containers' own venv, where ``agent_bridge`` is NOT importable), and
-falls back to the configured default when the file is absent/empty/unreadable.
+Covers dotfiles #1631: the container wrapper must point SSH ``-R`` at the
+agent-bridge daemon's *live* host port (published to
+``<config_dir>/relay-port``), not a stale static default. The container-facing
+port remains the configured stable loopback port.
 """
 
 from __future__ import annotations
 
-from agent_containers.__main__ import _live_relay_port_file, _resolve_relay_port
+import pytest
+
+from agent_containers.__main__ import (
+    _live_relay_port_file,
+    _require_live_relay_port,
+    _resolve_relay_port,
+)
 
 
 def test_prefers_live_relay_port_from_file(tmp_path, monkeypatch):
@@ -22,6 +26,12 @@ def test_prefers_live_relay_port_from_file(tmp_path, monkeypatch):
 def test_falls_back_when_file_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))  # no relay-port file
     assert _resolve_relay_port(9857) == 9857
+
+
+def test_required_port_refuses_missing_publication(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(tmp_path))
+    with pytest.raises(RuntimeError, match="start agent-bridge"):
+        _require_live_relay_port()
 
 
 def test_falls_back_when_file_empty(tmp_path, monkeypatch):

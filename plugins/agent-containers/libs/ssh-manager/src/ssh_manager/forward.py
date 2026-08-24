@@ -128,7 +128,12 @@ def build_forward_ssh_args(
     return args
 
 
-def build_remote_exec_args(config: SSHConfig, command: str) -> list[str]:
+def build_remote_exec_args(
+    config: SSHConfig,
+    command: str,
+    *,
+    reverse_forwards: list[str] | None = None,
+) -> list[str]:
     """Build an ``ssh`` argv that runs a one-shot remote ``command`` over a
     fresh, non-multiplexed connection.
 
@@ -139,6 +144,10 @@ def build_remote_exec_args(config: SSHConfig, command: str) -> list[str]:
     keepalive/batch options of :func:`build_forward_ssh_args` but appends a
     remote command instead of ``-N``, and never multiplexes over a
     ControlMaster (so the probe's lifetime is independent of any shared master).
+    ``reverse_forwards`` are ``-R`` specs carried by the same process for the
+    full remote-command lifetime. A requested reverse forward is a required
+    launch dependency, so ``ExitOnForwardFailure=yes`` fails before the remote
+    command starts when its far-side bind cannot be established.
     """
     args = ["ssh"]
     if config.config_file:
@@ -155,9 +164,18 @@ def build_remote_exec_args(config: SSHConfig, command: str) -> list[str]:
         "-T",  # no PTY
     ]
     for key, val in config.extra_options.items():
-        if key.lower() in ("controlmaster", "controlpath", "controlpersist"):
+        if key.lower() in (
+            "controlmaster",
+            "controlpath",
+            "controlpersist",
+            "exitonforwardfailure",
+        ):
             continue
         args += ["-o", f"{key}={val}"]
+    if reverse_forwards:
+        args += ["-o", "ExitOnForwardFailure=yes"]
+    for spec in reverse_forwards or []:
+        args += ["-R", spec]
     args.append(config.ssh_target)
     args.append(command)
     return args

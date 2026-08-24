@@ -18,8 +18,8 @@ from agent_bridge.transport import SpawnTarget
 
 
 @pytest.fixture(autouse=True)
-def _isolate_providers_dir(tmp_path, monkeypatch):
-    """Isolate every test from the machine's real ``~/.agent-bridge/providers.d``.
+def _isolate_runtime_dirs(tmp_path, monkeypatch):
+    """Isolate every test from the machine's live agent-bridge runtime.
 
     Agent enumeration + namespace resolution discover venue providers
     (``codespace:``/``container:``) from that directory (#1643), so without
@@ -31,6 +31,13 @@ def _isolate_providers_dir(tmp_path, monkeypatch):
     d = tmp_path / "providers.d-empty"
     d.mkdir(exist_ok=True)
     monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(d))
+    # App-lifespan tests start a real ephemeral credential relay. Without a
+    # per-test config root, relay_state publishes that test port into the live
+    # ~/.agent-bridge/relay-port rendezvous, making active CodeSpace/container
+    # forwards chase a dead port after the test exits.
+    runtime = tmp_path / "agent-bridge-runtime"
+    runtime.mkdir(exist_ok=True)
+    monkeypatch.setenv("AGENT_BRIDGE_CONFIG_DIR", str(runtime))
 
 
 @pytest.fixture

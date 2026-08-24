@@ -297,10 +297,14 @@ class ContainersConfig:
     # in-container Copilot CLI is authenticated headlessly.
     forward_gh_token: bool = True
     # On-demand credential relay: deploy in-container shims at connect that fetch
-    # tokens from the host relay (over host.docker.internal). Fixes rush
-    # dev-deploy (Azure storage) by serving the host az-login identity.
+    # tokens from the host relay through the trusted SSH reverse forward. Fixes
+    # rush dev-deploy (Azure storage) by serving the host az-login identity.
     relay_enabled: bool = True
+    # Legacy Transport-A host retained for config compatibility. Trusted SSH
+    # dispatch always binds the relay on container loopback.
     relay_host: str = "host.docker.internal"
+    # Container-loopback listen port for SSH -R. The host destination is
+    # agent-bridge's independently published live relay port.
     relay_port: int = 9857
     # Also deploy ado-auth-helper (ADO PAT / git credential relay). Off by
     # default to avoid disturbing already-working in-container ADO auth.

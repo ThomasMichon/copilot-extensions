@@ -24,6 +24,24 @@ def test_bootstrap_commands_never_inherit_acp_stdin(monkeypatch):
     assert "input" not in seen
 
 
+def test_staged_input_is_binary_to_preserve_lf(monkeypatch):
+    seen = {}
+
+    def fake_run(args, **kwargs):
+        seen.update(kwargs)
+        return SimpleNamespace(
+            args=args,
+            returncode=0,
+            stdout=b"",
+            stderr=b"",
+        )
+
+    monkeypatch.setattr(transport.subprocess, "run", fake_run)
+    transport._run(["docker", "exec", "-i", "repo-1"], input_text="value\n")
+    assert seen["input"] == b"value\n"
+    assert "text" not in seen
+
+
 def test_prepare_ssh_config_uses_docker_only_as_proxy(monkeypatch, tmp_path):
     monkeypatch.setattr(transport, "_SSH_DIR", tmp_path)
     monkeypatch.setattr(
@@ -37,7 +55,10 @@ def test_prepare_ssh_config_uses_docker_only_as_proxy(monkeypatch, tmp_path):
     config = transport.prepare_ssh_config("repo-1", "vscode")
 
     text = Path(config.config_file).read_text(encoding="utf-8")
-    assert "ProxyCommand docker exec -i -u root repo-1 /usr/sbin/sshd -i -e" in text
+    assert (
+        "ProxyCommand docker exec -i -u root repo-1 "
+        "/usr/sbin/sshd -i -e -o GatewayPorts=no"
+    ) in text
     assert "StrictHostKeyChecking accept-new" in text
     assert config.host_alias.endswith("-" + ("a" * 12))
     assert config.user == "vscode"
@@ -119,12 +140,23 @@ def test_write_remote_env_sends_secrets_over_stdin(monkeypatch):
 
 def test_build_ssh_command_uses_shared_builder(monkeypatch):
     config = SimpleNamespace()
+    seen = {}
+
+    def fake_build(cfg, cmd, *, reverse_forwards=None):
+        seen["reverse_forwards"] = reverse_forwards
+        return ["ssh", "target", cmd]
+
     monkeypatch.setattr(transport.shutil, "which", lambda name: "ssh")
     monkeypatch.setattr(
         transport,
         "build_remote_exec_args",
-        lambda cfg, cmd: ["ssh", "target", cmd],
+        fake_build,
     )
-    assert transport.build_ssh_command(config, "echo ok") == [
+    assert transport.build_ssh_command(
+        config,
+        "echo ok",
+        reverse_forwards=["9857:127.0.0.1:61234"],
+    ) == [
         "ssh", "target", "echo ok"
     ]
+    assert seen["reverse_forwards"] == ["9857:127.0.0.1:61234"]

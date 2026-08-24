@@ -10,6 +10,7 @@ agent-codespaces and are covered there.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -456,6 +457,34 @@ def test_build_remote_exec_args_shape():
     assert "ControlMaster" not in " ".join(argv)  # a probe never multiplexes
     assert argv[-1] == "bash -lc 'echo hi'"  # remote command is the last arg
     assert argv[-2] == cfg.ssh_target
+
+
+def test_build_remote_exec_args_carries_required_reverse_forward():
+    from ssh_manager import build_remote_exec_args
+
+    cfg = _probe_cfg()
+    spec = "127.0.0.1:9857:127.0.0.1:61234"
+    cfg = replace(
+        cfg,
+        extra_options={
+            **cfg.extra_options,
+            "ExitOnForwardFailure": "no",
+        },
+    )
+    argv = build_remote_exec_args(
+        cfg,
+        "copilot --acp --stdio",
+        reverse_forwards=[spec],
+    )
+
+    assert ["-o", "ExitOnForwardFailure=yes"] == argv[
+        argv.index("ExitOnForwardFailure=yes") - 1:
+        argv.index("ExitOnForwardFailure=yes") + 1
+    ]
+    assert argv[argv.index("-R") + 1] == spec
+    assert "ExitOnForwardFailure=no" not in argv
+    assert argv[-2] == cfg.ssh_target
+    assert argv[-1] == "copilot --acp --stdio"
 
 
 class _FakeProbeProc:

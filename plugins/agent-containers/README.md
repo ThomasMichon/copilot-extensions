@@ -48,6 +48,12 @@ addressing (`container:<name>`) is unavailable.
   inside the wrapper, it is **never** placed in the SpawnTarget that
   agent-bridge persists to its SQLite DB, nor in any log. Restricted fleets keep
   the direct `docker exec` boundary and receive no SSH key projection.
+  The same trusted SSH process carries
+  `-R 127.0.0.1:<container-relay>:127.0.0.1:<live-host-relay>`, so credential
+  helpers connect only to container loopback and the host relay remains bound
+  only to host loopback. The per-container token remains request authorization
+  for Azure-token minting on the shared relay; it is no longer compensating for
+  a host-network-reachable endpoint.
 
 ## CLI
 
@@ -99,6 +105,12 @@ fleets:
 Fleets default to `security_profile: trusted`, preserving the existing
 development-container behavior (host GitHub token forwarding, credential relay,
 the default broad Copilot launch command, and OpenSSH transport).
+
+The trusted credential relay is a required launch dependency by default. The
+wrapper reads agent-bridge's published live relay port, verifies its `ping/pong`
+protocol identity, and refuses launch if the SSH reverse forward cannot bind.
+Start agent-bridge before dispatch, or explicitly set `relay.enabled: false`
+when a trusted fleet intentionally does not need host credentials.
 
 Use `security_profile: restricted` for lower-trust agents. Restricted fleets
 are image-based, receive no host GitHub token or credential relay, use an
