@@ -2,8 +2,9 @@
 
 Implements the agent-bridge ``NamespaceResolver`` interface so that fleet
 containers can be addressed as ``container:<name>`` without pre-registration.
-Resolution returns a ``SpawnTarget`` that launches a Copilot ACP agent inside
-the container via ``docker exec -i``.
+Resolution returns a ``SpawnTarget`` that launches a Copilot ACP agent through
+the container wrapper. Trusted fleets use OpenSSH; restricted fleets retain the
+direct ``docker exec -i`` boundary.
 
 The host ``gh auth token`` is forwarded into the container as ``GH_TOKEN`` so
 the in-container Copilot CLI is authenticated headlessly. The token is passed
@@ -113,7 +114,7 @@ class ContainerResolver:
         return "container"
 
     async def resolve(self, name: str) -> SpawnTarget:
-        """Resolve a container name to a SpawnTarget over ``docker exec``.
+        """Resolve a container name to a SpawnTarget over its venue transport.
 
         Thin wrapper over :meth:`resolve_spec` (the agent_bridge-free data path,
         also the ``namespace-resolve`` CLI seam for #892 Inc 3b). Note the narrow

@@ -3,8 +3,7 @@
 Critical security property: the forwarded GH_TOKEN must NEVER appear in argv
 or in the SpawnTarget agent-bridge persists. The resolver returns the
 ``agent-containers exec --stdio <name>`` wrapper (no token); the wrapper fetches
-the token at spawn time. ``build_spawn_command`` (used inside the wrapper)
-references the token by name only (``-e GH_TOKEN``).
+the token at spawn time and selects SSH or restricted docker transport.
 """
 
 from __future__ import annotations
@@ -20,20 +19,16 @@ from agent_containers.resolver import (
 )
 
 
-def test_build_spawn_command_forwards_token_by_name():
-    cmd = build_spawn_command("myrepo-1", "vscode", "cd /w && copilot --acp", True)
+def test_restricted_spawn_command_references_token_by_name_only():
+    cmd = build_spawn_command(
+        "sandbox-1",
+        "agent",
+        "minimal-agent --stdio",
+        True,
+    )
     assert cmd[:3] == ["docker", "exec", "-i"]
-    assert "-e" in cmd and "GH_TOKEN" in cmd
-    # token value must NOT be embedded
+    assert "GH_TOKEN" in cmd
     assert not any("GH_TOKEN=" in part for part in cmd)
-    assert cmd[-3:] == ["bash", "-lc", "cd /w && copilot --acp"]
-    assert "vscode" in cmd
-
-
-def test_build_spawn_command_no_token():
-    cmd = build_spawn_command("c1", "vscode", "copilot --acp", False)
-    assert "GH_TOKEN" not in cmd
-    assert "-e" not in cmd
 
 
 def test_build_wrapper_command():

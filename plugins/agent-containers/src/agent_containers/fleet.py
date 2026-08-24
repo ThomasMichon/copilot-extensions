@@ -244,7 +244,7 @@ def _image_user(
             "--memory-swap", memory,
             "--cpus", str(cpus),
             "--pids-limit", str(pids_limit),
-            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",  # noqa: S108
             "--entrypoint", "bash",
             image, "-c", probe, "--", user,
         ],
@@ -265,7 +265,7 @@ def _image_user(
         raise RuntimeError(
             f"Restricted exec_user '{user}' must have a non-root uid and gid"
         )
-    if not home.startswith("/") or home in {"/", "/tmp", "/run"}:
+    if not home.startswith("/") or home in {"/", "/tmp", "/run"}:  # noqa: S108
         raise RuntimeError(
             f"Restricted exec_user '{user}' has unsafe home directory '{home}'"
         )
@@ -338,7 +338,9 @@ def _image_run(
             pids_limit=fleet.effective_pids_limit(),
         )
         image_id = _image_id(fleet.image)
-        if home == workspace_folder or workspace_folder in {"/", "/tmp", "/run"}:
+        if home == workspace_folder or workspace_folder in {
+            "/", "/tmp", "/run",  # noqa: S108
+        }:
             raise RuntimeError(
                 f"Restricted workspace_folder '{workspace_folder}' is unsafe"
             )
@@ -374,7 +376,7 @@ def _image_run(
                 f"exec,size={fleet.effective_home_size()},"
                 f"uid={uid},gid={gid},mode=0700"
             ),
-            "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",
+            "--tmpfs", "/tmp:rw,nosuid,nodev,size=512m",  # noqa: S108
             "--tmpfs", "/run:rw,nosuid,nodev,size=64m",
         ]
     else:

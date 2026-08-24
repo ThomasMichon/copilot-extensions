@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-containers"
-version = "0.1.2-dev72"
+version = "0.1.2-dev74"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -14,12 +14,15 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
+    "agent-ssh-manager",
     "agent-credential-relay",
     "agent-config-migrate",
     "agent-procutil",
 ]
 
 [tool.uv.sources]
+# Shared OpenSSH process/config primitives used by the trusted-fleet transport.
+agent-ssh-manager = { path = "libs/ssh-manager" }
 # credential-relay framework + host-credential sources (module ``credential_relay``).
 # Vendored locally; resolved from the path, never an index.
 agent-credential-relay = { path = "libs/credential-relay" }
