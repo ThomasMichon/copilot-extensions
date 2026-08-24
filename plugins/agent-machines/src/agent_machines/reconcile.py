@@ -217,10 +217,15 @@ def restore_result_to_dict(result: RestoreResult) -> dict[str, Any]:
     Module results include their captured ``stdout_tail``/``stderr_tail`` so a
     dry-run preview is fully machine-readable, not just a one-word status.
     """
+    resources = []
+    for resource in result.resource_results:
+        payload = dataclasses.asdict(resource)
+        payload["status"] = resource.status
+        resources.append(payload)
     return {
         "plan": plan_to_dict(result.plan),
         "surfaces": [dataclasses.asdict(s) for s in result.surface_results],
-        "resources": [dataclasses.asdict(r) for r in result.resource_results],
+        "resources": resources,
         "modules": [dataclasses.asdict(m) for m in result.module_results],
         "ok": result.ok,
     }

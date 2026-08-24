@@ -138,8 +138,17 @@ class ResourceResult:
     commands: list[list[str]] = field(default_factory=list)
 
     @property
+    def status(self) -> str:
+        """Stable machine-readable outcome independent of display wording."""
+        if self.action == "error":
+            return "error"
+        if self.skipped_reason is not None:
+            return "skipped"
+        return "changed" if self.changed else "ok"
+
+    @property
     def ok(self) -> bool:
-        return self.skipped_reason is not None or self.action != "error"
+        return self.status != "error"
 
 
 @dataclass
@@ -305,6 +314,23 @@ class PackageResourceHandler(ResourceHandler):
             return {"present": False, "version": None}
         return mgr["parse_detect"](out, pkg_id)
 
+    def _detect_pin(
+        self, ctx: ResourceContext, mgr: dict, pkg_id: str
+    ) -> dict[str, Any]:
+        detect_pin = mgr.get("detect_pin")
+        parse_pin = mgr.get("parse_pin")
+        if not detect_pin or not parse_pin:
+            return {"present": False, "version": None}
+        try:
+            out = ctx.runner(detect_pin(pkg_id))
+        except (OSError, subprocess.SubprocessError):
+            return {"present": False, "version": None}
+        return parse_pin(out, pkg_id)
+
+    @staticmethod
+    def _matches_desired(live: dict[str, Any], version: str | None) -> bool:
+        return bool(live["present"] and (not version or live.get("version") == version))
+
     def apply(
         self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
     ) -> ResourceResult:
@@ -334,11 +360,13 @@ class PackageResourceHandler(ResourceHandler):
             commands.append(mgr["uninstall"](pkg_id, ver))
             action = "uninstall"
         else:
-            needs_install = (not live["present"]) or (ver and live.get("version") != ver)
+            needs_install = not self._matches_desired(live, ver)
             if needs_install:
                 commands.append(mgr["install"](pkg_id, ver))
             if d.get("pin") and mgr.get("pin"):
-                commands.append(mgr["pin"](pkg_id, ver))
+                pin = self._detect_pin(ctx, mgr, pkg_id)
+                if not self._matches_desired(pin, ver):
+                    commands.append(mgr["pin"](pkg_id, ver))
             if not commands:
                 return ResourceResult(self.TYPE, pkg_id, False, dry_run, "none",
                                       detail=f"present{('@' + ver) if ver else ''}")
@@ -349,15 +377,40 @@ class PackageResourceHandler(ResourceHandler):
             return ResourceResult(self.TYPE, pkg_id, True, True, action,
                                   detail=detail, commands=commands)
 
+        verified_nonzero: list[str] = []
         for argv in commands:
             out = ctx.runner(argv)
+            if manager == "winget" and len(argv) > 1 and argv[1] in {"install", "pin"}:
+                label = "package" if argv[1] == "install" else "pin"
+                postcondition = (
+                    self._detect(ctx, mgr, pkg_id)
+                    if label == "package"
+                    else self._detect_pin(ctx, mgr, pkg_id)
+                )
+                if self._matches_desired(postcondition, ver):
+                    if out.returncode != 0:
+                        verified_nonzero.append(label)
+                    continue
+                command_detail = (
+                    f"exited {out.returncode}: "
+                    f"{(out.stderr or out.stdout).strip()[:200]}"
+                    if out.returncode != 0
+                    else "completed without satisfying the exact postcondition"
+                )
+                return ResourceResult(
+                    self.TYPE, pkg_id, True, False, "error", commands=commands,
+                    detail=f"`{' '.join(argv)}` {command_detail}",
+                )
             if out.returncode != 0:
                 return ResourceResult(
                     self.TYPE, pkg_id, True, False, "error", commands=commands,
                     detail=f"`{' '.join(argv)}` exited {out.returncode}: "
                            f"{(out.stderr or out.stdout).strip()[:200]}")
+        detail = "applied"
+        if verified_nonzero:
+            detail += f" (verified {' and '.join(verified_nonzero)} postcondition)"
         return ResourceResult(self.TYPE, pkg_id, True, False, action,
-                              detail="applied", commands=commands)
+                              detail=detail, commands=commands)
 
 
 class FileResourceHandler(ResourceHandler):
@@ -902,17 +955,35 @@ class FeatureResourceHandler(ResourceHandler):
 # --------------------------------------------------------------------------- #
 # Package-manager table (argv templates + detect parsers)
 # --------------------------------------------------------------------------- #
+def _winget_exact_row(out: RunOutcome, pkg_id: str) -> list[str] | None:
+    """Return the WinGet row containing ``pkg_id`` as an exact token."""
+    if out.returncode != 0:
+        return None
+    wanted = pkg_id.casefold()
+    for line in out.stdout.splitlines():
+        tokens = line.split()
+        if any(token.casefold() == wanted for token in tokens):
+            return tokens
+    return None
+
+
 def _parse_winget(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
-    present = out.returncode == 0 and pkg_id.lower() in out.stdout.lower()
-    version = None
-    if present:
-        for line in out.stdout.splitlines():
-            if pkg_id.lower() in line.lower():
-                m = _SEMVER_RE.search(line)
-                if m:
-                    version = m.group(0)
-                break
-    return {"present": present, "version": version}
+    row = _winget_exact_row(out, pkg_id)
+    if row is None:
+        return {"present": False, "version": None}
+    index = next(i for i, token in enumerate(row) if token.casefold() == pkg_id.casefold())
+    version = row[index + 1] if index + 1 < len(row) else None
+    return {"present": True, "version": version}
+
+
+def _parse_winget_pin(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
+    row = _winget_exact_row(out, pkg_id)
+    if row is None:
+        return {"present": False, "version": None}
+    index = next(i for i, token in enumerate(row) if token.casefold() == pkg_id.casefold())
+    tail = row[index + 1:]
+    version = tail[-1] if tail else None
+    return {"present": True, "version": version}
 
 
 def _parse_dpkg(out: RunOutcome, pkg_id: str) -> dict[str, Any]:
@@ -936,11 +1007,13 @@ MANAGERS: dict[str, dict[str, Any]] = {
         "parse_detect": _parse_winget,
         "detect": lambda i, v: ["winget", "list", "--id", i, "--exact",
                                 "--accept-source-agreements"],
+        "parse_pin": _parse_winget_pin,
+        "detect_pin": lambda i: ["winget", "pin", "list", "--id", i, "--exact"],
         "install": lambda i, v: ["winget", "install", "--id", i, "--exact",
                                  *(["--version", v] if v else []),
                                  "--accept-source-agreements", "--accept-package-agreements"],
-        "pin": lambda i, v: ["winget", "pin", "add", "--id", i,
-                             *(["--version", v] if v else [])],
+        "pin": lambda i, v: ["winget", "pin", "add", "--id", i, "--exact",
+                             *(["--version", v] if v else []), "--force"],
         "uninstall": lambda i, v: ["winget", "uninstall", "--id", i, "--exact"],
     },
     "apt": {
