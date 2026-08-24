@@ -128,6 +128,59 @@ def test_scalar_map_shape_conflict_is_error(tmp_path):
     assert has_errors(findings)
 
 
+def test_dotted_json_key_does_not_alias_nested_path(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"]["copilot.settings"]["values"] = {"a.b": 1}
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"]["copilot.settings"]["values"] = {"a": {"b": 2}}
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code == "enforce-conflict" for f in findings)
+
+
+def test_known_collection_map_stays_opaque_and_advisory(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {
+        "optional@example": True
+    }
+    findings = validate([_pkg(tmp_path, "a", data)])
+    advisory = next(f for f in findings if f.code == "shape-mismatch")
+    assert "'copilot.settings.enabledPlugins'" in advisory.message
+    assert not any(f.code == "enforce-conflict" for f in findings)
+
+
+def test_bool_and_numeric_scalar_values_conflict(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"]["copilot.settings"]["values"]["enabled"] = True
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"]["copilot.settings"]["values"]["enabled"] = 1
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert any(f.code == "enforce-conflict" for f in findings)
+
+
+def test_malformed_bootstrap_collections_report_shape_without_crashing(tmp_path):
+    data = base_package("a/x", gate=["*"])
+    data["manage"]["copilot.settings"]["values"].update(
+        {
+            "enabledPlugins": ["agent-worktrees@copilot-extensions"],
+            "extraKnownMarketplaces": ["copilot-extensions"],
+        }
+    )
+    findings = validate([_pkg(tmp_path, "a", data)])
+    shape_paths = {f.message.split("'", 2)[1] for f in findings if f.code == "shape-mismatch"}
+    assert shape_paths == {
+        "copilot.settings.enabledPlugins",
+        "copilot.settings.extraKnownMarketplaces",
+    }
+
+
+def test_omitted_enforce_values_do_not_create_shape_conflict(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {"copilot.settings.empty": {"disposition": "enforce"}}
+    b_data = base_package("b/x", gate=["*"])
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    assert not any(f.code == "enforce-shape-conflict" for f in findings)
+
+
 def test_bootstrap_floor_disable_is_error(tmp_path):
     data = base_package("a/x", gate=["*"])
     data["manage"]["copilot.settings"]["values"]["enabledPlugins"] = {

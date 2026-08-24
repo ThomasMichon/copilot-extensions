@@ -148,6 +148,10 @@ guide.
 - grouping suffixes such as `copilot.settings.sandbox` normalize to the physical
   `copilot.settings` root, and incompatible scalar/map/list shapes at one path
   are errors;
+- setting identity preserves raw JSON path components (a dotted key never aliases
+  a nested path), and scalar equality includes the JSON/Python type;
+- known union maps (`enabledPlugins`, `extraKnownMarketplaces`) stay opaque and
+  retain the collection-shape advisory under `enforce`;
 - list/opaque collection leaves under `enforce` are shape advisories because
   they should be `ensure-present` unions;
 - explicitly disabling a bootstrap-critical plugin is an error;

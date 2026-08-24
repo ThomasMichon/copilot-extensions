@@ -21,6 +21,7 @@ Two rules, plus one advisory, all computable from manifests alone (no live
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,6 +34,10 @@ from .manifest import (
 )
 
 _SCALAR = (str, int, float, bool)
+_OPAQUE_SETTING_MAPS = {
+    ("copilot.settings", "enabledPlugins"),
+    ("copilot.settings", "extraKnownMarketplaces"),
+}
 
 
 @dataclass
@@ -58,7 +63,10 @@ def _enabled_plugins_union(packages: list[RequirementPackage]) -> dict[str, bool
         for values in _managed_values_under(pkg, "copilot.settings"):
             if not isinstance(values, dict):
                 continue
-            for name, on in (values.get("enabledPlugins") or {}).items():
+            enabled_plugins = values.get("enabledPlugins") or {}
+            if not isinstance(enabled_plugins, dict):
+                continue
+            for name, on in enabled_plugins.items():
                 base = str(name).split("@", 1)[0]
                 # Record an explicit false anywhere so the floor check catches it.
                 union[base] = bool(on) and union.get(base, True)
@@ -72,17 +80,31 @@ def _marketplace_union(packages: list[RequirementPackage]) -> set[str]:
     for pkg in packages:
         for values in _managed_values_under(pkg, "copilot.settings"):
             if isinstance(values, dict):
-                out.update((values.get("extraKnownMarketplaces") or {}).keys())
+                marketplaces = values.get("extraKnownMarketplaces") or {}
+                if isinstance(marketplaces, dict):
+                    out.update(marketplaces.keys())
         out.update(pkg.bootstrap_floor.get("marketplaces") or [])
     return out
 
 
-def _enforced_nodes(prefix: str, value: Any):
+def _enforced_nodes(prefix: tuple[str, ...], value: Any):
     """Yield every value node, including maps that restore deep-merges."""
     yield prefix, value
-    if isinstance(value, dict):
+    if isinstance(value, dict) and prefix not in _OPAQUE_SETTING_MAPS:
         for key, child in value.items():
-            yield from _enforced_nodes(f"{prefix}.{key}", child)
+            yield from _enforced_nodes((*prefix, str(key)), child)
+
+
+def _format_path(path: tuple[str, ...]) -> str:
+    """Render an unambiguous setting path without conflating dotted JSON keys."""
+    rendered = path[0]
+    for component in path[1:]:
+        rendered += (
+            f".{component}"
+            if component.isidentifier()
+            else f"[{json.dumps(component)}]"
+        )
+    return rendered
 
 
 def _shape(value: Any) -> str:
@@ -108,15 +130,17 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
     shape advisory (it belongs under ``ensure-present`` union).
     """
     findings: list[Finding] = []
-    enforced_scalar: dict[str, list[tuple[str, Any]]] = {}
-    collection_leaf_owners: dict[str, set[str]] = {}
-    enforced_shapes: dict[str, list[tuple[str, str]]] = {}
+    enforced_scalar: dict[tuple[str, ...], list[tuple[str, Any]]] = {}
+    collection_leaf_owners: dict[tuple[str, ...], set[str]] = {}
+    enforced_shapes: dict[tuple[str, ...], list[tuple[str, str]]] = {}
 
     for pkg in packages:
         for key, spec in pkg.manage.items():
             if spec.get("disposition") != "enforce":
                 continue
             values = spec.get("values", spec.get("value"))
+            if values is None:
+                continue
             # copilot.settings.* suffixes group contributions but do not change
             # their physical settings.json root.
             root = (
@@ -124,11 +148,17 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                 if key == "copilot.settings" or key.startswith("copilot.settings.")
                 else key
             )
-            for leaf_key, val in _enforced_nodes(root, values):
+            for leaf_key, val in _enforced_nodes((root,), values):
                 enforced_shapes.setdefault(leaf_key, []).append((pkg.name, _shape(val)))
                 if isinstance(val, _SCALAR):
                     enforced_scalar.setdefault(leaf_key, []).append((pkg.name, val))
-                elif val is not None and not isinstance(val, dict):
+                elif (
+                    val is not None
+                    and (
+                        not isinstance(val, dict)
+                        or leaf_key in _OPAQUE_SETTING_MAPS
+                    )
+                ):
                     collection_leaf_owners.setdefault(leaf_key, set()).add(pkg.name)
 
     for leaf_key, entries in sorted(enforced_shapes.items()):
@@ -139,7 +169,7 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
                 Finding(
                     "error",
                     "enforce-shape-conflict",
-                    f"'{leaf_key}' is enforced with incompatible value shapes "
+                    f"'{_format_path(leaf_key)}' is enforced with incompatible value shapes "
                     f"across packages: {detail}",
                 )
             )
@@ -148,19 +178,19 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
             Finding(
                 "advisory",
                 "shape-mismatch",
-                f"'{leaf_key}' is enforced with a list/collection value by "
+                f"'{_format_path(leaf_key)}' is enforced with a list/collection value by "
                 f"{', '.join(sorted(owners))}; collection keys should be "
                 f"'ensure-present' (union), not 'enforce'.",
             )
         )
     for leaf_key, entries in sorted(enforced_scalar.items()):
-        if len({v for _, v in entries}) > 1:
+        if len({(type(value), value) for _, value in entries}) > 1:
             detail = "; ".join(f"{name}={value!r}" for name, value in entries)
             findings.append(
                 Finding(
                     "error",
                     "enforce-conflict",
-                    f"'{leaf_key}' is enforced to conflicting scalar values "
+                    f"'{_format_path(leaf_key)}' is enforced to conflicting scalar values "
                     f"across packages: {detail}",
                 )
             )
