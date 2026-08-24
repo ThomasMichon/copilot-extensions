@@ -124,7 +124,10 @@ def test_installer_and_launcher_use_exact_version_helper():
         "Get-Command psmux -CommandType Application -ErrorAction SilentlyContinue |"
         in installer
     )
-    assert "Select-Object -First 1" in installer
+    assert (
+        "Get-Command psmux -CommandType Application -ErrorAction Stop | "
+        "Select-Object -First 1"
+    ) in installer
     assert "Find-AwPsmuxPackageBinary" in launcher
     assert "-DesiredVersion '3.3.5'" in launcher
 

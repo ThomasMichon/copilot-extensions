@@ -1476,7 +1476,7 @@ function Ensure-PsmuxSshSafe {
 
     $env:AW_PSMUX_EXPECTED_VERSION = $desiredVersion
     try {
-        $verify = '$cmd = Get-Command psmux -CommandType Application -ErrorAction Stop; ' +
+        $verify = '$cmd = Get-Command psmux -CommandType Application -ErrorAction Stop | Select-Object -First 1; ' +
             '$out = (& $cmd.Source --help 2>&1 | Select-Object -First 1) | Out-String; ' +
             '$pattern = "(?<![0-9.])" + [regex]::Escape($env:AW_PSMUX_EXPECTED_VERSION) + "(?![0-9.])"; ' +
             'if ($out -notmatch $pattern) { exit 1 }'
