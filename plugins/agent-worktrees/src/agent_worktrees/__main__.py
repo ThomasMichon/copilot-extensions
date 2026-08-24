@@ -13167,13 +13167,14 @@ def cmd_accounts_dispatch(argv: list[str]) -> int:
 def _related_usage() -> None:
     """Print related subcommand usage."""
     project = cfg.active_project() or "agent-worktrees"
-    print(f"Usage: {project} related <command>")
+    print(f"Usage: {project} related <command> | related --conduct")
     print()
     print("Per-project, directional 'related repos' index (this repo's POV),")
     print("committed at <repo>/.agent-worktrees/related.yaml. Keys reference the")
     print("global repos registry; entries add role + locus + delegate + a narrative.")
     print()
     print("Commands:")
+    print("  --conduct                             Emit merged session guidance")
     print("  list [--role R] [--json]            List related repos (and the primary)")
     print("  show <name> [--json]                Show a related repo (+ registry context)")
     print("  add <name>                          Link a related repo + scaffold its doc")
@@ -13643,6 +13644,107 @@ def _render_related_findings(findings: list, current_machine: str) -> None:
                     "register), and remove an entry only with their approval.")
 
 
+def _related_conduct(anchor: str) -> int:
+    """Emit compact cross-repo guidance for the sessionStart conduct hook.
+
+    The configured-repo side comes from ``load_config`` so it includes every
+    registration contributed by the repo, machine override, and ``config.d``
+    drop-ins. The directional side comes from the full related config graft
+    (installed plugins, harness, and knowledge overlay).
+    """
+    from . import related, repos
+
+    try:
+        config = cfg.load_config()
+    except Exception:
+        return 0
+
+    anchors = _related_config_source_anchors(anchor)
+    rel = related.read_related_grafted(anchors)
+    registry = repos.read_registry()
+    names = set(config.repos) | set(rel.related)
+    if not names:
+        return 0
+
+    lines = [
+        "## Related-repository guidance",
+        "",
+        "This is the merged project view: committed repo config, machine-side "
+        "overrides, `config.d/` injections, installed-plugin contributions, "
+        "and the directional related-repo index.",
+        "",
+        "- Before reading or changing another repo, run "
+        "`agent-worktrees related resolve <repo>` and follow its class, locus, "
+        "and delegation plan.",
+        "- A non-`none` delegate means the target repo is agent-guarded: hand "
+        "content work to that repo's agent rather than editing its checkout "
+        "from this session.",
+        "- Related-repo plugins for CodeSpace/container venues are copied from "
+        "the dispatch host's installed payload and passed as `--plugin-dir`; "
+        "their marketplace need not exist in the venue. Ensure every listed "
+        "source is enabled and installed on the dispatch host.",
+        "",
+        "Available repository guidance:",
+    ]
+
+    def _sort_key(name: str) -> tuple[int, int, str]:
+        return (
+            0 if name == config.repo_name else 1,
+            0 if name == rel.primary else 1,
+            name.casefold(),
+        )
+
+    for name in sorted(names, key=_sort_key):
+        parts: list[str] = []
+        markers: list[str] = []
+        if name == config.repo_name:
+            markers.append("current")
+        if name == rel.primary:
+            markers.append("primary")
+
+        reg = registry.repos.get(name)
+        if reg is not None:
+            parts.append(f"class={reg.repo_class}")
+
+        entry = rel.related.get(name)
+        if entry is not None:
+            if entry.role:
+                parts.append(f"role={entry.role}")
+            parts.append(f"locus={entry.locus.preferred or 'local'}")
+            parts.append(f"delegate={entry.delegate or 'none'}")
+            enabled_plugins = [
+                str(p.get("source", "")).strip()
+                for p in entry.plugins
+                if p.get("enable", True) and str(p.get("source", "")).strip()
+            ]
+            if enabled_plugins:
+                parts.append("plugins=" + ",".join(enabled_plugins))
+
+        repo_cfg = config.repos.get(name)
+        if repo_cfg is not None:
+            flow = _pr_flow_profile(repo_cfg)
+            if repo_cfg.pr.enabled:
+                requirement = "required" if repo_cfg.pr.required else "optional"
+                parts.append(
+                    f"pr={flow.profile}/{requirement}/{repo_cfg.pr.provider}"
+                )
+                parts.append(f"after-create={repo_cfg.pr.strategy}")
+            else:
+                parts.append("pr=direct")
+
+        marker = f" ({', '.join(markers)})" if markers else ""
+        detail = "; ".join(parts) if parts else "registered"
+        lines.append(f"- `{name}`{marker}: {detail}")
+
+    lines.extend([
+        "",
+        "Use `agent-worktrees related show <repo>` for metadata and "
+        "`agent-worktrees related doctor` after changing the index.",
+    ])
+    print("\n".join(lines))
+    return 0
+
+
 def cmd_related_dispatch(argv: list[str]) -> int:
     """Route related subcommands (per-project related-repos index)."""
     from . import related, repos
@@ -13690,6 +13792,9 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             "--repo <path>."
         )
         return 1
+
+    if sub == "--conduct":
+        return _related_conduct(anchor)
 
     json_out = "--json" in rest
 

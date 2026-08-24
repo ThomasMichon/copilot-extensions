@@ -38,6 +38,10 @@ $parts = @()
 $defn = (& $python -m agent_worktrees state-root --conduct 2>$null | Out-String).Trim()
 if ($defn) { $parts += $defn }
 
+# Dynamic: complete related-repo guidance from the merged project corpus.
+$related = (& $python -m agent_worktrees related --conduct 2>$null | Out-String).Trim()
+if ($related) { $parts += $related }
+
 $dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'
 if (Test-Path $dir) {
     foreach ($f in (Get-ChildItem -Path $dir -Filter '*.md' -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
