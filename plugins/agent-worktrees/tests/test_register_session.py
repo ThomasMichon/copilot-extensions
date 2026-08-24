@@ -131,6 +131,20 @@ class TestRegisterSessionStdin:
         rec = load_record(tmp_tracking_dir / "wt-z.yaml")
         assert rec.sessions == []
 
+    def test_unknown_cwd_still_ensures_resident_monitor(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        monkeypatch.setenv("AGENT_WORKTREES_STATUS_MONITOR", "1")
+        _save_record(tmp_tracking_dir, "wt-z", "/tmp/src/wt-z")
+        payload = '{"sessionId":"sess-3","cwd":"/tmp/unrelated"}'
+        monkeypatch.setattr(m.sys, "stdin", io.StringIO(payload))
+        ensured: list[bool] = []
+        monkeypatch.setattr(
+            m, "_ensure_status_monitor", lambda: ensured.append(True) or True)
+
+        assert m.cmd_register_session(_args(stdin=True)) == 0
+        assert ensured == [True]
+
     def test_no_session_id_is_silent_noop(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
     ):

@@ -202,7 +202,7 @@ def note_demand(
 
 
 def recent_demands(
-    project: str,
+    project: str | None,
     *,
     now: float | None = None,
     max_age: float = _DEMAND_MAX_AGE,
@@ -223,7 +223,9 @@ def recent_demands(
                     pass
                 continue
             data = json.loads(path.read_text("utf-8"))
-            if not isinstance(data, dict) or data.get("project") != project:
+            if not isinstance(data, dict):
+                continue
+            if project is not None and data.get("project") != project:
                 continue
             key = data.get("key")
             shape = data.get("args")
@@ -239,6 +241,15 @@ def recent_demands(
             except OSError:
                 pass
     return out
+
+
+def recent_demand_projects() -> set[str]:
+    """Projects with list callers active inside the demand window."""
+    return {
+        str(demand["project"])
+        for demand in recent_demands(None)
+        if isinstance(demand.get("project"), str) and demand["project"]
+    }
 
 
 def resident_fresh_for(interval: float) -> float:
