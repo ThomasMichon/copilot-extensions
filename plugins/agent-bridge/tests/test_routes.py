@@ -89,6 +89,7 @@ class TestHealthEndpoint:
             assert resp.status_code == 200
             assert resp.json()["status"] == "ok"
             assert resp.json()["topology_error_count"] == 0
+            assert resp.json()["topology_warning_count"] == 0
 
 
 class TestAuthMiddleware:
@@ -757,6 +758,7 @@ class TestAgentRoutes:
         assert resp.status_code == 200
         assert resp.json()["agents"] == []
         assert resp.json()["topology_errors"] == []
+        assert resp.json()["topology_warnings"] == []
 
     def test_session_alias_reuses_canonical_identity(
         self, client, app,

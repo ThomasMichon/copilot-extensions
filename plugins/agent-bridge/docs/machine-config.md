@@ -240,6 +240,10 @@ no hand-authored agent list. Two sources:
 
 Precedence: explicit `acp-agents.json` (deprecated) > derived > projects.yaml
 auto-discovered. Names collide-safely; explicit/derived win over auto-discovered.
+Derived agents also advertise stable, case-insensitive SSH aliases. When
+overlapping topology profiles contribute the same alias, the resolver reports a
+warning while preserving exact canonical names; alias overlap does not
+invalidate either profile.
 
 ## acp-agents.json Format (deprecated)
 

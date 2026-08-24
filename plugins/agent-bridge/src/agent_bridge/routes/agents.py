@@ -16,9 +16,11 @@ async def list_agents(request: Request):
     list_async = getattr(resolver, "list_agents_async", None)
     agents = await list_async() if callable(list_async) else []
     errors = getattr(resolver, "topology_errors", [])
+    warnings = getattr(resolver, "topology_warnings", [])
     return {
         "agents": agents,
         "topology_errors": errors if isinstance(errors, list) else [],
+        "topology_warnings": warnings if isinstance(warnings, list) else [],
     }
 
 
@@ -97,9 +99,11 @@ async def list_machines(request: Request):
             ],
         })
     errors = getattr(resolver, "topology_errors", [])
+    warnings = getattr(resolver, "topology_warnings", [])
     return {
         "machines": machines,
         "topology_errors": errors if isinstance(errors, list) else [],
+        "topology_warnings": warnings if isinstance(warnings, list) else [],
     }
 
 

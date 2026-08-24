@@ -33,7 +33,11 @@ async def health(request: Request) -> dict:
     resolver = getattr(request.app.state, "resolver", None)
     if resolver is not None:
         errors = getattr(resolver, "topology_errors", [])
+        warnings = getattr(resolver, "topology_warnings", [])
         body["topology_error_count"] = len(errors) if isinstance(errors, list) else 0
+        body["topology_warning_count"] = (
+            len(warnings) if isinstance(warnings, list) else 0
+        )
     # When drained, surface *how long* and *why* so a stuck/aborted drain is
     # visible to monitoring without grepping logs (#1757).
     if draining and mgr is not None:
