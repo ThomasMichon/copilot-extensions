@@ -63,7 +63,12 @@ def test_health_events_are_not_malformed_state_transitions() -> None:
     ev = telemetry.session_lifecycle_event(
         "context_warning",
         "s",
-        {"context_pct": 81.5, "threshold": 80, "message": "private"},
+        {
+            "context_pct": 81.5,
+            "threshold": 80,
+            "message": "private",
+            "status": " RUNNING ",
+        },
         from_state="idle",
     )
     assert ev["kind"] == "event"

@@ -319,10 +319,13 @@ def session_lifecycle_event(
     identity: dict[str, Any] | None = None,
     event_id: int | None = None,
 ) -> dict[str, Any]:
-    """Shape a session lifecycle event into a generic state-transition record.
+    """Shape one session lifecycle/health event into a generic record.
 
-    Carries only the **session id, the event name, and the target status** --
-    never the event's message text, conversation content, or any secret.
+    ``session_state_changed`` becomes a ``state_transition`` with normalized
+    ``from``/``to``. Health/error events use ``event``/``error`` kinds and carry
+    only allow-listed structural fields. Stable identity, event cursor, bounded
+    causal trigger, and log epoch may be attached; message/content fields never
+    surface.
     """
     record: dict[str, Any] = {
         "kind": (
@@ -344,8 +347,8 @@ def session_lifecycle_event(
         record["event_id"] = event_id
     if event_type == "session_state_changed" and from_state is not None:
         record["from"] = from_state
-    status = data.get("status")
-    if status is not None:
+    status = _status(data.get("status"))
+    if event_type == "session_state_changed" and status is not None:
         record["to"] = status
     trigger = _bounded_trigger(data.get("trigger"))
     if trigger is not None:
