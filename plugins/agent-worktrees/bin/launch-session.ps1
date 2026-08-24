@@ -562,6 +562,14 @@ function Test-AwJoiningLiveSession {
     if ($noMuxNow) { return $false }
     $cmd = Get-Command psmux -ErrorAction SilentlyContinue
     if (-not $cmd) { return $false }
+    $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
+    if (Test-Path -LiteralPath $pathHelper) {
+        . $pathHelper
+        $desired = Find-AwPsmuxPackageBinary `
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+            -DesiredVersion '3.3.5'
+        if ($desired) { $cmd = Get-Command $desired.Path }
+    }
     # Resolve the WinGet reparse-stub to the real exe (pwsh 7.4 can't launch the
     # 0-byte App Execution Alias); mirrors Resolve-AwPsmuxBin below.
     $bin = $cmd.Source
@@ -679,6 +687,14 @@ $psmuxCmd = Get-Command psmux -ErrorAction SilentlyContinue
 function Resolve-AwPsmuxBin {
     param($Cmd)
     if (-not $Cmd) { return 'psmux' }
+    $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
+    if (Test-Path -LiteralPath $pathHelper) {
+        . $pathHelper
+        $desired = Find-AwPsmuxPackageBinary `
+            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
+            -DesiredVersion '3.3.5'
+        if ($desired) { return $desired.Path }
+    }
     $src = $Cmd.Source
     try {
         $item = Get-Item -LiteralPath $src -ErrorAction Stop

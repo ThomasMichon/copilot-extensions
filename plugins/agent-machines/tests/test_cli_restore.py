@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 from agent_machines import __main__ as cli
-from agent_machines import modules, reconcile
+from agent_machines import modules, reconcile, resources
 
 
 def _fake_result(stdout: str) -> reconcile.RestoreResult:
@@ -75,3 +75,37 @@ def test_json_emits_structured_result_with_stdout(monkeypatch, capsys):
     assert data["modules"][0]["name"] == "probe"
     assert data["modules"][0]["stdout_tail"] == "[OK] did the thing"
     assert "plan" in data
+
+
+def _resource_error_result() -> reconcile.RestoreResult:
+    result = _fake_result("")
+    result.module_results = []
+    result.resource_results = [
+        resources.ResourceResult(
+            type="package",
+            id="example.package",
+            changed=True,
+            dry_run=False,
+            action="error",
+            detail="install failed",
+        )
+    ]
+    return result
+
+
+def test_resource_error_makes_json_not_ok_and_exit_nonzero(monkeypatch, capsys):
+    _patch(monkeypatch, _resource_error_result())
+    rc = cli.main(["restore", "--machine", "box", "--apply", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc != 0
+    assert data["ok"] is False
+    assert data["resources"][0]["status"] == "error"
+
+
+def test_resource_error_makes_human_restore_exit_nonzero(monkeypatch, capsys):
+    _patch(monkeypatch, _resource_error_result())
+    rc = cli.main(["restore", "--machine", "box", "--apply"])
+    captured = capsys.readouterr()
+    assert rc != 0
+    assert "resource package:example.package: ERROR install failed" in captured.err
+    assert "did error" not in captured.out

@@ -135,7 +135,9 @@ def _cmd_restore(args: argparse.Namespace) -> int:
         print("  resources: none")
     for r in result.resource_results:
         label = f"{r.type}:{r.id}"
-        if r.skipped_reason:
+        if r.status == "error":
+            print(f"  resource {label}: ERROR {r.detail}", file=sys.stderr)
+        elif r.skipped_reason:
             print(f"  resource {label}: skipped ({r.skipped_reason})")
         elif r.changed:
             verb = "would" if r.dry_run else "did"
@@ -145,8 +147,6 @@ def _cmd_restore(args: argparse.Namespace) -> int:
                 print(f"      {r.detail}")
             for cmd in r.commands:
                 print(f"      $ {' '.join(cmd)}")
-        elif r.action == "error":
-            print(f"  resource {label}: ERROR {r.detail}", file=sys.stderr)
         else:
             print(f"  resource {label}: up-to-date")
 

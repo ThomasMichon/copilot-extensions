@@ -192,8 +192,9 @@ Resources appear in every verb:
   `--dry-run` (the default) previews the exact commands / writes, `--apply`
   performs them, and `--only <id|type|type:id>` restricts the run to a resource
   (and skips modules when nothing else is selected).
-- `agent-machines restore --json` includes a `resources` list and a
-  `plan.resources` list.
+- `agent-machines restore --json` includes a `resources` list (each result has
+  `status: ok|changed|skipped|error`) and a `plan.resources` list. Any resource
+  error makes the top-level `ok` false and the command exit nonzero.
 
 ## Adopter guide
 
@@ -253,4 +254,3 @@ be deleted. The rest of `~/.psmux.conf` (the user's own `set -g mouse on` and
 any hand edits) is preserved; only the marked block is engine-owned, and it is
 refreshed idempotently on every restore. Setting `state: absent` on the same
 resource removes the block cleanly.
-
