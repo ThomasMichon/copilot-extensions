@@ -6024,6 +6024,7 @@ def _monitor_list_sessions(mux_bin: str) -> dict[str, int] | None:
 
 def _monitor_sweep(
     mux_bin: str, token: str, prefix: str, ctx_done: set[str],
+    interval: float = 15,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -6046,9 +6047,11 @@ def _monitor_sweep(
         registry.pop(sess, None)
         ctx_done.discard(sess)
     served = [(s, p) for s, p in registry.items() if s in live_wt and p]
+    warm_projects: dict[str, str] = {}
     for sess, path in served:
         try:
             _activate_project_for_path(path, force=True)
+            warm_projects.setdefault(cfg.project_name(), path)
         except Exception:
             pass
         # Win the single-instance election so any per-session updater retires,
@@ -6071,6 +6074,12 @@ def _monitor_sweep(
         except Exception:
             seg = ""
         _monitor_mux_set(mux_bin, sess, "@aw_seg", seg)
+    for path in warm_projects.values():
+        try:
+            _activate_project_for_path(path, force=True)
+            _warm_list_cache_for_active_project(interval=interval)
+        except Exception:
+            pass
     return len(served)
 
 
@@ -6126,7 +6135,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                 return 0  # a current successor claimed the lock -> stand down
             _locks.write_lock(lock, extra={"prefix": my_prefix})
 
-            served = _monitor_sweep(mux_bin, token, my_prefix, ctx_done)
+            served = _monitor_sweep(
+                mux_bin, token, my_prefix, ctx_done, interval=interval)
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
@@ -6277,15 +6287,8 @@ def _cmd_list_glance(records) -> int:
     return 0
 
 
-def cmd_list(args: argparse.Namespace) -> int:
-    """List worktrees from tracking records.
-
-    By default, applies the same filters as the interactive picker:
-    only worktrees for the current platform whose directories still
-    exist on disk.  Pass ``--all`` to skip existence checks, or
-    ``--tracking-status`` / ``--include-other-platforms`` for finer
-    control.
-    """
+def _list_records_for_args(args: argparse.Namespace):
+    """Load the filtered record set shared by ``list`` and daemon cache warm."""
     tracking_path = cfg.tracking_dir()
     status_filter = None if args.tracking_status == "all" else args.tracking_status
 
@@ -6309,6 +6312,99 @@ def cmd_list(args: argparse.Namespace) -> int:
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
+    return records
+
+
+def _build_list_json_payload(
+    args: argparse.Namespace,
+    records,
+    *,
+    stamp_session_state: bool = True,
+) -> dict:
+    """Build the enriched JSON listing without reading or writing its cache."""
+    mux_map: dict[str, sessions.MuxInfo] = {}
+    if getattr(args, "mux_details", False):
+        wt_ids = [rec.worktree_id for rec in records]
+        mux_map = sessions.mux_status_many(wt_ids)
+    session_ctx = sessions.scan_sessions_fast(records)
+    state_map: dict[str, git_ops.WorktreeStateInfo] = {}
+    if getattr(args, "classify", False):
+        state_map = _classify_records(records, session_ctx)
+    # #93: same enriched pass as the streaming path -- mark worktrees hosting
+    # a bare (un-muxed) bound Copilot so the Picker (local or over SSH) can
+    # annotate the row. Gated on --mux-details (the Picker's flag) so a plain
+    # list --json stays cheap.
+    bare_orphan_wts: set[str] | None = None
+    if getattr(args, "mux_details", False):
+        try:
+            bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
+        except Exception:
+            bare_orphan_wts = None
+    worktrees = [
+        _worktree_to_dict(
+            rec, mux_info=mux_map.get(rec.worktree_id),
+            session_ctx=session_ctx,
+            state_info=state_map.get(rec.worktree_id),
+            bare_orphan_wts=bare_orphan_wts,
+        )
+        for rec in records
+    ]
+    # Enrich titles from session data (same cascade as table output)
+    for wt_dict, rec in zip(worktrees, records, strict=True):
+        title = wt_dict.get("title")
+        if not title or title == "null":
+            norm = _normalize_path(rec.worktree_path)
+            title = session_ctx.latest_summary.get(norm)
+        wt_dict["title"] = title
+    # picker-cache-first-paint (dotfiles#948) remote write-back: on the
+    # authoritative classify pass, stamp each worktree's session-render cache
+    # so a FUTURE --cache-only fast phase on THIS machine reads it directly.
+    if getattr(args, "classify", False) and stamp_session_state:
+        from .picker_tui.data_local import _stamp_from_raw
+        for wt_dict, rec in zip(worktrees, records, strict=True):
+            _stamp_from_raw(rec, wt_dict, session_ctx)
+    return {"worktrees": worktrees}
+
+
+def _warm_list_cache_for_active_project(*, interval: float = 15) -> int:
+    """Refresh exact, recently requested list shapes for the active project."""
+    if list_cache.ttl_seconds() <= 0:
+        return 0
+    project = cfg.project_name()
+    warmed = 0
+    for demand in list_cache.recent_demands(project):
+        shape = demand["args"]
+        args = argparse.Namespace(
+            json=True,
+            stream=False,
+            cache_only=False,
+            glance=False,
+            fresh=True,
+            tracking_status=demand.get("tracking_status", "all"),
+            **shape,
+        )
+        records = _list_records_for_args(args)
+        payload = _build_list_json_payload(
+            args, records, stamp_session_state=False)
+        list_cache.write(
+            demand["key"],
+            payload,
+            fresh_for=list_cache.resident_fresh_for(interval),
+        )
+        warmed += 1
+    return warmed
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    """List worktrees from tracking records.
+
+    By default, applies the same filters as the interactive picker:
+    only worktrees for the current platform whose directories still
+    exist on disk.  Pass ``--all`` to skip existence checks, or
+    ``--tracking-status`` / ``--include-other-platforms`` for finer
+    control.
+    """
+    records = _list_records_for_args(args)
 
     if getattr(args, "glance", False):
         # Compact situational-awareness digest -- active worktrees only, title +
@@ -6345,58 +6441,26 @@ def cmd_list(args: argparse.Namespace) -> int:
         # tolerate a few seconds of staleness) and best-effort.
         _lc_key = None
         try:
+            _project = cfg.project_name()
             _lc_key = list_cache.cache_key(
-                args, project=cfg.project_name(),
+                args, project=_project,
                 tracking_status=getattr(args, "tracking_status", "all"))
         except Exception:
             _lc_key = None
+            _project = None
+        if _lc_key and _project:
+            list_cache.note_demand(
+                _lc_key,
+                args,
+                project=_project,
+                tracking_status=getattr(args, "tracking_status", "all"),
+            )
         if _lc_key and not getattr(args, "fresh", False):
             _cached = list_cache.read_fresh(_lc_key)
             if isinstance(_cached, dict) and "worktrees" in _cached:
                 _json_output(_cached)
                 return 0
-        mux_map: dict[str, sessions.MuxInfo] = {}
-        if getattr(args, "mux_details", False):
-            wt_ids = [rec.worktree_id for rec in records]
-            mux_map = sessions.mux_status_many(wt_ids)
-        session_ctx = sessions.scan_sessions_fast(records)
-        state_map: dict[str, git_ops.WorktreeStateInfo] = {}
-        if getattr(args, "classify", False):
-            state_map = _classify_records(records, session_ctx)
-        # #93: same enriched pass as the streaming path -- mark worktrees hosting
-        # a bare (un-muxed) bound Copilot so the Picker (local or over SSH) can
-        # annotate the row. Gated on --mux-details (the Picker's flag) so a plain
-        # list --json stays cheap.
-        bare_orphan_wts: set[str] | None = None
-        if getattr(args, "mux_details", False):
-            try:
-                bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
-            except Exception:
-                bare_orphan_wts = None
-        worktrees = [
-            _worktree_to_dict(
-                rec, mux_info=mux_map.get(rec.worktree_id),
-                session_ctx=session_ctx,
-                state_info=state_map.get(rec.worktree_id),
-                bare_orphan_wts=bare_orphan_wts,
-            )
-            for rec in records
-        ]
-        # Enrich titles from session data (same cascade as table output)
-        for wt_dict, rec in zip(worktrees, records, strict=True):
-            title = wt_dict.get("title")
-            if not title or title == "null":
-                norm = _normalize_path(rec.worktree_path)
-                title = session_ctx.latest_summary.get(norm)
-            wt_dict["title"] = title
-        # picker-cache-first-paint (dotfiles#948) remote write-back: on the
-        # authoritative classify pass, stamp each worktree's session-render cache
-        # so a FUTURE --cache-only fast phase on THIS machine reads it directly.
-        if getattr(args, "classify", False):
-            from .picker_tui.data_local import _stamp_from_raw
-            for wt_dict, rec in zip(worktrees, records, strict=True):
-                _stamp_from_raw(rec, wt_dict, session_ctx)
-        _payload = {"worktrees": worktrees}
+        _payload = _build_list_json_payload(args, records)
         if _lc_key:
             list_cache.write(_lc_key, _payload)
         _json_output(_payload)

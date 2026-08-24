@@ -58,6 +58,15 @@ def test_write_then_fresh_read(_cache_home):
     assert lc.read_fresh(k, ttl=4, now=1002.0) == {"worktrees": [{"id": "x"}]}
 
 
+def test_resident_lease_extends_only_warmed_entry(_cache_home):
+    lc.write(
+        "warm", {"worktrees": [{"id": "x"}]},
+        now=1000.0, fresh_for=45.0)
+    assert lc.read_fresh("warm", ttl=4, now=1044.0) == {
+        "worktrees": [{"id": "x"}]}
+    assert lc.read_fresh("warm", ttl=4, now=1046.0) is None
+
+
 def test_read_expired_is_miss(_cache_home):
     k = "abc123"
     lc.write(k, {"worktrees": []}, now=1000.0)
@@ -153,3 +162,47 @@ def test_cmd_list_json_coalesces_scans(_cache_home, monkeypatch):
     m.cmd_list(_ns(fresh=True))  # --fresh -> re-scan
     assert scans["n"] == 2
 
+
+def test_resident_warm_populates_exact_demanded_shapes(_cache_home, monkeypatch):
+    """The daemon refreshes Windows Picker and bridge shapes without guessing."""
+    from agent_worktrees import __main__ as m
+
+    monkeypatch.setattr(cfg, "project_name", lambda: "testproj")
+    monkeypatch.setattr(m, "_list_records_for_args", lambda args: ["record"])
+    monkeypatch.setattr(
+        m, "_build_list_json_payload",
+        lambda args, records, **kw: {"worktrees": [{"id": records[0]}]})
+    picker_args = _args(include_other_platforms=True)
+    bridge_args = _args(classify=False)
+    for args in (picker_args, bridge_args):
+        key = lc.cache_key(args, project="testproj", tracking_status="all")
+        lc.note_demand(
+            key, args, project="testproj", tracking_status="all", now=1000.0)
+
+    monkeypatch.setattr(lc.time, "time", lambda: 1001.0)
+    assert m._warm_list_cache_for_active_project(interval=15) == 2
+    for args in (picker_args, bridge_args):
+        key = lc.cache_key(args, project="testproj", tracking_status="all")
+        assert lc.read_fresh(key, now=1040.0) == {
+            "worktrees": [{"id": "record"}]}
+
+
+def test_resident_warm_respects_disabled_cache(_cache_home, monkeypatch):
+    from agent_worktrees import __main__ as m
+
+    monkeypatch.setenv(lc._TTL_ENV, "0")
+    monkeypatch.setattr(m, "_list_records_for_args",
+                        lambda args: pytest.fail("disabled cache must not scan"))
+    assert m._warm_list_cache_for_active_project() == 0
+
+
+def test_recent_demands_are_project_scoped_and_expire(_cache_home):
+    a = _args()
+    lc.note_demand(
+        "a", a, project="p1", tracking_status="all", now=1000.0)
+    lc.note_demand(
+        "b", a, project="p2", tracking_status="active", now=1000.0)
+
+    assert [d["key"] for d in lc.recent_demands("p1", now=1100.0)] == ["a"]
+    assert lc.recent_demands("p1", now=1201.0) == []
+    assert not (_cache_home / "list-cache" / "demand" / "a.json").exists()
