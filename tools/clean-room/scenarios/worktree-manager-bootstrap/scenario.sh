@@ -30,6 +30,30 @@ MANAGER_REPO="${CR_MANAGER_REPO:-ThomasMichon/copilot-extensions}"
 MANAGER_REF="${CR_MANAGER_REF:-main}"
 BOOTSTRAP_URL="https://raw.githubusercontent.com/$MANAGER_REPO/$MANAGER_REF/worktree-manager/bootstrap.sh"
 WM_ROOT="$HOME/.worktree-manager"
+UV_INDEX="${CR_UV_INDEX:-}"
+
+# Point uv at an internal index when the opt-in fixture is supplied (design
+# Sec.3/7 uv-index fixture): uv does NOT read pip.conf, so on a governed box its
+# default public PyPI index is TLS-blocked and the bootstrap's `uv pip install`
+# of the payload fails. This is the SAME idiom every other scenario uses -- but
+# this pristine-box scenario needs it MOST, since it is the one that actually
+# runs a payload `uv pip install` from a bare machine. Exported env is inherited
+# by the `curl | bash` bootstrap subprocess and ~/.config/uv/uv.toml is global,
+# so applying it here reaches the bootstrap's uv.
+_apply_uv_index_fixture() {
+    [ -n "$UV_INDEX" ] || return 0
+    export UV_INDEX_URL="$UV_INDEX"
+    export UV_DEFAULT_INDEX="$UV_INDEX"
+    export UV_EXTRA_INDEX_URL="${UV_EXTRA_INDEX_URL:-$UV_INDEX}"
+    mkdir -p "$HOME/.config/uv"
+    cat > "$HOME/.config/uv/uv.toml" <<TOML
+# clean-room uv-index fixture (opt-in, CR_UV_INDEX) -- governed-feed unjam.
+[[index]]
+url = "$UV_INDEX"
+default = true
+TOML
+    info "uv-index fixture applied: uv -> $UV_INDEX (UV_INDEX_URL + ~/.config/uv/uv.toml)"
+}
 
 : "${CR_SCENARIO_NAME:=worktree-manager-bootstrap}"
 export CR_SCENARIO_NAME
@@ -59,6 +83,9 @@ fi
 
 # =========================================================================
 phase 1 "run the bootstrap one-liner (self-provisions uv, fetches payload, installs)"
+# Governed-box unjam: if -UvIndex / CR_UV_INDEX was supplied, point uv at the
+# internal index BEFORE the bootstrap runs its payload `uv pip install`.
+_apply_uv_index_fixture
 # Pipe the published one-liner exactly as a user would. Pass a non-interactive,
 # zero-on-success verb (--version) through so the post-install passthrough
 # neither hangs (no bare interactive default) nor conflates a read-only "fully
@@ -71,6 +98,12 @@ if [ "$_rc" -eq 0 ]; then
 elif grep -qiE 'astral|install\.sh|uv' "$CR_LOGDIR/bootstrap.log" 2>/dev/null && ! command -v uv >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/uv" ]; then
     jam "toolchain-uv" "bootstrap: uv self-provision failed (exit $_rc; see cr-logs/bootstrap.log)" \
         "confirm astral.sh is reachable; uv installs user-local into ~/.local/bin"
+elif grep -qiE 'pythonhosted\.org|HandshakeFailure|Failed to fetch|received fatal alert|SSL|TLS|index' "$CR_LOGDIR/bootstrap.log" 2>/dev/null; then
+    # uv provisioned but its payload `uv pip install` could not reach the package
+    # index (public PyPI TLS-blocked on a governed box). This is a toolchain-uv
+    # jam, not a path-binstub one -- and it is fixable with the uv-index fixture.
+    jam "toolchain-uv" "bootstrap: payload install could not reach the uv package index (public PyPI TLS-blocked; exit $_rc)" \
+        "re-run with CR_UV_INDEX=<internal index-url> (-UvIndex) so the bootstrap's uv pip install uses the governed feed"
 else
     jam "path-binstub" "bootstrap: one-liner exited $_rc (see cr-logs/bootstrap.log)" \
         "inspect the fetch/self-install step in the log"
