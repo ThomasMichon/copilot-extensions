@@ -25,17 +25,13 @@ import shutil
 import subprocess
 from functools import lru_cache
 
+from .procutil import run_agent_worktrees_capture
+
 
 def _aw_get(key: str) -> str | None:
     """Return `agent-worktrees get <key>` (CWD-resolved), or None if unavailable."""
-    exe = shutil.which("agent-worktrees")
-    if exe is None:
-        return None
-    try:
-        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            [exe, "get", key], check=False, capture_output=True, text=True, timeout=15
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = run_agent_worktrees_capture("get", key, timeout=15)
+    if result is None:
         return None
     if result.returncode != 0:
         return None
@@ -65,15 +61,10 @@ def aw_set_summary(summary: str) -> bool:
     resolved. Returns True on success, False when agent-worktrees is absent or
     the write fails (e.g. not inside a worktree).
     """
-    exe = shutil.which("agent-worktrees")
-    if exe is None:
-        return False
-    try:
-        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            [exe, "status", "--summary", summary],
-            check=False, capture_output=True, text=True, timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = run_agent_worktrees_capture(
+        "status", "--summary", summary, timeout=20
+    )
+    if result is None:
         return False
     return result.returncode == 0
 
@@ -85,15 +76,8 @@ def aw_list_records(machine: str | None = None) -> list[dict]:
     focus table (the vision's derive-don't-duplicate rule). Optionally filtered
     to one machine. Empty when agent-worktrees is absent or the read fails.
     """
-    exe = shutil.which("agent-worktrees")
-    if exe is None:
-        return []
-    try:
-        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            [exe, "list", "--json"],
-            check=False, capture_output=True, text=True, timeout=20,
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = run_agent_worktrees_capture("list", "--json", timeout=20)
+    if result is None:
         return []
     if result.returncode != 0:
         return []
@@ -187,15 +171,8 @@ def _repo_registry() -> tuple[tuple[str, str], ...]:
     UX: the caller types/reads a local repo *name*, the wire carries the
     canonical remote.
     """
-    exe = shutil.which("agent-worktrees")
-    if exe is None:
-        return ()
-    try:
-        result = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            [exe, "repos", "list", "--json"],
-            check=False, capture_output=True, text=True, timeout=15,
-        )
-    except (OSError, subprocess.SubprocessError):
+    result = run_agent_worktrees_capture("repos", "list", "--json", timeout=15)
+    if result is None:
         return ()
     if result.returncode != 0:
         return ()
@@ -235,4 +212,3 @@ def name_for_repo(canonical: str | None) -> str | None:
         if canon == canonical:
             return name
     return None
-

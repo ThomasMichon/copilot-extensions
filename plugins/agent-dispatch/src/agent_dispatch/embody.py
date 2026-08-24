@@ -18,13 +18,11 @@ a host without agent-worktrees.
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import shutil
 import subprocess
-from pathlib import Path
 
-from .procutil import no_window_kwargs, resolve_runtime_python
+from .procutil import agent_worktrees_launch_prefix, no_window_kwargs
 
 DEFAULT_DRIVER = "agent-dispatch"
 
@@ -105,14 +103,7 @@ def _agent_worktrees_launch_prefix() -> list[str] | None:
     back to a ``.ps1`` ``subprocess`` cannot exec on Windows). Fall back to the
     ``agent-worktrees`` binstub on PATH only on POSIX (its shims are plain exec
     scripts and do not re-parse). Returns ``None`` when neither is resolvable."""
-    py = resolve_runtime_python(Path.home() / ".agent-worktrees")
-    if py is not None:
-        return [str(py), "-m", "agent_worktrees"]
-    if os.name != "nt":
-        exe = shutil.which("agent-worktrees")
-        if exe:
-            return [exe]
-    return None
+    return agent_worktrees_launch_prefix()
 
 
 def embody_available() -> bool:

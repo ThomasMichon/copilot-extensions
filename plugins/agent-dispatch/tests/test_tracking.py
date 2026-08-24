@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import types
 
 from agent_dispatch import tracking
@@ -45,9 +46,6 @@ def test_embodiment_overlay_none_for_empty():
 def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
     captured = {}
 
-    def fake_which(_name):
-        return "/usr/bin/agent-bridge"
-
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
         captured["kwargs"] = kwargs
@@ -57,27 +55,35 @@ def test_resolve_live_session_shells_bridge_json_resolve(monkeypatch):
             stderr="",
         )
 
-    monkeypatch.setattr(tracking.shutil, "which", fake_which)
+    monkeypatch.setattr(
+        tracking, "agent_bridge_launch_prefix",
+        lambda: [r"C:\runtime\pythonw.exe", "-m", "agent_bridge"],
+    )
+    monkeypatch.setattr(tracking.os, "name", "nt")
     monkeypatch.setattr(tracking.subprocess, "run", fake_run)
-    monkeypatch.setattr(tracking, "no_window_kwargs", lambda: {"creationflags": 123})
+    monkeypatch.setattr(tracking, "detached_kwargs", lambda: {"creationflags": 0x208})
 
     got = tracking.resolve_live_session("wt-x")
     assert got == {"session_id": "s9", "worktree_id": "wt-x"}
     cmd = captured["cmd"]
-    assert cmd[0] == "/usr/bin/agent-bridge"
+    assert cmd[:3] == [r"C:\runtime\pythonw.exe", "-m", "agent_bridge"]
+    assert not any(arg.lower().endswith((".cmd", ".bat")) for arg in cmd)
     assert "--json" in cmd
     assert cmd[cmd.index("--handle") + 1] == "wt-x"
     assert "live-sessions" in cmd and "resolve" in cmd
-    assert captured["kwargs"]["creationflags"] == 123
+    assert captured["kwargs"]["creationflags"] == 0x208
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
 
 
 def test_resolve_live_session_none_without_cli(monkeypatch):
-    monkeypatch.setattr(tracking.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
     assert tracking.resolve_live_session("wt-x") is None
 
 
 def test_resolve_live_session_degrades_on_failures(monkeypatch):
-    monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(
+        tracking, "agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
 
     # non-zero exit
     monkeypatch.setattr(
@@ -176,7 +182,8 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/ssh")
-    monkeypatch.setattr(tracking, "no_window_kwargs", lambda: {"creationflags": 123})
+    monkeypatch.setattr(tracking.os, "name", "nt")
+    monkeypatch.setattr(tracking, "detached_kwargs", lambda: {"creationflags": 0x208})
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd
@@ -193,7 +200,7 @@ def test_resolve_live_session_runs_over_ssh_for_remote_owner(monkeypatch):
     assert got == {"session_id": "s-remote", "worktree_id": "wt-x"}
     assert captured["cmd"][0] == "/usr/bin/ssh"
     assert "emancipation-cube" in captured["cmd"]
-    assert captured["kwargs"]["creationflags"] == 123
+    assert captured["kwargs"]["creationflags"] == 0x208
 
 
 def test_enrich_task_resolves_remote_owner_over_mesh(monkeypatch):

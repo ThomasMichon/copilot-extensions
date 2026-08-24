@@ -20,6 +20,72 @@ def test_no_window_kwargs_off_windows(monkeypatch):
     assert procutil.no_window_kwargs() == {}
 
 
+def test_agent_worktrees_capture_bypasses_cmd_and_detaches_on_windows(
+    tmp_path, monkeypatch
+):
+    runtime = tmp_path / ".agent-worktrees"
+    python = _make_slot(runtime, "1.5.3-dev9")
+    pythonw = python.with_name("pythonw.exe")
+    pythonw.write_text("")
+    (runtime / "current-version").write_text("1.5.3-dev9")
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, "host-a\n", "")
+
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "nt")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.CMD"
+    )
+    monkeypatch.setattr(procutil.subprocess, "run", fake_run)
+    result = procutil.run_agent_worktrees_capture("get", "machine", timeout=15)
+
+    assert result is not None and result.stdout == "host-a\n"
+    assert captured["cmd"] == [
+        str(pythonw), "-m", "agent_worktrees", "get", "machine"
+    ]
+    assert not any(arg.lower().endswith((".cmd", ".bat")) for arg in captured["cmd"])
+    flags = captured["kwargs"]["creationflags"]
+    assert flags & 0x00000008  # DETACHED_PROCESS
+    assert not (flags & 0x08000000)  # CREATE_NO_WINDOW
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["stdin"] is subprocess.DEVNULL
+
+
+def test_agent_worktrees_launch_has_no_windows_path_fallback(tmp_path, monkeypatch):
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "nt")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: r"C:\bin\agent-worktrees.CMD"
+    )
+    assert procutil.agent_worktrees_launch_prefix() is None
+
+
+def test_agent_worktrees_capture_preserves_posix_process_semantics(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, "host-a\n", "")
+
+    monkeypatch.setattr(procutil.os, "name", "posix")
+    monkeypatch.setattr(
+        procutil, "agent_worktrees_launch_prefix",
+        lambda: ["/usr/bin/agent-worktrees"],
+    )
+    monkeypatch.setattr(procutil.subprocess, "run", fake_run)
+
+    procutil.run_agent_worktrees_capture("get", "machine", timeout=15)
+
+    assert captured["cmd"] == ["/usr/bin/agent-worktrees", "get", "machine"]
+    assert "creationflags" not in captured["kwargs"]
+    assert "start_new_session" not in captured["kwargs"]
+
+
 def test_runtime_root_is_under_home_not_payload():
     root = procutil.runtime_root()
     assert root == Path.home() / ".agent-dispatch"
@@ -99,4 +165,3 @@ def test_resolve_runtime_python_ignores_venv_junction_layout(tmp_path):
     (root / "venv" / "Scripts").mkdir(parents=True)
     (root / "venv" / "Scripts" / "python.exe").write_text("")
     assert procutil.resolve_runtime_python(root) is None
-

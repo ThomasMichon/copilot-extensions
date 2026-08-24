@@ -37,7 +37,9 @@ def _fake_run(returncode=0, stdout="", raises=None):
 
 
 def _bridge_ok(monkeypatch):
-    monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(
+        tracking, "agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
 
 
 def _claim_and_start(q, task_id, *, wt, session, now):
@@ -98,7 +100,7 @@ def test_verdict_unknown_on_any_resolver_failure(monkeypatch, run):
 
 
 def test_verdict_unknown_when_bridge_absent(monkeypatch):
-    monkeypatch.setattr(tracking.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
     assert tracking.liveness_verdict("wt", owner_session_id="S1") == tracking.UNKNOWN
 
 
@@ -181,7 +183,7 @@ def test_reconcile_ignores_unheld_tasks(q):
 
 
 def test_reconcile_default_resolver_safe_without_bridge(q, monkeypatch):
-    monkeypatch.setattr(tracking.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(tracking, "agent_bridge_launch_prefix", lambda: None)
     t = q.create("x", now=1000.0)
     _claim_and_start(q, t.id, wt="wt", session="S1", now=1001.0)
     assert q.reconcile_liveness(now=9999.0)["requeued"] == 0
@@ -298,34 +300,37 @@ class TestReapOrphanedTargets:
 
 class TestLiveWorktrees:
     def test_returns_id_set(self, monkeypatch):
-        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
         monkeypatch.setattr(
-            tracking.subprocess, "run",
+            tracking, "run_agent_worktrees_capture",
             _fake_run(0, '{"worktrees":[{"id":"wt-a"},{"id":"wt-b"}]}'))
         assert tracking.live_worktrees() == {"wt-a", "wt-b"}
 
     def test_supports_bare_array(self, monkeypatch):
-        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
-        monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, '[{"id":"w1"}]'))
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(0, '[{"id":"w1"}]')
+        )
         assert tracking.live_worktrees() == {"w1"}
 
     def test_none_when_cli_absent(self, monkeypatch):
-        monkeypatch.setattr(tracking.shutil, "which", lambda _n: None)
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
+        )
         assert tracking.live_worktrees() is None
 
     def test_none_on_nonzero_exit(self, monkeypatch):
-        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
-        monkeypatch.setattr(tracking.subprocess, "run", _fake_run(2, ""))
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(2, "")
+        )
         assert tracking.live_worktrees() is None
 
     def test_none_on_unparseable(self, monkeypatch):
-        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
-        monkeypatch.setattr(tracking.subprocess, "run", _fake_run(0, "not json"))
+        monkeypatch.setattr(
+            tracking, "run_agent_worktrees_capture", _fake_run(0, "not json")
+        )
         assert tracking.live_worktrees() is None
 
     def test_none_on_timeout(self, monkeypatch):
-        monkeypatch.setattr(tracking.shutil, "which", lambda _n: "/x")
         monkeypatch.setattr(
-            tracking.subprocess, "run",
-            _fake_run(raises=subprocess.TimeoutExpired("agent-worktrees", 5)))
+            tracking, "run_agent_worktrees_capture", lambda *_a, **_k: None
+        )
         assert tracking.live_worktrees() is None

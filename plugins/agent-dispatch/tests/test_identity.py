@@ -8,36 +8,34 @@ from agent_dispatch import identity
 
 
 def test_resolve_identity_via_agent_worktrees(monkeypatch):
-    monkeypatch.setattr(identity.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
-
-    def fake_run(cmd, **_kw):
-        key = cmd[-1]
+    def fake_run(*args, timeout):
+        key = args[-1]
         out = {
             "machine": "host-a",
             "worktree-dir": "/home/u/src/x.worktrees/host-a-wt-123",
         }[key]
-        return subprocess.CompletedProcess(cmd, 0, out + "\n", "")
+        return subprocess.CompletedProcess(args, 0, out + "\n", "")
 
-    monkeypatch.setattr(identity.subprocess, "run", fake_run)
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
     machine, worktree = identity.resolve_identity()
     assert machine == "host-a"
     assert worktree == "host-a-wt-123"
 
 
 def test_resolve_identity_absent_agent_worktrees(monkeypatch):
-    monkeypatch.setattr(identity.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(
+        identity, "run_agent_worktrees_capture", lambda *_a, **_k: None
+    )
     assert identity.resolve_identity() == (None, None)
 
 
 def test_resolve_identity_not_in_worktree(monkeypatch):
-    monkeypatch.setattr(identity.shutil, "which", lambda _n: "/usr/bin/agent-worktrees")
-
-    def fake_run(cmd, **_kw):
+    def fake_run(*args, timeout):
         # machine resolves, but worktree-dir is empty (not inside a worktree)
-        out = "host-a" if cmd[-1] == "machine" else ""
-        return subprocess.CompletedProcess(cmd, 0, out + "\n", "")
+        out = "host-a" if args[-1] == "machine" else ""
+        return subprocess.CompletedProcess(args, 0, out + "\n", "")
 
-    monkeypatch.setattr(identity.subprocess, "run", fake_run)
+    monkeypatch.setattr(identity, "run_agent_worktrees_capture", fake_run)
     machine, worktree = identity.resolve_identity()
     assert machine == "host-a"
     assert worktree is None
@@ -98,4 +96,3 @@ def test_resolve_repo_selector_name_and_remote(monkeypatch):
         identity.name_for_repo("git.example.com/acme/widget") == "widget"
     )
     assert identity.name_for_repo("example.com/x/y") is None
-

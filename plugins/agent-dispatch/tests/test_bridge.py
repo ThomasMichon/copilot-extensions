@@ -7,7 +7,7 @@ import subprocess
 
 import pytest
 
-from agent_dispatch import bridge
+from agent_dispatch import bridge, procutil
 from agent_dispatch.queue import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
@@ -76,9 +76,11 @@ def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(monkeypatch, tmp_
     slot_py.parent.mkdir(parents=True)
     slot_py.write_text("")  # only needs to exist as a file
     (tmp_path / ".agent-bridge" / "current-version").write_text("0.1.0-dev9")
-    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
     # Even with a .cmd binstub on PATH, the versioned interpreter wins.
-    monkeypatch.setattr(bridge.shutil, "which", lambda _n: r"C:\bin\agent-bridge.cmd")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: r"C:\bin\agent-bridge.cmd"
+    )
     prefix = bridge._agent_bridge_launch_prefix()
     assert prefix == [str(slot_py), "-m", "agent_bridge"]
     # The launcher is a real interpreter, never a shell shim that re-parses args.
@@ -89,9 +91,9 @@ def test_launch_prefix_falls_back_to_binstub_on_posix(monkeypatch, tmp_path):
     """Without an installed versioned runtime, fall back to the ``agent-bridge``
     binstub on PATH **on POSIX only** (its shims are plain exec scripts -- no
     cmd.exe re-parse)."""
-    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(bridge.os, "name", "posix")
-    monkeypatch.setattr(bridge.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "posix")
+    monkeypatch.setattr(procutil.shutil, "which", lambda _n: "/usr/bin/agent-bridge")
     assert bridge._agent_bridge_launch_prefix() == ["/usr/bin/agent-bridge"]
 
 
@@ -99,16 +101,18 @@ def test_launch_prefix_no_ps1_fallback_on_windows(monkeypatch, tmp_path):
     """On Windows, with no versioned runtime, do NOT fall back to the ``.ps1``
     binstub (``subprocess`` cannot exec it -> WinError 2). Return ``None`` so the
     caller degrades deliberately (the #974 fix)."""
-    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(bridge.os, "name", "nt")
-    monkeypatch.setattr(bridge.shutil, "which", lambda _n: r"C:\bin\agent-bridge.ps1")
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "nt")
+    monkeypatch.setattr(
+        procutil.shutil, "which", lambda _n: r"C:\bin\agent-bridge.ps1"
+    )
     assert bridge._agent_bridge_launch_prefix() is None
 
 
 def test_launch_prefix_none_when_unresolvable(monkeypatch, tmp_path):
-    monkeypatch.setattr(bridge.Path, "home", classmethod(lambda cls: tmp_path))
-    monkeypatch.setattr(bridge.os, "name", "posix")
-    monkeypatch.setattr(bridge.shutil, "which", lambda _n: None)
+    monkeypatch.setattr(procutil.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(procutil.os, "name", "posix")
+    monkeypatch.setattr(procutil.shutil, "which", lambda _n: None)
     assert bridge._agent_bridge_launch_prefix() is None
 
 

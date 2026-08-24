@@ -36,7 +36,11 @@ import time
 from typing import Any
 
 from . import remote_dispatch
-from .procutil import no_window_kwargs
+from .procutil import (
+    agent_bridge_launch_prefix,
+    detached_kwargs,
+    run_agent_worktrees_capture,
+)
 
 #: Sentinel distinguishing "local machine not yet computed" from a resolved
 #: ``None`` (an unresolvable local identity is a valid, meaningful value).
@@ -77,8 +81,8 @@ _OVERLAY_KEYS = (
 
 
 def bridge_available() -> bool:
-    """True if the ``agent-bridge`` CLI is on PATH."""
-    return shutil.which("agent-bridge") is not None
+    """True if the local ``agent-bridge`` runtime can be launched safely."""
+    return agent_bridge_launch_prefix() is not None
 
 
 def worktree_from_owner(owner: str | None) -> str | None:
@@ -111,7 +115,7 @@ def machine_from_owner(owner: str | None) -> str | None:
 def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | None:
     """Build the argv that resolves a worktree handle to its live session.
 
-    Local (``machine`` None): the ``agent-bridge`` binstub directly. Remote:
+    Local (``machine`` None): the installed ``agent-bridge`` module directly. Remote:
     ``ssh <machine> agent-bridge ...`` over the SSH mesh -- the machine
     name is its alias. Returns None when the required client (``agent-bridge``
     locally, or ``ssh`` for a remote) is not on PATH, so the caller degrades.
@@ -119,10 +123,10 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
     remote_argv = ["agent-bridge", "--json", "live-sessions", "resolve",
                    "--handle", worktree]
     if machine is None:
-        exe = shutil.which("agent-bridge")
-        if exe is None:
+        prefix = agent_bridge_launch_prefix()
+        if prefix is None:
             return None
-        return [exe, *remote_argv[1:]]
+        return [*prefix, *remote_argv[1:]]
     ssh = shutil.which("ssh")
     if ssh is None:
         return None
@@ -133,14 +137,16 @@ def _bridge_resolve_argv(worktree: str, *, machine: str | None) -> list[str] | N
 
 
 def _run_capture(argv: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
-    """Run a non-interactive probe without allocating a Windows console."""
+    """Run a passive probe without allocating a headed Windows console."""
+    creation_kwargs = detached_kwargs() if os.name == "nt" else {}
     return subprocess.run(  # noqa: S603 -- fixed argv, executable resolved by caller
         argv,
         check=False,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
         text=True,
         timeout=timeout,
-        **no_window_kwargs(),
+        **creation_kwargs,
     )
 
 
@@ -276,15 +282,10 @@ def live_worktrees(*, timeout: float = 5.0) -> set[str] | None:
     unparseable output) so the caller degrades safe -- an unresolved probe reaps
     nothing, never on ignorance. Never raises.
     """
-    exe = shutil.which("agent-worktrees")
-    if exe is None:
-        return None
-    try:
-        proc = _run_capture(
-            [exe, "list", "--json", "--tracking-status", "active"],
-            timeout=timeout,
-        )
-    except (subprocess.TimeoutExpired, OSError):
+    proc = run_agent_worktrees_capture(
+        "list", "--json", "--tracking-status", "active", timeout=timeout
+    )
+    if proc is None:
         return None
     if proc.returncode != 0:
         return None
