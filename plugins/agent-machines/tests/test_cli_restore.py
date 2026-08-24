@@ -109,3 +109,43 @@ def test_resource_error_makes_human_restore_exit_nonzero(monkeypatch, capsys):
     assert rc != 0
     assert "resource package:example.package: ERROR install failed" in captured.err
     assert "did error" not in captured.out
+
+
+def _resource_deferred_result() -> reconcile.RestoreResult:
+    result = _fake_result("")
+    result.module_results = []
+    result.resource_results = [
+        resources.ResourceResult(
+            type="package",
+            id="example.package",
+            changed=False,
+            dry_run=True,
+            action="defer",
+            detail="deferred update from 1.0.0 to 2.0.0",
+            deferred_reason="process guard matched running: example.exe",
+            commands=[["winget", "upgrade", "--id", "example.package"]],
+        )
+    ]
+    return result
+
+
+def test_resource_deferral_is_explicit_in_json_and_successful(monkeypatch, capsys):
+    _patch(monkeypatch, _resource_deferred_result())
+    rc = cli.main(["restore", "--machine", "box", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert data["ok"] is True
+    assert data["resources"][0]["status"] == "deferred"
+    assert data["resources"][0]["deferred_reason"] == (
+        "process guard matched running: example.exe"
+    )
+
+
+def test_resource_deferral_is_explicit_in_human_dry_run(monkeypatch, capsys):
+    _patch(monkeypatch, _resource_deferred_result())
+    rc = cli.main(["restore", "--machine", "box"])
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "resource package:example.package: deferred" in captured.out
+    assert "process guard matched running: example.exe" in captured.out
+    assert "$ winget upgrade --id example.package" in captured.out
