@@ -145,6 +145,9 @@ guide.
 - conflicting scalar `enforce` values for the same leaf are errors;
 - nested maps under `enforce` are traversed because settings restore deep-merges
   them; their scalar leaves participate in normal conflict detection;
+- grouping suffixes such as `copilot.settings.sandbox` normalize to the physical
+  `copilot.settings` root, and incompatible scalar/map/list shapes at one path
+  are errors;
 - list/opaque collection leaves under `enforce` are shape advisories because
   they should be `ensure-present` unions;
 - explicitly disabling a bootstrap-critical plugin is an error;

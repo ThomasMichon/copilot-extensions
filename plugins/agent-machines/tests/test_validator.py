@@ -83,7 +83,48 @@ def test_nested_enforced_scalar_conflict_is_error(tmp_path):
     }
     findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
     conflict = next(f for f in findings if f.code == "enforce-conflict")
-    assert "'copilot.settings.sandbox.sandbox.enabled'" in conflict.message
+    assert "'copilot.settings.sandbox.enabled'" in conflict.message
+    assert has_errors(findings)
+
+
+def test_grouped_and_root_settings_share_conflict_identity(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": False}},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": True}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    conflict = next(f for f in findings if f.code == "enforce-conflict")
+    assert "'copilot.settings.sandbox.enabled'" in conflict.message
+
+
+def test_scalar_map_shape_conflict_is_error(tmp_path):
+    a_data = base_package("a/x", gate=["*"])
+    a_data["manage"] = {
+        "copilot.settings": {
+            "disposition": "enforce",
+            "values": {"sandbox": False},
+        }
+    }
+    b_data = base_package("b/x", gate=["*"])
+    b_data["manage"] = {
+        "copilot.settings.sandbox": {
+            "disposition": "enforce",
+            "values": {"sandbox": {"enabled": True}},
+        }
+    }
+    findings = validate([_pkg(tmp_path, "a", a_data), _pkg(tmp_path, "b", b_data)])
+    conflict = next(f for f in findings if f.code == "enforce-shape-conflict")
+    assert "'copilot.settings.sandbox'" in conflict.message
     assert has_errors(findings)
 
 

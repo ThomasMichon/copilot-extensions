@@ -77,13 +77,24 @@ def _marketplace_union(packages: list[RequirementPackage]) -> set[str]:
     return out
 
 
-def _enforced_leaves(prefix: str, value: Any):
-    """Yield fully-qualified leaves, traversing maps that restore deep-merges."""
+def _enforced_nodes(prefix: str, value: Any):
+    """Yield every value node, including maps that restore deep-merges."""
+    yield prefix, value
     if isinstance(value, dict):
         for key, child in value.items():
-            yield from _enforced_leaves(f"{prefix}.{key}", child)
-        return
-    yield prefix, value
+            yield from _enforced_nodes(f"{prefix}.{key}", child)
+
+
+def _shape(value: Any) -> str:
+    if isinstance(value, dict):
+        return "map"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, _SCALAR):
+        return "scalar"
+    if value is None:
+        return "null"
+    return type(value).__name__
 
 
 def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
@@ -98,20 +109,41 @@ def check_scalar_conflicts(packages: list[RequirementPackage]) -> list[Finding]:
     """
     findings: list[Finding] = []
     enforced_scalar: dict[str, list[tuple[str, Any]]] = {}
-    map_leaf_owners: dict[str, set[str]] = {}
+    collection_leaf_owners: dict[str, set[str]] = {}
+    enforced_shapes: dict[str, list[tuple[str, str]]] = {}
 
     for pkg in packages:
         for key, spec in pkg.manage.items():
             if spec.get("disposition") != "enforce":
                 continue
             values = spec.get("values", spec.get("value"))
-            for leaf_key, val in _enforced_leaves(key, values):
+            # copilot.settings.* suffixes group contributions but do not change
+            # their physical settings.json root.
+            root = (
+                "copilot.settings"
+                if key == "copilot.settings" or key.startswith("copilot.settings.")
+                else key
+            )
+            for leaf_key, val in _enforced_nodes(root, values):
+                enforced_shapes.setdefault(leaf_key, []).append((pkg.name, _shape(val)))
                 if isinstance(val, _SCALAR):
                     enforced_scalar.setdefault(leaf_key, []).append((pkg.name, val))
-                elif val is not None:
-                    map_leaf_owners.setdefault(leaf_key, set()).add(pkg.name)
+                elif val is not None and not isinstance(val, dict):
+                    collection_leaf_owners.setdefault(leaf_key, set()).add(pkg.name)
 
-    for leaf_key, owners in sorted(map_leaf_owners.items()):
+    for leaf_key, entries in sorted(enforced_shapes.items()):
+        shapes = {shape for _, shape in entries}
+        if len(shapes) > 1:
+            detail = "; ".join(f"{name}={shape}" for name, shape in entries)
+            findings.append(
+                Finding(
+                    "error",
+                    "enforce-shape-conflict",
+                    f"'{leaf_key}' is enforced with incompatible value shapes "
+                    f"across packages: {detail}",
+                )
+            )
+    for leaf_key, owners in sorted(collection_leaf_owners.items()):
         findings.append(
             Finding(
                 "advisory",
