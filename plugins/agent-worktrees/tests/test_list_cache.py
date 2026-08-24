@@ -205,3 +205,4 @@ def test_recent_demands_are_project_scoped_and_expire(_cache_home):
 
     assert [d["key"] for d in lc.recent_demands("p1", now=1100.0)] == ["a"]
     assert lc.recent_demands("p1", now=1201.0) == []
+    assert not (_cache_home / "list-cache" / "demand" / "a.json").exists()

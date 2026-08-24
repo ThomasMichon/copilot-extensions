@@ -217,6 +217,10 @@ def recent_demands(
     for path in files:
         try:
             if now - path.stat().st_mtime > max_age:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
                 continue
             data = json.loads(path.read_text("utf-8"))
             if not isinstance(data, dict) or data.get("project") != project:
