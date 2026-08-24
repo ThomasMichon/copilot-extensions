@@ -1,26 +1,23 @@
 ---
 name: agent-bridge-troubleshooting
 description: >
-  Diagnose and recover a wedged agent-bridge CodeSpace dispatch. Two failure
-  modes: (1) the ACP resume-hang where `send`/`resume` of a stopped multi-turn
-  session stalls `[starting]`->`[stopped]` and never reaches `[idle]` (the
-  copilot-agent-runtime #13492/#13494 race, extended to ACP); (2) the
-  credential-relay flap where a dispatched agent works fine but then cannot
-  fetch/push/PR (`unable to get password` / `relay unreachable`) because the
-  CodeSpace relay reverse-forward re-establishes on a flapping host relay port.
-  Covers the end+recreate workaround (never repair an in-flight session's relay),
-  the signatures, `agent-bridge peek`, the persisted sessions.db trace, and the
-  split-brain/stale-relay-port check. Use when asked to "agent-bridge session
-  stuck/wedged", "resume hang", "dispatch stuck in starting", "send returns 409
-  not idle", "codespace can't push / git auth fails / relay unreachable / unable
-  to get password", "credential relay died", or "diagnose an agent-bridge
-  dispatch".
+  Diagnose agent-bridge CodeSpace dispatch failures without destroying evidence
+  or changing shared state by default. Covers expected disconnect-and-resume,
+  ACP resume hangs, 409 starting/not-idle errors, protocol disconnects,
+  mid-turn aborts, credential-relay auth flaps, `agent-bridge peek`, persisted
+  traces, split-brain checks, and operator-authorized remediation. Use for
+  "agent-bridge session stuck/wedged", "resume hang", "dispatch stuck in
+  starting", "send returns 409", "agent-bridge protocol error", "session
+  aborted mid-turn", "connection closed", "restart agent-bridge", "codespace
+  can't push", "relay unreachable", "unable to get password", or "diagnose an
+  agent-bridge dispatch".
 ---
 
 # Troubleshooting agent-bridge CodeSpace dispatch
 
-Recover a wedged `agent-bridge` CodeSpace dispatch fast. Two distinct failure
-modes -- jump to the matching section:
+Diagnose a wedged `agent-bridge` CodeSpace dispatch without discarding the
+session, disturbing unrelated work, or erasing the evidence. Two distinct
+failure modes -- jump to the matching section:
 
 - **ACP resume-hang** -- `agent-bridge send codespace:<name>` (or any `resume`)
   against a **stopped multi-turn** session stalls in `[starting]` and never
@@ -29,8 +26,8 @@ modes -- jump to the matching section:
   then **cannot fetch/push/PR**: git fails with `unable to get password` /
   `relay unreachable`. -> *Is this the credential-relay flap?* below.
 
-Identify the mode, apply the **immediate workaround**, then (optionally) capture
-the trace. The resume-hang root cause is the Copilot CLI startup race
+Identify the mode and capture the trace. The resume-hang root cause is the
+Copilot CLI startup race
 github/copilot-agent-runtime **#13492** (fix **#13494**), originally scoped to
 *headed* sessions but it reproduces on **ACP** sessions too. The relay-flap fix
 (sticky port + buffered token-fetch + single-owner republish) is tracked in
@@ -41,12 +38,56 @@ github/copilot-agent-runtime **#13492** (fix **#13494**), originally scoped to
 > for `Get-NetTCPConnection`, `ps -ef | grep agent_bridge` for the
 > `Get-CimInstance` process query, and `$HOME` for `$env:USERPROFILE`.
 
+## Authority boundary -- read-only first
+
+### Expected disconnect -- peek, then resume the same session
+
+A one-off disconnect caused by a network disruption or by the daemon restarting
+during a plugin update is normal transport recovery, not a wedged-session
+signature. Preserve the session and continue in place:
+
+```bash
+agent-bridge peek <session>                  # when its current state is unclear
+agent-bridge send <session> "<next prompt>"  # resumes the same persisted session
+```
+
+Do not `end` + `create`, start a replacement session, or restart the daemon.
+`peek` reads the target's persisted state without launching Copilot, so it is the
+safe way for a host agent to distinguish an interrupted client stream from a
+still-running, idle, stopped-but-resumable, or genuinely unhealthy session.
+
+### Unexpected resume/protocol behavior -- preserve and file
+
+A resume that fails, remains contradictory, or repeatedly disconnects -- and
+any unexpected timeout, status transition, or slow launch -- is **evidence**,
+not permission to diagnose or repair the system. If the operator did not ask for
+diagnosis, preserve the session, report/file the already-visible evidence, and
+stop. When the operator does request diagnosis, stay read-only unless a mutating
+step is separately authorized:
+
+- inspect only (`status`, bounded `read --tail`, `peek`, persisted events/logs,
+  routing/health, and exact process listings);
+- preserve the existing bridge session and remote child;
+- do **not** `stop`, `end`, recreate, or start a replacement session;
+- do **not** restart/update/reinstall agent-bridge, kill processes, stop/start a
+  CodeSpace or provider, or edit `active.json`, `relay-port`, session databases,
+  or other runtime state;
+- report the evidence and file a bug in the owning tracker.
+
+In particular, **never restart the shared agent-bridge daemon just to clear a
+session/protocol error**. Daemon-touching commands already self-heal a genuinely
+down service, while a restart can disrupt unrelated sessions and hide the
+original failure. The remediation sections below are reference procedures to
+use only after explicit authorization; they are not the default next step.
+
 ## Is this the resume-hang? -- the signature
 
 All of these together mean it's the race, **not** a broken CodeSpace or bad plugins:
 
 - `send`/`resume` of a **stopped, multi-turn** session goes `[starting]` and
-  **never reaches `[idle]`**, transitioning to `[stopped]` after ~5 min.
+  **does not reach `[idle]` within the normal client/startup window**. Any
+  multi-minute resume/create delay is a failure signal to trace, not normal or
+  "known" expected latency.
 - The `send` fails immediately with **`HTTP 409: Session ... is starting, not idle`**.
 - The **CodeSpace is healthy** -- a direct `agent-codespaces ssh <name>` works
   throughout (the diagnostic SSH path skips plugin injection, which is *why* SSH
@@ -57,18 +98,18 @@ All of these together mean it's the race, **not** a broken CodeSpace or bad plug
 If SSH itself fails, or a *fresh create* also hangs, it is **not** this -- treat
 it as a CodeSpace/transport problem (see the `agent-codespaces:codespaces-lifecycle` skill).
 
-## Immediate workaround -- end + create
+## Operator-authorized remediation -- end + create
 
-On a wedged/stopped ACP session, **stop trying to resume it** -- drop the
-prior-turn context and start fresh:
+Only when the operator explicitly authorizes dropping prior-turn context, a
+wedged/stopped ACP session can be ended and recreated:
 
 ```bash
 agent-bridge end <session>            # tears down the wedged session (bridge-side)
 agent-bridge create <target> ...      # fresh session-host -> reliably reaches [idle]
 ```
 
-Fresh creates succeed where resume hangs. This trades prior-turn context for a
-reliable start. `end` deletes the bridge-side session + its `events`, but the
+This trades prior-turn context for a new start; it is not a harmless diagnostic.
+`end` deletes the bridge-side session + its `events`, but the
 target's own `~/.copilot/session-state/<acp_session_id>/events.jsonl` persists
 independently on the CodeSpace (that's what `peek` reads -- see below).
 
@@ -86,12 +127,13 @@ agent-bridge peek <session> --json     # machine-ingestible
 
 A **`risky -- resumed without clean shutdown`** verdict is the resume-stall
 signature (a `session.resume` with no clean `session.shutdown`). Use `peek` to
-choose **resume vs. fresh** before committing to a dispatch that might hang.
+classify and report the session. If the operator authorizes remediation, that
+verdict informs the resume-vs-fresh decision.
 
 ## The automatic recovery ladder (what the daemon does on its own)
 
-`resume_session` self-heals the race -- you usually do **not** need to intervene
-manually:
+`resume_session` self-heals the race -- do **not** intervene manually while its
+recovery ladder is active:
 
 1. **stop -> resume x3** (`_MAX_RESUME_ROUNDS`) with per-round timeouts. Each
    round re-rolls the Copilot launch race against the **same** ACP session, so
@@ -103,8 +145,9 @@ manually:
 
 `submit_prompt` / `send` **opt in** to the last-resort recreate; an **explicit
 `resume`** and handoff paths **do not** (so an explicit resume never silently
-drops context). If even the ladder can't recover, fall back to the manual
-`end` + `create` above.
+drops context). If even the ladder cannot recover, preserve the trace and file a
+bug. Use the manual `end` + `create` procedure above only with operator
+authorization.
 
 ## Pull the persisted trace (diagnosing a fresh recurrence)
 
@@ -125,12 +168,14 @@ Look at:
 > `acp_child_log`. For a CodeSpace, read the child stderr on the box, or use
 > `peek` (which reads `events.jsonl` directly).
 
-## Cheap mitigations (attack the race at the source)
+## Operator-authorized mitigations (attack the race at the source)
 
-- **Bump the CodeSpace Copilot CLI past the #13494 fix.** The race is a CLI
+- **Bump the CodeSpace Copilot CLI past the #13494 fix.** This changes the
+  target environment and therefore requires explicit authorization. The race is a CLI
   startup bug; a CLI carrying the fix stops reproducing it.
-- **ACP `--no-experimental`** -- disables extensions, which sidesteps the
-  extension-load leg of the startup generation race.
+- **ACP `--no-experimental`** -- an operator-authorized diagnostic that disables
+  extensions and sidesteps the extension-load leg of the startup generation
+  race.
 
 ---
 
@@ -157,7 +202,7 @@ relay port is unstable** -- it oscillates (competing publishers / a cutover /
 a stale published port), so every git credential fetch that lands in a
 re-establish window hits a dead port. Fix tracked in **#580**.
 
-## Immediate workaround -- end + recreate, do NOT try to repair in-flight
+## Operator-authorized remediation -- end + recreate
 
 **There is no non-destructive way to repair an *in-flight* session's relay
 reverse-forward.** Don't burn time restarting the daemon or opening warm-up
@@ -165,8 +210,9 @@ connections to rescue the running session -- the wedged session's `-R` cannot be
 re-established under it, and while it holds the session the CodeSpace is
 **claimed** so you can't open a clean path either.
 
-Instead -- the work is almost always already **committed on the CodeSpace**, so
-context loss is safe:
+By default, preserve the session, capture the trace below, and file a bug. Only
+when the operator confirms the work is durably committed and authorizes context
+loss should you end and recreate:
 
 ```bash
 agent-bridge end <session>            # frees the CodeSpace claim + stops the flapping monitor
@@ -234,8 +280,9 @@ by `get_live_relay_port()`. Two ways it goes bad:
   What's *not* normal is two daemons each **hosting + publishing** a relay (e.g.
   an un-retired generation), which flip-flops the file. `active.json` names the
   canonical serving pid/port; a relay-hosting python that is **not** that pid and
-  is **not** its supervisor/worker is the stray. Only retire a genuinely stray
-  daemon with `Stop-Process -Id <pid>` -- never hand-hack `relay-port` /
+  is **not** its supervisor/worker is the stray. Record a genuinely stray daemon
+  in the bug report. Stop an exact PID only as an operator-authorized
+  diagnostic/remediation step -- never hand-hack `relay-port` /
   `current-version` / `active.json`.
 
 > **Valid state, not a bug: on Windows the two `python.exe` show DIFFERENT
@@ -256,10 +303,10 @@ by `get_live_relay_port()`. Two ways it goes bad:
 > purpose -- run *directly* it bypasses the venv; the daemon child reaches the
 > slot's packages only *through* the launcher.)
 
-Until the durable fix (**#580**) lands, **end + recreate** is the
-reliable recovery.
+Until the durable fix (**#580**) lands, an operator may choose **end + recreate**
+after reviewing the evidence and accepting context loss.
 
-## Cheap mitigations (relay flap)
+## Operator-authorized mitigations (relay flap)
 
 - Prefer **end + recreate** over daemon restarts -- a fresh session gets a clean
   port; restarting the daemon under a live wedged session does not fix its `-R`.
@@ -290,7 +337,8 @@ legacy 9280 (fixed separately) -- always confirm via the routing table.
   # then GET http://127.0.0.1:<that port>/health
   ```
 
-**Repairing a broken/never-ran auto-start task (one self-elevating command).** A
+**Repairing a broken/never-ran auto-start task (one self-elevating command,
+operator-directed only).** A
 stale **S4U/boot** task that never launches (`LastTaskResult = 267011` /
 `SCHED_S_TASK_HAS_NOT_RUN`) can't be rewritten by a routine non-elevated update
 (that's *why* updates leave it untouched). Fix it once with the self-elevating
