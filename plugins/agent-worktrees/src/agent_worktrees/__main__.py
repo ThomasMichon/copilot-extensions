@@ -6055,6 +6055,7 @@ def _monitor_sweep(
     mux_bin: str | None, token: str, prefix: str, ctx_done: set[str],
     interval: float = 15,
     picker_projects: set[str] | None = None,
+    catalog_observer=None,
 ) -> int:
     """One coalescing pass over all live, registered ``wt-*`` sessions.
 
@@ -6073,6 +6074,8 @@ def _monitor_sweep(
         live = _monitor_list_sessions(mux_bin)
         if live is None:
             return -1
+        if catalog_observer is not None:
+            catalog_observer(set(live))
         live_wt = {n for n in live if n.startswith("wt-")}
         for sess in [s for s in registry if s not in live_wt]:
             _remove_monitor_entry(reg_dir, sess)
@@ -6132,6 +6135,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     import time
     from . import locks as _locks
     from . import monitor_roots
+    from . import session_catalog
 
     _install_headless_child_guard()
 
@@ -6164,6 +6168,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         lock, extra={"prefix": my_prefix, "mux": bool(mux_bin)})
 
     ctx_done: set[str] = set()
+    reconciler = session_catalog.ResidentSessionReconciler(
+        register_monitor_session=_register_session_for_monitor)
     empty_strikes = 0
     _MAX_EMPTY_STRIKES = 3
     try:
@@ -6180,16 +6186,32 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
             external_projects = picker_projects | demand_projects
             served = _monitor_sweep(
                 mux_bin, token, my_prefix, ctx_done,
-                interval=interval, picker_projects=external_projects)
+                interval=interval, picker_projects=external_projects,
+                catalog_observer=reconciler.observe_mux)
+            try:
+                reconciler.step()
+            except Exception:
+                pass
             if served < 0:
                 time.sleep(interval)  # transient mux failure: hold, don't exit
                 continue
-            if served == 0 and not external_projects:
+            if (served == 0
+                    and not external_projects
+                    and not reconciler.has_live_worktree_mux):
                 empty_strikes += 1
                 if empty_strikes >= _MAX_EMPTY_STRIKES:
                     # Close the root-vs-idle race: a Picker/list caller can
-                    # register after this sweep but before the break.
-                    if (monitor_roots.live_picker_projects()
+                    # register, or a wt-* mux can appear, after this sweep but
+                    # before the break.
+                    retry_mux = (
+                        _monitor_list_sessions(mux_bin) if mux_bin else {})
+                    retry_wt = bool(
+                        retry_mux is not None
+                        and any(name.startswith("wt-") for name in retry_mux))
+                    if retry_wt:
+                        reconciler.observe_mux(set(retry_mux))
+                    if (retry_wt
+                            or monitor_roots.live_picker_projects()
                             or list_cache.recent_demand_projects()):
                         empty_strikes = 0
                     else:

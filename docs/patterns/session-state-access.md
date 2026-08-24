@@ -55,16 +55,14 @@ detonate the multiplier on the hottest path.
    a full scan. A blank row is repaired out-of-band (next step), not by melting a
    core on the hot path.
 
-3. **Repair is an explicit, one-off backfill — the only sanctioned sweep.** The
-   single place a session-state sweep is allowed is the on-demand backfill
-   operation (`backfill_sessions` / the `backfill-sessions` CLI verb, and the
-   maintenance `doctor` path that calls it). It walks the state root once, maps
-   sessions back to worktrees, and populates the registry. From then on the hooks
-   keep it fresh, so backfill is a rare repair, not a per-`list` cost. A full
-   recovery sweep is **permitted**, but only when **explicitly initiated by a user
-   or an agent in response to a diagnostic or recovery inquiry** — "why is this
-   worktree blank?", "rebuild the session index" — never as an implicit step of
-   normal operation.
+3. **Repair is either explicit backfill or a bounded resident cursor.** The
+   on-demand backfill (`backfill_sessions` / `backfill-sessions`, plus `doctor`)
+   may walk the state root once in response to an explicit recovery request. A
+   resident keeper may also hold one `scandir` iterator open and advance it by a
+   fixed entry budget per sweep. It never restarts the walk per worktree or per
+   read, and never parses more than its budget in one tick. The cursor populates
+   missing registry entries over time; `list` and every other hot path remain
+   exact-id-only.
 
 4. **Enrich in a single pass.** When a scan *is* warranted (the sanctioned
    backfill, or the registry-driven fast scan), gather everything a caller needs
@@ -81,17 +79,17 @@ detonate the multiplier on the hottest path.
 
 > A **session-state directory sweep** — any iteration over the subfolders of the
 > Copilot state root (`iterdir()`, `glob('*')`, `scandir`, `listdir`) — may occur
-> **only** inside the explicit, one-off **backfill** operation
-> (`backfill_sessions` and its `backfill-sessions` verb).
+> **only** inside the explicit one-off backfill or the resident reconciler's
+> fixed-budget, long-lived cursor.
 >
 > **Every other code path** resolves a session-state subfolder by **exact session
 > id** (random access via the worktree session registry). No discovery,
 > enrichment, status, finalize, or resume path may enumerate the state root to
 > *find* sessions.
 >
-> A full recovery sweep is **permitted**, but must be **initiated explicitly by a
-> user or an agent in response to a diagnostic or recovery inquiry** — never
-> triggered implicitly by normal operation.
+> A full immediate recovery sweep must be initiated explicitly. Normal
+> operation may only make bounded incremental progress through the resident
+> cursor; it cannot turn a single read or refresh into O(total sessions) work.
 
 ## Accepted tradeoff
 
@@ -103,8 +101,9 @@ invariant beats momentary completeness of a row.
 
 ## Enforcement
 
-- **One choke point.** All session-state iteration lives in exactly one function
-  (`backfill_sessions`). No other module in the plugin iterates the state root.
+- **Two choke points.** Session-state iteration lives only in
+  `backfill_sessions` (explicit full recovery) and
+  `ResidentSessionReconciler` (bounded resident cursor).
 - **A regression guard.** A test asserts that no source outside the backfill path
   references `iterdir()` / `glob('*')` / `scandir` / `listdir` on the session-state
   root — so a future "helpful fallback" cannot silently reintroduce the sweep.
