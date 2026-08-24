@@ -35,6 +35,40 @@ description: >
 > let it finish. If it reports a provisioning failure (e.g. missing uv / network),
 > surface the exact message — don't improvise a toolchain install.
 
+## Unexpected behavior is a troubleshooting event, not repair authorization
+
+An isolated disconnect caused by a network disruption or a daemon restart during
+a plugin update is **expected**. Preserve and resume the **same** session. If its
+state is unclear, use `agent-bridge peek <sid>` first; do not assume it is wedged
+and do not clear, end, or replace it.
+
+For genuinely **unexpected** bridge, provider, or session behavior -- a resume
+that fails or does not settle promptly, a 409/500, repeated disconnects, an
+apparently aborted turn, a relay/auth failure, or a session whose state does not
+match the client result -- invoke and follow the
+**`agent-bridge-troubleshooting` skill first**. It is the operational guidebook;
+do not improvise recovery from this command overview.
+
+The default response is **preserve and file**, not diagnose or repair:
+
+1. Preserve the existing session and report/file the exact command, error, and
+   already-visible state in the owning tracker. A client disconnect does not
+   prove the remote turn stopped, and an isolated expected disconnect is not a
+   bug by itself.
+2. Unless the operator explicitly requested diagnosis or remediation, **stop
+   there**.
+3. When diagnosis is requested, use the guidebook's read-only sequence:
+   `agent-bridge status <sid>`, a bounded
+   `agent-bridge read <sid> --tail N`, then `peek` / persisted traces as
+   applicable. Mutating steps still require explicit authorization.
+
+Do **not** stop/end/recreate a session, start a replacement session, restart or
+update the shared daemon, kill processes, stop/start a provider target, or edit
+bridge state merely to clear an error. A daemon restart is not a session-repair
+primitive and can affect unrelated work. Likewise, a CodeSpace resume/create
+that takes multiple minutes is **abnormal evidence to diagnose**, not "known"
+or expected latency to normalize.
+
 ## Agent-Bridge vs Internal Sub-Agents -- READ THIS FIRST
 
 **agent-bridge is NOT the Task tool.** They solve completely different
@@ -427,7 +461,8 @@ child is **not** gone: its session host keeps the child alive. **Resume it with
 `send`** — the bridge reattaches to the surviving child (adopts the same ACP
 session id — no respawn) and delivers the prompt. Do **not** reflexively
 `end`+`create` a connection-loss stop; that throws away a live, resumable child
-and its in-flight work. Just verify the resumed turn did real work.
+and its in-flight work. If the state is unclear, run `agent-bridge peek <sid>`;
+then resume the same session and verify the resumed turn did real work.
 
 **Stale-cancel on the first reattached turn.** If a session was `stop`ped (or
 severed) *mid-turn*, that turn may have been cancelled with an ACP
@@ -443,8 +478,8 @@ now-idle session continues normally:
 agent-bridge send <sid> "<same idempotent prompt>"   # first turn ate the stale cancel; this one runs
 ```
 
-Only if it **keeps** cancelling (or the session is genuinely gone) discard and
-recreate:
+Only if it **keeps** cancelling (or the session is genuinely gone) and the
+operator authorizes context loss, discard and recreate:
 
 ```bash
 agent-bridge end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too
@@ -712,13 +747,21 @@ takes the work over (see the `context-handoff:context-handoff` and `agent-dispat
 
 ## Troubleshooting
 
-- **"agent-bridge is not responding"** -- service isn't running. Start it
-  with `agent-bridge start`.
+- **Start with the `agent-bridge-troubleshooting` skill.** Its read-only
+  decision tree and persisted traces are authoritative; this short list is only
+  a symptom index.
+- **"agent-bridge is not responding"** -- run `agent-bridge status`. Normal
+  daemon-touching commands self-heal a down service. If that fails, capture the
+  routing/log evidence from the guidebook and file a bug; do not manually
+  restart the shared daemon unless the operator directs it.
 - **"Agent not found"** -- check `agent-bridge agents` for available names.
   The topology config may not include the agent you're looking for.
 - **Session stuck in RUNNING** -- the downstream agent may be waiting for
-  permission or processing a long tool call. Check with
-  `agent-bridge wait <session-id>` or `agent-bridge stop <session-id>`.
+  permission or processing a long tool call. Inspect with
+  `agent-bridge status <session-id>` and a bounded
+  `agent-bridge read <session-id> --tail N`. Do not stop or replace it merely
+  because the client timed out.
 - **SSH connection failures** -- verify SSH aliases work:
   `ssh <machine-alias> echo ok`. Check `agent-bridge machines` for
-  SSH readiness status.
+  SSH readiness status, then follow the guidebook without changing provider
+  state.

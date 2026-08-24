@@ -96,6 +96,36 @@ $env:PYTHONPATH = "..."; python -m worktree_manager ...
 git rebase && git checkout master && git merge ...
 ```
 
+## Cross-machine inspection -- enumerate first, then resolve suffixes
+
+Use the project binstub's **agent-worktrees commands** to inspect worktrees on
+another machine. Do not discover them by listing guessed checkout directories or
+by reconstructing paths from naming conventions.
+
+Operators often identify a worktree by only its four-character display suffix
+(for example, `0541`). Treat that as a lookup key, **not** as a complete
+worktree or Copilot session id:
+
+```bash
+# Run on the target through its canonical SSH alias.
+ssh <machine-alias> "<project> worktrees list --json"
+
+# Resolve the unique full id ending in -0541, then enumerate its sessions.
+ssh <machine-alias> "<project> worktrees list-sessions --worktree <full-worktree-id> --json"
+
+# Read one exact registered session without scanning unrelated transcripts.
+ssh <machine-alias> "<project> worktrees session-transcript <session-id> --json"
+```
+
+For example, a dotfiles control plane uses `dotfiles worktrees list --json`.
+Always pass the resolved **full worktree id** to follow-up commands; some
+surfaces display or accept a four-character suffix, but support is not uniform
+and suffixes can be ambiguous. Once `list-sessions` supplies exact Copilot
+session ids, an explicitly requested deep diagnosis may inspect only their
+`~/.copilot/session-state/<session-id>/events.jsonl` files or keyed rows in
+`~/.copilot/session-store.db`. Enumerate first; never begin with a recursive
+state-root or filesystem sweep.
+
 ## ⛔ Never Finalize Manually
 
 **Do NOT manually run git rebase, merge, checkout, push, or worktree

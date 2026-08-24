@@ -65,6 +65,40 @@ current project's tracking store; the Copilot session-state/store it cleans is
 shared across projects, so the guards (current + registered session ids) protect
 live work regardless of which project you invoke it from.
 
+## Cross-machine transcript investigation from a four-character suffix
+
+When an operator supplies short values such as `0541`, `96ff`, or `6659`, those
+are normally the worktree ids' four-character **display suffixes**, not Copilot
+session ids. Resolve them through agent-worktrees before inspecting transcript
+state:
+
+1. Enumerate the target project's worktrees over its canonical SSH alias:
+   ```
+   ssh <machine-alias> "<project> worktrees list --json"
+   ```
+   For example: `ssh <machine-alias> "dotfiles worktrees list --json"`.
+   Select the unique full `id` ending in the supplied suffix. Do not guess the
+   checkout root or use a directory listing as the worktree registry.
+2. Enumerate registered sessions using the **full** worktree id:
+   ```
+   ssh <machine-alias> "<project> worktrees list-sessions --worktree <full-worktree-id> --json"
+   ```
+   A four-character suffix is a human handle; follow-up commands do not
+   uniformly accept it, and it may be ambiguous.
+3. Start with the structured transcript:
+   ```
+   ssh <machine-alias> "<project> worktrees session-transcript <session-id> --json"
+   ```
+4. Only if event-level evidence is required, inspect the exact resolved
+   session(s) under `~/.copilot/session-state/<session-id>/events.jsonl`, or
+   query `~/.copilot/session-store.db` by exact session id / resolved worktree
+   cwd. Keep queries read-only and bounded. Do not recursively scan every
+   session-state directory after the worktree and session ids are known.
+
+This order keeps the project tracking records authoritative, handles legacy or
+nonstandard worktree roots, and prevents incidental mentions in unrelated
+transcripts from being mistaken for the session being investigated.
+
 ## "0 turns" / picker-shows-wrong-session — classify before you "recover"
 
 `doctor` backfill (`backfill-sessions`) only ever fills **empty** registries
