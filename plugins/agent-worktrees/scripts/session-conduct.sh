@@ -26,7 +26,7 @@ project="$(PYTHONPATH="" "$PY" -m agent_worktrees get project 2>/dev/null || tru
 # Dynamic: the "the user's state repo" definition (binds the term to the
 # resolved checkout so downstream plugins can refer to it in plain prose).
 defn="$(PYTHONPATH="" "$PY" -m agent_worktrees state-root --conduct 2>/dev/null || true)"
-related="$(PYTHONPATH="" "$PY" -m agent_worktrees related --conduct 2>/dev/null || true)"
+related="$(PYTHONPATH="" "$PY" -m agent_worktrees --project "$project" related --conduct 2>/dev/null || true)"
 dir="$HOME/.agent-worktrees/bin/conduct"
 
 # Dynamic: the worktree's own recent-history recovery digest (record-first
