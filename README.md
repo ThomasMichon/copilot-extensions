@@ -67,6 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [copilot-extensions-harness](plugins/copilot-extensions-harness/) | Operator harness | The portable, owner-authored skills to work *on* this suite — **contribute** changes and **diagnose** the deployed runtimes. Enable it in any control repo instead of hand-writing a per-repo narrative. Reference implementation of the `<repo>-harness` standard. Payload-only. |
 | [wsl-setup](plugins/wsl-setup/) | Environment setup | Set up and troubleshoot WSL2 as a reachable, persistent service host — pick the networking mode (NAT + localhostForwarding vs mirrored), diagnose corp-network egress + host↔WSL loopback failures, and keep a distro alive for a hosted listener (e.g. sshd behind a Dev Tunnel). Ships a windowless keepalive helper. |
 | [harness-knowledge](plugins/harness-knowledge/) | Binding skill | Bind a stateless control harness to its private **knowledge** repo, harness-first — ask for (or create) the knowledge repo, write the machine-local `knowledge_repo` pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths. Keeps the shareable harness tree generic + name-free. Payload-only. |
+| [ai-attribution](plugins/ai-attribution/) | Ambient policy + skills | Keep publication and AI-attribution safety active through a concise payload-cwd-gated session-start kernel, host-qualified operator policy, an idempotent static-fallback setup skill, and an on-demand publication workflow. Payload-only; no runtime, network call, or authentication. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -74,12 +75,12 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Eighteen plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
+Nineteen plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
-installer); **seven are payload-only** — `efforts` (skills), `visions` (skills),
+installer); **eight are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (a session extension), `customizing-copilot` (skills),
 `copilot-extensions-harness` (skills), `wsl-setup` (skills), and
-`harness-knowledge` (skills) need no install
+`harness-knowledge` (skills), and `ai-attribution` (hook + skill) need no install
 beyond enabling the plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
@@ -99,7 +100,7 @@ flowchart TB
       AI["agent-index<br/>index/search service"]
       AK["agent-machines<br/>machine-state reconciler CLI"]
       AV["agent-vault<br/>secret store CLI + service"]
-      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge<br/>(payload-only: skills / extension)"]
+      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge · ai-attribution<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -208,12 +209,14 @@ copilot plugin install agent-index@copilot-extensions    # optional — indexing
 copilot plugin install efforts@copilot-extensions        # optional — planning skills (no runtime)
 copilot plugin install context-handoff@copilot-extensions # optional — context-window handoff (no runtime)
 copilot plugin install customizing-copilot@copilot-extensions # optional — how to customize the CLI (no runtime)
+copilot plugin install ai-attribution@copilot-extensions # optional — ambient publication safety (no runtime)
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
 skills, hooks, extensions). The eleven runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
-`copilot-extensions-harness`, and `wsl-setup`) then need their runtime deployed once — that's Step 2,
+`copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
+`ai-attribution`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 

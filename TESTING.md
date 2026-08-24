@@ -46,6 +46,14 @@ python tools/check-version-consistency.py      # plugin.json / pyproject / marke
   absent.
 - **agent-worktrees:** a large suite covering worktree lifecycle, the
   status/tracking model, PR flow, and the Textual **Picker**.
+- **ai-attribution:** payload-only hook tests covering authoritative
+  `sessionStart` payload cwd, malformed/missing payloads, git-repo gating, safe
+  defaults, bounded operator/repository config discovery, symlink/reparse
+  rejection, repository authority boundaries, normalized guide and
+  host-qualified account/remote validation, same-owner cross-forge isolation,
+  injection-shaped data, complete JSON control escaping, missing-script
+  fallback, setup-skill structure, exact JSON and context size, and live
+  Bash/PowerShell parity when `pwsh` is available.
 
 ---
 
