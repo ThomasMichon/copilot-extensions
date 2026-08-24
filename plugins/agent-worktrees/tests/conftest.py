@@ -10,6 +10,23 @@ import pytest
 from agent_worktrees import tracking
 
 
+@pytest.fixture(autouse=True)
+def _disable_resident_monitor_processes():
+    """Unit tests opt in explicitly when resident monitor behavior is under test."""
+    import os
+
+    key = "AGENT_WORKTREES_STATUS_MONITOR"
+    prior = os.environ.get(key)
+    os.environ[key] = "0"
+    try:
+        yield
+    finally:
+        if prior is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = prior
+
+
 # ---------------------------------------------------------------------------
 # Headless subprocess launches (Windows) -- keep the suite from flashing windows.
 #
