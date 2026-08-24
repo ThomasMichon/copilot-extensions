@@ -118,17 +118,27 @@ function Read-PolicyConfig([string] $Path, [string] $Authority) {
             return
         }
         $Utf8 = New-Object Text.UTF8Encoding($false, $true)
-        $Content = $Utf8.GetString($Buffer, 0, $Count)
+        try {
+            $Content = $Utf8.GetString($Buffer, 0, $Count)
+        } catch {
+            Write-Diagnostic 'config is not valid UTF-8; safe defaults remain active'
+            return
+        }
         if ($Content.Contains([char]0)) {
-            Write-Diagnostic 'could not safely read config; safe defaults remain active'
+            Write-Diagnostic 'config contains NUL; safe defaults remain active'
             return
         }
         $Lines = $Content -split '\r\n|\n|\r'
+        $LineCount = ([regex]::Matches($Content, '\r\n|\n|\r')).Count
+        if ($Content.Length -gt 0 -and
+            -not ($Content.EndsWith("`r") -or $Content.EndsWith("`n"))) {
+            $LineCount += 1
+        }
     } catch {
         Write-Diagnostic 'could not safely read config; safe defaults remain active'
         return
     }
-    if ($Lines.Count -gt $script:MaxConfigLines) {
+    if ($LineCount -gt $script:MaxConfigLines) {
         Write-Diagnostic 'config exceeds the 200-line limit; safe defaults remain active'
         return
     }

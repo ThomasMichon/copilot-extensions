@@ -18,6 +18,27 @@ HOOKS = PLUGIN / "hooks.json"
 SETUP_SKILL = PLUGIN / "skills" / "ai-attribution-setup" / "SKILL.md"
 
 
+def _powershell_command() -> str | None:
+    if os.name == "nt":
+        return shutil.which("pwsh") or shutil.which("powershell.exe")
+    return shutil.which("pwsh")
+
+
+def _native_hook() -> Path:
+    if os.name == "nt":
+        assert _powershell_command(), "PowerShell is required on Windows"
+        return POWERSHELL_HOOK
+    assert shutil.which("bash"), "Bash is required on POSIX"
+    return BASH_HOOK
+
+
+def _parity_hooks() -> list[Path]:
+    hooks = [_native_hook()]
+    if os.name != "nt" and shutil.which("pwsh"):
+        hooks.append(POWERSHELL_HOOK)
+    return hooks
+
+
 def _git_repo(path: Path, remote: str | None = None) -> Path:
     path.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(path)], check=True)
@@ -54,7 +75,9 @@ def _run(
     **extra: str,
 ) -> subprocess.CompletedProcess[str]:
     if hook.suffix == ".ps1":
-        command = ["pwsh", "-NoProfile", "-File", str(hook)]
+        powershell = _powershell_command()
+        assert powershell
+        command = [powershell, "-NoProfile", "-File", str(hook)]
     else:
         command = ["bash", str(hook)]
     environment = _environment(home, **extra)
@@ -94,7 +117,9 @@ def _run_hook_wrapper(
         "sessionStart"
     ][0][shell_key]
     if shell_key == "powershell":
-        command = ["pwsh", "-NoProfile", "-Command", hook_command]
+        powershell = _powershell_command()
+        assert powershell
+        command = [powershell, "-NoProfile", "-Command", hook_command]
     else:
         command = ["bash", "-c", hook_command]
     return subprocess.run(
@@ -117,12 +142,38 @@ def _write_guide(repo: Path, relative_path: str) -> None:
     _write(repo / relative_path, "# Contribution guide\n")
 
 
+def _run_bytes(
+    hook: Path,
+    cwd: Path,
+    home: Path,
+    payload: bytes,
+) -> subprocess.CompletedProcess[bytes]:
+    if hook.suffix == ".ps1":
+        powershell = _powershell_command()
+        assert powershell
+        command = [powershell, "-NoProfile", "-File", str(hook)]
+    else:
+        command = ["bash", str(hook)]
+    environment = _environment(home)
+    environment["GIT_CEILING_DIRECTORIES"] = str(cwd.parent)
+    return subprocess.run(
+        command,
+        cwd=cwd,
+        env=environment,
+        input=payload,
+        capture_output=True,
+        check=True,
+    )
+
+
 def _serializer_output(hook: Path, value: str) -> str:
     env = os.environ.copy()
     env["SERIALIZER_INPUT"] = value
     if hook.suffix == ".ps1":
+        powershell = _powershell_command()
+        assert powershell
         command = [
-            "pwsh",
+            powershell,
             "-NoProfile",
             "-Command",
             f". '{hook}'; [Console]::Out.Write("
@@ -146,14 +197,14 @@ def _serializer_output(hook: Path, value: str) -> str:
 
 
 def test_no_git_gate_emits_empty_object(tmp_path: Path) -> None:
-    result = _run(BASH_HOOK, tmp_path, tmp_path / "home")
+    result = _run(_native_hook(), tmp_path, tmp_path / "home")
     assert result.stdout == "{}"
     assert result.stderr == ""
 
 
 def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
-    context = _context(_run(BASH_HOOK, repo, tmp_path / "home"))
+    context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
         "[owner: ai-attribution@0.1.0-dev1] Before publishing"
     )
@@ -182,9 +233,7 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
         home / ".copilot" / "ai-attribution.conf",
         "owned_account=github.com/example-owner\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         context = _context(
             _run(
@@ -201,9 +250,7 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
 
 def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "r\u00e9po-\N{GRINNING FACE}")
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
             "[owner: ai-attribution@0.1.0-dev1]"
@@ -229,9 +276,7 @@ def test_missing_or_malformed_payload_fails_open_once(
     payload: str,
 ) -> None:
     repo = _git_repo(tmp_path / "repo")
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(hook, repo, tmp_path / "home", payload=payload)
         assert result.stdout == "{}"
@@ -251,9 +296,7 @@ def test_oversized_or_nul_payload_fails_open_before_parsing(
     payload: str,
 ) -> None:
     repo = _git_repo(tmp_path / "repo")
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     results = [_run(hook, repo, tmp_path / "home", payload=payload) for hook in hooks]
     for result in results:
         assert result.stdout == "{}"
@@ -267,9 +310,7 @@ def test_oversized_or_nul_payload_fails_open_before_parsing(
 def test_relative_payload_cwd_is_rejected_with_shell_parity(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     payload = json.dumps({"cwd": ".", "source": "copilot-cli"})
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     results = [
         _run(hook, repo, tmp_path / "home", payload=payload) for hook in hooks
     ]
@@ -280,11 +321,46 @@ def test_relative_payload_cwd_is_rejected_with_shell_parity(tmp_path: Path) -> N
         assert results[1].stderr == results[0].stderr
 
 
+@pytest.mark.parametrize("escaped", [True, False])
+def test_payload_cwd_rejects_escaped_and_raw_newlines_with_shell_parity(
+    tmp_path: Path,
+    escaped: bool,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    separator = r"\n" if escaped else "\n"
+    payload = '{"cwd":"' + str(repo) + separator + 'child"}'
+    results = [
+        _run(hook, repo, tmp_path / "home", payload=payload)
+        for hook in _parity_hooks()
+    ]
+    for result in results:
+        assert result.stdout == "{}"
+        assert "missing or malformed sessionStart payload" in result.stderr
+    if len(results) == 2:
+        assert results[1].stdout == results[0].stdout
+        assert results[1].stderr == results[0].stderr
+
+
+def test_malformed_utf8_payload_fails_open_with_shell_parity(tmp_path: Path) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    payload = b'{"cwd":"' + os.fsencode(repo) + b'"}\xff'
+    results = [
+        _run_bytes(hook, repo, tmp_path / "home", payload)
+        for hook in _parity_hooks()
+    ]
+    for result in results:
+        assert result.stdout == b"{}"
+        assert b"missing or malformed sessionStart payload" in result.stderr
+    if len(results) == 2:
+        assert results[1].stdout == results[0].stdout
+        assert results[1].stderr == results[0].stderr
+
+
 def test_canonical_personal_config_tightens_disclosure(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     home = tmp_path / "home"
     _write(home / ".copilot" / "ai-attribution.conf", "disclosure=always\n")
-    context = _context(_run(BASH_HOOK, repo, home))
+    context = _context(_run(_native_hook(), repo, home))
     assert "every contribution" in context
 
 
@@ -297,9 +373,7 @@ def test_payload_depth_limit_has_shell_parity(
     repo = _git_repo(tmp_path / "repo")
     nested = "[" * nested_arrays + "0" + "]" * nested_arrays
     payload = f'{{"extra":{nested},"cwd":{json.dumps(str(repo))}}}'
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
 
     results = [
         _run(hook, repo, tmp_path / "home", payload=payload) for hook in hooks
@@ -327,7 +401,7 @@ def test_operator_config_home_tightens_disclosure_and_classifies_owner(
         home / "config" / "ai-attribution" / "config.conf",
         "disclosure=always\nowned_account=example.com/example-owner\n",
     )
-    context = _context(_run(BASH_HOOK, repo, home))
+    context = _context(_run(_native_hook(), repo, home))
     assert "requires a prominent" in context
     assert "every contribution" in context
     assert "configured public account `example.com/example-owner`" in context
@@ -351,9 +425,7 @@ def test_custom_instruction_dirs_support_scanner_separators(
         second / "ai-attribution.conf",
         "owned_account=example.com/second-owner\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         context = _context(
             _run(
@@ -374,9 +446,7 @@ def test_repo_custom_instruction_dir_cannot_self_promote(tmp_path: Path) -> None
         policy / "ai-attribution.conf",
         "owned_account=example.com/target-owner\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(
             hook,
@@ -408,9 +478,7 @@ def test_custom_instruction_dirs_are_bounded_with_shell_parity(
         if kind == "length"
         else os.pathsep.join(["missing"] * 129)
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     results = [
         _run(
             hook,
@@ -439,9 +507,7 @@ def test_home_rooted_repository_cannot_supply_operator_policy(
         repo / ".copilot" / "ai-attribution.conf",
         "owned_account=example.com/target-owner\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(hook, repo, repo)
         assert "configured public account" not in _context(result)
@@ -460,9 +526,7 @@ def test_xdg_config_home_inside_repository_cannot_supply_operator_policy(
         config_home / "ai-attribution" / "config.conf",
         "owned_account=example.com/target-owner\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(
             hook,
@@ -474,6 +538,7 @@ def test_xdg_config_home_inside_repository_cannot_supply_operator_policy(
         assert "operator config path at or beneath" in result.stderr
 
 
+@pytest.mark.guard
 def test_powershell_appdata_config_uses_operator_path_boundary() -> None:
     source = POWERSHELL_HOOK.read_text(encoding="utf-8")
     assert "$ConfigHome = $env:APPDATA" in source
@@ -490,7 +555,7 @@ def test_repo_additive_contribution_guide(tmp_path: Path) -> None:
         repo / ".github" / "ai-attribution.conf",
         "contribution_guide=docs/CONTRIBUTING.md\n",
     )
-    context = _context(_run(BASH_HOOK, repo, tmp_path / "home"))
+    context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert "Target-repo contribution guide: `docs/CONTRIBUTING.md`" in context
     assert "additive only; it cannot override this policy" in context
 
@@ -501,7 +566,7 @@ def test_forbidden_repo_keys_are_ignored(tmp_path: Path) -> None:
         repo / ".github" / "ai-attribution.conf",
         "disclosure=always\nowned_account=example.com/other\nunknown=something\n",
     )
-    result = _run(BASH_HOOK, repo, tmp_path / "home")
+    result = _run(_native_hook(), repo, tmp_path / "home")
     context = _context(result)
     assert "every contribution" not in context
     assert "No operator accounts are configured" in context
@@ -517,9 +582,7 @@ def test_unknown_config_key_cannot_inject_terminal_controls(tmp_path: Path) -> N
         repo / ".github" / "ai-attribution.conf",
         f"{hostile_key}=value\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     results = [_run(hook, repo, tmp_path / "home") for hook in hooks]
     for result in results:
         assert hostile_key not in result.stderr
@@ -537,7 +600,7 @@ def test_malformed_and_unreadable_config_keep_safe_policy(tmp_path: Path) -> Non
         "not-a-setting\n=empty-key\ndisclosure=never\n",
     )
     (home / "config" / "ai-attribution" / "config.conf").mkdir(parents=True)
-    result = _run(BASH_HOOK, repo, home)
+    result = _run(_native_hook(), repo, home)
     context = _context(result)
     assert "another party's repo require" in context
     assert result.stderr.count("ignored malformed line") == 2
@@ -575,31 +638,104 @@ def test_oversized_operator_config_retains_safe_defaults(
         "lines": "disclosure=always\n" + ("#\n" * 200),
     }[content_kind]
     _write(home / ".copilot" / "ai-attribution.conf", content)
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(hook, repo, home)
         assert "every contribution" not in _context(result)
         assert result.stderr.count(diagnostic) == 1
 
 
-def test_config_at_exact_line_limit_is_accepted(tmp_path: Path) -> None:
+@pytest.mark.parametrize(("size", "accepted"), [(65536, True), (65537, False)])
+def test_config_byte_limit_is_exact(
+    tmp_path: Path,
+    size: int,
+    accepted: bool,
+) -> None:
     repo = _git_repo(tmp_path / "repo")
     home = tmp_path / "home"
-    content = (
-        "disclosure=always\n"
-        + ("# bounded comment\n" * 198)
-        + "owned_account=github.com/example-owner"
-    )
-    _write(home / ".copilot" / "ai-attribution.conf", content)
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
-    for hook in hooks:
+    prefix = b"disclosure=always\n#"
+    config = home / ".copilot" / "ai-attribution.conf"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(prefix + (b"x" * (size - len(prefix))))
+    for hook in _parity_hooks():
+        result = _run(hook, repo, home)
+        context = _context(result)
+        assert ("every contribution" in context) is accepted
+        if accepted:
+            assert result.stderr == ""
+        else:
+            assert "config exceeds the 65536-byte limit" in result.stderr
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_config_at_exact_line_limit_is_accepted(
+    tmp_path: Path,
+    newline: str,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    lines = ["disclosure=always", *(["# bounded comment"] * 198), "# final"]
+    content = newline.join(lines) + newline
+    config = home / ".copilot" / "ai-attribution.conf"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(content.encode("utf-8"))
+    for hook in _parity_hooks():
         result = _run(hook, repo, home)
         assert "every contribution" in _context(result)
         assert result.stderr == ""
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_config_over_exact_line_limit_is_rejected(
+    tmp_path: Path,
+    newline: str,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    lines = ["disclosure=always", *(["# bounded comment"] * 200)]
+    config = home / ".copilot" / "ai-attribution.conf"
+    config.parent.mkdir(parents=True)
+    config.write_bytes((newline.join(lines) + newline).encode("utf-8"))
+    for hook in _parity_hooks():
+        result = _run(hook, repo, home)
+        assert "every contribution" not in _context(result)
+        assert "config exceeds the 200-line limit" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("content", "diagnostic"),
+    [
+        (b"disclosure=always\n\x00", "config contains NUL"),
+        (b"disclosure=always\n\xff", "config is not valid UTF-8"),
+    ],
+)
+def test_binary_config_rejections_are_distinct(
+    tmp_path: Path,
+    content: bytes,
+    diagnostic: str,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    config = home / ".copilot" / "ai-attribution.conf"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(content)
+    for hook in _parity_hooks():
+        result = _run(hook, repo, home)
+        assert "every contribution" not in _context(result)
+        assert diagnostic in result.stderr
+
+
+def test_bash_config_buffer_is_cleaned_up(tmp_path: Path) -> None:
+    if os.name == "nt" or not shutil.which("bash"):
+        pytest.skip("Bash behavior is tested on POSIX")
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    temp_dir = tmp_path / "hook-temp"
+    temp_dir.mkdir()
+    _write(home / ".copilot" / "ai-attribution.conf", "disclosure=always\n")
+    result = _run(BASH_HOOK, repo, home, TMPDIR=str(temp_dir))
+    assert "every contribution" in _context(result)
+    assert list(temp_dir.iterdir()) == []
 
 
 def test_symlinked_target_repo_config_is_rejected(tmp_path: Path) -> None:
@@ -610,9 +746,7 @@ def test_symlinked_target_repo_config_is_rejected(tmp_path: Path) -> None:
     config = repo / ".github" / "ai-attribution.conf"
     config.parent.mkdir(parents=True)
     config.symlink_to(outside)
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(hook, repo, tmp_path / "home")
         assert "Target-repo contribution guide:" not in _context(result)
@@ -625,9 +759,7 @@ def test_symlinked_repo_config_directory_is_rejected(tmp_path: Path) -> None:
     _write(outside / "ai-attribution.conf", "contribution_guide=CONTRIBUTING.md\n")
     _write_guide(repo, "CONTRIBUTING.md")
     (repo / ".github").symlink_to(outside, target_is_directory=True)
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     results = [_run(hook, repo, tmp_path / "home") for hook in hooks]
     for result in results:
         assert "Target-repo contribution guide:" not in _context(result)
@@ -647,7 +779,7 @@ def test_invalid_operator_accounts_are_ignored_without_glob_matching(
         "owned_account=`hostile`\n"
         "owned_account=example-owner\n",
     )
-    result = _run(BASH_HOOK, repo, home)
+    result = _run(_native_hook(), repo, home)
     context = _context(result)
     assert "configured public account" not in context
     assert "No operator accounts are configured" in context
@@ -679,7 +811,7 @@ def test_remote_owner_classification(
         home / ".copilot" / "ai-attribution.conf",
         "owned_account=example.com/example-owner\n",
     )
-    assert expected in _context(_run(BASH_HOOK, repo, home))
+    assert expected in _context(_run(_native_hook(), repo, home))
 
 
 def test_same_owner_on_different_host_does_not_unlock_exception(
@@ -694,7 +826,7 @@ def test_same_owner_on_different_host_does_not_unlock_exception(
         home / ".copilot" / "ai-attribution.conf",
         "owned_account=github.com/example-owner\n",
     )
-    context = _context(_run(BASH_HOOK, repo, home))
+    context = _context(_run(_native_hook(), repo, home))
     assert "does not match a configured operator account" in context
     assert "configured public account" not in context
     assert "gitlab.com/example-owner" not in context
@@ -712,7 +844,7 @@ def test_host_and_owner_match_case_insensitively_for_ssh_remote(
         home / ".copilot" / "ai-attribution.conf",
         "owned_account=github.com/example-owner\n",
     )
-    context = _context(_run(BASH_HOOK, repo, home))
+    context = _context(_run(_native_hook(), repo, home))
     assert "configured public account `github.com/example-owner`" in context
 
 
@@ -755,7 +887,7 @@ def test_hostile_remote_owner_is_unresolved_and_never_emitted(
     owner: str,
 ) -> None:
     repo = _git_repo(tmp_path / "repo", f"https://example.com/{owner}/repo.git")
-    result = _run(BASH_HOOK, repo, tmp_path / "home")
+    result = _run(_native_hook(), repo, tmp_path / "home")
     context = _context(result)
     assert "Ownership for the session-start repository is unresolved" in context
     assert owner not in context
@@ -786,7 +918,7 @@ def test_invalid_contribution_guides_are_rejected_and_never_emitted(
         repo / ".github" / "ai-attribution.conf",
         f"contribution_guide={hostile}\n",
     )
-    result = _run(BASH_HOOK, repo, tmp_path / "home")
+    result = _run(_native_hook(), repo, tmp_path / "home")
     context = _context(result)
     assert "Target-repo contribution guide:" not in context
     assert hostile not in context
@@ -800,7 +932,7 @@ def test_missing_contribution_guide_is_rejected(tmp_path: Path) -> None:
         repo / ".github" / "ai-attribution.conf",
         "contribution_guide=docs/MISSING.md\n",
     )
-    result = _run(BASH_HOOK, repo, tmp_path / "home")
+    result = _run(_native_hook(), repo, tmp_path / "home")
     assert "Target-repo contribution guide:" not in _context(result)
     assert "ignored invalid contribution_guide path" in result.stderr
 
@@ -814,9 +946,7 @@ def test_contribution_guide_symlink_escape_is_rejected(tmp_path: Path) -> None:
         repo / ".github" / "ai-attribution.conf",
         "contribution_guide=linked/guide.md\n",
     )
-    hooks = [BASH_HOOK]
-    if shutil.which("pwsh"):
-        hooks.append(POWERSHELL_HOOK)
+    hooks = _parity_hooks()
     for hook in hooks:
         result = _run(hook, repo, tmp_path / "home")
         assert "Target-repo contribution guide:" not in _context(result)
@@ -832,7 +962,7 @@ def test_exact_json_output_and_kernel_size(tmp_path: Path) -> None:
         repo / ".github" / "ai-attribution.conf",
         "".join(f"contribution_guide={guide}\n" for guide in guides),
     )
-    result = _run(BASH_HOOK, repo, tmp_path / "home")
+    result = _run(_native_hook(), repo, tmp_path / "home")
     context = _context(result)
     assert result.stdout == json.dumps(
         {"additionalContext": context},
@@ -844,6 +974,10 @@ def test_exact_json_output_and_kernel_size(tmp_path: Path) -> None:
     assert context.count("Target-repo contribution guide:") == 4
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or not shutil.which("bash"),
+    reason="live Bash/PowerShell parity requires POSIX Bash",
+)
 def test_json_serializer_escapes_all_non_nul_controls_with_parity() -> None:
     controls = "".join(chr(value) for value in range(1, 32)) + '"\\'
     expected = json.dumps(controls)[1:-1]
@@ -856,14 +990,17 @@ def test_json_serializer_escapes_all_non_nul_controls_with_parity() -> None:
         assert _serializer_output(POWERSHELL_HOOK, controls) == bash
 
 
-@pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not installed")
+@pytest.mark.skipif(
+    not _powershell_command(),
+    reason="PowerShell is not installed",
+)
 def test_powershell_json_serializer_escapes_nul() -> None:
     command = (
         f". '{POWERSHELL_HOOK}'; "
         "[Console]::Out.Write((ConvertTo-JsonString ([string][char]0)))"
     )
     result = subprocess.run(
-        ["pwsh", "-NoProfile", "-Command", command],
+        [_powershell_command() or "pwsh", "-NoProfile", "-Command", command],
         capture_output=True,
         text=True,
         check=True,
@@ -876,9 +1013,10 @@ def test_hook_wrapper_finds_non_default_marketplace(
     tmp_path: Path,
     shell_key: str,
 ) -> None:
-    if shell_key == "powershell":
-        if not shutil.which("pwsh"):
-            pytest.skip("pwsh is not installed")
+    if shell_key == "powershell" and not _powershell_command():
+        pytest.skip("PowerShell is not installed")
+    if shell_key == "bash" and (os.name == "nt" or not shutil.which("bash")):
+        pytest.skip("Bash wrapper behavior is tested on POSIX")
     repo = _git_repo(tmp_path / "repo")
     home = tmp_path / "home"
     installed = (
@@ -894,6 +1032,28 @@ def test_hook_wrapper_finds_non_default_marketplace(
     assert result.stderr == ""
 
 
+@pytest.mark.skipif(
+    os.name == "nt" or not shutil.which("pwsh"),
+    reason="POSIX pwsh is required",
+)
+def test_powershell_wrapper_uses_components_under_posix_pwsh(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    home = tmp_path / "home"
+    installed = (
+        home
+        / ".copilot"
+        / "installed-plugins"
+        / "non-default-marketplace"
+        / "ai-attribution"
+    )
+    shutil.copytree(PLUGIN, installed)
+    result = _run_hook_wrapper("powershell", repo, home)
+    assert _context(result).startswith("[owner: ai-attribution@")
+    assert result.stderr == ""
+
+
 @pytest.mark.parametrize("shell_key", ["bash", "powershell"])
 @pytest.mark.parametrize("condition", ["missing", "directory", "ambiguous"])
 def test_hook_wrapper_rejects_missing_non_leaf_or_ambiguous_payloads(
@@ -901,8 +1061,10 @@ def test_hook_wrapper_rejects_missing_non_leaf_or_ambiguous_payloads(
     shell_key: str,
     condition: str,
 ) -> None:
-    if shell_key == "powershell" and not shutil.which("pwsh"):
-        pytest.skip("pwsh is not installed")
+    if shell_key == "powershell" and not _powershell_command():
+        pytest.skip("PowerShell is not installed")
+    if shell_key == "bash" and (os.name == "nt" or not shutil.which("bash")):
+        pytest.skip("Bash wrapper behavior is tested on POSIX")
     home = tmp_path / "home"
     if condition == "directory":
         suffix = "emit-policy.ps1" if shell_key == "powershell" else "emit-policy.sh"
@@ -932,6 +1094,40 @@ def test_hook_wrapper_rejects_missing_non_leaf_or_ambiguous_payloads(
     assert f"hook script is {expected}; no policy context emitted" in result.stderr
 
 
+@pytest.mark.guard
+def test_hook_wrapper_uses_cross_platform_path_components() -> None:
+    command = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"][
+        "sessionStart"
+    ][0]["powershell"]
+    assert "'.copilot\\\\installed-plugins'" not in command
+    assert "'ai-attribution\\\\scripts\\\\emit-policy.ps1'" not in command
+    assert command.count("Join-Path") >= 5
+    assert "Test-Path -LiteralPath $_ -PathType Leaf" in command
+    assert "$scripts.Count -eq 1" in command
+    assert "Sort-Object" in command
+
+
+@pytest.mark.guard
+def test_bash_input_bounds_and_cwd_controls_are_structural() -> None:
+    source = BASH_HOOK.read_text(encoding="utf-8")
+    read_config = source[source.index("read_config() {") : source.index(
+        "\nresolve_config_dir() {"
+    )]
+    extract_cwd = source[source.index("extract_payload_cwd() {") : source.index(
+        "\nresolve_config_dir() {"
+    )]
+    main = source[source.index("main() {") :]
+    assert "head -c $((max_config_bytes + 1))" in read_config
+    assert 'wc -c < "$path"' not in read_config
+    assert "config contains NUL" in read_config
+    assert "config is not valid UTF-8" in read_config
+    assert '[[ "$cwd" != *$\'\\r\'* && "$cwd" != *$\'\\n\'* ]]' in extract_cwd
+    assert main.index('utf8_is_valid "$json_text"') < main.index(
+        'payload_cwd="$(extract_payload_cwd)"'
+    )
+
+
+@pytest.mark.guard
 def test_version_owner_markers_match_manifest_and_fallback() -> None:
     version = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))[
         "version"
@@ -947,6 +1143,7 @@ def test_version_owner_markers_match_manifest_and_fallback() -> None:
     assert "ai-attribution:static-fallback:end" in docs
 
 
+@pytest.mark.guard
 def test_setup_skill_structurally_owns_fallback_and_policy_setup() -> None:
     source = SETUP_SKILL.read_text(encoding="utf-8")
     assert source.startswith("---\nname: ai-attribution-setup\n")
@@ -969,11 +1166,11 @@ def test_bash_powershell_parity_or_static_semantics(tmp_path: Path) -> None:
         repo / ".github" / "ai-attribution.conf",
         "contribution_guide=CONTRIBUTING.md\n",
     )
-    bash = _run(BASH_HOOK, repo, home)
-    if shutil.which("pwsh"):
+    native = _run(_native_hook(), repo, home)
+    if os.name != "nt" and shutil.which("pwsh"):
         powershell = _run(POWERSHELL_HOOK, repo, home)
-        assert powershell.stdout == bash.stdout
-        assert powershell.stderr == bash.stderr
+        assert powershell.stdout == native.stdout
+        assert powershell.stderr == native.stderr
     else:
         source = POWERSHELL_HOOK.read_text(encoding="utf-8")
         for fixture in (
@@ -988,7 +1185,10 @@ def test_bash_powershell_parity_or_static_semantics(tmp_path: Path) -> None:
             assert fixture in source
 
 
-@pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not installed")
+@pytest.mark.skipif(
+    os.name == "nt" or not shutil.which("pwsh"),
+    reason="live Bash/PowerShell parity requires POSIX pwsh",
+)
 def test_malicious_input_rejection_has_live_shell_parity(tmp_path: Path) -> None:
     owner = "`touch executed`"
     repo = _git_repo(tmp_path / "repo", f"https://example.com/{owner}/repo.git")
@@ -1019,12 +1219,14 @@ def test_malicious_input_rejection_has_live_shell_parity(tmp_path: Path) -> None
     assert not (repo / "executed").exists()
 
 
+@pytest.mark.guard
 def test_powershell_uses_legacy_compatible_windows_detection() -> None:
     source = POWERSHELL_HOOK.read_text(encoding="utf-8")
     assert "$IsWindows" not in source
     assert "$env:OS -eq 'Windows_NT'" in source
 
 
+@pytest.mark.guard
 def test_owner_validation_patterns_stay_identical() -> None:
     bash_source = BASH_HOOK.read_text(encoding="utf-8")
     powershell_source = POWERSHELL_HOOK.read_text(encoding="utf-8")

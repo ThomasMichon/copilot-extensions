@@ -18,6 +18,17 @@ repo_root=""
 json_text=""
 json_pos=0
 json_string=""
+temp_files=()
+
+cleanup() {
+    local path
+    for path in "${temp_files[@]}"; do
+        rm -f -- "$path"
+    done
+}
+
+trap cleanup EXIT
+trap 'exit 0' HUP INT TERM
 
 diag() {
     printf '[ai-attribution] %s\n' "$1" >&2
@@ -156,32 +167,58 @@ utf8_is_valid() {
 read_config() {
     local path="$1"
     local authority="$2"
-    local content="" raw line key value line_count=0 newline_free nul_found=0
+    local content="" raw line key value line_count=0 newline_free
+    local byte_count config_buffer without_nul_count
     [[ -e "$path" || -L "$path" ]] || return 0
     if path_contains_symlink "$path" || [[ ! -f "$path" || ! -r "$path" ]]; then
         diag "could not safely read config; safe defaults remain active"
         return 0
     fi
-    local byte_count
-    if ! byte_count="$(LC_ALL=C wc -c < "$path" 2>/dev/null)"; then
+    config_buffer="$(mktemp "${TMPDIR:-/tmp}/ai-attribution.XXXXXXXX")" || {
+        diag "could not safely read config; safe defaults remain active"
+        return 0
+    }
+    temp_files+=("$config_buffer")
+    if ! LC_ALL=C head -c $((max_config_bytes + 1)) -- "$path" > "$config_buffer" 2>/dev/null ||
+        ! byte_count="$(LC_ALL=C wc -c < "$config_buffer" 2>/dev/null)"; then
         diag "could not safely read config; safe defaults remain active"
         return 0
     fi
     byte_count="${byte_count//[[:space:]]/}"
-    if [[ ! "$byte_count" =~ ^[0-9]+$ ]] || (( byte_count > max_config_bytes )); then
+    if [[ ! "$byte_count" =~ ^[0-9]+$ ]]; then
+        diag "could not safely read config; safe defaults remain active"
+        return 0
+    fi
+    if (( byte_count > max_config_bytes )); then
         diag "config exceeds the 65536-byte limit; safe defaults remain active"
         return 0
     fi
-    IFS= LC_ALL=C read -r -d '' content < "$path" && nul_found=1
-    if (( nul_found )) || ! utf8_is_valid "$content"; then
+    if ! without_nul_count="$(
+        LC_ALL=C tr -d '\000' < "$config_buffer" | LC_ALL=C wc -c
+    )"; then
         diag "could not safely read config; safe defaults remain active"
+        return 0
+    fi
+    without_nul_count="${without_nul_count//[[:space:]]/}"
+    if [[ ! "$without_nul_count" =~ ^[0-9]+$ ]]; then
+        diag "could not safely read config; safe defaults remain active"
+        return 0
+    fi
+    if [[ "$without_nul_count" != "$byte_count" ]]; then
+        diag "config contains NUL; safe defaults remain active"
+        return 0
+    fi
+    IFS= LC_ALL=C read -r -d '' content < "$config_buffer" || true
+    if ! utf8_is_valid "$content"; then
+        diag "config is not valid UTF-8; safe defaults remain active"
         return 0
     fi
     content="${content//$'\r\n'/$'\n'}"
     content="${content//$'\r'/$'\n'}"
     if [[ -n "$content" ]]; then
         newline_free="${content//$'\n'/}"
-        line_count=$(( ${#content} - ${#newline_free} + 1 ))
+        line_count=$(( ${#content} - ${#newline_free} ))
+        [[ "$content" == *$'\n' ]] || ((line_count += 1))
     fi
     if (( line_count > max_config_lines )); then
         diag "config exceeds the 200-line limit; safe defaults remain active"
@@ -498,6 +535,7 @@ extract_payload_cwd() {
     done
     json_skip_space
     (( json_pos == ${#json_text} && found == 1 )) && [[ -n "$cwd" ]] || return 1
+    [[ "$cwd" != *$'\r'* && "$cwd" != *$'\n'* ]] || return 1
     printf '%s' "$cwd"
 }
 
@@ -574,6 +612,7 @@ main() {
     IFS= LC_ALL=C read -r -d '' -n $((max_payload_bytes + 1)) json_text && payload_nul=1
     if (( payload_nul || ${#json_text} > max_payload_bytes )) ||
         [[ -z "$json_text" ]] ||
+        ! utf8_is_valid "$json_text" ||
         ! payload_cwd="$(extract_payload_cwd)"; then
         diag "missing or malformed sessionStart payload; no policy context emitted"
         emit_empty
