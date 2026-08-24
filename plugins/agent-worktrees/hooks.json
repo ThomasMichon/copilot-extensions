@@ -80,8 +80,8 @@
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\provision-check.ps1\"; if (Test-Path $s) { $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/provision-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\provision-check.ps1\"; if (Test-Path $s) { Set-Location -LiteralPath $HOME; $p = Get-Command pwsh -ErrorAction SilentlyContinue; if ($p) { & $p.Source -NoProfile -File $s } else { powershell.exe -NoProfile -ExecutionPolicy Bypass -File $s } }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/provision-check.sh\"; if [ -f \"$s\" ]; then cd \"$HOME\" && bash \"$s\"; fi; exit 0",
         "timeoutSec": 15
       }
     ],

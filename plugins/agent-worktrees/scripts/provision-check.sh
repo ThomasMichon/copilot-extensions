@@ -44,11 +44,14 @@ echo "[agent-worktrees] Provisioning runtime(s) in background: $services"
 _log INFO "provisioning in background: $services"
 
 # Background apply: execute the plan detached so the slow build never blocks the
-# session. Fully detach so the child outlives this hook.
+# session. Fully detach so the child outlives this hook. Move out of the plugin
+# payload first for parity with Windows, where an inherited payload cwd prevents
+# an in-place marketplace refresh.
 log_dir="$HOME/.agent-worktrees/logs"
 mkdir -p "$log_dir" 2>/dev/null || true
 stamp="$(date -u '+%Y%m%d-%H%M%S')"
 (
+    cd "$HOME" || exit 0
     PYTHONPATH="" nohup "$PYTHON" -m agent_worktrees reconcile-plugins --apply \
         >> "$log_dir/provision-$stamp.log" 2>&1 &
 ) >/dev/null 2>&1

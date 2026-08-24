@@ -37,7 +37,9 @@ $services = ($plan.updates | ForEach-Object { $_.service } | Select-Object -Uniq
 Write-Host "[agent-worktrees] Provisioning runtime(s) in background: $services" -ForegroundColor DarkGray
 
 # Background apply: execute the plan detached so the slow build never blocks the
-# session. Capture output for troubleshooting.
+# session. Run from HOME: Copilot can invoke hooks with the installed plugin
+# payload as cwd, and a long-lived Windows child inheriting that directory blocks
+# `copilot plugin update` from replacing the payload.
 $logDir = Join-Path $InstallDir 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyyMMdd-HHmmss')
@@ -46,6 +48,7 @@ $log = Join-Path $logDir "provision-$stamp.log"
 try {
     Start-Process -FilePath $VenvPython `
         -ArgumentList @('-m', 'agent_worktrees', 'reconcile-plugins', '--apply') `
+        -WorkingDirectory $HOME `
         -WindowStyle Hidden `
         -RedirectStandardOutput $log `
         -RedirectStandardError "$log.err" | Out-Null
