@@ -95,8 +95,10 @@ class TestBuildMuxNewWindowArgv:
         assert argv[-2:] == ["pwsh.exe", "--allow-all-tools"]
 
     def test_psmux_prompt_transport_requires_and_uses_wrapper(self, tmp_path):
-        wrapper = tmp_path / "pane-wrapper.ps1"
+        wrapper = tmp_path / "wrapper with spaces" / "pane-wrapper.ps1"
+        wrapper.parent.mkdir()
         wrapper.write_text("# test wrapper\n")
+        receipt = tmp_path / "receipt path" / "receipt123"
         argv = sessions.build_mux_new_window_argv(
             "id2",
             "C:/w",
@@ -105,21 +107,24 @@ class TestBuildMuxNewWindowArgv:
             mux="psmux",
             pane_wrapper=str(wrapper),
             initial_prompt="three word seed",
-            prompt_receipt="receipt123",
+            prompt_receipt=str(receipt),
         )
-        flag = argv.index("--aw-prompt-b64")
-        transport = argv[flag + 1]
-        assert base64.b64decode(transport).decode("utf-8") == "three word seed"
+        assert argv[-5:-1] == [
+            "pwsh.exe", "-NoProfile", "-NoLogo", "-EncodedCommand",
+        ]
         assert "three word seed" not in argv
-        assert argv[flag + 2:flag + 4] == [
-            "--aw-prompt-receipt", "receipt123",
-        ]
-        p = argv.index("pwsh.exe")
-        assert argv[p:p + 7] == [
-            "pwsh.exe", "-NoProfile", "-NoLogo", "-File", str(wrapper),
-            "-AwWt", "id2",
-        ]
-        assert argv[flag + 4:flag + 7] == ["pwsh.exe", "-File", "s.ps1"]
+        assert str(wrapper) not in argv
+        encoded_script = argv[-1]
+        script = base64.b64decode(encoded_script).decode("utf-16-le")
+        assert "FromBase64String" in script
+        assert base64.b64encode(str(wrapper).encode()).decode() in script
+        args_b64 = script.split("FromBase64String('")[2].split("'")[0]
+        wrapper_args = json.loads(base64.b64decode(args_b64).decode("utf-8"))
+        receipt_flag = wrapper_args.index("--aw-prompt-receipt-b64")
+        decoded_receipt = base64.b64decode(
+            wrapper_args[receipt_flag + 1]
+        ).decode("utf-8")
+        assert decoded_receipt == str(receipt)
 
     def test_prompt_transport_fails_closed_without_wrapper(self):
         with pytest.raises(RuntimeError, match="pane wrapper is required"):
@@ -127,7 +132,7 @@ class TestBuildMuxNewWindowArgv:
                 "id2", "C:/w", ["copilot"], None,
                 mux="psmux", pane_wrapper="/does/not/exist",
                 initial_prompt="three word seed",
-                prompt_receipt="receipt123",
+                prompt_receipt="C:/receipt path/receipt123",
             )
 
     def test_empty_work_dir_omits_c_flag(self):
@@ -255,6 +260,41 @@ class TestMuxNewWindow:
         assert out["prompt_status"] == "failed:2"
         assert cleaned == {"pane": "%9", "tree": {100, 101}}
 
+    def test_parent_transports_exact_watched_receipt_path(
+        self, monkeypatch, tmp_path,
+    ):
+        receipt = tmp_path / "receipt path" / "receipt"
+        captured = {}
+
+        class R:
+            returncode = 0
+            stdout = "%9\n"
+            stderr = ""
+
+        def _build(*args, **kwargs):
+            captured.update(kwargs)
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text("launching", encoding="utf-8")
+            return ["psmux", "new-window"]
+
+        monkeypatch.setattr(
+            sessions, "_initial_prompt_receipt_path", lambda token: receipt,
+        )
+        monkeypatch.setattr(
+            sessions, "build_mux_new_window_argv", _build,
+        )
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
+        monkeypatch.setattr(sessions, "_mux_pane_alive", lambda *a: True)
+
+        out = sessions.mux_new_window(
+            "id", "/w", ["copilot"], None,
+            mux="psmux", initial_prompt="continue",
+            prompt_startup_grace=0,
+        )
+
+        assert out["ok"] is True
+        assert captured["prompt_receipt"] == str(receipt)
+
     def test_failed_successor_cleanup_terminates_exact_tree(self, monkeypatch):
         alive = {100, 101, 102}
         monkeypatch.setattr(
@@ -283,6 +323,8 @@ class TestMuxNewWindow:
 class TestPaneWrapperInitialPrompt:
     def test_wrapper_appends_native_interactive_prompt(self, tmp_path):
         root = Path(__file__).resolve().parents[1]
+        wrapper_dir = tmp_path / "wrapper with spaces"
+        wrapper_dir.mkdir()
         capture = tmp_path / "capture.py"
         output = tmp_path / "args.json"
         capture.write_text(
@@ -291,46 +333,41 @@ class TestPaneWrapperInitialPrompt:
             "    json.dump(sys.argv[1:], f)\n",
             encoding="utf-8",
         )
-        prompt = 'continue the "multi word" work'
+        prompt = 'continue the "multi word" work\n\n'
+        receipt = tmp_path / "receipt path" / "wrappertest"
         env = os.environ.copy()
         env["PROMPT_ARGS_OUT"] = str(output)
         env["WORKTREE_PANE_MIN_RUNTIME"] = "0"
         env["WORKTREE_PANE_WAIT_TIMEOUT"] = "0"
         env["WORKTREE_PROMPT_STARTUP_GRACE"] = "0"
-        env["USERPROFILE"] = str(tmp_path)
-        env["HOME"] = str(tmp_path)
 
         if platform.system() == "Windows":
             pwsh = shutil.which("pwsh")
             if not pwsh:
                 pytest.skip("pwsh is required for the Windows pane wrapper")
-            wrapper = root / "bin" / "pane-wrapper.ps1"
-            cmd = [
-                pwsh, "-NoProfile", "-NoLogo", "-File", str(wrapper),
-                "--aw-prompt-b64",
-                base64.b64encode(prompt.encode("utf-8")).decode("ascii"),
-                "--aw-prompt-receipt", "wrappertest",
-                sys.executable, str(capture),
-            ]
-            receipt = (
-                tmp_path / ".agent-worktrees" /
-                "handoff-prompt-receipts" / "wrappertest"
+            wrapper = wrapper_dir / "pane-wrapper.ps1"
+            shutil.copy2(root / "bin" / "pane-wrapper.ps1", wrapper)
+            cmd = sessions._mux_pane_cmd(
+                "id",
+                [sys.executable, str(capture)],
+                is_tmux=False,
+                pane_wrapper=str(wrapper),
+                initial_prompt=prompt,
+                prompt_receipt=str(receipt),
             )
         else:
             bash = shutil.which("bash")
             if not bash:
                 pytest.skip("bash is required for the Unix pane wrapper")
-            wrapper = root / "bin" / "pane-wrapper.sh"
-            cmd = [
-                bash, str(wrapper),
-                "--aw-prompt-b64",
-                base64.b64encode(prompt.encode("utf-8")).decode("ascii"),
-                "--aw-prompt-receipt", "wrappertest",
-                sys.executable, str(capture),
-            ]
-            receipt = (
-                tmp_path / ".agent-worktrees" /
-                "handoff-prompt-receipts" / "wrappertest"
+            wrapper = wrapper_dir / "pane-wrapper.sh"
+            shutil.copy2(root / "bin" / "pane-wrapper.sh", wrapper)
+            cmd = sessions._mux_pane_cmd(
+                "id",
+                [sys.executable, str(capture)],
+                is_tmux=True,
+                pane_wrapper=str(wrapper),
+                initial_prompt=prompt,
+                prompt_receipt=str(receipt),
             )
 
         receipt.unlink(missing_ok=True)

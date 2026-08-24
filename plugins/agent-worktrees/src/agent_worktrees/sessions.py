@@ -1552,7 +1552,7 @@ _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 # A receipt token lets the parent verify that the wrapper decoded and appended
 # the real argument before declaring the successor seeded.
 _INITIAL_PROMPT_B64_FLAG = "--aw-prompt-b64"
-_INITIAL_PROMPT_RECEIPT_FLAG = "--aw-prompt-receipt"
+_INITIAL_PROMPT_RECEIPT_B64_FLAG = "--aw-prompt-receipt-b64"
 
 
 def _initial_prompt_receipt_path(token: str) -> Path:
@@ -1604,9 +1604,12 @@ def _mux_pane_cmd(
                 "initial prompt transport requires a receipt token"
             )
         encoded = base64.b64encode(initial_prompt.encode("utf-8")).decode("ascii")
+        receipt_encoded = base64.b64encode(
+            prompt_receipt.encode("utf-8")
+        ).decode("ascii")
         controls = [
             _INITIAL_PROMPT_B64_FLAG, encoded,
-            _INITIAL_PROMPT_RECEIPT_FLAG, prompt_receipt,
+            _INITIAL_PROMPT_RECEIPT_B64_FLAG, receipt_encoded,
         ]
     wrapper = pane_wrapper
     if wrapper is None:
@@ -1620,9 +1623,32 @@ def _mux_pane_cmd(
             return clean + [
                 "bash", wrapper, "--aw-wt", worktree_id, *controls, *cmd,
             ]
+        # psmux space-joins pane argv, so even the wrapper path itself cannot be
+        # passed literally when a Windows profile contains spaces. Carry the
+        # wrapper path + its complete argv inside PowerShell's space-free
+        # UTF-16LE EncodedCommand payload instead.
+        wrapper_args = ["-AwWt", worktree_id, *controls, *cmd]
+        wrapper_b64 = base64.b64encode(
+            wrapper.encode("utf-8")
+        ).decode("ascii")
+        args_b64 = base64.b64encode(
+            json.dumps(wrapper_args).encode("utf-8")
+        ).decode("ascii")
+        script = (
+            "$w=[Text.Encoding]::UTF8.GetString("
+            f"[Convert]::FromBase64String('{wrapper_b64}'));"
+            "$j=[Text.Encoding]::UTF8.GetString("
+            f"[Convert]::FromBase64String('{args_b64}'));"
+            "$a=@(ConvertFrom-Json -InputObject $j);"
+            "& $w @a;"
+            "exit $LASTEXITCODE"
+        )
+        encoded_command = base64.b64encode(
+            script.encode("utf-16-le")
+        ).decode("ascii")
         return [
-            "pwsh.exe", "-NoProfile", "-NoLogo", "-File", wrapper,
-            "-AwWt", worktree_id, *controls, *cmd,
+            "pwsh.exe", "-NoProfile", "-NoLogo",
+            "-EncodedCommand", encoded_command,
         ]
     if initial_prompt is not None:
         raise RuntimeError(
@@ -1984,7 +2010,7 @@ def mux_new_window(
             env,
             mux=mux,
             initial_prompt=initial_prompt,
-            prompt_receipt=receipt_token,
+            prompt_receipt=str(receipt_path) if receipt_path else None,
         )
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:
@@ -2002,10 +2028,12 @@ def mux_new_window(
         while time.monotonic() < deadline:
             if receipt_path.exists():
                 try:
-                    prompt_status = receipt_path.read_text("utf-8").strip()
+                    candidate = receipt_path.read_text("utf-8").strip()
                 except OSError:
-                    prompt_status = None
-                break
+                    candidate = ""
+                if candidate == "launching" or candidate.startswith("failed:"):
+                    prompt_status = candidate
+                    break
             time.sleep(0.05)
         if prompt_status == "launching":
             startup_deadline = time.monotonic() + prompt_startup_grace
@@ -2021,7 +2049,13 @@ def mux_new_window(
                     prompt_status = "failed:pane-exited"
                     break
                 time.sleep(0.05)
-            prompt_received = prompt_status == "launching"
+            prompt_received = bool(
+                prompt_status == "launching"
+                and new_pane
+                and _mux_pane_alive(new_pane, mux_bin)
+            )
+            if prompt_status == "launching" and not prompt_received:
+                prompt_status = "failed:pane-exited"
         receipt_path.unlink(missing_ok=True)
         if not prompt_received:
             # Snapshot at the failure boundary, not immediately after new-window:
@@ -2101,6 +2135,10 @@ def _retire_failed_successor(
     mux: str | None = None,
 ) -> dict:
     """Retire a failed successor pane and terminate its exact surviving tree."""
+    import platform
+    import signal
+    import time
+
     retire = (
         mux_retire_pane(pane_id, mux=mux)
         if pane_id else {"ok": True, "gone": True, "method": "no-pane"}
@@ -2117,9 +2155,30 @@ def _retire_failed_successor(
                 continue
             if procs.terminate_pid(pid):
                 terminated.append(pid)
-        for pid in sorted(process_tree):
-            if locks.pid_alive(pid):
-                survivors.append(pid)
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            survivors = [
+                pid for pid in sorted(process_tree) if locks.pid_alive(pid)
+            ]
+            if not survivors:
+                break
+            time.sleep(0.05)
+        # procs.terminate_pid is SIGTERM on POSIX. Escalate the exact pane tree
+        # after the bounded grace period; Windows already uses TerminateProcess.
+        if survivors and platform.system() != "Windows":
+            for pid in survivors:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                survivors = [
+                    pid for pid in survivors if locks.pid_alive(pid)
+                ]
+                if not survivors:
+                    break
+                time.sleep(0.05)
     except OSError:
         survivors = sorted(process_tree)
     return {

@@ -22,12 +22,12 @@ PROMPT_STARTUP_GRACE="${WORKTREE_PROMPT_STARTUP_GRACE:-3}"
 # mark. Consumed here so it is never forwarded to the wrapped command.
 AW_WT=""
 INITIAL_PROMPT_B64=""
-INITIAL_PROMPT_RECEIPT=""
+INITIAL_PROMPT_RECEIPT_B64=""
 while [[ $# -ge 2 ]]; do
     case "$1" in
         --aw-wt) AW_WT="$2" ;;
         --aw-prompt-b64) INITIAL_PROMPT_B64="$2" ;;
-        --aw-prompt-receipt) INITIAL_PROMPT_RECEIPT="$2" ;;
+        --aw-prompt-receipt-b64) INITIAL_PROMPT_RECEIPT_B64="$2" ;;
         *) break ;;
     esac
     shift 2
@@ -38,22 +38,40 @@ done
 # after mux argv handling, append a real Copilot argument, and write the receipt
 # before exec.
 if [[ -n "$INITIAL_PROMPT_B64" ]]; then
-    if [[ ! "$INITIAL_PROMPT_RECEIPT" =~ ^[A-Za-z0-9_-]+$ ]]; then
-        echo "[agent-worktrees] invalid initial-prompt receipt token" >&2
-        exit 2
-    fi
-    if INITIAL_PROMPT="$(printf '%s' "$INITIAL_PROMPT_B64" | base64 --decode 2>/dev/null)"; then
+    # Command substitution strips trailing newlines. Append a non-newline
+    # sentinel inside the substitution, then remove only that sentinel so the
+    # original prompt (including any trailing newlines) survives byte-for-byte.
+    if INITIAL_PROMPT_RAW="$(
+        { printf '%s' "$INITIAL_PROMPT_B64" | base64 --decode; rc=$?;
+          printf '\034'; exit "$rc"; } 2>/dev/null
+    )"; then
+        INITIAL_PROMPT="${INITIAL_PROMPT_RAW%$'\034'}"
         :
-    elif INITIAL_PROMPT="$(printf '%s' "$INITIAL_PROMPT_B64" | base64 -D 2>/dev/null)"; then
+    elif INITIAL_PROMPT_RAW="$(
+        { printf '%s' "$INITIAL_PROMPT_B64" | base64 -D; rc=$?;
+          printf '\034'; exit "$rc"; } 2>/dev/null
+    )"; then
+        INITIAL_PROMPT="${INITIAL_PROMPT_RAW%$'\034'}"
         :
     else
         echo "[agent-worktrees] invalid initial-prompt transport" >&2
         exit 2
     fi
+    if RECEIPT_PATH="$(printf '%s' "$INITIAL_PROMPT_RECEIPT_B64" | base64 --decode 2>/dev/null)"; then
+        :
+    elif RECEIPT_PATH="$(printf '%s' "$INITIAL_PROMPT_RECEIPT_B64" | base64 -D 2>/dev/null)"; then
+        :
+    else
+        echo "[agent-worktrees] invalid initial-prompt receipt path" >&2
+        exit 2
+    fi
+    [[ -n "$RECEIPT_PATH" ]] || exit 2
     set -- "$@" --interactive "$INITIAL_PROMPT"
-    RECEIPT_DIR="$HOME/.agent-worktrees/handoff-prompt-receipts"
+    RECEIPT_DIR="$(dirname "$RECEIPT_PATH")"
     mkdir -p "$RECEIPT_DIR" || exit 2
-    printf 'launching' > "$RECEIPT_DIR/$INITIAL_PROMPT_RECEIPT" || exit 2
+    RECEIPT_TMP="$RECEIPT_PATH.$$.tmp"
+    printf 'launching' > "$RECEIPT_TMP" || exit 2
+    mv -f "$RECEIPT_TMP" "$RECEIPT_PATH" || exit 2
 fi
 
 START_TIME=$(date +%s)
@@ -65,9 +83,12 @@ RUNTIME=$((END_TIME - START_TIME))
 # A prompt receipt is provisional until the child survives startup. If native
 # --interactive is rejected or the launcher fails immediately, overwrite it so
 # the parent keeps the predecessor and reaps this failed successor.
-if [[ -n "$INITIAL_PROMPT_RECEIPT" ]] \
+if [[ -n "${RECEIPT_PATH:-}" ]] \
     && { [[ $EXIT_CODE -ne 0 ]] || [[ $RUNTIME -lt $PROMPT_STARTUP_GRACE ]]; }; then
-    printf 'failed:%s' "$EXIT_CODE" > "$RECEIPT_DIR/$INITIAL_PROMPT_RECEIPT" || true
+    RECEIPT_TMP="$RECEIPT_PATH.$$.tmp"
+    if printf 'failed:%s' "$EXIT_CODE" > "$RECEIPT_TMP"; then
+        mv -f "$RECEIPT_TMP" "$RECEIPT_PATH" || true
+    fi
 fi
 
 # Durable pane-exit mark (Tier-A): the only place the mux pane's real exit code

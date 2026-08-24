@@ -94,15 +94,15 @@ Set-AwPaneKillOnCloseJob
 $rest = @($args)
 $awWt = ''
 $initialPromptB64 = ''
-$initialPromptReceipt = ''
+$initialPromptReceiptB64 = ''
 while ($rest.Count -ge 2) {
     $key = [string]$rest[0]
     if ($key -eq '-AwWt') {
         $awWt = [string]$rest[1]
     } elseif ($key -eq '--aw-prompt-b64') {
         $initialPromptB64 = [string]$rest[1]
-    } elseif ($key -eq '--aw-prompt-receipt') {
-        $initialPromptReceipt = [string]$rest[1]
+    } elseif ($key -eq '--aw-prompt-receipt-b64') {
+        $initialPromptReceiptB64 = [string]$rest[1]
     } else {
         break
     }
@@ -118,17 +118,21 @@ if ($rest.Count -eq 0) { exit 0 }
 # before the child starts.
 if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
     try {
-        if ($initialPromptReceipt -notmatch '^[A-Za-z0-9_-]+$') {
-            throw 'invalid initial-prompt receipt token'
-        }
         $initialPrompt = [Text.Encoding]::UTF8.GetString(
             [Convert]::FromBase64String($initialPromptB64)
         )
+        $receiptPath = [Text.Encoding]::UTF8.GetString(
+            [Convert]::FromBase64String($initialPromptReceiptB64)
+        )
+        if ([string]::IsNullOrWhiteSpace($receiptPath)) {
+            throw 'missing initial-prompt receipt path'
+        }
         $rest += @('--interactive', $initialPrompt)
-        $receiptDir = Join-Path $env:USERPROFILE '.agent-worktrees\handoff-prompt-receipts'
+        $receiptDir = Split-Path -Parent $receiptPath
         New-Item -ItemType Directory -Path $receiptDir -Force -ErrorAction Stop | Out-Null
-        $receiptPath = Join-Path $receiptDir $initialPromptReceipt
-        [IO.File]::WriteAllText($receiptPath, 'launching')
+        $receiptTmp = "$receiptPath.$PID.tmp"
+        [IO.File]::WriteAllText($receiptTmp, 'launching')
+        Move-Item -LiteralPath $receiptTmp -Destination $receiptPath -Force -ErrorAction Stop
     } catch {
         [Console]::Error.WriteLine(
             "[agent-worktrees] invalid initial-prompt transport: $($_.Exception.Message)"
@@ -146,10 +150,14 @@ $runtime = [int]((Get-Date) - $start).TotalSeconds
 # A prompt receipt is provisional until the child survives startup. If native
 # --interactive is rejected or the launcher fails immediately, overwrite it so
 # the parent keeps the predecessor and reaps this failed successor.
-if ($initialPromptReceipt -and (
+if ($receiptPath -and (
         $exitCode -ne 0 -or $runtime -lt $promptStartupGrace
     )) {
-    try { [IO.File]::WriteAllText($receiptPath, "failed:$exitCode") } catch {}
+    try {
+        $receiptTmp = "$receiptPath.$PID.tmp"
+        [IO.File]::WriteAllText($receiptTmp, "failed:$exitCode")
+        Move-Item -LiteralPath $receiptTmp -Destination $receiptPath -Force
+    } catch {}
 }
 
 # Durable pane-exit mark (Tier-A): the only place the psmux pane's real exit code
