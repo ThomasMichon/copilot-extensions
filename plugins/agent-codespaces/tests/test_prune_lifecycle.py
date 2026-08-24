@@ -242,7 +242,7 @@ def test_create_retries_after_reclaim(store):
              "agent_codespaces.__main__.create_codespace",
              side_effect=[RuntimeError("maximum number of codespaces"), info],
          ) as cc:
-        rc = main(["create", "owner/repo", "--no-wait"])
+        rc = main(["create", "owner/repo", "--no-wait", "--force-create"])
     assert rc == 0
     assert cc.call_count == 2
 
@@ -255,5 +255,5 @@ def test_create_quota_no_reclaim_fails(store):
              "agent_codespaces.__main__.create_codespace",
              side_effect=RuntimeError("maximum number of codespaces"),
          ):
-        rc = main(["create", "owner/repo", "--no-wait"])
+        rc = main(["create", "owner/repo", "--no-wait", "--force-create"])
     assert rc == 1

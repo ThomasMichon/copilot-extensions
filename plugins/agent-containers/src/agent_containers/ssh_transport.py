@@ -88,18 +88,30 @@ def _run(
     timeout: float = 30.0,
 ) -> subprocess.CompletedProcess:
     try:
-        stdin_args = (
-            {"input": input_text}
-            if input_text is not None
-            else {"stdin": subprocess.DEVNULL}
-        )
-        return subprocess.run(
+        if input_text is None:
+            return subprocess.run(
+                args,
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                creationflags=_creation_flags(),
+            )
+        # Windows text-mode pipes translate LF to CRLF. These payloads are
+        # consumed by Linux shell/read and must remain byte-exact; otherwise a
+        # trailing CR becomes part of a staged token or authorized key.
+        completed = subprocess.run(
             args,
+            input=input_text.encode("utf-8"),
             capture_output=True,
-            text=True,
             timeout=timeout,
             creationflags=_creation_flags(),
-            **stdin_args,
+        )
+        return subprocess.CompletedProcess(
+            completed.args,
+            completed.returncode,
+            completed.stdout.decode("utf-8", "replace"),
+            completed.stderr.decode("utf-8", "replace"),
         )
     except FileNotFoundError as exc:
         raise RuntimeError(f"Required transport command not found: {args[0]}") from exc
@@ -291,7 +303,7 @@ def prepare_ssh_config(container: str, user: str) -> SSHConfig:
             "    StrictHostKeyChecking accept-new",
             f'    UserKnownHostsFile "{_config_path(known_hosts)}"',
             f"    ProxyCommand docker exec -i -u root {container} "
-            "/usr/sbin/sshd -i -e",
+            "/usr/sbin/sshd -i -e -o GatewayPorts=no",
             "    LogLevel ERROR",
             "",
         ])
@@ -416,8 +428,17 @@ def build_remote_command(acp_command: str, remote_env: str | None) -> str:
     return f"exec bash -lc {shlex.quote(inner)}"
 
 
-def build_ssh_command(config: SSHConfig, remote_command: str) -> list[str]:
+def build_ssh_command(
+    config: SSHConfig,
+    remote_command: str,
+    *,
+    reverse_forwards: list[str] | None = None,
+) -> list[str]:
     """Build the shared OpenSSH remote-exec argv for the ACP stdio channel."""
     if not shutil.which("ssh"):
         raise RuntimeError("ssh is required for trusted-container transport")
-    return build_remote_exec_args(config, remote_command)
+    return build_remote_exec_args(
+        config,
+        remote_command,
+        reverse_forwards=reverse_forwards,
+    )

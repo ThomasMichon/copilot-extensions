@@ -2,13 +2,12 @@
 
 agent-containers is generic: rather than baking auth into the image, it deploys
 thin shims into the running container that fetch tokens on-demand from the host
-relay (over ``host.docker.internal``), authenticated with the container's
-per-session secret. The patched Azure CLI / rush ``AdoCodespacesAuthCredential``
-call ``azure-auth-helper get-access-token <scope>`` on PATH; that resolves to our
+relay through the trusted venue's SSH ``-R`` loopback forward. The per-container
+secret remains request authorization for the shared relay's Azure-token gate;
+it is no longer a defense for a host-network-exposed endpoint. The patched Azure
+CLI / rush ``AdoCodespacesAuthCredential`` call
+``azure-auth-helper get-access-token <scope>`` on PATH; that resolves to our
 shim, which relays the request to the host.
-
-Transport A: TCP to ``LC_GIT_CREDENTIAL_RELAY_HOST:LC_GIT_CREDENTIAL_RELAY`` with
-``LC_GIT_CREDENTIAL_RELAY_TOKEN``. (Phase B will switch to a bind-mounted socket.)
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ AZURE_HELPER_PATH = f"{_BIN}/azure-auth-helper"
 RELAY_CLIENT = r'''#!/usr/bin/env python3
 import os, socket, sys
 
-HOST = os.environ.get("LC_GIT_CREDENTIAL_RELAY_HOST", "host.docker.internal")
+HOST = os.environ.get("LC_GIT_CREDENTIAL_RELAY_HOST", "127.0.0.1")
 PORT = int(os.environ.get("LC_GIT_CREDENTIAL_RELAY", "9857"))
 TOKEN = os.environ.get("LC_GIT_CREDENTIAL_RELAY_TOKEN", "")
 

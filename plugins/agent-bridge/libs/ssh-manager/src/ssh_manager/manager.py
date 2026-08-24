@@ -383,8 +383,16 @@ class ConnectionManager:
         host: str,
         command: str,
         timeout: float | None = 60.0,
+        input_bytes: bytes | None = None,
     ) -> CommandResult:
         """Run a command over the multiplexed (or direct) SSH connection.
+
+        When ``input_bytes`` is given it is written to the remote command's
+        **stdin** (and stdin is a pipe rather than ``/dev/null``). This lets a
+        caller stream a large payload -- e.g. a base64 plugin tarball for
+        ``--plugin-dir`` staging -- without embedding it in the command string,
+        which would overrun the Windows ~32 KB command-line limit (``[WinError
+        206]``).
 
         Returns a CommandResult with stdout, stderr, exit code, and
         timeout status. Does not raise on nonzero exit -- call
@@ -404,7 +412,11 @@ class ConnectionManager:
 
         proc = await asyncio.create_subprocess_exec(
             *args,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=(
+                asyncio.subprocess.PIPE
+                if input_bytes is not None
+                else asyncio.subprocess.DEVNULL
+            ),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             **_subprocess_kwargs(),
@@ -415,7 +427,7 @@ class ConnectionManager:
             info.child_processes.append(proc)
             try:
                 stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                    proc.communicate(), timeout=timeout
+                    proc.communicate(input=input_bytes), timeout=timeout
                 )
             finally:
                 if proc in info.child_processes and proc.returncode is not None:

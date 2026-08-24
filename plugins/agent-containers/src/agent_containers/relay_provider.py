@@ -2,10 +2,10 @@
 
 agent-bridge discovers this hook (see ``agent_bridge.agent_registry``) and calls
 ``register_relay`` so agent-containers can contribute the credential sources its
-container targets need. Unlike codespaces (auth forwarded over an isolated SSH
-tunnel), containers reach the host relay over ``host.docker.internal`` -- network
-reachable -- so the Azure token action is gated behind a per-container secret
-(see :data:`SESSION_TOKENS` / :func:`token_for`).
+container targets need. Trusted containers reach the host relay through an SSH
+``-R`` loopback forward. The Azure token action remains gated behind a
+per-container secret because the relay's request-authorization policy is shared
+across providers, not because the endpoint is host-network reachable.
 
 The relay itself is owned/run by agent-bridge; this module only injects the
 container profile (sources + storage-resource allowlist + token gate).
@@ -35,10 +35,9 @@ _TOKENS_FILE = Path.home() / ".agent-containers" / "relay-tokens.json"
 # forwarding any scope verbatim keeps the shim a faithful broker.
 DEFAULT_AZURE_RESOURCES = ["*"]
 
-# Actions gated behind the per-container secret. Only the NEW Azure action is
-# gated: codespaces never calls get-azure-token, so its (shared) relay path is
-# unaffected. ADO get-access-token stays ungated to preserve codespaces; the
-# Phase-B Unix-socket transport removes the network exposure entirely.
+# Actions gated behind the per-container secret. The gate is request
+# authorization on the shared relay; SSH -R removes the old host-network
+# exposure but does not weaken the Azure-token policy.
 _GATED_ACTIONS = ["get-azure-token"]
 
 _lock = threading.Lock()
