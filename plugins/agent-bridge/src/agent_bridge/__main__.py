@@ -3496,6 +3496,7 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     import asyncio
     from pathlib import Path
 
+    from . import telemetry
     from .acp_agent import BridgeAgent
     from .agent_registry import build_resolver
     from .config import load_config
@@ -3505,6 +3506,8 @@ def _cmd_agent(args: argparse.Namespace) -> None:
     log = logging.getLogger("agent-bridge")
 
     cfg = load_config()
+    if not telemetry.load_sink_from_config():
+        telemetry.load_sink_from_env()
 
     # Initialize DB and session manager via the shared config factory so
     # ACP-agent mode wires session-host settings identically to the HTTP daemon.

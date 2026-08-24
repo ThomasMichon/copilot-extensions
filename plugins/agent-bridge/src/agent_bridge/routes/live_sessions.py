@@ -283,11 +283,16 @@ async def ingest_live_events(
     registered live session -- representation follows registration.
     """
     db = _db(request)
-    if db.get_live_session(session_id) is None:
+    registration = db.get_live_session(session_id)
+    if registration is None:
         raise HTTPException(status_code=404, detail="live session not found")
     store = _store(request)
     raw = [e.model_dump() for e in body.events]
-    ingested = store.ingest(session_id, raw)
+    ingested = store.ingest(
+        session_id,
+        raw,
+        worktree_id=registration.get("worktree_id"),
+    )
     # Phase 7 Channel A: fold the raw batch into a coarse turn_state so the
     # tracker sees running/idle/stalled -- objective and token-free.
     prior = (db.get_live_session(session_id) or {}).get("turn_state")
@@ -316,10 +321,13 @@ async def stream_live_events(
     ``?after=<id>`` (default 0 = the whole in-memory tail).
     """
     db = _db(request)
-    if db.get_live_session(session_id) is None:
+    registration = db.get_live_session(session_id)
+    if registration is None:
         raise HTTPException(status_code=404, detail="live session not found")
     store = _store(request)
-    log = store.get_or_create(session_id)
+    log = store.get_or_create(
+        session_id, worktree_id=registration.get("worktree_id")
+    )
     shim = _RepresentedSession(session_id=session_id, event_log=log)
     server = getattr(request.app.state, "uvicorn_server", None)
     return StreamingResponse(
@@ -421,7 +429,10 @@ async def post_live_message(
         return SendMessageResult(session_id=session_id, message_id=message_id)
 
     store = _store(request)
-    log = store.get_or_create(session_id)
+    registration = db.get_live_session(session_id) or {}
+    log = store.get_or_create(
+        session_id, worktree_id=registration.get("worktree_id")
+    )
     reply = await await_turn_reply(log, after=after, timeout=body.wait_timeout)
     return SendMessageResult(
         session_id=session_id,

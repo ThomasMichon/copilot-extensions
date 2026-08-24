@@ -1203,6 +1203,7 @@ class SessionManager:
             session.acp_session_id = row.get("acp_session_id")
 
             # Mark formerly-active sessions as stopped
+            interrupted_on_restart = False
             if status in (
                 SessionStatus.RUNNING.value,
                 SessionStatus.IDLE.value,
@@ -1220,11 +1221,37 @@ class SessionManager:
                             stop_reason="interrupted",
                             completed_at=now,
                         )
+                        interrupted_on_restart = True
             else:
                 session.status = SessionStatus(status)
 
             # Restore event log from DB
-            session.event_log = EventLog.from_db(self._db, sid)
+            session.event_log = EventLog.from_db(
+                self._db,
+                sid,
+                acp_session_id=session.acp_session_id,
+                worktree_id=target.worktree_id,
+            )
+            if status in (
+                SessionStatus.RUNNING.value,
+                SessionStatus.IDLE.value,
+                SessionStatus.STARTING.value,
+            ):
+                # Persist the restart boundary the DB state already records.
+                # A formerly-running turn cannot remain open in telemetry/SSE
+                # after its process is gone.
+                if (
+                    interrupted_on_restart
+                    and session.event_log.telemetry_conversation_state
+                    in {None, "sending", "responding"}
+                ):
+                    session.event_log.append(
+                        "turn_complete", {"stop_reason": "interrupted"}
+                    )
+                session.event_log.append(
+                    "session_state_changed",
+                    {"status": SessionStatus.STOPPED.value, "trigger": "daemon_restart"},
+                )
             session.turn_count = len(self._db.get_turns(sid))
 
             # Rebuild structured progress from the restored agent messages so a
@@ -2423,7 +2450,11 @@ class SessionManager:
         # AcpClient._apply_model_config).
         session.model_override = model
         session.effort_override = effort
-        session.event_log = EventLog(db=self._db, session_id=session_id)
+        session.event_log = EventLog(
+            db=self._db,
+            session_id=session_id,
+            worktree_id=target.worktree_id,
+        )
 
         # Wire ACP events into the session's event log
         def on_acp_event(event_type: str, data: dict[str, Any]) -> None:
@@ -2690,6 +2721,11 @@ class SessionManager:
             session.client = client
             session.acp_session_id = acp_sid
             session.status = SessionStatus.IDLE
+            if session.event_log:
+                session.event_log.set_telemetry_identity(
+                    acp_session_id=acp_sid,
+                    worktree_id=target.worktree_id,
+                )
             self._db.update_session_acp_id(session_id, acp_sid)
             # Persist target with resolved values (worktree_id, cwd from plan)
             self._db.update_session_target(
@@ -2985,6 +3021,11 @@ class SessionManager:
                     session.client = recreate_client
                     session.acp_session_id = new_acp
                     session.status = SessionStatus.IDLE
+                    if session.event_log:
+                        session.event_log.set_telemetry_identity(
+                            acp_session_id=new_acp,
+                            worktree_id=session.target.worktree_id,
+                        )
                     # The fresh ACP session starts EMPTY -- reset context-usage /
                     # handoff state so stale "critical" usage or a pending
                     # context-pressure handoff from the dropped session can't

@@ -56,6 +56,9 @@ class EventLog:
         *,
         db: Database | None = None,
         session_id: str | None = None,
+        acp_session_id: str | None = None,
+        worktree_id: str | None = None,
+        telemetry_source: str = "owned",
     ) -> None:
         self._events: list[SseEvent] = []
         self._lock = Lock()
@@ -63,12 +66,32 @@ class EventLog:
         self._waiters: list[asyncio.Event] = []
         self._db = db
         self._session_id = session_id
+        self._telemetry = telemetry.SessionTraceReducer(
+            session_id,
+            acp_session_id=acp_session_id,
+            worktree_id=worktree_id,
+            source=telemetry_source,
+        )
 
     @classmethod
-    def from_db(cls, db: Database, session_id: str) -> EventLog:
+    def from_db(
+        cls,
+        db: Database,
+        session_id: str,
+        *,
+        acp_session_id: str | None = None,
+        worktree_id: str | None = None,
+        telemetry_source: str = "owned",
+    ) -> EventLog:
         """Create an EventLog pre-populated with persisted events."""
         db.flush()
-        log = cls(db=db, session_id=session_id)
+        log = cls(
+            db=db,
+            session_id=session_id,
+            acp_session_id=acp_session_id,
+            worktree_id=worktree_id,
+            telemetry_source=telemetry_source,
+        )
         rows = db.get_events(session_id, after=0)
         for row in rows:
             evt = SseEvent(
@@ -78,6 +101,11 @@ class EventLog:
                 timestamp=row["timestamp"],
             )
             log._events.append(evt)
+            if evt.id == 1:
+                log._telemetry.set_log_origin(evt.timestamp)
+            log._telemetry.observe(
+                evt.event, evt.data, event_id=evt.id
+            )
 
         max_id = db.get_max_event_id(session_id)
         log._next_id = max_id + 1
@@ -97,6 +125,11 @@ class EventLog:
             evt = SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
             self._events.append(evt)
             waiters = list(self._waiters)
+            if event_id == 1:
+                self._telemetry.set_log_origin(ts)
+            telemetry_records = self._telemetry.observe(
+                event_type, data, event_id=event_id
+            )
 
         for waiter in waiters:
             waiter.set()
@@ -104,13 +137,30 @@ class EventLog:
             self._db.append_event(
                 self._session_id, event_id, event_type, data, ts,
             )
-        # Generic telemetry seam: forward only lifecycle/health transitions
-        # (no-op unless a consumer registered a sink; content events excluded).
-        if event_type in telemetry.LIFECYCLE_EVENTS:
-            telemetry.emit(
-                telemetry.session_lifecycle_event(event_type, self._session_id, data)
-            )
+        # Generic telemetry seam: emit only the reducer's content-free
+        # structural transitions (no-op unless a consumer registered a sink).
+        for record in telemetry_records:
+            telemetry.emit(record)
         return evt
+
+    def set_telemetry_identity(
+        self,
+        *,
+        acp_session_id: str | None = None,
+        worktree_id: str | None = None,
+    ) -> None:
+        """Fill stable identities learned after session startup."""
+        with self._lock:
+            self._telemetry.update_identity(
+                acp_session_id=acp_session_id,
+                worktree_id=worktree_id,
+            )
+
+    @property
+    def telemetry_conversation_state(self) -> str | None:
+        """Conversation state derived from the durable event sequence."""
+        with self._lock:
+            return self._telemetry.conversation_state
 
     def get_events(self, after: int = 0) -> list[SseEvent]:
         """Return events with ID > ``after``."""
@@ -139,6 +189,7 @@ class EventLog:
                 self._db.reset_delivery_cursors(self._session_id)
             self._events = []
             self._next_id = 1
+            prior_epoch = self._telemetry.begin_rebuild()
             ts = time.time()
             for event_type, data in events:
                 event_id = self._next_id
@@ -150,11 +201,20 @@ class EventLog:
                 self._events.append(
                     SseEvent(id=event_id, event=event_type, data=data, timestamp=ts)
                 )
+                if event_id == 1:
+                    self._telemetry.set_log_origin(ts)
+                # Rebuild reducer state from authoritative history, but do not
+                # emit historical telemetry again.
+                self._telemetry.observe(event_type, data, event_id=event_id)
             count = len(self._events)
             if self._db is not None and self._session_id is not None:
                 self._db.flush()
+            rebuild_marker = self._telemetry.complete_rebuild(
+                prior_epoch, count
+            )
         for waiter in self._waiters:
             waiter.set()
+        telemetry.emit(rebuild_marker)
         return count
 
     @property

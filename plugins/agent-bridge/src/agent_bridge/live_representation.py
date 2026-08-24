@@ -321,13 +321,21 @@ class LiveEventStore:
         with self._lock:
             return self._logs.get(session_id)
 
-    def get_or_create(self, session_id: str) -> EventLog:
+    def get_or_create(
+        self, session_id: str, *, worktree_id: str | None = None
+    ) -> EventLog:
         """Return (creating if needed) the represented log for ``session_id``."""
         with self._lock:
             log = self._logs.get(session_id)
             if log is None:
-                log = EventLog()  # db=None -> in-memory only
+                log = EventLog(
+                    session_id=session_id,
+                    worktree_id=worktree_id,
+                    telemetry_source="represented",
+                )  # db=None -> in-memory only
                 self._logs[session_id] = log
+            elif worktree_id is not None:
+                log.set_telemetry_identity(worktree_id=worktree_id)
             return log
 
     def drop(self, session_id: str) -> None:
@@ -359,7 +367,11 @@ class LiveEventStore:
             return True
 
     def ingest(
-        self, session_id: str, sdk_events: list[dict[str, Any]]
+        self,
+        session_id: str,
+        sdk_events: list[dict[str, Any]],
+        *,
+        worktree_id: str | None = None,
     ) -> int:
         """Translate + append a batch of raw SDK events; return the count appended.
 
@@ -375,7 +387,7 @@ class LiveEventStore:
         skipped; an event with no ``id`` cannot be deduped and is appended as
         before (honest best-effort).
         """
-        log = self.get_or_create(session_id)
+        log = self.get_or_create(session_id, worktree_id=worktree_id)
         appended = 0
         for item in sdk_events:
             if not isinstance(item, dict):

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agent_bridge.db import Database
+from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
 from agent_bridge.session_manager import (
     Session,
@@ -1354,6 +1355,48 @@ class TestRehydrate:
         turn = tmp_db.get_turn("s1", 0)
         assert turn["stop_reason"] == "interrupted"
         assert turn["completed_at"] is not None
+
+    def test_rehydrate_closes_an_open_event_trace(self, tmp_db: Database) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "running", now)
+        tmp_db.create_turn("s1", 0, "hello", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("user_message", {"content": "hello"})
+        log.append("session_state_changed", {"status": "running"})
+        tmp_db.flush()
+
+        mgr = SessionManager(tmp_db)
+        session = mgr.get_session("s1")
+        assert session is not None
+        events = session.event_log.get_events()
+        assert [event.event for event in events[-2:]] == [
+            "turn_complete",
+            "session_state_changed",
+        ]
+        assert events[-2].data["stop_reason"] == "interrupted"
+        assert events[-1].data["status"] == "stopped"
+
+    def test_rehydrate_does_not_duplicate_an_existing_turn_complete(
+        self, tmp_db: Database
+    ) -> None:
+        now = time.time()
+        tmp_db.create_session("s1", "test", None, ".", "local", "running", now)
+        # Simulate the crash window where the durable event arrived but the
+        # turn row had not yet been marked complete.
+        tmp_db.create_turn("s1", 0, "hello", now)
+        log = EventLog(db=tmp_db, session_id="s1")
+        log.append("user_message", {"content": "hello"})
+        log.append("session_state_changed", {"status": "running"})
+        log.append("turn_complete", {"stop_reason": "end_turn"})
+        tmp_db.flush()
+
+        mgr = SessionManager(tmp_db)
+        session = mgr.get_session("s1")
+        assert session is not None
+        events = session.event_log.get_events()
+        assert sum(event.event == "turn_complete" for event in events) == 1
+        assert events[-1].event == "session_state_changed"
+        assert events[-1].data["status"] == "stopped"
 
     def test_rehydrate_cleans_ended_sessions(self, tmp_db: Database) -> None:
         now = time.time()

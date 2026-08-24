@@ -38,7 +38,7 @@ Copilot CLI sessions (multiple)
 | Transport | `transport.py` | Local + SSH subprocess spawning |
 | ACP agent | `acp_agent.py` | Upstream ACP agent interface (stdio mode) |
 | ACP client | `acp_client.py` | Downstream ACP client (subprocess comms) |
-| Events | `events.py` | SSE event log with durable IDs |
+| Events | `events.py` | SSE event log with durable IDs; content-free session, conversation, and tool-call telemetry reduction. Owned and represented sources are labeled; represented turn completion supplies its terminal idle boundary. |
 | Config | `config.py` | Config loading, topology management |
 | Client | `client.py` | HTTP client for CLI commands |
 | Single-instance guard | `singleton.py` | OS-level lock: one daemon per config dir |
