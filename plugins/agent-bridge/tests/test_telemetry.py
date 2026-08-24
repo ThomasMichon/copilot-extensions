@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import json
+
 from agent_bridge import telemetry
+from agent_bridge.db import Database
 from agent_bridge.events import EventLog
+from agent_bridge.live_representation import LiveEventStore
 
 
 def _reset() -> None:
@@ -55,28 +59,361 @@ def test_session_lifecycle_event_carries_state_only() -> None:
     assert "message" not in ev
 
 
-def test_lifecycle_events_only_forwarded_from_event_log() -> None:
-    """EventLog.append forwards lifecycle events to the sink but not content
-    events (user messages, tool calls)."""
+def test_health_events_are_not_malformed_state_transitions() -> None:
+    ev = telemetry.session_lifecycle_event(
+        "context_warning",
+        "s",
+        {"context_pct": 81.5, "threshold": 80, "message": "private"},
+        from_state="idle",
+    )
+    assert ev["kind"] == "event"
+    assert ev["name"] == "session_health"
+    assert "from" not in ev
+    assert "to" not in ev
+    assert ev["context_pct"] == 81.5
+    assert ev["threshold"] == 80
+    assert "message" not in ev
+
+
+def test_event_log_emits_replayable_conversation_and_tool_transitions() -> None:
     _reset()
     seen: list[dict] = []
     telemetry.set_telemetry_sink(seen.append)
     try:
-        log = EventLog(session_id="sess-9")
-        # A content event -> NOT forwarded to telemetry.
+        log = EventLog(
+            session_id="sess-9",
+            acp_session_id="acp-9",
+            worktree_id="wt-9",
+        )
+        log.append("session_state_changed", {"status": "idle"})
         log.append("user_message", {"content": "a secret prompt"})
-        assert seen == []
-        # A lifecycle event -> forwarded as a generic state-transition.
+        log.append("session_state_changed", {"status": "running", "turn_index": 1})
+        log.append(
+            "tool_call_start",
+            {
+                "tool_call_id": "tool-1",
+                "kind": "read",
+                "title": "secret title",
+                "raw_input": {"path": "/secret"},
+            },
+        )
+        log.append(
+            "tool_call_update",
+            {
+                "tool_call_id": "tool-1",
+                "status": "completed",
+                "raw_output": {"content": "secret result"},
+            },
+        )
+        log.append("turn_complete", {"stop_reason": "end_turn"})
+        log.append("session_state_changed", {"status": "idle"})
+
+        conversation = [r for r in seen if r["name"] == "conversation"]
+        assert [(r.get("from"), r["to"], r["event"]) for r in conversation] == [
+            (None, "idle", "session_state_changed"),
+            ("idle", "sending", "user_message"),
+            ("sending", "responding", "session_state_changed"),
+            ("responding", "end-turn", "turn_complete"),
+            ("end-turn", "idle", "session_state_changed"),
+        ]
+        tools = [r for r in seen if r["name"] == "tool_call"]
+        assert [(r.get("from"), r["to"]) for r in tools] == [
+            (None, "running"),
+            ("running", "completed"),
+        ]
+        assert all(r["session_id"] == "sess-9" for r in seen)
+        assert all(r["acp_session_id"] == "acp-9" for r in seen)
+        assert all(r["worktree_id"] == "wt-9" for r in seen)
+        serialized = json.dumps(seen)
+        assert "secret prompt" not in serialized
+        assert "secret title" not in serialized
+        assert "/secret" not in serialized
+        assert "secret result" not in serialized
+        assert all(r["log_epoch"] for r in conversation + tools)
+    finally:
+        _reset()
+
+
+def test_cancel_and_error_paths_settle_back_to_idle() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        log.append("session_state_changed", {"status": "idle"})
+        log.append("user_message", {"content": "cancel me"})
         log.append("session_state_changed", {"status": "running"})
+        log.append(
+            "tool_call_start", {"tool_call_id": "cancelled-tool", "kind": "read"}
+        )
+        log.append("turn_complete", {"stop_reason": "cancelled"})
+        log.append("session_state_changed", {"status": "idle"})
+        log.append("user_message", {"content": "fail me"})
+        log.append("session_state_changed", {"status": "running"})
+        log.append(
+            "tool_call_start", {"tool_call_id": "failed-tool", "kind": "read"}
+        )
+        log.append("error", {"message": "private failure detail"})
+        log.append("session_state_changed", {"status": "idle"})
+
+        conversation = [r for r in seen if r["name"] == "conversation"]
+        assert [r["to"] for r in conversation] == [
+            "idle", "sending", "responding", "cancelled", "idle",
+            "sending", "responding", "error", "idle",
+        ]
+        tools = [r for r in seen if r["name"] == "tool_call"]
+        assert [(r["tool_call_id"], r["to"]) for r in tools] == [
+            ("cancelled-tool", "running"),
+            ("cancelled-tool", "cancelled"),
+            ("failed-tool", "running"),
+            ("failed-tool", "error"),
+        ]
+        assert "private failure detail" not in json.dumps(seen)
+    finally:
+        _reset()
+
+
+def test_free_text_stop_reason_and_tool_status_are_bounded() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        log.append("user_message", {"content": "hidden"})
+        log.append("session_state_changed", {"status": "running"})
+        log.append(
+            "tool_call_start", {"tool_call_id": "t", "kind": "execute"}
+        )
+        log.append(
+            "tool_call_update",
+            {"tool_call_id": "t", "status": "FAILED: private detail"},
+        )
+        log.append(
+            "tool_call_update", {"tool_call_id": "t", "status": "failed"}
+        )
+        log.append(
+            "turn_complete", {"stop_reason": "error: private exception"}
+        )
+        serialized = json.dumps(seen)
+        assert "private detail" not in serialized
+        assert "private exception" not in serialized
+        tool = [r for r in seen if r["name"] == "tool_call"][-1]
+        assert tool["tool_status"] == "error"
+        turn = [r for r in seen if r["name"] == "conversation"][-1]
+        assert turn["stop_reason"] == "other"
+    finally:
+        _reset()
+
+
+def test_rebuild_restores_reducer_without_reemitting_history() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        count = log.rebuild(
+            [
+                ("session_state_changed", {"status": "idle"}),
+                ("user_message", {"content": "hidden"}),
+                ("session_state_changed", {"status": "running"}),
+                ("turn_complete", {"stop_reason": "end_turn"}),
+            ]
+        )
+        assert count == 4
         assert len(seen) == 1
-        assert seen[0]["event"] == "session_state_changed"
-        assert seen[0]["session_id"] == "sess-9"
-        assert seen[0]["to"] == "running"
-        # A content event carrying no status must never leak its content.
-        log.append("error", {"message": "boom"})
-        assert len(seen) == 2
-        assert seen[1]["event"] == "error"
-        assert "message" not in seen[1]
+        assert seen[0]["kind"] == "event"
+        assert seen[0]["event"] == "log_rebuilt"
+        epoch = seen[0]["log_epoch"]
+        assert seen[0]["conversation_state"] == "end-turn"
+        assert seen[0]["active_tool_call_ids"] == []
+
+        log.append("session_state_changed", {"status": "idle"})
+        conversation = [r for r in seen if r["name"] == "conversation"]
+        assert len(conversation) == 1
+        assert conversation[0]["from"] == "end-turn"
+        assert conversation[0]["to"] == "idle"
+        assert conversation[0]["event_id"] == 5
+        assert conversation[0]["log_epoch"] == epoch
+    finally:
+        _reset()
+
+
+def test_empty_rebuild_first_event_epoch_survives_restart(tmp_path) -> None:
+    _reset()
+    db = Database(tmp_path / "empty-rebuild.db")
+    db.create_session("s", "test", None, ".", "local", "idle", 1.0)
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(db=db, session_id="s")
+        log.rebuild([])
+        marker = seen.pop()
+        assert marker["event"] == "log_rebuilt"
+        assert "log_epoch" not in marker
+
+        log.append("session_state_changed", {"status": "idle"})
+        first_epoch = seen[-1]["log_epoch"]
+        db.flush()
+
+        seen.clear()
+        restored = EventLog.from_db(db, "s")
+        restored.append("user_message", {"content": "hidden"})
+        assert seen[-1]["log_epoch"] == first_epoch
+    finally:
+        _reset()
+        db.close()
+
+
+def test_identity_can_be_filled_after_event_log_construction() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        log.set_telemetry_identity(acp_session_id="acp", worktree_id="wt")
+        log.append("session_state_changed", {"status": "idle"})
+        assert all(r["acp_session_id"] == "acp" for r in seen)
+        assert all(r["worktree_id"] == "wt" for r in seen)
+    finally:
+        _reset()
+
+
+def test_tool_ids_preserve_case_and_duplicate_terminal_is_suppressed() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        log.append(
+            "tool_call_start",
+            {"tool_call_id": "Tool_AbC-123", "kind": "read"},
+        )
+        terminal = {
+            "tool_call_id": "Tool_AbC-123",
+            "status": "completed",
+        }
+        log.append("tool_call_update", terminal)
+        log.append("tool_call_update", terminal)
+        tools = [r for r in seen if r["name"] == "tool_call"]
+        assert [r["tool_call_id"] for r in tools] == [
+            "Tool_AbC-123",
+            "Tool_AbC-123",
+        ]
+        assert [(r.get("from"), r["to"]) for r in tools] == [
+            (None, "running"),
+            ("running", "completed"),
+        ]
+    finally:
+        _reset()
+
+
+def test_mid_turn_user_echo_does_not_move_responding_back_to_sending() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        log.append("user_message", {"content": "submitted"})
+        log.append("session_state_changed", {"status": "running"})
+        log.append("user_message", {"content": "echoed by ACP"})
+        log.append("turn_complete", {"stop_reason": "end_turn"})
+        assert [
+            (r.get("from"), r["to"])
+            for r in seen
+            if r["name"] == "conversation"
+        ] == [
+            (None, "sending"),
+            ("sending", "responding"),
+            ("responding", "end-turn"),
+        ]
+    finally:
+        _reset()
+
+
+def test_from_db_restores_state_without_reemitting_history(tmp_path) -> None:
+    _reset()
+    db = Database(tmp_path / "events.db")
+    now = 1.0
+    db.create_session(
+        "s",
+        "test",
+        None,
+        target_dir=".",
+        target_type="local",
+        status="idle",
+        target_json=None,
+        now=now,
+    )
+    original = EventLog(db=db, session_id="s")
+    original.append("session_state_changed", {"status": "idle"})
+    original.append("user_message", {"content": "hidden"})
+    original.append("session_state_changed", {"status": "running"})
+    original.append("turn_complete", {"stop_reason": "end_turn"})
+    db.flush()
+
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        restored = EventLog.from_db(db, "s")
+        assert seen == []
+        restored.append("session_state_changed", {"status": "idle"})
+        conversation = [r for r in seen if r["name"] == "conversation"]
+        assert len(conversation) == 1
+        assert conversation[0]["from"] == "end-turn"
+        assert conversation[0]["to"] == "idle"
+    finally:
+        _reset()
+        db.close()
+
+
+def test_represented_source_is_attributed() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(
+            session_id="represented-1",
+            telemetry_source="represented",
+        )
+        log.append("user_message", {"content": "hidden"})
+        log.append("agent_message", {"text": "hidden"})
+        log.append("turn_complete", {"stop_reason": "end_turn"})
+        conversation = [r for r in seen if r["name"] == "conversation"]
+        assert [r["to"] for r in conversation] == [
+            "sending", "responding", "end-turn", "idle",
+        ]
+        assert all(r["session_id"] == "represented-1" for r in conversation)
+        assert all(r["source"] == "represented" for r in conversation)
+    finally:
+        _reset()
+
+
+def test_represented_store_threads_worktree_identity() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        store = LiveEventStore()
+        log = store.get_or_create("represented-1", worktree_id="wt-1")
+        log.append("turn_complete", {"stop_reason": "end_turn"})
+        assert seen
+        assert all(record["worktree_id"] == "wt-1" for record in seen)
+    finally:
+        _reset()
+
+
+def test_bounded_causal_trigger_is_preserved() -> None:
+    _reset()
+    seen: list[dict] = []
+    telemetry.set_telemetry_sink(seen.append)
+    try:
+        log = EventLog(session_id="s")
+        log.append(
+            "session_state_changed",
+            {"status": "stopped", "trigger": "daemon_restart"},
+        )
+        assert seen
+        assert all(record["trigger"] == "daemon_restart" for record in seen)
     finally:
         _reset()
 
@@ -187,8 +524,6 @@ def test_load_sink_from_config_default_path_honors_config_dir(monkeypatch, tmp_p
 
 
 # --- built-in spool sink (dependency-free, out-of-process drain) ------------
-
-import json  # noqa: E402
 
 
 def _read_spool(path) -> list[dict]:
