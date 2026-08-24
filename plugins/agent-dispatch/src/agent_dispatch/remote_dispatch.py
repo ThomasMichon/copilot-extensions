@@ -242,8 +242,8 @@ def build_remote_browse_argv(
             argv += ["--recent-mins", str(recent_mins)]
     elif subcommand == "inbox" and getattr(args, "awaiting_steer", False):
         # Forward the steer-surface filter so a remote machine tab shows the
-        # peer's awaiting-steer tasks too (needs the peer on a build that knows
-        # --awaiting-steer; older peers degrade to their default inbox).
+        # peer's awaiting-steer tasks too. The peer must run a build that knows
+        # --awaiting-steer; mixed-version peers report the unsupported flag.
         argv += ["--awaiting-steer"]
     if not board and getattr(args, "status", None):
         argv += ["--status", args.status]
