@@ -64,6 +64,10 @@ jobs:
         # chain, never a `.venv`/`venv` link and never a PATH python. --strict
         # fails the build on any regression now that the migration has landed.
         run: python tools/check-runtime-resolution.py --strict
+      - name: Hook process hygiene
+        # PowerShell command hooks already run inside PowerShell. Spawning a
+        # second interpreter can surface Default Terminal windows on Windows.
+        run: python tools/check-hook-process-hygiene.py
       - name: Skills
         run: python tools/check-skills.py
       - name: Docs consistency

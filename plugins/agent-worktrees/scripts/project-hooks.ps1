@@ -17,12 +17,7 @@ $HookPath = Join-Path $env:USERPROFILE ".$ProjectName\hooks\session-start.ps1"
 if (-not (Test-Path $HookPath)) { exit 0 }
 
 try {
-    $p = Get-Command pwsh -ErrorAction SilentlyContinue
-    if ($p) {
-        & $p.Source -NoProfile -File $HookPath
-    } else {
-        powershell.exe -NoProfile -ExecutionPolicy Bypass -File $HookPath
-    }
+    & $HookPath
 } catch { }
 
 exit 0
