@@ -41,7 +41,7 @@ class FakeClient:
                 return dict(s)
         raise BridgeClientError(404, "not found")
 
-    def resume_session(self, sid):
+    def resume_session(self, sid, *, request_timeout=None):
         self.resumed.append(sid)
         for s in self.sessions:
             if s.get("session_id") == sid:
@@ -74,12 +74,13 @@ class FakeClient:
 
     def start_session(self, *, agent=None, caller_id=None, sender_repo=None,
                       force_new=False, caller_owner_ref=None,
-                      model=None, effort=None):
+                      model=None, effort=None, request_timeout=None):
         self.started.append(
             {"agent": agent, "caller_id": caller_id,
              "sender_repo": sender_repo, "force_new": force_new,
              "caller_owner_ref": caller_owner_ref,
-             "model": model, "effort": effort}
+             "model": model, "effort": effort,
+             "request_timeout": request_timeout}
         )
         if self._conflict_sid is not None:
             raise BridgeClientError(
@@ -475,3 +476,28 @@ def test_resolve_target_busy_session_id_force_takes_over(fixed_caller, monkeypat
     sid = m._resolve_target(client, "s1", force=True)
     assert client.ended == ["s1"]
     assert sid == "fresh-sid"
+
+
+def test_wait_for_idle_surfaces_connect_failure_detail(capsys):
+    class FailedClient:
+        def get_session(self, session_id):
+            return {"status": "failed"}
+
+        def read_range(self, session_id):
+            return [{
+                "event": "connect_failed",
+                "data": {
+                    "stage": 7,
+                    "stage_name": "LAUNCH_ACP",
+                    "message": "ACP launch timed out",
+                },
+            }]
+
+    with pytest.raises(SystemExit) as exc:
+        m._wait_for_idle(FailedClient(), "failed-session")
+
+    assert exc.value.code == 1
+    assert (
+        "[stage 7/LAUNCH_ACP] ACP launch timed out"
+        in capsys.readouterr().err
+    )

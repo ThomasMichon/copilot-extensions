@@ -77,10 +77,10 @@ hung turn. Configure in `~/.agent-bridge/config.yaml`:
 
 ```yaml
 timeouts:
-  codespace_boot: 180   # waiting for a Shutdown codespace to boot
+  codespace_boot: 300   # waiting for a Shutdown codespace to boot
   ssh_connect: 120      # establishing SSH (patient: wake-on-LAN / ProxyJump)
-  session_start: 60     # ACP handshake (client start + initialize)
-  session_new: 180      # cold ACP session/new (large-workspace + skills load)
+  session_start: 240    # ACP handshake (client start + initialize)
+  session_new: 1200     # cold ACP session/new (large-workspace + skills load)
   command: 1800         # a single turn/command to complete
 ```
 

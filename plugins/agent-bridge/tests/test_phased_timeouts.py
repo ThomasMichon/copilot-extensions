@@ -2,23 +2,68 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import yaml
 
+from agent_bridge import __main__ as cli
+from agent_bridge.client import BridgeClient
 from agent_bridge.models import PhasedTimeouts, ServiceConfig
 
 
 class TestPhasedTimeouts:
     def test_defaults(self) -> None:
         cfg = ServiceConfig()
+        assert cfg.timeouts.codespace_boot == 300.0
+        assert cfg.timeouts.session_start == 240.0
+        assert cfg.timeouts.session_new == 1200.0
         assert cfg.timeouts.codespace_boot > 0
         assert cfg.timeouts.session_start > 0
         assert cfg.timeouts.session_new > 0
         assert cfg.timeouts.command > 0
-        # Cold-boot is the most generous, a single turn the longest cap.
+        # Cold-boot must cover the handshake budget; a turn has the longest cap.
         assert cfg.timeouts.codespace_boot >= cfg.timeouts.session_start
         # A cold session/new (workspace + skills load) gets a larger budget
         # than the fast initialize handshake (#2107).
         assert cfg.timeouts.session_new >= cfg.timeouts.session_start
+
+    def test_startup_http_budget_covers_all_phases(self, monkeypatch) -> None:
+        timeouts = PhasedTimeouts(
+            codespace_boot=300,
+            ssh_connect=120,
+            session_start=240,
+            session_new=1200,
+        )
+        monkeypatch.setattr(cli, "_phased_timeouts", lambda: timeouts)
+        assert cli._startup_request_timeout() == 1770.0
+        assert cli._startup_request_timeout(resume=True) == 5310.0
+        assert cli._startup_request_timeout(
+            resume=True,
+            fresh_fallback=True,
+        ) == 7080.0
+
+        timeouts.session_host_ready = 600
+        assert cli._startup_request_timeout() == 2070.0
+
+    def test_client_forwards_startup_request_timeout(self) -> None:
+        client = object.__new__(BridgeClient)
+        client._request = MagicMock(return_value={})
+
+        client.start_session(agent="container:repo-1", request_timeout=1770.0)
+        assert client._request.call_args.kwargs["request_timeout"] == 1770.0
+
+        client.resume_session("session-1", request_timeout=1770.0)
+        assert client._request.call_args.kwargs["request_timeout"] == 1770.0
+
+        client.resume_worktree("worktree-1", request_timeout=5310.0)
+        assert client._request.call_args.kwargs["request_timeout"] == 5310.0
+
+        client.submit_prompt(
+            "session-1",
+            "hello",
+            request_timeout=7080.0,
+        )
+        assert client._request.call_args.kwargs["request_timeout"] == 7080.0
 
     def test_parsed_from_yaml(self, tmp_path, monkeypatch) -> None:
         config_dir = tmp_path
