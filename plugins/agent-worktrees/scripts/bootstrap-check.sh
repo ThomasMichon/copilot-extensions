@@ -1,10 +1,19 @@
 #!/usr/bin/env bash
-# Bootstrap hook -- runs on session start via hooks.json
-# Auto-updates the agent-worktrees runtime payload when stale.
-# If not installed, prints a hint (full install requires interactive setup).
+# Bootstrap hook -- runs on session start via hooks.json. hooks.json runs the
+# PLUGIN PAYLOAD copy first, falling back to the deployed ~/.agent-worktrees/bin
+# copy. Two jobs, both grace-window-cheap:
+#   1. FIRST install (runtime not provisioned yet): fire the installer's cheap
+#      'stamp' action so the self-provisioning agent-worktrees TOOL binstub lands
+#      on PATH THIS session; the binstub builds the versioned venv on first use
+#      (#1236/#1393). No venv build on the hook. Only fires when run from the
+#      plugin payload (install.sh is a sibling) and the installer declares a
+#      'stamp' action; otherwise a setup hint (deployed-copy fallback).
+#   2. RECONCILE (already provisioned via the full launcher install): refresh the
+#      deployed lib-copy package when the source commit drifts.
 
 set -euo pipefail
 
+ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo '')"
 INSTALL_DIR="$HOME/.agent-worktrees"
 LIB_DIR="$INSTALL_DIR/lib"
 PKG_DST="$LIB_DIR/agent_worktrees"
@@ -13,12 +22,41 @@ _awresolve="$INSTALL_DIR/bin/resolve-runtime.sh"
 VENV_PYTHON="${AW_PY:-}"
 MANIFEST="$INSTALL_DIR/deploy-manifest.json"
 
-# --- Not installed: hint only ---
-if [[ ! -x "$VENV_PYTHON" ]]; then
+# Is the tools-half runtime already provisioned? (versioned-venv marker model,
+# #581/#1393 -- a `.venv` link OR a current-version marker whose slot python
+# exists.) A tools-half box has no full-launcher resolve-runtime.sh (so AW_PY is
+# empty) yet IS provisioned; this keeps it from being mistaken for "not
+# installed" and re-stamped/nagged every session.
+_aw_provisioned() {
+    [ -e "$INSTALL_DIR/.venv" ] && return 0
+    if [ -f "$INSTALL_DIR/current-version" ]; then
+        local cv; cv="$(tr -d '[:space:]' < "$INSTALL_DIR/current-version" 2>/dev/null || true)"
+        if [ -n "$cv" ] && { [ -x "$INSTALL_DIR/versions/$cv/bin/python" ] || [ -f "$INSTALL_DIR/versions/$cv/Scripts/python.exe" ]; }; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# --- FIRST install (nothing provisioned yet): stamp so the tool binstub is on
+#     PATH this session and self-provisions the runtime on first use. ---
+if [[ ! -x "$VENV_PYTHON" ]] && ! _aw_provisioned; then
+    _installer="${ScriptDir:+$ScriptDir/install.sh}"
+    if [[ -n "$_installer" && -f "$_installer" ]] && grep -qE '^[[:space:]]*stamp\)' "$_installer" 2>/dev/null; then
+        bash "$_installer" stamp >/dev/null 2>&1 || true
+        exit 0
+    fi
+    # Deployed-copy fallback on a still-unprovisioned box -> setup hint.
     echo ''
     echo -e '\033[33m[agent-worktrees] Runtime not installed.\033[0m'
     echo -e "\033[90m  Ask Copilot to 'set up agent-worktrees' to bootstrap the runtime.\033[0m"
     echo ''
+    exit 0
+fi
+
+# Provisioned via the tools-half (versioned slot) but the full-launcher resolver
+# isn't deployed -> nothing to reconcile via the legacy lib-copy path; no-op.
+if [[ ! -x "$VENV_PYTHON" ]]; then
     exit 0
 fi
 
