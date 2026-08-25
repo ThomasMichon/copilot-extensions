@@ -38,56 +38,56 @@
     "sessionStart": [
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\session-conduct.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/session-conduct.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\session-conduct.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/session-conduct.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\session-machine.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/session-machine.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\session-machine.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/session-machine.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\session-ext-reload.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/session-ext-reload.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\session-ext-reload.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/session-ext-reload.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\bootstrap-check.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\bootstrap-check.ps1\" }; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$PWD/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/bootstrap-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\bootstrap-check.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\bootstrap-check.ps1\" }; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$PWD/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/bootstrap-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 15
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\project-hooks.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/project-hooks.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\project-hooks.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/project-hooks.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\register-nudge.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\register-nudge.ps1\" }; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$PWD/scripts/register-nudge.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/register-nudge.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = (Join-Path (Get-Location).Path 'scripts\\register-nudge.ps1'); if (-not (Test-Path $s)) { $s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\register-nudge.ps1\" }; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$PWD/scripts/register-nudge.sh\"; [ -f \"$s\" ] || s=\"$HOME/.agent-worktrees/bin/register-nudge.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\register-session.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/register-session.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\register-session.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/register-session.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 5
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\anchor-hygiene-check.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/anchor-hygiene-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\anchor-hygiene-check.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/anchor-hygiene-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 10
       },
       {
         "type": "command",
-        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\provision-check.ps1\"; if (Test-Path $s) { Set-Location -LiteralPath $HOME; & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/provision-check.sh\"; if [ -f \"$s\" ]; then cd \"$HOME\" && bash \"$s\"; fi; exit 0",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\provision-check.ps1\"; if (Test-Path $s) { Set-Location -LiteralPath $HOME; & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/provision-check.sh\"; if [ -f \"$s\" ]; then cd \"$HOME\" && bash \"$s\"; else printf '{}'; fi; exit 0",
         "timeoutSec": 15
       }
     ],
@@ -95,7 +95,7 @@
       {
         "type": "command",
         "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\deregister-session.ps1\"; if (Test-Path $s) { & $s }",
-        "bash": "s=\"$HOME/.agent-worktrees/bin/deregister-session.sh\"; [ -f \"$s\" ] && bash \"$s\"",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/deregister-session.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else :; fi",
         "timeoutSec": 5
       }
     ]
