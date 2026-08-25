@@ -5,7 +5,7 @@
   local services on a user's machine.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-08-18
+- **Last revised:** 2026-08-24
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -41,6 +41,11 @@ into a coordination problem.
 - **Plugin runtime** — the self-contained venv + binstub a runtime plugin's own
   installer deploys under `~/.agent-*`, per the shared **install contract**. The
   runtime, not a git checkout, is what executes.
+- **Drop-in contribution registry** — a consumer-owned `*.d` directory through
+  which independently-installed plugins contribute manifests, pointers, or
+  config fragments without importing across runtimes or editing one shared file.
+  Presence is only a discovery candidate: the consumer validates provenance,
+  current eligibility, and the referenced target before activating it.
 - **Service-bearing plugin** — a plugin whose runtime includes a **long-lived
   local service** (an always-on daemon), as distinct from an on-demand CLI or a
   payload-only (skills/extension) plugin.
@@ -157,6 +162,29 @@ it is absent**, rather than carrying the heavyweight multiplexer itself. The
 capability lives where it belongs (the Worktree Manager); the plugins consume it if
 it is there and degrade cleanly if it is not.
 
+### self-auditing-drop-in-composition
+Cross-plugin `*.d` registries are **safe to sweep and easy to clean**. A routine
+consumer sweep treats each entry independently: a malformed manifest, missing
+target, disabled or uninstalled contributor, ambiguous identity, or unavailable
+command makes only that contribution inert; every valid peer still loads. The
+consumer emits a bounded, actionable warning that identifies the entry, target,
+and reason, while long-running services deduplicate or rate-limit repeats so one
+stale file—or a directory full of stale files—cannot flood logs. A scan that
+cannot authoritatively enumerate the registry is **indeterminate**, never
+misreported as an empty registry that withdraws healthy last-known contributions.
+Removing or deactivating a contribution is a
+desired-set change, not a restart requirement: live state sourced from an entry
+is withdrawn when the entry ceases to be valid.
+
+Each consumer also owns a **doctor** surface that audits its contribution
+registry without activating entries. Doctor distinguishes malformed, missing,
+unauthorized, ambiguous, duplicate, and legacy/unattributed entries; reports the
+exact file and target; and recommends the narrow cleanup or re-registration
+command. Routine sweeps never delete user state. Doctor is report-only by
+default, and may auto-fix only an entry whose managed ownership is proven by a
+consumer-issued registration receipt and whose file identity is revalidated
+immediately before unlinking.
+
 ### version-skew-tolerant-contracts
 Because every plugin updates on its **own schedule**, the parties to a live
 interaction may be at **different versions** at the same moment — a client newer
@@ -216,6 +244,19 @@ running.
 Absent an optional peer or coordinator, a service still performs its own local
 function; optional cross-service features simply stay dark until the peer is
 present. A missing sibling degrades a feature, never the whole service.
+
+### stale-drop-ins-are-inert-and-legible
+A stale cross-plugin drop-in never breaks its consumer and never silently stays
+active. Discovery validates entries one at a time, continues past every bad
+entry, and rebuilds the live desired set from what is valid **now** rather than
+additively retaining what was valid once. A failed/partial registry enumeration
+is not a valid desired-set snapshot: the consumer retains its last-known set,
+warns, and retries rather than turning uncertainty into mass removal. Invalid
+contributions are visible
+through warnings and doctor findings with stable reason codes, so cruft can be
+removed deliberately instead of accumulating invisibly. Operational resilience
+and hygiene are complementary: the sweep stays available; doctor makes the
+degraded edge legible and removable.
 
 ### interoperate-across-version-skew
 Two composed services at different versions still interoperate within their
@@ -339,6 +380,20 @@ credentials.** Guarded by the *single-instance-lease*, cut over by
 
 ## Provenance
 
+- **2026-08-24** — Added the **drop-in contribution registry** concept,
+  **self-auditing-drop-in-composition** feature, and
+  **stale-drop-ins-are-inert-and-legible** behavior. Mined from a suite-wide
+  audit of `providers.d`, `config.d`, Picker pivots, managed SSH fragments, and
+  the designed dispatch registrar: consumers generally avoided hard failure,
+  but several skipped missing targets silently, retained live state
+  additively, restored installed-but-disabled contributions, or had no doctor
+  path to identify cruft. The intent separates routine availability from
+  hygiene: per-entry failures warn but never abort a sweep; only an authoritative
+  scan drives the live desired set; consumer-owned doctor commands report exact
+  stale entries and recommend narrow cleanup, while auto-fix requires a
+  consumer-issued ownership receipt and pre-unlink identity recheck. Realized by
+  the `drop-in-registry-hygiene` pattern and tracked by
+  ThomasMichon/copilot-extensions#1043.
 - **2026-07-13** — Initial authoring. Intent mined from the recurring
   static-port coordination pain across the service-bearing plugins (the
   hand-maintained loopback-port table in `docs/architecture.md` and the

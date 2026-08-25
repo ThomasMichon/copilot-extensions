@@ -45,7 +45,11 @@ absolute-command manifest is the only seam that survives. Two rules keep it clea
   manifest*, never re-point it.
 - **The host degrades if the provider is absent.** A provider is optional: a missing
   or malformed manifest is skipped with a warning and discovery never raises, so a
-  peer's absence darkens only that namespace, never the host daemon.
+  peer's absence darkens only that namespace, never the host daemon. The sweep
+  reconciles the current desired set rather than retaining providers it saw once,
+  and the host's doctor command identifies stale entries and exact cleanup. The
+  suite-wide warning, provenance, reconciliation, and doctor rules are the
+  [`drop-in-registry-hygiene`](drop-in-registry-hygiene.md) pattern.
 
 **No cross-plugin reach-around.** A plugin talks to a sibling through the sibling's
 declared surface (its CLI, its service endpoint, its resolver), never by poking the
@@ -63,3 +67,5 @@ whose absence would break everyone.
 - Intent: [`visions/plugin-services/`](../../visions/plugin-services/README.md)
 - Hub: [`docs/patterns/`](README.md) · Reality: [`architecture.md`](../architecture.md)
   (communication paths, provider-manifest registry)
+- Hygiene contract:
+  [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md)

@@ -158,7 +158,10 @@ control harness (3 plugins enabled)                     GitHub CodeSpace
   filesystem pointer and an unrecognized manifest field. `agent-codespaces` never
   imports the harness plugin; the harness plugin never writes into agent-codespaces'
   state beyond its own drop-in pointer. A stale/uninstalled provider is skipped, not
-  fatal.
+  fatal; it warns with an actionable finding, and `agent-codespaces doctor`
+  identifies the exact pointer and cleanup/re-registration remedy under the
+  suite-wide
+  [`drop-in-registry-hygiene`](drop-in-registry-hygiene.md) contract.
 - **Provenance is authoritative, not guessed.** `workspace_repo` makes the
   vessel→product link explicit, so the ACP cwd is the product checkout by
   construction — not a fragile parse of the launch string, and not `/home/<user>`.
@@ -193,3 +196,5 @@ control harness (3 plugins enabled)                     GitHub CodeSpace
   (`resolve_codespace_plugins`).
 - The provider-manifest seam agent-codespaces uses to reach agent-bridge:
   [`a-la-carte-independence`](a-la-carte-independence.md).
+- Drop-in warning and cleanup semantics:
+  [`drop-in-registry-hygiene`](drop-in-registry-hygiene.md).
