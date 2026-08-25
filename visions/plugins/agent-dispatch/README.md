@@ -384,8 +384,22 @@ makes them **available wherever that repo is synced** — they light up on sync 
 wind down when the repo or its declaration goes away, with no per-host installer
 step. Second, the declaration carries **provenance** — which system owns it — so
 the aggregated, machine-wide set of supervised units stays **legible** even though
-many independent systems contribute to it. Crucially there is **one source of
-truth**: the declared documents themselves. The imperative registration call
+many independent systems contribute to it.
+
+A plugin can contribute the same way: its session-start hook leaves a lightweight
+pointer to declarations in the plugin's own footprint. That drop-in is a
+**candidate, not authority**. It contributes only while that exact plugin source
+is effectively enabled **globally or by at least one registered project
+repository** on the machine, and only while the pointer still resolves inside a
+current, identity-matching root for that plugin. Ambiguous roots do not get an
+arbitrary winner, and merely finding a stale drop-in from a former install never
+keeps work alive. This is deliberately machine-wide: enabling a plugin in any
+registered project makes its contribution available to the singleton, while the
+declaration's ordinary filters decide which repos, machines, and environments it
+may serve.
+
+Crucially there is **one source of truth**: the declared documents themselves. The
+imperative registration call
 (*registered-supervision*) is a **thin writer over that source** — to register is
 to **write a declaration**, to remove is to **delete it**, to query a handle is to
 **read it back** — after which the singleton discovers and reconciles the change
@@ -611,7 +625,11 @@ of *declaring it where the supervisor already looks*, and removing it is a matte
 **continuously-reconciled reflection** of what every registered system currently
 declares — the same self-healing posture the singleton already applies to a unit's
 liveness, extended to the *membership* of the set itself. Discovery reconciles
-**intent to reality**: what is declared is what runs.
+**intent to reality**: what is declared by an eligible source is what runs. For a
+plugin-owned source, changes to global or registered-project plugin enablement are
+membership changes too: disabling the plugin everywhere winds its units down even
+if an old pointer remains, while enabling it in any registered project activates
+the contribution without a supervisor restart.
 
 ### overrides-take-precedence
 The running set of supervised work is **declarations reconciled with operator
@@ -664,6 +682,18 @@ does **not** quietly undo it.
 
 ## Provenance
 
+- **2026-08-24** — Tightened *declarative-discovered-registrar* and
+  *discover-and-live-reconcile* for plugin-owned declarations. A plugin may drop a
+  pointer to declarations in its own footprint from a session-start hook, but the
+  machine-level drop-in is only a **candidate**: the singleton activates it only
+  while that canonical plugin source is enabled globally or by at least one
+  registered project repo, and only when the target remains inside a current valid
+  identity-matching root for that plugin. Ambiguous roots have no arbitrary winner.
+  Stale files from disabled or uninstalled plugins are inert; enablement changes
+  participate in live reconciliation. Mined from the
+  agent-bridge `providers.d` and agent-codespaces `config.d` precedents, with an
+  explicit stale-contribution guard added for autonomous supervised work. Concrete
+  directory and manifest formats stay spec-level.
 - **2026-08-11** — Added the *overrides-take-precedence* behavior: the running set
   of supervised work is declarations **reconciled with operator overrides**, and an
   override wins. A fast, local, reversible enable/disable toggle on a declared unit

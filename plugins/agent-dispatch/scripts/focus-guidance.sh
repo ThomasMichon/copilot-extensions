@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev213"
+plugin_version="0.1.0-dev214"
 kernel="[owner: agent-dispatch@${plugin_version}]
 Before starting work likely to overlap another worktree, check \`agent-dispatch focus --list\`. At the start of substantial operator-led or task-less work, and when its direction changes, advertise it early with \`agent-dispatch focus \"<one-line subject>\"\`; this is shorthand for writing the same agent-worktrees status-core summary, not a separate store. Agent-worktrees conduct and regular \`agent-worktrees status --summary\` remain authoritative for ongoing disposition, and their normal update cadence still applies."
 

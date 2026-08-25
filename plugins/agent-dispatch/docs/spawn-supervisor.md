@@ -246,6 +246,93 @@ The machine filter selects which singleton may run the unit; the emitter's
 disable|enable declared:<owner>:<name>` provides immediate pause/resume parity
 without racing a declaration sync.
 
+### Plugin-owned registrar drop-ins (designed; not yet built)
+
+Current registrar discovery has two inputs:
+
+- operator-managed pointers in `~/.agent-dispatch/registrar/pointers.json`; and
+- declarations under a pointed repo's `.agent-dispatch/registrar/`.
+
+It does **not** yet have a plugin contribution directory. The next discovery
+increment adds `~/.agent-dispatch/registrar.d/*.json`, following the existing
+agent-bridge `providers.d` and agent-codespaces `config.d` conventions. A
+contributing plugin ships declarations in its own footprint and its
+`sessionStart` hook atomically writes an idempotent candidate manifest:
+
+```json
+{
+  "schema_version": 1,
+  "plugin": "example-producer@example-marketplace",
+  "plugin_root": "/absolute/path/to/example-producer",
+  "registrar": "references/agent-dispatch/registrar"
+}
+```
+
+`registrar` is relative to `plugin_root`; path canonicalization must prove it
+does not escape that root. The filename is only a stable collision-free key.
+The manifest's canonical `name@marketplace` identity is the authorization key.
+
+Unlike the operator-managed pointer registry, `registrar.d` is an **untrusted
+candidate index**, not proof that a contribution should run. On every reconcile,
+the singleton computes a machine-wide eligible plugin set:
+
+1. truthy `enabledPlugins` in user-global Copilot settings
+   (`~/.copilot/settings.json`, with the local override applied); plus
+2. truthy `enabledPlugins` from every adopted project in
+   `~/.agent-worktrees/projects.yaml`, joined to the current-platform checkout
+   in `~/.agent-worktrees/repos.yaml` and read through the normal native-first
+   repo-settings resolver.
+
+One registered project enabling a plugin is sufficient; the contribution is
+then available machine-wide and its declaration filters own repo/machine/env
+scope. Missing agent-worktrees registries simply contribute no repo-enabled
+plugins, leaving the user-global lane usable.
+
+A candidate is active only when all of these hold:
+
+- its exact `name@marketplace` source is in that effective enabled set;
+- every registered-project checkout used as enablement evidence proves it is the
+  registered repo: canonical Git top-level plus normalized remote identity match
+  the joined `projects.yaml`/`repos.yaml` record;
+- `plugin_root` is the **one unambiguous, currently resolvable** on-disk root for
+  that source (an installed marketplace payload or the enabled repo's resolved
+  local plugin), after canonicalization;
+- the root's own plugin manifest names the requested plugin, and the marketplace
+  resolution/installed layout proves the requested marketplace rather than only
+  finding an arbitrary directory that happens to contain a plugin manifest;
+- the relative registrar directory remains inside that root; and
+- the manifest and declaration documents validate.
+
+All enabling scopes for one canonical source must converge on the same real
+plugin root. If two registered projects reuse a marketplace name for different
+local plugin roots, or global and repo resolution disagree, that source is
+**ambiguous and contributes nothing** until the conflict is removed. The
+source-derived drop-in filename may be overwritten idempotently by several hooks,
+but reconciliation never makes session timing or last-writer order choose the
+active root.
+
+Therefore a disabled plugin, an uninstalled payload, a deleted registered repo,
+an existing path reused by the wrong repo, an obsolete or identity-mismatched
+plugin root, an ambiguous source, a malformed manifest, or a path-escape attempt
+contributes nothing even if its old `registrar.d` file remains. There is no TTL
+and no uninstall cleanup requirement: the live eligibility/root check makes
+stale entries inert.
+
+Plugin candidates are isolated from trusted discovery. The existing fail-loud
+duplicate-name rule remains within the trusted `pointers.json` tier. Trusted
+declarations win over plugin candidates with the same profile name. If two
+plugin sources claim one name, that **name alone** is quarantined from both
+sources; their other non-conflicting declarations still reconcile. A malformed
+or conflicting plugin candidate therefore cannot abort aggregation, preserve a
+last-known desired set, or prevent an unrelated authorization removal from
+winding a unit down. Diagnostics report every skipped candidate/name.
+
+The trusted `pointers.json` surface remains for explicit operator/service
+adoption. Plugin hooks never edit that aggregate JSON file; each owns only its
+drop-in, so independent plugin starts cannot race or erase one another.
+Enablement and root changes are desired-set changes: live reconcile starts,
+updates, or winds down the affected units without restarting the singleton.
+
 ### Operator overrides (built) — the kill-switch
 
 The running set is the declared/registered set **reconciled with operator
