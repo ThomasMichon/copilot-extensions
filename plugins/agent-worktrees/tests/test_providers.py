@@ -183,6 +183,44 @@ class TestRunCli:
         assert r.returncode == 127
         assert "cannot find the file" in r.stderr
 
+    def test_timeout_becomes_sanitized_result(self, monkeypatch):
+        secret = "synthetic-secret-value"
+        argv = [
+            "curl",
+            "-H",
+            f"Authorization: token {secret}",
+            "https://example.com/api",
+        ]
+        monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
+
+        def timeout(args, **kw):
+            raise subprocess.TimeoutExpired(cmd=args, timeout=kw["timeout"])
+
+        monkeypatch.setattr(base.subprocess, "run", timeout)
+        result = base.run_cli(argv, timeout=7)
+
+        assert result.returncode == 124
+        assert result.stderr == "provider command timed out after 7s"
+        assert secret not in repr(result.args)
+        assert result.args[2] == "Authorization: [REDACTED]"
+
+    def test_success_result_does_not_retain_secret_argv(self, monkeypatch):
+        secret = "synthetic-secret-value"
+        argv = ["provider", "--token", secret, "query"]
+        monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
+        monkeypatch.setattr(
+            base.subprocess,
+            "run",
+            lambda args, **kw: subprocess.CompletedProcess(args, 0, "ok", ""),
+        )
+
+        result = base.run_cli(argv)
+
+        assert result.returncode == 0
+        assert result.stdout == "ok"
+        assert secret not in repr(result.args)
+        assert result.args == ["provider", "--token", "[REDACTED]", "query"]
+
 
 class TestScopeFromResult:
     def test_builds_scope_and_templates_labels(self):
