@@ -173,15 +173,18 @@ class TestRunCli:
     def test_never_raises_on_spawn_failure(self, monkeypatch):
         # A missing exe / spawn error must become a returncode=127 result, never
         # an exception that aborts an unrelated command (create-pr's git work).
+        secret = "synthetic-secret-value"
         monkeypatch.setattr(base.shutil, "which", lambda name, path=None: None)
 
         def boom(args, **kw):
             raise FileNotFoundError(2, "The system cannot find the file specified")
 
         monkeypatch.setattr(base.subprocess, "run", boom)
-        r = base.run_cli(["definitely-missing"])
+        r = base.run_cli(["definitely-missing", "--token", secret])
         assert r.returncode == 127
         assert "cannot find the file" in r.stderr
+        assert secret not in repr(r.args)
+        assert r.args == ["definitely-missing", "--token", "[REDACTED]"]
 
     def test_timeout_becomes_sanitized_result(self, monkeypatch):
         secret = "synthetic-secret-value"
