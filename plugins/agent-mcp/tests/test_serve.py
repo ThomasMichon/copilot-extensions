@@ -6,6 +6,7 @@ import sys
 
 import pytest
 
+from agent_mcp.client import UpstreamError
 from agent_mcp.config import parse_config
 from agent_mcp.serve import (
     _HAS_AF_UNIX,
@@ -50,11 +51,14 @@ _CHILD = (
 )
 
 
-def _cfg():
-    return parse_config({
+def _cfg(extra: dict | None = None):
+    data = {
         "server": {"type": "stdio", "command": [sys.executable, "-c", _CHILD]},
         "auth": {"kind": "none"},
-    })
+    }
+    if extra:
+        data.update(extra)
+    return parse_config(data)
 
 
 async def test_warmpool_reuses_one_session():
@@ -82,6 +86,55 @@ async def test_warmpool_list():
         tools = await pool.list("k", _cfg())
         assert [t["name"] for t in tools] == ["echo"]
     finally:
+        await pool.close_all()
+
+
+async def test_warmpool_enforces_fresh_tool_filter():
+    pool = WarmPool()
+    try:
+        initial = _cfg()
+        await pool.call("k", initial, "echo", {"value": 1})
+        session = pool._entries["k"].session
+
+        denied = _cfg({"tools": {"deny": ["echo"]}})
+        with pytest.raises(UpstreamError, match="blocked by bridge tools filter"):
+            await pool.call("k", denied, "echo", {})
+        assert await pool.list("k", denied) == []
+        assert pool._entries["k"].session is not session
+    finally:
+        await pool.close_all()
+
+
+async def test_warmpool_reopens_when_config_widens():
+    pool = WarmPool()
+    try:
+        denied = _cfg({"tools": {"deny": ["echo"]}})
+        assert await pool.list("k", denied) == []
+        old_session = pool._entries["k"].session
+
+        widened = _cfg()
+        assert [tool["name"] for tool in await pool.list("k", widened)] == ["echo"]
+        assert pool._entries["k"].session is not old_session
+        result = await pool.call("k", widened, "echo", {"value": 2})
+        assert json.loads(result["content"][0]["text"]) == {"value": 2}
+    finally:
+        await pool.close_all()
+
+
+async def test_busy_bridge_does_not_block_other_bridge():
+    pool = WarmPool()
+    lock = await pool._key_lock("busy")
+    await lock.acquire()
+    queued = asyncio.create_task(pool.call("busy", _cfg(), "echo", {"value": 1}))
+    try:
+        result = await asyncio.wait_for(
+            pool.call("other", _cfg(), "echo", {"value": 2}),
+            timeout=2,
+        )
+        assert json.loads(result["content"][0]["text"]) == {"value": 2}
+    finally:
+        lock.release()
+        await queued
         await pool.close_all()
 
 

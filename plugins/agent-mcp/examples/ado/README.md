@@ -37,8 +37,11 @@ auth:
   resource: 2a72489c-aab2-4b65-b93a-a91edccf33b8   # mcp.dev.azure.com
 ```
 
-…and layers a `decorators:` stack on top. Every variant also stacks a read-only
-`filter` (drop the mutating tools). The five variants in this folder:
+…and layers a `decorators:` stack on top. Every variant also carries the same
+read-only deny list in **both** top-level `tools:` and a decorator `filter`.
+The top-level filter is the authorization boundary shared by bridge and
+materialized CLI fallback; the decorator shapes the primary MCP surface. The
+five variants in this folder:
 
 | file | stack | idea |
 |------|-------|------|
@@ -88,6 +91,13 @@ Each [`agents/ado-*.agent.md`](agents) wired to one variant, same task
 
 **All five completed the task correctly** — every adapter is agent-usable, with
 no change to the upstream server.
+
+Each example agent also documents a same-config materialized fallback. That
+fallback exposes raw read tools after the top-level filter; decorator-specific
+surfaces (`run_code`, `find_tool`, transforms, storage handles) are intentionally
+not claimed on the one-shot CLI path. For `defer`/`code-mode` this means the
+fallback catalog is deliberately wider (the raw read catalog rather than the
+three-tool decorated surface), while remaining read-only.
 
 ## Choosing an adapter
 

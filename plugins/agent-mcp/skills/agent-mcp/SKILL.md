@@ -5,8 +5,9 @@ description: >-
   inject host credentials, and set up repo-scoped Copilot sub-agents backed by
   it. Use when asked to "wrap an MCP", "bridge an MCP", "add auth to an MCP
   server", "proxy an MCP", "use an MCP that needs az/gh login", "set up a
-  sub-agent for <service>", "troubleshoot an agent-mcp bridge", or to expose a
-  remote/authenticated MCP to Copilot.
+  sub-agent for <service>", "reliable MCP agent", "materialized fallback",
+  "troubleshoot an agent-mcp bridge", or to expose a remote/authenticated MCP to
+  Copilot.
 ---
 
 # agent-mcp
@@ -125,6 +126,19 @@ path just works.
 **3. Verify end-to-end** by invoking the sub-agent and having it call an upstream
 tool (e.g. fetch a repo). A clean way to prove the bridge -- not a stale runtime
 -- is in use is to exercise a real query and confirm a live result.
+
+**4. Add the equivalent CLI fallback.** Every reliable agent-mcp-backed
+sub-agent should name a materialized fleet over the same bridge config, probe a
+read-only stub after catalog failure, preserve identity and top-level `tools:`
+filtering, and stop only after both surfaces fail. Decorator-only restrictions
+are not applied by the CLI path, and frontmatter-only env is not inherited.
+Use an existing fleet first; re-materialize when the expected stub is absent or
+`manifest.json.generated_by` differs from `agent-mcp --version` (config drift
+needs a deploy-owned digest). Use `--no-serve` for identity-sensitive fallback
+calls. The complete reusable agent
+template, Windows/POSIX commands, failure matrix, warmth guidance, and drift
+contract live in
+[Reliable MCP-backed sub-agent](references/reliable-agent.md).
 
 > **`command: agent-mcp` is cross-platform.** The Windows binstub is a single
 > `.cmd` (no competing `.ps1`), so a bare `agent-mcp` resolves to it under
@@ -375,6 +389,14 @@ of speaking JSON-RPC.
   Re-running `materialize` rebuilds the tree atomically (temp dir + swap), so it
   doubles as a drift refresh. The bridge's `tools:` allow/deny filter gates which
   tools are materialized.
+
+For sub-agent reliability, this fleet is the **same-bridge fallback** after a
+Copilot catalog/registration failure -- not a raw bypass. Authorization must be
+captured by bridge auth + top-level `tools:`; decorator stacks are not applied
+on the one-shot CLI path. Preserve the primary error, verify identity/capability
+through a read-only stub, and report both errors if the upstream also fails.
+See
+[Reliable MCP-backed sub-agent](references/reliable-agent.md).
 
 ## CLI -> MCP: the `cli` server type
 

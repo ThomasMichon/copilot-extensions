@@ -300,7 +300,9 @@ def _cmd_materialize(args: argparse.Namespace) -> int:
     server = _materialize.server_name_for(cfg, args.server_name)
     dest = Path(args.dest).expanduser() if args.dest else _materialize.default_dest()
     server_dir = dest / server
-    bridge_ref = str(cfg.source_path) if cfg.source_path else args.name
+    bridge_ref = (
+        str(cfg.source_path.resolve()) if cfg.source_path else args.name
+    )
     _materialize.write_farm(
         server_dir, plan, server=server, bridge_ref=bridge_ref,
         version=__version__, windows=args.windows,

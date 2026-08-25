@@ -629,9 +629,10 @@ instead of registering many MCP tools on the primary agent. This keeps the
 primary context lean and isolates credential scope. Define these with the
 **`customizing-copilot:defining-subagents`** skill, and honor its **MCP-readiness / anti-recursion**
 pattern: a sub-agent checks its MCP tools are actually available before using
-them, and reports back to the host when they are not (the host can fall back to
-a CLI). If `agent-dispatch` is in the set, its MCP surface is a natural fit for a
-delegated queue sub-agent.
+them. For an authorization-equivalent agent-mcp bridge, it records a catalog
+failure and uses the same bridge's materialized CLI fleet before stopping; raw
+product/API bypasses remain forbidden. If `agent-dispatch` is in the set, its MCP
+surface is a natural fit for a delegated queue sub-agent.
 
 ### The primary-session exception (narrow)
 

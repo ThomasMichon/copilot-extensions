@@ -34,6 +34,41 @@ mcp-servers:
 For setup steps use the bundled **`agent-mcp`** skill; for per-machine tuning of
 an existing bridge use **`customizing-bridges`**.
 
+## Reliable agents: one bridge, two surfaces
+
+A robust MCP-backed sub-agent pairs its primary `mcp-servers` catalog with a
+materialized CLI fleet over the **same bridge config**. When Copilot fails to
+register or retain the catalog, the agent preserves that error, probes the
+identity-matched fleet, and continues through the CLI surface. It stops only
+when both surfaces fail.
+
+This is equivalent transport only when authorization is expressed by the shared
+bridge auth and top-level `tools:` allow/deny filter. `call`/`materialize` do
+not apply decorator stacks. Duplicate static name restrictions in top-level
+`tools:`; conditional `gate`/argument-dependent authorization cannot be
+represented there and therefore forbids this fallback. Shape-only decorators
+yield a wider raw fallback catalog that the agent must document. A credential
+failure, denied operation, confirmation gate, or unavailable upstream still
+fails honestly.
+
+Identity-affecting values belong in the bridge config/overlay, not only in
+`mcp-servers.env`, because shell fallback does not inherit frontmatter-only env.
+
+Use an existing fleet first. Re-materialize when the expected stub is absent or
+`manifest.json.generated_by` differs from `agent-mcp --version`; repositories
+that need config/schema/overlay drift detection should own a digest of the
+effective post-overlay config.
+Materialize standing fleets from a stable checkout or plugin-shipped named
+bridge; use `--windows` for PowerShell/CMD shims. On Windows pass arguments via
+`--request-file` to the `.ps1` shim. Use `--no-serve` for identity-sensitive
+readiness/fallback calls unless the deployment lifecycle evicts warm sessions
+after config/auth changes. Warmth can amortize cold starts, but cannot rescue an
+upstream that does not initialize.
+
+The full reusable `.agent.md` template, platform commands, failure matrix,
+security boundaries, and deploy/drift checklist are in
+[Reliable MCP-backed sub-agent](skills/agent-mcp/references/reliable-agent.md).
+
 ## Concepts
 
 - **Bridge** — one upstream MCP server exposed locally over stdio. Defined by a

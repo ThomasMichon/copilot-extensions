@@ -3,7 +3,8 @@ name: defining-subagents
 description: >
   Define Copilot CLI custom agents (sub-agents) for delegation -- the .agent.md
   file format, frontmatter properties, tool aliases, invocation, owning MCP
-  servers per-agent, and the anti-recursion / MCP-readiness pattern. Use when
+  servers per-agent, reliable materialized CLI fallback, and the anti-recursion
+  / MCP-readiness pattern. Use when
   creating or editing a custom agent, a .agent.md file, or configuring sub-agent
   delegation.
   Trigger phrases include:
@@ -15,6 +16,8 @@ description: >
   - 'delegate to an agent'
   - 'create an agent'
   - 'anti-recursion'
+  - 'agent fallback'
+  - 'sub-agent fallback policy'
 ---
 
 # Defining Sub-Agents
@@ -119,12 +122,20 @@ sub-agent is spawned and manages the lifecycle automatically. Project-level
 domain-specific MCP servers belong in the sub-agent that uses them. For the full
 registration hierarchy, see the **registering-mcp-servers** skill.
 
-If an agent's MCP tools fail to load, report the problem to the administrator and
-stop -- don't improvise a *different* transport to the upstream (raw `curl`/HTTP
-to the service, hand-rolled JSON-RPC, hitting the product API directly) to paper
-over a broken bridge. Invoking the **same bridge** through its own CLI face is
-**not** such a workaround (see *Invoking MCP tools from the shell* below); a raw
-bypass of the bridge is.
+An **agent-mcp-backed** agent needs two authorization-equivalent surfaces over
+one bridge config: the primary `mcp-servers` catalog and an explicit materialized
+CLI fallback. Both surfaces preserve the same auth source, identity, upstream,
+protocol, and top-level `tools:` allow/deny filter. Identity-affecting values
+belong in the shared bridge config/overlay, **not** only in
+`mcp-servers.env` (shell fallback does not inherit frontmatter-only env).
+
+Decorator-enforced behavior is not equivalent on the one-shot CLI path today.
+Static name restrictions must be duplicated in top-level `tools:`. Conditional
+authorization (`gate`, or argument-dependent redaction) cannot be represented by
+that filter, so those agents must not permit materialized fallback. Shape-only
+decorators (`rename`, `defer`, `code-mode`, `transform`, `storage`) also vanish;
+their fallback is the wider raw catalog and must be documented honestly. A raw
+`curl`/HTTP/product-API bypass is never this fallback.
 
 ## Anti-recursion and tool access
 
@@ -135,23 +146,40 @@ config, or run commands. Instead, prevent self-delegation via
 **instruction-based guards**:
 
 1. **MCP readiness check.** Every agent with MCP servers must probe one tool on
-   startup. If the tools are unavailable, **report the specific tool/MCP error
-   and stop immediately** — do not paraphrase it to a generic "not available."
-   Report the *exact observed* failure; if the runtime exposes no lower-level
-   error, name the specific server/tool that failed to load and state that no
-   further diagnostic was available (don't invent one). The honest, specific
-   stop is *load-bearing*: it is what **surfaces the real runtime fault** (a
-   broken interpreter/venv, an unstarted daemon, a missing binstub, an expired
-   token) so the operator can fix it. Any fallback — a neighboring capability, a
-   shell/curl workaround, or delegating to a fresh copy of the agent — **masks**
-   that fault and, in the recursion case, burns the sub-agent-depth budget until
-   the runtime kills it with a misleading "maximum sub-agent depth reached."
-2. **Anti-self-delegation rule.** Every agent's instructions must include, **as
+   startup and preserve the exact observed error if the catalog does not load.
+2. **Same-bridge CLI fallback.** After a catalog/load failure, use the existing
+   materialized fleet named by the agent. Re-materialize when the expected stub
+   is missing or `manifest.json.generated_by` differs from `agent-mcp --version`;
+   config/schema drift needs a deploy-owned digest. Probe a read-only stub with
+   `--no-serve` and verify identity/capability before acting. If both surfaces
+   fail, report both errors and stop. This fallback does not bypass an auth
+   failure, authorization boundary, confirmation gate, or upstream outage.
+3. **Anti-self-delegation rule.** Every agent's instructions must include, **as
    a literal line**: "Do NOT use the task tool to spawn another `<agent-name>`
    agent." This prevents the recursive loop where an MCP failure makes the agent
    delegate to a fresh copy of itself, which also fails, ad infinitum.
 
-Both guards belong in the agent's `## MCP Readiness` section.
+All three guards belong in the agent's `## MCP Readiness` section. Start from
+this compact body template, then substitute the real fleet, probe, and identity:
+
+```markdown
+## MCP Readiness
+
+1. Probe `<read-only-tool>`.
+2. If the catalog did not load, preserve the exact error and use the existing
+   `<fleet>` materialized fleet; materialize the same bridge only if the stub is
+   absent or its `generated_by` version differs.
+3. Probe the fallback with `--no-serve` and verify `<expected-identity>`.
+4. Verify `manifest.json.bridge` resolves to the frontmatter's bridge config.
+5. If both surfaces fail, report both errors and stop.
+6. If fallback succeeds, include the preserved primary error in the final output.
+
+Do NOT use the task tool to spawn another `<agent-name>` agent.
+```
+
+For the full bridge YAML, Windows/POSIX commands, request-file invocation, and
+drift policy, load **`agent-mcp:agent-mcp`** and read *Reliable MCP-backed
+sub-agent*.
 
 > **Keep an explicit "Do NOT … spawn / delegate" line — a reworded guard slips
 > past the scanner as *missing*.** The `reviewing-customizations` scan detects
@@ -166,23 +194,33 @@ Both guards belong in the agent's `## MCP Readiness` section.
 
 ### Hard-rule validation checklist
 
-These are **not** suggestions — they are conformance gates. Run this checklist
-against every `.agent.md` you author or review (it is the machine-checkable core
-the **`reviewing-customizations`** scan enforces). An agent **fails** review if
-any applicable box is unchecked:
+These are **not** suggestions — they are conformance gates. The
+**`reviewing-customizations`** scan machine-checks the presence of readiness,
+fallback, and anti-recursion text; reviewers must still verify bridge/identity
+equivalence. An agent **fails** review if any applicable box is unchecked:
 
 - [ ] **Tools are not narrowed for anti-recursion.** `tools` is omitted or
       `["*"]` (or lists only *additive* MCP grants); it is **never** trimmed to
       "prevent recursion" — that cripples the agent, it doesn't protect it.
 - [ ] **Every MCP-owning agent has a `## MCP Readiness` section.** If the
       frontmatter declares `mcp-servers`, the body must carry the section that
-      houses both guards below.
+      houses the readiness, equivalent-fallback, and anti-recursion guards.
 - [ ] **Readiness probe present.** The section instructs the agent to probe one
-      MCP tool on startup and, on failure, **report the specific error and stop**
-      — no bash/curl/HTTP fallback, no neighboring-capability fallback, no silent
-      degradation. A generic "tools unavailable, stopping" that hides the
-      underlying cause is a weak probe: the specific error (or, absent one, the
-      named server/tool that failed) is what lets the operator repair the runtime.
+      MCP tool on startup and preserve the specific error (or, absent one, name
+      the server/tool that failed), then report it even if fallback succeeds.
+- [ ] **Equivalent CLI fallback present.** Every agent-mcp-backed server names
+      its materialized fleet, uses the same bridge config/identity/top-level
+      `tools:` filter, probes a read-only stub with `--no-serve`, and stops only
+      after both surfaces fail. Raw product/API bypasses are not accepted.
+- [ ] **No frontmatter-only identity.** Auth/identity-affecting env lives in the
+      bridge config or overlay, not only in `mcp-servers.env`.
+- [ ] **Fleet provenance matches.** `manifest.json.bridge` resolves to the same
+      config path used by the primary frontmatter before the fleet is trusted.
+- [ ] **Decorator boundary reviewed.** Duplicate static restrictions in
+      top-level `tools:`. Conditional `gate`/argument-dependent authorization
+      requires the explicit marker `Materialized CLI fallback: disabled
+      (conditional authorization gate)`; shape-only decorators yield a wider
+      raw catalog that the agent documents.
 - [ ] **Anti-self-delegation line present.** The section contains an explicit
       "Do NOT … (task tool / spawn / delegate) …" directive — canonically the
       literal line "Do NOT use the task tool to spawn another `<agent-name>`
@@ -215,26 +253,24 @@ the exact config path** the frontmatter uses — e.g. the `--config <path>` the
   like any command; `--windows` emits a `.ps1`/`.cmd` shim farm). Re-running
   rebuilds atomically, so it doubles as a drift refresh.
 
-This is a **first-class, sanctioned path**, not a fault-masking fallback: it loads
-the *same* bridge configuration and follows the *same* upstream auth and
-protocol-negotiation path as the in-process `mcp-servers` block — it is the
-bridge's own CLI face, not an improvised bypass. (Caveat: a shell invocation only
-inherits the ambient environment, **not** variables set *only* in the frontmatter
-`mcp-servers.env` — export those yourself if the bridge relies on them.) It shines
-for **shell-native work**: piping a result through `jq`, chaining tools where one's
-output feeds the next, or reaching a tool the runtime registered as
-*deferred/searchable* rather than immediately callable. See the **`agent-mcp`**
-skill (§ *MCP → CLI: `call` and `materialize`*) for the full mechanics.
+This is a **first-class, sanctioned path** and the required load-failure
+fallback for authorization-equivalent agent-mcp-backed agents: it loads the
+same bridge configuration and follows the same upstream auth, protocol, and
+top-level `tools:` filtering path. It is the bridge's own CLI face, not an
+improvised bypass. Shell fallback does not inherit `mcp-servers.env`; move such
+values into the bridge config/overlay rather than exporting them ad hoc.
+
+Decorator stacks are intentionally not applied by `call`/`materialize`. The
+fleet exposes raw upstream names/results after the top-level `tools:` filter, so
+an agent whose safety depends on decorator-only `filter`/`gate` cannot use this
+fallback. See **`agent-mcp:agent-mcp`** → *Reliable MCP-backed sub-agent*.
 
 Three boundaries keep this coherent with the readiness rule above:
 
-- **Not a way past a failed readiness probe.** Use `call`/`materialize` as
-  ordinary execution options when your MCP surface is **healthy** (or a tool is
-  merely *deferred/searchable* — that is available, not failed). Do **not** reach
-  for the CLI to keep going after the readiness probe *fails*: a probe that fails
-  while the same bridge answers on the CLI is itself a fault (an in-process
-  registration problem) worth surfacing — report that discrepancy and **stop**,
-  per the readiness rule, rather than quietly proceeding.
+- **Report the primary failure before falling back.** A probe that fails while
+  the same bridge answers on the CLI is an in-process registration fault worth
+  surfacing; record it, then continue through the equivalent fleet rather than
+  hiding the discrepancy.
 - **It cannot rescue a broken bridge.** If the *bridge itself* is broken (upstream
   down, credentials missing, provisioning failed), `agent-mcp call` fails
   **identically** — same bridge — so it can't paper over a genuine bridge fault.

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+import tomllib
 
+from agent_mcp import _FALLBACK_VERSION
 from agent_mcp.config import (
     BRIDGES_DIR,
     ConfigError,
@@ -22,6 +25,12 @@ def _http_doc(**over):
     }
     doc.update(over)
     return doc
+
+
+def test_source_fallback_version_matches_pyproject():
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+    assert _FALLBACK_VERSION == project["version"]
 
 
 def test_parse_http_entra_ok():
