@@ -66,10 +66,11 @@ def _tool_path(
     status_core: bool = True,
 ) -> Path:
     path.mkdir(parents=True)
-    tool_names = ("git.exe", "python.exe") if os.name == "nt" else ("git", "python3")
-    for name in tool_names:
-        target = shutil.which(name)
+    tool_names = ("git", "python") if os.name == "nt" else ("git", "python3")
+    for command in tool_names:
+        target = shutil.which(command)
         assert target
+        name = Path(target).name if os.name == "nt" else command
         try:
             (path / name).symlink_to(target)
         except OSError:

@@ -18,6 +18,12 @@ TERMINAL = frozenset({"Completed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
 
 
+def _no_window_kwargs() -> dict:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def _local_machine() -> str | None:
     value = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
     root = Path(
@@ -179,7 +185,9 @@ def main(argv: list[str] | None = None) -> int:
         ]
         if args.label:
             command.extend(["--label", args.label])
-        return subprocess.run(command, check=False).returncode
+        return subprocess.run(
+            command, check=False, **_no_window_kwargs()
+        ).returncode
 
     query = {
         "status": "proposed,queued,claimed,started,completed,abandoned,dead_letter",

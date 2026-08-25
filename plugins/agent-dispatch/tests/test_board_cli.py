@@ -112,9 +112,10 @@ def test_remote_machine_falls_back_to_full_cli(monkeypatch):
     monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
     captured = {}
 
-    def run(command, check):
+    def run(command, check, **kwargs):
         captured["command"] = command
         assert check is False
+        assert isinstance(kwargs, dict)
         return types.SimpleNamespace(returncode=7)
 
     monkeypatch.setattr(board_cli.subprocess, "run", run)
