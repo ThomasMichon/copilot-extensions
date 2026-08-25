@@ -15,6 +15,21 @@ import pytest
 _PLUGIN = Path(__file__).resolve().parents[1]
 
 
+def _bash() -> str:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("Bash is not available")
+    return bash
+
+
+def _powershell() -> str:
+    for name in ("pwsh", "powershell.exe", "powershell"):
+        executable = shutil.which(name)
+        if executable is not None:
+            return executable
+    pytest.skip("PowerShell is not available")
+
+
 def _hooks(event: str) -> list[dict[str, object]]:
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
     return hooks["hooks"][event]
@@ -26,7 +41,8 @@ def _run(command: str, shell: str, home: Path, cwd: Path) -> subprocess.Complete
     env["USERPROFILE"] = str(home)
     return subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-Command", command]
-        if Path(shell).name.startswith("pwsh")
+        if "powershell" in Path(shell).name.lower()
+        or Path(shell).name.lower().startswith("pwsh")
         else [shell, "-c", command],
         cwd=cwd,
         env=env,
@@ -59,7 +75,7 @@ def test_bash_hooks_emit_empty_context_when_runtime_scripts_are_absent(tmp_path:
     cwd.mkdir()
 
     for hook in _hooks("sessionStart"):
-        result = _run(str(hook["bash"]), "bash", home, cwd)
+        result = _run(str(hook["bash"]), _bash(), home, cwd)
         assert result.returncode == 0, result.stderr
         assert result.stdout == "{}"
 
@@ -70,7 +86,7 @@ def test_bash_session_end_hook_succeeds_when_runtime_script_is_absent(tmp_path: 
     home.mkdir()
     cwd.mkdir()
 
-    result = _run(str(_hooks("sessionEnd")[0]["bash"]), "bash", home, cwd)
+    result = _run(str(_hooks("sessionEnd")[0]["bash"]), _bash(), home, cwd)
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
 
@@ -84,11 +100,8 @@ def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         command = str(hook["bash"])
         _stage_stub(command, home, cwd, "exit 23")
 
-        result = _run(command, "bash", home, cwd)
-        if "provision-check.sh" in command:
-            assert result.returncode == 0
-        else:
-            assert result.returncode == 23
+        result = _run(command, _bash(), home, cwd)
+        assert result.returncode == 23
 
 
 def test_bash_hook_forwards_runtime_script_output(tmp_path: Path):
@@ -100,34 +113,35 @@ def test_bash_hook_forwards_runtime_script_output(tmp_path: Path):
     expected = '{"additionalContext":"runtime guidance"}'
     _stage_stub(command, home, cwd, f"printf '%s' '{expected}'")
 
-    result = _run(command, "bash", home, cwd)
+    result = _run(command, _bash(), home, cwd)
     assert result.returncode == 0, result.stderr
     assert result.stdout == expected
 
 
 def test_powershell_hooks_fail_open_when_runtime_scripts_are_absent(tmp_path: Path):
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell is not available")
+    powershell = _powershell()
     home = tmp_path / "home"
     cwd = tmp_path / "cwd"
     home.mkdir()
     cwd.mkdir()
 
     for hook in _hooks("sessionStart"):
-        result = _run(str(hook["powershell"]), pwsh, home, cwd)
+        result = _run(str(hook["powershell"]), powershell, home, cwd)
         assert result.returncode == 0, result.stderr
         assert result.stdout == "{}"
 
-    result = _run(str(_hooks("sessionEnd")[0]["powershell"]), pwsh, home, cwd)
+    result = _run(
+        str(_hooks("sessionEnd")[0]["powershell"]),
+        powershell,
+        home,
+        cwd,
+    )
     assert result.returncode == 0, result.stderr
     assert result.stdout == ""
 
 
 def test_powershell_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell is not available")
+    powershell = _powershell()
 
     for index, hook in enumerate(_hooks("sessionStart") + _hooks("sessionEnd")):
         home = tmp_path / str(index) / "home"
@@ -138,14 +152,12 @@ def test_powershell_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         script.write_text("exit 23\n", encoding="utf-8")
         command = _powershell_wrapper(str(hook["powershell"]), script)
 
-        result = _run(command, pwsh, home, cwd)
+        result = _run(command, powershell, home, cwd)
         assert result.returncode != 0
 
 
 def test_powershell_hook_forwards_runtime_script_output(tmp_path: Path):
-    pwsh = shutil.which("pwsh")
-    if pwsh is None:
-        pytest.skip("PowerShell is not available")
+    powershell = _powershell()
     home = tmp_path / "home"
     cwd = tmp_path / "cwd"
     home.mkdir()
@@ -158,6 +170,6 @@ def test_powershell_hook_forwards_runtime_script_output(tmp_path: Path):
         script,
     )
 
-    result = _run(command, pwsh, home, cwd)
+    result = _run(command, powershell, home, cwd)
     assert result.returncode == 0, result.stderr
     assert result.stdout == expected
