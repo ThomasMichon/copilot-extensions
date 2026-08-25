@@ -44,6 +44,13 @@ from . import config as cfg
 #: disposition write is human/agent-initiated (not per-tool), so this is ample.
 MAX_ENTRIES = 500
 
+#: Maximum rendered history-digest size, including any succession header added
+#: by the CLI. Stored history remains untouched.
+DIGEST_MAX_CHARS = 800
+
+#: Maximum rendered summary/title size for one digest entry.
+DIGEST_LABEL_MAX_CHARS = 96
+
 #: The disposition fields a history entry snapshots / can mark as changed.
 _FIELDS = ("summary", "title", "follow_up")
 
@@ -148,7 +155,20 @@ def remove(worktree_id: str) -> None:
         pass
 
 
-def digest(worktree_id: str, *, limit: int = 8) -> str:
+def _digest_label(value: Any) -> str:
+    """Collapse and bound one rendered digest label without changing storage."""
+    text = " ".join(str(value or "").split())
+    if len(text) <= DIGEST_LABEL_MAX_CHARS:
+        return text
+    return text[: DIGEST_LABEL_MAX_CHARS - 3].rstrip() + "..."
+
+
+def digest(
+    worktree_id: str,
+    *,
+    limit: int = 8,
+    max_chars: int = DIGEST_MAX_CHARS,
+) -> str:
     """A compact, human/agent-readable recovery digest of a worktree's recent
     history, newest last, or ``""`` when there is none. Never raises.
 
@@ -162,7 +182,10 @@ def digest(worktree_id: str, *, limit: int = 8) -> str:
         entries = read(worktree_id, limit=limit)
         if not entries:
             return ""
-        lines = ["This worktree's recent history (most recent last):"]
+        heading = "This worktree's recent history (most recent last):"
+        if max_chars < len(heading):
+            return ""
+        rendered: list[str] = []
         for e in entries:
             at = (e.get("at") or "?")
             kind = e.get("kind") or "status"
@@ -170,13 +193,23 @@ def digest(worktree_id: str, *, limit: int = 8) -> str:
             sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
             flag = " !" if e.get("follow_up") else ""
             title = e.get("title")
-            summary = (e.get("summary") or "").strip()
+            summary = _digest_label(e.get("summary"))
             label = summary or (title or "")
             if kind != "status" and not label:
                 label = f"({kind})"
+            label = _digest_label(label)
             line = f"- {at} [{kind}{sess_tag}]{flag} {label}".rstrip()
-            lines.append(line)
-        return "\n".join(lines)
+            rendered.append(line)
+
+        selected: list[str] = []
+        used = len(heading)
+        for line in reversed(rendered):
+            added = 1 + len(line)
+            if used + added > max_chars:
+                break
+            selected.append(line)
+            used += added
+        selected.reverse()
+        return "\n".join([heading, *selected])
     except Exception:
         return ""
-

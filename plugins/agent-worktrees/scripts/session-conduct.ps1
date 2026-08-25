@@ -30,34 +30,17 @@ $env:PYTHONPATH = ''
 $project = (& $python -m agent_worktrees get project 2>$null | Select-Object -First 1)
 if (-not $project) { Emit-Empty }
 
-# --- collect deployed conduct fragments ---
-$parts = @()
-
-# Dynamic: the "the user's state repo" definition (binds the term to the
-# resolved checkout so downstream plugins can refer to it in plain prose).
+# --- collect dynamic conduct; one Python assembler owns ordering + budget ---
 $defn = (& $python -m agent_worktrees state-root --conduct 2>$null | Out-String).Trim()
-if ($defn) { $parts += $defn }
-
-# Dynamic: complete related-repo guidance from the merged project corpus.
 $related = (& $python -m agent_worktrees --project $project related --conduct 2>$null | Out-String).Trim()
-if ($related) { $parts += $related }
-
 $dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'
-if (Test-Path $dir) {
-    foreach ($f in (Get-ChildItem -Path $dir -Filter '*.md' -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
-        $t = (Get-Content -Raw -LiteralPath $f.FullName)
-        if ($t) { $parts += $t.TrimEnd() }
-    }
-}
 
 # Dynamic: the worktree's own recent-history recovery digest (record-first
 # recovery -- what this worktree has been doing, so a fresh/successor session
 # inherits it even if a live handoff never completed). Empty when no history.
 $digest = (& $python -m agent_worktrees history-digest 2>$null | Out-String).Trim()
-if ($digest) { $parts += $digest }
-
-if ($parts.Count -eq 0) { Emit-Empty }
-
-$ctx = ($parts -join "`n`n")
-Write-Output (@{ additionalContext = $ctx } | ConvertTo-Json -Compress -Depth 3)
+$env:AW_CONDUCT_DEFINITION = $defn
+$env:AW_CONDUCT_RELATED = $related
+$env:AW_CONDUCT_HISTORY = $digest
+& $python -m agent_worktrees.conduct $dir
 exit 0

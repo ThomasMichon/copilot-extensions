@@ -175,6 +175,23 @@ def test_as_dict_shape(fake_checkouts):
     assert d["bound"] is True
 
 
+def test_bound_state_definition_routes_exact_content_categories():
+    text = sr.state_repo_definition(sr.StateRoot(
+        "/repos/personal-state", "knowledge_repo", "knowledge",
+        True, True, True,
+    ))
+    assert (
+        "generic, reusable, name-free configuration, skills, agents, "
+        "`AGENTS.md`, and docs"
+    ) in text
+    assert "belong in the shared harness repo" in text
+    assert (
+        "Personal preferences, personal skills/config, private/reference data, "
+        "and ambiguous or rootless writes"
+    ) in text
+    assert "belong in the state repo above" in text
+
+
 # ---------------------------------------------------------------------------
 # state-root --pair: the citadel paired-worktree resolver (#957).
 # ---------------------------------------------------------------------------
@@ -366,6 +383,23 @@ def test_state_repo_definition_bound_knowledge_carries_write_routing():
     assert "Where changes go" in text
     assert "shared harness" in text
     assert "harness repo (your current checkout)" in text
+    for shared_category in (
+        "generic, reusable, name-free configuration",
+        "skills",
+        "agents",
+        "`AGENTS.md`",
+        "docs",
+    ):
+        assert shared_category in text
+    for state_category in (
+        "Personal preferences",
+        "personal skills/config",
+        "private/reference data",
+        "ambiguous or rootless writes",
+    ):
+        assert state_category in text
+    assert "belong in the state repo above" in text
+    assert len(text) <= 700
 
 
 def test_state_repo_definition_self_hosted_has_no_write_routing():

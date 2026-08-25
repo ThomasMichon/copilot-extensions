@@ -32,10 +32,13 @@ def test_conduct_fragment_present_and_shaped():
     # Plain guidance -- no ownership marker / frontmatter: it is emitted as
     # additionalContext, not scanned as a *.instructions.md file.
     assert not text.lstrip().startswith(m._INSTRUCTION_MARKER)
-    # Names the resolver + injection mechanics agents must follow.
-    assert "repos account-for" in text
+    # Keeps only the race-safety invariant and preferred per-process path.
     assert "repos gh" in text
-    assert "GH_TOKEN" in text
+    assert "gh auth switch" in text
+    assert "global, shared, and racy" in text
+    assert "agent-worktrees:agent-worktrees-repos" in text
+    assert "GH_TOKEN" not in text
+    assert len(text.rstrip()) <= 700
 
 
 def test_per_project_deploy_retired():
@@ -56,6 +59,19 @@ def test_worktree_conduct_fragment_migrated():
     text = frag.read_text(encoding="utf-8")
     assert not text.lstrip().startswith(m._INSTRUCTION_MARKER)
     assert "agent-worktrees status" in text
+    assert "--follow-up" in text and "--resolved" in text
+    assert "--title" in text and "--summary" in text
+    assert "Leftover temp state" in text
+    assert "unpushed external-repo work" in text
+    assert "merged-but-undeployed" in text
+    assert "finalized/completed worktree" in text
+    assert "resolved and safe to prune" in text
+    assert "finalize" in text
+    assert "reflective cue" in text
+    assert "no status" in text.lower() and "timer" in text
+    assert "status --history" in text
+    assert "agent-worktrees:worktree" in text
+    assert len(text.rstrip()) <= 1_800
     assert not hasattr(m, "_deploy_worktree_conduct")
 
 

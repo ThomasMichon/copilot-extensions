@@ -127,10 +127,13 @@ related --conduct                        Emit merged session-start guidance
 `related --conduct` is the dynamic source used by the `session-conduct` hook.
 It combines all configured repos from the normal config loader (committed
 in-repo settings, machine-side overrides, and `config.d/` injections) with the
-grafted related index (installed plugins, harness, and knowledge overlay). It
-reports the derived PR-flow profile separately from the post-`create-pr`
-disposition, so `pr-self-merge`/`pr-human-merge` is never confused with
-`keep-alive`/`detach`.
+grafted related index (installed plugins, harness, and knowledge overlay). The
+always-on output is intentionally bounded: registered repositories are
+discovered through the active project's repository tooling, while a directional
+count is shown only with `agent-worktrees related list`, which enumerates that
+corpus. It then gives the cross-repo safety kernel and fully qualified `show`,
+`resolve`, and `doctor` commands instead of emitting the full roster every
+session.
 
 `add` options: `--role R`, `--summary S`, `--doc PATH`, `--delegate D`,
 `--ownership owned|internal|external`, `--owner ACCOUNT`,

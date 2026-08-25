@@ -23,8 +23,10 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import config as cfg
+from agent_worktrees import disposition_history as dh
 from agent_worktrees import related
 from agent_worktrees import state_root as sr
+from agent_worktrees import tracking
 
 # ---------------------------------------------------------------------------
 # Fixtures: a name-free harness + a knowledge repo carrying the real config.
@@ -148,7 +150,6 @@ def test_related_conduct_merges_configured_and_related_corpora(
     split, monkeypatch, capfd
 ):
     from agent_worktrees import __main__ as cli
-    from agent_worktrees import repos
 
     harness, _ = split
     configured = _stateless_config(harness)
@@ -163,34 +164,146 @@ def test_related_conduct_merges_configured_and_related_corpora(
         ),
     )
     monkeypatch.setattr(cfg, "load_config", lambda: configured)
-    monkeypatch.setattr(
-        repos,
-        "read_registry",
-        lambda: repos.ReposRegistry(repos={
-            "harness": repos.RepoEntry(
-                name="harness", repo_class="worktree"
-            ),
-            "injected-tool": repos.RepoEntry(
-                name="injected-tool", repo_class="worktree"
-            ),
-            "example-web": repos.RepoEntry(
-                name="example-web", repo_class="reference"
-            ),
-        }),
-    )
-
     assert cli.cmd_related_dispatch(
         ["--conduct", "--repo", str(harness)]
     ) == 0
     out = capfd.readouterr().out
-    assert "`harness` (current)" in out
-    assert "`injected-tool`" in out
-    assert "pr=pr-self-merge/optional/github" in out
-    assert "after-create=keep-alive" in out
-    assert "`example-web` (primary)" in out
-    assert "delegate=agent-codespaces" in out
-    assert "config.d/" in out
-    assert "installed payload" in out
+    assert "configured repos" not in out
+    assert "`agent-worktrees repos list`" not in out
+    assert "Registered repositories are discovered through the active project's" in out
+    assert "repository tooling" in out
+    assert "2 directional related entries" in out
+    assert "`agent-worktrees related list`" in out
+    assert "`agent-worktrees related show <repo>`" in out
+    assert "`agent-worktrees related resolve <repo>`" in out
+    assert "`agent-worktrees related doctor`" in out
+    assert "4 repositories are available" not in out
+    assert "class, locus, and delegate" in out
+    assert "non-`none` delegate" in out
+    assert "owning agent" in out
+    assert "dispatch host's installed plugins" in out
+    assert "`harness`" not in out
+    assert "`example-web`" not in out
+    assert len(out.rstrip()) <= 900
+
+
+def test_related_conduct_omits_counts_without_directional_entries(
+    split, monkeypatch, capfd
+):
+    from agent_worktrees import __main__ as cli
+
+    harness, _ = split
+    monkeypatch.setattr(
+        related,
+        "read_related_grafted",
+        lambda anchors: related.RelatedConfig(),
+    )
+    assert cli.cmd_related_dispatch(
+        ["--conduct", "--repo", str(harness)]
+    ) == 0
+    out = capfd.readouterr().out
+    assert "Registered repositories are discovered through" in out
+    assert "configured repos" not in out
+    assert "directional related entries" not in out
+    assert "`agent-worktrees repos list`" not in out
+    assert "`agent-worktrees related list`" not in out
+
+
+def test_typical_session_conduct_stays_within_context_budget(
+    split, monkeypatch, capfd, tmp_path
+):
+    from agent_worktrees import __main__ as cli
+
+    harness, knowledge = split
+    configured = _stateless_config(harness)
+    configured.repos["injected-tool"] = cfg.RepoConfig(
+        anchor="/injected", worktree_root="/injected.wt"
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: configured)
+
+    assert cli.cmd_related_dispatch(
+        ["--conduct", "--repo", str(harness)]
+    ) == 0
+    related_text = capfd.readouterr().out.strip()
+
+    history_dir = tmp_path / "history"
+    history_dir.mkdir()
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: history_dir)
+    record = tracking.WorktreeRecord(
+        worktree_id="wt-budget",
+        branch="b",
+        worktree_path=str(harness),
+        repo="harness",
+        machine="test",
+        platform="linux",
+        started_at="2026-01-01T00:00:00",
+        last_resumed_at="2026-01-01T00:00:00",
+        resume_count=0,
+        title="Conduct budget",
+        status="active",
+        completed_at=None,
+    )
+    tracking.save_record(record, history_dir / "wt-budget.yaml")
+    summaries = [f"history-{i}-" + ("x" * 500) for i in range(8)]
+    for i, summary in enumerate(summaries):
+        dh.append(
+            "wt-budget",
+            at=f"2026-01-01T00:00:0{i}",
+            summary=summary,
+            title="Conduct budget",
+            follow_up=True,
+            changed=["summary"],
+        )
+    monkeypatch.setattr(
+        cli, "_resolve_worktree_for_read",
+        lambda worktree_id, worktree_dir, session_id: "wt-budget",
+    )
+    assert cli.cmd_history_digest(type("Args", (), {
+        "worktree_id": "wt-budget",
+        "worktree_dir": str(harness),
+        "session_id": None,
+        "limit": 8,
+    })()) == 0
+    history_text = capfd.readouterr().out.strip()
+    assert len(history_text) <= dh.DIGEST_MAX_CHARS
+    assert len(history_text) >= 700
+    assert "history-7-" in history_text
+    assert "..." in history_text
+    assert dh.read("wt-budget")[-1]["summary"] == summaries[-1]
+
+    record.sessions = [
+        tracking.SessionEntry(session_id="active-session", started_at="t")
+    ]
+    record.head_session = "active-session"
+    tracking.save_record(record, history_dir / "wt-budget.yaml")
+    assert cli.cmd_history_digest(type("Args", (), {
+        "worktree_id": "wt-budget",
+        "worktree_dir": str(harness),
+        "session_id": None,
+        "limit": 8,
+    })()) == 0
+    history_with_succession = capfd.readouterr().out.strip()
+    assert len(history_with_succession) <= dh.DIGEST_MAX_CHARS
+    assert "Worktree succession" in history_with_succession
+    assert "history-7-" in history_with_succession
+
+    plugin = Path(__file__).parents[1]
+    conduct = plugin / "scripts" / "conduct"
+    from agent_worktrees.conduct import assemble_payload
+
+    payload = assemble_payload(
+        conduct,
+        sr.state_repo_definition(sr.StateRoot(
+            str(knowledge), "knowledge_repo", "knowledge",
+            True, True, True,
+        )),
+        related_text,
+        history_text,
+    )
+    assembled = json.loads(payload)["additionalContext"]
+    assert len(payload) <= 4_000
+    assert related_text in assembled
+    assert history_text in assembled
 
 
 def test_session_conduct_forwards_discovered_project():
@@ -203,6 +316,14 @@ def test_session_conduct_forwards_discovered_project():
     sh = (plugin / "scripts" / "session-conduct.sh").read_text(encoding="utf-8")
     assert "-m agent_worktrees --project $project related --conduct" in ps1
     assert '-m agent_worktrees --project "$project" related --conduct' in sh
+    assert "-m agent_worktrees history-digest" in ps1
+    assert '-m agent_worktrees history-digest' in sh
+    assert "-m agent_worktrees.conduct $dir" in ps1
+    assert '-m agent_worktrees.conduct "$dir"' in sh
+    assert ps1.index("state-root --conduct") < ps1.index("related --conduct")
+    assert ps1.index("related --conduct") < ps1.index("history-digest")
+    assert sh.index("state-root --conduct") < sh.index("related --conduct")
+    assert sh.index("related --conduct") < sh.index("history-digest")
 
 
 # ---------------------------------------------------------------------------

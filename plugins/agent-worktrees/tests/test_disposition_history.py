@@ -167,6 +167,21 @@ def test_digest_honors_limit(_tracking_dir):
     assert "s6" not in out
 
 
+def test_digest_bounds_rendering_without_mutating_recent_history(_tracking_dir):
+    summaries = [f"summary-{i}-" + ("x" * 500) for i in range(10)]
+    for i, summary in enumerate(summaries):
+        dh.append("wt-bounded", at=f"t{i}", summary=summary, title=None,
+                  follow_up=False, changed=["summary"])
+
+    out = dh.digest("wt-bounded", limit=8)
+
+    assert len(out) <= dh.DIGEST_MAX_CHARS
+    assert "summary-9-" in out
+    assert "summary-0-" not in out
+    assert "..." in out
+    assert dh.read("wt-bounded")[-1]["summary"] == summaries[-1]
+
+
 def test_set_disposition_tags_session(_tracking_dir):
     from agent_worktrees.tracking import WorktreeRecord, set_disposition
 
