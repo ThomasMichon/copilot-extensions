@@ -172,8 +172,7 @@ room* is set up correctly is that the scenario **ran to completion and produced 
 stages executed). It is **not** `failed: 0`. The `generic-single-plugin`
 reference scenario deliberately asserts hard PASS/FAIL lines about the
 **install/bootstrap flow under test**, and on the current product it is *expected*
-to surface some `FAIL`s (e.g. installing one plugin not pulling its siblings, or
-the first-session bootstrap not deploying a runtime venv on a truly fresh box).
+to surface some `FAIL`s (e.g. installing one plugin not pulling its siblings).
 Those are **findings about the product**, not problems with your Docker setup —
 the rig doing its job. A setup problem looks different: the run doesn't start
 (Docker errors), or every phase-0 line is missing (auth/image failure). If phase 0

@@ -17,7 +17,8 @@
 # surface it saw and captures all output for triage.
 #
 # Configurable via env (defaults reproduce today's Layer-0 check):
-#   CR_MARKETPLACE_REPO  owner/name of the marketplace repo (GitHub)
+#   CR_MARKETPLACE_REPO  owner/name of the marketplace repo (GitHub), or a
+#                        container-local marketplace directory for worktree tests
 #                        default: ThomasMichon/copilot-extensions
 #   CR_MARKETPLACE_NAME  marketplace id used in <plugin>@<name> sources
 #                        default: copilot-extensions
@@ -51,6 +52,12 @@ PRIMARY_PLUGIN="${CR_PRIMARY_PLUGIN:-agent-codespaces}"
 EXPECT_DEPS="${CR_EXPECT_DEPS:-agent-bridge agent-worktrees}"
 UV_INDEX="${CR_UV_INDEX:-}"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
+MARKETPLACE_REPO_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MARKETPLACE_REPO")"
+if [ -d "$MARKETPLACE_REPO" ]; then
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": $MARKETPLACE_REPO_JSON } }"
+else
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": $MARKETPLACE_REPO_JSON } }"
+fi
 
 : "${CR_SCENARIO_NAME:=generic-single-plugin}"
 export CR_SCENARIO_NAME
@@ -101,7 +108,7 @@ mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
   "extraKnownMarketplaces": {
-    "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } }
+    "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE
   },
   "enabledPlugins": {
     "$PRIMARY_PLUGIN@$MARKETPLACE_NAME": true
@@ -142,10 +149,10 @@ pass "$PRIMARY_PLUGIN installed standalone (companions compose opportunistically
 info "installed-plugins dir: $(ls -1 "$INSTALLED_ROOT" 2>/dev/null | tr '\n' ' ' || echo '(none)')"
 
 # =========================================================================
-phase 3 "runtime bootstrap on first session (venv + binstub)"
-# Firing a session runs the plugins' sessionStart hooks. On a clean machine the
-# bootstrap-check hook currently EXITS if there is no deploy-manifest yet -- this
-# phase measures whether a first session actually deploys the runtime.
+phase 3 "first session stamps binstub; first use provisions runtime"
+# Firing a session runs the plugins' sessionStart hooks. The hook must perform
+# only the grace-window-cheap stamp; the stamped binstub builds the runtime on
+# first use.
 _apply_uv_index_fixture
 mkdir -p "$HOME/harness-repo" && ( cd "$HOME/harness-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# harness' > README.md && git add -A && git commit -qm init )
 _plugin_dir_args() {
@@ -158,24 +165,32 @@ _plugin_dir_args() {
 mapfile -t PLUGIN_ARGS < <(_plugin_dir_args)
 ( cd "$HOME/harness-repo" && capture "session-first" -- \
     copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARGS[@]}" ) || true
-# Give any backgrounded installer a moment.
-sleep 8
-# The versioned venv is deliberately DEFERRED to the binstub's first use (#1393):
-# a first session STAMPS the self-provisioning ~/.local/bin/agent-codespaces
-# binstub (grace-window-cheap, no venv build) and the binstub builds the venv on
-# first invocation. So a stamped binstub -- not only a venv -- is a valid
-# first-session bootstrap outcome (mirrors agent-codespaces-solo Phase 2).
-if [ -x "$HOME/.agent-codespaces/.venv/bin/python" ] || [ -d "$HOME/.agent-codespaces/versions" ] || [ -e "$HOME/.local/bin/agent-codespaces" ]; then
-    pass "agent-codespaces runtime bootstrapped after first session (venv or self-provisioning binstub)"
+if [ -e "$HOME/.local/bin/agent-codespaces" ]; then
+    pass "first session stamped ~/.local/bin/agent-codespaces"
+    if capture "first-use-agent-codespaces" -- bash -lc 'agent-codespaces --help'; then
+        first_use_ok=1
+    else
+        first_use_ok=0
+        jam "path-binstub" "first agent-codespaces binstub use failed (see cr-logs/first-use-agent-codespaces.log)" \
+            "stamped binstub should invoke install provision and then dispatch"
+    fi
 else
-    # Classify: on a governed box without the uv-index fixture, provisioning is
-    # blocked at uv; otherwise it is the fresh-machine bootstrap-check no-op (#1236).
-    if [ -z "$UV_INDEX" ] && grep -qiE 'HandshakeFailure|pythonhosted|SSL|TLS|self.signed|certificate' "$CR_LOGDIR/session-first.log" 2>/dev/null; then
-        jam "toolchain-uv" "session-first: uv could not reach its index (public PyPI TLS-blocked on a governed box)" \
+    first_use_ok=0
+    jam "path-binstub" "first session did not stamp ~/.local/bin/agent-codespaces" \
+        "payload bootstrap-check should run install.sh stamp"
+fi
+sleep 3
+_current="$(tr -d ' \t\r\n' < "$HOME/.agent-codespaces/current-version" 2>/dev/null || true)"
+_slot="$HOME/.agent-codespaces/versions/$_current"
+if [ "$first_use_ok" -eq 1 ] && [ -n "$_current" ] && [ -x "$_slot/bin/python" ] && [ -f "$_slot/.install-complete.json" ]; then
+    pass "agent-codespaces runtime venv deployed on first binstub use"
+else
+    if [ -z "$UV_INDEX" ] && grep -qiE 'HandshakeFailure|pythonhosted|SSL|TLS|self.signed|certificate' "$CR_LOGDIR/first-use-agent-codespaces.log" 2>/dev/null; then
+        jam "toolchain-uv" "first use: uv could not reach its index (public PyPI TLS-blocked on a governed box)" \
             "re-run with CR_UV_INDEX=<internal pip index-url> (the uv-index fixture)"
     else
-        jam "path-binstub" "agent-codespaces runtime venv NOT deployed by first session (bootstrap-check no-op'd on fresh machine, #1236)" \
-            "first-install should deploy the runtime, not just reconcile"
+        jam "path-binstub" "agent-codespaces runtime venv NOT deployed by first binstub use" \
+            "stamped binstub should invoke install provision"
     fi
 fi
 
@@ -246,7 +261,7 @@ _repo="$HOME/repo-scoped"
 rm -rf "$_repo"; mkdir -p "$_repo/.github/copilot"
 cat > "$_repo/.github/copilot/settings.json" <<JSON
 {
-  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
+  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": { "$PRIMARY_PLUGIN@$MARKETPLACE_NAME": true }
 }
 JSON

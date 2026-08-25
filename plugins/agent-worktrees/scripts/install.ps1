@@ -2313,18 +2313,21 @@ function Invoke-Stamp {
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) { Ensure-InstallDir $dir }
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+    if (-not (Test-Path $snapDir)) {
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
+        Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+            Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+        }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir
+        Write-ServiceOk "Snapshot: $snapDir"
+    } else {
+        Write-ServiceSkipped "Snapshot already stamped: $snapDir"
     }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), "$snapDir", $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
-    Write-ServiceOk "Snapshot: $snapDir"
     Deploy-GlobalBinstub
     Write-ServiceOk 'Stamped: agent-worktrees tool binstub on PATH; runtime provisions on first use.'
 }

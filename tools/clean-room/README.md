@@ -34,7 +34,7 @@ TLS-blocked public index while pip works.
 | 0 | Is the box actually clean (no pre-existing runtime/binstubs)? |
 | 1 | Does registering the marketplace + `plugin install <one plugin>` land the payload? |
 | 2 | **Dependency chain:** does installing `agent-codespaces` alone pull `agent-bridge` + `agent-worktrees`? |
-| 3 | **Bootstrap crux:** does the *first session* deploy the runtime venv + binstub, or does `bootstrap-check` no-op on a machine with no deploy-manifest yet? |
+| 3 | **Bootstrap crux:** does the *first session* cheaply stamp a callable binstub, and does its first use provision the runtime instead of `bootstrap-check` no-oping on a machine with no deploy manifest? |
 | 4 | Is `~/.local/bin` on a **stock login-shell PATH** (are the binstubs callable)? Do cross-plugin shell-outs (`agent-worktrees …`) resolve? |
 | 5 | **Headless plugin loading:** does `copilot -p` honor `enabledPlugins`, or does it need explicit `--plugin-dir` per plugin (the agent-bridge dispatch mechanism)? |
 | 6 | Does `agent-worktrees register` wire the repo as a harness project (`projects.yaml`)? |
@@ -328,7 +328,9 @@ PASS/FAIL) plus per-phase command logs under `cr-logs/`.
 ## Configuration
 
 Override via `run.ps1` params or `CR_*` env (see the `scenarios/generic-single-plugin/scenario.sh`
-header): `CR_MARKETPLACE_REPO`, `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
+header): `CR_MARKETPLACE_REPO` (a GitHub `owner/repo`, or a container-local
+marketplace directory mounted with `-HarnessMount` for uncommitted-worktree
+validation), `CR_MARKETPLACE_NAME`, `CR_PRIMARY_PLUGIN`,
 `CR_EXPECT_DEPS`, `CR_UV_INDEX` (opt-in uv-index fixture), `CR_UNTIL` (stop after
 stage N). The scenario name + stage list live in `manifest.json`.
 

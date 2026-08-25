@@ -8,20 +8,36 @@
 # resort (#234 defect 2).
 export PYTHONUTF8=1
 _awroot="$HOME/.agent-worktrees"
-_awver=""
-if [ -f "$_awroot/current-version" ]; then _awver=$(tr -d ' \t\r\n' < "$_awroot/current-version"); fi
-_awslot="$_awroot/versions/$_awver"
-if [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
-  exec "$_awslot/bin/agent-worktrees" "$@"
-elif [ -n "$_awver" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
-  exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
-fi
-# Marker absent/stale: newest installed slot (POSIX then Windows layout).
-_awcand=""
-for _p in "$_awroot"/versions/*/bin/agent-worktrees; do [ -x "$_p" ] && _awcand="$_p"; done
-if [ -n "$_awcand" ]; then exec "$_awcand" "$@"; fi
-for _p in "$_awroot"/versions/*/Scripts/python.exe; do [ -x "$_p" ] && _awcand="$_p"; done
-if [ -n "$_awcand" ]; then exec "$_awcand" -m agent_worktrees "$@"; fi
+_aw_exec_resolved() {
+  for _marker in current-version last-known-good; do
+    _awver=""
+    [ -f "$_awroot/$_marker" ] && _awver=$(tr -d ' \t\r\n' < "$_awroot/$_marker")
+    _awslot="$_awroot/versions/$_awver"
+    if [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
+      exec "$_awslot/bin/agent-worktrees" "$@"
+    elif [ -n "$_awver" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
+      exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
+    fi
+  done
+  # Marker absent/stale: newest COMPLETE slot only. A bare interpreter can exist
+  # before package installation/health checks finish and must never be launched.
+  _awcand=""
+  _awmode=""
+  _complete="$(ls -1t "$_awroot"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
+  if [ -n "$_complete" ]; then
+    _awslot=$(dirname "$_complete")
+    if [ -x "$_awslot/bin/agent-worktrees" ]; then
+      _awcand="$_awslot/bin/agent-worktrees"
+      _awmode=console
+    elif [ -x "$_awslot/Scripts/python.exe" ]; then
+      _awcand="$_awslot/Scripts/python.exe"
+      _awmode=python
+    fi
+  fi
+  if [ "$_awmode" = console ]; then exec "$_awcand" "$@"; fi
+  if [ "$_awmode" = python ]; then exec "$_awcand" -m agent_worktrees "$@"; fi
+}
+_aw_exec_resolved "$@"
 
 # No runtime slot exists -> self-provision on first use (runtime-self-provisioning
 # pattern). This is the confined-host path: a Copilot app / cloud agent where the
@@ -45,24 +61,21 @@ if [ -z "${AGENT_WORKTREES_NO_SELFPROVISION:-}" ]; then
       exec 9>"$_awroot/.provision.lock" 2>/dev/null || true
       flock 9 2>/dev/null || true
       # Re-resolve after acquiring the lock: another process may have finished.
-      if [ -f "$_awroot/current-version" ]; then _awver=$(tr -d ' \t\r\n' < "$_awroot/current-version"); _awslot="$_awroot/versions/$_awver"; fi
-      [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ] && exec "$_awslot/bin/agent-worktrees" "$@"
+      _aw_exec_resolved "$@"
     fi
     printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_awstatus" 2>/dev/null || true
     # install.sh is bash (self-staging); run it under bash, not this sh.
     bash "$_awinstall" provision >&2
     _awrc=$?
-    if [ -f "$_awroot/current-version" ]; then _awver=$(tr -d ' \t\r\n' < "$_awroot/current-version"); _awslot="$_awroot/versions/$_awver"; fi
-    if [ "$_awrc" -eq 0 ] && [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
+    if [ "$_awrc" -eq 0 ]; then
       printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_awstatus" 2>/dev/null || true
-      exec "$_awslot/bin/agent-worktrees" "$@"
-    fi
-    if [ "$_awrc" -eq 0 ] && [ -n "$_awver" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
-      printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_awstatus" 2>/dev/null || true
-      exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
+      _aw_exec_resolved "$@"
+      _awrc=1
+      printf '%s\n' "[agent-worktrees] provisioning reported success but no marker-resolved runtime is available." >&2
+    else
+      printf '%s\n' "[agent-worktrees] provisioning FAILED (rc=$_awrc). See the log above; retry, or run: bash \"$_awinstall\" provision" >&2
     fi
     printf 'failed rc=%s %s\n' "$_awrc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_awstatus" 2>/dev/null || true
-    printf '%s\n' "[agent-worktrees] provisioning FAILED (rc=$_awrc). See the log above; retry, or run: bash \"$_awinstall\" provision" >&2
     exit "${_awrc:-1}"
   fi
 fi
