@@ -633,9 +633,14 @@ def merge_squash(branch: str, worktree_id: str, *, cwd: str | Path) -> bool:
     result = git("merge", branch, "--squash", "--quiet", cwd=cwd, check=False)
     if result.returncode != 0:
         return False
+    # no_hooks: this is the plugin's own trusted landing commit of ALREADY-reviewed
+    # worktree content into the anchor's default branch. It must not be blocked by
+    # the client-side guard hooks (the anchor-commit / default-branch pre-commit
+    # guard), which exist to stop *stray* human/agent commits -- not this
+    # mechanical finalize step. Mirrors the sibling squash path + rebase/push.
     commit_r = git(
         "commit", "--no-edit", "-m", f"squash: merge worktree/{worktree_id}",
-        cwd=cwd, check=False,
+        cwd=cwd, check=False, no_hooks=True,
     )
     return commit_r.returncode == 0
 
