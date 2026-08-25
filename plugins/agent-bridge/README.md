@@ -23,6 +23,11 @@ drops a provider manifest into `~/.agent-bridge/providers.d/`, its namespace
 (for example `codespace:` or `container:`) appears; when it also exposes a
 credential-relay profile, agent-bridge folds those sources into its relay. If a
 sibling is absent, only that sibling's namespace/relay feature is absent.
+Provider discovery is desired-set based: deleting, invalidating, or losing the
+command target of a manifest withdraws that dynamic namespace without a daemon
+restart. Bad entries warn but do not block valid peers. `agent-bridge doctor`
+lists every provider finding with the exact entry, target, and cleanup or
+re-registration remedy.
 
 ## Streaming & the delivery cursor
 

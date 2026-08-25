@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.0-dev352"
+version = "0.4.0-dev353"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -36,6 +36,7 @@ dependencies = [
     "agent-config-migrate",
     "agent-plugin-resolve",
     "agent-procutil",
+    "agent-dropin-registry",
 ]
 
 [tool.uv.sources]
@@ -61,6 +62,8 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 # Shared Windows-headless / detached process-spawn kwargs (module
 # ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# Resilient tri-state scans/findings for providers.d.
+agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.scripts]
 agent-bridge = "agent_bridge.__main__:main"

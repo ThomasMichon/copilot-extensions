@@ -15,9 +15,10 @@ find its binstub), so the daemon never depends on importing the provider or on
 its ``PATH``. Providers self-register merely by dropping a manifest -- no
 imperative "register" call, no TTL, always freshly enumerated on demand.
 
-Robustness (also mirrors the pivot registry): a malformed or unreadable manifest
-is skipped with a warning; discovery never raises, so a single bad drop-in can
-never break daemon startup or agent enumeration.
+Robustness follows the suite drop-in registry contract: every entry is an
+independent fault boundary, missing commands are detected during discovery, and
+only an authoritative scan withdraws a prior provider. Findings feed both
+bounded daemon warnings and ``agent-bridge doctor``.
 
 Manifest schema (``~/.agent-bridge/providers.d/<name>.json``)::
 
@@ -36,12 +37,21 @@ provider's agents on demand.
 from __future__ import annotations
 
 import json
-import logging
 import os
+import shutil
+import stat
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-log = logging.getLogger("agent-bridge")
+from dropin_registry import (
+    EntryDecision,
+    Finding,
+    ScanSnapshot,
+    scan_directory,
+)
+
+REGISTRY_NAME = "providers.d"
 
 #: Environment override for the provider-manifest directory (tests use it for
 #: hermetic isolation; also an operator escape hatch).
@@ -72,10 +82,17 @@ class ProviderManifest:
     restricted: bool = False
     description: str = ""
     source_path: str = ""
+    schema_version: int = 0
+    plugin: str | None = None
+    plugin_root: str | None = None
 
 
 class ManifestError(ValueError):
     """A provider manifest was structurally invalid."""
+
+
+class TargetUnusableError(ValueError):
+    """A provider target exists but cannot satisfy its contract."""
 
 
 def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
@@ -108,45 +125,210 @@ def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
     if not isinstance(restricted, bool):
         raise ManifestError("`restricted` must be a JSON boolean when present")
 
+    schema_version = data.get("schema_version", 0)
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version not in (0, 1)
+    ):
+        raise ManifestError("`schema_version` must be 1 when present")
+
+    plugin = data.get("plugin")
+    plugin_root = data.get("plugin_root")
+    if schema_version == 1:
+        if not isinstance(plugin, str) or "@" not in plugin or not plugin.strip():
+            raise ManifestError("schema v1 requires canonical `plugin` name@marketplace")
+        if not isinstance(plugin_root, str) or not plugin_root.strip():
+            raise ManifestError("schema v1 requires non-empty `plugin_root`")
+    elif plugin is not None or plugin_root is not None:
+        raise ManifestError("`plugin`/`plugin_root` require schema_version 1")
+
     return ProviderManifest(
         namespace=ns,
         command=tuple(cmd),
         restricted=restricted,
         description=desc,
         source_path=source_path,
+        schema_version=schema_version,
+        plugin=plugin.strip() if isinstance(plugin, str) else None,
+        plugin_root=plugin_root.strip() if isinstance(plugin_root, str) else None,
+    )
+
+
+@dataclass(frozen=True)
+class ProviderRegistryReport:
+    """Provider scan plus its reconciled entries and namespace winners."""
+
+    snapshot: ScanSnapshot[ProviderManifest]
+    entries: Mapping[str, ProviderManifest]
+    manifests: Mapping[str, ProviderManifest]
+    findings: tuple[Finding, ...]
+
+
+def _inactive(
+    path: Path,
+    reason: str,
+    *,
+    target: str | None = None,
+    detail: str | None = None,
+    owner: str | None = None,
+) -> EntryDecision[ProviderManifest]:
+    return EntryDecision.inactive(
+        Finding(
+            registry=REGISTRY_NAME,
+            entry=str(path),
+            status="inactive",
+            reason=reason,
+            target=target,
+            owner=owner,
+            remedy=(
+                f"Run `agent-bridge doctor`; remove {path} or "
+                "reinstall/re-enable its provider."
+            ),
+            detail=detail,
+        )
+    )
+
+
+def _resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
+    first = command[0]
+    candidate = Path(first).expanduser()
+    has_path = candidate.is_absolute() or candidate.parent != Path(".")
+    resolved = str(candidate) if has_path else shutil.which(first)
+    if not resolved:
+        raise FileNotFoundError(first)
+    target = Path(resolved)
+    info = target.stat()
+    if not stat.S_ISREG(info.st_mode):
+        raise TargetUnusableError("provider command is not a regular file")
+    if os.name != "nt" and not os.access(target, os.X_OK):
+        raise TargetUnusableError("provider command is not executable")
+    return (str(target), *command[1:])
+
+
+def _classify_manifest(path: Path) -> EntryDecision[ProviderManifest]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        manifest = parse_manifest(data, source_path=str(path))
+    except (json.JSONDecodeError, UnicodeDecodeError, ManifestError) as exc:
+        return _inactive(path, "invalid-entry", detail=str(exc))
+
+    try:
+        command = _resolve_command(manifest.command)
+    except FileNotFoundError:
+        return _inactive(
+            path,
+            "missing-target",
+            target=manifest.command[0],
+            owner=manifest.plugin,
+        )
+    except TargetUnusableError as exc:
+        return _inactive(
+            path,
+            "target-unusable",
+            target=manifest.command[0],
+            detail=str(exc),
+            owner=manifest.plugin,
+        )
+
+    if manifest.schema_version == 1:
+        root = Path(manifest.plugin_root or "").expanduser()
+        try:
+            root_info = root.stat()
+            if not stat.S_ISDIR(root_info.st_mode):
+                raise TargetUnusableError("plugin_root is not a directory")
+            canonical_root = str(root.resolve(strict=True))
+        except FileNotFoundError as exc:
+            return _inactive(
+                path,
+                "missing-target",
+                target=str(root),
+                detail=str(exc),
+                owner=manifest.plugin,
+            )
+        except TargetUnusableError as exc:
+            return _inactive(
+                path,
+                "target-unusable",
+                target=str(root),
+                detail=str(exc),
+                owner=manifest.plugin,
+            )
+        manifest = ProviderManifest(
+            namespace=manifest.namespace,
+            command=command,
+            restricted=manifest.restricted,
+            description=manifest.description,
+            source_path=manifest.source_path,
+            schema_version=manifest.schema_version,
+            plugin=manifest.plugin,
+            plugin_root=canonical_root,
+        )
+        return EntryDecision.active(manifest)
+
+    manifest = ProviderManifest(
+        namespace=manifest.namespace,
+        command=command,
+        restricted=manifest.restricted,
+        description=manifest.description,
+        source_path=manifest.source_path,
+    )
+    return EntryDecision.advisory(
+        manifest,
+        Finding(
+            registry=REGISTRY_NAME,
+            entry=str(path),
+            status="advisory",
+            reason="legacy-unattributed",
+            target=command[0],
+            remedy="Re-run the provider plugin's sessionStart registration hook.",
+        ),
+    )
+
+
+def scan_provider_registry(
+    directory: str | os.PathLike[str] | None = None,
+    *,
+    previous: Mapping[str, ProviderManifest] | None = None,
+) -> ProviderRegistryReport:
+    """Scan, reconcile, and de-duplicate provider manifests."""
+    root = Path(directory) if directory is not None else providers_dir()
+    snapshot = scan_directory(
+        root,
+        _classify_manifest,
+        registry=REGISTRY_NAME,
+        suffixes=(".json",),
+    )
+    entries = snapshot.reconcile(previous)
+    manifests: dict[str, ProviderManifest] = {}
+    findings = list(snapshot.findings)
+    for entry, manifest in sorted(entries.items()):
+        prior = manifests.get(manifest.namespace)
+        if prior is None:
+            manifests[manifest.namespace] = manifest
+            continue
+        findings.append(
+            Finding(
+                registry=REGISTRY_NAME,
+                entry=entry,
+                status="inactive",
+                reason="duplicate",
+                target=manifest.namespace,
+                owner=manifest.plugin,
+                remedy=f"Remove {entry} or the conflicting {prior.source_path}.",
+                detail=f"namespace already claimed by {prior.source_path}",
+            )
+        )
+    return ProviderRegistryReport(
+        snapshot=snapshot,
+        entries=entries,
+        manifests=manifests,
+        findings=tuple(findings),
     )
 
 
 def discover_provider_manifests(
     directory: str | os.PathLike[str] | None = None,
 ) -> dict[str, ProviderManifest]:
-    """Scan ``providers.d`` and return ``{namespace: manifest}``.
-
-    Invalid manifests are skipped with a warning; a duplicate namespace keeps
-    the first (lexicographic) manifest. Never raises.
-    """
-    directory = Path(directory) if directory is not None else providers_dir()
-    manifests: dict[str, ProviderManifest] = {}
-    try:
-        entries = sorted(directory.glob("*.json"))
-    except OSError:
-        return manifests
-
-    for path in entries:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8-sig"))
-            manifest = parse_manifest(data, source_path=str(path))
-        except (OSError, ValueError) as exc:
-            log.warning("Skipping invalid provider manifest %s: %s", path, exc)
-            continue
-        if manifest.namespace in manifests:
-            log.warning(
-                "Duplicate provider namespace '%s' in %s -- keeping %s",
-                manifest.namespace,
-                path,
-                manifests[manifest.namespace].source_path,
-            )
-            continue
-        manifests[manifest.namespace] = manifest
-
-    return manifests
+    """Compatibility wrapper returning the active namespace map."""
+    return dict(scan_provider_registry(directory).manifests)

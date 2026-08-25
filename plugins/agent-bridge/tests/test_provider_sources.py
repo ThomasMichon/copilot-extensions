@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -17,6 +18,7 @@ from agent_bridge.provider_sources import (
     discover_provider_manifests,
     parse_manifest,
     providers_dir,
+    scan_provider_registry,
 )
 
 
@@ -53,6 +55,29 @@ def test_parse_manifest_valid():
     assert m.description == "GitHub Codespaces"
 
 
+def test_parse_manifest_v1_requires_attribution(tmp_path):
+    m = parse_manifest(
+        {
+            "schema_version": 1,
+            "plugin": "agent-codespaces@copilot-extensions",
+            "plugin_root": str(tmp_path),
+            "namespace": "codespace",
+            "command": [sys.executable],
+        }
+    )
+    assert m.schema_version == 1
+    assert m.plugin == "agent-codespaces@copilot-extensions"
+    with pytest.raises(ManifestError, match="plugin"):
+        parse_manifest(
+            {
+                "schema_version": 1,
+                "plugin_root": str(tmp_path),
+                "namespace": "codespace",
+                "command": [sys.executable],
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "data",
     [
@@ -87,23 +112,102 @@ def test_discover_missing_dir_returns_empty(tmp_path):
 
 
 def test_discover_reads_valid_and_skips_bad(tmp_path):
-    _write(tmp_path, "codespaces.json", {"namespace": "codespace", "command": ["cs"]})
-    _write(tmp_path, "containers.json", {"namespace": "container", "command": ["ct"]})
+    _write(
+        tmp_path,
+        "codespaces.json",
+        {"namespace": "codespace", "command": [sys.executable]},
+    )
+    _write(
+        tmp_path,
+        "containers.json",
+        {"namespace": "container", "command": [sys.executable]},
+    )
     (tmp_path / "broken.json").write_text("{ not json", encoding="utf-8")
     _write(tmp_path, "invalid.json", {"namespace": "x"})  # missing command
 
     found = discover_provider_manifests(tmp_path)
 
     assert set(found) == {"codespace", "container"}
-    assert found["codespace"].command == ("cs",)
+    assert found["codespace"].command == (sys.executable,)
+    report = scan_provider_registry(tmp_path)
+    assert {finding.reason for finding in report.findings} >= {
+        "invalid-entry",
+        "legacy-unattributed",
+    }
 
 
 def test_discover_dedups_namespace_keeps_first(tmp_path):
     # "a.json" sorts before "b.json"; both claim "codespace".
-    _write(tmp_path, "a.json", {"namespace": "codespace", "command": ["first"]})
-    _write(tmp_path, "b.json", {"namespace": "codespace", "command": ["second"]})
+    _write(tmp_path, "a.json", {"namespace": "codespace", "command": [sys.executable, "a"]})
+    _write(tmp_path, "b.json", {"namespace": "codespace", "command": [sys.executable, "b"]})
     found = discover_provider_manifests(tmp_path)
-    assert found["codespace"].command == ("first",)
+    assert found["codespace"].command == (sys.executable, "a")
+    report = scan_provider_registry(tmp_path)
+    assert any(finding.reason == "duplicate" for finding in report.findings)
+
+
+def test_discover_missing_command_is_inactive(tmp_path):
+    missing = tmp_path / "gone"
+    _write(
+        tmp_path,
+        "stale.json",
+        {"namespace": "stale", "command": [str(missing)]},
+    )
+    report = scan_provider_registry(tmp_path)
+    assert report.manifests == {}
+    assert report.findings[0].reason == "missing-target"
+
+
+def test_transient_command_access_failure_retains_prior_provider(
+    monkeypatch, tmp_path
+):
+    from agent_bridge import provider_sources
+
+    manifest = tmp_path / "provider.json"
+    _write(
+        tmp_path,
+        manifest.name,
+        {"namespace": "stable", "command": [sys.executable]},
+    )
+    first = scan_provider_registry(tmp_path)
+    assert "stable" in first.manifests
+
+    def deny(_command):
+        raise PermissionError("temporarily denied")
+
+    monkeypatch.setattr(provider_sources, "_resolve_command", deny)
+    second = scan_provider_registry(tmp_path, previous=first.entries)
+    assert second.manifests["stable"] == first.manifests["stable"]
+    assert any(finding.reason == "entry-indeterminate" for finding in second.findings)
+
+
+def test_doctor_json_reports_exact_stale_entry(monkeypatch, tmp_path, capsys):
+    from agent_bridge import __main__ as cli
+
+    stale = tmp_path / "stale.json"
+    missing = tmp_path / "gone"
+    _write(
+        tmp_path,
+        stale.name,
+        {"namespace": "stale", "command": [str(missing)]},
+    )
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(tmp_path))
+    with pytest.raises(SystemExit) as exc:
+        cli._cmd_doctor(SimpleNamespace(json=True))
+    assert exc.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["authority"] == "complete"
+    assert payload["findings"][0]["entry"] == str(stale)
+    assert payload["findings"][0]["target"] == str(missing)
+    assert payload["findings"][0]["reason"] == "missing-target"
+
+
+def test_doctor_parser_supports_plain_and_both_json_positions():
+    from agent_bridge import __main__ as cli
+
+    assert cli.build_parser().parse_args(["doctor"]).json is False
+    assert cli.build_parser().parse_args(["doctor", "--json"]).json is True
+    assert cli.build_parser().parse_args(["--json", "doctor"]).json is True
 
 
 # -- CliNamespaceResolver explicit-command override ----------------------------
@@ -155,9 +259,9 @@ def _bridge_providers_dir(monkeypatch, tmp_path):
 def test_refresh_registers_from_manifest(monkeypatch, tmp_path):
     _bridge_providers_dir(monkeypatch, tmp_path)
     _write(tmp_path, "codespaces.json",
-           {"namespace": "codespace", "command": ["/abs/cs"]})
+           {"namespace": "codespace", "command": [sys.executable]})
     _write(tmp_path, "containers.json",
-           {"namespace": "container", "command": ["/abs/ct"], "restricted": True})
+           {"namespace": "container", "command": [sys.executable], "restricted": True})
 
     resolver = AgentResolver({}, {})
     resolver.refresh_provider_resolvers(force=True)
@@ -171,7 +275,7 @@ def test_refresh_registers_from_manifest(monkeypatch, tmp_path):
 def test_refresh_is_additive_and_idempotent(monkeypatch, tmp_path):
     _bridge_providers_dir(monkeypatch, tmp_path)
     _write(tmp_path, "codespaces.json",
-           {"namespace": "codespace", "command": ["/abs/cs"]})
+           {"namespace": "codespace", "command": [sys.executable]})
 
     resolver = AgentResolver({}, {})
     resolver.refresh_provider_resolvers(force=True)
@@ -180,11 +284,48 @@ def test_refresh_is_additive_and_idempotent(monkeypatch, tmp_path):
     # A second manifest appears; a forced refresh adds it without replacing the
     # already-registered one.
     _write(tmp_path, "containers.json",
-           {"namespace": "container", "command": ["/abs/ct"]})
+           {"namespace": "container", "command": [sys.executable]})
     resolver.refresh_provider_resolvers(force=True)
 
     assert resolver.namespace_resolvers["codespace"] is first
     assert "container" in resolver.namespace_resolvers
+
+
+def test_refresh_removes_deleted_provider(monkeypatch, tmp_path):
+    _bridge_providers_dir(monkeypatch, tmp_path)
+    manifest = tmp_path / "codespaces.json"
+    _write(
+        tmp_path,
+        manifest.name,
+        {"namespace": "codespace", "command": [sys.executable]},
+    )
+    resolver = AgentResolver({}, {})
+    resolver.refresh_provider_resolvers(force=True)
+    assert "codespace" in resolver.namespace_resolvers
+
+    manifest.unlink()
+    resolver.refresh_provider_resolvers(force=True)
+    assert "codespace" not in resolver.namespace_resolvers
+
+
+def test_refresh_replaces_changed_provider(monkeypatch, tmp_path):
+    _bridge_providers_dir(monkeypatch, tmp_path)
+    _write(
+        tmp_path,
+        "codespaces.json",
+        {"namespace": "codespace", "command": [sys.executable, "one"]},
+    )
+    resolver = AgentResolver({}, {})
+    resolver.refresh_provider_resolvers(force=True)
+    first = resolver.namespace_resolvers["codespace"]
+
+    _write(
+        tmp_path,
+        "codespaces.json",
+        {"namespace": "codespace", "command": [sys.executable, "two"]},
+    )
+    resolver.refresh_provider_resolvers(force=True)
+    assert resolver.namespace_resolvers["codespace"] is not first
 
 
 def test_refresh_throttled_without_force(monkeypatch, tmp_path):
@@ -195,7 +336,7 @@ def test_refresh_throttled_without_force(monkeypatch, tmp_path):
     # Drop a manifest AFTER the throttle window opened; a non-forced refresh
     # within the TTL must not pick it up yet.
     _write(tmp_path, "codespaces.json",
-           {"namespace": "codespace", "command": ["/abs/cs"]})
+           {"namespace": "codespace", "command": [sys.executable]})
     resolver.refresh_provider_resolvers(force=False)
     assert "codespace" not in resolver.namespace_resolvers
 
@@ -223,7 +364,7 @@ def test_daemon_resolver_registers_providers_without_topology(monkeypatch, tmp_p
     monkeypatch.setattr(agent_registry, "build_resolver", lambda cfg: None)
     _bridge_providers_dir(monkeypatch, tmp_path)
     _write(tmp_path, "codespaces.json",
-           {"namespace": "codespace", "command": ["/abs/cs"]})
+           {"namespace": "codespace", "command": [sys.executable]})
 
     resolver = agent_registry.daemon_resolver(cfg=None)
 
@@ -240,4 +381,3 @@ def test_daemon_resolver_uses_topology_when_present(monkeypatch, tmp_path):
     monkeypatch.setattr(agent_registry, "build_resolver", lambda cfg: sentinel)
     resolver = agent_registry.daemon_resolver(cfg=None)
     assert resolver is sentinel
-
