@@ -22,7 +22,6 @@ import time
 from pathlib import Path
 
 from rich.panel import Panel
-from rich.style import Style
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -32,6 +31,7 @@ from textual.screen import ModalScreen
 from textual.widget import Widget
 from textual.widgets import (
     Input,
+    Markdown,
     OptionList,
     RadioButton,
     RadioSet,
@@ -6486,7 +6486,8 @@ def _normalize_form_fields(raw: object) -> list[dict]:
     ``card.request_input``). Drops non-dict / un-named entries, defaults an
     unknown/absent type to ``text``, keeps only a non-empty ``options`` list for
     a choice/multichoice (an empty one degrades to a free-text field), and
-    carries ``allow_other`` (the "Other…" affordance). Never raises -- a
+    carries ``allow_other`` (the "Other…" affordance) and a valid
+    ``show_when={"field", "equals"}`` choice predicate. Never raises -- a
     malformed spec degrades to a shorter (or empty) form, so the modal always
     renders."""
     if not isinstance(raw, list):
@@ -6513,8 +6514,63 @@ def _normalize_form_fields(raw: object) -> list[dict]:
                 field["options"] = options
                 if item.get("allow_other"):
                     field["allow_other"] = True
+        condition = item.get("show_when")
+        if isinstance(condition, dict):
+            source = condition.get("field")
+            expected = condition.get("equals")
+            if (
+                isinstance(source, str)
+                and source.strip()
+                and isinstance(expected, str)
+                and expected.strip()
+            ):
+                field["show_when"] = {
+                    "field": source.strip(),
+                    "equals": expected.strip(),
+                }
         out.append(field)
+    by_name = {field["name"]: field for field in out}
+    for field in out:
+        condition = field.get("show_when")
+        if not condition:
+            continue
+        controller = by_name.get(condition["field"])
+        if (
+            controller is None
+            or controller is field
+            or controller.get("type") != "choice"
+            or controller.get("show_when")
+            or condition["equals"] not in (controller.get("options") or [])
+        ):
+            field.pop("show_when", None)
     return out
+
+
+def _escape_markdown_inline(value: object) -> str:
+    """Escape card metadata before embedding it in the Markdown wrapper."""
+    return re.sub(r"([\\`*_{}\[\]()#+.!|>-])", r"\\\1", str(value))
+
+
+def _card_markdown(card: dict, fallback_title: str = "") -> str:
+    """Compose card metadata and its Markdown body into one document."""
+    parts: list[str] = []
+    title = card.get("title") or fallback_title
+    if title:
+        parts.append(f"# {_escape_markdown_inline(title)}")
+    status = card.get("status")
+    if status:
+        parts.append(f"*Status:* **{status}**")
+    link = card.get("link")
+    if link:
+        parts.append(f"*Link:* <{str(link).strip()}>")
+    body = card.get("body")
+    if body:
+        if parts:
+            parts.append("---")
+        parts.append(str(body))
+    if not parts:
+        parts.append("*(empty card)*")
+    return "\n\n".join(parts)
 
 
 class PivotCardScreen(ModalScreen[None]):
@@ -6533,6 +6589,16 @@ class PivotCardScreen(ModalScreen[None]):
         border: round #ffaf00; background: $surface; padding: 0 1;
     }
     PivotCardScreen #card-scroll { height: auto; max-height: 24; }
+    PivotCardScreen Markdown { background: $surface; padding: 0 1; }
+    PivotCardScreen MarkdownH1 {
+        content-align: left middle; color: #ffaf00; background: $surface;
+    }
+    PivotCardScreen MarkdownH2, PivotCardScreen MarkdownH3 { color: #4aa3ff; }
+    PivotCardScreen MarkdownBlock > .strong { color: #ffaf00; text-style: bold; }
+    PivotCardScreen MarkdownBlock > .em { color: #a3a3a3; text-style: italic; }
+    PivotCardScreen MarkdownBlockQuote {
+        background: #17212b; border-left: outer #4aa3ff;
+    }
     PivotCardScreen #card-foot { color: grey; height: auto; padding: 1 0 0 0; }
     """
     BINDINGS = [
@@ -6549,33 +6615,15 @@ class PivotCardScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="card-frame"):
             with VerticalScroll(id="card-scroll"):
-                yield Static(self._body(), id="card-body")
+                yield Markdown(
+                    _card_markdown(self._card, self._row_title),
+                    id="card-body",
+                )
             yield Static("↑/↓ scroll · Esc close", id="card-foot")
 
     def on_mount(self) -> None:
         self.query_one("#card-frame", Vertical).border_title = "Card"
         self.query_one("#card-scroll", VerticalScroll).focus()
-
-    def _body(self) -> Text:
-        card = self._card
-        t = Text()
-        title = card.get("title") or self._row_title
-        if title:
-            t.append(f"{title}\n", style=C_HEADER)
-        status = card.get("status")
-        if status:
-            t.append(f"{status}\n", style="white")
-        link = card.get("link")
-        if link:
-            t.append(f"{link}\n", style="#4aa3ff underline")
-        body = card.get("body")
-        if title or status or link:
-            t.append("\n")
-        if body:
-            t.append(str(body), style="white")
-        elif not (title or status or link):
-            t.append("(empty card)", style=C_FAINT)
-        return t
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -6600,40 +6648,6 @@ def _steer_draft_path(task_id: str) -> Path | None:
     ``None`` when the task id has no filesystem-safe characters."""
     tid = "".join(c for c in str(task_id) if c.isalnum() or c in "-_")
     return _steer_drafts_dir() / f"{tid}.json" if tid else None
-
-
-#: Matches an http(s) URL in card prose (stops at whitespace / closing brackets).
-_URL_RE = re.compile(r"https?://[^\s<>\)\]]+")
-
-
-def _linkify(text: str, style: str) -> Text:
-    """Render ``text`` as Rich ``Text`` with any http(s) URL turned into a
-    clickable OSC-8 hyperlink (underlined), so the operator can click it -- or
-    hover to reveal the full URL -- instead of reading a bare string. Non-URL
-    spans keep the base ``style``. (Click-through depends on the terminal; over
-    SSH/mux it degrades to a hover/inspectable link, which is why the picker is
-    usually driven locally.)"""
-    base = Style.parse(style) if style else Style()
-    t = Text()
-    pos = 0
-    for m in _URL_RE.finditer(text):
-        if m.start() > pos:
-            t.append(text[pos:m.start()], style=base)
-        url = m.group(0)
-        # Don't swallow trailing sentence punctuation into the link target
-        # (a URL that ends a sentence, e.g. "…see https://x/y." ).
-        trail = ""
-        while url and url[-1] in ".,;:!?)]}'\"":
-            trail = url[-1] + trail
-            url = url[:-1]
-        if url:
-            t.append(url, style=base + Style(link=url, underline=True))
-        if trail:
-            t.append(trail, style=base)
-        pos = m.end()
-    if pos < len(text):
-        t.append(text[pos:], style=base)
-    return t
 
 
 class _AutoExpandTextArea(TextArea):
@@ -6838,6 +6852,16 @@ class PivotFormScreen(ModalScreen[dict]):
         border: round #ffaf00; background: $surface; padding: 0 1;
     }
     PivotFormScreen #steer-card { height: 1fr; }
+    PivotFormScreen Markdown { background: $surface; padding: 0 1; }
+    PivotFormScreen MarkdownH1 {
+        content-align: left middle; color: #ffaf00; background: $surface;
+    }
+    PivotFormScreen MarkdownH2, PivotFormScreen MarkdownH3 { color: #4aa3ff; }
+    PivotFormScreen MarkdownBlock > .strong { color: #ffaf00; text-style: bold; }
+    PivotFormScreen MarkdownBlock > .em { color: #a3a3a3; text-style: italic; }
+    PivotFormScreen MarkdownBlockQuote {
+        background: #17212b; border-left: outer #4aa3ff;
+    }
     PivotFormScreen #steer-dock { height: auto; max-height: 65%; padding: 0; }
     PivotFormScreen .steer-qlabel { color: #ffaf00; height: auto; padding: 1 0 0 0; }
     PivotFormScreen .steer-note { color: grey; height: auto; padding: 1 0 0 0; }
@@ -6871,7 +6895,7 @@ class PivotFormScreen(ModalScreen[dict]):
     def compose(self) -> ComposeResult:
         with Vertical(id="steer-frame"):
             with VerticalScroll(id="steer-card"):
-                yield Static(self._card_prose(), id="steer-card-body")
+                yield Markdown(_card_markdown(self._card), id="steer-card-body")
             with Vertical(id="steer-dock"):
                 yield from self._compose_questions()
                 yield Static(self._foot(), id="steer-foot")
@@ -6890,15 +6914,23 @@ class PivotFormScreen(ModalScreen[dict]):
             return
         with TabbedContent(id="steer-tabs"):
             for i, f in enumerate(self._fields):
-                with TabPane(f["name"], id=f"tab-{i}"):
+                with TabPane(self._field_label(f), id=f"tab-{i}"):
                     yield from self._compose_one(f, i)
 
     def _compose_one(self, f: dict, i: int):
         name, ftype = f["name"], f["type"]
         options = list(f.get("options", []))
         allow_other = bool(f.get("allow_other"))
-        rec = {"name": name, "type": ftype, "options": options,
-               "allow_other": allow_other, "primary": None, "other": None}
+        rec = {
+            "name": name,
+            "type": ftype,
+            "options": options,
+            "allow_other": allow_other,
+            "show_when": f.get("show_when"),
+            "visible": True,
+            "primary": None,
+            "other": None,
+        }
         yield Static(self._q_label(f), classes="steer-qlabel")
         if ftype == "choice":
             btns = [RadioButton(o, value=(j == 0)) for j, o in enumerate(options)]
@@ -6934,35 +6966,9 @@ class PivotFormScreen(ModalScreen[dict]):
         self._q.append(rec)
 
     # ---- rendering helpers --------------------------------------------------
-    def _card_prose(self) -> Text:
-        card = self._card
-        t = Text()
-        title = card.get("title")
-        if title:
-            t.append(f"{title}\n", style=C_HEADER)
-        status = card.get("status")
-        if status:
-            self._append_linked(t, str(status), "white")
-            t.append("\n")
-        link = card.get("link")
-        if link:
-            t.append_text(_linkify(str(link), "#4aa3ff underline"))
-            t.append("\n")
-        body = card.get("body")
-        if title or status or link:
-            t.append("\n")
-        if body:
-            self._append_linked(t, str(body), "white")
-        elif not (title or status or link):
-            t.append("(no card detail)", style=C_FAINT)
-        return t
-
     @staticmethod
-    def _append_linked(t: Text, text: str, style: str) -> None:
-        """Append ``text`` to ``t``, rendering any http(s) URLs as clickable
-        Rich hyperlinks (OSC-8) so the operator can click them (or hover to see
-        the full URL) rather than eyeballing a bare string."""
-        t.append_text(_linkify(text, style))
+    def _field_label(f: dict) -> str:
+        return str(f["name"]).replace("_", " ").capitalize()
 
     @staticmethod
     def _q_label(f: dict) -> str:
@@ -6971,12 +6977,13 @@ class PivotFormScreen(ModalScreen[dict]):
         hint = hints.get(f["type"], "")
         if f.get("allow_other"):
             hint += " · Other… for free text"
-        return f"{f['name']}" + (f"  ({hint})" if hint else "") + ":"
+        label = PivotFormScreen._field_label(f)
+        return label + (f"  ({hint})" if hint else "") + ":"
 
     def _foot(self) -> str:
         return ("Enter accept+next · Shift+Enter newline · Space toggle · "
                 "Ctrl+←/→ tabs · Ctrl+S save · Esc save+close  ·  "
-                "Confirm submits (never a vote)")
+                "Confirm sends this response to the agent")
 
     # ---- lifecycle ----------------------------------------------------------
     def on_mount(self) -> None:
@@ -6985,8 +6992,14 @@ class PivotFormScreen(ModalScreen[dict]):
         restored = self._load_draft()
         if restored:
             self._restore(restored)
+        self._sync_conditional_fields()
         # Focus the first question's input (or the card scroll when there is none).
-        target = self._q[0]["primary"] if self._q else self.query_one("#steer-card", VerticalScroll)
+        visible = self._visible_question_indexes()
+        target = (
+            self._q[visible[0]]["primary"]
+            if visible
+            else self.query_one("#steer-card", VerticalScroll)
+        )
         try:
             target.focus()
         except Exception:
@@ -7011,10 +7024,10 @@ class PivotFormScreen(ModalScreen[dict]):
         # Reveal/hide the "Other…" free-text box for this question (display only;
         # focus is handled on Enter by _advance_after_choice so Space stays put).
         rec = self._rec_for(event.radio_set)
-        if not rec or not rec.get("other"):
-            return
-        other_idx = len(rec["options"])  # "Other…" is appended after the options
-        rec["other"].display = getattr(event, "index", -1) == other_idx
+        if rec and rec.get("other"):
+            other_idx = len(rec["options"])  # "Other…" follows the real options
+            rec["other"].display = getattr(event, "index", -1) == other_idx
+        self._sync_conditional_fields()
 
     def on_selection_list_selected_changed(self, event) -> None:
         rec = self._rec_for(event.selection_list)
@@ -7022,6 +7035,50 @@ class PivotFormScreen(ModalScreen[dict]):
             return
         selected = list(getattr(event.selection_list, "selected", []) or [])
         rec["other"].display = _OTHER_SENTINEL in selected
+
+    def _condition_value(self, rec: dict) -> str:
+        """Current scalar answer used by a dependent field predicate."""
+        primary = rec.get("primary")
+        if rec.get("type") == "choice":
+            idx = getattr(primary, "pressed_index", -1)
+            options = rec.get("options") or []
+            if 0 <= idx < len(options):
+                return str(options[idx])
+        return ""
+
+    def _condition_matches(self, rec: dict) -> bool:
+        condition = rec.get("show_when")
+        if not isinstance(condition, dict):
+            return True
+        controller = next(
+            (item for item in self._q if item["name"] == condition.get("field")),
+            None,
+        )
+        if controller is None:
+            return True
+        if not controller.get("visible", True):
+            return False
+        return self._condition_value(controller) == str(condition.get("equals", ""))
+
+    def _visible_question_indexes(self) -> list[int]:
+        return [i for i, rec in enumerate(self._q) if rec.get("visible", True)]
+
+    def _sync_conditional_fields(self) -> None:
+        """Show/hide dependent tabs after their controlling choice changes."""
+        tabs = next(iter(self.query(TabbedContent)), None)
+        for i, rec in enumerate(self._q):
+            visible = self._condition_matches(rec)
+            rec["visible"] = visible
+            if tabs is not None:
+                try:
+                    (tabs.show_tab if visible else tabs.hide_tab)(f"tab-{i}")
+                except Exception:
+                    pass
+        if tabs is not None:
+            visible = self._visible_question_indexes()
+            active = str(getattr(tabs, "active", ""))
+            if visible and active not in {f"tab-{i}" for i in visible}:
+                tabs.active = f"tab-{visible[0]}"
 
     # ---- keyboard flow: advance + tab cycling -------------------------------
     def _activate_tab(self, i: int) -> None:
@@ -7033,10 +7090,12 @@ class PivotFormScreen(ModalScreen[dict]):
     def _advance_to_next_question(self, i: int) -> None:
         """Focus the next question's input (switching tabs), or the button row
         (Confirm) when there is none left."""
-        if 0 <= i and i + 1 < len(self._q):
-            self._activate_tab(i + 1)
+        following = [j for j in self._visible_question_indexes() if j > i]
+        if following:
+            next_i = following[0]
+            self._activate_tab(next_i)
             try:
-                self._q[i + 1]["primary"].focus()
+                self._q[next_i]["primary"].focus()
             except Exception:
                 pass
         else:
@@ -7070,17 +7129,18 @@ class PivotFormScreen(ModalScreen[dict]):
         self._advance_to_next_question(self._question_index(widget))
 
     def _cycle_tab(self, direction: int) -> None:
-        if len(self._q) <= 1:
+        visible = self._visible_question_indexes()
+        if len(visible) <= 1:
             return
         try:
             tabs = self.query_one("#steer-tabs", TabbedContent)
         except Exception:
             return
         try:
-            cur = int(str(tabs.active).split("-")[1])
+            cur = visible.index(int(str(tabs.active).split("-")[1]))
         except Exception:
             cur = 0
-        i = (cur + direction) % len(self._q)
+        i = visible[(cur + direction) % len(visible)]
         tabs.active = f"tab-{i}"
         try:
             self._q[i]["primary"].focus()
@@ -7094,9 +7154,11 @@ class PivotFormScreen(ModalScreen[dict]):
         self._cycle_tab(-1)
 
     # ---- collect / draft ----------------------------------------------------
-    def _collect(self) -> dict:
+    def _collect(self, *, include_hidden: bool = False) -> dict:
         values: dict = {}
         for rec in self._q:
+            if not include_hidden and not rec.get("visible", True):
+                continue
             name, ftype = rec["name"], rec["type"]
             options, allow_other = rec["options"], rec["allow_other"]
             prim, other = rec["primary"], rec["other"]
@@ -7174,7 +7236,10 @@ class PivotFormScreen(ModalScreen[dict]):
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(
-                json.dumps({"task_id": self._task_id, "values": self._collect()}),
+                json.dumps({
+                    "task_id": self._task_id,
+                    "values": self._collect(include_hidden=True),
+                }),
                 encoding="utf-8",
             )
         except OSError:

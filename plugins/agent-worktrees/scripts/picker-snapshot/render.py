@@ -14,11 +14,15 @@ Also requires node + a Python env with textual/rich/pyyaml importable.
 Usage:
     python render.py out.png                 # picker home screen
     python render.py out.png --modal cfg     # with the Configuration modal open
+    python render.py steer.png --modal steer # Markdown steering card
+    python render.py verdict.png --modal steer-verdict
+    python render.py reject.png --modal steer-reject
     python render.py out.png --zoom 4        # crisper (bigger file)
 """
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import sys
@@ -137,17 +141,135 @@ async def _open_prof(scr, pilot):
     await pilot.pause()
 
 
+def _steer_card() -> dict:
+    return {
+        "title": "Review draft: PR 4242",
+        "status": "Recommended verdict: Approve",
+        "link": "https://example.test/pull/4242",
+        "body": """\
+# Review of PR 4242 - Preserve the shared parser contract
+
+> *Recommended verdict:* **APPROVE**
+
+## Proposed comment
+
+> Could we reuse the shared parser here? It already preserves escaped separators
+> and keeps this path consistent with neighboring callers.
+>
+> *AI-assisted review comment.*
+
+*Rationale: the hand-rolled split loses escaped separators. The shared parser is
+already the local source of truth; this rationale is for the operator and is not
+posted.*
+""",
+    }
+
+
+def _steer_fields() -> list[dict]:
+    return [
+        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"]},
+        {
+            "name": "reason",
+            "type": "textarea",
+            "show_when": {"field": "comments", "equals": "Reject"},
+        },
+        {
+            "name": "verdict",
+            "type": "choice",
+            "options": ["Approve", "Waiting for author", "Reject"],
+            "show_when": {"field": "comments", "equals": "Accept"},
+        },
+    ]
+
+
+async def _open_steer(
+    scr,
+    pilot,
+    *,
+    rejected: bool = False,
+    verdict: bool = False,
+    card: dict | None = None,
+):
+    from textual.widgets import RadioButton, RadioSet
+
+    from agent_worktrees.picker_tui.engine import PivotFormScreen
+
+    card = card or _steer_card()
+    fields = card.get("request_input") or _steer_fields()
+    modal = PivotFormScreen(card, fields, "Review", task_id="preview")
+    scr.app.push_screen(modal)
+    await pilot.pause()
+    if rejected:
+        feedback = modal.query_one("#q-0", RadioSet)
+        list(feedback.query(RadioButton))[1].value = True
+        await pilot.pause()
+        await pilot.pause()
+        modal.query_one("#q-1").focus()
+    elif verdict and len(fields) >= 3:
+        from textual.widgets import TabbedContent
+
+        modal.query_one("#steer-tabs", TabbedContent).active = "tab-2"
+        modal.query_one("#q-2").focus()
+        await pilot.pause()
+
+
+async def _open_steer_default(scr, pilot):
+    await _open_steer(scr, pilot)
+
+
+async def _open_steer_reject(scr, pilot):
+    await _open_steer(scr, pilot, rejected=True)
+
+
+async def _open_steer_verdict(scr, pilot):
+    await _open_steer(scr, pilot, verdict=True)
+
+
+def _load_card(path: str, task_id: str | None) -> dict:
+    data = json.loads(open(path, encoding="utf-8").read())
+    if isinstance(data, list):
+        entries = data
+        if task_id:
+            entries = [
+                item for item in entries
+                if isinstance(item, dict) and str(item.get("id")) == task_id
+            ]
+        data = next(
+            (
+                item.get("card")
+                for item in entries
+                if isinstance(item, dict) and isinstance(item.get("card"), dict)
+            ),
+            None,
+        )
+    elif isinstance(data, dict) and isinstance(data.get("card"), dict):
+        data = data["card"]
+    if not isinstance(data, dict):
+        raise ValueError("card JSON must be a card, a task with a card, or a task list")
+    return data
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Render a picker snapshot to PNG.")
     ap.add_argument("out", help="output PNG path")
     ap.add_argument(
         "--modal",
-        choices=["cfg", "clean", "new", "submenu", "maint", "quit", "prof"],
+        choices=[
+            "cfg", "clean", "new", "submenu", "maint", "quit", "prof",
+            "steer", "steer-verdict", "steer-reject",
+        ],
         help="open a native modal before capturing (composited app)")
     ap.add_argument("--zoom", default="3", help="rasterizer zoom (default 3)")
+    ap.add_argument(
+        "--card-json",
+        help="card/task/task-list JSON to use with --modal steer")
+    ap.add_argument(
+        "--task-id",
+        help="task to select when --card-json contains a task list")
     args = ap.parse_args()
 
     src = _demo_source()
+    card = _load_card(args.card_json, args.task_id) if args.card_json else None
     if args.modal == "cfg":
         svg = pcap.capture_modal(src, _open_cfg, title="Configuration menu")
     elif args.modal == "clean":
@@ -162,6 +284,18 @@ def main() -> int:
         svg = pcap.capture_modal(src, _open_quit, title="Quit confirm")
     elif args.modal == "prof":
         svg = pcap.capture_modal(src, _open_prof, title="Profiles apply confirm")
+    elif args.modal == "steer":
+        async def _open(scr, pilot):
+            await _open_steer(scr, pilot, card=card)
+
+        svg = pcap.capture_modal(
+            src, _open, title="Steering card - recommended defaults")
+    elif args.modal == "steer-reject":
+        svg = pcap.capture_modal(
+            src, _open_steer_reject, title="Steering card - rejected feedback")
+    elif args.modal == "steer-verdict":
+        svg = pcap.capture_modal(
+            src, _open_steer_verdict, title="Steering card - verdict choice")
     else:
         svg = pcap.capture(src, update_state="current")["svg"]
 

@@ -3417,7 +3417,8 @@ def build_parser() -> argparse.ArgumentParser:
     cs.add_argument(
         "--request-input", dest="request_input",
         help="form spec the operator should fill, e.g. "
-             "'feedback:textarea,decision:choice[revise,post-approved,hold-all]'",
+             "'decision:choice[Proceed,Revise],"
+             "notes:textarea?decision=Revise'",
     )
     cs.add_argument("--machine", help="override the resolved machine")
     cs.add_argument("--worktree", help="override the resolved worktree id")
