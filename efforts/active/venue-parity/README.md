@@ -218,7 +218,7 @@ the rest:
   authoritative death, while Docker/provider failure remains inconclusive and
   blocks duplicate spawn. Partial launch and explicit reap retain target
   ownership until identity-checked remote death is confirmed. Deployed
-  agent-bridge **0.4.0-dev356** + agent-containers **0.1.2-dev78** on dev6.
+  agent-bridge **0.4.0-dev356** + agent-containers **0.1.2-dev79** on dev6.
   **Live proof:** session `dbbacaa8-823` published container Host PID 266 /
   child PID 268 with relay metadata; after deleting only the local HostIndex row
   and restarting agent-bridge, the frontend reconstructed the record, rebuilt
