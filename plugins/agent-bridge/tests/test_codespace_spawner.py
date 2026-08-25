@@ -10,10 +10,12 @@ agent-codespaces and are covered there.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from ssh_manager import SSHConfig
 
 from agent_bridge.session_host import bundle as bundle_mod
 from agent_bridge.session_host import endpoints as endpoints_mod
@@ -24,7 +26,6 @@ from agent_bridge.session_host.endpoints import (
     forward_from_endpoint,
     ssh_config_from_endpoint,
 )
-from ssh_manager import SSHConfig
 
 
 class _FakeForward:
@@ -64,6 +65,7 @@ class _FakeTransport:
         probe_result=None,
         probe_error: Exception | None = None,
         preflight_result=None,
+        liveness="1:1",
     ):
         self._state = state
         self.exists = exists
@@ -71,8 +73,10 @@ class _FakeTransport:
         self.probe_result = probe_result
         self.probe_error = probe_error
         self.preflight_result = preflight_result
+        self.liveness = liveness
         self.pushed: list[tuple[str, str]] = []
         self.runs: list[str] = []
+        self.launched_session_id = ""
 
     async def push_file(self, local_path, remote_path):
         self.pushed.append((local_path, remote_path))
@@ -84,13 +88,30 @@ class _FakeTransport:
         self.runs.append(command)
         if command.startswith("python3 -S "):
             return self.preflight_result or (0, "", "")
-        if command.startswith("cat "):
-            return (0, json.dumps(self._state), "")
+        if command.startswith("cat ") or command.startswith("if test -f "):
+            state = dict(self._state)
+            state.setdefault("session_id", self.launched_session_id or "sess1")
+            state.setdefault("nonce", "test-nonce")
+            return (0, json.dumps(state), "")
+        if command.startswith("b=$(cat "):
+            return (0, self.liveness, "")
         if "/dev/tcp/127.0.0.1/" in command:
             if self.probe_error is not None:
                 raise self.probe_error
             return self.probe_result or (1, "", "refused")
+        if "kill -TERM --" in command:
+            self.liveness = "0:0"
+            return (0, "", "")
+        match = re.search(r"--session-id ([A-Za-z0-9_.-]+)", command)
+        if match:
+            self.launched_session_id = match.group(1)
         return (0, "launched", "")
+
+    async def home_dir(self):
+        return "/home/vscode"
+
+    async def is_running(self):
+        return True
 
     def ssh_config(self):
         return SSHConfig(host_alias="cs.box", user="vscode",
@@ -115,6 +136,7 @@ def _reset_forward():
 
 
 def _patch_common(monkeypatch):
+    monkeypatch.setattr(sp, "new_nonce", lambda: "test-nonce")
     monkeypatch.setattr(
         bundle_mod, "build_session_host_bundle",
         lambda *a, **k: (Path("/tmp/session-host-abc123.pyz"), "abc123"),
@@ -158,6 +180,9 @@ def test_build_remote_launch_shape():
         ["copilot", "--acp", "--stdio"],
         nonce="deadbeef",
         cwd="/workspaces/repo",
+        session_id="s1",
+        host_version="0.4.0-dev1",
+        reverse_forwards=["9857:127.0.0.1:61234"],
     )
     assert "setsid nohup" in cmd
     assert "--state-file" in cmd
@@ -165,6 +190,11 @@ def test_build_remote_launch_shape():
     assert "</dev/null" in cmd
     assert sp._NONCE_ENV in cmd
     assert "deadbeef" in cmd
+    assert "--session-id s1" in cmd
+    assert "--host-version 0.4.0-dev1" in cmd
+    assert "--reverse-forward" in cmd
+    assert "9857:127.0.0.1:61234" in cmd
+    assert "chmod 700" in cmd
     assert "copilot" in cmd
     # reap bounds are threaded to the detached far-side host (#145)
     assert "--unexpected-reap-seconds" in cmd
@@ -217,6 +247,144 @@ async def test_codespace_spawner_ships_launches_forwards(monkeypatch):
     assert ep["local_port"] == 49555
     assert ep["codespace"] == "cs-foo"
     assert ep["ssh"]["config_file"] == "/tmp/cs.config"
+    assert spawned.state_file == (
+        "/home/vscode/.agent-bridge/session-hosts/host-sess1.json"
+    )
+
+
+@pytest.mark.asyncio
+async def test_codespace_spawner_recovers_remote_authority_record(monkeypatch):
+    _patch_common(monkeypatch)
+    state = {
+        "version": 2,
+        "session_id": "sess1",
+        "pid": 111,
+        "host_pid": 111,
+        "child_pid": 222,
+        "port": 51000,
+        "protocol_version": proto.PROTOCOL_VERSION,
+        "host_version": "0.4.0-dev1",
+        "nonce": "secure-nonce",
+        "created_at": 123.0,
+        "state": "running",
+        "child_executable": "bash",
+        "cwd": "/workspaces/repo",
+        "reverse_forwards": ["9857:127.0.0.1:61234"],
+        "boot_id": "boot-one",
+        "host_start_ticks": "100",
+        "child_start_ticks": "101",
+    }
+    t = _FakeTransport(state)
+
+    rec = await sp.CodeSpaceSpawner(t).recover_record("sess1")
+
+    assert rec is not None
+    assert rec.session_id == "sess1"
+    assert rec.host_pid == 111
+    assert rec.child_pid == 222
+    assert rec.port == 0
+    assert rec.nonce == "secure-nonce"
+    assert rec.endpoint["remote_port"] == 51000
+    assert rec.endpoint["local_port"] == 0
+    assert rec.endpoint["reverse_forwards"] == ["9857:127.0.0.1:61234"]
+    assert rec.extra["recovered_from_remote"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("liveness", ["0:1", "1:0"])
+async def test_remote_authority_reaps_asymmetric_survivor(
+    monkeypatch,
+    liveness,
+):
+    _patch_common(monkeypatch)
+    state = {
+        "version": 2,
+        "session_id": "sess1",
+        "pid": 111,
+        "child_pid": 222,
+        "port": 51000,
+        "nonce": "secure-nonce",
+        "state": "running",
+        "boot_id": "boot-one",
+        "host_start_ticks": "100",
+        "child_start_ticks": "101",
+    }
+    t = _FakeTransport(state, liveness=liveness)
+
+    with pytest.raises(sp.RemoteHostDeadError):
+        await sp.CodeSpaceSpawner(t).recover_record("sess1")
+    assert any("kill -TERM -- -111" in command for command in t.runs)
+
+
+@pytest.mark.asyncio
+async def test_poll_state_ignores_stale_replacement_record():
+    class StaleThenLive(_FakeTransport):
+        def __init__(self):
+            super().__init__({})
+            self.polls = 0
+
+        async def run(self, command, *, timeout=60.0):
+            if command.startswith("cat "):
+                self.polls += 1
+                nonce = "old" if self.polls == 1 else "new"
+                return (0, json.dumps({
+                    "session_id": "sess1",
+                    "nonce": nonce,
+                    "pid": 111,
+                    "child_pid": 222,
+                    "port": 51000,
+                }), "")
+            return await super().run(command, timeout=timeout)
+
+    transport = StaleThenLive()
+    spawner = sp.CodeSpaceSpawner(transport, ready_timeout=2.0)
+
+    state = await spawner._poll_state(
+        "/home/vscode/.agent-bridge/session-hosts/host-sess1.json",
+        "/tmp/host.log",
+        session_id="sess1",
+        nonce="new",
+    )
+
+    assert state["nonce"] == "new"
+    assert transport.polls == 2
+
+
+@pytest.mark.asyncio
+async def test_remote_authority_malformed_liveness_is_inconclusive(monkeypatch):
+    _patch_common(monkeypatch)
+    state = {
+        "version": 2,
+        "session_id": "sess1",
+        "pid": 111,
+        "child_pid": 222,
+        "port": 51000,
+        "nonce": "secure-nonce",
+        "state": "running",
+        "boot_id": "boot-one",
+        "host_start_ticks": "100",
+        "child_start_ticks": "101",
+    }
+    t = _FakeTransport(state, liveness="warning\n1:1")
+
+    with pytest.raises(ConnectionError, match="inconclusive"):
+        await sp.CodeSpaceSpawner(t).recover_record("sess1")
+
+    assert not any("kill -TERM" in command for command in t.runs)
+
+
+@pytest.mark.asyncio
+async def test_remote_authority_read_failure_is_inconclusive(monkeypatch):
+    _patch_common(monkeypatch)
+
+    class FailedReadTransport(_FakeTransport):
+        async def run(self, command, *, timeout=60.0):
+            if command.startswith("if test -f "):
+                return (255, "", "ssh transport failed")
+            return await super().run(command, timeout=timeout)
+
+    with pytest.raises(ConnectionError, match="read failed"):
+        await sp.CodeSpaceSpawner(FailedReadTransport({})).recover_record("sess1")
 
 
 @pytest.mark.asyncio

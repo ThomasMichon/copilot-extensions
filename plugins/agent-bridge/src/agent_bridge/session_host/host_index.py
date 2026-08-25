@@ -59,14 +59,25 @@ class HostRecord:
                         host_version: str = "") -> HostRecord:
         """Build a record from the JSON the launcher's ``run_host`` wrote."""
         data = json.loads(Path(state_file).read_text())
+        recorded_session = str(data.get("session_id") or session_id)
+        if recorded_session != session_id:
+            raise ValueError(
+                f"state file session mismatch: {recorded_session} != {session_id}"
+            )
         return cls(
             session_id=session_id,
             port=int(data["port"]),
-            host_pid=int(data["pid"]),
+            host_pid=int(data.get("host_pid", data["pid"])),
             child_pid=int(data["child_pid"]),
-            host_version=host_version,
+            host_version=host_version or str(data.get("host_version") or ""),
             protocol_version=int(data.get("protocol_version", 1)),
             state_file=str(state_file),
+            created_at=float(data.get("created_at") or 0.0),
+            nonce=str(data.get("nonce") or ""),
+            extra={
+                "child_executable": str(data.get("child_executable") or ""),
+                "cwd": str(data.get("cwd") or ""),
+            },
         )
 
 

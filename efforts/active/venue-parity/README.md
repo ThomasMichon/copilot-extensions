@@ -103,7 +103,10 @@ the rest:
 - **WS-D — session/status/coordination parity.** Container dispatch gets the same
   monitoring/coordination core codespaces use. **Failed-launch process hygiene
   complete:** a process-owned ACP launch failure now reaps its provider/SSH/
-  remote-agent tree before terminal failure is recorded.
+  remote-agent tree before terminal failure is recorded. ✅ **Remote Session Host
+  authority:** far-side hosts publish secure per-session ownership
+  records so a restarted frontend can reconstruct and reattach without spawning
+  a duplicate child.
 - **WS-E — container-as-parity-harness.** Codify "reproduce the venue flow in a
   container" as accepted evidence for a CodeSpace fix.
 
@@ -181,3 +184,21 @@ the rest:
   phase-aware HTTP budgets covering every retry/fallback round, and terminal CLI
   output includes the persisted connect stage/message. **Next:** WS1 shared
   launch-policy relocation and the broader container parity corpus.
+- **2026-08-24 — remote Session Host authority.** Session Hosts now publish a
+  stable, mode-0600 per-session record under the remote user's mode-0700
+  catalogue: session identity, host/child PIDs, port, connect nonce, host/wire
+  version, process boot/start identity, cwd/executable, and relay-forward
+  descriptors. A frontend whose local HostIndex is missing reconstructs it from
+  that far-side authority only for already-running CodeSpaces, with bounded
+  per-CodeSpace recovery. Reconnect remains first priority: transient SSH/attach
+  failure retains the authority record and credential-relay owner and blocks a
+  duplicate Copilot spawn. A successfully executed liveness probe must prove
+  boot/PID identity before pruning; if the Host is confirmed dead but its owned
+  child survived PDEATHSIG, the far side reaps that process group explicitly.
+  The structured CodeSpace provider metadata seam was restored in the same
+  slice after live validation exposed that current namespace output had fallen
+  back to process-owned `agent-codespaces ssh --stdio`. **Live proof:** a
+  CodeSpace Session Host published host PID 8887 / child PID 8888; after the
+  local HostIndex row was deliberately removed and agent-bridge restarted, the
+  frontend reconstructed the record from the far side, rebuilt ACP + relay
+  forwards, reattached to the same PIDs, and completed another Copilot turn.

@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import is_dataclass, replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -168,6 +168,10 @@ class CodespaceClaimConflictError(Exception):
                 f"worktree; refusing to dispatch '{owner}' over it."
             )
         )
+
+
+class RemoteHostRecoveryPendingError(RuntimeError):
+    """Remote Session Host liveness is inconclusive; never spawn a duplicate."""
 
 
 def _codespace_claim_key(target: "SpawnTarget") -> tuple[str, str] | None:
@@ -702,6 +706,8 @@ class SessionManager:
         # its own stop). Handed to every LocalSpawner/CodeSpaceSpawner.
         self._session_host_active_reap_seconds = session_host_active_reap_seconds
         self._host_index: Any = None
+        self._remote_recovery_inconclusive: set[str] = set()
+        self._remote_recovery_skipped: set[str] = set()
         # Live remote-boundary forwards (session_id -> LocalForward). Held so a
         # CodeSpace/mesh Session Host's -L forward can be refreshed on reattach
         # and torn down on teardown. Empty for local hosts.
@@ -1374,6 +1380,7 @@ class SessionManager:
         spawner: Any | None = None,
         remote_child_argv: list[str] | None = None,
         remote_cwd: str | None = None,
+        load_session_id: str | None = None,
         model: str | None = None,
         effort: str | None = None,
     ) -> tuple[AcpClient, str]:
@@ -1473,10 +1480,20 @@ class SessionManager:
                     timeout=self._timeouts.session_start,
                 )
                 session_cwd = remote_cwd or target.cwd or _default_cwd(target)
-                acp_sid = await asyncio.wait_for(
-                    client.new_session(cwd=session_cwd, mcp_servers=mcp_servers),
-                    timeout=self._timeouts.session_new,
-                )
+                if load_session_id:
+                    await asyncio.wait_for(
+                        client.load_session(
+                            cwd=session_cwd,
+                            session_id=load_session_id,
+                        ),
+                        timeout=self._timeouts.session_new,
+                    )
+                    acp_sid = load_session_id
+                else:
+                    acp_sid = await asyncio.wait_for(
+                        client.new_session(cwd=session_cwd, mcp_servers=mcp_servers),
+                        timeout=self._timeouts.session_new,
+                    )
             except (TimeoutError, asyncio.TimeoutError) as exc:
                 # Leave a queryable marker so a stalled session-host resume/launch
                 # is not a silent [starting]->[stopped] (#1468). The child's
@@ -1489,6 +1506,10 @@ class SessionManager:
                         "handshake_timeout_s": self._timeouts.session_start,
                         "session_new_timeout_s": self._timeouts.session_new,
                     })
+                with contextlib.suppress(Exception):
+                    await sock.terminate()
+                with contextlib.suppress(Exception):
+                    await spawned.aclose()
                 raise ConnectError(
                     ConnectStage.LAUNCH_ACP,
                     f"Copilot ACP launch (session host) timed out "
@@ -1500,6 +1521,12 @@ class SessionManager:
                     retryable=False,
                     cause=exc,
                 ) from exc
+            except Exception:
+                with contextlib.suppress(Exception):
+                    await sock.terminate()
+                with contextlib.suppress(Exception):
+                    await spawned.aclose()
+                raise
 
         if self._host_index is not None:
             self._host_index.register(HostRecord(
@@ -1514,6 +1541,9 @@ class SessionManager:
                 nonce=spawned.nonce,
                 boundary=spawned.boundary,
                 endpoint=getattr(spawned, "endpoint", {}) or {},
+                extra={
+                    "remote_authority_v2": spawned.boundary != "local",
+                },
             ))
         # #4272 bridge-lock: mark this bridge-owned session's liveness as a
         # lattice file the picker reads cheaply, so a bare/bridge Copilot
@@ -1609,10 +1639,24 @@ class SessionManager:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
 
+        recovered = await self._recover_remote_host_records()
+        if recovered:
+            log.info(
+                "Recovered %d remote Session Host record(s) from far-side "
+                "authority files",
+                recovered,
+            )
         self._prune_dead_hosts()
         reattached = 0
         now = time.time()
         for rec in self._live_host_records():
+            if rec.session_id in self._remote_recovery_skipped:
+                log.info(
+                    "Skipping startup reattach for %s because its CodeSpace is "
+                    "not already running",
+                    rec.session_id,
+                )
+                continue
             plan = plan_host(
                 protocol_version=rec.protocol_version,
                 child_alive=self._rec_child_alive(rec),
@@ -1642,12 +1686,181 @@ class SessionManager:
             if await self._reattach_one(
                 rec, session, new_status=SessionStatus.IDLE,
                 send_resume=getattr(rec, "resume_on_reattach", False),
-                prune_on_fail=True,
+                # A failed remote attach may be a transient SSH/control-plane
+                # outage while the far-side host, child, and auth relay are
+                # still serving tools. Retain its record and relay ownership;
+                # only an authoritative far-side liveness probe may declare it
+                # dead. Local PIDs remain directly authoritative.
+                prune_on_fail=(
+                    getattr(rec, "boundary", "local") == "local"
+                    or not (getattr(rec, "extra", {}) or {}).get(
+                        "remote_authority_v2"
+                    )
+                ),
             ):
                 reattached += 1
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
         return reattached
+
+    async def _recover_remote_host_records(
+        self,
+        *,
+        allow_wake: bool = False,
+        session_ids: set[str] | None = None,
+    ) -> int:
+        """Rebuild missing CodeSpace HostIndex rows from far-side records.
+
+        The frontend DB identifies adoptable ACP sessions and their CodeSpace
+        targets. The Session Host itself is authoritative for host/child PID,
+        port, nonce, version, and relay-forward metadata. Reconnect is always
+        attempted before any fresh child launch.
+        """
+        if self._host_index is None:
+            return 0
+        from .relay_state import get_live_relay_port
+        from .session_host.codespace_transport import (
+            build_codespace_spawner,
+            parse_codespace_target,
+        )
+        from .session_host.spawner import RemoteHostDeadError
+
+        groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
+        for session in self._sessions.values():
+            if session_ids is not None and session.session_id not in session_ids:
+                continue
+            if not session.acp_session_id:
+                continue
+            existing = self._host_index.get(session.session_id)
+            if (
+                existing is not None
+                and not (getattr(existing, "extra", {}) or {}).get(
+                    "remote_authority_v2"
+                )
+            ):
+                continue
+            target = session.target
+            cs_target = None
+            if isinstance(target.codespace, dict) and target.codespace.get("name"):
+                cs_target = target.codespace
+            elif target.spawn_command:
+                cs_target = parse_codespace_target(target.spawn_command)
+            if not cs_target:
+                continue
+            name = cs_target["name"]
+            if name not in groups:
+                groups[name] = (
+                    build_codespace_spawner(
+                        name,
+                        cs_target.get("repo") or "",
+                        relay_port=get_live_relay_port(),
+                        unexpected_reap_seconds=(
+                            self._session_host_unexpected_reap_seconds
+                        ),
+                        active_reap_seconds=self._session_host_active_reap_seconds,
+                    ),
+                    [],
+                )
+            groups[name][1].append((session, existing))
+
+        semaphore = asyncio.Semaphore(3)
+
+        async def _inspect_group(spawner: Any, entries: list[tuple[Session, Any]]):
+            async with semaphore:
+                if not allow_wake:
+                    try:
+                        can_inspect = await spawner.can_inspect_without_wake()
+                    except Exception:
+                        log.warning(
+                            "Could not determine CodeSpace state without waking; "
+                            "skipping startup authority inspection",
+                            exc_info=True,
+                        )
+                        can_inspect = False
+                    if not can_inspect:
+                        return [
+                            (session, existing, "skipped", None)
+                            for session, existing in entries
+                        ]
+                results = []
+                for session, existing in entries:
+                    try:
+                        record = await spawner.recover_record(session.session_id)
+                        status = "live" if record is not None else "missing"
+                        results.append((session, existing, status, record))
+                    except RemoteHostDeadError:
+                        results.append((session, existing, "dead", None))
+                    except Exception:
+                        log.warning(
+                            "Could not inspect remote Session Host authority for %s",
+                            session.session_id,
+                            exc_info=True,
+                        )
+                        results.append((session, existing, "unknown", None))
+                return results
+
+        task_entries = {
+            asyncio.create_task(_inspect_group(spawner, entries)): entries
+            for spawner, entries in groups.values()
+        }
+        tasks = list(task_entries)
+        if not tasks:
+            return 0
+        done, pending = await asyncio.wait(tasks, timeout=120.0)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+        if pending:
+            log.warning(
+                "Remote Session Host authority recovery timed out with %d "
+                "CodeSpace group(s) still pending",
+                len(pending),
+            )
+            for task in pending:
+                for session, _existing in task_entries[task]:
+                    self._remote_recovery_inconclusive.add(session.session_id)
+
+        recovered = 0
+        for task in done:
+            try:
+                results = task.result()
+            except Exception:
+                log.warning(
+                    "Remote Session Host authority recovery group failed",
+                    exc_info=True,
+                )
+                for session, _existing in task_entries[task]:
+                    self._remote_recovery_skipped.add(session.session_id)
+                continue
+            for session, existing, status, record in results:
+                if status == "live" and record is not None:
+                    self._remote_recovery_inconclusive.discard(session.session_id)
+                    self._remote_recovery_skipped.discard(session.session_id)
+                    if existing is not None:
+                        record.resume_on_reattach = existing.resume_on_reattach
+                    self._host_index.register(record)
+                    if existing is None:
+                        recovered += 1
+                elif status == "dead":
+                    self._remote_recovery_inconclusive.discard(session.session_id)
+                    self._remote_recovery_skipped.discard(session.session_id)
+                    if existing is not None:
+                        await self._drop_forward(session.session_id)
+                        self._host_index.remove(session.session_id)
+                        log.info(
+                            "Pruned confirmed-dead remote Session Host for %s",
+                            session.session_id,
+                        )
+                elif status == "unknown":
+                    self._remote_recovery_skipped.discard(session.session_id)
+                    self._remote_recovery_inconclusive.add(session.session_id)
+                elif status == "missing":
+                    self._remote_recovery_inconclusive.discard(session.session_id)
+                    self._remote_recovery_skipped.discard(session.session_id)
+                elif status == "skipped":
+                    self._remote_recovery_skipped.add(session.session_id)
+        return recovered
 
     async def _ensure_forward(self, rec: Any) -> None:
         """Ensure a remote-boundary Host's frontend ``-L`` forward is up.
@@ -1673,11 +1886,20 @@ class SessionManager:
         existing = self._forwards.get(rec.session_id)
         try:
             if existing is not None:
-                await existing.refresh()
+                local_port = await existing.refresh()
             else:
                 fwd = forward_from_endpoint(endpoint)
-                await fwd.establish()
+                local_port = await fwd.establish()
                 self._forwards[rec.session_id] = fwd
+            if (
+                getattr(rec, "port", None) != local_port
+                or endpoint.get("local_port") != local_port
+            ):
+                rec.port = local_port
+                endpoint["local_port"] = local_port
+                rec.endpoint = endpoint
+                if self._host_index is not None and is_dataclass(rec):
+                    self._host_index.register(rec)
             await self._ensure_relays_from_endpoint(rec.session_id, endpoint)
         except Exception:
             log.warning(
@@ -1879,8 +2101,25 @@ class SessionManager:
         if not session.acp_session_id:
             return False
         rec = self._host_index.get(session.session_id)
-        if rec is None:
-            return False
+        authority_v2 = bool(
+            rec is not None
+            and getattr(rec, "boundary", "local") != "local"
+            and (getattr(rec, "extra", {}) or {}).get("remote_authority_v2")
+        )
+        if rec is None or authority_v2:
+            await self._recover_remote_host_records(
+                allow_wake=True,
+                session_ids={session.session_id},
+            )
+            rec = self._host_index.get(session.session_id)
+            if rec is None:
+                if session.session_id in self._remote_recovery_inconclusive:
+                    raise RemoteHostRecoveryPendingError(
+                        f"Remote Session Host state is inconclusive for "
+                        f"{session.session_id}; refusing to spawn a duplicate "
+                        "Copilot process"
+                    )
+                return False
         if not self._rec_host_alive(rec) or not self._rec_child_alive(rec):
             return False
         from .session_host.version_mux import HostDisposition, plan_host
@@ -1891,19 +2130,96 @@ class SessionManager:
             age_seconds=(time.time() - rec.created_at) if rec.created_at else None,
             stale_reap_seconds=self._session_host_stale_reap_seconds,
         )
+        authority_v2 = (getattr(rec, "extra", {}) or {}).get(
+            "remote_authority_v2"
+        )
         if plan.disposition is not HostDisposition.REATTACH:
+            if (
+                getattr(rec, "boundary", "local") != "local"
+                and authority_v2
+            ):
+                raise RemoteHostRecoveryPendingError(
+                    f"Remote Session Host for {session.session_id} is still "
+                    f"authoritative but cannot be reattached: {plan.reason}"
+                )
             return False
-        try:
-            return await self._reattach_one(
-                rec, session, new_status=SessionStatus.IDLE, send_resume=False,
+        attached = await self._reattach_one(
+            rec, session, new_status=SessionStatus.IDLE, send_resume=False,
+        )
+        if (
+            not attached
+            and getattr(rec, "boundary", "local") != "local"
+            and authority_v2
+        ):
+            raise RemoteHostRecoveryPendingError(
+                f"Could not reattach remote Session Host for "
+                f"{session.session_id}; retained its authority record and "
+                "credential relay, refusing to spawn a duplicate Copilot process"
             )
-        except Exception:
-            log.warning(
-                "Reattach-before-respawn failed for session %s; "
-                "falling back to a fresh child", session.session_id,
-                exc_info=True,
-            )
-            return False
+        return attached
+
+    async def _resume_via_new_codespace_host(
+        self,
+        session: Session,
+        *,
+        on_acp_event: Any,
+        permission_callback: Any | None,
+        load_existing: bool = True,
+    ) -> tuple[AcpClient, str] | None:
+        """Replace a dead CodeSpace Host and load/create its ACP session."""
+        target = session.target
+        cs_target = (
+            target.codespace
+            if isinstance(target.codespace, dict)
+            and target.codespace.get("name")
+            else None
+        )
+        if cs_target is None and target.spawn_command:
+            from .session_host.codespace_transport import parse_codespace_target
+
+            cs_target = parse_codespace_target(target.spawn_command)
+        if not cs_target:
+            return None
+        from .relay_state import get_live_relay_port
+        from .session_host.codespace_transport import build_codespace_spawner
+
+        relay_prelude, relay_port = _resolve_relay_launch_env(
+            cs_target["name"],
+            get_live_relay_port(),
+        )
+        acp_command = cs_target["acp_command"]
+        ai_plugin_dirs = _resolve_codespace_ai_plugin_dirs(
+            cs_target["name"],
+            cs_target.get("repo") or None,
+            repo_dir=cs_target.get("workspace_folder") or None,
+        )
+        for directory in ai_plugin_dirs:
+            acp_command += f' --plugin-dir="{directory}"'
+        spawner = build_codespace_spawner(
+            cs_target["name"],
+            cs_target.get("repo") or "",
+            relay_port=relay_port,
+            unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
+            active_reap_seconds=self._session_host_active_reap_seconds,
+        )
+        tracker = ConnectTracker(
+            session.event_log.append,
+            session_id=session.session_id,
+        )
+        client, acp_sid = await self._connect_via_session_host(
+            target,
+            tracker=tracker,
+            session_id=session.session_id,
+            on_acp_event=on_acp_event,
+            permission_callback=permission_callback,
+            spawner=spawner,
+            remote_child_argv=["bash", "-lc", relay_prelude + acp_command],
+            remote_cwd=cs_target.get("workspace_folder") or None,
+            load_session_id=(session.acp_session_id if load_existing else None),
+            model=session.model_override,
+            effort=session.effort_override,
+        )
+        return client, acp_sid
 
     async def recover_disconnected_hosts(self) -> int:
         """In-session liveness-driven reattach for host-backed sessions (P1).
@@ -2914,29 +3230,39 @@ class SessionManager:
             for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
                 client = None
                 try:
-                    agent_proc = await spawn(session.target)
-                    client = AcpClient(
-                        on_event=on_acp_event,
-                        on_permission=permission_callback,
-                        model_override=session.model_override,
-                        effort_override=session.effort_override,
+                    host_result = await self._resume_via_new_codespace_host(
+                        session,
+                        on_acp_event=on_acp_event,
+                        permission_callback=permission_callback,
                     )
-                    if permission_callback:
-                        client.auto_approve = False
-                    # Bound each round so a stalled Copilot ACP launch (the
-                    # "Resuming…"/extension-reload race, #1468) fails fast and we
-                    # re-roll, rather than hanging in STARTING.
-                    await asyncio.wait_for(
-                        client.start(agent_proc.proc),
-                        timeout=self._timeouts.session_start,
-                    )
-                    await asyncio.wait_for(
-                        client.load_session(
-                            cwd=session.target.cwd or _default_cwd(session.target),
-                            session_id=session.acp_session_id,
-                        ),
-                        timeout=self._timeouts.session_new,
-                    )
+                    client = host_result[0] if host_result is not None else None
+                    if client is None:
+                        agent_proc = await spawn(session.target)
+                        client = AcpClient(
+                            on_event=on_acp_event,
+                            on_permission=permission_callback,
+                            model_override=session.model_override,
+                            effort_override=session.effort_override,
+                        )
+                        if permission_callback:
+                            client.auto_approve = False
+                        # Bound each round so a stalled Copilot ACP launch (the
+                        # "Resuming…"/extension-reload race, #1468) fails fast and
+                        # we re-roll, rather than hanging in STARTING.
+                        await asyncio.wait_for(
+                            client.start(agent_proc.proc),
+                            timeout=self._timeouts.session_start,
+                        )
+                        await asyncio.wait_for(
+                            client.load_session(
+                                cwd=(
+                                    session.target.cwd
+                                    or _default_cwd(session.target)
+                                ),
+                                session_id=session.acp_session_id,
+                            ),
+                            timeout=self._timeouts.session_new,
+                        )
 
                     session.client = client
                     session.status = SessionStatus.IDLE
@@ -3026,29 +3352,38 @@ class SessionManager:
             if session.status != SessionStatus.IDLE:
                 recreate_client: AcpClient | None = None
                 try:
-                    agent_proc = await spawn(session.target)
-                    recreate_client = AcpClient(
-                        on_event=on_acp_event,
-                        on_permission=permission_callback,
-                        model_override=session.model_override,
-                        effort_override=session.effort_override,
+                    host_result = await self._resume_via_new_codespace_host(
+                        session,
+                        on_acp_event=on_acp_event,
+                        permission_callback=permission_callback,
+                        load_existing=False,
                     )
-                    if permission_callback:
-                        recreate_client.auto_approve = False
-                    await asyncio.wait_for(
-                        recreate_client.start(agent_proc.proc),
-                        timeout=self._timeouts.session_start,
-                    )
-                    new_acp = await asyncio.wait_for(
-                        recreate_client.new_session(
-                            cwd=(
-                                _venue_workspace_cwd(session.target)
-                                or session.target.cwd
-                                or _default_cwd(session.target)
+                    if host_result is not None:
+                        recreate_client, new_acp = host_result
+                    else:
+                        agent_proc = await spawn(session.target)
+                        recreate_client = AcpClient(
+                            on_event=on_acp_event,
+                            on_permission=permission_callback,
+                            model_override=session.model_override,
+                            effort_override=session.effort_override,
+                        )
+                        if permission_callback:
+                            recreate_client.auto_approve = False
+                        await asyncio.wait_for(
+                            recreate_client.start(agent_proc.proc),
+                            timeout=self._timeouts.session_start,
+                        )
+                        new_acp = await asyncio.wait_for(
+                            recreate_client.new_session(
+                                cwd=(
+                                    _venue_workspace_cwd(session.target)
+                                    or session.target.cwd
+                                    or _default_cwd(session.target)
+                                ),
                             ),
-                        ),
-                        timeout=self._timeouts.session_new,
-                    )
+                            timeout=self._timeouts.session_new,
+                        )
                     old_acp = session.acp_session_id
                     session.client = recreate_client
                     session.acp_session_id = new_acp

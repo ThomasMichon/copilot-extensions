@@ -28,6 +28,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import secrets
 import shlex
 import time
@@ -40,6 +41,10 @@ from agent_procutil import no_window_flags
 from .launcher import launch_session_host
 
 log = logging.getLogger("agent-bridge.session-host.spawner")
+
+
+class RemoteHostDeadError(RuntimeError):
+    """The far side authoritatively reports that a recorded Host is dead."""
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -168,6 +173,10 @@ def new_nonce() -> str:
     return secrets.token_hex(16)
 
 
+def _safe_session_id(session_id: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "session")[:48]
+
+
 class LocalSpawner:
     """Spawn a survivable Session Host on **this** machine (the shipped path).
 
@@ -204,9 +213,12 @@ class LocalSpawner:
         env: dict[str, str] | None = None,
         session_id: str = "",
     ) -> SpawnedHost:
+        from .. import __version__
+
         nonce = new_nonce()
         handle = await asyncio.to_thread(
             launch_session_host, child_argv, cwd=cwd, env=env, nonce=nonce,
+            session_id=session_id, host_version=__version__,
             ready_timeout=self._ready_timeout,
             unexpected_reap_seconds=self._unexpected_reap_seconds,
             active_reap_seconds=self._active_reap_seconds,
@@ -269,6 +281,9 @@ def build_remote_launch(
     *,
     nonce: str = "",
     cwd: str | None = None,
+    session_id: str = "",
+    host_version: str = "",
+    reverse_forwards: list[str] | None = None,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
 ) -> str:
@@ -285,15 +300,36 @@ def build_remote_launch(
     """
     import posixpath
 
-    dirs = " ".join(shlex.quote(posixpath.dirname(p))
-                    for p in (state_remote, log_remote) if posixpath.dirname(p))
-    prep = f"mkdir -p {dirs}; " if dirs else ""
+    state_dir = posixpath.dirname(state_remote)
+    dirs = sorted({
+        posixpath.dirname(p)
+        for p in (state_remote, log_remote)
+        if posixpath.dirname(p)
+    })
+    prep = ""
+    if dirs:
+        prep = (
+            "mkdir -p "
+            + " ".join(shlex.quote(d) for d in dirs)
+            + " || exit 1; "
+        )
+    if state_dir:
+        prep += (
+            f"chmod 700 {shlex.quote(state_dir)} || exit 1; "
+            f"rm -f {shlex.quote(state_remote)} || exit 1; "
+        )
     host_cmd = (
         f"python3 {shlex.quote(bundle_remote)} --port 0 "
         f"--state-file {shlex.quote(state_remote)} "
         f"--unexpected-reap-seconds {unexpected_reap_seconds} "
         f"--active-reap-seconds {active_reap_seconds} "
     )
+    if session_id:
+        host_cmd += f"--session-id {shlex.quote(session_id)} "
+    if host_version:
+        host_cmd += f"--host-version {shlex.quote(host_version)} "
+    for spec in reverse_forwards or []:
+        host_cmd += f"--reverse-forward {shlex.quote(spec)} "
     if cwd:
         host_cmd += f"--cwd {shlex.quote(cwd)} "
     host_cmd += "-- " + " ".join(shlex.quote(a) for a in child_argv)
@@ -348,10 +384,9 @@ class CodeSpaceSpawner:
         env: dict[str, str] | None = None,
         session_id: str = "",
     ) -> SpawnedHost:
-        import re
-
         from ssh_manager import LocalForward
 
+        from .. import __version__
         from . import protocol as proto
         from .bundle import build_session_host_bundle
         from .endpoints import endpoint_from_ssh_config, relay_forwards_from_ssh_config
@@ -407,14 +442,19 @@ class CodeSpaceSpawner:
                         exc_info=True,
                     )
 
+        safe_sid = _safe_session_id(session_id)
         ts = int(time.time() * 1000)
-        safe_sid = re.sub(r"[^A-Za-z0-9_.-]", "_", session_id or "session")[:48]
-        state_remote = f"{self._remote_dir}/host-{safe_sid}-{ts}.json"
+        state_remote = await self._authority_path(session_id)
         log_remote = f"{self._remote_dir}/host-{safe_sid}-{ts}.log"
+        reverse = list(self._reverse_forwards)
+        get_reverse = getattr(self._transport, "reverse_forwards", None)
+        if callable(get_reverse):
+            reverse += list(get_reverse() or [])
 
         launch = build_remote_launch(
             remote_bundle, state_remote, log_remote, child_argv,
-            nonce=nonce, cwd=cwd,
+            nonce=nonce, cwd=cwd, session_id=session_id,
+            host_version=__version__, reverse_forwards=reverse,
             unexpected_reap_seconds=self._unexpected_reap_seconds,
             active_reap_seconds=self._active_reap_seconds,
         )
@@ -426,7 +466,12 @@ class CodeSpaceSpawner:
                 f"remote Session Host launch failed (rc={rc}): {err or out}"
             )
 
-        state = await self._poll_state(state_remote, log_remote)
+        state = await self._poll_state(
+            state_remote,
+            log_remote,
+            session_id=session_id,
+            nonce=nonce,
+        )
         remote_port = int(state["port"])
         host_pid = int(state["pid"])
         child_pid = int(state["child_pid"])
@@ -436,10 +481,6 @@ class CodeSpaceSpawner:
         # Also allow the transport to contribute reverse-forwards (e.g. the
         # credential relay) so a detached far-side Host that outlives its launch
         # channel keeps a live relay for the whole session (rush build / ADO).
-        reverse = list(self._reverse_forwards)
-        get_reverse = getattr(self._transport, "reverse_forwards", None)
-        if callable(get_reverse):
-            reverse += list(get_reverse() or [])
         forward = LocalForward(config, remote_port)
         local_port = await forward.establish()
         from ..relay_state import get_live_relay_port
@@ -496,6 +537,231 @@ class CodeSpaceSpawner:
             _refresh=_refresh,
         )
 
+    async def _authority_path(self, session_id: str) -> str:
+        get_home = getattr(self._transport, "home_dir", None)
+        if callable(get_home):
+            home = await get_home()
+            return (
+                f"{home}/.agent-bridge/session-hosts/"
+                f"host-{_safe_session_id(session_id)}.json"
+            )
+        return (
+            f"{self._remote_dir}/hosts/"
+            f"host-{_safe_session_id(session_id)}.json"
+        )
+
+    async def can_inspect_without_wake(self) -> bool:
+        is_running = getattr(self._transport, "is_running", None)
+        if callable(is_running):
+            return bool(await is_running())
+        return True
+
+    async def recover_record(self, session_id: str):
+        """Rebuild a HostRecord from the far-side authority file.
+
+        Used when the frontend DB survived but its local HostIndex did not. The
+        record is adopted only after the far side confirms both host and child
+        PIDs are alive; transport failure is inconclusive and leaves recovery
+        for a later attempt.
+        """
+        from .endpoints import endpoint_from_ssh_config
+        from .host_index import HostRecord
+
+        state_remote = await self._authority_path(session_id)
+        state_q = shlex.quote(state_remote)
+        rc, out, err = await self._transport.run(
+            f"if test -f {state_q}; then cat {state_q}; "
+            "else printf __MISSING__; fi",
+            timeout=30.0,
+        )
+        if rc != 0:
+            raise ConnectionError(
+                f"Remote Session Host authority read failed for {session_id} "
+                f"(rc={rc}): {err or out}"
+            )
+        if (out or "").strip() == "__MISSING__":
+            log.info(
+                "No remote Session Host authority record for %s",
+                session_id,
+            )
+            return None
+        if not out:
+            raise ConnectionError(
+                f"Remote Session Host authority read was empty for {session_id}"
+            )
+        try:
+            state = json.loads(out)
+            recorded_session = str(state["session_id"])
+            host_pid = int(state.get("host_pid", state["pid"]))
+            child_pid = int(state["child_pid"])
+            remote_port = int(state["port"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            raise ConnectionError(
+                f"Remote Session Host authority record is invalid for {session_id}"
+            )
+        state_name = str(state.get("state") or "")
+        if (
+            int(state.get("version", 0)) != 2
+            or recorded_session != session_id
+            or host_pid <= 1
+            or child_pid <= 1
+            or remote_port <= 0
+        ):
+            raise ConnectionError(
+                "Remote Session Host authority mismatch for %s (version=%s, "
+                "recorded=%s, secured=%s, host_pid=%s, child_pid=%s, port=%s)"
+                % (
+                    session_id,
+                    state.get("version"),
+                    recorded_session,
+                    bool(state.get("nonce")),
+                    host_pid,
+                    child_pid,
+                    remote_port,
+                )
+            )
+        if state_name not in {"running", "stopped"}:
+            raise ConnectionError(
+                f"Remote Session Host state is unknown for {session_id}: "
+                f"{state_name!r}"
+            )
+        nonce = str(state.get("nonce") or "")
+        if state_name == "running" and not nonce:
+            raise ConnectionError(
+                f"Running remote Session Host authority is unsecured for "
+                f"{session_id}"
+            )
+
+        boot_id = str(state.get("boot_id") or "")
+        host_start = str(state.get("host_start_ticks") or "")
+        child_start = str(state.get("child_start_ticks") or "")
+        if not boot_id or not host_start or not child_start:
+            raise ConnectionError(
+                f"Remote Session Host authority lacks process identity for "
+                f"{session_id}"
+            )
+        alive_cmd = (
+            f"b=$(cat /proc/sys/kernel/random/boot_id 2>/dev/null || true); "
+            f"h=$(awk '{{print $22}}' /proc/{host_pid}/stat 2>/dev/null || true); "
+            f"c=$(awk '{{print $22}}' /proc/{child_pid}/stat 2>/dev/null || true); "
+            f"test \"$b\" = {shlex.quote(boot_id)} && "
+            f"test \"$h\" = {shlex.quote(host_start)} && hv=1 || hv=0; "
+            f"test \"$b\" = {shlex.quote(boot_id)} && "
+            f"test \"$c\" = {shlex.quote(child_start)} && cv=1 || cv=0; "
+            'printf "%s:%s" "$hv" "$cv"'
+        )
+        async def _probe_liveness() -> tuple[bool, bool, str]:
+            alive_rc, alive_out, _alive_err = await self._transport.run(
+                alive_cmd,
+                timeout=30.0,
+            )
+            liveness_text = (alive_out or "").strip()
+            if (
+                alive_rc != 0
+                or liveness_text not in {"0:0", "0:1", "1:0", "1:1"}
+            ):
+                raise ConnectionError(
+                    f"Remote Session Host liveness probe was inconclusive for "
+                    f"{session_id} (rc={alive_rc}, output={alive_out!r})"
+                )
+            host_flag, child_flag = liveness_text.split(":", 1)
+            return host_flag == "1", child_flag == "1", liveness_text
+
+        host_alive, child_alive, liveness_text = await _probe_liveness()
+        should_reap = (
+            state_name == "stopped"
+            or not host_alive
+            or not child_alive
+        )
+        if should_reap and (host_alive or child_alive):
+            # Any asymmetric survivor is unsafe: a child without its Host is
+            # unreachable, and a Host without its child can never serve ACP.
+            # Process identity was proven above, so reap the recorded group and
+            # both individual PIDs, then re-probe before declaring death.
+            cleanup = (
+                f"kill -TERM -- -{host_pid} 2>/dev/null || "
+                f"kill -TERM {host_pid} 2>/dev/null || true; "
+                f"kill -TERM {child_pid} 2>/dev/null || true; "
+                "sleep 0.2; "
+                f"kill -KILL -- -{host_pid} 2>/dev/null || "
+                f"kill -KILL {host_pid} 2>/dev/null || true; "
+                f"kill -KILL {child_pid} 2>/dev/null || true"
+            )
+            cleanup_rc, _cleanup_out, cleanup_err = await self._transport.run(
+                cleanup,
+                timeout=30.0,
+            )
+            if cleanup_rc != 0:
+                raise ConnectionError(
+                    f"Remote Session Host cleanup failed for {session_id}: "
+                    f"{cleanup_err}"
+                )
+            host_alive, child_alive, liveness_text = await _probe_liveness()
+            if host_alive or child_alive:
+                raise ConnectionError(
+                    f"Remote Session Host cleanup could not verify death for "
+                    f"{session_id} (liveness={liveness_text})"
+                )
+            log.warning(
+                "Reaped asymmetric remote Session Host tree (host=%s child=%s "
+                "session=%s)",
+                host_pid,
+                child_pid,
+                session_id,
+            )
+        if should_reap:
+            log.info(
+                "Remote Session Host authority record for %s is not live "
+                "(host_pid=%s child_pid=%s liveness=%s state=%s)",
+                session_id,
+                host_pid,
+                child_pid,
+                liveness_text,
+                state.get("state"),
+            )
+            raise RemoteHostDeadError(
+                f"Remote Session Host is dead for {session_id} "
+                f"(host_pid={host_pid}, child_pid={child_pid})"
+            )
+
+        reverse = [
+            str(spec)
+            for spec in (state.get("reverse_forwards") or [])
+            if spec
+        ]
+        config = self._transport.ssh_config()
+        extra = {}
+        get_extra = getattr(self._transport, "endpoint_extra", None)
+        if callable(get_extra):
+            extra = get_extra() or {}
+        endpoint = endpoint_from_ssh_config(
+            config,
+            remote_port,
+            0,
+            kind=self.boundary,
+            reverse_forwards=reverse,
+            extra=extra,
+        )
+        return HostRecord(
+            session_id=session_id,
+            port=0,
+            host_pid=host_pid,
+            child_pid=child_pid,
+            host_version=str(state.get("host_version") or ""),
+            protocol_version=int(state.get("protocol_version", 1)),
+            state_file=state_remote,
+            created_at=float(state.get("created_at") or 0.0),
+            nonce=nonce,
+            boundary=self.boundary,
+            endpoint=endpoint,
+            extra={
+                "recovered_from_remote": True,
+                "remote_authority_v2": True,
+                "child_executable": str(state.get("child_executable") or ""),
+                "cwd": str(state.get("cwd") or ""),
+            },
+        )
+
     def _serving_probe_for_port(self, relay_port: int) -> Callable[[], Awaitable[bool]]:
         """Build a best-effort far-side relay-serving probe for Session-Host use.
 
@@ -523,7 +789,12 @@ class CodeSpaceSpawner:
         return _probe
 
     async def _poll_state(
-        self, state_remote: str, log_remote: str,
+        self,
+        state_remote: str,
+        log_remote: str,
+        *,
+        session_id: str,
+        nonce: str,
     ) -> dict[str, Any]:
         """Poll the far-side state file until the Host reports port + child."""
         deadline = time.time() + self._ready_timeout
@@ -536,7 +807,12 @@ class CodeSpaceSpawner:
                     data = json.loads(out)
                 except json.JSONDecodeError:
                     data = {}
-                if data.get("port") and data.get("child_pid"):
+                if (
+                    data.get("port")
+                    and data.get("child_pid")
+                    and data.get("session_id") == session_id
+                    and data.get("nonce") == nonce
+                ):
                     return data
             await asyncio.sleep(0.5)
         # Surface the Host's own log to explain a launch that never got ready.
