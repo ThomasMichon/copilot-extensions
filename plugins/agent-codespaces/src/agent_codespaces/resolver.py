@@ -242,6 +242,7 @@ class CodespaceResolver:
             type=spec.get("type", "command"),
             spawn_command=spec["spawn_command"],
             user=spec.get("user"),
+            codespace=spec.get("codespace"),
         )
 
     async def resolve_spec(
@@ -318,11 +319,22 @@ class CodespaceResolver:
                 cs.name, len(stage), stage,
             )
         log.info("Resolved codespace:%s -> %s", cs.name, " ".join(spawn_cmd))
+        workspace_folder = (
+            config.workspace_folder_for_request(cs.repository, repo)[0]
+            if repo is not None
+            else config.resolved_workspace_folder_for(cs.repository)
+        )
 
         return {
             "type": "command",
             "spawn_command": spawn_cmd,
             "user": config.ssh_user,
+            "codespace": {
+                "name": cs.name,
+                "repo": repo or cs.repository,
+                "acp_command": acp_command,
+                "workspace_folder": workspace_folder,
+            },
         }
 
     async def target_repo(self, name: str) -> str | None:

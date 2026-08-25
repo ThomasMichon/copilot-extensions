@@ -478,6 +478,7 @@ class CliNamespaceResolver(NamespaceResolver):
                         type=spec.get("type", "command"),
                         spawn_command=spec["spawn_command"],
                         user=spec.get("user"),
+                        codespace=spec.get("codespace"),
                         venue=venue,
                     )
                 except Exception:

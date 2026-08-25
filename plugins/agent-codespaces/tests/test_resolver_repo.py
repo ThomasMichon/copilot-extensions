@@ -61,6 +61,7 @@ def _stub_agent_bridge_transport(monkeypatch):
         type: str = ""
         spawn_command: list = field(default_factory=list)
         user: str | None = None
+        codespace: dict | None = None
 
     pkg = types.ModuleType("agent_bridge")
     transport = types.ModuleType("agent_bridge.transport")
@@ -117,6 +118,11 @@ class TestResolveCrossRepo:
             f"git clone {remote} /workspaces/example-marketplace; "
             f"cd /workspaces/example-marketplace && {_COPILOT}"
         )
+        assert target.codespace["name"] == "cs-1"
+        assert target.codespace["repo"] == "example-marketplace"
+        assert target.codespace["workspace_folder"] == (
+            "/workspaces/example-marketplace"
+        )
 
     @pytest.mark.asyncio
     async def test_own_product_no_clone(self, _patched):
@@ -151,6 +157,12 @@ class TestResolveCrossRepo:
         target = await CodespaceResolver().resolve("cs-1")
         cmd = _remote_cmd(target.spawn_command)
         assert cmd == f"cd /workspaces/example-web && {_COPILOT}"
+        assert target.codespace == {
+            "name": "cs-1",
+            "repo": _CS_REPO,
+            "acp_command": cmd,
+            "workspace_folder": "/workspaces/example-web",
+        }
 
     @pytest.mark.asyncio
     async def test_cross_repo_no_longer_rejected(self, _patched):
@@ -161,4 +173,3 @@ class TestResolveCrossRepo:
             repo_remote="https://example.com/x/some-other-repo",
         )
         assert "/workspaces/some-other-repo" in _remote_cmd(target.spawn_command)
-
