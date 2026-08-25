@@ -32,14 +32,14 @@ $project = (& $python -m agent_worktrees get project 2>$null | Select-Object -Fi
 if (-not $project) { Emit-Empty }
 
 # --- collect dynamic conduct; one Python assembler owns ordering + budget ---
-$defn = (& $python -m agent_worktrees state-root --conduct 2>$null | Out-String).Trim()
-$related = (& $python -m agent_worktrees --project $project related --conduct 2>$null | Out-String).Trim()
+$defn = ((& $python -m agent_worktrees state-root --conduct 2>$null | Out-String).Trim()).Replace("`r`n", "`n").Replace("`r", "`n")
+$related = ((& $python -m agent_worktrees --project $project related --conduct 2>$null | Out-String).Trim()).Replace("`r`n", "`n").Replace("`r", "`n")
 $dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'
 
 # Dynamic: the worktree's own recent-history recovery digest (record-first
 # recovery -- what this worktree has been doing, so a fresh/successor session
 # inherits it even if a live handoff never completed). Empty when no history.
-$digest = (& $python -m agent_worktrees history-digest 2>$null | Out-String).Trim()
+$digest = ((& $python -m agent_worktrees history-digest 2>$null | Out-String).Trim()).Replace("`r`n", "`n").Replace("`r", "`n")
 $env:AW_CONDUCT_DEFINITION = $defn
 $env:AW_CONDUCT_RELATED = $related
 $env:AW_CONDUCT_HISTORY = $digest

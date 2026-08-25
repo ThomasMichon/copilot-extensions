@@ -5,10 +5,13 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import subprocess
 import sys
+
+import pytest
 
 from agent_worktrees import conduct as c
 
@@ -23,6 +26,7 @@ def _prepare_hook_home(
     definition: str,
     related: str,
     history: str,
+    windows_line_endings: bool = False,
 ) -> tuple[Path, Path]:
     home = tmp_path / "home"
     bindir = home / ".agent-worktrees" / "bin"
@@ -35,7 +39,17 @@ def _prepare_hook_home(
     )
     (conduct_dir / "keep.txt").write_text("unmanaged", encoding="utf-8")
 
-    shim = tmp_path / "runtime-python"
+    def output_text(value: str) -> str:
+        if not windows_line_endings:
+            return value
+        placeholder = "\0"
+        return (
+            value.replace("\r\n", placeholder)
+            .replace("\n", "\r\n")
+            .replace(placeholder, "\r\n")
+        )
+
+    shim = tmp_path / "runtime-python.py"
     shim.write_text(
         f"""#!{sys.executable}
 import os
@@ -45,11 +59,11 @@ args = sys.argv[1:]
 if args == ["-m", "agent_worktrees", "get", "project"]:
     print("harness")
 elif "state-root" in args and "--conduct" in args:
-    print({definition!r})
+    sys.stdout.write({output_text(definition)!r})
 elif "related" in args and "--conduct" in args:
-    print({related!r})
+    sys.stdout.write({output_text(related)!r})
 elif "history-digest" in args:
-    print({history!r})
+    sys.stdout.write({output_text(history)!r})
 elif args[:2] == ["-m", "agent_worktrees.conduct"]:
     os.execv(sys.executable, [sys.executable, *args])
 else:
@@ -57,11 +71,19 @@ else:
 """,
         encoding="utf-8",
     )
-    shim.chmod(0o755)
+    if os.name == "nt":
+        launcher = tmp_path / "runtime-python.cmd"
+        launcher.write_text(
+            f'@"{sys.executable}" "{shim}" %*\n',
+            encoding="utf-8",
+        )
+    else:
+        shim.chmod(0o755)
+        launcher = shim
     (bindir / "resolve-runtime.sh").write_text(
-        f"AW_PY={shlex.quote(str(shim))}\n", encoding="utf-8"
+        f"AW_PY={shlex.quote(str(launcher))}\n", encoding="utf-8"
     )
-    ps_path = str(shim).replace("'", "''")
+    ps_path = str(launcher).replace("'", "''")
     (bindir / "resolve-runtime.ps1").write_text(
         f"$AwPy = '{ps_path}'\n", encoding="utf-8"
     )
@@ -80,12 +102,13 @@ def _run(script: Path, home: Path, shell: str) -> str:
         env=env,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=True,
     )
     return result.stdout.strip()
 
 
-def test_real_hooks_enforce_budget_priority_and_json_parity(tmp_path):
+def _stress_hook_fixture(tmp_path):
     long_path = "/state/" + ("deep-unicode-深/" * 40)
     definition = (
         f"**The user's state repo** is `{long_path}`. STATE-ROOT-REQUIRED."
@@ -104,6 +127,12 @@ def test_real_hooks_enforce_budget_priority_and_json_parity(tmp_path):
     home, conduct_dir = _prepare_hook_home(
         tmp_path, definition=definition, related=related, history=history
     )
+    return definition, related, history, home, conduct_dir
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="Bash is unavailable")
+def test_posix_hook_enforces_budget_priority(tmp_path):
+    definition, related, _history, home, conduct_dir = _stress_hook_fixture(tmp_path)
 
     bash_output = _run(_SCRIPTS / "session-conduct.sh", home, "bash")
     data = json.loads(bash_output)
@@ -119,10 +148,49 @@ def test_real_hooks_enforce_budget_priority_and_json_parity(tmp_path):
     assert c.HISTORY_TRUNCATED in context
     assert "🙂" in context
 
-    pwsh = shutil.which("pwsh")
-    if pwsh:
-        ps_output = _run(_SCRIPTS / "session-conduct.ps1", home, pwsh)
-        assert ps_output == bash_output
+
+def _powershell() -> str | None:
+    return shutil.which("pwsh") or (
+        shutil.which("powershell") if os.name == "nt" else None
+    )
+
+
+@pytest.mark.skipif(_powershell() is None, reason="PowerShell is unavailable")
+def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(tmp_path):
+    definition = "definition-one\rdefinition-two\nSTATE-ROOT-REQUIRED"
+    related = "related-one\r\nrelated-two"
+    history = (
+        "This worktree's recent history (most recent last):\r\n"
+        "- newest-history\r\n\r\n"
+        "Worktree succession: retain this complete instruction."
+    )
+    home, _ = _prepare_hook_home(
+        tmp_path,
+        definition=definition,
+        related=related,
+        history=history,
+        windows_line_endings=True,
+    )
+
+    output = _run(_SCRIPTS / "session-conduct.ps1", home, _powershell())
+    context = json.loads(output)["additionalContext"]
+    assert c.runtime_units(output) <= c.MAX_OUTPUT_CHARS
+    assert "\r" not in context
+    assert "definition-one\ndefinition-two" in context
+    assert "related-one\nrelated-two" in context
+    assert "- newest-history" in context
+    assert "Worktree succession: retain this complete instruction." in context
+
+
+@pytest.mark.skipif(
+    shutil.which("bash") is None or _powershell() is None,
+    reason="Bash and PowerShell are both required for parity",
+)
+def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path):
+    _definition, _related, _history, home, _ = _stress_hook_fixture(tmp_path)
+    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, "bash")
+    ps_output = _run(_SCRIPTS / "session-conduct.ps1", home, _powershell())
+    assert ps_output == bash_output
 
 
 def test_related_is_omitted_only_after_history(tmp_path):
@@ -147,6 +215,35 @@ def test_related_is_omitted_only_after_history(tmp_path):
     assert "HISTORY-FULL-" in context or c.HISTORY_TRUNCATED in context
 
 
+def test_history_truncation_keeps_complete_succession_and_newest_lines(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(c, "_installed_package_version", lambda: "1.2.3")
+    history = (
+        "This worktree's recent history (most recent last):\n"
+        + "\n".join(f"- history-{i}-" + ("x" * 100) for i in range(12))
+        + "\n\nWorktree succession: this complete instruction must survive."
+    )
+    payload = c.assemble_payload(
+        tmp_path / "missing-conduct",
+        "mandatory",
+        "",
+        history,
+        max_chars=390,
+    )
+    context = json.loads(payload)["additionalContext"]
+
+    assert c.runtime_units(payload) <= 390
+    assert c.HISTORY_TRUNCATED in context
+    assert "Worktree succession: this complete instruction must survive." in context
+    assert "history-11-" in context
+    assert "history-0-" not in context
+    assert context.count("Worktree succession:") == 1
+    assert context.split("Worktree succession:", 1)[1] == (
+        " this complete instruction must survive."
+    )
+
+
 def test_custom_omission_marker_wins_over_related_marker(tmp_path):
     conduct_dir = tmp_path / "conduct"
     conduct_dir.mkdir()
@@ -160,12 +257,47 @@ def test_custom_omission_marker_wins_over_related_marker(tmp_path):
         "",
         "related-" + ("r" * 1_000),
         "",
-        max_chars=260,
+        max_chars=320,
     )
     context = json.loads(payload)["additionalContext"]
-    assert c.runtime_units(payload) <= 260
+    assert c.runtime_units(payload) <= 320
     assert c.UNKNOWN_OMITTED in context
     assert c.RELATED_OMITTED not in context
+
+
+def test_nonempty_payload_begins_with_exact_installed_owner_marker(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(c, "_installed_package_version", lambda: "1.2.3-dev4")
+    payload = c.assemble_payload(
+        tmp_path / "missing-conduct",
+        "definition",
+        "",
+        "",
+    )
+    context = json.loads(payload)["additionalContext"]
+    assert context.splitlines()[0] == "[owner: agent-worktrees@1.2.3-dev4]"
+    assert context == "[owner: agent-worktrees@1.2.3-dev4]\n\ndefinition"
+
+
+def test_owner_version_fallback_is_safe_and_well_formed(monkeypatch):
+    def fail(_name):
+        raise RuntimeError("metadata unavailable")
+
+    monkeypatch.setattr(c.metadata, "version", fail)
+    assert c._owner_marker() == "[owner: agent-worktrees@unknown]"
+    monkeypatch.setattr(c.metadata, "version", lambda _name: "bad]\nvalue")
+    assert c._owner_marker() == "[owner: agent-worktrees@unknown]"
+
+
+def test_related_skill_distinguishes_conduct_count_from_list_enumeration():
+    skill = (
+        _PLUGIN / "skills" / "agent-worktrees-related" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+    assert "conduct output itself shows the directional-entry count" in normalized
+    assert "`agent-worktrees related list` enumerates those entries" in normalized
+    assert "list shows" not in normalized
 
 
 def test_assembler_forces_utf8_stdout(tmp_path):
@@ -183,7 +315,13 @@ def test_assembler_forces_utf8_stdout(tmp_path):
         ],
         env=env,
         capture_output=True,
+        encoding="utf-8",
         check=True,
     )
-    payload = json.loads(result.stdout.decode("utf-8"))
-    assert payload["additionalContext"] == "Unicode conduct 🙂"
+    payload = json.loads(result.stdout)
+    context = payload["additionalContext"]
+    assert re.fullmatch(
+        r"\[owner: agent-worktrees@[A-Za-z0-9][A-Za-z0-9._+-]*\]",
+        context.splitlines()[0],
+    )
+    assert context.endswith("Unicode conduct 🙂")

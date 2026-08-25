@@ -182,6 +182,60 @@ def test_digest_bounds_rendering_without_mutating_recent_history(_tracking_dir):
     assert dh.read("wt-bounded")[-1]["summary"] == summaries[-1]
 
 
+def test_digest_sanitizes_untrusted_metadata_and_preserves_storage(_tracking_dir):
+    raw = {
+        "at": "at\r\n" + ("a" * 500),
+        "kind": "kind\n" + ("k" * 500),
+        "session": "session\r\n" + ("s" * 500),
+        "summary": "newest",
+    }
+    p = _tracking_dir / "wt-malformed.history.jsonl"
+    p.write_text(
+        json.dumps({
+            **raw,
+            "title": None,
+            "follow_up": False,
+            "changed": [],
+        }) + "\n",
+        encoding="utf-8",
+    )
+    stored = p.read_bytes()
+
+    out = dh.digest("wt-malformed")
+
+    assert len(out) <= dh.DIGEST_MAX_CHARS
+    assert "\r" not in out
+    assert "\n-" in out
+    assert "newest" in out
+    assert "a" * (dh.DIGEST_AT_MAX_CHARS + 1) not in out
+    assert "k" * (dh.DIGEST_KIND_MAX_CHARS + 1) not in out
+    assert "s" * (dh.DIGEST_SESSION_SUFFIX_CHARS + 1) not in out
+    assert p.read_bytes() == stored
+    assert dh.read("wt-malformed")[0]["at"] == raw["at"]
+    assert dh.read("wt-malformed")[0]["kind"] == raw["kind"]
+    assert dh.read("wt-malformed")[0]["session"] == raw["session"]
+
+
+def test_digest_budget_omission_marker_keeps_newest_entries_last(_tracking_dir):
+    for i in range(12):
+        dh.append(
+            "wt-omitted",
+            at=f"t{i}",
+            summary=f"summary-{i}-" + ("x" * 80),
+            title=None,
+            follow_up=False,
+            changed=["summary"],
+        )
+
+    out = dh.digest("wt-omitted", limit=12, max_chars=360)
+
+    assert len(out) <= 360
+    assert dh.DIGEST_OMITTED in out
+    assert "summary-11-" in out
+    assert "summary-0-" not in out
+    assert out.rfind("summary-11-") > out.rfind("summary-10-")
+
+
 def test_set_disposition_tags_session(_tracking_dir):
     from agent_worktrees.tracking import WorktreeRecord, set_disposition
 

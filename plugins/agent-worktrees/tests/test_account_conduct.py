@@ -36,6 +36,12 @@ def test_conduct_fragment_present_and_shaped():
     assert "repos gh" in text
     assert "gh auth switch" in text
     assert "global, shared, and racy" in text
+    assert "ordinary calls, never" in text
+    assert "auth-repair flow is the exception" in text
+    assert "restore the prior account" in text
+    assert "per process when a token is available" in text
+    assert "ambient-auth\nfallback" in text
+    assert "verify identity before mutation" in text
     assert "agent-worktrees:agent-worktrees-repos" in text
     assert "GH_TOKEN" not in text
     assert len(text.rstrip()) <= 700
@@ -70,6 +76,8 @@ def test_worktree_conduct_fragment_migrated():
     assert "reflective cue" in text
     assert "threshold-based status nudge" in text
     assert "not a mandatory heartbeat" in text
+    assert "paired-worktree and other holds may" in text
+    assert "delay pruning" in text
     assert "status --history" in text
     assert "agent-worktrees:worktree" in text
     assert len(text.rstrip()) <= 1_800

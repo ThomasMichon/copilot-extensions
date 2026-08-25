@@ -10,7 +10,8 @@
   `--follow-up`/`--resolved` state.
 - Leftover temp state, unpushed external-repo work, and merged-but-undeployed
   changes are follow-up; a finalized/completed worktree without `--follow-up`
-  is resolved and safe to prune once pairing and other holds clear.
+  is resolved and safe to prune, though paired-worktree and other holds may
+  delay pruning.
 - Run `agent-worktrees finalize` last; do not resume work after finalizing.
 - A threshold-based status nudge is a reflective cue, not a mandatory heartbeat:
   ignore it when focus and state have not changed.

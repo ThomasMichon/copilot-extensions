@@ -50,6 +50,10 @@ DIGEST_MAX_CHARS = 800
 
 #: Maximum rendered summary/title size for one digest entry.
 DIGEST_LABEL_MAX_CHARS = 96
+DIGEST_AT_MAX_CHARS = 32
+DIGEST_KIND_MAX_CHARS = 20
+DIGEST_SESSION_SUFFIX_CHARS = 6
+DIGEST_OMITTED = "- ... older entries omitted ..."
 
 #: The disposition fields a history entry snapshots / can mark as changed.
 _FIELDS = ("summary", "title", "follow_up")
@@ -163,6 +167,23 @@ def _digest_label(value: Any) -> str:
     return text[: DIGEST_LABEL_MAX_CHARS - 3].rstrip() + "..."
 
 
+def _digest_field(value: Any, max_chars: int, *, default: str) -> str:
+    """Collapse and bound an untrusted scalar used in digest metadata."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return default
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _digest_session_suffix(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    return text[-DIGEST_SESSION_SUFFIX_CHARS:]
+
+
 def digest(
     worktree_id: str,
     *,
@@ -179,7 +200,8 @@ def digest(
     per entry) so it is cheap to carry as session context.
     """
     try:
-        entries = read(worktree_id, limit=limit)
+        all_entries = read(worktree_id)
+        entries = all_entries[-limit:] if limit > 0 else all_entries
         if not entries:
             return ""
         heading = "This worktree's recent history (most recent last):"
@@ -187,10 +209,12 @@ def digest(
             return ""
         rendered: list[str] = []
         for e in entries:
-            at = (e.get("at") or "?")
-            kind = e.get("kind") or "status"
-            sess = e.get("session")
-            sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
+            at = _digest_field(e.get("at"), DIGEST_AT_MAX_CHARS, default="?")
+            kind = _digest_field(
+                e.get("kind"), DIGEST_KIND_MAX_CHARS, default="status"
+            )
+            sess = _digest_session_suffix(e.get("session"))
+            sess_tag = f" {sess}" if sess else ""
             flag = " !" if e.get("follow_up") else ""
             title = e.get("title")
             summary = _digest_label(e.get("summary"))
@@ -203,13 +227,21 @@ def digest(
 
         selected: list[str] = []
         used = len(heading)
+        omitted = len(all_entries) - len(entries)
+        marker_cost = 1 + len(DIGEST_OMITTED)
         for line in reversed(rendered):
             added = 1 + len(line)
-            if used + added > max_chars:
+            needs_marker = omitted > 0 or len(selected) < len(rendered) - 1
+            if used + added + (marker_cost if needs_marker else 0) > max_chars:
+                omitted += 1
                 break
             selected.append(line)
             used += added
         selected.reverse()
-        return "\n".join([heading, *selected])
+        parts = [heading]
+        if omitted and len(heading) + marker_cost <= max_chars:
+            parts.append(DIGEST_OMITTED)
+        parts.extend(selected)
+        return "\n".join(parts)
     except Exception:
         return ""

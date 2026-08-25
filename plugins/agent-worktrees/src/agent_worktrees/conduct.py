@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from importlib import metadata
 import os
 from pathlib import Path
+import re
 import sys
 
 from . import output
@@ -14,12 +16,29 @@ KNOWN_FRAGMENTS = ("account-conduct.md", "worktree-conduct.md")
 UNKNOWN_OMITTED = "[Additional unrecognized conduct fragments omitted.]"
 RELATED_OMITTED = "[Related-repository guidance omitted to fit the conduct budget.]"
 HISTORY_TRUNCATED = "[Older worktree history omitted.]"
+_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+
+
+def _installed_package_version() -> str:
+    """Resolve the installed distribution version without risking hook startup."""
+    try:
+        value = metadata.version("agent-worktrees").strip()
+        if _VERSION_RE.fullmatch(value):
+            return value
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _owner_marker() -> str:
+    return f"[owner: agent-worktrees@{_installed_package_version()}]"
 
 
 def _payload(parts: list[str]) -> str:
     clean = [part.strip() for part in parts if part.strip()]
     if not clean:
         return "{}"
+    clean.insert(0, _owner_marker())
     return json.dumps(
         {"additionalContext": "\n\n".join(clean)},
         ensure_ascii=False,
@@ -47,20 +66,51 @@ def _bounded_history(
         return prefix
     if _fits([*prefix, history], max_chars):
         return [*prefix, history]
-    if not _fits([*prefix, HISTORY_TRUNCATED], max_chars):
+
+    blocks = history.split("\n\n")
+    succession = next(
+        (block.strip() for block in blocks if block.strip().startswith(
+            "Worktree succession:"
+        )),
+        "",
+    )
+    digest_text = "\n\n".join(
+        block for block in blocks
+        if not block.strip().startswith("Worktree succession:")
+    ).strip()
+    digest_lines = digest_text.splitlines()
+    newest_lines = [
+        line for line in digest_lines
+        if line.startswith("- ")
+    ]
+
+    fixed = HISTORY_TRUNCATED
+    if succession:
+        fixed = f"{fixed}\n\n{succession}"
+    if not _fits([*prefix, fixed], max_chars):
+        # A succession instruction is semantic and must never be sliced.
+        if succession and _fits([*prefix, succession], max_chars):
+            return [*prefix, succession]
         return prefix
 
-    low, high = 0, len(history)
-    while low < high:
-        keep = (low + high + 1) // 2
-        candidate = [*prefix, f"{HISTORY_TRUNCATED}\n{history[-keep:]}"]
-        if _fits(candidate, max_chars):
-            low = keep
-        else:
-            high = keep - 1
-    if low:
-        return [*prefix, f"{HISTORY_TRUNCATED}\n{history[-low:]}"]
-    return [*prefix, HISTORY_TRUNCATED]
+    selected: list[str] = []
+    for line in reversed(newest_lines):
+        candidate_lines = [line, *selected]
+        candidate = (
+            f"{HISTORY_TRUNCATED}\n" + "\n".join(candidate_lines)
+        )
+        if succession:
+            candidate += f"\n\n{succession}"
+        if not _fits([*prefix, candidate], max_chars):
+            break
+        selected = candidate_lines
+
+    bounded = HISTORY_TRUNCATED
+    if selected:
+        bounded += "\n" + "\n".join(selected)
+    if succession:
+        bounded += f"\n\n{succession}"
+    return [*prefix, bounded]
 
 
 def _read_fragments(conduct_dir: Path) -> tuple[list[str], list[str], bool]:
