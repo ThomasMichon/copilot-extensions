@@ -378,13 +378,20 @@ Two consequences shape how a plugin author writes them:
   (and `source`) from stdin and decide whether -- and what -- to emit. This
   cwd-gating is what lets one plugin **target its emission at the calling repo**
   (the whole premise of using a hook to replace a per-project instructions dir).
-- **Reference the plugin's own files by absolute path.** The hook's `cwd` is the
-  *session's* directory, not the plugin's, so a plugin hook typically shells to a
-  script under its install dir (`~/.copilot/installed-plugins/<marketplace>/<plugin>/...`)
-  or a deployed sidecar under `~/.<tool>/bin/`, guarded by a `Test-Path` / `[ -f ]`
-  existence check so a partial install fails open. Keep it under the perf budget
-  below; do expensive work in a background process and have the hook read a cheap
-  state file.
+- **Resolve the plugin's own files from the plugin root, not the session
+  repository.** The hook's `cwd` is the *session's* directory, not the plugin's.
+  Copilot CLI 1.0.26+ supplies `COPILOT_PLUGIN_ROOT`, `PLUGIN_ROOT`, and
+  `CLAUDE_PLUGIN_ROOT` to plugin command hooks with the plugin installation
+  directory; prefer `COPILOT_PLUGIN_ROOT`, keep the aliases for compatibility,
+  and build the script's absolute path from that root. This works for installed
+  marketplace payloads and in-repo directory-source plugins without hardcoding
+  `~/.copilot/installed-plugins/...` or rediscovering the target repository.
+  Guard the resolved script with `Test-Path` / `[ -f ]`, diagnose a missing root
+  or script to stderr, and emit `{}` so a partial install fails open. A deployed
+  runtime sidecar under `~/.<tool>/bin/` remains appropriate when the hook
+  intentionally calls runtime code rather than payload code. Keep it under the
+  perf budget below; do expensive work in a background process and have the hook
+  read a cheap state file.
 - **The ACP transport and repo-scoped hooks — trust-gated, but usually fine.** A
   host that drives the agent over **ACP** (for example an ACP-mode bridge) creates
   a real session that loads plugin hooks, but ACP sessions **do not run the
