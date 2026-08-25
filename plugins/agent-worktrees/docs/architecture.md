@@ -408,11 +408,12 @@ containers, bridge sessions) so finalizing never orphans unfinished work. (Effor
   the shared exclusion lease (`sweep.lease_disposition_of` →
   `obligations.from_context`), which resolves both the **missed-settle** and the
   **cross-machine** cases (the shared lease is the source of truth, so any
-  machine's sweep reclaims its own stale claim). The sweep runs automatically as a
-  **finalize self-heal** (`sweep.self_heal`) before the gate can block, and on
-  demand via `claims sweep`. A `finalize --abandon` re-homes still-unsettled
-  obligations to a durable **orphanage** (not dropped); `claims cleanup` reclaims
-  them. *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*
+  machine's sweep reclaims its own stale claim). Reclaim is **explicit only** via
+  `claims sweep`; finalize never auto-reclaims creator ownership. A
+  `finalize --abandon --handoff-to <recipient-or-flow>` re-homes
+  still-unsettled obligations to a durable **orphanage** (not dropped);
+  selective `claims cleanup <ref-or-source-worktree>` accepts/reclaims them.
+  *(Phases 4–6 complete; effort `resource-obligation-settlement` closed.)*
 
 ### Recovery Mode
 

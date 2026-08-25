@@ -247,6 +247,19 @@ def test_claims_add_dedups_by_ref(monkeypatch, tmp_path, capfd):
     assert len(rec.resources) == 1  # refreshed, not duplicated
 
 
+def test_claims_add_rejects_finalizing_owner(monkeypatch, tmp_path, capfd):
+    _seed(tmp_path, monkeypatch)
+    path = tmp_path / "worktrees" / "wt-A.yaml"
+    rec = tracking.load_record(path)
+    rec.status = "finalizing"
+    tracking.save_record(rec, path)
+    rc = m.cmd_claims(_add_args("codespace", "cs-late"))
+    assert rc == 1
+    out = json.loads(capfd.readouterr().out)
+    assert "ownership is frozen" in out["error"]
+    assert tracking.load_record(path).resources == []
+
+
 def test_claims_add_missing_operands(monkeypatch, tmp_path):
     _seed(tmp_path, monkeypatch)
     rc = m.cmd_claims(argparse.Namespace(

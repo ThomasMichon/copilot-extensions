@@ -269,7 +269,13 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   another machine, or a bridge-driven box) is reclaimed by `claims sweep` reading
   the lease's mirrored disposition. If you had to `finalize --abandon` a worktree,
   its still-unsettled obligations are re-homed to the durable **orphanage** —
-  ownership transfers but **your closeout responsibility does not end**.
+  ownership does **not** transfer anonymously. The creating agent must close
+  every resource itself unless the operator explicitly directs a handoff to a
+  named recipient/flow. Without that instruction, stop and ask; do not pass
+  `--abandon`. The accepted form is
+  `finalize --abandon --handoff-to <recipient-or-flow>`; the target is persisted
+  on every orphan entry, and the creating agent remains responsible until the
+  named flow accepts it.
   `claims orphans` lists them; immediately dry-run
   `claims cleanup <source-worktree-id>`, investigate every selected child, close
   it through its owning lifecycle, then use the same selective command with
