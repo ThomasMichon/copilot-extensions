@@ -115,6 +115,11 @@ sources must fail open: write diagnostics to stderr if useful, emit `{}`, and do
 not block session startup. The hook writes exactly one final JSON object to
 stdout.
 
+The command wrapper treats an absent optional producer as a no-op. Once the
+producer exists, it owns its internal fail-open behavior; the wrapper must not
+hide a crashing producer, because partial stdout cannot be repaired by appending
+another JSON object.
+
 Some headless, cloud, or other confined launch paths do not load plugin hooks.
 Critical safety and publication rules therefore retain an irreducible static
 fallback in repository or platform instructions on those paths. The fallback is
