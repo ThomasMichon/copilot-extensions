@@ -269,8 +269,15 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   another machine, or a bridge-driven box) is reclaimed by `claims sweep` reading
   the lease's mirrored disposition. If you had to `finalize --abandon` a worktree,
   its still-unsettled obligations are re-homed to the durable **orphanage** —
-  `claims orphans` lists them and `claims cleanup --apply` reclaims the orphaned
-  resources (delete the Codespace, finalize the cross-repo worktree). **But the
+  ownership transfers but **your closeout responsibility does not end**.
+  `claims orphans` lists them; immediately dry-run
+  `claims cleanup <source-worktree-id>`, investigate every selected child, close
+  it through its owning lifecycle, then use the same selective command with
+  `--apply` and confirm no matches remain. An unfiltered `claims cleanup --apply`
+  acts on the entire orphanage and may delete unrelated resources; never use it
+  as a reflexive "clear the blocker" command. If you cannot close a child, record
+  and explicitly transfer responsibility for each ref rather than reporting the
+  parent fully closed. **But the
   ledger is best-effort and relatively new:** many older worktrees show `(none)`
   even though they really did touch a Codespace or a cross-repo PR — those actions
   predate consistent claim-journaling. An empty ledger is *not* proof of an empty
