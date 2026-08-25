@@ -1,16 +1,6 @@
 # Emit opt-in worktree-focus guidance for an applicable sessionStart payload.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$PluginVersion = '0.1.0-dev214'
-$Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
-    'Before starting work likely to overlap another worktree, check ' +
-    '`agent-dispatch focus --list`. At the start of substantial operator-led ' +
-    'or task-less work, and when its direction changes, advertise it early ' +
-    'with `agent-dispatch focus "<one-line subject>"`; this is shorthand for ' +
-    'writing the same agent-worktrees status-core summary, not a separate ' +
-    'store. Agent-worktrees conduct and regular ' +
-    '`agent-worktrees status --summary` remain authoritative for ongoing ' +
-    'disposition, and their normal update cadence still applies.'
 $GitEnvironmentNames = @(
     'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
     'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -28,6 +18,44 @@ $GitEnvironmentNames += @(
 function Emit-Empty {
     [Console]::Out.Write('{}')
     exit 0
+}
+
+function Read-PluginVersion {
+    $ManifestPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'plugin.json'
+    $Stream = [IO.File]::Open(
+        $ManifestPath,
+        [IO.FileMode]::Open,
+        [IO.FileAccess]::Read,
+        [IO.FileShare]::Read
+    )
+    try {
+        if ($Stream.Length -gt 4096) { throw 'invalid manifest' }
+        $Buffer = New-Object byte[] 4097
+        $Count = 0
+        while ($Count -lt $Buffer.Length) {
+            $Read = $Stream.Read($Buffer, $Count, $Buffer.Length - $Count)
+            if ($Read -eq 0) { break }
+            $Count += $Read
+        }
+    } finally {
+        $Stream.Dispose()
+    }
+    if ($Count -gt 4096 -or [Array]::IndexOf($Buffer, [byte]0, 0, $Count) -ge 0) {
+        throw 'invalid manifest'
+    }
+    $Utf8 = New-Object Text.UTF8Encoding($false, $true)
+    $ManifestText = $Utf8.GetString($Buffer, 0, $Count)
+    if (-not $ManifestText.TrimStart().StartsWith('{')) {
+        throw 'invalid manifest'
+    }
+    $Manifest = $ManifestText | ConvertFrom-Json -ErrorAction Stop
+    if ($Manifest -isnot [pscustomobject]) { throw 'invalid manifest' }
+    $Version = $Manifest.version
+    if ($Version -isnot [string] -or $Version.Length -gt 64 -or
+        $Version -cnotmatch '\A[0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?\z') {
+        throw 'invalid manifest version'
+    }
+    return $Version
 }
 
 function Read-BoundedUtf8Stdin {
@@ -151,6 +179,16 @@ function Invoke-WithCleanGitEnvironment([scriptblock] $Action) {
 }
 
 try {
+    $PluginVersion = Read-PluginVersion
+    $Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
+        'Before starting work likely to overlap another worktree, check ' +
+        '`agent-dispatch focus --list`. At the start of substantial operator-led ' +
+        'or task-less work, and when its direction changes, advertise it early ' +
+        'with `agent-dispatch focus "<one-line subject>"`; this is shorthand for ' +
+        'writing the same agent-worktrees status-core summary, not a separate ' +
+        'store. Agent-worktrees conduct and regular ' +
+        '`agent-worktrees status --summary` remain authoritative for ongoing ' +
+        'disposition, and their normal update cadence still applies.'
     $InputText = Read-BoundedUtf8Stdin
     $Payload = $InputText | ConvertFrom-Json -ErrorAction Stop
     if ($Payload -is [Array] -or -not ($Payload.PSObject.Properties.Name -contains 'cwd')) {

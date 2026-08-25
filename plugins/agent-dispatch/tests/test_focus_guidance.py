@@ -165,6 +165,20 @@ def _run(
     )
 
 
+def _hook_with_manifest(
+    tmp_path: Path, hook: Path, manifest: object | bytes | None
+) -> Path:
+    plugin = tmp_path / hook.stem / "plugin"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    copied = scripts / hook.name
+    shutil.copy2(hook, copied)
+    if manifest is not None:
+        content = manifest if isinstance(manifest, bytes) else json.dumps(manifest).encode()
+        (plugin / "plugin.json").write_bytes(content)
+    return copied
+
+
 @pytest.mark.parametrize("enabled", [None, False, "true", 1, "yes", [], {}])
 def test_absent_or_disabled_or_non_boolean_opt_in_emits_empty(
     tmp_path: Path, enabled: object | None
@@ -198,6 +212,50 @@ def test_enabled_opt_in_emits_exact_bounded_owned_kernel(tmp_path: Path) -> None
         assert "normal update cadence still applies" in kernel
     if len(results) == 2:
         assert results[1].stdout == results[0].stdout
+
+
+def test_owner_marker_is_derived_from_adjacent_manifest(tmp_path: Path) -> None:
+    repo = _repo(tmp_path / "repo")
+    tools = _tool_path(tmp_path / "bin")
+    version = "9.8.7-dev654"
+    for hook in _hooks():
+        copied = _hook_with_manifest(
+            tmp_path / hook.suffix.removeprefix("."),
+            hook,
+            {"name": "agent-dispatch", "version": version},
+        )
+        kernel = json.loads(_run(copied, repo, tools).stdout)["additionalContext"]
+        assert kernel.startswith(f"[owner: agent-dispatch@{version}]\n")
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        None,
+        b"{",
+        [{"version": "1.2.3"}],
+        [{"version": "1.2.3"}, {"version": "1.2.4"}],
+        {"version": 1},
+        {"version": "not-a-version"},
+        {"version": "1.2.3-dev" + ("1" * 65)},
+        b'{"version":"1.2.3"}\x00',
+        b"x" * 4097,
+    ],
+)
+def test_missing_malformed_or_invalid_manifest_fails_open(
+    tmp_path: Path, manifest: object | bytes | None
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    tools = _tool_path(tmp_path / "bin")
+    for hook in _hooks():
+        copied = _hook_with_manifest(
+            tmp_path / hook.suffix.removeprefix("."),
+            hook,
+            manifest,
+        )
+        result = _run(copied, repo, tools)
+        assert result.stdout == b"{}"
+        assert result.stderr == b""
 
 
 def test_absent_agent_worktrees_emits_empty(tmp_path: Path) -> None:
