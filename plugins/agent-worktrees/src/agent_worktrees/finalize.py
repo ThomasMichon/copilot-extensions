@@ -1109,8 +1109,7 @@ def _assert_obligations_settled(
     A worktree answers for the outbound resources it still owns before it may
     finalize. Reads the **local ledger** (`record.resources`) for **unsettled**
     (``active``) claims -- a cheap, local, no-traversal balance check (a settled
-    child has already flipped its claim to ``at-rest``/``released``). Behavior by
-    :func:`obligations.gate_mode`:
+    child has already flipped its claim to ``at-rest``/``released``).
 
     The legacy ``off``/``warn``/``block`` setting no longer weakens ownership:
     any unsettled resource **refuses** finalize unless ``abandon`` carries an

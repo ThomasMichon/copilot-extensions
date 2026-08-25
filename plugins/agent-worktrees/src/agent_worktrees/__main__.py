@@ -7497,8 +7497,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     # active pending claim blocks finalize but does not hold the sidecar lock
     # across the subprocess (which may itself pre-journal a worktree claim).
     # On success the reservation is atomically replaced by the parsed real
-    # claim; on child failure it is removed. An unparseable success leaves the
-    # pending claim in place for explicit repair rather than orphaning resource.
+    # claim. Any failure or unparseable output retains the pending claim for
+    # explicit repair rather than guessing that no resource was created.
     owner_path = None
     pending_ref = ""
     if owner_ref:
