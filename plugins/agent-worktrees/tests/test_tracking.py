@@ -226,6 +226,13 @@ class TestSaveLoadRoundTrip:
         with pytest.raises(yaml.parser.ParserError):
             load_record(path)
 
+    def test_load_rejects_repaired_non_mapping_yaml(self, tmp_path: Path):
+        path = tmp_path / "wt.yaml"
+        path.write_bytes(b"\x07not-a-record")
+
+        with pytest.raises(yaml.YAMLError, match="must be a YAML mapping"):
+            load_record(path)
+
     def test_null_title(self, tmp_path: Path):
         rec = self._make_record(title=None)
         path = tmp_path / "wt.yaml"

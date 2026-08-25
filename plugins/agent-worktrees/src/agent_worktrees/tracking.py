@@ -794,7 +794,8 @@ def load_record(path: Path) -> WorktreeRecord:
     try:
         data = yaml.safe_load(raw)
     except yaml.reader.ReaderError:
-        # dotfiles#1789: a stray C0 control char (e.g. BEL) persisted into a
+        # tmichon_microsoft/dotfiles#1789: a stray C0 control char (e.g. BEL)
+        # persisted into a
         # value makes the YAML reader raise on every load, wedging all future
         # disposition writes. Self-heal by stripping the illegal control chars
         # and re-parsing; the next save then rewrites the file cleanly. Do not
@@ -803,6 +804,9 @@ def load_record(path: Path) -> WorktreeRecord:
         if repaired == raw:
             raise
         data = yaml.safe_load(repaired)
+
+    if not isinstance(data, dict):
+        raise yaml.YAMLError("worktree tracking record must be a YAML mapping")
 
     title = data.get("title")
     if title == "null" or title is None:
@@ -1323,7 +1327,8 @@ def update_status(
 #: LF (\x0a) and CR (\x0d) are legitimate YAML stream characters and are kept;
 #: the rest (BEL \x07, etc.) are illegal in a YAML scalar and, once persisted,
 #: make ``yaml.safe_load`` raise a ``ReaderError`` on EVERY subsequent read --
-#: wedging all future disposition writes (dotfiles#1789). A stray BEL is easy to
+#: wedging all future disposition writes (tmichon_microsoft/dotfiles#1789). A
+#: stray BEL is easy to
 #: introduce from a caller (e.g. PowerShell renders a literal backtick-a ``` `a ```
 #: as \x07), so sanitize defensively on write and self-heal on read.
 _ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
