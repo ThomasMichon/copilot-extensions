@@ -38,6 +38,7 @@ try {
     $data = Get-Content $template -Raw | ConvertFrom-Json
 } catch { exit 0 }
 $data | Add-Member -NotePropertyName command -NotePropertyValue @($binstub) -Force
+$data | Add-Member -NotePropertyName plugin_root -NotePropertyValue ([IO.Path]::GetFullPath($PluginDir)) -Force
 
 $payload = ($data | ConvertTo-Json -Depth 10)
 $out = Join-Path $dir "$name.json"
@@ -45,8 +46,23 @@ $out = Join-Path $dir "$name.json"
 try {
     $existing = if (Test-Path $out) { [System.IO.File]::ReadAllText($out) } else { $null }
     if ($existing -ne $payload) {
-        # WriteAllText -> UTF-8 without BOM (json.loads-safe).
-        [System.IO.File]::WriteAllText($out, $payload)
+        $tmp = "$out.$PID.tmp"
+        $backup = "$out.$PID.bak"
+        [System.IO.File]::WriteAllText($tmp, $payload)
+        try {
+            if (Test-Path $out) {
+                [System.IO.File]::Replace($tmp, $out, $backup, $true)
+            } else {
+                try {
+                    [System.IO.File]::Move($tmp, $out)
+                } catch [System.IO.IOException] {
+                    if (-not (Test-Path $out)) { throw }
+                    [System.IO.File]::Replace($tmp, $out, $backup, $true)
+                }
+            }
+        } finally {
+            Remove-Item -LiteralPath $tmp, $backup -Force -ErrorAction SilentlyContinue
+        }
     }
 } catch { exit 0 }
 exit 0

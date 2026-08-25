@@ -24,7 +24,9 @@ addressing (`container:<name>`) is unavailable.
    with `agent-containers borrow <effort>`, and release when done.
 4. If agent-bridge is present, the session-start hook also drops a provider
    manifest into `~/.agent-bridge/providers.d/`; bridge then discovers
-   `container:<name>` on demand.
+   `container:<name>` on demand. The manifest carries provider provenance; a
+   missing binstub/payload makes only that namespace inactive and is diagnosed
+   by `agent-bridge doctor`.
 
 ## Concepts
 

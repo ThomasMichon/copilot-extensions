@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "plugin": "agent-containers@copilot-extensions",
   "namespace": "container",
   "restricted": true,
   "description": "Local Docker dev containers (agent-containers)"
