@@ -1887,8 +1887,8 @@ class TestCapTitle:
     def test_short_title_unchanged(self):
         assert cap_title("Fix relay port") == "Fix relay port"
 
-    def test_newlines_collapsed_and_stripped(self):
-        assert cap_title("  fix\nthe bug  ") == "fix the bug"
+    def test_terminal_whitespace_collapsed_and_stripped(self):
+        assert cap_title("  fix\tthe\r\nbug  ") == "fix the bug"
 
     def test_illegal_controls_removed(self):
         assert cap_title("\x07Fix\x0b relay\x1f port\x7f") == "Fix relay port"

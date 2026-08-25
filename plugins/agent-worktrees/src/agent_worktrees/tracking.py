@@ -1353,7 +1353,7 @@ def cap_title(title: str | None) -> str | None:
     """
     if not title:
         return None
-    t = _strip_control_chars(title).replace("\n", " ").strip()
+    t = re.sub(r"[\t\r\n]+", " ", _strip_control_chars(title)).strip()
     if not t:
         return None
     if len(t) > TITLE_MAX:
