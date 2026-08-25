@@ -4865,8 +4865,6 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
     )
     if not worktree_id:
         return 0
-    limit = getattr(args, "limit", None) or 8
-    text = disposition_history.digest(worktree_id, limit=limit)
     # Prepend the succession/role header so an arriving session learns not just
     # what the worktree was doing, but whether it should drive or defer.
     header = ""
@@ -4875,6 +4873,14 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
         header = _succession_header(record)
     except Exception:
         header = ""
+    limit = getattr(args, "limit", None) or 8
+    separator = 2 if header else 0
+    digest_budget = max(
+        0, disposition_history.DIGEST_MAX_CHARS - len(header) - separator
+    )
+    text = disposition_history.digest(
+        worktree_id, limit=limit, max_chars=digest_budget
+    )
     combined = "\n\n".join([p for p in (text, header) if p])
     if combined:
         print(combined)
@@ -13652,7 +13658,7 @@ def _related_conduct(anchor: str) -> int:
     drop-ins. The directional side comes from the full related config graft
     (installed plugins, harness, and knowledge overlay).
     """
-    from . import related, repos
+    from . import related
 
     try:
         config = cfg.load_config()
@@ -13661,86 +13667,33 @@ def _related_conduct(anchor: str) -> int:
 
     anchors = _related_config_source_anchors(anchor)
     rel = related.read_related_grafted(anchors)
-    registry = repos.read_registry()
-    names = set(config.repos) | set(rel.related)
-    if not names:
+    related_count = len(rel.related)
+    if not config.repos and not related_count:
         return 0
 
     lines = [
         "## Related-repository guidance",
         "",
-        "This is the merged project view: committed repo config, machine-side "
-        "overrides, `config.d/` injections, installed-plugin contributions, "
-        "and the directional related-repo index.",
-        "",
-        "- Before reading or changing another repo, run "
-        "`agent-worktrees related resolve <repo>` and follow its class, locus, "
-        "and delegation plan.",
-        "- A non-`none` delegate means the target repo is agent-guarded: hand "
-        "content work to that repo's agent rather than editing its checkout "
-        "from this session.",
-        "- Related-repo plugins for CodeSpace/container venues are copied from "
-        "the dispatch host's installed payload and passed as `--plugin-dir`; "
-        "their marketplace need not exist in the venue. Ensure every listed "
-        "source is enabled and installed on the dispatch host.",
-        "",
-        "Available repository guidance:",
+        "- Before touching another repo, run "
+        "`agent-worktrees related resolve <repo>`; follow its class, locus, "
+        "and delegate.",
+        "- A non-`none` delegate means hand content work to the owning agent; "
+        "do not edit that target from this session.",
+        "- CodeSpace/container venue payloads come from the dispatch host's "
+        "installed plugins via `--plugin-dir`; ensure listed sources are "
+        "installed there.",
+        "- Registered repositories are discovered through the active project's "
+        "repository tooling.",
+        "- Inspect with `agent-worktrees related show <repo>`; plan with "
+        "`agent-worktrees related resolve <repo>`.",
+        "- After index changes, run `agent-worktrees related doctor`.",
     ]
-
-    def _sort_key(name: str) -> tuple[int, int, str]:
-        return (
-            0 if name == config.repo_name else 1,
-            0 if name == rel.primary else 1,
-            name.casefold(),
+    if related_count:
+        lines.insert(
+            -2,
+            f"- {related_count} directional related entries: "
+            "`agent-worktrees related list`.",
         )
-
-    for name in sorted(names, key=_sort_key):
-        parts: list[str] = []
-        markers: list[str] = []
-        if name == config.repo_name:
-            markers.append("current")
-        if name == rel.primary:
-            markers.append("primary")
-
-        reg = registry.repos.get(name)
-        if reg is not None:
-            parts.append(f"class={reg.repo_class}")
-
-        entry = rel.related.get(name)
-        if entry is not None:
-            if entry.role:
-                parts.append(f"role={entry.role}")
-            parts.append(f"locus={entry.locus.preferred or 'local'}")
-            parts.append(f"delegate={entry.delegate or 'none'}")
-            enabled_plugins = [
-                str(p.get("source", "")).strip()
-                for p in entry.plugins
-                if p.get("enable", True) and str(p.get("source", "")).strip()
-            ]
-            if enabled_plugins:
-                parts.append("plugins=" + ",".join(enabled_plugins))
-
-        repo_cfg = config.repos.get(name)
-        if repo_cfg is not None:
-            flow = _pr_flow_profile(repo_cfg)
-            if repo_cfg.pr.enabled:
-                requirement = "required" if repo_cfg.pr.required else "optional"
-                parts.append(
-                    f"pr={flow.profile}/{requirement}/{repo_cfg.pr.provider}"
-                )
-                parts.append(f"after-create={repo_cfg.pr.strategy}")
-            else:
-                parts.append("pr=direct")
-
-        marker = f" ({', '.join(markers)})" if markers else ""
-        detail = "; ".join(parts) if parts else "registered"
-        lines.append(f"- `{name}`{marker}: {detail}")
-
-    lines.extend([
-        "",
-        "Use `agent-worktrees related show <repo>` for metadata and "
-        "`agent-worktrees related doctor` after changing the index.",
-    ])
     print("\n".join(lines))
     return 0
 

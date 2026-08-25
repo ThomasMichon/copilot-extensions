@@ -44,6 +44,17 @@ from . import config as cfg
 #: disposition write is human/agent-initiated (not per-tool), so this is ample.
 MAX_ENTRIES = 500
 
+#: Maximum rendered history-digest size, including any succession header added
+#: by the CLI. Stored history remains untouched.
+DIGEST_MAX_CHARS = 800
+
+#: Maximum rendered summary/title size for one digest entry.
+DIGEST_LABEL_MAX_CHARS = 96
+DIGEST_AT_MAX_CHARS = 32
+DIGEST_KIND_MAX_CHARS = 20
+DIGEST_SESSION_SUFFIX_CHARS = 6
+DIGEST_OMITTED = "- ... older entries omitted ..."
+
 #: The disposition fields a history entry snapshots / can mark as changed.
 _FIELDS = ("summary", "title", "follow_up")
 
@@ -148,7 +159,37 @@ def remove(worktree_id: str) -> None:
         pass
 
 
-def digest(worktree_id: str, *, limit: int = 8) -> str:
+def _digest_label(value: Any) -> str:
+    """Collapse and bound one rendered digest label without changing storage."""
+    text = " ".join(str(value or "").split())
+    if len(text) <= DIGEST_LABEL_MAX_CHARS:
+        return text
+    return text[: DIGEST_LABEL_MAX_CHARS - 3].rstrip() + "..."
+
+
+def _digest_field(value: Any, max_chars: int, *, default: str) -> str:
+    """Collapse and bound an untrusted scalar used in digest metadata."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return default
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _digest_session_suffix(value: Any) -> str:
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    return text[-DIGEST_SESSION_SUFFIX_CHARS:]
+
+
+def digest(
+    worktree_id: str,
+    *,
+    limit: int = 8,
+    max_chars: int = DIGEST_MAX_CHARS,
+) -> str:
     """A compact, human/agent-readable recovery digest of a worktree's recent
     history, newest last, or ``""`` when there is none. Never raises.
 
@@ -159,24 +200,48 @@ def digest(worktree_id: str, *, limit: int = 8) -> str:
     per entry) so it is cheap to carry as session context.
     """
     try:
-        entries = read(worktree_id, limit=limit)
+        all_entries = read(worktree_id)
+        entries = all_entries[-limit:] if limit > 0 else all_entries
         if not entries:
             return ""
-        lines = ["This worktree's recent history (most recent last):"]
+        heading = "This worktree's recent history (most recent last):"
+        if max_chars < len(heading):
+            return ""
+        rendered: list[str] = []
         for e in entries:
-            at = (e.get("at") or "?")
-            kind = e.get("kind") or "status"
-            sess = e.get("session")
-            sess_tag = f" {sess[-6:]}" if isinstance(sess, str) and sess else ""
+            at = _digest_field(e.get("at"), DIGEST_AT_MAX_CHARS, default="?")
+            kind = _digest_field(
+                e.get("kind"), DIGEST_KIND_MAX_CHARS, default="status"
+            )
+            sess = _digest_session_suffix(e.get("session"))
+            sess_tag = f" {sess}" if sess else ""
             flag = " !" if e.get("follow_up") else ""
             title = e.get("title")
-            summary = (e.get("summary") or "").strip()
+            summary = _digest_label(e.get("summary"))
             label = summary or (title or "")
             if kind != "status" and not label:
                 label = f"({kind})"
+            label = _digest_label(label)
             line = f"- {at} [{kind}{sess_tag}]{flag} {label}".rstrip()
-            lines.append(line)
-        return "\n".join(lines)
+            rendered.append(line)
+
+        selected: list[str] = []
+        used = len(heading)
+        omitted = len(all_entries) - len(entries)
+        marker_cost = 1 + len(DIGEST_OMITTED)
+        for line in reversed(rendered):
+            added = 1 + len(line)
+            needs_marker = omitted > 0 or len(selected) < len(rendered) - 1
+            if used + added + (marker_cost if needs_marker else 0) > max_chars:
+                omitted += 1
+                break
+            selected.append(line)
+            used += added
+        selected.reverse()
+        parts = [heading]
+        if omitted and len(heading) + marker_cost <= max_chars:
+            parts.append(DIGEST_OMITTED)
+        parts.extend(selected)
+        return "\n".join(parts)
     except Exception:
         return ""
-
