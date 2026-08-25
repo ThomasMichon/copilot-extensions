@@ -7,6 +7,7 @@ tracking its lifecycle state.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import threading
 from collections.abc import Callable, Iterable
@@ -789,7 +790,19 @@ def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
 
 def load_record(path: Path) -> WorktreeRecord:
     """Load a worktree tracking record from a YAML file."""
-    data = yaml.safe_load(_read_text_with_retry(path))
+    raw = _read_text_with_retry(path)
+    try:
+        data = yaml.safe_load(raw)
+    except yaml.YAMLError:
+        # dotfiles#1789: a stray C0 control char (e.g. BEL) persisted into a
+        # value makes the YAML reader raise on every load, wedging all future
+        # disposition writes. Self-heal by stripping the illegal control chars
+        # and re-parsing; the next save then rewrites the file cleanly. Do not
+        # reinterpret unrelated malformed YAML as a repairable record.
+        repaired = _strip_control_chars(raw)
+        if repaired == raw:
+            raise
+        data = yaml.safe_load(repaired)
 
     title = data.get("title")
     if title == "null" or title is None:
@@ -1306,6 +1319,28 @@ def update_status(
         save_record(record)
 
 
+#: C0 control characters that must never reach the tracking YAML. TAB (\x09),
+#: LF (\x0a) and CR (\x0d) are legitimate YAML stream characters and are kept;
+#: the rest (BEL \x07, etc.) are illegal in a YAML scalar and, once persisted,
+#: make ``yaml.safe_load`` raise a ``ReaderError`` on EVERY subsequent read --
+#: wedging all future disposition writes (dotfiles#1789). A stray BEL is easy to
+#: introduce from a caller (e.g. PowerShell renders a literal backtick-a ``` `a ```
+#: as \x07), so sanitize defensively on write and self-heal on read.
+_ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
+def _strip_control_chars(text: str | None) -> str | None:
+    """Drop C0 control chars (except TAB/LF/CR) that corrupt the tracking YAML.
+
+    Used on the write path (disposition ``summary`` / ``title``) to prevent a
+    control char from being persisted, and on the read path to self-heal a file
+    that was poisoned before this guard existed. See :data:`_ILLEGAL_CTRL_RE`.
+    """
+    if text is None:
+        return None
+    return _ILLEGAL_CTRL_RE.sub("", text)
+
+
 def cap_title(title: str | None) -> str | None:
     """Normalize + cap an agent-asserted worktree title at :data:`TITLE_MAX`.
 
@@ -1318,7 +1353,7 @@ def cap_title(title: str | None) -> str | None:
     """
     if not title:
         return None
-    t = title.replace("\n", " ").strip()
+    t = _strip_control_chars(title).replace("\n", " ").strip()
     if not t:
         return None
     if len(t) > TITLE_MAX:
@@ -1351,7 +1386,7 @@ def set_disposition(
     """
     changed: list[str] = []
     if summary is not None:
-        record.summary = summary.replace("\n", " ").strip()
+        record.summary = _strip_control_chars(summary).replace("\n", " ").strip()
         changed.append("summary")
     if title is not None:
         record.title = cap_title(title)
