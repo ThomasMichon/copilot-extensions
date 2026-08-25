@@ -19,8 +19,7 @@ from typing import Literal
 import yaml
 
 from . import config as cfg
-from . import disposition_history
-from . import obligations
+from . import disposition_history, obligations
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
@@ -2219,6 +2218,8 @@ class _RecordLock:
       **proceeds anyway** on the in-process lock alone (graceful degradation; the
       atomic temp+replace retry in ``_atomic_write`` is the last line of defence)
       -- so a critical update is never dropped. ``acquired`` is always True.
+      Callers that cannot safely degrade may set ``require_sidecar=True`` to
+      raise :class:`TimeoutError` instead.
     - ``blocking=False`` -- a **best-effort background writer** (a Picker sweep's
       liveness/session-state stamp). It makes a **single** non-blocking attempt at
       both the in-process and the sidecar lock; if either is already held it
@@ -2250,12 +2251,19 @@ class _RecordLock:
       before the push) is reload-merged under a tight lock instead.
     """
 
-    def __init__(self, yaml_path: Path, timeout: float = 2.0, *,
-                 blocking: bool = True):
+    def __init__(
+        self,
+        yaml_path: Path,
+        timeout: float = 2.0,
+        *,
+        blocking: bool = True,
+        require_sidecar: bool = False,
+    ):
         self._yaml_path = yaml_path
         self._lock_path = yaml_path.with_suffix(".lock")
         self._timeout = timeout
         self._blocking = blocking
+        self._require_sidecar = require_sidecar
         self._fd: int | None = None
         self._plock: threading.RLock | None = None
         self._plock_held = False
@@ -2280,19 +2288,27 @@ class _RecordLock:
             # Another same-process thread holds it -- best-effort skip.
             return self
 
-        self._lock_path.parent.mkdir(parents=True, exist_ok=True)
-        self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
+        try:
+            self._lock_path.parent.mkdir(parents=True, exist_ok=True)
+            self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
 
-        if self._blocking:
-            self._acquire_sidecar_blocking()
-            self.acquired = True  # proceeds even if the sidecar timed out
-        elif self._sidecar_try():
-            self.acquired = True
-        else:
-            # Sidecar held by another process -- best-effort skip: drop the fd
-            # and the in-process lock so we hold nothing.
+            if self._blocking:
+                sidecar_acquired = self._acquire_sidecar_blocking()
+                if not sidecar_acquired and self._require_sidecar:
+                    raise TimeoutError(
+                        f"timed out acquiring cross-process lock {self._lock_path}"
+                    )
+                self.acquired = True  # proceeds even if the sidecar timed out
+            elif self._sidecar_try():
+                self.acquired = True
+            else:
+                # Sidecar held by another process -- best-effort skip: drop the
+                # fd and the in-process lock so we hold nothing.
+                self._release()
+            return self
+        except BaseException:
             self._release()
-        return self
+            raise
 
     def _sidecar_try(self) -> bool:
         """One **non-blocking** attempt at the cross-process sidecar lock.
@@ -2326,39 +2342,43 @@ class _RecordLock:
         except OSError:
             return False
 
-    def _acquire_sidecar_blocking(self) -> None:
+    def _acquire_sidecar_blocking(self) -> bool:
         """Retry :meth:`_sidecar_try` until it wins or ``timeout`` elapses; on
-        timeout, return anyway (the caller proceeds on the in-process lock)."""
+        timeout, report failure so the caller can degrade or fail closed."""
         import time
         deadline = time.monotonic() + self._timeout
         while True:
             if self._sidecar_try():
-                return
+                return True
             if time.monotonic() >= deadline:
-                return  # degrade to the in-process lock alone
+                return False
             time.sleep(0.05)
 
     def _release(self) -> None:
-        if self._fd is not None:
-            if self._held == "posix":
+        try:
+            if self._fd is not None:
                 try:
-                    import fcntl as _fcntl
-                    _fcntl.flock(self._fd, _fcntl.LOCK_UN)
-                except (ImportError, OSError):
-                    pass
-            elif self._held == "windows":
-                try:
-                    import msvcrt as _msvcrt
-                    os.lseek(self._fd, 0, os.SEEK_SET)
-                    _msvcrt.locking(self._fd, _msvcrt.LK_UNLCK, 1)
-                except (ImportError, OSError):
-                    pass
-            os.close(self._fd)
-            self._fd = None
-            self._held = None
-        if self._plock_held and self._plock is not None:
-            self._plock.release()
-            self._plock_held = False
+                    if self._held == "posix":
+                        try:
+                            import fcntl as _fcntl
+                            _fcntl.flock(self._fd, _fcntl.LOCK_UN)
+                        except (ImportError, OSError):
+                            pass
+                    elif self._held == "windows":
+                        try:
+                            import msvcrt as _msvcrt
+                            os.lseek(self._fd, 0, os.SEEK_SET)
+                            _msvcrt.locking(self._fd, _msvcrt.LK_UNLCK, 1)
+                        except (ImportError, OSError):
+                            pass
+                    os.close(self._fd)
+                finally:
+                    self._fd = None
+                    self._held = None
+        finally:
+            if self._plock_held and self._plock is not None:
+                self._plock.release()
+                self._plock_held = False
 
     def __exit__(self, *_: object) -> None:
         self._release()

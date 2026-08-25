@@ -74,6 +74,64 @@ class StateRoot:
         }
 
 
+@dataclass(frozen=True)
+class PairCheckout:
+    """One role-bearing checkout in a tracked harness/knowledge pair."""
+
+    role: str
+    path: str
+    repo: str
+    worktree_id: str | None
+    kind: str = "worktree"
+    status: str | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "worktree_id": self.worktree_id,
+            "role": self.role,
+            "path": self.path,
+            "kind": self.kind,
+            "status": self.status,
+        }
+
+
+@dataclass(frozen=True)
+class StatePair:
+    """Resolution of the current tracked harness/knowledge pair."""
+
+    paired: bool
+    pair_id: str | None = None
+    pair_ref: str | None = None
+    pair_kind: str | None = None
+    current: PairCheckout | None = None
+    sibling: PairCheckout | None = None
+    error: str | None = None
+
+    def as_dict(self) -> dict:
+        if not self.paired:
+            result: dict = {"paired": False}
+            if self.current:
+                result["worktree_id"] = self.current.worktree_id
+            if self.error:
+                result["error"] = self.error
+            return result
+        result = {
+            "paired": True,
+            "pair_id": self.pair_id,
+            "self": self.current.as_dict() if self.current else None,
+            "sibling": self.sibling.as_dict() if self.sibling else None,
+        }
+        if self.error:
+            result.update(
+                {
+                    "pair_ref": self.pair_ref,
+                    "pair_kind": self.pair_kind,
+                    "error": self.error,
+                }
+            )
+        return result
+
+
 def _git_toplevel(cwd: str | None) -> str | None:
     """Return the git worktree root of ``cwd`` (or the process cwd), or None."""
     try:
@@ -199,6 +257,254 @@ def resolve_state_root(
             f"could not resolve a state root for '{launch_repo}': no git "
             f"worktree at the current directory and no usable anchor."
         ),
+    )
+
+
+def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StatePair:
+    """Resolve both roles of the tracked pair containing ``cwd``.
+
+    This is the typed ownership seam shared by ``state-root --pair`` and
+    knowledge-repo management commands. It never falls from a stale worktree
+    pair back to the knowledge anchor.
+    """
+    from . import tracking
+
+    current_dir = cwd or os.getcwd()
+    worktree_id = tracking.find_worktree_id_by_cwd(current_dir)
+    record = tracking.load_record_by_id(worktree_id) if worktree_id else None
+    if record is None:
+        return StatePair(
+            paired=False, error="current directory is not a tracked worktree"
+        )
+    current = PairCheckout(
+        role=record.pair_role or "",
+        path=record.worktree_path,
+        repo=record.repo,
+        worktree_id=record.worktree_id,
+        kind=record.pair_kind or "worktree",
+        status=record.status,
+    )
+    if not record.is_paired:
+        return StatePair(
+            paired=False,
+            current=current,
+            error=f"worktree '{record.worktree_id}' is not paired",
+        )
+
+    if record.pair_kind == "anchor":
+        if config is None:
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind="anchor",
+                current=current,
+                error="paired knowledge anchor requires an active project config",
+            )
+        pair_ref = tracking.parse_claim_ref(record.pair_ref or "")
+        bound_repo = (config.knowledge_repo or "").strip()
+        if not (pair_ref and pair_ref.is_qualified and pair_ref.project):
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind="anchor",
+                current=current,
+                error=(
+                    f"paired knowledge anchor reference "
+                    f"'{record.pair_ref or '?'}' is not a qualified pair ref"
+                ),
+            )
+        if pair_ref.project != bound_repo:
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind="anchor",
+                current=current,
+                error=(
+                    f"paired knowledge anchor repo '{pair_ref.project}' no longer "
+                    f"matches the current binding '{bound_repo or '<unbound>'}'; "
+                    "create or select a current pair"
+                ),
+            )
+        resolved = resolve_state_root(config)
+        if not (resolved.bound and resolved.path):
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind="anchor",
+                current=current,
+                error=resolved.error or "paired knowledge anchor could not be resolved",
+            )
+        sibling = PairCheckout(
+            role="knowledge",
+            path=resolved.path,
+            repo=resolved.repo,
+            worktree_id=None,
+            kind="anchor",
+        )
+    else:
+        sibling_record = tracking.find_paired_record(record)
+        if sibling_record is None:
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind=record.pair_kind,
+                current=current,
+                error=(
+                    f"paired sibling '{record.pair_ref or '?'}' has no local "
+                    "record on this machine"
+                ),
+            )
+        current_pair_id = (record.pair_id or "").strip()
+        sibling_pair_id = (sibling_record.pair_id or "").strip()
+        if not current_pair_id or not sibling_pair_id:
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind=record.pair_kind,
+                current=current,
+                error=(
+                    "paired worktree records require the same non-empty pair_id "
+                    f"(current={current_pair_id or '<empty>'!r}, "
+                    f"sibling={sibling_pair_id or '<empty>'!r})"
+                ),
+            )
+        if current_pair_id != sibling_pair_id:
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind=record.pair_kind,
+                current=current,
+                error=(
+                    "paired worktree records disagree on pair_id "
+                    f"(current={current_pair_id!r}, sibling={sibling_pair_id!r})"
+                ),
+            )
+
+        current_identity = (
+            record.machine,
+            record.repo,
+            record.worktree_id,
+        )
+        sibling_identity = (
+            sibling_record.machine,
+            sibling_record.repo,
+            sibling_record.worktree_id,
+        )
+        if current_identity == sibling_identity:
+            identity = tracking.format_claim_ref(*current_identity)
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind=record.pair_kind,
+                current=current,
+                error=f"paired worktree cannot pair with itself ({identity!r})",
+            )
+
+        current_role = (record.pair_role or "").strip()
+        sibling_role = (sibling_record.pair_role or "").strip()
+        if {current_role, sibling_role} != {"harness", "knowledge"}:
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind=record.pair_kind,
+                current=current,
+                error=(
+                    "paired worktree records require complementary "
+                    "harness/knowledge roles "
+                    f"(current={current_role or '<empty>'!r}, "
+                    f"sibling={sibling_role or '<empty>'!r})"
+                ),
+            )
+
+        current_kind = (record.pair_kind or "").strip()
+        sibling_kind = (sibling_record.pair_kind or "").strip()
+        if (
+            current_kind != sibling_kind
+            or current_kind != "worktree"
+        ):
+            return StatePair(
+                paired=True,
+                pair_id=record.pair_id,
+                pair_ref=record.pair_ref,
+                pair_kind=record.pair_kind,
+                current=current,
+                error=(
+                    "paired worktree records require matching 'worktree' "
+                    "pair_kind values "
+                    f"(current={current_kind or '<empty>'!r}, "
+                    f"sibling={sibling_kind or '<empty>'!r})"
+                ),
+            )
+
+        for owner, raw_ref, target, target_label in (
+            ("current", record.pair_ref, sibling_record, "sibling"),
+            ("sibling", sibling_record.pair_ref, record, "current"),
+        ):
+            parsed = tracking.parse_claim_ref(raw_ref or "")
+            expected = tracking.format_claim_ref(
+                target.machine,
+                target.repo,
+                target.worktree_id,
+            )
+            if parsed is None or not parsed.is_qualified:
+                return StatePair(
+                    paired=True,
+                    pair_id=record.pair_id,
+                    pair_ref=record.pair_ref,
+                    pair_kind=record.pair_kind,
+                    current=current,
+                    error=(
+                        f"{owner} pair_ref {raw_ref or '<empty>'!r} is not a "
+                        f"qualified machine/repo/worktree reference to the "
+                        f"{target_label} ({expected!r})"
+                    ),
+                )
+            actual_identity = (
+                parsed.machine,
+                parsed.project,
+                parsed.worktree_id,
+            )
+            expected_identity = (
+                target.machine,
+                target.repo,
+                target.worktree_id,
+            )
+            if actual_identity != expected_identity:
+                return StatePair(
+                    paired=True,
+                    pair_id=record.pair_id,
+                    pair_ref=record.pair_ref,
+                    pair_kind=record.pair_kind,
+                    current=current,
+                    error=(
+                        f"{owner} pair_ref {raw_ref!r} does not reference the "
+                        f"{target_label} {expected!r}"
+                    ),
+                )
+        sibling = PairCheckout(
+            role=sibling_record.pair_role or "",
+            path=sibling_record.worktree_path,
+            repo=sibling_record.repo,
+            worktree_id=sibling_record.worktree_id,
+            kind=record.pair_kind or "worktree",
+            status=sibling_record.status,
+        )
+    return StatePair(
+        paired=True,
+        pair_id=record.pair_id,
+        pair_ref=record.pair_ref,
+        pair_kind=record.pair_kind,
+        current=current,
+        sibling=sibling,
     )
 
 

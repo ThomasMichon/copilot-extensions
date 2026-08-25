@@ -38,11 +38,11 @@ flow, and re-pointing steps.
 |----------|------------------|
 | `~/.<harness>/config.yaml` | Top-level `knowledge_repo: <knowledge-name>` pointer read by the state-root resolver. Existing config content is preserved. |
 | `~/.<harness>/knowledge-binding.md` | Managed instructions data labeling this machine's harness, knowledge, and optional product repo paths. The harness-knowledge `sessionStart` hook emits this file as additional context only when the current project resolves to that harness. |
-| `<harness>/.github/copilot/settings.local.json` | Optional personal-plugin overlay, written when both `--harness-path` and `--knowledge-path` are supplied. It mirrors only the knowledge repo's local (`directory`/`local`) marketplaces with absolute paths and preserves unmanaged local settings. Keep this file gitignored. |
+| `<harness>/.github/copilot/settings.local.json` | Optional personal-plugin overlay, written when both `--harness-path` and `--knowledge-path` are supplied. The canonical `agent-worktrees knowledge compose-plugins` implementation carries local and operator-specific remote marketplaces/enables, preserves the committed harness base and unmanaged local settings, and is invoked automatically for paired launches. If the tracked pair becomes invalid, launch preflight retires only unchanged marker-owned pair values and fails closed when safe cleanup is impossible. Keep this file gitignored. |
 
 The plugin never writes a knowledge or product repo name into committed harness
 config and does not use `agent-worktrees related add` for the binding.
 
 Re-running is safe: the pointer is replaced in place, the binding fragment is
-regenerated, and managed local-plugin overlay entries are refreshed while
-unmanaged entries are preserved.
+regenerated, and the compatibility assembler delegates to agent-worktrees'
+single managed-overlay implementation.
