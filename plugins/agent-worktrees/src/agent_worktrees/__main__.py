@@ -1488,7 +1488,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
       ``wt-<id>`` mux session (cutting the operator over). The seed is encoded as
       a space-free pane-wrapper control argument; the wrapper decodes it after
       psmux's lossy argv reconstruction, appends native
-      ``--interactive <seed>``, and writes a receipt before the parent reports
+      ``-i <seed>``, and writes a receipt before the parent reports
       success. Deliberately omits ``--resume``: a handoff wants a FRESH context
       window seeded by the prompt, not the old transcript replayed. Returns the
       OLD (pre-cutover) pane id so the successor-side handoff consumer can retire
@@ -1600,7 +1600,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
     # sends base64 control tokens to the platform wrapper instead; the wrapper
-    # decodes and appends native ``--interactive <seed>`` immediately before
+    # decodes and appends native ``-i <seed>`` immediately before
     # launching the setup/Copilot command, after psmux has finished reconstructing
     # argv. A receipt handshake proves the wrapper performed that reconstruction
     # before this command reports success.
@@ -1681,7 +1681,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     session detached (never attaching -- the operator or Neuron Forge attaches
     later). An optional ``--seed`` is injected as the first interactive turn via
     ``send-keys`` once Copilot is ready. Handoff cutover uses native
-    ``--interactive`` startup instead because its attached successor does not
+    ``-i`` startup instead because its attached successor does not
     need embody's post-launch bridge verification.
 
     Verification: the caller confirms the embodiment by polling
@@ -5425,6 +5425,35 @@ def _activate_project_for_path(path: str | None, *, force: bool = False) -> None
         # leave a PRIOR session's project active: clear it so an unresolved path
         # can't render with the previous session's identity/title.
         cfg.set_active_project(None)
+
+
+def _activate_project_for_worktree_id(worktree_id: str | None) -> str | None:
+    """Activate the unique adopted project that owns ``worktree_id``.
+
+    A sessionStart hook can recover a ``wt-<id>`` mux session from process
+    ancestry even when its payload cwd is HOME. Project state is partitioned, so
+    resolve that globally unique worktree id across the bounded adopted-project
+    registry before writing the session binding. Ambiguity fails closed.
+    """
+    if not worktree_id:
+        return None
+    try:
+        projects = (inst.read_projects_registry().get("projects") or {}).keys()
+    except Exception:
+        return None
+    matches = [
+        str(project)
+        for project in projects
+        if (
+            cfg.project_dir(str(project))
+            / "worktrees"
+            / f"{worktree_id}.yaml"
+        ).is_file()
+    ]
+    if len(matches) != 1:
+        return None
+    cfg.set_active_project(matches[0])
+    return matches[0]
 
 
 def _slot_superseded(active: str, mine: str, versions_root: str) -> bool:
@@ -15448,6 +15477,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
     sp.add_argument("--launch-id", dest="launch_id", default=None,
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
+    sp.add_argument("--emit-context", action="store_true",
+                    help="Emit sessionStart additionalContext for the recovered binding")
 
     sp = sub.add_parser("deregister-session",
                         help="Mark a Copilot session as ended on a worktree")
@@ -15785,9 +15816,33 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         try:
             wt_id = tracking.find_worktree_id_by_cwd(cwd)
         except Exception:
-            return 0
+            wt_id = None
+
+    # Last-resort mux recovery for HOME-cwd/Bare resumes and hooks whose mux
+    # environment was stripped. The exact session lock identifies Copilot's
+    # process; its ancestry identifies the owning mux pane and wt-<id> session.
+    mux_binding = None
+    if not wt_id or not pane_id:
+        try:
+            mux_binding = sessions.mux_binding_for_session(session_id)
+        except Exception:
+            mux_binding = None
+    if not wt_id and mux_binding:
+        candidate = mux_binding.get("worktree_id")
+        if candidate and _activate_project_for_worktree_id(candidate):
+            wt_id = candidate
     if not wt_id:
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
+    if not cfg.active_project():
+        _activate_project_for_worktree_id(wt_id)
+    recovered_mux = (
+        mux_binding
+        if mux_binding and mux_binding.get("worktree_id") == wt_id
+        else None
+    )
+    if recovered_mux:
+        pane_id = pane_id or mux_binding.get("pane_id")
+        pid = pid or mux_binding.get("copilot_pid")
 
     try:
         tracking.register_session(wt_id, session_id, pid=pid, pane_id=pane_id)
@@ -15811,15 +15866,55 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     # hook payload's cwd (the worktree); fall back to the tracking record when
     # cwd is absent (e.g. wt_id came from the env, bare-resume path) so we never
     # hand the updater the plugin install dir.
+    record = None
+    try:
+        rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if rec_path.exists():
+            record = tracking.load_record(rec_path)
+    except Exception:
+        record = None
     upd_path = cwd
-    if not upd_path:
+    if record is not None:
+        root = os.path.normcase(os.path.normpath(record.worktree_path))
+        candidate = (
+            os.path.normcase(os.path.normpath(cwd)) if cwd else ""
+        )
         try:
-            rec_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-            if rec_path.exists():
-                upd_path = tracking.load_record(rec_path).worktree_path
-        except Exception:
-            upd_path = None
+            inside = (
+                bool(candidate)
+                and os.path.commonpath([candidate, root]) == root
+            )
+        except ValueError:
+            inside = False
+        if not inside:
+            upd_path = record.worktree_path
     _spawn_status_updater(wt_id, upd_path)
+
+    if getattr(args, "emit_context", False):
+        target_cwd = (
+            record.worktree_path if record is not None else cwd or "<unknown>"
+        )
+        if recovered_mux:
+            message = (
+                f"[agent-worktrees] This Copilot session is inside mux session "
+                f"{recovered_mux['session_name']}, pane {pane_id} (recovered "
+                "from the session lock PID and process ancestry). Its authoritative "
+                f"worktree id is {wt_id}; run task commands from {target_cwd}. "
+                "Treat this binding as authoritative even when TMUX/PSMUX "
+                "environment variables or the session payload cwd are absent."
+            )
+        elif pane_id:
+            message = (
+                f"[agent-worktrees] This Copilot session reports mux pane "
+                f"{pane_id} and is bound to worktree {wt_id}; run task commands "
+                f"from {target_cwd}."
+            )
+        else:
+            message = (
+                f"[agent-worktrees] This Copilot session is bound to worktree "
+                f"{wt_id}; run task commands from {target_cwd}."
+            )
+        print(json.dumps({"additionalContext": message}, separators=(",", ":")))
     return 0
 
 
@@ -15866,7 +15961,19 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
     wt_id = getattr(args, "worktree_id", None)
     wdir = getattr(args, "worktree_dir", None) or os.getcwd()
     if wt_id:
-        wt_id = _resolve_worktree_id(wt_id)
+        if (
+            not cfg.active_project()
+            and not _activate_project_for_worktree_id(wt_id)
+        ):
+            return _json_error(
+                f"could not find the adopted project that owns worktree "
+                f"'{wt_id}'",
+                exit_code=3,
+            )
+        try:
+            wt_id = _resolve_worktree_id(wt_id)
+        except Exception as e:
+            return _json_error(f"could not resolve worktree '{wt_id}': {e}")
     else:
         # Resolve the worktree from the declared dir. Like register-session, this
         # is a no-project verb, so activate project context from the dir before

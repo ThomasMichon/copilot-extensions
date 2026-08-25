@@ -376,7 +376,7 @@ class TestPaneWrapperInitialPrompt:
         )
         assert result.returncode == 0, result.stderr
         assert json.loads(output.read_text("utf-8")) == [
-            "--interactive", prompt,
+            "-i", prompt,
         ]
         assert receipt.read_text("utf-8") == "launching"
         receipt.unlink()
@@ -717,7 +717,7 @@ class TestCmdHandoffCutover:
         assert out["seed_len"] == len("resume the multi word work")
         assert out["seeded"] is True
         # The launch cmd carries NO seed arg; the wrapper receives base64 through
-        # the mux window environment and appends native --interactive afterward.
+        # the mux window environment and appends native -i afterward.
         assert captured["cmd"] == ["copilot"]
         assert captured["kwargs"]["initial_prompt"] == (
             "resume the multi word work"

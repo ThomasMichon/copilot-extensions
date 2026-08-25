@@ -18,21 +18,27 @@ const TASK = "abc123def456";
 const WT = "lambda-core-wsl-20260101-000000-0000";
 const SID = "11111111-2222-3333-4444-555555555555";
 const PANE = "%42";
-const known = { oldPane: PANE, worktree: WT, sessionId: SID };
+const WTDIR = "/tmp/src/lambda-core";
+const known = {
+  oldPane: PANE,
+  worktree: WT,
+  worktreeDir: WTDIR,
+  sessionId: SID,
+};
 
 test("leadFrom: empty -> generic lead", () => {
-  assert.equal(leadFrom(""), "Continue this session");
-  assert.equal(leadFrom(null), "Continue this session");
-  assert.equal(leadFrom(undefined), "Continue this session");
+  assert.equal(leadFrom(""), "Task: Continue the current work");
+  assert.equal(leadFrom(null), "Task: Continue the current work");
+  assert.equal(leadFrom(undefined), "Task: Continue the current work");
 });
 
-test("leadFrom: prepends 'Continue:' when absent", () => {
-  assert.equal(leadFrom("Fix the widget"), "Continue: Fix the widget");
+test("leadFrom: leads with the actual task title", () => {
+  assert.equal(leadFrom("Fix the widget"), "Task: Fix the widget");
 });
 
-test("leadFrom: does not compound an existing 'Continue:' prefix", () => {
-  assert.equal(leadFrom("Continue: Fix the widget"), "Continue: Fix the widget");
-  assert.equal(leadFrom("continue: fix"), "continue: fix");
+test("leadFrom: replaces inherited handoff prefixes", () => {
+  assert.equal(leadFrom("Continue: Fix the widget"), "Task: Fix the widget");
+  assert.equal(leadFrom("task: fix"), "Task: fix");
 });
 
 test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () => {
@@ -54,8 +60,15 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
     `agent-worktrees handoff-cutover --retire-pane ${PANE} --successor-verified`,
   );
   assert.ok(consumeAt >= 0, "seed must contain the consume verb");
-  assert.ok(concludeAt > consumeAt, "conclude verb must follow consume");
+  const bindAt = seed.indexOf(
+    `agent-worktrees bind-session --worktree-id ${WT}`,
+  );
+  assert.ok(bindAt > consumeAt, "successor binding must follow consume");
+  assert.ok(concludeAt > bindAt, "conclude verb must follow successor binding");
   assert.ok(retireAt > concludeAt, "retire verb must follow conclude");
+
+  assert.match(seed, new RegExp(`worktree ID ${WT}`));
+  assert.ok(seed.includes(`intended cwd "${WTDIR}"`));
 
   // Retire verb passes the explicit worktree/session so it resolves from any cwd.
   assert.match(seed, new RegExp(`--worktree-id ${WT} --session-id ${SID}`));
@@ -84,9 +97,22 @@ test("task + missing pane -> tool-based fallback seed", () => {
 });
 
 test("task + missing worktree/session -> tool-based fallback seed", () => {
-  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), { oldPane: PANE });
+  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), {
+    oldPane: PANE,
+    worktreeDir: WTDIR,
+  });
   assert.match(seed, /consume_handoff tool/);
   assert.ok(!seed.includes("agent-worktrees handoff-cutover --retire-pane"));
+});
+
+test("task + missing worktree cwd -> tool-based fallback seed", () => {
+  const seed = buildCutoverSeed("task", TASK, leadFrom("x"), {
+    oldPane: PANE,
+    worktree: WT,
+    sessionId: SID,
+  });
+  assert.match(seed, /consume_handoff tool/);
+  assert.ok(!seed.includes("agent-worktrees bind-session"));
 });
 
 test("file-backed handoff -> tool-based seed (never bash-first)", () => {
