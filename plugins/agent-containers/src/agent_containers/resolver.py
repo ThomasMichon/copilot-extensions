@@ -22,12 +22,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from agent_procutil import no_window_flags
 
 from ._invoke import module_argv
-from .config import load_config
+from .config import RESTRICTED_PROFILE, load_config
 from .lease import get_lease
 from .lifecycle import (
     get_container,
@@ -36,6 +37,7 @@ from .lifecycle import (
     restricted_policy_errors,
     start_container,
 )
+from .ssh_transport import prepare_ssh_config
 
 if TYPE_CHECKING:
     from agent_bridge.agent_registry import NamespaceAgentInfo
@@ -129,6 +131,7 @@ class ContainerResolver:
             type=spec.get("type", "command"),
             spawn_command=spec["spawn_command"],
             user=spec.get("user"),
+            container=spec.get("container"),
         )
 
     async def resolve_spec(self, name: str) -> dict:
@@ -179,13 +182,36 @@ class ContainerResolver:
         # plugins, etc.) on the fleet's trust posture -- a `restricted` fleet is a
         # fail-closed boundary and must never be silently upgraded (venue-parity).
         workspace_folder = fleet.workspace_folder or config.workspace_folder
-        return {
+        spec = {
             "type": "command",
             "spawn_command": spawn_cmd,
             "user": user,
             "workspace_folder": workspace_folder,
             "security_profile": fleet.security_profile,
         }
+        actual_profile = getattr(
+            info, "security_profile", fleet.security_profile,
+        )
+        if not fleet.restricted and actual_profile != RESTRICTED_PROFILE:
+            ssh_config = await asyncio.to_thread(
+                prepare_ssh_config,
+                name,
+                user,
+            )
+            _forward_gh, relay_enabled = config.credentials_for(fleet)
+            spec["container"] = {
+                "name": name,
+                "workspace_folder": workspace_folder,
+                "security_profile": fleet.security_profile,
+                "user": user,
+                "acp_command": config.acp_command_for(fleet),
+                "ssh": asdict(ssh_config),
+                "provider_command": module_argv(),
+                "relay_remote_port": (
+                    config.relay_port if relay_enabled else None
+                ),
+            }
+        return spec
 
     async def list(self) -> list[NamespaceAgentInfo]:
         """List fleet containers as namespace agent info (in-process path)."""

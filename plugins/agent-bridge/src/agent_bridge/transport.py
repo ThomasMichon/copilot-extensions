@@ -115,6 +115,10 @@ class SpawnTarget:
     #                                repo, acp_command, workspace_folder} -- lets
     #                                the daemon route a CS agent through the
     #                                CodeSpaceSpawner without parsing spawn_command
+    container: dict | None = None  # structured trusted-container transport:
+    #                                {name, workspace_folder, security_profile,
+    #                                 user, ssh, provider_command,
+    #                                 relay_remote_port}
     venue: dict | None = None  # structured venue metadata for provider agents
     #                            (e.g. container fleets): {workspace_folder,
     #                            security_profile} from the provider's

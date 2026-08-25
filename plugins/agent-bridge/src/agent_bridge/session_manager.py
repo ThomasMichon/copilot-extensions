@@ -716,6 +716,11 @@ class SessionManager:
         # These are intentionally separate from the frontend-refreshed -L above:
         # their lifetime follows the remote Session Host/child.
         self._relays: dict[str, list[Any]] = {}
+        # Cross-process ownership for trusted container SSH/Session-Host use.
+        # This is bridge-owned (not held by agent-containers' launch wrapper)
+        # and follows the remote Host record's lifetime.
+        self._container_locks: dict[str, tuple[Any, str]] = {}
+        self._container_lock_sessions: dict[str, str] = {}
         # Strong refs to in-flight best-effort remote-reap tasks (so they are not
         # GC'd mid-flight); each removes itself on completion.
         self._remote_reap_tasks: set[Any] = set()
@@ -1650,10 +1655,13 @@ class SessionManager:
         reattached = 0
         now = time.time()
         for rec in self._live_host_records():
-            if rec.session_id in self._remote_recovery_skipped:
+            if (
+                rec.session_id in self._remote_recovery_skipped
+                or rec.session_id in self._remote_recovery_inconclusive
+            ):
                 log.info(
-                    "Skipping startup reattach for %s because its CodeSpace is "
-                    "not already running",
+                    "Skipping startup reattach for %s because its remote venue "
+                    "could not be authoritatively inspected",
                     rec.session_id,
                 )
                 continue
@@ -1709,12 +1717,11 @@ class SessionManager:
         allow_wake: bool = False,
         session_ids: set[str] | None = None,
     ) -> int:
-        """Rebuild missing CodeSpace HostIndex rows from far-side records.
+        """Rebuild missing remote HostIndex rows from far-side records.
 
-        The frontend DB identifies adoptable ACP sessions and their CodeSpace
+        The frontend DB identifies adoptable ACP sessions and their remote venue
         targets. The Session Host itself is authoritative for host/child PID,
-        port, nonce, version, and relay-forward metadata. Reconnect is always
-        attempted before any fresh child launch.
+        port, nonce, version, and relay-forward metadata.
         """
         if self._host_index is None:
             return 0
@@ -1723,13 +1730,19 @@ class SessionManager:
             build_codespace_spawner,
             parse_codespace_target,
         )
+        from .session_host.container_transport import build_container_spawner
         from .session_host.spawner import RemoteHostDeadError
 
         groups: dict[str, tuple[Any, list[tuple[Session, Any]]]] = {}
         for session in self._sessions.values():
             if session_ids is not None and session.session_id not in session_ids:
                 continue
-            if not session.acp_session_id:
+            target = session.target
+            has_container_target = (
+                isinstance(target.container, dict)
+                and bool(target.container.get("name"))
+            )
+            if not session.acp_session_id and not has_container_target:
                 continue
             existing = self._host_index.get(session.session_id)
             if (
@@ -1739,47 +1752,80 @@ class SessionManager:
                 )
             ):
                 continue
-            target = session.target
             cs_target = None
+            container_target = (
+                target.container
+                if isinstance(target.container, dict)
+                and target.container.get("name")
+                else None
+            )
             if isinstance(target.codespace, dict) and target.codespace.get("name"):
                 cs_target = target.codespace
             elif target.spawn_command:
                 cs_target = parse_codespace_target(target.spawn_command)
-            if not cs_target:
+            if not cs_target and not container_target:
                 continue
-            name = cs_target["name"]
-            if name not in groups:
-                groups[name] = (
-                    build_codespace_spawner(
-                        name,
+            if container_target:
+                name = f"container:{container_target['name']}"
+                if name not in groups:
+                    spawner = build_container_spawner(
+                        container_target,
+                        ready_timeout=self._timeouts.session_host_ready,
+                        unexpected_reap_seconds=(
+                            self._session_host_unexpected_reap_seconds
+                        ),
+                        active_reap_seconds=(
+                            self._session_host_active_reap_seconds
+                        ),
+                    )
+                    groups[name] = (spawner, [])
+            else:
+                codespace_name = cs_target["name"]
+                name = f"codespace:{codespace_name}"
+                if name not in groups:
+                    spawner = build_codespace_spawner(
+                        codespace_name,
                         cs_target.get("repo") or "",
                         relay_port=get_live_relay_port(),
                         unexpected_reap_seconds=(
                             self._session_host_unexpected_reap_seconds
                         ),
-                        active_reap_seconds=self._session_host_active_reap_seconds,
-                    ),
-                    [],
-                )
+                        active_reap_seconds=(
+                            self._session_host_active_reap_seconds
+                        ),
+                    )
+                    groups[name] = (spawner, [])
             groups[name][1].append((session, existing))
 
         semaphore = asyncio.Semaphore(3)
 
         async def _inspect_group(spawner: Any, entries: list[tuple[Session, Any]]):
             async with semaphore:
-                if not allow_wake:
+                inspect_before_connect = (
+                    not allow_wake
+                    or getattr(spawner, "boundary", "") == "container"
+                )
+                if inspect_before_connect:
                     try:
                         can_inspect = await spawner.can_inspect_without_wake()
                     except Exception:
                         log.warning(
-                            "Could not determine CodeSpace state without waking; "
+                            "Could not determine remote venue state without waking; "
                             "skipping startup authority inspection",
                             exc_info=True,
                         )
-                        can_inspect = False
-                    if not can_inspect:
                         return [
-                            (session, existing, "skipped", None)
+                            (session, existing, "unknown", None)
+                            for session, existing in entries
+                        ]
+                    if not can_inspect:
+                        status = (
+                            "dead"
+                            if getattr(spawner, "boundary", "") == "container"
+                            else "skipped"
+                        )
+                        return [
+                            (session, existing, status, None)
                             for session, existing in entries
                         ]
                 results = []
@@ -1814,7 +1860,7 @@ class SessionManager:
         if pending:
             log.warning(
                 "Remote Session Host authority recovery timed out with %d "
-                "CodeSpace group(s) still pending",
+                "remote venue group(s) still pending",
                 len(pending),
             )
             for task in pending:
@@ -1835,6 +1881,29 @@ class SessionManager:
                 continue
             for session, existing, status, record in results:
                 if status == "live" and record is not None:
+                    container_target = (
+                        session.target.container
+                        if isinstance(session.target.container, dict)
+                        and session.target.container.get("name")
+                        else None
+                    )
+                    if container_target is not None:
+                        try:
+                            self._acquire_container_lock(
+                                session.session_id,
+                                container_target["name"],
+                            )
+                        except Exception:
+                            self._remote_recovery_inconclusive.add(
+                                session.session_id
+                            )
+                            log.warning(
+                                "Live container Session Host authority for %s "
+                                "could not reclaim target ownership",
+                                session.session_id,
+                                exc_info=True,
+                            )
+                            continue
                     self._remote_recovery_inconclusive.discard(session.session_id)
                     self._remote_recovery_skipped.discard(session.session_id)
                     if existing is not None:
@@ -1843,6 +1912,11 @@ class SessionManager:
                     if existing is None:
                         recovered += 1
                 elif status == "dead":
+                    self._release_container_lock(session.session_id)
+                    self._set_container_launch_pending(
+                        session.session_id,
+                        False,
+                    )
                     self._remote_recovery_inconclusive.discard(session.session_id)
                     self._remote_recovery_skipped.discard(session.session_id)
                     if existing is not None:
@@ -1856,6 +1930,11 @@ class SessionManager:
                     self._remote_recovery_skipped.discard(session.session_id)
                     self._remote_recovery_inconclusive.add(session.session_id)
                 elif status == "missing":
+                    self._release_container_lock(session.session_id)
+                    self._set_container_launch_pending(
+                        session.session_id,
+                        False,
+                    )
                     self._remote_recovery_inconclusive.discard(session.session_id)
                     self._remote_recovery_skipped.discard(session.session_id)
                 elif status == "skipped":
@@ -1962,6 +2041,58 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await relay.stop()
 
+    def _acquire_container_lock(self, session_id: str, name: str) -> None:
+        if session_id in self._container_lock_sessions:
+            return
+        existing = self._container_locks.get(name)
+        if existing is not None:
+            raise RuntimeError(
+                f"Container '{name}' is already owned by bridge session "
+                f"{existing[1]}"
+            )
+        from ssh_manager import TargetLock
+
+        lock = TargetLock(f"container:{name}", op="session-host")
+        lock.acquire()
+        self._container_locks[name] = (lock, session_id)
+        self._container_lock_sessions[session_id] = name
+
+    def _release_container_lock(self, session_id: str) -> None:
+        name = self._container_lock_sessions.pop(session_id, None)
+        if name is None:
+            return
+        entry = self._container_locks.get(name)
+        if entry is None:
+            return
+        lock, owner_session = entry
+        if owner_session != session_id:
+            return
+        self._container_locks.pop(name, None)
+        with contextlib.suppress(Exception):
+            lock.release()
+
+    def _set_container_launch_pending(
+        self,
+        session_id: str,
+        pending: bool,
+    ) -> None:
+        """Persist whether a partially launched container Host needs reaping."""
+        session = self._sessions.get(session_id)
+        if session is None or not isinstance(session.target.container, dict):
+            return
+        target = session.target.container
+        if pending:
+            target["launch_pending_session_id"] = session_id
+        elif target.get("launch_pending_session_id") == session_id:
+            target.pop("launch_pending_session_id", None)
+        else:
+            return
+        self._db.update_session_target(
+            session_id,
+            session.target.to_json(),
+            session.target.cwd,
+        )
+
     async def _drop_forward(self, session_id: str) -> None:
         """Cancel and forget a session's remote-boundary forwards (if any)."""
         await self._stop_relays(session_id)
@@ -1969,6 +2100,7 @@ class SessionManager:
         if fwd is not None:
             with contextlib.suppress(Exception):
                 await fwd.cancel()
+        self._release_container_lock(session_id)
 
     async def _reattach_one(
         self,
@@ -2112,14 +2244,33 @@ class SessionManager:
                 session_ids={session.session_id},
             )
             rec = self._host_index.get(session.session_id)
+            if session.session_id in self._remote_recovery_inconclusive:
+                raise RemoteHostRecoveryPendingError(
+                    f"Remote Session Host state is inconclusive for "
+                    f"{session.session_id}; refusing to spawn a duplicate "
+                    "Copilot process"
+                )
             if rec is None:
-                if session.session_id in self._remote_recovery_inconclusive:
-                    raise RemoteHostRecoveryPendingError(
-                        f"Remote Session Host state is inconclusive for "
-                        f"{session.session_id}; refusing to spawn a duplicate "
-                        "Copilot process"
-                    )
                 return False
+        container_target = (
+            session.target.container
+            if isinstance(session.target.container, dict)
+            else {}
+        )
+        if (
+            container_target.get("launch_pending_session_id")
+            == session.session_id
+        ):
+            if rec is not None:
+                self._reap_host_record(
+                    rec,
+                    "partially launched container Session Host",
+                )
+            raise RemoteHostRecoveryPendingError(
+                f"Container Session Host cleanup is pending for "
+                f"{session.session_id}; refusing to attach or spawn a "
+                "duplicate Copilot process"
+            )
         if not self._rec_host_alive(rec) or not self._rec_child_alive(rec):
             return False
         from .session_host.version_mux import HostDisposition, plan_host
@@ -2158,7 +2309,7 @@ class SessionManager:
             )
         return attached
 
-    async def _resume_via_new_codespace_host(
+    async def _resume_via_new_remote_host(
         self,
         session: Session,
         *,
@@ -2166,8 +2317,94 @@ class SessionManager:
         permission_callback: Any | None,
         load_existing: bool = True,
     ) -> tuple[AcpClient, str] | None:
-        """Replace a dead CodeSpace Host and load/create its ACP session."""
+        """Replace a dead remote Host and load/create its ACP session."""
         target = session.target
+        container_target = (
+            target.container
+            if isinstance(target.container, dict)
+            and target.container.get("name")
+            else None
+        )
+        if container_target is not None:
+            from .relay_state import get_live_relay_port
+            from .session_host.container_transport import (
+                build_container_spawner,
+                cleanup_container_session_host,
+                ensure_container_ready,
+                prepare_container_session_host,
+            )
+            from .session_host.spawner import RemoteSpawnCleanupPendingError
+
+            already_held = (
+                session.session_id in self._container_lock_sessions
+            )
+            self._acquire_container_lock(
+                session.session_id, container_target["name"],
+            )
+            prepared = None
+            try:
+                await ensure_container_ready(container_target)
+                prepared = await prepare_container_session_host(
+                    container_target,
+                    get_live_relay_port(),
+                )
+                container_target["ssh"] = prepared["ssh"]
+                container_target["state_command"] = prepared["state_command"]
+                self._db.update_session_target(
+                    session.session_id,
+                    target.to_json(),
+                    target.cwd,
+                )
+                spawner = build_container_spawner(
+                    container_target,
+                    prepared=prepared,
+                    ready_timeout=self._timeouts.session_host_ready,
+                    unexpected_reap_seconds=(
+                        self._session_host_unexpected_reap_seconds
+                    ),
+                    active_reap_seconds=self._session_host_active_reap_seconds,
+                )
+                tracker = ConnectTracker(
+                    session.event_log.append,
+                    session_id=session.session_id,
+                )
+                return await self._connect_via_session_host(
+                    target,
+                    tracker=tracker,
+                    session_id=session.session_id,
+                    on_acp_event=on_acp_event,
+                    permission_callback=permission_callback,
+                    spawner=spawner,
+                    remote_child_argv=[
+                        "bash", "-lc", prepared["remote_command"],
+                    ],
+                    remote_cwd=(
+                        prepared.get("workspace_folder")
+                        or container_target.get("workspace_folder")
+                        or None
+                    ),
+                    load_session_id=(
+                        session.acp_session_id if load_existing else None
+                    ),
+                    model=session.model_override,
+                    effort=session.effort_override,
+                )
+            except Exception as exc:
+                if isinstance(exc, RemoteSpawnCleanupPendingError):
+                    self._set_container_launch_pending(
+                        session.session_id,
+                        True,
+                    )
+                elif not already_held:
+                    self._release_container_lock(session.session_id)
+                raise
+            finally:
+                if prepared is not None:
+                    with contextlib.suppress(Exception):
+                        await cleanup_container_session_host(
+                            container_target,
+                            prepared,
+                        )
         cs_target = (
             target.codespace
             if isinstance(target.codespace, dict)
@@ -2441,7 +2678,10 @@ class SessionManager:
             # FAR side -- killing those pid numbers locally would hit unrelated
             # local processes. Tear down the local forward and best-effort kill
             # the remote host (its PR_SET_PDEATHSIG takes the child with it).
-            self._kill_forward_sync(rec.session_id)
+            self._kill_forward_sync(
+                rec.session_id,
+                release_container_lock=False,
+            )
             self._schedule_remote_reap(rec, reason)
         with contextlib.suppress(Exception):
             self._host_index.remove(rec.session_id)
@@ -2452,16 +2692,22 @@ class SessionManager:
             from . import bridge_lock
             bridge_lock.remove_sync(rec.session_id)
 
-    def _kill_forward_sync(self, session_id: str) -> None:
+    def _kill_forward_sync(
+        self,
+        session_id: str,
+        *,
+        release_container_lock: bool = True,
+    ) -> None:
         """Best-effort synchronous teardown of session forward processes."""
         self._kill_relays_sync(session_id)
         fwd = self._forwards.pop(session_id, None)
-        if fwd is None:
-            return
-        proc = getattr(fwd, "_proc", None)
-        if proc is not None and getattr(proc, "returncode", 0) is None:
-            with contextlib.suppress(Exception):
-                proc.kill()
+        if fwd is not None:
+            proc = getattr(fwd, "_proc", None)
+            if proc is not None and getattr(proc, "returncode", 0) is None:
+                with contextlib.suppress(Exception):
+                    proc.kill()
+        if release_container_lock:
+            self._release_container_lock(session_id)
 
     def _kill_relays_sync(self, session_id: str) -> None:
         """Best-effort synchronous teardown of relay supervisors."""
@@ -2511,6 +2757,8 @@ class SessionManager:
 
         cfg = ssh_config_from_endpoint(endpoint)
         host = cfg.host_alias
+        mgr = None
+        confirmed_dead = False
         try:
             mgr = ConnectionManager()
             await mgr.ensure_connected(host, _StaticSource(cfg), [])
@@ -2523,14 +2771,30 @@ class SessionManager:
             # bare pid if the group send is rejected. SIGTERM first (lets copilot
             # flush), then SIGKILL as a backstop.
             pid = int(rec.host_pid)
-            await mgr.exec_command(
+            child_pid = int(rec.child_pid)
+            result = await mgr.exec_command(
                 host,
                 f"kill -TERM -{pid} 2>/dev/null || kill -TERM {pid} 2>/dev/null; "
                 f"sleep 1; kill -KILL -{pid} 2>/dev/null || kill -KILL {pid} "
-                f"2>/dev/null || true",
+                "2>/dev/null || true; "
+                "alive() { test -r /proc/$1/stat && "
+                "test \"$(awk '{print $3}' /proc/$1/stat 2>/dev/null)\" != Z; }; "
+                "i=0; while { alive "
+                f"{pid} || alive {child_pid}; "
+                "} && test $i -lt 20; do sleep 0.1; i=$((i+1)); done; "
+                f"if alive {pid} || alive {child_pid}; then exit 42; fi; "
+                "printf __REAPED__",
                 timeout=20.0,
             )
-            await mgr.disconnect(host)
+            confirmed_dead = (
+                result.exit_code == 0
+                and "__REAPED__" in (result.stdout or "")
+            )
+            if not confirmed_dead:
+                raise RuntimeError(
+                    f"remote reap could not verify process death "
+                    f"(rc={result.exit_code}, output={result.stdout!r})"
+                )
             log.info("Remote-reaped Session Host group for session %s (far pid=%s)",
                      rec.session_id, rec.host_pid)
         except Exception:
@@ -2539,6 +2803,13 @@ class SessionManager:
                 "the detached Host will exit when the CodeSpace stops",
                 rec.session_id, rec.host_pid, exc_info=True,
             )
+        finally:
+            if mgr is not None:
+                with contextlib.suppress(Exception):
+                    await mgr.disconnect(host)
+            if confirmed_dead:
+                self._set_container_launch_pending(rec.session_id, False)
+                self._release_container_lock(rec.session_id)
 
     def sweep_stranded_hosts(self) -> int:
         """Reap stranded incompatible Session Hosts that are now reapable.
@@ -2844,6 +3115,12 @@ class SessionManager:
             elif target.spawn_command:
                 from .session_host.codespace_transport import parse_codespace_target
                 cs_target = parse_codespace_target(target.spawn_command)
+            container_target = (
+                target.container
+                if isinstance(target.container, dict)
+                and target.container.get("name")
+                else None
+            )
 
             if target.type == "local":
                 # Session-Host mode: the child lives in a survivable host that
@@ -2859,6 +3136,89 @@ class SessionManager:
                     model=model,
                     effort=effort,
                 )
+            elif container_target is not None:
+                # Trusted containers use the same durable far-side Session Host
+                # model as CodeSpaces.  agent-containers prepares only the SSH
+                # endpoint and one launch's secret-backed env command; all Host,
+                # forwarding, authority, and recovery ownership stays here.
+                from .relay_state import get_live_relay_port
+                from .session_host.container_transport import (
+                    build_container_spawner,
+                    cleanup_container_session_host,
+                    ensure_container_ready,
+                    prepare_container_session_host,
+                )
+                from .session_host.spawner import RemoteSpawnCleanupPendingError
+
+                self._acquire_container_lock(
+                    session_id, container_target["name"],
+                )
+                prepared = None
+                try:
+                    await ensure_container_ready(container_target)
+                    prepared = await prepare_container_session_host(
+                        container_target,
+                        get_live_relay_port(),
+                    )
+                    container_target["ssh"] = prepared["ssh"]
+                    container_target["state_command"] = prepared["state_command"]
+                    self._db.update_session_target(
+                        session_id,
+                        target.to_json(),
+                        target.cwd,
+                    )
+                    container_spawner = build_container_spawner(
+                        container_target,
+                        prepared=prepared,
+                        ready_timeout=self._timeouts.session_host_ready,
+                        unexpected_reap_seconds=(
+                            self._session_host_unexpected_reap_seconds
+                        ),
+                        active_reap_seconds=self._session_host_active_reap_seconds,
+                    )
+                    client, acp_sid = await self._connect_via_session_host(
+                        target,
+                        tracker=tracker,
+                        session_id=session_id,
+                        on_acp_event=on_acp_event,
+                        permission_callback=permission_callback,
+                        mcp_servers=mcp_servers,
+                        spawner=container_spawner,
+                        remote_child_argv=[
+                            "bash", "-lc", prepared["remote_command"],
+                        ],
+                        remote_cwd=(
+                            prepared.get("workspace_folder")
+                            or container_target.get("workspace_folder")
+                            or None
+                        ),
+                        model=model,
+                        effort=effort,
+                    )
+                except Exception as exc:
+                    if isinstance(exc, RemoteSpawnCleanupPendingError):
+                        self._set_container_launch_pending(session_id, True)
+                        with contextlib.suppress(Exception):
+                            await self._recover_remote_host_records(
+                                allow_wake=True,
+                                session_ids={session_id},
+                            )
+                            provisional = self._host_index.get(session_id)
+                            if provisional is not None:
+                                self._reap_host_record(
+                                    provisional,
+                                    "incomplete container Session Host launch",
+                                )
+                    else:
+                        self._release_container_lock(session_id)
+                    raise
+                finally:
+                    if prepared is not None:
+                        with contextlib.suppress(Exception):
+                            await cleanup_container_session_host(
+                                container_target,
+                                prepared,
+                            )
             elif cs_target is not None:
                 # CodeSpace Session-Host mode (#177): bootstrap the Host inside
                 # the CodeSpace, forward its loopback endpoint, and drive ACP over
@@ -3227,10 +3587,12 @@ class SessionManager:
                     self._handle_usage_update(session, data)
 
             client: AcpClient | None = None
+            from .session_host.spawner import RemoteSpawnCleanupPendingError
+
             for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
                 client = None
                 try:
-                    host_result = await self._resume_via_new_codespace_host(
+                    host_result = await self._resume_via_new_remote_host(
                         session,
                         on_acp_event=on_acp_event,
                         permission_callback=permission_callback,
@@ -3284,6 +3646,19 @@ class SessionManager:
                     )
                     break  # success -- leave the ladder
                 except Exception as exc:
+                    if isinstance(exc, RemoteSpawnCleanupPendingError):
+                        session.status = SessionStatus.STOPPED
+                        self._db.update_session_status(
+                            session_id,
+                            SessionStatus.STOPPED.value,
+                            time.time(),
+                        )
+                        if session.event_log:
+                            session.event_log.append(
+                                "remote_launch_cleanup_pending",
+                                {"message": str(exc)},
+                            )
+                        raise
                     # Capture the child's startup stderr tail BEFORE tearing the
                     # client down, so the retry marker records why it stalled.
                     stderr_tail = client.stderr_tail() if client else ""
@@ -3352,7 +3727,7 @@ class SessionManager:
             if session.status != SessionStatus.IDLE:
                 recreate_client: AcpClient | None = None
                 try:
-                    host_result = await self._resume_via_new_codespace_host(
+                    host_result = await self._resume_via_new_remote_host(
                         session,
                         on_acp_event=on_acp_event,
                         permission_callback=permission_callback,

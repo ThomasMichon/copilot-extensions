@@ -1080,7 +1080,7 @@ async def test_startup_reattach_skips_when_state_check_fails(
 
     assert await session_manager.reattach_session_hosts() == 0
     attach.assert_not_awaited()
-    assert "s1" in session_manager._remote_recovery_skipped
+    assert "s1" in session_manager._remote_recovery_inconclusive
 
 
 @pytest.mark.asyncio
@@ -1341,7 +1341,7 @@ async def test_codespace_resume_replacement_uses_new_session_host(
     host_resume = AsyncMock(return_value=(client, "acp-1"))
     monkeypatch.setattr(
         session_manager,
-        "_resume_via_new_codespace_host",
+        "_resume_via_new_remote_host",
         host_resume,
     )
     monkeypatch.setattr(

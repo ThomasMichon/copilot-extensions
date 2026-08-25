@@ -47,6 +47,10 @@ class RemoteHostDeadError(RuntimeError):
     """The far side authoritatively reports that a recorded Host is dead."""
 
 
+class RemoteSpawnCleanupPendingError(RuntimeError):
+    """A launched far-side Host could not be confirmed dead after failure."""
+
+
 def _as_list(value: Any) -> list[Any]:
     if value is None:
         return []
@@ -466,12 +470,20 @@ class CodeSpaceSpawner:
                 f"remote Session Host launch failed (rc={rc}): {err or out}"
             )
 
-        state = await self._poll_state(
-            state_remote,
-            log_remote,
-            session_id=session_id,
-            nonce=nonce,
-        )
+        try:
+            state = await self._poll_state(
+                state_remote,
+                log_remote,
+                session_id=session_id,
+                nonce=nonce,
+            )
+        except Exception as exc:
+            if not await self._abort_remote_launch(state_remote, session_id):
+                raise RemoteSpawnCleanupPendingError(
+                    f"remote Session Host launch failed and cleanup is "
+                    f"inconclusive for {session_id}; retaining target ownership"
+                ) from exc
+            raise
         remote_port = int(state["port"])
         host_pid = int(state["pid"])
         child_pid = int(state["child_pid"])
@@ -482,7 +494,17 @@ class CodeSpaceSpawner:
         # credential relay) so a detached far-side Host that outlives its launch
         # channel keeps a live relay for the whole session (rush build / ADO).
         forward = LocalForward(config, remote_port)
-        local_port = await forward.establish()
+        try:
+            local_port = await forward.establish()
+        except Exception as exc:
+            with contextlib.suppress(Exception):
+                await forward.cancel()
+            if not await self._abort_remote_launch(state_remote, session_id):
+                raise RemoteSpawnCleanupPendingError(
+                    f"remote Session Host forwarding failed and cleanup is "
+                    f"inconclusive for {session_id}; retaining target ownership"
+                ) from exc
+            raise
         from ..relay_state import get_live_relay_port
         relays = relay_forwards_from_ssh_config(
             config,
@@ -536,6 +558,99 @@ class CodeSpaceSpawner:
             relay=started_relays,
             _refresh=_refresh,
         )
+
+    async def _abort_remote_launch(
+        self,
+        state_remote: str,
+        session_id: str,
+    ) -> bool:
+        """Identity-check and reap a Host after post-launch setup fails."""
+        script = f"""
+import json
+import os
+import signal
+import time
+
+path = {state_remote!r}
+session_id = {session_id!r}
+try:
+    with open(path, encoding="utf-8") as handle:
+        state = json.load(handle)
+except FileNotFoundError:
+    print("__ABSENT__")
+    raise SystemExit(0)
+
+if state.get("session_id") != session_id:
+    raise SystemExit(43)
+host_pid = int(state["host_pid"])
+child_pid = int(state["child_pid"])
+boot_id = str(state["boot_id"])
+host_start = str(state["host_start_ticks"])
+child_start = str(state["child_start_ticks"])
+
+def start_ticks(pid):
+    try:
+        return open(f"/proc/{{pid}}/stat", encoding="utf-8").read().split()[21]
+    except (FileNotFoundError, IndexError, OSError):
+        return ""
+
+try:
+    current_boot = open(
+        "/proc/sys/kernel/random/boot_id", encoding="utf-8"
+    ).read().strip()
+except OSError:
+    raise SystemExit(44)
+if (
+    current_boot != boot_id
+    or start_ticks(host_pid) != host_start
+    or start_ticks(child_pid) != child_start
+):
+    raise SystemExit(45)
+
+for sig in (signal.SIGTERM, signal.SIGKILL):
+    try:
+        os.killpg(host_pid, sig)
+    except ProcessLookupError:
+        pass
+    for pid in (host_pid, child_pid):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            pass
+    time.sleep(0.25)
+if start_ticks(host_pid) or start_ticks(child_pid):
+    raise SystemExit(42)
+print("__REAPED__")
+"""
+        command = f"python3 -c {shlex.quote(script)}"
+        try:
+            rc, out, _err = await self._transport.run(
+                command,
+                timeout=30.0,
+            )
+        except Exception:
+            log.warning(
+                "Could not clean a partially launched remote Session Host for %s",
+                session_id,
+                exc_info=True,
+            )
+            return False
+        confirmed = (
+            rc == 0
+            and (
+                "__REAPED__" in (out or "")
+                or "__ABSENT__" in (out or "")
+            )
+        )
+        if not confirmed:
+            log.warning(
+                "Partial remote Session Host cleanup was inconclusive for %s "
+                "(rc=%s, output=%r)",
+                session_id,
+                rc,
+                out,
+            )
+        return confirmed
 
     async def _authority_path(self, session_id: str) -> str:
         get_home = getattr(self._transport, "home_dir", None)

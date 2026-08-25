@@ -416,6 +416,24 @@ def cleanup_remote_env(container: str, user: str, remote_path: str | None) -> No
         )
 
 
+def cleanup_remote_envs(container: str, user: str) -> None:
+    """Remove abandoned launch-only env files before preparing a new launch."""
+    _validate_target(container, user)
+    launch_dir = f"{_remote_home(container, user)}/.agent-containers/launch"
+    result = _run([
+        "docker", "exec", "-u", user, container,
+        "sh", "-c",
+        f"if test -d {shlex.quote(launch_dir)}; then "
+        f"find {shlex.quote(launch_dir)} -maxdepth 1 -type f "
+        "-name '*.env' -delete; fi",
+    ])
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Could not clear abandoned SSH launch environments in "
+            f"'{container}': {result.stderr.strip() or result.stdout.strip()}"
+        )
+
+
 def build_remote_command(acp_command: str, remote_env: str | None) -> str:
     """Build the remote shell command without embedding credential values."""
     inner = acp_command
