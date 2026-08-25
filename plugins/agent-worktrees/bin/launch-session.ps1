@@ -170,6 +170,20 @@ if ($RecoveryMode) {
 # #637, and prone to drift; a marker file never is). Fallback: the newest
 # installed slot only -- the `.venv` link is retired (#1106).
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+function Resolve-CurrentRuntimePython {
+    try {
+        $version = ([IO.File]::ReadAllText(
+            (Join-Path $RuntimeDir 'current-version')
+        )).Trim()
+        if (-not $version) { return $null }
+        $python = Join-Path $RuntimeDir (
+            'versions\' + $version + '\Scripts\python.exe'
+        )
+        if (Test-Path -LiteralPath $python -PathType Leaf) { return $python }
+    } catch {}
+    return $null
+}
+
 $VenvPython = $null
 try {
     $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'current-version'))).Trim()
@@ -433,7 +447,7 @@ function Invoke-UpdateApply {
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
 $DirectCommands = @(
-    'services', 'repos', 'agent-worktrees',
+    'services', 'repos', 'knowledge', 'agent-worktrees',
     'resolve', 'post-exit', 'finalize', 'push-changes', 'mark-complete',
     'status', 'list', 'create', 'cleanup', 'validate', 'install',
     'register', 'unregister', 'uninstall', 'update', 'install-status',
@@ -610,6 +624,51 @@ if (Test-AwJoiningLiveSession) {
 # ── Execute the launch plan ──────────────────────────────────────────────
 
 Set-Location $plan.work_dir
+
+# Compose the paired private knowledge repo's plugin settings into the harness
+# worktree before Copilot starts and performs plugin discovery. status_path is
+# the real worktree during Bare resume (work_dir is HOME).
+$refreshedVenvPython = Resolve-CurrentRuntimePython
+if (-not $refreshedVenvPython) {
+    $runtimeMessage = (
+        'Current agent-worktrees runtime is unavailable after update apply; ' +
+        "expected a valid current-version slot under $RuntimeDir"
+    )
+    Write-SetupLog $runtimeMessage 'ERROR'
+    [Console]::Error.WriteLine("ERROR: $runtimeMessage")
+    exit 1
+}
+$VenvPython = $refreshedVenvPython
+Write-SetupLog "Runtime refreshed before knowledge preflight: $VenvPython"
+
+$knowledgeCwd = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
+    [string]$plan.status_path
+} else {
+    [string]$plan.work_dir
+}
+$knowledgeArgs = @('-m', 'agent_worktrees')
+if ($script:LaunchProject) {
+    $knowledgeArgs += @('--project', $script:LaunchProject)
+}
+$knowledgeArgs += @('knowledge', 'compose-plugins', '--cwd', $knowledgeCwd, '--json')
+$savedErrorAction = $ErrorActionPreference
+try {
+    # Handle native non-zero explicitly even when the host enabled
+    # PSNativeCommandUseErrorActionPreference.
+    $ErrorActionPreference = 'Continue'
+    $knowledgeOutput = & $VenvPython @knowledgeArgs 2>&1
+    $knowledgeExit = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorAction
+}
+$knowledgeText = (($knowledgeOutput | ForEach-Object { "$_" }) -join '').Trim()
+if ($knowledgeExit -eq 0) {
+    Write-SetupLog "Knowledge plugin preflight completed: $knowledgeText"
+} else {
+    Write-SetupLog "Knowledge plugin preflight failed (exit ${knowledgeExit}): $knowledgeText" 'ERROR'
+    [Console]::Error.WriteLine("ERROR: Knowledge plugin preflight failed: $knowledgeText")
+    exit $knowledgeExit
+}
 
 # Apply environment variables from the launch plan
 if ($plan.env) {

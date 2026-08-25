@@ -12,15 +12,15 @@ from agent_worktrees.tracking import (
     ResourceClaim,
     SessionEntry,
     WorktreeRecord,
-    _RecordLock,
     _atomic_write,
+    _RecordLock,
     _strip_control_chars,
     add_resource_claim,
     cap_title,
     create_new_record,
     deregister_session,
-    find_paired_record,
     find_orphaned_children,
+    find_paired_record,
     find_worktree_id_by_cwd,
     find_worktree_id_by_session,
     format_claim_ref,
@@ -1222,6 +1222,52 @@ class TestRecordLockCrossProcess:
         path = self._seed(tmp_path)
         with _RecordLock(path, blocking=False) as lk:
             assert lk.acquired is True
+
+    @pytest.mark.parametrize("failure_site", ["mkdir", "open"])
+    def test_setup_failure_releases_in_process_lock(
+        self, tmp_path: Path, monkeypatch, failure_site: str
+    ):
+        import os
+        import threading
+
+        path = self._seed(tmp_path)
+        lock_path = path.with_suffix(".lock")
+        original_mkdir = Path.mkdir
+        original_open = os.open
+        failed = False
+
+        def fail_mkdir(candidate: Path, *args, **kwargs):
+            nonlocal failed
+            if failure_site == "mkdir" and candidate == lock_path.parent and not failed:
+                failed = True
+                raise PermissionError("mkdir denied")
+            return original_mkdir(candidate, *args, **kwargs)
+
+        def fail_open(candidate, *args, **kwargs):
+            nonlocal failed
+            if failure_site == "open" and Path(candidate) == lock_path and not failed:
+                failed = True
+                raise PermissionError("open denied")
+            return original_open(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "mkdir", fail_mkdir)
+        monkeypatch.setattr(os, "open", fail_open)
+        with pytest.raises(PermissionError, match=f"{failure_site} denied"):
+            with _RecordLock(path):
+                pytest.fail("setup failure must prevent entry")
+        assert failed
+
+        acquired = threading.Event()
+
+        def acquire_after_failure() -> None:
+            with _RecordLock(path):
+                acquired.set()
+
+        thread = threading.Thread(target=acquire_after_failure, daemon=True)
+        thread.start()
+        thread.join(timeout=2)
+        assert acquired.is_set(), "setup failure leaked the per-path RLock"
+        assert not thread.is_alive()
 
     def test_best_effort_skips_and_preserves_when_held(self, tmp_path: Path):
         # #4547: while a critical (blocking) holder in ANOTHER process owns the
