@@ -69,20 +69,36 @@ else
 fi
 
 # =========================================================================
-phase 2 "runtime provisions on first session (venv + binstub)"
+phase 2 "runtime self-provisions on first session / first use (stamp + venv)"
 _apply_uv_index_fixture
 mkdir -p "$HOME/wt-repo" && ( cd "$HOME/wt-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# wt' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
 ( cd "$HOME/wt-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
 sleep 8
-if [ -d "$HOME/.agent-worktrees/versions" ] || [ -x "$HOME/.agent-worktrees/.venv/bin/python" ]; then
-    pass "agent-worktrees runtime deployed after first session"
+# The versioned venv is deliberately DEFERRED to the tool binstub's first use
+# (#1393): a first session STAMPS the self-provisioning ~/.local/bin/agent-worktrees
+# binstub (grace-window-cheap, no venv build), and the binstub builds the venv on
+# first invocation. So assert the stamp landed, then trigger first use and assert
+# the runtime -- mirroring agent-ssh-solo / agent-machines-solo.
+_aw_runtime_ready() { [ -d "$HOME/.agent-worktrees/versions" ] || [ -x "$HOME/.agent-worktrees/.venv/bin/python" ]; }
+if [ -e "$HOME/.local/bin/agent-worktrees" ]; then
+    pass "session-start stamped the self-provisioning binstub (~/.local/bin/agent-worktrees)"
 else
-    if [ -z "$UV_INDEX" ] && grep -qiE 'HandshakeFailure|pythonhosted|SSL|TLS|certificate' "$CR_LOGDIR/session-first.log" 2>/dev/null; then
-        jam "toolchain-uv" "first session: uv could not reach its index (public PyPI TLS-blocked)" "re-run with CR_UV_INDEX=<internal index-url>"
+    info "session-start did not stamp a binstub yet; still probing for a runtime"
+fi
+if ! _aw_runtime_ready && bash -lc 'command -v agent-worktrees >/dev/null'; then
+    info "runtime not built yet -- triggering the binstub's first-use provision"
+    capture "binstub-first-use" -- bash -lc 'agent-worktrees --version' || true
+    sleep 3
+fi
+if _aw_runtime_ready; then
+    pass "agent-worktrees runtime deployed after first session / first use"
+else
+    if [ -z "$UV_INDEX" ] && grep -qiE 'HandshakeFailure|pythonhosted|SSL|TLS|certificate' "$CR_LOGDIR/session-first.log" "$CR_LOGDIR/binstub-first-use.log" 2>/dev/null; then
+        jam "toolchain-uv" "first session/use: uv could not reach its index (public PyPI TLS-blocked)" "re-run with CR_UV_INDEX=<internal index-url>"
     else
-        jam "path-binstub" "runtime NOT deployed by first session (bootstrap-check no-op on fresh machine, #1236)" "first-install should deploy, not just reconcile"
+        jam "path-binstub" "runtime NOT deployed by first session or first-use binstub (#1236)" "first-install should stamp the binstub + self-provision on first use"
     fi
 fi
 

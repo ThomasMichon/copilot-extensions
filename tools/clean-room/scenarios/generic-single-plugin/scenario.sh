@@ -145,8 +145,13 @@ mapfile -t PLUGIN_ARGS < <(_plugin_dir_args)
     copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARGS[@]}" ) || true
 # Give any backgrounded installer a moment.
 sleep 8
-if [ -x "$HOME/.agent-codespaces/.venv/bin/python" ] || [ -d "$HOME/.agent-codespaces/versions" ]; then
-    pass "agent-codespaces runtime venv deployed after first session"
+# The versioned venv is deliberately DEFERRED to the binstub's first use (#1393):
+# a first session STAMPS the self-provisioning ~/.local/bin/agent-codespaces
+# binstub (grace-window-cheap, no venv build) and the binstub builds the venv on
+# first invocation. So a stamped binstub -- not only a venv -- is a valid
+# first-session bootstrap outcome (mirrors agent-codespaces-solo Phase 2).
+if [ -x "$HOME/.agent-codespaces/.venv/bin/python" ] || [ -d "$HOME/.agent-codespaces/versions" ] || [ -e "$HOME/.local/bin/agent-codespaces" ]; then
+    pass "agent-codespaces runtime bootstrapped after first session (venv or self-provisioning binstub)"
 else
     # Classify: on a governed box without the uv-index fixture, provisioning is
     # blocked at uv; otherwise it is the fresh-machine bootstrap-check no-op (#1236).
