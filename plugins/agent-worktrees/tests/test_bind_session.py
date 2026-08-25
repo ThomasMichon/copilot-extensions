@@ -90,6 +90,9 @@ class TestBindSession:
         _save_record(tmp_tracking_dir, "wt-c", "/tmp/src/wt-c")
         captured: dict = {}
         _neutralize(monkeypatch, captured)
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id", lambda _wt: "test-project"
+        )
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda wid: wid)
 
         rc = m.cmd_bind_session(
@@ -106,12 +109,40 @@ class TestBindSession:
         captured: dict = {}
         _neutralize(monkeypatch, captured)
 
-        m.cmd_bind_session(_args(worktree_dir="/tmp/src/wt-d", session_id="sess-d", pane="%1"))
+        m.cmd_bind_session(
+            _args(
+                worktree_dir="/tmp/src/wt-d",
+                session_id="sess-d",
+                pane="%1",
+                pid=123,
+            )
+        )
         m.cmd_bind_session(_args(worktree_dir="/tmp/src/wt-d", session_id="sess-d", pane="%2"))
 
         rec = load_record(tmp_tracking_dir / "wt-d.yaml")
         assert [s.session_id for s in rec.sessions] == ["sess-d"]
         assert rec.sessions[0].pane_id == "%2"
+        assert rec.sessions[0].pid == 123
+
+    def test_worktree_id_activates_owning_project(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-direct", "/tmp/src/wt-direct")
+        captured: dict = {}
+        _neutralize(monkeypatch, captured)
+        activated: list[str] = []
+        m.cfg.set_active_project(None)
+        monkeypatch.setattr(
+            m,
+            "_activate_project_for_worktree_id",
+            lambda wt: activated.append(wt) or "test-project",
+        )
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda wt: wt)
+
+        assert m.cmd_bind_session(
+            _args(worktree_id="wt-direct", session_id="sess-direct")
+        ) == 0
+        assert activated == ["wt-direct"]
 
     def test_no_session_id_errors_exit_2(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch

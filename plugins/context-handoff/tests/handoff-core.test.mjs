@@ -45,14 +45,22 @@ test("buildSeedForStored: task-backed + known pane/worktree/session -> bash-firs
   const stored = {
     storage: "agent-dispatch",
     id: "task-42",
-    metadata: { title: "Ship the thing", oldPane: "%7", worktree: "wt-abc", sessionId: "sid-9" },
+    metadata: {
+      title: "Ship the thing",
+      oldPane: "%7",
+      worktree: "wt-abc",
+      worktreeDir: "/tmp/src/wt-abc",
+      sessionId: "sid-9",
+    },
   };
   const seed = buildSeedForStored(stored, { retry: true });
   // Bash-first invariant (issue #853): the successor's first action is a core
   // shell chain, not the consume_handoff tool.
   assert.match(seed, /agent-dispatch consume task-42 --defer-complete/);
   assert.match(seed, /agent-worktrees handoff-cutover --retire-pane %7/);
-  assert.match(seed, /Continue: Ship the thing/);
+  assert.match(seed, /^Task: Ship the thing/);
+  assert.match(seed, /intended cwd "\/tmp\/src\/wt-abc"/);
+  assert.match(seed, /agent-worktrees bind-session --worktree-id wt-abc/);
   assert.doesNotMatch(seed, /consume_handoff tool/);
 });
 

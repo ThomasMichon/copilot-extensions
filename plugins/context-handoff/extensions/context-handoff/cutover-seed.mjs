@@ -14,14 +14,14 @@
 // servicing it is torn down mid-launch (no completion, no error -> the call
 // hangs indefinitely), whereas a core `bash` call cannot.
 
-// Normalize a handoff title into the seed's leading topic clause. A handoff
-// title often already begins with "Continue:" (a successor handing off again),
-// which would compound into "Continue: Continue: ..." on each hop -- so only
-// prepend when absent. Empty title -> a generic lead.
+// Normalize a handoff title into the seed's leading topic clause. Copilot's
+// inferred session title is biased toward the beginning of the first prompt, so
+// lead with the actual task title rather than generic handoff/resume wording.
+// Strip prefixes inherited from older handoffs before adding the stable marker.
 export function leadFrom(title) {
-  const t = (title || "").toString().trim();
-  if (!t) return "Continue this session";
-  return /^\s*continue\s*:/i.test(t) ? t : `Continue: ${t}`;
+  const t = (title || "").toString().trim()
+    .replace(/^(?:continue|task)\s*:\s*/i, "");
+  return `Task: ${t || "Continue the current work"}`;
 }
 
 // Build the single-line ASCII CUTOVER seed (the HANDOFF_SEED) for a live
@@ -42,16 +42,22 @@ export function leadFrom(title) {
 // only helps when the bad call fails FAST (a 400 / tool-not-found the model can
 // see and retry) -- it does nothing for the silent-hang case, which is why the
 // bash-first path exists. The bash-first seed is used only when the predecessor
-// pane / worktree / session id are known (`oldPane`, `worktree`, `sessionId`);
-// otherwise, and for file-backed handoffs, we fall back to the tool-based seed +
-// retry clause.
+// pane / worktree / cwd / session id are known (`oldPane`, `worktree`,
+// `worktreeDir`, `sessionId`); otherwise, and for file-backed handoffs, we fall
+// back to the tool-based seed + retry clause.
 //
 // `retry` (default true) appends the retry-on-not-ready clause described above.
 // Pass `retry: false` for the human-facing paste prompt (resumed in an
 // already-loaded session, where there is no such race and brevity matters).
 export function buildCutoverSeed(
   kind, id, lead,
-  { retry = true, oldPane = null, worktree = null, sessionId = null } = {},
+  {
+    retry = true,
+    oldPane = null,
+    worktree = null,
+    worktreeDir = null,
+    sessionId = null,
+  } = {},
 ) {
   const retryClause = retry
     ? " If that call fails because the tool is not yet available (e.g. a 400 / " +
@@ -60,18 +66,23 @@ export function buildCutoverSeed(
       "call, up to 5 attempts, before doing anything else."
     : "";
   if (kind === "task") {
-    // Bash-first path: the three verbs are exactly what consume_handoff shells
-    // to -- load the brief + take ownership (agent-dispatch consume
-    // --defer-complete), conclude the predecessor, then retire + reap its pane --
-    // reproduced here as a single shell chain so no extension tool sits in the
-    // reload-window critical path.
-    if (oldPane && worktree && sessionId) {
+    // Bash-first path: load the brief + take ownership, bind the new session,
+    // conclude the predecessor, then retire + reap its pane. Reproducing that as
+    // one shell chain keeps extension tools out of the reload-window critical
+    // path and makes the successor's intended worktree explicit.
+    if (oldPane && worktree && worktreeDir && sessionId) {
+      const cwd = `"${String(worktreeDir)
+        .replace(/[\r\n]+/g, " ")
+        .replace(/"/g, '\\"')}"`;
       return (
-        `${lead}. You are taking over a handoff (agent-dispatch task ${id}) IN ` +
-        `PLACE -- do not restart or create a new worktree. As your FIRST action, ` +
-        `run this single shell command -- it loads your full brief, then retires ` +
-        `the predecessor now that you are alive: agent-dispatch consume ${id} ` +
-        `--defer-complete && agent-worktrees conclude-session --worktree ` +
+        `${lead}. Handoff target: agent-dispatch task ${id}; worktree ID ` +
+        `${worktree}; intended cwd ${cwd}. Continue IN PLACE: do not restart, ` +
+        `create another worktree, or work from a different cwd. As your FIRST ` +
+        `action, run this single shell command from that intended cwd -- it loads ` +
+        `your full brief, durably binds this new session to the worktree, then ` +
+        `retires the predecessor now that you are alive: agent-dispatch consume ` +
+        `${id} --defer-complete && agent-worktrees bind-session --worktree-id ` +
+        `${worktree} && agent-worktrees conclude-session --worktree ` +
         `${worktree} --session ${sessionId} --state handed-off && agent-worktrees ` +
         `handoff-cutover --retire-pane ${oldPane} --successor-verified ` +
         `--retire-reason handoff-consume --worktree-id ${worktree} --session-id ` +
@@ -81,8 +92,8 @@ export function buildCutoverSeed(
       );
     }
     return (
-      `${lead}. You are taking over a handoff (agent-dispatch task ` +
-      `${id}) IN PLACE -- do not restart or create a new worktree. ` +
+      `${lead}. You are taking over a handoff (agent-dispatch task ${id}) ` +
+      `IN PLACE -- do not restart or create a new worktree. ` +
       `Call the context-handoff consume_handoff tool with arguments ` +
       `{"task_id":"${id}","defer_complete":true}.${retryClause} That consumes ` +
       `the handoff, loads your full brief, and retires the predecessor pane only ` +

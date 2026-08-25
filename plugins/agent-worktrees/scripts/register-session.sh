@@ -23,7 +23,7 @@ if [[ ! -x "$PYTHON" ]]; then
     exit 0
 fi
 
-args=(-m agent_worktrees register-session --stdin)
+args=(-m agent_worktrees register-session --stdin --emit-context)
 [[ -n "$wt_id" ]] && args+=(--worktree-id "$wt_id")
 
 # Forward the CLI's stdin payload to the Python command. PYTHONPATH is

@@ -23,7 +23,7 @@ if ([Console]::IsInputRedirected) {
 }
 
 $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
-$cmdArgs = @('-m', 'agent_worktrees', 'register-session', '--stdin')
+$cmdArgs = @('-m', 'agent_worktrees', 'register-session', '--stdin', '--emit-context')
 if ($wt_id) { $cmdArgs += @('--worktree-id', $wt_id) }
 
 try {

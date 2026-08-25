@@ -958,7 +958,7 @@ const session = await joinSession({
             type: "string",
             description:
               "Optional short, specific title for the handoff task (e.g. " +
-              "'Continue: agent-dispatch producers'). Used only in the " +
+              "'Fix agent-dispatch producer recovery'). Used only in the " +
               "agent-dispatch task path.",
           },
           prompt: {
@@ -991,10 +991,7 @@ const session = await joinSession({
         // session's title-inference (biased toward the START of the prompt)
         // derives a meaningful title from the topic rather than the generic
         // handoff boilerplate that follows it.
-        // De-dupe the prefix: a handoff title often already begins with
-        // "Continue:" (e.g. a successor handing off again), which would compound
-        // into "Continue: Continue: …" on each hop. Only prepend when absent.
-        const lead = title ? leadFrom(title) : "Continue this session";
+        const lead = leadFrom(title);
 
         // Store the handoff (agent-dispatch task preferred, else worktree file)
         // and derive both the short reply prompt (the baton paste-seed) and the
@@ -1033,6 +1030,7 @@ const session = await joinSession({
             cutoverSeed = buildCutoverSeed("task", taskId, lead, {
               oldPane: stored?.metadata?.oldPane,
               worktree: stored?.metadata?.worktree,
+              worktreeDir: stored?.metadata?.worktreeDir,
               sessionId: sid,
             });
             // Mirror the handoff into the worktree record (record-first recovery).
@@ -1263,7 +1261,7 @@ const session = await joinSession({
         // EXACT cutover seed via the shared builder -- no regeneration.
         let kind = null;
         let id = null;
-        let lead = "Continue this session";
+        let lead = leadFrom("");
         const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
         const worktree = wtDir ? basename(wtDir) : null;
         if (worktree) {
@@ -1295,7 +1293,12 @@ const session = await joinSession({
         const seed = buildCutoverSeed(
           kind, id, lead,
           kind === "task"
-            ? { oldPane: currentPaneId(), worktree, sessionId: sid }
+            ? {
+                oldPane: currentPaneId(),
+                worktree,
+                worktreeDir: wtDir,
+                sessionId: sid,
+              }
             : {},
         );
         const result = runHandoffCutover(cwd, seed, sid);

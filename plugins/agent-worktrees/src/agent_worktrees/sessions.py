@@ -1547,7 +1547,7 @@ def _stamp_mux_live_quiet(worktree_id: str, live: bool) -> None:
 _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 
 # Space-free transport flags for a native Copilot
-# ``--interactive <prompt>`` launch. psmux flattens the pane command argv before
+# ``-i <prompt>`` launch. psmux flattens the pane command argv before
 # CreateProcess, so the multi-word prompt travels as base64 to the pane wrapper.
 # A receipt token lets the parent verify that the wrapper decoded and appended
 # the real argument before declaring the successor seeded.
@@ -1975,6 +1975,176 @@ def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
         return None
 
 
+def mux_binding_for_session(
+    session_id: str,
+    *,
+    mux: str | None = None,
+) -> dict | None:
+    """Recover a session's mux/worktree identity from its live lock process.
+
+    Random-access the exact session directory from the sessionStart payload,
+    read Copilot's authoritative ``inuse.<pid>.lock``, then match that live
+    process's ancestry against mux pane roots. The owning ``wt-<id>`` session
+    yields both the worktree and exact pane without trusting an incidental cwd
+    or sweeping historical session state.
+    """
+    import subprocess
+
+    if (
+        not session_id
+        or session_id in (".", "..")
+        or "/" in session_id
+        or "\\" in session_id
+    ):
+        return None
+    entry = _session_state_dir() / session_id
+    if not entry.is_dir():
+        return None
+
+    live_pids: list[int] = []
+    try:
+        for lock_file in entry.glob("inuse.*.lock"):
+            parts = lock_file.stem.split(".")
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[1])
+            except ValueError:
+                continue
+            if _is_copilot_process(pid):
+                live_pids.append(pid)
+    except OSError:
+        return None
+    if not live_pids:
+        return None
+
+    from . import reclaim
+
+    table = reclaim.build_process_table()
+    if not table:
+        return None
+
+    # Prefer the lock PID that is actually an ancestor of this sessionStart hook
+    # process. This rejects a stale lock whose PID was reused by another live
+    # Copilot before falling back to the lock's ordinary process validation.
+    own_ancestry: set[int] = set()
+    seen: set[int] = set()
+    cur = os.getpid()
+    while cur in table and cur not in seen and len(seen) < 64:
+        seen.add(cur)
+        own_ancestry.add(cur)
+        cur = table[cur]["ppid"]
+    owned_pids = [pid for pid in live_pids if pid in own_ancestry]
+    if owned_pids:
+        live_pids = owned_pids
+
+    ancestry_by_pid: dict[int, set[int]] = {}
+    for pid in live_pids:
+        ancestry: set[int] = set()
+        seen: set[int] = set()
+        cur = pid
+        while cur in table and cur not in seen and len(seen) < 64:
+            seen.add(cur)
+            ancestry.add(cur)
+            parent = table[cur]["ppid"]
+            if platform.system() == "Windows":
+                child_started = _windows_process_start_time(cur)
+                parent_started = _windows_process_start_time(parent)
+                # Windows retains a creator PID after that process exits. If the
+                # PID was reused, the apparent parent can be newer than its
+                # child; reject that dangling edge instead of mis-binding.
+                if (
+                    child_started is None
+                    or parent_started is None
+                    or parent_started > child_started
+                ):
+                    break
+            cur = parent
+        ancestry_by_pid[pid] = ancestry
+
+    mux_bin = _mux_bin(mux)
+    try:
+        result = subprocess.run(
+            [
+                mux_bin, "list-panes", "-a", "-F",
+                "#{session_name}|#{pane_id}|#{pane_pid}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+
+    matches: dict[tuple[str, str, int, int], dict] = {}
+    for line in result.stdout.splitlines():
+        fields = line.strip().split("|")
+        if len(fields) != 3:
+            continue
+        session_name, pane_id, pane_pid_raw = fields
+        if not session_name.startswith("wt-") or not pane_id:
+            continue
+        try:
+            pane_pid = int(pane_pid_raw)
+        except ValueError:
+            continue
+        for copilot_pid, ancestry in ancestry_by_pid.items():
+            if pane_pid not in ancestry:
+                continue
+            key = (session_name, pane_id, pane_pid, copilot_pid)
+            matches[key] = {
+                "worktree_id": session_name[3:],
+                "session_name": session_name,
+                "pane_id": pane_id,
+                "pane_pid": pane_pid,
+                "copilot_pid": copilot_pid,
+            }
+
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _windows_process_start_time(pid: int) -> int | None:
+    """Return a Windows process creation FILETIME, or ``None`` on failure."""
+    if pid <= 0:
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = _get_kernel32()
+    process_query_limited_information = 0x1000
+    handle = kernel32.OpenProcess(
+        process_query_limited_information, False, pid
+    )
+    if not handle:
+        return None
+    try:
+        created = wintypes.FILETIME()
+        exited = wintypes.FILETIME()
+        kernel = wintypes.FILETIME()
+        user = wintypes.FILETIME()
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        if not kernel32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
+            return None
+        return (int(created.dwHighDateTime) << 32) | int(created.dwLowDateTime)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
 def mux_new_window(
     worktree_id: str,
     work_dir: str,
@@ -2074,7 +2244,7 @@ def mux_new_window(
                 "prompt_status": prompt_status,
                 "cleanup": cleanup,
                 "error": (
-                    "successor did not confirm a stable native interactive "
+                    "successor did not confirm a stable native -i "
                     f"prompt launch (status: {prompt_status or 'no-receipt'})"
                 ),
             }
