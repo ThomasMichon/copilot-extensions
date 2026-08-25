@@ -1132,7 +1132,8 @@ do_start() {
 
     # Prefer systemd if available
     if command -v systemctl &>/dev/null && [[ -f "$HOME/.config/systemd/user/$SYSTEMD_UNIT" ]]; then
-        systemctl --user start "$SYSTEMD_UNIT"
+        local systemd_start_rc=0
+        systemctl --user start "$SYSTEMD_UNIT" || systemd_start_rc=$?
         sleep 2
         if systemctl --user is-active "$SYSTEMD_UNIT" &>/dev/null; then
             if _health_check; then
@@ -1142,7 +1143,7 @@ do_start() {
             fi
             return 0
         fi
-        _warn "systemd start failed -- falling back to direct start"
+        _warn "systemd start did not activate the service (rc=$systemd_start_rc) -- falling back to direct start"
     fi
 
     # Direct start -- launch through the stable `venv` link. Close fd 8 (8>&-) so
