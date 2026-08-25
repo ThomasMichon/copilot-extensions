@@ -193,6 +193,7 @@ def _machine_from_owner(owner: str | None) -> str | None:
 #: session on its pool host over SSH; ``unknown`` is never treated as death.
 #: Injectable so tests drive verdicts deterministically.
 FleetVerdictFn = Callable[[str, str], str]
+FleetActivityFn = Callable[[str, str], str | None]
 
 #: A **local-body** liveness verdict resolver: ``(bridge_session_id) ->
 #: 'live' | 'gone' | 'unknown'``. Probes a *local* headless body's agent-bridge
@@ -236,6 +237,12 @@ def _default_fleet_verdict(host: str, bridge_session_id: str) -> str:
     from . import embody
 
     return embody.fleet_body_verdict(host, bridge_session_id)
+
+
+def _default_fleet_activity(host: str, bridge_session_id: str) -> str | None:
+    from . import embody
+
+    return embody.fleet_body_activity(host, bridge_session_id)
 
 
 def _parse_local_body_handle(session_handle: str | None) -> str | None:
@@ -435,6 +442,7 @@ class Supervisor:
         liveness_fn: LivenessFn | None = None,
         verdict_fn: VerdictFn | None = None,
         fleet_verdict_fn: FleetVerdictFn | None = None,
+        fleet_activity_fn: FleetActivityFn | None = None,
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
         nudge_fn: NudgeFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
@@ -482,6 +490,7 @@ class Supervisor:
         #: :meth:`hold_live_leases` (heartbeat a confirmed-live one). Injectable
         #: for tests; ``unknown`` is never treated as death.
         self.fleet_verdict_fn = fleet_verdict_fn or _default_fleet_verdict
+        self.fleet_activity_fn = fleet_activity_fn or _default_fleet_activity
         #: Tri-state verdict resolver for a **local headless body** (probes the
         #: body's agent-bridge session on this host, no SSH). Used by
         #: :meth:`recover_gone` (re-embody/free a confirmed-gone local body) and
@@ -652,9 +661,22 @@ class Supervisor:
             # lease rides its course; recover_gone handles a confirmed-gone body).
             fleet = _parse_fleet_body_handle(res.get("session_handle"))
             if fleet is not None:
+                host, bridge_sid = fleet
+                if self.publish_activity:
+                    try:
+                        fleet_activity = self.fleet_activity_fn(host, bridge_sid)
+                    except Exception:  # best-effort observation, never fatal
+                        fleet_activity = None
+                    try:
+                        self.client.set_activity(
+                            task["id"],
+                            fleet_activity,
+                            reservation_key=res["key"],
+                        )
+                    except DispatchError:
+                        pass
                 if not owner:
                     continue
-                host, bridge_sid = fleet
                 try:
                     fverdict = self.fleet_verdict_fn(host, bridge_sid)
                 except Exception:  # liveness is best-effort -- never fatal

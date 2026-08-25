@@ -1075,6 +1075,27 @@ def test_hold_live_leases_skips_unknown_fleet_body(q, client, monkeypatch):
     assert beats == []
 
 
+def test_supervisor_publishes_fleet_body_activity(q, client):
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:h:brg-activity")
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        heartbeat=False,
+        publish_activity=True,
+        fleet_activity_fn=lambda host, sid: "STALLED",
+        fleet_verdict_fn=lambda host, sid: "live",
+        recover=False,
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    assert q.get(t.id).activity == "ACTIVE"  # immediate spawn observation
+    assert sup.hold_live_leases() == 0
+    assert q.get(t.id).activity == "STALLED"
+
+
 # -- local headless-body recovery (confirmed-gone on THIS host, no SSH) --------
 #
 # The local analog of the fleet-body slice above: a headless body embodied on

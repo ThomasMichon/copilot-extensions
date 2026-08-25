@@ -50,7 +50,12 @@ def _endpoint() -> str:
         data = json.loads((root / "active.json").read_text(encoding="utf-8"))
         active = data.get("active") or {}
         if active.get("bind") and active.get("port"):
-            return f"http://{active['bind']}:{active['port']}"
+            bind = str(active["bind"]).strip()
+            if bind in {"0.0.0.0", "*"}:
+                bind = "127.0.0.1"
+            elif bind in {"::", "[::]"}:
+                bind = "[::1]"
+            return f"http://{bind}:{int(active['port'])}"
     except (OSError, ValueError, TypeError):
         pass
     endpoint = os.environ.get("AGENT_DISPATCH_ENDPOINT")

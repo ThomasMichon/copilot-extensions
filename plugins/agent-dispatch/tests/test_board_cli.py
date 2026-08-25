@@ -79,6 +79,15 @@ def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):
     assert captured["timeout"] == 3
 
 
+def test_endpoint_maps_wildcard_bind_to_loopback(monkeypatch, tmp_path):
+    (tmp_path / "active.json").write_text(
+        json.dumps({"active": {"bind": "0.0.0.0", "port": "4321"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path))
+    assert board_cli._endpoint() == "http://127.0.0.1:4321"
+
+
 def test_remote_machine_falls_back_to_full_cli(monkeypatch):
     monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
     captured = {}
