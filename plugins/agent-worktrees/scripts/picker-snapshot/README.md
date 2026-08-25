@@ -42,6 +42,10 @@ Then, end-to-end (needs a Python env with `textual` / `rich` / `pyyaml`):
 ```bash
 python render.py home.png                 # picker home screen
 python render.py cfg.png --modal cfg      # with the Configuration modal open
+python render.py steer.png --modal steer  # Markdown card + recommended defaults
+python render.py verdict.png --modal steer-verdict  # recommended verdict selected
+python render.py reject.png --modal steer-reject  # rejected-feedback follow-up
+python render.py prior.png --modal steer --card-json tasks.json --task-id <id>
 python render.py home.png --zoom 4        # crisper, larger file
 ```
 
@@ -50,6 +54,14 @@ Or rasterize an SVG you already captured:
 ```bash
 node svg2png.mjs some-capture.svg out.png 3
 ```
+
+`--card-json` accepts a raw card object, one task object containing `card`, or a
+task-list JSON array. Use `--task-id` to select a specific task from a list. This
+keeps recovered real-world examples out of source while still rendering them
+through the worktree implementation. It applies only to `--modal steer`;
+`steer-verdict` and `steer-reject` intentionally use the synthetic fixture.
+Never commit a recovered-card raster to this public repository; committed demos
+must use the identifier-neutral synthetic fixture.
 
 ## Files
 

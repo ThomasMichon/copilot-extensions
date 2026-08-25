@@ -10,18 +10,20 @@ Save drafts. The screen only gathers the operator's answer (returned via
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
 pytest.importorskip("textual", reason="textual not installed (optional TUI dep)")
 
-from textual.widgets import RadioButton, RadioSet, SelectionList  # noqa: E402
+from textual.widgets import Markdown, RadioButton, RadioSet, SelectionList  # noqa: E402
 from textual.app import App  # noqa: E402
 
 from agent_worktrees.picker_tui.engine import (  # noqa: E402
     PivotCardScreen,
     PivotFormScreen,
     _AutoExpandTextArea,
+    _normalize_form_fields,
     _steer_draft_path,
 )
 
@@ -48,8 +50,16 @@ def _drafts(monkeypatch, tmp_path):
 
 
 def _card():
-    return {"title": "Review PR 123", "status": "recommend post-approved",
-            "link": "https://ado/pr/123", "body": "The full review body.\nLine two."}
+    return {
+        "title": "Review PR 123",
+        "status": "recommend post-approved",
+        "link": "https://example.test/pr/123",
+        "body": (
+            "> *Recommended verdict:* **APPROVE**\n\n"
+            "> The exact postable comment.\n\n"
+            "*Rationale: this follows the local contract.*"
+        ),
+    }
 
 
 def _fields():
@@ -94,8 +104,10 @@ def test_card_renders_parts_and_closes():
         async with app.run_test(size=(100, 40)) as pilot:
             await pilot.pause()
             assert isinstance(app.screen, PivotCardScreen)
-            text = getattr(scr.query_one("#card-body").render(), "plain", "")
-            assert "Review PR 123" in text and "The full review body." in text
+            markdown = scr.query_one("#card-body", Markdown)
+            assert "Review PR 123" in markdown.source
+            assert "*Recommended verdict:* **APPROVE**" in markdown.source
+            assert scr.query("MarkdownBlockQuote")
             await pilot.press("escape")
             await pilot.pause()
             assert not isinstance(app.screen, PivotCardScreen)
@@ -115,8 +127,10 @@ def test_form_shows_card_prose_and_tabs(monkeypatch, tmp_path):
     async def run():
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
-            body = getattr(scr.query_one("#steer-card-body").render(), "plain", "")
-            assert "Review PR 123" in body and "The full review body." in body
+            markdown = scr.query_one("#steer-card-body", Markdown)
+            assert "Review PR 123" in markdown.source
+            assert "*Recommended verdict:* **APPROVE**" in markdown.source
+            assert scr.query("MarkdownBlockQuote")
             from textual.widgets import TabbedContent
             assert scr.query(TabbedContent)   # >1 question -> a tab bar exists
 
@@ -168,6 +182,91 @@ def test_form_collect_all_types_on_confirm(monkeypatch, tmp_path):
         "severity": "in between",
         "tags": ["perf", "api"],
     }
+
+
+def test_choice_gated_followup_and_separate_verdict(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    fields = [
+        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"]},
+        {
+            "name": "reason",
+            "type": "textarea",
+            "show_when": {"field": "comments", "equals": "Reject"},
+        },
+        {
+            "name": "verdict",
+            "type": "choice",
+            "options": ["Approve", "Waiting for author", "Reject"],
+            "show_when": {"field": "comments", "equals": "Accept"},
+        },
+    ]
+    scr = PivotFormScreen(_card(), fields, "Steer", task_id="t-conditional")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            from textual.widgets import TabbedContent
+
+            tabs = scr.query_one("#steer-tabs", TabbedContent)
+            assert tabs.get_tab("tab-1").display is False
+            assert scr._collect() == {"comments": "Accept", "verdict": "Approve"}
+
+            feedback = scr.query_one("#q-0", RadioSet)
+            list(feedback.query(RadioButton))[1].value = True
+            await pilot.pause()
+            await pilot.pause()
+            assert tabs.get_tab("tab-1").display is True
+            scr.query_one("#q-1", _AutoExpandTextArea).text = "Drop comment 2."
+            scr._confirm()
+            await pilot.pause()
+
+    asyncio.run(run())
+    assert app.result == {
+        "comments": "Reject",
+        "reason": "Drop comment 2.",
+    }
+
+
+def test_choice_gated_followup_keyboard_skips_hidden_tab(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    fields = [
+        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"]},
+        {
+            "name": "reason",
+            "type": "textarea",
+            "show_when": {"field": "comments", "equals": "Reject"},
+        },
+        {
+            "name": "verdict",
+            "type": "choice",
+            "options": ["Approve", "Reject"],
+            "show_when": {"field": "comments", "equals": "Accept"},
+        },
+    ]
+    scr = PivotFormScreen(_card(), fields, "Steer", task_id="t-conditional-flow")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            scr.query_one("#q-0", RadioSet).focus()
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app.focused.id == "q-2"
+
+    asyncio.run(run())
+
+
+def test_invalid_condition_degrades_to_visible_field():
+    fields = _normalize_form_fields([
+        {
+            "name": "reason",
+            "type": "textarea",
+            "show_when": {"field": "missing", "equals": "Reject"},
+        },
+    ])
+    assert fields == [{"name": "reason", "type": "textarea"}]
 
 
 def test_form_multichoice_other_free_member(monkeypatch, tmp_path):
@@ -286,6 +385,39 @@ def test_form_escape_preserves_draft(monkeypatch, tmp_path):
     assert path.exists()   # Escape auto-saves so nothing is lost
     import json
     assert json.loads(path.read_text())["values"]["feedback"] == "unsaved but escaped"
+
+
+def test_form_save_preserves_hidden_conditional_text(monkeypatch, tmp_path):
+    _drafts(monkeypatch, tmp_path)
+    fields = [
+        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"]},
+        {
+            "name": "reason",
+            "type": "textarea",
+            "show_when": {"field": "comments", "equals": "Reject"},
+        },
+    ]
+    scr = PivotFormScreen(_card(), fields, "Steer", task_id="t-hidden-draft")
+    app = _Host(scr)
+
+    async def run():
+        async with app.run_test(size=(120, 45)) as pilot:
+            await pilot.pause()
+            comments = scr.query_one("#q-0", RadioSet)
+            buttons = list(comments.query(RadioButton))
+            buttons[1].value = True
+            await pilot.pause()
+            scr.query_one("#q-1", _AutoExpandTextArea).text = "Keep this draft."
+            buttons[0].value = True
+            await pilot.pause()
+            scr.action_save()
+            await pilot.pause()
+
+    asyncio.run(run())
+    values = json.loads(
+        _steer_draft_path("t-hidden-draft").read_text(encoding="utf-8")
+    )["values"]
+    assert values == {"comments": "Accept", "reason": "Keep this draft."}
 
 
 # ---- button row + auto-expand -----------------------------------------------
@@ -597,10 +729,18 @@ def test_card_prose_linkifies_urls(monkeypatch, tmp_path):
     async def run():
         async with app.run_test(size=(120, 45)) as pilot:
             await pilot.pause()
-            rendered = scr.query_one("#steer-card-body").render()
-            links = [getattr(sp.style, "link", None) for sp in rendered.spans
-                     if getattr(sp.style, "link", None)]
-            assert "https://ado/pr/2312460" in links       # clean target
-            assert "https://ado/pr/2312460." not in links  # period trimmed
+            markdown = scr.query_one("#steer-card-body", Markdown)
+            assert "https://ado/pr/2312460." in markdown.source
+            await pilot.pause()
+            # The GFM parser recognizes the URL while keeping sentence
+            # punctuation outside the clickable span.
+            actions = []
+            for block in markdown.query("MarkdownBlock"):
+                content = getattr(block, "_content", None)
+                for span in getattr(content, "spans", []):
+                    meta = getattr(span.style, "meta", None) or {}
+                    actions.extend(str(value) for value in meta.values())
+            assert any("https://ado/pr/2312460" in action for action in actions)
+            assert not any("https://ado/pr/2312460." in action for action in actions)
 
     asyncio.run(run())

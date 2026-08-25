@@ -65,16 +65,19 @@ def parse_request_input(spec: str | None) -> list[dict]:
     * ``notes:textarea`` -> a multi-line text field
     * ``decision:choice[revise,post-approved,hold-all]`` -> a single-select
     * ``tags:multichoice[perf,api,ux]`` -> a multi-select (answer is a JSON array)
+    * ``reason:textarea?feedback=Reject`` -> a field shown only while the
+      ``feedback`` choice equals ``Reject``
     * a trailing ``*`` option in a choice/multichoice bracket declares an
       **"Other…"** affordance: ``severity:choice[low,med,high,*]`` -> single-select
       of low/med/high **or** a free-text "other" answer. ``*`` is stripped from
       ``options`` and recorded as ``allow_other: true``.
 
-    Returns ``[{"name", "type", "options"?, "allow_other"?}]`` (``options`` +
-    ``allow_other`` only for a choice/multichoice). A ``None``/empty spec yields
-    ``[]`` (a card with no form -- a pure status/notification card). Raises
-    :class:`SteeringError` on a malformed spec so a producer catches the mistake
-    early.
+    Returns ``[{"name", "type", "options"?, "allow_other"?, "show_when"?}]``
+    (``options`` + ``allow_other`` only for a choice/multichoice;
+    ``show_when={"field", "equals"}`` for a conditional field). A ``None``/empty
+    spec yields ``[]`` (a card with no form -- a pure status/notification card).
+    Raises :class:`SteeringError` on a malformed spec so a producer catches the
+    mistake early.
 
     Commas inside ``choice[...]`` / ``multichoice[...]`` are **not** field
     separators; the bracket content is parsed first, then the remainder split on
@@ -120,6 +123,39 @@ def parse_request_input(spec: str | None) -> list[dict]:
             fields.append({"name": name, "type": FIELD_TEXT})
             continue
 
+        condition_index = None
+        depth = 0
+        for index, char in enumerate(type_part):
+            if char == "[":
+                depth += 1
+            elif char == "]":
+                depth = max(0, depth - 1)
+            elif char == "?" and depth == 0:
+                condition_index = index
+                break
+        if condition_index is None:
+            condition_part = ""
+        else:
+            type_part, condition_part = (
+                type_part[:condition_index],
+                type_part[condition_index + 1:],
+            )
+        type_part = type_part.strip()
+        show_when = None
+        if condition_index is not None:
+            source, equals_sep, expected = condition_part.partition("=")
+            source = source.strip()
+            expected = expected.strip()
+            if (
+                not equals_sep
+                or not FIELD_NAME_RE.match(source)
+                or not expected
+            ):
+                raise SteeringError(
+                    f"field {name!r}: condition must be '?choice_field=value'"
+                )
+            show_when = {"field": source, "equals": expected}
+
         m = re.match(r"^(choice|multichoice)\[(.*)\]$", type_part)
         if m:
             ftype = m.group(1)
@@ -133,6 +169,8 @@ def parse_request_input(spec: str | None) -> list[dict]:
             field = {"name": name, "type": ftype, "options": options}
             if allow_other:
                 field["allow_other"] = True
+            if show_when:
+                field["show_when"] = show_when
             fields.append(field)
             continue
 
@@ -142,8 +180,40 @@ def parse_request_input(spec: str | None) -> list[dict]:
                 f"(text | textarea | choice[a,b,...] | multichoice[a,b,...]; "
                 f"add * for an Other option)"
             )
-        fields.append({"name": name, "type": type_part})
+        field = {"name": name, "type": type_part}
+        if show_when:
+            field["show_when"] = show_when
+        fields.append(field)
 
+    by_name = {field["name"]: field for field in fields}
+    for field in fields:
+        condition = field.get("show_when")
+        if not condition:
+            continue
+        source = condition["field"]
+        source_field = by_name.get(source)
+        if source_field is None:
+            raise SteeringError(
+                f"field {field['name']!r}: condition references unknown field {source!r}"
+            )
+        if source == field["name"]:
+            raise SteeringError(
+                f"field {field['name']!r}: condition cannot reference itself"
+            )
+        if source_field.get("type") != FIELD_CHOICE:
+            raise SteeringError(
+                f"field {field['name']!r}: condition source {source!r} must be a choice"
+            )
+        if source_field.get("show_when"):
+            raise SteeringError(
+                f"field {field['name']!r}: condition source {source!r} "
+                "cannot itself be conditional"
+            )
+        if condition["equals"] not in (source_field.get("options") or []):
+            raise SteeringError(
+                f"field {field['name']!r}: condition value "
+                f"{condition['equals']!r} is not an option of {source!r}"
+            )
     return fields
 
 
@@ -227,6 +297,12 @@ def validate_steer_fields(fields: dict, request_input: list[dict] | None) -> Non
     by_name = {f["name"]: f for f in request_input if isinstance(f, dict) and "name" in f}
     for key, value in fields.items():
         spec = by_name.get(key)
+        condition = spec.get("show_when") if spec else None
+        if condition and str(fields.get(condition["field"], "")) != condition["equals"]:
+            raise SteeringError(
+                f"field {key!r} is only valid when "
+                f"{condition['field']!r}={condition['equals']!r}"
+            )
         if not spec or spec.get("type") not in FIELD_CHOICE_TYPES:
             continue
         if spec.get("allow_other"):
