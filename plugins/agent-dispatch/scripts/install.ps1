@@ -628,6 +628,21 @@ function Deploy-SelfProvisioningBinstub {
         New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
     }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    $machine = $env:AGENT_DISPATCH_SUPERVISE_MACHINE
+    if (-not $machine) {
+        try {
+            $aw = Get-Command agent-worktrees -ErrorAction Stop
+            $machine = (& $aw.Source get machine 2>$null | Select-Object -First 1)
+        } catch {}
+    }
+    if (-not $machine) { $machine = [Environment]::MachineName.ToLowerInvariant() }
+    if ($machine) {
+        [System.IO.File]::WriteAllText(
+            (Join-Path $InstallDir 'machine'),
+            $machine.Trim().ToLowerInvariant(),
+            $utf8NoBom
+        )
+    }
 
     # Co-deploy the canonical resolvers so every launcher resolves identically
     # (uniform-runtime-resolution, #765).

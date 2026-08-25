@@ -88,6 +88,26 @@ def test_endpoint_maps_wildcard_bind_to_loopback(monkeypatch, tmp_path):
     assert board_cli._endpoint() == "http://127.0.0.1:4321"
 
 
+def test_local_machine_reads_persisted_alias_before_hostname(monkeypatch, tmp_path):
+    (tmp_path / "machine").write_text("augloop1", encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(board_cli.platform, "node", lambda: "CPC-tmich-OIXUI")
+    assert board_cli._local_machine() == "augloop1"
+
+
+def test_main_reports_missing_endpoint_without_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path))
+    monkeypatch.setenv("AGENT_DISPATCH_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    assert board_cli.main(["--machine", "m1"]) == 1
+    err = capsys.readouterr().err
+    assert "coordinator endpoint is unavailable" in err
+    assert "Traceback" not in err
+
+
 def test_remote_machine_falls_back_to_full_cli(monkeypatch):
     monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
     captured = {}

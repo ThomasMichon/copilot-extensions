@@ -26,6 +26,11 @@ def _local_machine() -> str | None:
     )
     if not value:
         try:
+            value = (root / "machine").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    if not value:
+        try:
             for line in (root / "supervisor.env").read_text(
                 encoding="utf-8"
             ).splitlines():
@@ -182,12 +187,12 @@ def main(argv: list[str] | None = None) -> int:
     }
     if args.label:
         query["label"] = args.label
-    url = f"{_endpoint()}/tasks?{urllib.parse.urlencode(query)}"
-    request = urllib.request.Request(url)
-    token = os.environ.get("AGENT_DISPATCH_TOKEN")
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
     try:
+        url = f"{_endpoint()}/tasks?{urllib.parse.urlencode(query)}"
+        request = urllib.request.Request(url)
+        token = os.environ.get("AGENT_DISPATCH_TOKEN")
+        if token:
+            request.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(request, timeout=3) as response:
             tasks = json.loads(response.read().decode("utf-8"))
     except Exception as exc:

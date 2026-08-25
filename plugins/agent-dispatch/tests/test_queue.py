@@ -192,6 +192,8 @@ def test_set_activity_rejects_stale_or_wrong_reservation(q):
     with pytest.raises(TaskError, match="active spawned reservation"):
         q.set_activity(t.id, "ACTIVE", reservation_key=wrong.key)
     q.settle_spawn(reservation.key)
+    assert q.get(t.id).activity is None
+    assert q.get(t.id).activity_updated_at is not None
     with pytest.raises(TaskError, match="active spawned reservation"):
         q.set_activity(t.id, "ACTIVE", reservation_key=reservation.key)
 

@@ -2080,6 +2080,12 @@ class TaskQueue:
                 "detail = COALESCE(?, detail) WHERE key = ?",
                 (to_state, ts, session_handle, worktree, detail, key),
             )
+            if to_state in SpawnState.RELEASABLE:
+                conn.execute(
+                    "UPDATE tasks SET activity = NULL, activity_updated_at = ? "
+                    "WHERE id = ?",
+                    (ts, row["task_id"]),
+                )
             row = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE key = ?", (key,)
             ).fetchone()

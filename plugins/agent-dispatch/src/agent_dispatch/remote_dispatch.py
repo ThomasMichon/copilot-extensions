@@ -47,11 +47,16 @@ def local_machine() -> str | None:
     host node name. Returns None only when none yield a name.
     """
     configured = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
+    root = Path(
+        os.environ.get("AGENT_DISPATCH_INSTALL_DIR")
+        or (Path.home() / ".agent-dispatch")
+    )
     if not configured:
-        root = Path(
-            os.environ.get("AGENT_DISPATCH_INSTALL_DIR")
-            or (Path.home() / ".agent-dispatch")
-        )
+        try:
+            configured = (root / "machine").read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+    if not configured:
         try:
             for line in (root / "supervisor.env").read_text(
                 encoding="utf-8"

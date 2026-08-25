@@ -508,6 +508,14 @@ _ensure_uv_index() {
 # caller can extend its timeout), lock-serialized, fail-fast.
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
+    local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
+    if [[ -z "$machine" ]] && command -v agent-worktrees >/dev/null 2>&1; then
+        machine="$(agent-worktrees get machine 2>/dev/null | head -n1 || true)"
+    fi
+    [[ -n "$machine" ]] || machine="$(hostname 2>/dev/null || true)"
+    [[ -n "$machine" ]] &&
+        printf '%s' "$(printf '%s' "$machine" | tr '[:upper:]' '[:lower:]')" \
+            > "$INSTALL_DIR/machine"
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
