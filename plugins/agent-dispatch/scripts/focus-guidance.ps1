@@ -1,7 +1,7 @@
 # Emit opt-in worktree-focus guidance for an applicable sessionStart payload.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$PluginVersion = '0.1.0-dev213'
+$PluginVersion = '0.1.0-dev214'
 $Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
     'Before starting work likely to overlap another worktree, check ' +
     '`agent-dispatch focus --list`. At the start of substantial operator-led ' +
