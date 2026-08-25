@@ -185,11 +185,30 @@ def reclaim_worktree(
             "reclaimed",
             f"would finalize worktree {parsed.worktree_id} in {parsed.project}")
     proc = _run_worktrees(
-        ["finalize", parsed.worktree_id, "--abandon", "--json"],
+        ["finalize", parsed.worktree_id, "--abandon",
+         "--handoff-to", "claims-cleanup", "--json"],
         cwd=anchor)
     if proc is None:
         return ReclaimResult("failed", "agent-worktrees binstub unavailable")
     if proc.returncode == 0:
+        try:
+            nested = [
+                entry for entry in tracking.load_orphaned_obligations_strict(
+                    parsed.project)
+                if entry.get("source_worktree") == parsed.worktree_id
+                and (entry.get("handoff_to") or "").strip() == "claims-cleanup"
+            ]
+        except Exception as exc:
+            return ReclaimResult(
+                "failed", f"child orphanage is unreadable; handoff acceptance "
+                          f"cannot be proven: {exc}")
+        if nested:
+            return ReclaimResult(
+                "failed",
+                f"finalized child but {len(nested)} nested obligation(s) await "
+                f"handoff acceptance; from {parsed.project} run: "
+                f"agent-worktrees claims cleanup "
+                f"{parsed.worktree_id} --apply, then retry this cleanup")
         return ReclaimResult(
             "reclaimed", f"finalized worktree {parsed.worktree_id}")
     tail = (proc.stderr or proc.stdout or "").strip().splitlines()
@@ -263,6 +282,7 @@ def cleanup_orphanage(
             "kind": entry.get("kind"),
             "ref": entry.get("ref"),
             "source_worktree": entry.get("source_worktree"),
+            "handoff_to": entry.get("handoff_to"),
             "status": result.status,
             "detail": result.detail,
         })

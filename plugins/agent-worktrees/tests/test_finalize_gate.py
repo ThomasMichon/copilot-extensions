@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from agent_worktrees import obligations as ob
+from agent_worktrees.__main__ import build_parser
 from agent_worktrees.finalize import _assert_obligations_settled
 from agent_worktrees.tracking import ResourceClaim
 
@@ -32,16 +33,16 @@ def test_no_unsettled_proceeds(monkeypatch):
     assert _assert_obligations_settled(rec, "wt", abandon=False) is True
 
 
-def test_off_mode_skips_even_with_unsettled(monkeypatch):
+def test_off_mode_cannot_bypass_creator_ownership(monkeypatch):
     _gate(monkeypatch, "off")
     rec = _record("active")
-    assert _assert_obligations_settled(rec, "wt", abandon=False) is True
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is False
 
 
-def test_warn_mode_proceeds_and_lists(monkeypatch, capsys):
+def test_warn_mode_cannot_bypass_creator_ownership(monkeypatch, capsys):
     _gate(monkeypatch, "warn")
     rec = _record("active", "at-rest")
-    assert _assert_obligations_settled(rec, "wt", abandon=False) is True
+    assert _assert_obligations_settled(rec, "wt", abandon=False) is False
     cap = capsys.readouterr()
     combined = (cap.err + cap.out).lower()
     assert "unsettled" in combined and "cs-0" in combined
@@ -67,9 +68,38 @@ def test_block_mode_refuses_unsettled(monkeypatch, capsys):
 def test_block_mode_abandon_overrides(monkeypatch, capsys):
     _gate(monkeypatch, "block")
     rec = _record("active")
-    assert _assert_obligations_settled(rec, "wt", abandon=True) is True
+    assert _assert_obligations_settled(
+        rec, "wt", abandon=True, handoff_to="operator-flow") is True
     combined = capsys.readouterr()
     assert "abandon" in (combined.err + combined.out).lower()
+
+
+def test_block_mode_abandon_requires_affirmative_handoff(monkeypatch, capsys):
+    monkeypatch.setenv("AGENT_WORKTREES_OBLIGATION_GATE", "block")
+    rec = _record("active")
+    assert _assert_obligations_settled(rec, "wt", abandon=True) is False
+    combined = capsys.readouterr()
+    assert "affirmative handoff" in (combined.err + combined.out).lower()
+
+
+def test_finalize_parser_accepts_named_handoff_target():
+    args = build_parser().parse_args([
+        "finalize", "wt", "--abandon", "--handoff-to", "operator-flow"])
+    assert args.abandon is True
+    assert args.handoff_to == "operator-flow"
+
+
+def test_pending_resource_creation_cannot_be_handed_off(monkeypatch, capsys):
+    _gate(monkeypatch, "block")
+    rec = SimpleNamespace(resources=[
+        ResourceClaim(
+            kind="workdir", ref="pending-run:abc", state="active")
+    ])
+    assert _assert_obligations_settled(
+        rec, "wt", abandon=True, handoff_to="operator-flow") is False
+    combined = capsys.readouterr()
+    assert "in-flight resource creation" in (
+        combined.err + combined.out).lower()
 
 
 def test_only_unsettled_claims_count(monkeypatch):
@@ -88,44 +118,18 @@ def _worktree_record(*states):
                    for i, s in enumerate(states)])
 
 
-def test_gate_self_heals_gone_and_safe_then_proceeds(monkeypatch, capsys):
+def test_gate_never_auto_reclaims_creator_obligations(monkeypatch):
     _gate(monkeypatch, "block")
     rec = _worktree_record("active")
-    from agent_worktrees import config as cfg
     from agent_worktrees import sweep
-
-    def _fake_heal(record, config, *, path=None, save=True):
-        record.resources[0].state = "abandoned"   # provably gone + safe
-        return [record.resources[0]]
-
-    monkeypatch.setattr(sweep, "self_heal", _fake_heal)
-    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(cfg, "tracking_dir",
-                        lambda: __import__("pathlib").Path("."))
-    # Under block, the lone blocking claim is auto-reclaimed -> finalize proceeds.
-    assert _assert_obligations_settled(rec, "wt", abandon=False) is True
-    out = capsys.readouterr()
-    assert "auto-reclaimed" in (out.err + out.out).lower()
-
-
-def test_gate_still_blocks_when_self_heal_reclaims_nothing(monkeypatch):
-    _gate(monkeypatch, "block")
-    rec = _worktree_record("active")
-    from agent_worktrees import config as cfg
-    from agent_worktrees import sweep
-    monkeypatch.setattr(sweep, "self_heal", lambda *a, **k: [])
-    monkeypatch.setattr(cfg, "load_config", lambda *a, **k: SimpleNamespace())
-    monkeypatch.setattr(cfg, "tracking_dir",
-                        lambda: __import__("pathlib").Path("."))
-    # A genuinely-active claim that the sweep spares still blocks.
+    monkeypatch.setattr(
+        sweep, "self_heal",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("finalize must not auto-reclaim")))
     assert _assert_obligations_settled(rec, "wt", abandon=False) is False
 
 
-def test_gate_self_heal_failure_never_breaks_finalize(monkeypatch):
+def test_gate_settled_claims_proceed_without_reclaim(monkeypatch):
     _gate(monkeypatch, "block")
-    rec = _worktree_record("at-rest")   # nothing unsettled
-    from agent_worktrees import config as cfg
-    monkeypatch.setattr(cfg, "load_config",
-                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
-    # load_config blowing up is swallowed; the gate still evaluates normally.
+    rec = _worktree_record("at-rest")
     assert _assert_obligations_settled(rec, "wt", abandon=False) is True

@@ -937,6 +937,7 @@ def _carve_paired_knowledge(
 
 def _journal_owner_reciprocal_claim(
     config: cfg.Config, worktree_id: str, owner_ref: str | None,
+    *, owner_locked: bool = False,
 ) -> bool:
     """Journal the reciprocal ``worktree`` claim onto an owner's ledger (Ph3c).
 
@@ -967,16 +968,22 @@ def _journal_owner_reciprocal_claim(
         child_ref = tracking.format_claim_ref(
             config.machine, config.repo_name, worktree_id,
         )
-        owner_rec = tracking.load_record(owner_path)
-        tracking.add_resource_claim(
-            owner_rec,
-            tracking.ResourceClaim(
-                kind="worktree", ref=child_ref,
-                created_at=tracking._now_iso(), state=obligations.ACTIVE,
-            ),
-            save=False,
-        )
-        tracking.save_record(owner_rec, owner_path)
+        def _write_claim() -> None:
+            owner_rec = tracking.load_record(owner_path)
+            tracking.add_resource_claim(
+                owner_rec,
+                tracking.ResourceClaim(
+                    kind="worktree", ref=child_ref,
+                    created_at=tracking._now_iso(), state=obligations.ACTIVE,
+                ),
+                save=False,
+            )
+            tracking.save_record(owner_rec, owner_path)
+        if owner_locked:
+            _write_claim()
+        else:
+            with tracking._RecordLock(owner_path, require_sidecar=True):
+                _write_claim()
         print(
             f"Journaled this worktree as an obligation on {owner_ref}.",
             file=sys.stderr,
@@ -1048,37 +1055,70 @@ def _create_worktree_core(
             file=sys.stderr,
         )
 
-    print(f"Creating worktree on branch {branch}...", file=sys.stderr)
-    git_ops.create_worktree(repo.anchor, worktree_path, branch, start_point)
+    # Creator ownership is established before the resource exists, and its
+    # ledger lock stays held until the child tracking record is durable. Thus
+    # finalize cannot hand off/clean a not-yet-created child reference.
+    owner_guard = None
+    if owner_ref:
+        parsed_owner = tracking.parse_claim_ref(owner_ref)
+        if parsed_owner is None or not parsed_owner.is_qualified:
+            raise RuntimeError(
+                f"--owner-ref must be qualified as "
+                f"machine/project/worktree_id (got {owner_ref!r})")
+        if parsed_owner.machine != config.machine:
+            raise RuntimeError(
+                f"cross-machine owner {owner_ref} cannot synchronously accept "
+                "this worktree obligation; use a dispatch/lease flow that "
+                "persists remote ownership before creation")
+        if parsed_owner.machine == config.machine:
+            owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
+                owner_ref, config)
+            if owner_err or owner_path is None or not owner_path.exists():
+                raise RuntimeError(
+                    owner_err or f"owner ledger is missing: {owner_ref}")
+            owner_guard = tracking._RecordLock(
+                owner_path, require_sidecar=True)
+            owner_guard.__enter__()
 
-    # Write tracking YAML
-    tracking_path = cfg.tracking_dir()
-    tracking_path.mkdir(parents=True, exist_ok=True)
-    record = tracking.create_new_record(
-        worktree_id=worktree_id,
-        branch=branch,
-        worktree_path=worktree_path,
-        repo=config.repo_name,
-        machine=config.machine,
-        platform_name=plat,
-        tracking_path=tracking_path,
-        kind=kind,
-        owner=owner,
-        interface=interface,
-        origin=origin,
-        # #1029: link the new worktree back to the session that spawned it, so a
-        # later resume (esp. a PR/feedback worktree with no sessions of its own)
-        # restores context instead of cold-starting.
-        parent_session=(parent_session
-                        or os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
-        # #2178: for a bridge spawn, record the caller worktree so the Picker can
-        # jump back to it.
-        caller_worktree=caller_worktree or None,
-        # resource-claims: the qualified backward owner link, for a worktree
-        # spun up as another worktree's outbound resource (stamped by `run` /
-        # an explicit --owner-ref). Absent = unclaimed.
-        owner_ref=owner_ref or None,
-    )
+    try:
+        if owner_guard is not None and not _journal_owner_reciprocal_claim(
+                config, worktree_id, owner_ref, owner_locked=True):
+            raise RuntimeError(
+                f"owner {owner_ref} cannot accept a new worktree obligation")
+        print(f"Creating worktree on branch {branch}...", file=sys.stderr)
+        git_ops.create_worktree(repo.anchor, worktree_path, branch, start_point)
+
+        # Write tracking YAML
+        tracking_path = cfg.tracking_dir()
+        tracking_path.mkdir(parents=True, exist_ok=True)
+        record = tracking.create_new_record(
+            worktree_id=worktree_id,
+            branch=branch,
+            worktree_path=worktree_path,
+            repo=config.repo_name,
+            machine=config.machine,
+            platform_name=plat,
+            tracking_path=tracking_path,
+            kind=kind,
+            owner=owner,
+            interface=interface,
+            origin=origin,
+            # #1029: link the new worktree back to the session that spawned it, so a
+            # later resume (esp. a PR/feedback worktree with no sessions of its own)
+            # restores context instead of cold-starting.
+            parent_session=(parent_session
+                            or os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
+            # #2178: for a bridge spawn, record the caller worktree so the Picker can
+            # jump back to it.
+            caller_worktree=caller_worktree or None,
+            # resource-claims: the qualified backward owner link, for a worktree
+            # spun up as another worktree's outbound resource (stamped by `run` /
+            # an explicit --owner-ref). Absent = unclaimed.
+            owner_ref=owner_ref or None,
+        )
+    finally:
+        if owner_guard is not None:
+            owner_guard.__exit__(None, None, None)
 
     # Clone permissions
     if permissions.clone_permissions(repo.anchor, worktree_path):
@@ -1093,12 +1133,6 @@ def _create_worktree_core(
     # Trust the new worktree path
     if permissions.add_trusted_folder(worktree_path):
         print("Added worktree path to trustedFolders.", file=sys.stderr)
-
-    # resource-obligation-settlement (Phase 3c): a worktree created WITH an
-    # ``owner_ref`` is another worktree's outbound resource, so journal the
-    # reciprocal ``worktree`` claim onto that owner's ledger (see
-    # ``_journal_owner_reciprocal_claim``).
-    _journal_owner_reciprocal_claim(config, worktree_id, owner_ref)
 
     # citadel paired -harness/-knowledge worktree lifecycle (#957): when this is
     # a stateless harness bound to a knowledge repo, carve/stamp the knowledge
@@ -4009,9 +4043,27 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             output.err(msg)
             return 1
         worktree_id = _resolve_worktree_id(worktree_id)
+        abandon = getattr(args, "abandon", False)
+        handoff_to = (getattr(args, "handoff_to", None) or "").strip()
+        if abandon and not handoff_to:
+            msg = (
+                "--abandon requires --handoff-to <recipient-or-flow>. "
+                "The creating agent owns cleanup unless the operator explicitly "
+                "directed an affirmative handoff."
+            )
+            if use_json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        if handoff_to and not abandon:
+            msg = "--handoff-to is valid only with --abandon"
+            if use_json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
         success = fin.validate_and_finalize(
             worktree_id, config, dry_run=args.dry_run,
-            abandon=getattr(args, "abandon", False),
+            abandon=abandon, handoff_to=handoff_to or None,
         )
 
         if use_json:
@@ -6771,8 +6823,17 @@ def _claims_add(args: argparse.Namespace, kind: str, ref: str) -> int:
         return 1
     # Foreground verb (#4547): claim add is a critical RMW held under the
     # blocking record lock (no I/O in the window).
-    with tracking._RecordLock(rec_path):
+    with tracking._RecordLock(rec_path, require_sidecar=True):
         rec = tracking.load_record(rec_path)
+        if rec.status in {"finalizing", "finalized", "orphaned"}:
+            msg = (
+                f"claims add: owner worktree {wt_id} is {rec.status}; "
+                "creator ownership is frozen and cannot accept new resources"
+            )
+            if args.json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
         claim = tracking.ResourceClaim(
             kind=kind, ref=ref, created_at=tracking._now_iso(),
             state=obligations.ACTIVE, note=getattr(args, "note", "") or "",
@@ -7022,6 +7083,8 @@ def _claims_orphans(args: argparse.Namespace) -> int:
                                      f"@ {when}" if when else "") if x)
         if meta:
             line += f"  ({meta})"
+        if e.get("handoff_to"):
+            line += f" -> handoff: {e['handoff_to']}"
         if e.get("note"):
             line += f" -- {e['note']}"
         print(line)
@@ -7393,10 +7456,10 @@ def _journal_run_claim(owner_ref: str, stdout: str) -> tracking.ResourceClaim | 
                 return None
         else:
             return None
-    else:
+    with tracking._RecordLock(rec_path, require_sidecar=True):
         record = tracking.load_record(rec_path)
-    tracking.add_resource_claim(record, claim, save=False)
-    tracking.save_record(record, rec_path)
+        tracking.add_resource_claim(record, claim, save=False)
+        tracking.save_record(record, rec_path)
     return claim
 
 
@@ -7422,12 +7485,83 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not owner_ref:
         output.err(
             "run: could not resolve the calling worktree from the current "
-            "directory -- running the inner command WITHOUT journaling a claim. "
-            "Run from inside a managed worktree, or pass --owner-ref.")
+            "directory. Refusing to create a resource without creator "
+            "ownership; run from a managed worktree or pass --owner-ref.")
+        return 1
 
     child_env = dict(os.environ)
     if owner_ref:
         child_env["AGENT_WORKTREES_OWNER_REF"] = owner_ref
+
+    # Reserve creator ownership BEFORE launching the resource command. The
+    # active pending claim blocks finalize but does not hold the sidecar lock
+    # across the subprocess (which may itself pre-journal a worktree claim).
+    # On success the reservation is atomically replaced by the parsed real
+    # claim. Any failure or unparseable output retains the pending claim for
+    # explicit repair rather than guessing that no resource was created.
+    owner_path = None
+    pending_ref = ""
+    if owner_ref:
+        try:
+            run_config = cfg.load_config()
+            owner_path, _owner_id, owner_err = _resolve_owner_ref_record_path(
+                owner_ref, run_config)
+            if owner_err:
+                raise RuntimeError(owner_err)
+            parsed_owner = tracking.parse_claim_ref(owner_ref)
+            if (parsed_owner and parsed_owner.machine
+                    and parsed_owner.machine != run_config.machine):
+                raise RuntimeError(
+                    f"cross-machine owner {owner_ref} cannot synchronously "
+                    "reserve this resource; use a dispatch/lease flow that "
+                    "persists remote ownership before creation")
+            if owner_path is not None and not owner_path.exists():
+                parsed_owner = tracking.parse_claim_ref(owner_ref)
+                if parsed_owner and parsed_owner.is_anchor:
+                    _ensure_anchor_ledger(
+                        parsed_owner, owner_path.parent)
+            if owner_path is not None and not owner_path.exists():
+                raise RuntimeError(
+                    f"same-machine owner ledger is missing: {owner_ref}")
+            if owner_path is not None:
+                pending_ref = f"pending-run:{secrets.token_hex(12)}"
+                with tracking._RecordLock(
+                        owner_path, require_sidecar=True):
+                    owner_record = tracking.load_record(owner_path)
+                    tracking.add_resource_claim(
+                        owner_record,
+                        tracking.ResourceClaim(
+                            kind="workdir", ref=pending_ref,
+                            created_at=tracking._now_iso(),
+                            state=obligations.ACTIVE,
+                            note=f"pending resource creation: {cmd_str[:160]}",
+                        ),
+                        save=False,
+                    )
+                    tracking.save_record(owner_record, owner_path)
+        except Exception as exc:
+            output.err(f"run: cannot freeze owner ledger before creation: {exc}")
+            return 1
+
+    def _finish_pending(claim: tracking.ResourceClaim | None) -> bool:
+        if owner_path is None or not pending_ref:
+            return claim is not None
+        if claim is None:
+            return False  # preserve ambiguous pending ownership for repair
+        try:
+            with tracking._RecordLock(owner_path, require_sidecar=True):
+                owner_record = tracking.load_record(owner_path)
+                owner_record.resources = [
+                    item for item in owner_record.resources
+                    if item.ref != pending_ref
+                ]
+                tracking.add_resource_claim(
+                    owner_record, claim, save=False)
+                tracking.save_record(owner_record, owner_path)
+            return True
+        except Exception as exc:
+            output.err(f"run: could not settle pending ownership: {exc}")
+            return False
 
     # Capture stdout (to parse the produced resource) while stderr streams
     # through; re-emit stdout verbatim so callers/pipes see the child output.
@@ -7437,21 +7571,25 @@ def cmd_run(args: argparse.Namespace) -> int:
             stdout=subprocess.PIPE, text=True,
         )
     except Exception as e:
-        output.err(f"run: failed to execute inner command: {e}")
+        output.err(
+            f"run: failed to execute inner command: {e}; pending ownership "
+            f"{pending_ref or '(cross-machine)'} is retained")
         return 1
     child_stdout = proc.stdout or ""
     sys.stdout.write(child_stdout)
     sys.stdout.flush()
 
-    if owner_ref and proc.returncode == 0 and child_stdout.strip():
-        try:
-            claim = _journal_run_claim(owner_ref, child_stdout)
-            if claim is not None:
-                output.err(f"run: journaled outbound claim {claim.ref} "
-                           f"({claim.kind}) on {owner_ref}")
-        except Exception as e:
-            output.err(f"run: could not journal claim: {e}")
-
+    claim = _claim_from_run_output(child_stdout) if child_stdout.strip() else None
+    if claim is None:
+        output.err(
+            f"run: resource command exited {proc.returncode} but no claim could "
+            f"be parsed; "
+            f"pending ownership {pending_ref or '(cross-machine)'} is retained")
+        return proc.returncode or 1
+    if not _finish_pending(claim):
+        return 1
+    output.err(f"run: journaled outbound claim {claim.ref} "
+               f"({claim.kind}) on {owner_ref}")
     return proc.returncode
 
 
@@ -14570,8 +14708,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--abandon", action="store_true",
                    help="Finalize past the obligation gate even when the worktree "
-                        "still owns unsettled outbound resources, re-homing them "
-                        "for cleanup/adoption (resource-obligation-settlement).")
+                        "still owns unsettled outbound resources; requires an "
+                        "operator-directed --handoff-to recipient/flow.")
+    p.add_argument("--handoff-to", default=None,
+                   help="With --abandon, affirmative recipient or cleanup flow "
+                        "that accepts responsibility for every re-homed resource")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
     p.add_argument("--config", default=None)

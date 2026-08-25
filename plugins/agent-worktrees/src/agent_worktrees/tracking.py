@@ -1925,6 +1925,10 @@ def add_resource_claim(
     (kind/state/note/created_at) rather than duplicated, so re-running the
     owning ``run`` wrapper is idempotent. Returns the stored claim.
     """
+    if record.status in {"finalizing", "finalized", "orphaned"}:
+        raise ValueError(
+            f"owner worktree {record.worktree_id} is {record.status}; "
+            "creator ownership is frozen")
     for existing in record.resources:
         if existing.ref == claim.ref:
             existing.kind = claim.kind
@@ -2056,15 +2060,31 @@ def orphanage_path(project: str | None = None) -> Path:
 
 def load_orphaned_obligations(project: str | None = None) -> list[dict]:
     """Read the durable orphanage registry (empty when absent/unreadable)."""
+    try:
+        return load_orphaned_obligations_strict(project)
+    except Exception:
+        return []
+
+
+def load_orphaned_obligations_strict(
+    project: str | None = None,
+) -> list[dict]:
+    """Read the orphanage, distinguishing absence from corruption.
+
+    Missing is a valid empty registry. Any read/parse/shape failure raises so an
+    ownership-transfer RMW can fail closed instead of overwriting obligations.
+    """
     path = orphanage_path(project)
     if not path.exists():
         return []
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        items = data.get("orphaned", [])
-        return list(items) if isinstance(items, list) else []
-    except Exception:
-        return []
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"invalid orphanage mapping: {path}")
+    items = data.get("orphaned", [])
+    if not isinstance(items, list) or not all(
+            isinstance(item, dict) for item in items):
+        raise ValueError(f"invalid orphanage entries: {path}")
+    return list(items)
 
 
 def rehome_abandoned_obligations(
@@ -2072,44 +2092,59 @@ def rehome_abandoned_obligations(
     *,
     source_worktree: str,
     config: object,
+    handoff_to: str | None = None,
     project: str | None = None,
 ) -> list[dict]:
     """Durably re-home abandoned obligations to the control-plane orphanage.
 
     Appends each claim to :func:`orphanage_path` with provenance (source
-    worktree, machine, project, timestamp) so the orphaned resource it named is
-    recorded rather than dropped. **Idempotent** (dedups by
+    worktree, machine, project, timestamp) plus the affirmative recipient/flow
+    in ``handoff_to`` so the orphaned resource it named is recorded rather than
+    dropped. **Idempotent** (dedups by
     ``source_worktree`` + ``ref``). Returns the entries **newly** written.
     Best-effort: any IO failure returns ``[]`` and never raises -- re-homing must
     never break the finalize it rides on.
     """
     try:
-        existing = load_orphaned_obligations(project)
-        seen = {(e.get("source_worktree"), e.get("ref")) for e in existing}
-        machine = getattr(config, "machine", None)
-        proj = project or getattr(config, "repo_name", None)
-        now = _now_iso()
-        added: list[dict] = []
-        for c in claims:
-            key = (source_worktree, c.ref)
-            if key in seen:
-                continue
-            entry = {
-                "kind": c.kind, "ref": c.ref, "note": c.note or "",
-                "source_worktree": source_worktree, "machine": machine,
-                "project": proj, "disposition": "abandoned", "abandoned_at": now,
+        path = orphanage_path(project)
+        with _RecordLock(path, require_sidecar=True):
+            existing = load_orphaned_obligations_strict(project)
+            by_key = {
+                (e.get("source_worktree"), e.get("ref")): e for e in existing
             }
-            existing.append(entry)
-            added.append(entry)
-            seen.add(key)
-        if added:
-            path = orphanage_path(project)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                yaml.safe_dump({"orphaned": existing}, sort_keys=False),
-                encoding="utf-8",
-            )
-        return added
+            machine = getattr(config, "machine", None)
+            proj = project or getattr(config, "repo_name", None)
+            now = _now_iso()
+            target = (handoff_to or "").strip()
+            added: list[dict] = []
+            changed = False
+            for c in claims:
+                key = (source_worktree, c.ref)
+                prior = by_key.get(key)
+                if prior is not None:
+                    # Legacy orphan entries had no target. An explicit retry may
+                    # upgrade that empty field, but never overwrite a different
+                    # affirmative recipient.
+                    if target and not (prior.get("handoff_to") or "").strip():
+                        prior["handoff_to"] = target
+                        changed = True
+                    continue
+                entry = {
+                    "kind": c.kind, "ref": c.ref, "note": c.note or "",
+                    "source_worktree": source_worktree, "machine": machine,
+                    "project": proj, "disposition": "abandoned",
+                    "abandoned_at": now, "handoff_to": target,
+                }
+                existing.append(entry)
+                added.append(entry)
+                by_key[key] = entry
+                changed = True
+            if changed:
+                _atomic_write(
+                    path,
+                    yaml.safe_dump({"orphaned": existing}, sort_keys=False),
+                )
+            return added
     except Exception:
         return []
 
@@ -2132,21 +2167,22 @@ def remove_orphaned_obligations(
         drop = {(k[0], k[1]) for k in keys}
         if not drop:
             return 0
-        existing = load_orphaned_obligations(project)
-        kept = [e for e in existing
-                if (e.get("source_worktree"), e.get("ref")) not in drop]
-        removed = len(existing) - len(kept)
-        if removed <= 0:
-            return 0
         path = orphanage_path(project)
-        if kept:
-            path.write_text(
-                yaml.safe_dump({"orphaned": kept}, sort_keys=False),
-                encoding="utf-8",
-            )
-        elif path.exists():
-            path.unlink()
-        return removed
+        with _RecordLock(path, require_sidecar=True):
+            existing = load_orphaned_obligations_strict(project)
+            kept = [e for e in existing
+                    if (e.get("source_worktree"), e.get("ref")) not in drop]
+            removed = len(existing) - len(kept)
+            if removed <= 0:
+                return 0
+            if kept:
+                _atomic_write(
+                    path,
+                    yaml.safe_dump({"orphaned": kept}, sort_keys=False),
+                )
+            elif path.exists():
+                path.unlink()
+            return removed
     except Exception:
         return 0
 
