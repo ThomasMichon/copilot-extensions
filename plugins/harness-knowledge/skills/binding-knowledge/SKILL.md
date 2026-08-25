@@ -136,7 +136,9 @@ checkout + the same `enabledPlugins`. Copilot merges `settings.local.json` over
 the committed `settings.json` on launch (local tier wins), so the personal
 plugins load while the harness tree stays name-free.
 
-`bind_knowledge.py` runs this automatically; to (re)assemble it directly:
+`bind_knowledge.py` runs this automatically through agent-worktrees' canonical
+composer. To (re)assemble an explicit anchor binding directly, the legacy script
+remains a compatibility delegate:
 
 ```
 python skills/binding-knowledge/scripts/assemble_plugins.py \
@@ -144,32 +146,31 @@ python skills/binding-knowledge/scripts/assemble_plugins.py \
   --knowledge-path "<knowledge-path>"
 ```
 
-Only **local** (`directory`/`local`) marketplaces are carried across (a remote
-github/git marketplace the harness declares itself or is globally installed).
-The overlay is idempotent and merge-safe: it preserves unmanaged entries and
-refreshes the managed local marketplaces to exactly mirror the knowledge repo.
+The canonical composer carries local (`directory`/`local`) marketplaces,
+operator-specific remote marketplace declarations, and their enabled plugins.
+Committed generic harness entries remain the base and are not duplicated.
+The overlay is idempotent and merge-safe: unmanaged entries are preserved, and
+exact managed values are tracked so stale entries can be retired safely.
 
 > **Keep `settings.local.json` gitignored in the harness.** It is machine-local
 > and names the concrete knowledge checkout; add
 > `.github/copilot/settings.local.json` to the harness `.gitignore`.
 
 > **Paired-worktree re-assembly.** The bind writes an overlay pointing at the
-> knowledge **anchor**'s `.ai`. In a paired `-harness`/`-knowledge` worktree, the
-> operator's personal-plugin state lives in the paired knowledge **worktree**.
-> Re-render the overlay against the pair with:
+> knowledge **anchor**. In a paired harness/knowledge worktree, the launch
+> preflight automatically runs:
 >
 > ```
-> python skills/binding-knowledge/scripts/assemble_plugins.py --from-pair
+> agent-worktrees knowledge compose-plugins
 > ```
 >
-> Run from within the paired **harness** worktree, `--from-pair` resolves the pair
-> via `agent-worktrees state-root --pair --json`, maps the two checkouts by role,
-> and points the harness worktree's `settings.local.json` at the paired
-> **knowledge** worktree's `.ai` (falling back cleanly, exit 3, when the current
-> worktree is not part of a resolvable pair -- including the anchor-pair case,
-> which resolves to the knowledge anchor). Wire this into a paired launch so a
-> pair-launched session loads personal plugins from its paired worktree rather
-> than the anchor.
+> The command resolves both paths by pair role and points local marketplaces at
+> the paired **knowledge worktree** before Copilot discovers plugins. For an
+> invalid tracked harness pair it retires only exact marker-owned pair values,
+> preserving modified/operator settings; an ordinary unpaired repo is a no-op.
+> Malformed or otherwise unsanitizable overlays fail closed before Copilot
+> starts. The old `assemble_plugins.py --from-pair` spelling remains only as a
+> compatibility delegate; it contains no separate composition logic.
 
 ## 4. Verify
 

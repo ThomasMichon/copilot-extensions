@@ -190,6 +190,155 @@ def test_bound_state_definition_routes_exact_content_categories():
         "and ambiguous or rootless writes"
     ) in text
     assert "belong in the state repo above" in text
+def test_anchor_pair_rejects_rebound_knowledge_before_resolving(
+    tmp_path, monkeypatch
+):
+    from agent_worktrees import tracking as tk
+
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    record = tk.WorktreeRecord(
+        worktree_id="wt-harness",
+        branch="worktree/wt-harness",
+        worktree_path=str(harness),
+        repo="harness",
+        machine="test",
+        platform="wsl",
+        started_at="2026-06-01T10:00:00",
+        last_resumed_at="2026-06-01T10:00:00",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[],
+        pair_id="pair1",
+        pair_role="harness",
+        pair_ref="test/old-private/@anchor",
+        pair_kind="anchor",
+    )
+    monkeypatch.setattr(tk, "find_worktree_id_by_cwd", lambda _cwd: record.worktree_id)
+    monkeypatch.setattr(tk, "load_record_by_id", lambda _wt_id: record)
+    resolved = False
+
+    def _resolve(_config):
+        nonlocal resolved
+        resolved = True
+        raise AssertionError("mismatched anchor pair must not resolve the new binding")
+
+    monkeypatch.setattr(sr, "resolve_state_root", _resolve)
+
+    result = sr.resolve_pair(
+        _config("harness", stateless=True, knowledge_repo="new-private"),
+        cwd=str(harness),
+    )
+
+    assert result.paired is True
+    assert "old-private" in result.error
+    assert "new-private" in result.error
+    assert resolved is False
+
+
+@pytest.mark.parametrize(
+    ("case", "message"),
+    [
+        ("pair-id-mismatch", "disagree on pair_id"),
+        ("same-role", "complementary harness/knowledge roles"),
+        ("kind-mismatch", "matching 'worktree' pair_kind"),
+        ("current-ref-wrong-repo", "does not reference the sibling"),
+        ("sibling-ref-wrong-worktree", "does not reference the current"),
+        ("sibling-ref-wrong-repo", "does not reference the current"),
+        ("unqualified-ref", "is not a qualified"),
+        ("self-pair", "cannot pair with itself"),
+        ("valid", None),
+    ],
+)
+def test_worktree_pair_requires_coherent_reciprocal_records(
+    tmp_path, monkeypatch, case, message
+):
+    from agent_worktrees import tracking as tk
+
+    def _record(
+        wt_id,
+        *,
+        repo,
+        role,
+        path,
+        pair_ref,
+    ):
+        return tk.WorktreeRecord(
+            worktree_id=wt_id,
+            branch=f"worktree/{wt_id}",
+            worktree_path=str(path),
+            repo=repo,
+            machine="test",
+            platform="wsl",
+            started_at="2026-06-01T10:00:00",
+            last_resumed_at="2026-06-01T10:00:00",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[],
+            pair_id="pair-1",
+            pair_role=role,
+            pair_ref=pair_ref,
+            pair_kind="worktree",
+        )
+
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    current = _record(
+        "wt-harness",
+        repo="harness",
+        role="harness",
+        path=harness,
+        pair_ref="test/knowledge/wt-knowledge",
+    )
+    sibling = _record(
+        "wt-knowledge",
+        repo="knowledge",
+        role="knowledge",
+        path=knowledge,
+        pair_ref="test/harness/wt-harness",
+    )
+
+    if case == "pair-id-mismatch":
+        sibling.pair_id = "pair-2"
+    elif case == "same-role":
+        sibling.pair_role = "harness"
+    elif case == "kind-mismatch":
+        sibling.pair_kind = "anchor"
+    elif case == "current-ref-wrong-repo":
+        current.pair_ref = "test/wrong-repo/wt-knowledge"
+    elif case == "sibling-ref-wrong-worktree":
+        sibling.pair_ref = "test/harness/wt-other"
+    elif case == "sibling-ref-wrong-repo":
+        sibling.pair_ref = "test/wrong-repo/wt-harness"
+    elif case == "unqualified-ref":
+        current.pair_ref = "wt-knowledge"
+    elif case == "self-pair":
+        sibling.repo = current.repo
+        sibling.worktree_id = current.worktree_id
+        current.pair_ref = "test/harness/wt-harness"
+
+    monkeypatch.setattr(tk, "find_worktree_id_by_cwd", lambda _cwd: current.worktree_id)
+    monkeypatch.setattr(tk, "load_record_by_id", lambda _wt_id: current)
+    monkeypatch.setattr(tk, "find_paired_record", lambda _record: sibling)
+
+    result = sr.resolve_pair(None, cwd=str(harness))
+
+    assert result.current is not None
+    assert result.current.worktree_id == "wt-harness"
+    if message is None:
+        assert result.error is None
+        assert result.sibling is not None
+        assert result.sibling.worktree_id == "wt-knowledge"
+        assert result.pair_id == "pair-1"
+    else:
+        assert result.sibling is None
+        assert message in result.error
 
 
 # ---------------------------------------------------------------------------
@@ -202,10 +351,10 @@ class TestStateRootPairCLI:
     def _pair_records(self, tracking_dir, harness_path, knowledge_path):
         from agent_worktrees import tracking as tk
 
-        def _rec(wt_id, role, wp, ref):
+        def _rec(wt_id, role, repo, wp, ref):
             rec = tk.WorktreeRecord(
                 worktree_id=wt_id, branch=f"worktree/{wt_id}", worktree_path=wp,
-                repo="r", machine="test", platform="wsl",
+                repo=repo, machine="test", platform="wsl",
                 started_at="2026-06-01T10:00:00",
                 last_resumed_at="2026-06-01T10:00:00", resume_count=0,
                 title=None, status="active", completed_at=None, sessions=[],
@@ -213,9 +362,9 @@ class TestStateRootPairCLI:
             )
             tk.save_record(rec, tracking_dir / f"{wt_id}.yaml")
 
-        _rec("wt-harness", "harness", str(harness_path),
+        _rec("wt-harness", "harness", "harness", str(harness_path),
              "test/knowledge/wt-knowledge")
-        _rec("wt-knowledge", "knowledge", str(knowledge_path),
+        _rec("wt-knowledge", "knowledge", "knowledge", str(knowledge_path),
              "test/harness/wt-harness")
 
     def test_pair_prints_sibling_path(self, tmp_path, monkeypatch, capsys):

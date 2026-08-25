@@ -164,7 +164,9 @@ class TestStateRootPairAnchor:
         monkeypatch.setattr(
             "agent_worktrees.__main__.os.getcwd", lambda: str(harness)
         )
-        monkeypatch.setattr(m.cfg, "load_config", lambda: object())
+        monkeypatch.setattr(
+            m.cfg, "load_config", lambda: types.SimpleNamespace(knowledge_repo="kb")
+        )
         monkeypatch.setattr(
             m.state_root_mod, "resolve_state_root",
             lambda c: _state_root(path=str(k_anchor), repo="kb"),

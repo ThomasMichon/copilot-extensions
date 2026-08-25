@@ -19,6 +19,42 @@ agent-worktrees -p copilot-extensions worktree create --json
 Running a project binstub bare (e.g. `my-control-harness`) still launches the
 interactive picker.
 
+## Knowledge plugin composition
+
+A stateless harness paired with a private knowledge worktree can compose the
+operator's plugin settings into the harness worktree before Copilot discovery:
+
+```bash
+agent-worktrees knowledge compose-plugins [--json] [--cwd PATH]
+agent-worktrees knowledge compose-plugins --harness-path PATH \
+  --knowledge-path PATH [--json]
+```
+
+The command works from a neutral directory. `--cwd` activates the adopted
+project containing that path before resolving its tracked pair; explicit
+checkout paths bypass pair lookup. It writes the harness's gitignored
+`.github/copilot/settings.local.json` and points
+`directory`/`local` marketplaces at the paired **knowledge worktree** rather
+than its anchor. It also carries operator-specific remote marketplace
+declarations and enabled plugins. Committed harness settings remain the generic
+base; already-provided base entries are not duplicated, and unmanaged local
+settings are preserved. Exact managed values are recorded in the local file so
+re-pointing can retire stale entries without deleting operator edits.
+
+The command is also the launcher's idempotent safety preflight. A stale,
+missing, unbound, or binding-mismatched **tracked harness pair** retires only
+marker-owned values that are still exact, preserves modified/operator values,
+removes the marker, and returns success with `action: "retired"` plus the
+original `pair_error`. An ordinary untracked or unpaired repo, or a legitimate
+marker-managed anchor overlay without a pair identity, returns success with
+`action: "no-op"` and is not changed. Malformed/unreadable settings or an unsafe
+retirement return exit `3`; launchers surface that detail and stop before
+Copilot starts.
+
+The Worktree Picker launcher runs this command after resolving the selected
+worktree and before starting Copilot. `--cwd` supplies the real worktree during
+Bare resume, where the launch process itself starts from the user's home.
+
 ## Headless projects (CLI-only)
 
 Adopt an external repo as a **headless** project to drive its worktree

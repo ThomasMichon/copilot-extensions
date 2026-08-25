@@ -77,6 +77,17 @@ if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
     done
 fi
 
+resolve_current_runtime_python() {
+    local version="" python=""
+    [[ -f "$RUNTIME_DIR/current-version" ]] || return 1
+    version="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version" 2>/dev/null)" \
+        || return 1
+    [[ -n "$version" ]] || return 1
+    python="$RUNTIME_DIR/versions/$version/bin/python"
+    [[ -f "$python" && -x "$python" ]] || return 1
+    printf '%s\n' "$python"
+}
+
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then
     setup_log INFO "Venv resolved: $RUNTIME_DIR"
 else
@@ -355,7 +366,7 @@ for a in json.load(sys.stdin)['updates'][$_ri].get('argv', []):
 # Subcommands that agent_worktrees's main() handles directly — these
 # must NOT fall through to the resolve→picker flow.  Keep in sync with
 # COMMAND_MAP in __main__.py, plus "services" and "agent-worktrees".
-_DIRECT_COMMANDS="services repos worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
+_DIRECT_COMMANDS="services repos knowledge worktree agent-worktrees resolve post-exit finalize push-changes mark-complete status list create cleanup validate install register unregister uninstall update install-status deploy-instructions get pre-launch stage-update reconcile-plugins dev handoff-cutover register-session deregister-session backfill-sessions anchor-check activity activity-log"
 _IS_DIRECT=""
 if [[ $# -gt 0 ]]; then
     for _dc in $_DIRECT_COMMANDS; do
@@ -547,6 +558,33 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
     if [[ -n "$WORK_DIR" ]]; then
         cd "$WORK_DIR"
+    fi
+
+    # Compose the paired private knowledge repo's plugin settings into the
+    # harness worktree before Copilot starts and performs plugin discovery.
+    # status_path is the real worktree during Bare resume (work_dir is HOME).
+    if ! _REFRESHED_PYTHON="$(resolve_current_runtime_python)"; then
+        setup_log ERROR "Current agent-worktrees runtime is unavailable after update apply; expected a valid current-version slot under $RUNTIME_DIR"
+        printf 'ERROR: Current agent-worktrees runtime is unavailable after update apply; expected a valid current-version slot under %s\n' \
+            "$RUNTIME_DIR" >&2
+        exit 1
+    fi
+    PYTHON="$_REFRESHED_PYTHON"
+    setup_log INFO "Runtime refreshed before knowledge preflight: $PYTHON"
+
+    _KNOWLEDGE_CWD="${STATUS_PATH:-${WORK_DIR:-$PWD}}"
+    _KNOWLEDGE_ARGS=(-m agent_worktrees)
+    [[ -n "$LAUNCH_PROJECT" ]] \
+        && _KNOWLEDGE_ARGS+=(--project "$LAUNCH_PROJECT")
+    _KNOWLEDGE_ARGS+=(knowledge compose-plugins --cwd "$_KNOWLEDGE_CWD" --json)
+    if _KNOWLEDGE_JSON=$("$PYTHON" "${_KNOWLEDGE_ARGS[@]}" 2>&1); then
+        setup_log INFO "Knowledge plugin preflight completed: $_KNOWLEDGE_JSON"
+    else
+        _KNOWLEDGE_RC=$?
+        setup_log ERROR "Knowledge plugin preflight failed (exit $_KNOWLEDGE_RC): ${_KNOWLEDGE_JSON:-no details}"
+        printf 'ERROR: Knowledge plugin preflight failed: %s\n' \
+            "${_KNOWLEDGE_JSON:-no details}" >&2
+        exit "$_KNOWLEDGE_RC"
     fi
 
     if [[ "$NO_MUX" == "1" ]]; then

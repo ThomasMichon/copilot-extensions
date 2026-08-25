@@ -29,6 +29,7 @@ Usage (direct):
     agent-worktrees repos list [--type project|repo] [--json]
     agent-worktrees repos find <name>
     agent-worktrees repos srcroot [--set PATH] [--platform P]
+    agent-worktrees knowledge compose-plugins [--json] [--cwd PATH]
     agent-worktrees pre-launch
     agent-worktrees reconcile-plugins [--machine M]
 
@@ -13344,118 +13345,23 @@ def _related_lookup_anchors(
 def _state_root_pair(json_out: bool) -> int:
     """Resolve the paired (harness/knowledge sibling) worktree of the cwd.
 
-    The citadel paired-worktree resolver (#957): find the current worktree from
-    the cwd, then load its recorded sibling (``pair_ref``). Prints the sibling's
-    checkout path (or a JSON summary). Exit ``3`` when the current directory is
-    not a tracked worktree, or the worktree is unpaired, or the sibling record
-    cannot be loaded -- callers must NOT assume a pair on non-zero.
+    Prints the sibling checkout path (or a JSON summary). Exit ``3`` when the
+    typed resolver cannot produce both sides of the pair.
     """
-    cwd = os.getcwd()
-    wt_id = tracking.find_worktree_id_by_cwd(cwd)
-    rec = tracking.load_record_by_id(wt_id) if wt_id else None
-    if rec is None:
-        msg = "current directory is not a tracked worktree"
-        if json_out:
-            print(json.dumps({"paired": False, "error": msg}, indent=2))
-        else:
-            print(msg, file=sys.stderr)
-        return 3
-    if not rec.is_paired:
-        msg = f"worktree '{rec.worktree_id}' is not paired"
-        if json_out:
-            print(json.dumps(
-                {"paired": False, "worktree_id": rec.worktree_id, "error": msg},
-                indent=2,
-            ))
-        else:
-            print(msg, file=sys.stderr)
-        return 3
-    # Anchor pairing: a non-worktree-class knowledge repo has no sibling record;
-    # resolve to its checkout via the normal state-root resolution.
-    if rec.pair_kind == "anchor":
-        res = state_root_mod.resolve_state_root(cfg.load_config())
-        if not res.path:
-            msg = (res.error
-                   or f"anchor pair '{rec.pair_ref}' could not be resolved")
-            if json_out:
-                print(json.dumps(
-                    {
-                        "paired": True, "pair_id": rec.pair_id,
-                        "pair_ref": rec.pair_ref, "pair_kind": "anchor",
-                        "sibling_path": None, "error": msg,
-                    },
-                    indent=2,
-                ))
-            else:
-                print(msg, file=sys.stderr)
-            return 3
-        if json_out:
-            print(json.dumps(
-                {
-                    "paired": True,
-                    "pair_id": rec.pair_id,
-                    "self": {
-                        "worktree_id": rec.worktree_id,
-                        "role": rec.pair_role,
-                        "path": rec.worktree_path,
-                    },
-                    "sibling": {
-                        "worktree_id": None,
-                        "role": "knowledge",
-                        "path": res.path,
-                        "kind": "anchor",
-                        "status": None,
-                    },
-                },
-                indent=2,
-            ))
-        else:
-            print(res.path)
-        return 0
-    sibling = tracking.find_paired_record(rec)
-    if sibling is None:
-        ref = rec.pair_ref or "?"
-        msg = f"paired sibling '{ref}' has no local record on this machine"
-        if json_out:
-            print(json.dumps(
-                {
-                    "paired": True,
-                    "worktree_id": rec.worktree_id,
-                    "pair_id": rec.pair_id,
-                    "pair_role": rec.pair_role,
-                    "pair_ref": rec.pair_ref,
-                    "pair_kind": rec.pair_kind,
-                    "sibling_path": None,
-                    "error": msg,
-                },
-                indent=2,
-            ))
-        else:
-            print(msg, file=sys.stderr)
-        return 3
+    try:
+        config = cfg.load_config()
+    except (OSError, RuntimeError, ValueError):
+        # A worktree/worktree pair is fully recorded and needs no project
+        # config. Anchor pairs still return a precise config-required error.
+        config = None
+    pair = state_root_mod.resolve_pair(config, cwd=os.getcwd())
     if json_out:
-        print(json.dumps(
-            {
-                "paired": True,
-                "pair_id": rec.pair_id,
-                "self": {
-                    "worktree_id": rec.worktree_id,
-                    "role": rec.pair_role,
-                    "path": rec.worktree_path,
-                },
-                "sibling": {
-                    "worktree_id": sibling.worktree_id,
-                    "role": sibling.pair_role,
-                    "path": sibling.worktree_path,
-                    "kind": rec.pair_kind,
-                    "status": sibling.status,
-                },
-            },
-            indent=2,
-        ))
-    else:
-        print(sibling.worktree_path)
-    return 0
+        print(json.dumps(pair.as_dict(), indent=2))
+    elif pair.sibling and not pair.error:
+        print(pair.sibling.path)
+    elif pair.error:
+        print(pair.error, file=sys.stderr)
+    return 0 if pair.paired and pair.sibling and not pair.error else 3
 
 
 def cmd_state_root_dispatch(argv: list[str]) -> int:
@@ -13524,6 +13430,113 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
         if res.error:
             print(res.error, file=sys.stderr)
     return 0 if res.path else 3
+
+
+def cmd_knowledge_dispatch(argv: list[str]) -> int:
+    """Manage the launch-time harness/knowledge composition boundary."""
+    p = argparse.ArgumentParser(
+        prog="agent-worktrees knowledge",
+        description=(
+            "Manage machine-local composition between a stateless harness and "
+            "its paired private knowledge checkout."
+        ),
+    )
+    sub = p.add_subparsers(dest="command")
+    compose_p = sub.add_parser(
+        "compose-plugins",
+        help=(
+            "Compose the paired knowledge checkout's local and remote plugin "
+            "settings into the harness settings.local.json"
+        ),
+    )
+    compose_p.add_argument(
+        "--cwd",
+        default=None,
+        help=(
+            "Resolve the tracked pair containing this path (defaults to the "
+            "current directory; launchers pass the real worktree for Bare resume)"
+        ),
+    )
+    compose_p.add_argument(
+        "--harness-path",
+        default=None,
+        help="Explicit harness checkout (requires --knowledge-path; bypasses pair lookup)",
+    )
+    compose_p.add_argument(
+        "--knowledge-path",
+        default=None,
+        help="Explicit knowledge checkout (requires --harness-path; bypasses pair lookup)",
+    )
+    compose_p.add_argument(
+        "--json", action="store_true", help="Emit the composition summary as JSON"
+    )
+    try:
+        args = p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+    if args.command != "compose-plugins":
+        p.print_help()
+        return 2
+    if bool(args.harness_path) != bool(args.knowledge_path):
+        print(
+            "agent-worktrees knowledge compose-plugins: error: --harness-path "
+            "and --knowledge-path must be supplied together",
+            file=sys.stderr,
+        )
+        return 2
+
+    from . import knowledge_plugins
+
+    try:
+        if args.harness_path:
+            summary = knowledge_plugins.compose(
+                args.harness_path, args.knowledge_path
+            )
+        else:
+            _activate_project_for_path(args.cwd)
+            summary = knowledge_plugins.compose_from_pair(cwd=args.cwd)
+    except knowledge_plugins.KnowledgePluginError as exc:
+        summary = {
+            "action": "error",
+            "paired": False,
+            "sanitized": False,
+            "error": str(exc),
+        }
+        if args.json:
+            print(json.dumps(summary, indent=2))
+        else:
+            print(f"Knowledge plugin preflight failed: {exc}", file=sys.stderr)
+        return 3
+
+    if args.json:
+        print(json.dumps(summary, indent=2))
+    else:
+        outcome = summary["action"]
+        if outcome == "composed":
+            action = "Updated" if summary["changed"] else "Verified"
+            print(f"{action} knowledge plugin overlay: {summary['settings_local']}")
+            print(f"  knowledge: {summary['knowledge_path']}")
+            if summary["marketplaces"]:
+                print(f"  marketplaces: {', '.join(summary['marketplaces'])}")
+            if summary["enabled_plugins"]:
+                print(f"  enabled: {', '.join(summary['enabled_plugins'])}")
+            conflicts = summary["conflicts"]
+            if conflicts["marketplaces"] or conflicts["enabled_plugins"]:
+                print(
+                    "  preserved conflicting harness/unmanaged settings: "
+                    f"{len(conflicts['marketplaces'])} marketplace(s), "
+                    f"{len(conflicts['enabled_plugins'])} plugin enable(s)",
+                    file=sys.stderr,
+                )
+        elif outcome == "retired":
+            print(
+                "Retired stale knowledge plugin overlay: "
+                f"{summary['settings_local']}"
+            )
+            print(f"  pair error: {summary['pair_error']}")
+        else:
+            print(f"Knowledge plugin preflight: no-op ({summary['pair_error']})")
+    return 0
 
 
 def _hunt_checkout(name: str) -> str | None:
@@ -15373,6 +15386,12 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Emit the full resolution as JSON")
     sp.add_argument("--repo", default=None, metavar="NAME",
                     help="Explicit override: resolve this registered repo")
+
+    # knowledge -- dispatched pre-argparse (see cmd_knowledge_dispatch)
+    sub.add_parser(
+        "knowledge",
+        help="Harness/knowledge composition (run 'knowledge' for usage)",
+    )
 
     # git -- dispatched pre-argparse (see cmd_git_dispatch)
     sub.add_parser("git", help="Git collaboration primitives (run 'git' for usage)")
@@ -17499,7 +17518,8 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # now it resolves from CWD, or from the ``--project`` a project binstub injects,
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
-    "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install", "register", "hook",
+    "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
+    "register", "hook", "knowledge",
     "picker", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
     "bind-session",
     "bind-nudge",
@@ -19167,6 +19187,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "state-root":
         try:
             return cmd_state_root_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # knowledge (paired private-repo management) -- manual dispatch.
+    if args_list[0] == "knowledge":
+        try:
+            return cmd_knowledge_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

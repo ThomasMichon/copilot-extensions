@@ -1,258 +1,309 @@
-"""Tests for the harness-knowledge assemble_plugins configurator (#955)."""
+"""Compatibility tests for the migrated knowledge-plugin assembler."""
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
-_MOD = (Path(__file__).resolve().parents[1] / "skills" / "binding-knowledge"
-        / "scripts" / "assemble_plugins.py")
+import pytest
+
+_MOD = (
+    Path(__file__).resolve().parents[1]
+    / "skills"
+    / "binding-knowledge"
+    / "scripts"
+    / "assemble_plugins.py"
+)
 _spec = importlib.util.spec_from_file_location("assemble_plugins", _MOD)
 ap = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(ap)
 
 
-def _write_settings(repo: Path, data: dict, *, claude=False, local=False):
-    if claude:
-        d = repo / ".claude"
-        name = "settings.local.json" if local else "settings.json"
-    else:
-        d = repo / ".github" / "copilot"
-        name = "settings.local.json" if local else "settings.json"
-    d.mkdir(parents=True, exist_ok=True)
-    (d / name).write_text(json.dumps(data), encoding="utf-8")
+def _result(
+    summary: dict | str,
+    *,
+    returncode: int = 0,
+    stderr: str = "",
+) -> subprocess.CompletedProcess:
+    stdout = summary if isinstance(summary, str) else json.dumps(summary)
+    return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
 
-def _knowledge_with_ai(tmp_path: Path) -> Path:
-    """A knowledge repo declaring a `.ai` directory marketplace + a remote one."""
-    k = tmp_path / "knowledge"
-    (k / ".ai").mkdir(parents=True)
-    _write_settings(k, {
-        "extraKnownMarketplaces": {
-            "kn-plugins": {"source": {"source": "directory", "path": "./.ai"}},
-            "dev-remote": {"source": {"source": "github", "repo": "owner/remote"}},
-        },
-        "enabledPlugins": {
-            "connect@kn-plugins": True,
-            "weekly@kn-plugins": True,
-            "shared@dev-remote": True,   # remote -> must NOT be carried
-            "disabled@kn-plugins": False,
-        },
-    })
-    return k
-
-
-# --- read_repo_settings -------------------------------------------------------
-
-def test_read_native_and_claude_native_wins(tmp_path: Path):
-    repo = tmp_path / "r"
-    _write_settings(repo, {"enabledPlugins": {"a@m": False},
-                           "extraKnownMarketplaces": {"m": {"source": {"source": "directory", "path": "./x"}}}})
-    _write_settings(repo, {"enabledPlugins": {"a@m": True}}, claude=True)
-    enabled, mkts = ap.read_repo_settings(repo)
-    # native (a@m: False) wins over claude (a@m: True)
-    assert enabled["a@m"] is False
-    assert "m" in mkts
-
-
-def test_read_missing_is_empty(tmp_path: Path):
-    enabled, mkts = ap.read_repo_settings(tmp_path / "nope")
-    assert enabled == {} and mkts == {}
-
-
-# --- assemble -----------------------------------------------------------------
-
-def test_assemble_carries_only_local_marketplace(tmp_path: Path):
-    k = _knowledge_with_ai(tmp_path)
-    h = tmp_path / "harness"
-    h.mkdir()
-    summary = ap.assemble(h, k)
-    out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
-    # Only the local `.ai` marketplace is carried, path made absolute.
-    assert "kn-plugins" in out["extraKnownMarketplaces"]
-    assert "dev-remote" not in out["extraKnownMarketplaces"]
-    src = out["extraKnownMarketplaces"]["kn-plugins"]["source"]
-    assert src["source"] == "directory"
-    assert Path(src["path"]).is_absolute()
-    assert src["path"].endswith("/.ai")
-    # Only enabled local plugins carried; remote + disabled excluded.
-    assert out["enabledPlugins"] == {
-        "connect@kn-plugins": True, "weekly@kn-plugins": True
-    }
-    assert summary["count"] == 2
-    assert summary["marketplaces"] == ["kn-plugins"]
-
-
-def test_assemble_absolute_path_points_into_knowledge(tmp_path: Path):
-    k = _knowledge_with_ai(tmp_path)
-    h = tmp_path / "harness"
-    h.mkdir()
-    ap.assemble(h, k)
-    out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
-    p = out["extraKnownMarketplaces"]["kn-plugins"]["source"]["path"]
-    assert Path(p) == (k / ".ai").resolve()
-
-
-def test_assemble_preserves_unmanaged_and_refreshes_stale(tmp_path: Path):
-    k = _knowledge_with_ai(tmp_path)
-    h = tmp_path / "harness"
-    out_dir = h / ".github" / "copilot"
-    out_dir.mkdir(parents=True)
-    # Pre-existing settings.local.json with an unmanaged marketplace + a STALE
-    # managed-marketplace plugin that should be cleared on refresh.
-    (out_dir / "settings.local.json").write_text(json.dumps({
-        "extraKnownMarketplaces": {"user-own": {"source": {"source": "github", "repo": "me/own"}}},
-        "enabledPlugins": {"mine@user-own": True, "old@kn-plugins": True},
-    }), encoding="utf-8")
-    ap.assemble(h, k)
-    out = json.loads((out_dir / "settings.local.json").read_text())
-    # Unmanaged entries preserved.
-    assert out["extraKnownMarketplaces"]["user-own"]["source"]["repo"] == "me/own"
-    assert out["enabledPlugins"]["mine@user-own"] is True
-    # Managed marketplace refreshed; the stale old@kn-plugins is gone.
-    assert "old@kn-plugins" not in out["enabledPlugins"]
-    assert out["enabledPlugins"]["connect@kn-plugins"] is True
-
-
-def test_assemble_idempotent(tmp_path: Path):
-    k = _knowledge_with_ai(tmp_path)
-    h = tmp_path / "harness"
-    h.mkdir()
-    ap.assemble(h, k)
-    first = (h / ".github" / "copilot" / "settings.local.json").read_text()
-    ap.assemble(h, k)
-    second = (h / ".github" / "copilot" / "settings.local.json").read_text()
-    assert first == second
-
-
-def test_assemble_no_local_marketplace_is_noop_ish(tmp_path: Path):
-    k = tmp_path / "knowledge"
-    _write_settings(k, {
-        "extraKnownMarketplaces": {"dev-remote": {"source": {"source": "github", "repo": "o/r"}}},
-        "enabledPlugins": {"x@dev-remote": True},
-    })
-    h = tmp_path / "harness"
-    h.mkdir()
-    summary = ap.assemble(h, k)
-    assert summary["count"] == 0
-    out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
-    # No managed marketplace/plugins written.
-    assert out.get("extraKnownMarketplaces", {}) == {}
-    assert out.get("enabledPlugins", {}) == {}
-
-
-def test_assemble_claude_convention_source(tmp_path: Path):
-    # A knowledge repo declaring its `.ai` via the Claude settings convention.
-    k = tmp_path / "knowledge"
-    (k / ".ai").mkdir(parents=True)
-    _write_settings(k, {
-        "extraKnownMarketplaces": {"kn": {"source": {"source": "directory", "path": "./.ai"}}},
-        "enabledPlugins": {"s@kn": True},
-    }, claude=True)
-    h = tmp_path / "harness"
-    h.mkdir()
-    summary = ap.assemble(h, k)
-    assert summary["count"] == 1
-    out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
-    assert "kn" in out["extraKnownMarketplaces"]
-
-
-# --- Paired-worktree re-assembly (#1017) --------------------------------------
-
-def _pair_json(harness: Path, knowledge: Path, *, anchor=False):
-    """A `state-root --pair --json` payload with the given role paths."""
+def _summary(action: str) -> dict:
+    if action == "composed":
+        return {
+            "action": "composed",
+            "paired": True,
+            "changed": True,
+            "settings_local": "/harness/settings.local.json",
+            "harness_path": "/harness",
+            "knowledge_path": "/knowledge",
+            "marketplaces": ["personal"],
+            "enabled_plugins": ["skills@personal"],
+            "count": 1,
+            "conflicts": {"marketplaces": [], "enabled_plugins": []},
+        }
+    if action == "retired":
+        return {
+            "action": "retired",
+            "paired": False,
+            "retired": True,
+            "changed": True,
+            "settings_local": "/harness/settings.local.json",
+            "harness_path": "/harness",
+            "pair_error": "pair records disagree",
+            "retired_entries": {
+                "marketplaces": ["personal"],
+                "enabled_plugins": ["skills@personal"],
+            },
+            "preserved_modified": {
+                "marketplaces": [],
+                "enabled_plugins": [],
+            },
+            "file_removed": False,
+        }
     return {
-        "paired": True,
-        "pair_id": "pair-1",
-        "self": {"worktree_id": "wt-h", "role": "harness", "path": str(harness)},
-        "sibling": {
-            "worktree_id": None if anchor else "wt-k",
-            "role": "knowledge",
-            "path": str(knowledge),
-            "kind": "anchor" if anchor else "worktree",
-            "status": None if anchor else "active",
-        },
+        "action": "no-op",
+        "paired": False,
+        "retired": False,
+        "changed": False,
+        "pair_error": "ordinary repo is not paired",
     }
 
 
-def test_pair_paths_maps_roles_regardless_of_position(tmp_path: Path):
-    h, k = tmp_path / "h", tmp_path / "k"
-    # Even when the *self* entry is the knowledge side, roles drive the mapping.
-    data = {
-        "paired": True,
-        "self": {"worktree_id": "wt-k", "role": "knowledge", "path": str(k)},
-        "sibling": {"worktree_id": "wt-h", "role": "harness", "path": str(h)},
-    }
-    harness, knowledge, err = ap.pair_paths_from_resolution(data)
-    assert err is None
-    assert harness == str(h) and knowledge == str(k)
-
-
-def test_pair_paths_unpaired(tmp_path: Path):
-    harness, knowledge, err = ap.pair_paths_from_resolution(
-        {"paired": False, "error": "not paired"})
-    assert harness is None and knowledge is None
-    assert "not paired" in err
-
-
-def test_pair_paths_anchor_kind(tmp_path: Path):
-    h, k = tmp_path / "h", tmp_path / "kanchor"
-    harness, knowledge, err = ap.pair_paths_from_resolution(
-        _pair_json(h, k, anchor=True))
-    assert err is None
-    assert harness == str(h) and knowledge == str(k)
-
-
-def test_pair_paths_missing_role(tmp_path: Path):
-    data = {"paired": True,
-            "self": {"role": "harness", "path": str(tmp_path / "h")},
-            "sibling": {"role": "harness", "path": str(tmp_path / "h2")}}
-    harness, knowledge, err = ap.pair_paths_from_resolution(data)
-    assert harness is None and knowledge is None
-    assert "knowledge" in err
-
-
-def test_assemble_from_pair_renders_against_worktree(tmp_path: Path):
-    k = _knowledge_with_ai(tmp_path)  # knowledge worktree with a `.ai` marketplace
-    h = tmp_path / "harness"
-    h.mkdir()
-    resolver = _fake_resolver(tmp_path, _pair_json(h, k))
-    summary = ap.assemble_from_pair(cwd=h, resolver_cmd=resolver)
-    assert summary.get("paired") is not False
-    assert summary["pair"]["harness_path"] == str(h)
-    assert summary["pair"]["knowledge_path"] == str(k)
-    out = json.loads((h / ".github" / "copilot" / "settings.local.json").read_text())
-    assert "kn-plugins" in out["extraKnownMarketplaces"]
-
-
-def test_assemble_from_pair_unpaired_is_safe(tmp_path: Path):
-    h = tmp_path / "harness"
-    h.mkdir()
-    resolver = _fake_resolver(tmp_path, {"paired": False, "error": "not paired"}, exit_code=3)
-    summary = ap.assemble_from_pair(cwd=h, resolver_cmd=resolver)
-    assert summary["paired"] is False
-    assert "not paired" in summary["error"]
-    # No overlay written when unpaired.
-    assert not (h / ".github" / "copilot" / "settings.local.json").exists()
-
-
-def test_resolve_pair_missing_binary_is_safe(tmp_path: Path):
-    harness, knowledge, err = ap.resolve_pair(
-        cwd=tmp_path, resolver_cmd=["definitely-not-a-real-binary-xyz"])
-    assert harness is None and knowledge is None
-    assert err  # a reason, not a crash
-
-
-def _fake_resolver(tmp_path: Path, payload: dict, *, exit_code: int = 0):
-    """Write a tiny python script that prints `payload` and exits `exit_code`,
-    returned as a resolver_cmd list."""
-    script = tmp_path / f"fake_resolver_{abs(hash(json.dumps(payload, sort_keys=True))) % 10000}.py"
-    script.write_text(
-        "import json,sys\n"
-        f"print(json.dumps({payload!r}))\n"
-        f"sys.exit({exit_code})\n",
-        encoding="utf-8",
+def test_assemble_delegates_explicit_paths_and_parses_json(
+    monkeypatch, tmp_path: Path
+):
+    summary = _summary("composed")
+    calls = []
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    monkeypatch.setattr(
+        ap.shutil,
+        "which",
+        lambda name: "/tools/agent-worktrees" if name == "agent-worktrees" else None,
     )
-    import sys as _sys
-    return [_sys.executable, str(script)]
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return _result(summary)
+
+    monkeypatch.setattr(ap.subprocess, "run", fake_run)
+
+    assert ap.assemble(harness, knowledge) == summary
+    assert calls == [
+        (
+            [
+                "/tools/agent-worktrees",
+                "knowledge",
+                "compose-plugins",
+                "--harness-path",
+                str(harness),
+                "--knowledge-path",
+                str(knowledge),
+                "--json",
+            ],
+            {"capture_output": True, "text": True, "check": False},
+        )
+    ]
+
+
+def test_assemble_from_pair_uses_public_command(monkeypatch):
+    summary = _summary("no-op")
+    commands = []
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: "agent-worktrees.exe")
+    monkeypatch.setattr(
+        ap.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command) or _result(summary),
+    )
+
+    assert ap.assemble_from_pair() == summary
+    assert commands == [
+        [
+            "agent-worktrees.exe",
+            "knowledge",
+            "compose-plugins",
+            "--json",
+        ]
+    ]
+
+
+def test_missing_command_is_explicit(monkeypatch):
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: None)
+
+    with pytest.raises(ap.KnowledgePluginError, match="not found on PATH"):
+        ap.assemble_from_pair()
+
+
+def test_execution_failure_is_explicit(monkeypatch):
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: "agent-worktrees")
+
+    def fail(*_args, **_kwargs):
+        raise OSError("launch denied")
+
+    monkeypatch.setattr(ap.subprocess, "run", fail)
+
+    with pytest.raises(ap.KnowledgePluginError, match="launch denied"):
+        ap.assemble_from_pair()
+
+
+def test_nonzero_exit_uses_structured_error(monkeypatch):
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: "agent-worktrees")
+    monkeypatch.setattr(
+        ap.subprocess,
+        "run",
+        lambda *_args, **_kwargs: _result(
+            {"action": "error", "error": "unsafe malformed overlay"},
+            returncode=3,
+            stderr="less useful stderr",
+        ),
+    )
+
+    with pytest.raises(
+        ap.KnowledgePluginError,
+        match="status 3: unsafe malformed overlay",
+    ):
+        ap.assemble_from_pair()
+
+
+@pytest.mark.parametrize("payload", ["not json", "[]"])
+def test_invalid_json_response_is_explicit(monkeypatch, payload):
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: "agent-worktrees")
+    monkeypatch.setattr(
+        ap.subprocess,
+        "run",
+        lambda *_args, **_kwargs: _result(payload),
+    )
+
+    with pytest.raises(ap.KnowledgePluginError, match="returned .*JSON"):
+        ap.assemble_from_pair()
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"action": "unknown"},
+        {"action": []},
+        {"action": "composed", "paired": True},
+        {
+            **_summary("composed"),
+            "conflicts": {"marketplaces": [], "enabled_plugins": [1]},
+        },
+        {"action": "retired", "paired": False, "changed": True},
+        {"action": "no-op", "paired": False, "changed": False},
+    ],
+)
+def test_invalid_success_summary_is_explicit(monkeypatch, payload):
+    monkeypatch.setattr(ap.shutil, "which", lambda _name: "agent-worktrees")
+    monkeypatch.setattr(
+        ap.subprocess,
+        "run",
+        lambda *_args, **_kwargs: _result(payload),
+    )
+
+    with pytest.raises(ap.KnowledgePluginError, match="invalid"):
+        ap.assemble_from_pair()
+
+
+def test_non_json_composed_output(monkeypatch, capsys):
+    monkeypatch.setattr(ap, "assemble", lambda *_args: _summary("composed"))
+
+    assert ap.main(
+        ["--harness-path", "/harness", "--knowledge-path", "/knowledge"]
+    ) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "Updated knowledge plugin overlay: /harness/settings.local.json",
+        "  knowledge: /knowledge",
+        "  marketplaces: personal",
+        "  enabled: skills@personal",
+        "Canonical command: agent-worktrees knowledge compose-plugins",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("summary", "expected"),
+    [
+        (
+            _summary("retired"),
+            [
+                (
+                    "Retired stale knowledge plugin overlay: "
+                    "/harness/settings.local.json"
+                ),
+                "  pair error: pair records disagree",
+            ],
+        ),
+        (
+            _summary("no-op"),
+            [
+                (
+                    "Knowledge plugin preflight: no-op "
+                    "(ordinary repo is not paired)"
+                ),
+            ],
+        ),
+    ],
+)
+def test_from_pair_non_json_action_outputs(
+    monkeypatch, capsys, summary, expected
+):
+    monkeypatch.setattr(ap, "assemble_from_pair", lambda: summary)
+
+    assert ap.main(["--from-pair"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        *expected,
+        "Canonical command: agent-worktrees knowledge compose-plugins",
+    ]
+
+
+def test_json_error_output(monkeypatch, capsys):
+    def fail():
+        raise ap.KnowledgePluginError("agent-worktrees unavailable")
+
+    monkeypatch.setattr(ap, "assemble_from_pair", fail)
+
+    assert ap.main(["--from-pair", "--json"]) == 3
+    assert json.loads(capsys.readouterr().out) == {
+        "paired": False,
+        "error": "agent-worktrees unavailable",
+    }
+
+
+@pytest.mark.parametrize(
+    "summary",
+    [
+        {},
+        {"action": "unexpected"},
+        {"action": []},
+        {"action": "composed", "paired": True, "changed": True},
+        {"action": "retired", "paired": False, "changed": True},
+        {"action": "no-op", "paired": False, "changed": False},
+    ],
+)
+def test_main_invalid_summary_returns_documented_exit(
+    monkeypatch, capsys, summary
+):
+    monkeypatch.setattr(ap, "assemble_from_pair", lambda: summary)
+
+    assert ap.main(["--from-pair", "--json"]) == 3
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["paired"] is False
+    assert "invalid" in payload["error"]
+
+
+def test_non_json_error_output(monkeypatch, capsys):
+    def fail():
+        raise ap.KnowledgePluginError("agent-worktrees unavailable")
+
+    monkeypatch.setattr(ap, "assemble_from_pair", fail)
+
+    assert ap.main(["--from-pair"]) == 3
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.strip() == (
+        "Knowledge plugin overlay not composed: agent-worktrees unavailable"
+    )

@@ -22,13 +22,16 @@ launch-session.{ps1,sh}            # ① pre-flight freshness (see below)
 agent-worktrees resolve            # ② the Picker — you select or create a worktree
    │                                  emits a JSON launch plan, then exits
    ▼
-setup script                       # ③ tools/setup/setup.{ps1,sh} (or config launch:)
+knowledge plugin composition       # ③ paired harness only; settings.local.json
+   │                                  is ready before Copilot plugin discovery
+   ▼
+setup script                       # ④ tools/setup/setup.{ps1,sh} (or config launch:)
    │                                  install deps, set env, print status
    ▼
-Copilot CLI session                # ④ your work happens here (often in a mux pane)
+Copilot CLI session                # ⑤ your work happens here (often in a mux pane)
    │
    ▼
-post-exit checks                   # ⑤ detect completion; finalize if pushed
+post-exit checks                   # ⑥ detect completion; finalize if pushed
 ```
 
 Running the bare binstub always opens the Picker. To **skip** it and drive
@@ -75,6 +78,14 @@ never work against a stale tree or runtime:
 - **Auto-fast-forward** — resuming a *clean, strictly-behind* worktree
   fast-forwards it first (never a worktree with local commits). Disable with
   `--no-fast-forward` or `auto_fast_forward: false`.
+- **Paired knowledge plugins** — after you select a tracked harness worktree,
+  `agent-worktrees knowledge compose-plugins` refreshes its ignored local
+  settings from the paired knowledge worktree. Directory marketplaces therefore
+  resolve to that worktree (not the knowledge anchor), and operator-specific
+  remote marketplaces/enables are available before Copilot starts. A stale
+  tracked harness pair safely retires its exact marker-owned overlay; ordinary
+  unpaired repos are unchanged. If settings cannot be sanitized exactly, launch
+  stops before Copilot can discover stale plugins.
 
 ## The Picker screen
 

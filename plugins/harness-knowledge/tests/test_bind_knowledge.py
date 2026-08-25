@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import shutil
+import subprocess
 from pathlib import Path
 
 _MOD = Path(__file__).resolve().parents[1] / "skills" / "binding-knowledge" / "scripts" / "bind_knowledge.py"
@@ -127,25 +130,56 @@ def test_bind_idempotent_repoint(tmp_path: Path):
 
 # --- bind assembles the personal-plugin overlay (#955) ------------------------
 
-def test_bind_assembles_plugins_when_paths_known(tmp_path: Path):
-    import json as _json
-
+def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     harness = tmp_path / "harness"
     harness.mkdir()
     knowledge = tmp_path / "knowledge"
     (knowledge / ".ai").mkdir(parents=True)
     (knowledge / ".github" / "copilot").mkdir(parents=True)
-    (knowledge / ".github" / "copilot" / "settings.json").write_text(_json.dumps({
+    (knowledge / ".github" / "copilot" / "settings.json").write_text(json.dumps({
         "extraKnownMarketplaces": {"kn": {"source": {"source": "directory", "path": "./.ai"}}},
         "enabledPlugins": {"skill@kn": True},
     }), encoding="utf-8")
+
+    overlay = harness / ".github" / "copilot" / "settings.local.json"
+    summary = {
+        "action": "composed",
+        "paired": False,
+        "changed": True,
+        "count": 1,
+        "settings_local": str(overlay),
+        "harness_path": str(harness),
+        "knowledge_path": str(knowledge),
+        "marketplaces": ["kn"],
+        "enabled_plugins": ["skill@kn"],
+        "conflicts": {"marketplaces": [], "enabled_plugins": []},
+    }
+
+    def fake_run(command, **_kwargs):
+        assert command[1:6] == [
+            "knowledge",
+            "compose-plugins",
+            "--harness-path",
+            str(harness),
+            "--knowledge-path",
+        ]
+        assert command[6:] == [str(knowledge), "--json"]
+        overlay.parent.mkdir(parents=True)
+        overlay.write_text(
+            json.dumps({"enabledPlugins": {"skill@kn": True}}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, json.dumps(summary), "")
+
+    monkeypatch.setattr(shutil, "which", lambda _name: "agent-worktrees")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
     summary = bk.bind("citadel-harness", "kn-repo", str(knowledge),
                       home=home, harness_path=str(harness))
     # The overlay was written into the harness checkout.
-    overlay = harness / ".github" / "copilot" / "settings.local.json"
     assert overlay.exists()
-    out = _json.loads(overlay.read_text())
+    out = json.loads(overlay.read_text())
     assert out["enabledPlugins"] == {"skill@kn": True}
     assert summary["plugins"]["count"] == 1
 
@@ -154,4 +188,3 @@ def test_bind_skips_assembly_without_harness_path(tmp_path: Path):
     home = tmp_path / "home"
     summary = bk.bind("h", "k", "C:/k", home=home)  # no harness_path
     assert "plugins" not in summary
-
