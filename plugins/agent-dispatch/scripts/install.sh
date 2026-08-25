@@ -216,6 +216,7 @@ VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
+BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
 SYSTEMD_UNIT="agent-dispatch.service"
 SUPERVISOR_UNIT="agent-dispatch-supervisor.service"
 UNIT_DIR="$HOME/.config/systemd/user"
@@ -565,7 +566,10 @@ fi
 exit "$_rc"
 STUBEOF
     chmod +x "$STUB"
+    sed 's/-m agent_dispatch /-m agent_dispatch.board_cli /g' "$STUB" > "$BOARD_STUB"
+    chmod +x "$BOARD_STUB"
     _ok "Binstub: $STUB (self-provisioning)"
+    _ok "Fast board binstub: $BOARD_STUB"
 }
 
 _ensure_runtime() {
@@ -1426,7 +1430,7 @@ do_uninstall() {
         systemctl --user daemon-reload 2>/dev/null || true
         _ok "Coordinator service removed"
     fi
-    rm -f "$STUB"; _ok "Binstub removed"
+    rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
     rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
     if [[ "$PURGE" -eq 1 ]]; then
         rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"

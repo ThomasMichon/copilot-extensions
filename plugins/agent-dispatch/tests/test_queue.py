@@ -143,6 +143,59 @@ def test_heartbeat_wrong_owner_rejected(q):
         q.heartbeat(t.id, "w2")
 
 
+def test_set_activity_persists_independently_from_task_updated_at(q):
+    t = q.create("observed", now=1000.0)
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(reservation.key, session_handle="local-body:s1")
+    observed = q.set_activity(
+        t.id, "ACTIVE", reservation_key=reservation.key, now=1010.0
+    )
+    assert observed.activity == "ACTIVE"
+    assert observed.activity_updated_at == 1010.0
+    assert observed.updated_at == 1000.0
+    cleared = q.set_activity(
+        t.id, None, reservation_key=reservation.key, now=1020.0
+    )
+    assert cleared.activity is None
+    assert cleared.activity_updated_at == 1020.0
+
+
+def test_set_activity_rejects_unknown_value(q):
+    t = q.create("observed")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(reservation.key, session_handle="local-body:s1")
+    with pytest.raises(TaskError, match="invalid task activity"):
+        q.set_activity(t.id, "IDLE", reservation_key=reservation.key)
+
+
+def test_state_transition_clears_activity(q):
+    t = q.create("observed")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(reservation.key, session_handle="local-body:s1")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.set_activity(
+        t.id, "ACTIVE", reservation_key=reservation.key, now=1000.0
+    )
+    done = q.complete(t.id, "w1", now=1010.0)
+    assert done.activity is None
+    assert done.activity_updated_at == 1010.0
+
+
+def test_set_activity_rejects_stale_or_wrong_reservation(q):
+    t = q.create("observed")
+    other = q.create("other")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(reservation.key, session_handle="local-body:s1")
+    wrong, _ = q.reserve_spawn(other.id)
+    q.record_spawn(wrong.key, session_handle="local-body:s2")
+    with pytest.raises(TaskError, match="active spawned reservation"):
+        q.set_activity(t.id, "ACTIVE", reservation_key=wrong.key)
+    q.settle_spawn(reservation.key)
+    with pytest.raises(TaskError, match="active spawned reservation"):
+        q.set_activity(t.id, "ACTIVE", reservation_key=reservation.key)
+
+
 # -- progress beats ----------------------------------------------------------
 
 

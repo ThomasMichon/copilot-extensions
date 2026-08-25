@@ -681,7 +681,25 @@ if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) e
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
+    $boardStubPath = Join-Path $LocalBin 'agent-dispatch-board.cmd'
+    $boardStubContent = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_ROOT=%USERPROFILE%\.agent-dispatch"
+set "_VER="
+if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
+set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if exist "%_PY%" (
+  "%_PY%" -m agent_dispatch.board_cli %*
+  exit /b %ERRORLEVEL%
+)
+agent-dispatch inbox %* --board
+exit /b %ERRORLEVEL%
+'@
+    [System.IO.File]::WriteAllText($boardStubPath, $boardStubContent, $utf8NoBom)
     Write-Ok "Binstub: $stubPath (self-provisioning)"
+    Write-Ok "Fast board binstub: $boardStubPath"
 }
 
 function Install-Runtime {
@@ -2407,7 +2425,10 @@ function Invoke-Uninstall {
             Write-Ok 'Coordinator firewall rule removed'
         }
     }
-    foreach ($n in @('agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch')) {
+    foreach ($n in @(
+        'agent-dispatch.cmd', 'agent-dispatch.ps1', 'agent-dispatch',
+        'agent-dispatch-board.cmd'
+    )) {
         $p = Join-Path $LocalBin $n
         if (Test-Path $p) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
     }

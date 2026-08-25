@@ -249,6 +249,12 @@ class Task:
     #: (``live``/``gone``/``unknown``), so the buildup metric can classify held
     #: tasks without re-probing the bridge on every ``/health`` call.
     last_liveness: str | None = None
+    #: Background-published execution state, independent from lifecycle status.
+    #: ``ACTIVE`` means an assigned body is executing now; ``STALLED`` means its
+    #: turn is still running but has gone quiet. ``None`` means not executing or
+    #: unknown. The supervisor refreshes ``activity_updated_at``.
+    activity: str | None = None
+    activity_updated_at: float | None = None
     #: Steering (the card + steer seam). ``card`` is the latest-only card object
     #: a worker posts when it needs operator input -- parsed from JSON to a dict
     #: (``{title, status, link, body, request_input, ts}``), or ``None``.
@@ -295,6 +301,8 @@ class Task:
             generation=row["generation"],
             last_seen_at=row["last_seen_at"],
             last_liveness=row["last_liveness"],
+            activity=row["activity"],
+            activity_updated_at=row["activity_updated_at"],
             card=json.loads(row["card"]) if row["card"] else None,
             awaiting_steer=bool(row["awaiting_steer"]),
         )
@@ -434,6 +442,8 @@ _COLUMNS: dict[str, str] = {
     "generation": "INTEGER NOT NULL DEFAULT 0",
     "last_seen_at": "REAL",
     "last_liveness": "TEXT",
+    "activity": "TEXT",
+    "activity_updated_at": "REAL",
     # Steering (the card + steer seam): ``card`` is a latest-only JSON object the
     # worker posts to describe what it needs from the operator (title/status/link/
     # body/request_input); ``awaiting_steer`` is 1 while the task is blocked on an
@@ -1148,6 +1158,49 @@ class TaskQueue:
             conn.execute("COMMIT")
         return result  # type: ignore[return-value]
 
+    def set_activity(
+        self,
+        task_id: str,
+        activity: str | None,
+        *,
+        reservation_key: str,
+        now: float | None = None,
+    ) -> Task:
+        """Publish activity fenced to this task's active spawn reservation."""
+        if activity not in {None, "ACTIVE", "STALLED"}:
+            raise TaskError(
+                f"invalid task activity {activity!r} "
+                "(allowed: ACTIVE, STALLED, or null)"
+            )
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            reservation = conn.execute(
+                "SELECT task_id, state FROM spawn_reservations WHERE key = ?",
+                (reservation_key,),
+            ).fetchone()
+            if (
+                reservation is None
+                or reservation["task_id"] != task_id
+                or reservation["state"] != SpawnState.SPAWNED
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"activity update requires task {task_id!r}'s active spawned "
+                    f"reservation, got {reservation_key!r}"
+                )
+            conn.execute(
+                "UPDATE tasks SET activity = ?, activity_updated_at = ? WHERE id = ?",
+                (activity, ts, task_id),
+            )
+            result = self._fetch(conn, task_id)
+            conn.execute("COMMIT")
+        return result  # type: ignore[return-value]
+
     def record_progress(
         self,
         task_id: str,
@@ -1802,6 +1855,12 @@ class TaskQueue:
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
             sets = ["status = ?", "updated_at = ?"]
             params: list[object] = [to, ts]
+            # Preserve execution across claimed -> started; clear it when work
+            # leaves the held lifecycle. The supervisor keeps held observations
+            # fresh in the background.
+            if to not in Status.HELD:
+                sets.extend(["activity = NULL", "activity_updated_at = ?"])
+                params.append(ts)
             if stamp is not None:
                 sets.append(f"{stamp} = ?")
                 params.append(ts)

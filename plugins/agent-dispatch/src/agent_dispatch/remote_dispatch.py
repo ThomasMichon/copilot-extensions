@@ -22,9 +22,11 @@ needed; the remaining args are shell-quoted argv.
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import shutil
 import subprocess
+from pathlib import Path
 
 from .procutil import no_window_kwargs
 
@@ -36,16 +38,33 @@ class RemoteDispatchUnavailable(RuntimeError):
 def local_machine() -> str | None:
     """This machine's name (its SSH alias), or None if unresolvable.
 
-    Primary source is agent-worktrees' CWD-resolved identity. That resolution
-    fails in a bare **service / scheduled-task context** (no repo CWD, minimal
-    env), which would leave the supervisor daemon unable to identify itself and so
-    unable to scope machine-pinned declarations -- it would then either fail closed
-    (run nothing pinned) or, before the fix, run *everything* (aperture-labs #5001).
-    As a CWD-independent fallback, use the host's own **node name**
-    (``platform.node()``), normalized to the lowercase convention machine aliases
-    follow: a machine's node name is its natural identity and, by convention, is
-    its alias. Returns None only when neither source yields a name.
+    Prefer the configured supervisor machine from the environment or
+    ``~/.agent-dispatch/supervisor.env``. It is CWD-independent, preserves
+    supported aliases that differ from the OS hostname, and avoids shelling to
+    agent-worktrees on latency-sensitive reads.
+
+    Fall back to agent-worktrees' authoritative identity, then the normalized
+    host node name. Returns None only when none yield a name.
     """
+    configured = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
+    if not configured:
+        root = Path(
+            os.environ.get("AGENT_DISPATCH_INSTALL_DIR")
+            or (Path.home() / ".agent-dispatch")
+        )
+        try:
+            for line in (root / "supervisor.env").read_text(
+                encoding="utf-8"
+            ).splitlines():
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "AGENT_DISPATCH_SUPERVISE_MACHINE":
+                    configured = value.strip().strip("\"'")
+                    break
+        except OSError:
+            pass
+    if configured:
+        return configured.strip().casefold()
+
     from .identity import resolve_identity
 
     machine = resolve_identity()[0]

@@ -66,7 +66,8 @@ def _tool_path(
     status_core: bool = True,
 ) -> Path:
     path.mkdir(parents=True)
-    for name in ("git", "python3" if os.name != "nt" else "python.exe"):
+    tool_names = ("git.exe", "python.exe") if os.name == "nt" else ("git", "python3")
+    for name in tool_names:
         target = shutil.which(name)
         assert target
         try:

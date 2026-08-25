@@ -426,6 +426,7 @@ class Supervisor:
         label_max_attempts: Mapping[str, int] | None = None,
         supervisor_id: str | None = None,
         heartbeat: bool = True,
+        publish_activity: bool = False,
         recover: bool = True,
         nudge: bool = True,
         reactive: bool = True,
@@ -457,6 +458,9 @@ class Supervisor:
         }
         self.supervisor_id = supervisor_id or f"supervisor-{uuid.uuid4().hex[:8]}"
         self.heartbeat = heartbeat
+        #: Publish exact execution state into coordinator-owned task rows. This
+        #: keeps read surfaces pure API queries instead of shelling to bridge.
+        self.publish_activity = publish_activity
         #: When True, release the spawn reservation of a *confirmed-gone* embody
         #: so its task can be re-embodied (auto-recovery -- see
         #: :meth:`recover_gone`). Liveness-gated: only a ``gone`` verdict releases;
@@ -624,14 +628,21 @@ class Supervisor:
         recovery), and a transient bridge miss cannot mask a live worker (the
         worker's own activity still extends its lease). Returns the count held.
         """
+        tracking = _tracking()
+        local_sessions = (
+            tracking.list_local_body_sessions() if self.publish_activity else None
+        )
+        local_by_id = {
+            str(row.get("session_id")): row
+            for row in (local_sessions or [])
+            if isinstance(row, dict) and row.get("session_id")
+        }
         held = 0
         for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
             worktree = res.get("worktree")
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
-                continue
-            if task.get("status") not in _LEASED:
                 continue
             owner = task.get("owner")
             # Headless fleet body: probe its agent-bridge session on the pool host;
@@ -648,7 +659,7 @@ class Supervisor:
                     fverdict = self.fleet_verdict_fn(host, bridge_sid)
                 except Exception:  # liveness is best-effort -- never fatal
                     fverdict = _tracking().UNKNOWN
-                if fverdict == _tracking().LIVE:
+                if fverdict == _tracking().LIVE and self.heartbeat:
                     try:
                         self.client.heartbeat(task["id"], owner)
                         held += 1
@@ -661,16 +672,36 @@ class Supervisor:
             # course; recover_gone frees a confirmed-gone body).
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is not None:
+                if self.publish_activity:
+                    try:
+                        self.client.set_activity(
+                            task["id"],
+                            tracking.session_activity(local_by_id.get(local_sid)),
+                            reservation_key=res["key"],
+                        )
+                    except DispatchError:
+                        pass
+                if task.get("status") not in _LEASED:
+                    continue
                 if not owner:
                     continue
                 try:
                     lverdict = self.local_body_verdict_fn(local_sid)
                 except Exception:  # liveness is best-effort -- never fatal
                     lverdict = _tracking().UNKNOWN
-                if lverdict == _tracking().LIVE:
+                if lverdict == _tracking().LIVE and self.heartbeat:
                     try:
                         self.client.heartbeat(task["id"], owner)
                         held += 1
+                    except DispatchError:
+                        pass
+                continue
+            if task.get("status") not in _LEASED:
+                if self.publish_activity:
+                    try:
+                        self.client.set_activity(
+                            task["id"], None, reservation_key=res["key"]
+                        )
                     except DispatchError:
                         pass
                 continue
@@ -682,10 +713,27 @@ class Supervisor:
             except Exception:  # liveness is best-effort -- never let a probe be fatal
                 session = None
             if not session:
+                if self.publish_activity:
+                    try:
+                        self.client.set_activity(
+                            task["id"], None, reservation_key=res["key"]
+                        )
+                    except DispatchError:
+                        pass
                 continue  # not confirmed alive -> let the lease ride
+            if self.publish_activity:
+                try:
+                    self.client.set_activity(
+                        task["id"],
+                        tracking.session_activity(session),
+                        reservation_key=res["key"],
+                    )
+                except DispatchError:
+                    pass
             try:
-                self.client.heartbeat(task["id"], owner)
-                held += 1
+                if self.heartbeat:
+                    self.client.heartbeat(task["id"], owner)
+                    held += 1
             except DispatchError:
                 pass
         return held
@@ -1116,7 +1164,7 @@ class Supervisor:
         self.reconcile()
         if self.evaluator is not None:
             self.advance_via_evaluator()
-        if self.heartbeat:
+        if self.heartbeat or self.publish_activity:
             self.hold_live_leases()
         if self.recover:
             self.recover_gone()
@@ -1154,6 +1202,10 @@ class Supervisor:
                         session_handle=handle.get("session"),
                         worktree=handle.get("worktree"),
                     )
+                    if self.publish_activity:
+                        self.client.set_activity(
+                            task["id"], "ACTIVE", reservation_key=key
+                        )
                     active += 1
                     spawned.append(task["id"])
                     log.info("spawned embody for task %s (%s)", task["id"], key)
