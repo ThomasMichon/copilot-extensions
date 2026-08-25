@@ -20,7 +20,10 @@ def _executable(path: Path, text: str) -> None:
     path.chmod(0o755)
 
 
-@pytest.mark.skipif(_BASH is None, reason="bash is not available")
+@pytest.mark.skipif(
+    _BASH is None or os.name == "nt",
+    reason="a POSIX bash environment is not available",
+)
 def test_failed_systemd_start_reaches_direct_fallback(tmp_path: Path) -> None:
     home = tmp_path / "home"
     fake_bin = tmp_path / "bin"

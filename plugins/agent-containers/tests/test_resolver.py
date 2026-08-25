@@ -12,6 +12,8 @@ import asyncio
 import sys
 import types
 
+from ssh_manager import SSHConfig
+
 from agent_containers.resolver import (
     ContainerResolver,
     build_spawn_command,
@@ -77,6 +79,14 @@ def test_resolve_returns_wrapper_without_token(monkeypatch):
     config.fleets["myrepo"] = FleetConfig()
     monkeypatch.setattr(r, "load_config", lambda: config)
     monkeypatch.setattr(r, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        r,
+        "prepare_ssh_config",
+        lambda name, user: SSHConfig(
+            host_alias=f"agent-container-{name}", user=user,
+            identity_file="/keys/id_ed25519", config_file="/ssh/container.config",
+        ),
+    )
     # If resolve() ever called host_gh_token, this would put a token in the
     # target -- make it explode so the test fails loudly if that regresses.
     monkeypatch.setattr(
@@ -90,6 +100,9 @@ def test_resolve_returns_wrapper_without_token(monkeypatch):
     assert target.spawn_command[-3:] == ["exec", "--stdio", "myrepo-1"]
     # no token persisted anywhere on the target
     assert not getattr(target, "env", {})
+    assert target.container["name"] == "myrepo-1"
+    assert target.container["ssh"]["identity_file"] == "/keys/id_ed25519"
+    assert "token" not in str(target.container).lower()
     assert "container" == ContainerResolver().prefix
 
 
@@ -118,6 +131,76 @@ def test_resolve_spec_exposes_workspace_folder_and_profile(monkeypatch):
     # unchanged contract fields still present
     assert spec["type"] == "command"
     assert spec["spawn_command"][-3:] == ["exec", "--stdio", "myrepo-1"]
+    assert "container" not in spec
+
+
+def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    _stub_agent_bridge(monkeypatch)
+    monkeypatch.setattr(
+        r, "get_container",
+        lambda config, name: types.SimpleNamespace(fleet="myrepo"),
+    )
+    config = ContainersConfig()
+    config.fleets["myrepo"] = FleetConfig(
+        workspace_folder="/workspaces/myrepo",
+        security_profile="trusted",
+        acp_command="copilot --acp --stdio",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        r,
+        "prepare_ssh_config",
+        lambda name, user: SSHConfig(
+            host_alias=f"agent-container-{name}",
+            user=user,
+            identity_file="/keys/id_ed25519",
+            config_file="/ssh/container.config",
+        ),
+    )
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("myrepo-1"))
+
+    transport = spec["container"]
+    assert transport["name"] == "myrepo-1"
+    assert transport["workspace_folder"] == "/workspaces/myrepo"
+    assert transport["security_profile"] == "trusted"
+    assert transport["acp_command"] == "copilot --acp --stdio"
+    assert transport["ssh"]["host_alias"] == "agent-container-myrepo-1"
+    assert transport["provider_command"][1:3] == ["-m", "agent_containers"]
+
+
+def test_actual_restricted_label_never_projects_session_host_ssh(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    _stub_agent_bridge(monkeypatch)
+    monkeypatch.setattr(
+        r,
+        "get_container",
+        lambda config, name: types.SimpleNamespace(
+            fleet="myrepo",
+            security_profile="restricted",
+        ),
+    )
+    config = ContainersConfig()
+    config.fleets["myrepo"] = FleetConfig(security_profile="trusted")
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        r,
+        "prepare_ssh_config",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("restricted container must receive no SSH key")
+        ),
+    )
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("myrepo-1"))
+
+    assert "container" not in spec
 
 
 def test_resolve_missing_container_raises(monkeypatch):

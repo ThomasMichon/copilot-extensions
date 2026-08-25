@@ -122,6 +122,14 @@ async def test_resolve_carries_venue_metadata():
     SpawnTarget.venue (container fleets surface them for cwd + trust gating)."""
     fb = _Fallback()
 
+    container = {
+        "name": "odsp-web-1",
+        "workspace_folder": "/workspaces/odsp-web",
+        "security_profile": "trusted",
+        "ssh": {"host_alias": "agent-container-odsp-web-1"},
+        "provider_command": ["python", "-m", "agent_containers"],
+    }
+
     def _run(argv, **_kw):
         return _cp(0, json.dumps({
             "type": "command",
@@ -129,6 +137,7 @@ async def test_resolve_carries_venue_metadata():
             "user": "vscode",
             "workspace_folder": "/workspaces/odsp-web",
             "security_profile": "trusted",
+            "container": container,
         }))
 
     with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
@@ -139,6 +148,7 @@ async def test_resolve_carries_venue_metadata():
         "workspace_folder": "/workspaces/odsp-web",
         "security_profile": "trusted",
     }
+    assert t.container == container
 
 
 @pytest.mark.asyncio

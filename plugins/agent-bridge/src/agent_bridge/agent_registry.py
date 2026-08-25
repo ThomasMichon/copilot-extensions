@@ -479,6 +479,7 @@ class CliNamespaceResolver(NamespaceResolver):
                         spawn_command=spec["spawn_command"],
                         user=spec.get("user"),
                         codespace=spec.get("codespace"),
+                        container=spec.get("container"),
                         venue=venue,
                     )
                 except Exception:
