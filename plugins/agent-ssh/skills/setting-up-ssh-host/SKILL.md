@@ -124,7 +124,7 @@ Host dt-<host>-wsl
     Port 2200                   # the WSL sshd's dedicated loopback port
     User <linux-user>
     ProxyJump dt-<host>         # the machine's existing dtssh host
-    IdentityFile ~/.ssh/id_ed25519
+    IdentityFile <existing-local-private-key>
     StrictHostKeyChecking accept-new
     ServerAliveInterval 30
 ```
@@ -168,16 +168,22 @@ so pipe SSH through it and let `nc` inside WSL make the local connection:
 Host <host>-wsl
     User <linux-user>
     ProxyCommand wsl.exe -d <distro> -u <linux-user> exec nc 127.0.0.1 2200
-    IdentityFile ~/.ssh/id_ed25519
+    IdentityFile <existing-local-private-key>
     StrictHostKeyChecking accept-new
 ```
 
 Generate this with the transport rather than hand-writing it:
 
-```
+```bash
 python transports/wsl/deploy/emit-registry.py --machines machines.yaml --out wsl-registry.yaml
 python -m agent_ssh emit-profile wsl-registry.yaml --module transports/wsl/module.yaml
 ```
+
+When `--identity-file` is omitted, the emitter selects an existing local
+private key with a sibling `.pub` (machine-scoped key first, then canonical
+`id_ed25519`, then another local keypair). The provisioning flow seeds those
+public keys into WSL, so the emitted profile must never name a nonexistent
+default key.
 
 `emit-registry` auto-detects the local machine's `ssh.environments` `wsl` entry
 and emits a one-record registry; the core renders `50-agent-ssh-wsl.conf`. This is
