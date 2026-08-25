@@ -3,8 +3,8 @@
 #
 # Installs ONLY agent-worktrees on a fresh box and asserts the WORKTREE BASE
 # itself stands up self-sufficiently and its CLI surface actually works: the
-# runtime provisions on first session, the binstub is on PATH and reports a real
-# version, its read verbs enumerate, and a worktree ROUND-TRIPS
+# first session stamps the binstub, first use provisions the runtime, the binstub
+# is on PATH and reports a real version, its read verbs enumerate, and a worktree ROUND-TRIPS
 # (register -> create -> finalize). agent-worktrees is the base other plugins
 # degrade against, so this is the anchor of the P1 solo set.
 #
@@ -28,6 +28,11 @@ MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
 UV_INDEX="${CR_UV_INDEX:-}"
 PLUGIN="agent-worktrees"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
+if [ -d "$MARKETPLACE_REPO" ]; then
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": \"$MARKETPLACE_REPO\" } }"
+else
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": \"$MARKETPLACE_REPO\" } }"
+fi
 
 : "${CR_SCENARIO_NAME:=agent-worktrees-solo}"
 export CR_SCENARIO_NAME
@@ -56,7 +61,7 @@ phase 1 "install ONLY $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
-  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
+  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
 JSON
@@ -69,36 +74,34 @@ else
 fi
 
 # =========================================================================
-phase 2 "runtime self-provisions on first session / first use (stamp + venv)"
+phase 2 "first session stamps binstub; first use provisions runtime"
 _apply_uv_index_fixture
 mkdir -p "$HOME/wt-repo" && ( cd "$HOME/wt-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# wt' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
 ( cd "$HOME/wt-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
-sleep 8
-# The versioned venv is deliberately DEFERRED to the tool binstub's first use
-# (#1393): a first session STAMPS the self-provisioning ~/.local/bin/agent-worktrees
-# binstub (grace-window-cheap, no venv build), and the binstub builds the venv on
-# first invocation. So assert the stamp landed, then trigger first use and assert
-# the runtime -- mirroring agent-ssh-solo / agent-machines-solo.
-_aw_runtime_ready() { [ -d "$HOME/.agent-worktrees/versions" ] || [ -x "$HOME/.agent-worktrees/.venv/bin/python" ]; }
 if [ -e "$HOME/.local/bin/agent-worktrees" ]; then
-    pass "session-start stamped the self-provisioning binstub (~/.local/bin/agent-worktrees)"
-else
-    info "session-start did not stamp a binstub yet; still probing for a runtime"
-fi
-if ! _aw_runtime_ready && bash -lc 'command -v agent-worktrees >/dev/null'; then
-    info "runtime not built yet -- triggering the binstub's first-use provision"
-    capture "binstub-first-use" -- bash -lc 'agent-worktrees --version' || true
-    sleep 3
-fi
-if _aw_runtime_ready; then
-    pass "agent-worktrees runtime deployed after first session / first use"
-else
-    if [ -z "$UV_INDEX" ] && grep -qiE 'HandshakeFailure|pythonhosted|SSL|TLS|certificate' "$CR_LOGDIR/session-first.log" "$CR_LOGDIR/binstub-first-use.log" 2>/dev/null; then
-        jam "toolchain-uv" "first session/use: uv could not reach its index (public PyPI TLS-blocked)" "re-run with CR_UV_INDEX=<internal index-url>"
+    pass "first session stamped ~/.local/bin/agent-worktrees"
+    if capture "first-use-version" -- bash -lc 'agent-worktrees --version'; then
+        first_use_ok=1
     else
-        jam "path-binstub" "runtime NOT deployed by first session or first-use binstub (#1236)" "first-install should stamp the binstub + self-provision on first use"
+        first_use_ok=0
+        jam "path-binstub" "first binstub use failed (see cr-logs/first-use-version.log)" "stamped binstub should invoke install provision and then dispatch"
+    fi
+else
+    first_use_ok=0
+    jam "path-binstub" "first session did not stamp ~/.local/bin/agent-worktrees" "payload bootstrap-check should run install.sh stamp"
+fi
+sleep 3
+_current="$(tr -d ' \t\r\n' < "$HOME/.agent-worktrees/current-version" 2>/dev/null || true)"
+_slot="$HOME/.agent-worktrees/versions/$_current"
+if [ "$first_use_ok" -eq 1 ] && [ -n "$_current" ] && [ -x "$_slot/bin/python" ] && [ -f "$_slot/.install-complete.json" ]; then
+    pass "agent-worktrees runtime deployed on first binstub use"
+else
+    if [ -z "$UV_INDEX" ] && grep -qiE 'HandshakeFailure|pythonhosted|SSL|TLS|certificate' "$CR_LOGDIR/first-use-version.log" 2>/dev/null; then
+        jam "toolchain-uv" "first use: uv could not reach its index (public PyPI TLS-blocked)" "re-run with CR_UV_INDEX=<internal index-url>"
+    else
+        jam "path-binstub" "runtime NOT deployed by first binstub use (see cr-logs/first-use-version.log)" "stamped binstub should invoke install provision"
     fi
 fi
 
@@ -117,36 +120,36 @@ else
 fi
 
 # =========================================================================
-phase 4 "read verbs enumerate (repos list / projects / list)"
-# Invoke through a login shell: the tool binstub lives in ~/.local/bin, which is
-# on the login PATH (as an agent's shell-outs see it) but NOT a bare exec PATH.
-_read_ok=0
-for verb in "repos list" "projects" "list"; do
-    _label="read-$(printf '%s' "$verb" | tr ' ' '-')"
-    if capture "$_label" -- bash -lc "agent-worktrees $verb"; then
+phase 4 "read verbs enumerate (repos / projects / list)"
+if capture "read-repos-list" -- bash -lc "agent-worktrees repos list"; then
+    pass "agent-worktrees repos list exits 0"
+else
+    fail "agent-worktrees repos list failed (see cr-logs/read-repos-list.log)"
+fi
+for probe in help version; do
+    if [ "$probe" = help ]; then verb="--help"; else verb="--version"; fi
+    if capture "read-$probe" -- bash -lc "agent-worktrees $verb"; then
         pass "agent-worktrees $verb exits 0"
-        _read_ok=1
     else
-        info "agent-worktrees $verb non-zero (see cr-logs/$_label.log)"
+        fail "agent-worktrees $verb failed (see cr-logs/read-$probe.log)"
     fi
 done
-[ $_read_ok -eq 1 ] || fail "no agent-worktrees read verb (repos list/projects/list) exited 0"
 
 # =========================================================================
 phase 5 "worktree round-trips (register -> create -> finalize)"
 if bash -lc 'command -v agent-worktrees >/dev/null'; then
-    ( cd "$HOME/wt-repo" && capture "register" -- bash -lc 'agent-worktrees register wt-repo' ) || true
+    capture "register" -- bash -lc "cd '$HOME/wt-repo' && agent-worktrees register wt-repo" || true
     if [ -f "$HOME/.agent-worktrees/projects.yaml" ] && grep -qi wt-repo "$HOME/.agent-worktrees/projects.yaml" 2>/dev/null; then
         pass "register: wt-repo recognized (projects.yaml written)"
     else
         fail "register: no projects.yaml entry for wt-repo"
     fi
     # create (programmatic, no launch) -> capture the id -> finalize it.
-    ( cd "$HOME/wt-repo" && capture "create" -- bash -lc 'agent-worktrees create --json' ) || true
+    capture "create" -- bash -lc "cd '$HOME/wt-repo' && agent-worktrees create --json" || true
     _wt_id="$(grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$CR_LOGDIR/create.log" 2>/dev/null | head -1 | sed -E 's/.*"id"[^"]*"([^"]+)".*/\1/')"
     if [ -n "$_wt_id" ]; then
         pass "create: worktree carved ($_wt_id)"
-        ( cd "$HOME/wt-repo" && capture "finalize" -- bash -lc "agent-worktrees finalize '$_wt_id' --json" ) || true
+        capture "finalize" -- bash -lc "cd '$HOME/wt-repo' && agent-worktrees finalize '$_wt_id' --json" || true
         if grep -qiE 'finaliz|prune|safe to' "$CR_LOGDIR/finalize.log" 2>/dev/null; then
             pass "finalize: $_wt_id round-tripped (create -> finalize)"
         else

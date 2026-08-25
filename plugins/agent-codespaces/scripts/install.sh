@@ -515,9 +515,24 @@ deploy_binstub() {
 export PYTHONUTF8=1
 _name="agent-codespaces"
 _root="$HOME/.$_name"
-_console="$_root/.venv/bin/$_name"
+_resolve_python() {
+    for _marker in current-version last-known-good; do
+        _ver=""
+        [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
+        _candidate="$_root/versions/$_ver/bin/python"
+        if [ -n "$_ver" ] && [ -x "$_candidate" ]; then
+            printf '%s\n' "$_candidate"
+            return
+        fi
+    done
+    _complete="$(ls -1t "$_root"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
+    _candidate=""
+    [ -n "$_complete" ] && _candidate="$(dirname "$_complete")/bin/python"
+    [ -n "$_candidate" ] && printf '%s\n' "$_candidate"
+}
+_python="$(_resolve_python)"
 # Fast path: runtime already provisioned.
-[ -x "$_console" ] && exec "$_console" "$@"
+[ -n "$_python" ] && exec "$_python" -m agent_codespaces "$@"
 # --- not provisioned: self-install on first use --------------------------
 mkdir -p "$_root"
 _status="$_root/.provision-status"
@@ -537,17 +552,19 @@ _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
 # Re-check under the lock -- another invocation may have finished provisioning.
-[ -x "$_console" ] && exec "$_console" "$@"
+_python="$(_resolve_python)"
+[ -n "$_python" ] && exec "$_python" -m agent_codespaces "$@"
 printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 bash "$_install" provision >&2
 _rc=$?
-if [ "$_rc" -eq 0 ] && [ -x "$_console" ]; then
+_python="$(_resolve_python)"
+if [ "$_rc" -eq 0 ] && [ -n "$_python" ]; then
     printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$_console" "$@"
+    exec "$_python" -m agent_codespaces "$@"
 fi
 printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
 if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but the CLI is still missing ($_console)." >&2
+    printf '%s\n' "[$_name] provisioning reported success but no marker-resolved runtime python is available." >&2
     _rc=1
 else
     printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2

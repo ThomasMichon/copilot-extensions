@@ -62,7 +62,6 @@ fi
 
 # --- Installed: check if package is stale ---
 if [[ ! -f "$MANIFEST" ]]; then exit 0; fi
-
 plugin_dir="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('plugin_source',''))" "$MANIFEST" 2>/dev/null || true)"
 if [[ -z "$plugin_dir" || ! -d "$plugin_dir" ]]; then exit 0; fi
 
