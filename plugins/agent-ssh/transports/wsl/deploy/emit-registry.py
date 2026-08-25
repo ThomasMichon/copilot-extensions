@@ -54,6 +54,29 @@ def _wsl_env(machine: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _select_identity_file(machine_key: str, ssh_dir: Path | None = None) -> str | None:
+    """Select an existing private key whose sibling public key is present."""
+    root = ssh_dir or (Path.home() / ".ssh")
+    scoped = "id_ed25519_" + re.sub(r"[^A-Za-z0-9]+", "_", machine_key).strip("_")
+    names = [scoped, "id_ed25519"]
+    try:
+        names.extend(p.name for p in sorted(root.glob("id_ed25519_*")))
+        names.extend(p.name for p in sorted(root.glob("id_*")))
+    except OSError:
+        return None
+
+    seen: set[str] = set()
+    for name in names:
+        if name in seen or name.endswith(".pub") or "-cert" in name:
+            continue
+        seen.add(name)
+        private = root / name
+        public = root / f"{name}.pub"
+        if private.is_file() and public.is_file():
+            return f"~/.ssh/{name}"
+    return None
+
+
 def _yaml_quote(value: Any) -> str:
     if isinstance(value, int):
         return str(value)
@@ -90,7 +113,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--port", type=int, default=2200, help="WSL sshd loopback port (default 2200)")
     ap.add_argument("--distro", default="Ubuntu", help="WSL distro name for `wsl.exe -d` (default Ubuntu)")
     ap.add_argument("--user", default=None, help="Override the WSL login user (default: from machines.yaml wsl env)")
-    ap.add_argument("--identity-file", default="~/.ssh/id_ed25519", help="Client identity file for the alias")
+    ap.add_argument(
+        "--identity-file",
+        default=None,
+        help="Client identity file for the alias (default: select an existing local keypair)",
+    )
     ap.add_argument("--out", type=Path, help="Write registry YAML to this path instead of stdout")
     args = ap.parse_args(argv)
 
@@ -111,12 +138,19 @@ def main(argv: list[str] | None = None) -> int:
 
     name = env.get("alias") or f"{key}-wsl"
     user = args.user or env.get("user") or os.environ.get("USERNAME") or "agent"
+    identity_file = args.identity_file or _select_identity_file(key)
+    if not identity_file:
+        sys.stderr.write(
+            "No usable local SSH identity found under ~/.ssh "
+            "(expected a private key with a sibling .pub); pass --identity-file <path>.\n"
+        )
+        return 2
     record = {
         "name": name,
         "user": user,
         "port": args.port,
         "distro": args.distro,
-        "identity_file": args.identity_file,
+        "identity_file": identity_file,
     }
     text = render_registry(record)
     if args.out:

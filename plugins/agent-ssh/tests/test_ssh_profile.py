@@ -170,6 +170,7 @@ def test_wsl_emit_registry_from_machines_yaml() -> None:
             "--machines", str(machines_yaml),
             "--machine", "devbox",
             "--distro", "Ubuntu",
+            "--identity-file", "~/.ssh/id_test",
             "--out", str(out),
         ]
     )
@@ -181,8 +182,36 @@ def test_wsl_emit_registry_from_machines_yaml() -> None:
     assert m["user"] == "agent"
     assert m["port"] == 2200
     assert m["distro"] == "Ubuntu"
+    assert m["identity_file"] == "~/.ssh/id_test"
 
     # Round-trip: the emitted registry renders the interop ProxyCommand.
     wsl = _load_transport("wsl")
     fragment = ssh_profile.render_fragment(reg, wsl)
     assert "ProxyCommand wsl.exe -d Ubuntu -u agent exec nc 127.0.0.1 2200" in fragment
+
+
+def _keypair(root: Path, name: str) -> None:
+    (root / name).write_text("private", encoding="utf-8")
+    (root / f"{name}.pub").write_text("public", encoding="utf-8")
+
+
+def test_wsl_identity_selection_prefers_machine_scoped_then_canonical() -> None:
+    scratch = _reset_scratch()
+    mod = _load_wsl_emit_registry()
+    _keypair(scratch, "id_ed25519_devbox")
+    assert mod._select_identity_file("devbox", scratch) == "~/.ssh/id_ed25519_devbox"
+    _keypair(scratch, "id_ed25519")
+    assert mod._select_identity_file("devbox", scratch) == "~/.ssh/id_ed25519_devbox"
+    (scratch / "id_ed25519_devbox").unlink()
+    (scratch / "id_ed25519_devbox.pub").unlink()
+    assert mod._select_identity_file("devbox", scratch) == "~/.ssh/id_ed25519"
+
+
+def test_wsl_identity_selection_falls_back_and_requires_public_sibling() -> None:
+    scratch = _reset_scratch()
+    mod = _load_wsl_emit_registry()
+    (scratch / "id_ed25519_devbox").write_text("private-only", encoding="utf-8")
+    _keypair(scratch, "id_ed25519_other")
+    assert mod._select_identity_file("devbox", scratch) == "~/.ssh/id_ed25519_other"
+    (scratch / "id_ed25519_other.pub").unlink()
+    assert mod._select_identity_file("devbox", scratch) is None
