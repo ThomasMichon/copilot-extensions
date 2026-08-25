@@ -162,13 +162,50 @@ def test_reclaim_worktree_finalize_refusal_retains(monkeypatch):
 def test_reclaim_worktree_unresolvable_project_fails(monkeypatch):
     monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
                         lambda project, config: None)
+    monkeypatch.setattr(cleanup.repos_mod, "find_repo", lambda project: None)
     r = cleanup.reclaim_worktree("m/p/child", _config(), apply=True)
     assert r.status == "failed" and "resolve project" in r.detail
+
+
+def test_reclaim_worktree_falls_back_to_global_repo_registry(
+        tmp_path, monkeypatch):
+    anchor = tmp_path / "child-anchor"
+    anchor.mkdir()
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: None)
+    monkeypatch.setattr(
+        cleanup.repos_mod, "find_repo",
+        lambda project: types.SimpleNamespace(local_path=lambda: str(anchor)))
+    seen = {}
+
+    def _run(args, *, cwd=None, **kwargs):
+        seen["cwd"] = cwd
+        return _proc(0)
+
+    monkeypatch.setattr(cleanup, "_run_worktrees", _run)
+    r = cleanup.reclaim_worktree("m/dev.tmichon/child", _config(), apply=True)
+    assert r.status == "reclaimed"
+    assert seen["cwd"] == str(anchor)
 
 
 def test_reclaim_worktree_unparseable_ref_fails():
     r = cleanup.reclaim_worktree("", _config(), apply=True)
     assert r.status == "failed"
+
+
+def test_reclaim_worktree_cross_machine_skips_before_local_resolution(
+        monkeypatch):
+    resolved = {"called": False}
+
+    def _find(project):
+        resolved["called"] = True
+        return None
+
+    monkeypatch.setattr(cleanup.repos_mod, "find_repo", _find)
+    r = cleanup.reclaim_worktree(
+        "other/p/child", _config(machine="local"), apply=True)
+    assert r.status == "skipped" and "other" in r.detail
+    assert resolved["called"] is False
 
 
 def test_reclaim_orphan_worktree_dispatches(monkeypatch):
@@ -249,10 +286,31 @@ def test_cleanup_empty_orphanage(tmp_path, monkeypatch):
     assert cleanup.cleanup_orphanage(_config(), apply=True) == []
 
 
+def test_cleanup_selects_exact_ref_or_source_worktree(tmp_path, monkeypatch):
+    _seed_project(tmp_path, monkeypatch)
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a"), _claim("codespace", "cs-b")],
+        source_worktree="owner-a", config=_config())
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-c")],
+        source_worktree="owner-b", config=_config())
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: _proc(0))
+
+    by_ref = cleanup.cleanup_orphanage(
+        _config(), apply=True, selectors={"cs-a"})
+    assert [row["ref"] for row in by_ref] == ["cs-a"]
+    by_owner = cleanup.cleanup_orphanage(
+        _config(), apply=True, selectors={"owner-b"})
+    assert [row["ref"] for row in by_owner] == ["cs-c"]
+    assert [entry["ref"] for entry in tracking.load_orphaned_obligations()] == [
+        "cs-b"]
+
+
 # ── claims cleanup verb (CLI integration) ────────────────────────────────────
 
-def _cleanup_args(apply=False, json_=False):
-    return argparse.Namespace(target=(["cleanup"]), apply=apply, json=json_)
+def _cleanup_args(apply=False, json_=False, selectors=None):
+    return argparse.Namespace(
+        target=["cleanup", *(selectors or [])], apply=apply, json=json_)
 
 
 def test_claims_cleanup_verb_json(tmp_path, monkeypatch, capfd):
@@ -275,3 +333,20 @@ def test_claims_cleanup_verb_empty_text(tmp_path, monkeypatch, capfd):
     rc = m.cmd_claims(_cleanup_args(apply=False, json_=False))
     assert rc == 0
     assert "orphanage is empty" in capfd.readouterr().out.lower()
+
+
+def test_claims_cleanup_verb_passes_selectors(tmp_path, monkeypatch, capfd):
+    _seed_project(tmp_path, monkeypatch)
+    monkeypatch.setattr(cfg, "load_config", lambda: _config())
+    tracking.rehome_abandoned_obligations(
+        [_claim("codespace", "cs-a"), _claim("codespace", "cs-b")],
+        source_worktree="owner", config=_config())
+    monkeypatch.setattr(cleanup, "_run_codespaces", lambda *a, **k: _proc(0))
+    rc = m.cmd_claims(_cleanup_args(
+        apply=True, json_=True, selectors=["cs-a"]))
+    assert rc == 0
+    out = json.loads(capfd.readouterr().out)
+    assert out["selectors"] == ["cs-a"]
+    assert [row["ref"] for row in out["results"]] == ["cs-a"]
+    assert [entry["ref"] for entry in tracking.load_orphaned_obligations()] == [
+        "cs-b"]

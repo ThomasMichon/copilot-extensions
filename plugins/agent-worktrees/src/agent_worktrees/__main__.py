@@ -6963,17 +6963,25 @@ def _claims_cleanup(args: argparse.Namespace) -> int:
     """
     config = cfg.load_config()
     apply = getattr(args, "apply", False)
+    target = list(getattr(args, "target", None) or [])
+    selectors = set(target[1:])
     from . import cleanup as cleanup_mod
-    rows = cleanup_mod.cleanup_orphanage(config, apply=apply)
+    rows = cleanup_mod.cleanup_orphanage(
+        config, apply=apply, selectors=selectors or None)
 
     reclaimed = [r for r in rows if r["status"] == "reclaimed"]
     if args.json:
         _json_output({"applied": apply, "results": rows,
+                      "selectors": sorted(selectors),
                       "reclaimed": len(reclaimed), "count": len(rows)})
         return 0
     if not rows:
-        print("claims cleanup: no re-homed obligations to reclaim "
-              "(the orphanage is empty).")
+        if selectors:
+            print("claims cleanup: no re-homed obligations matched: "
+                  + ", ".join(sorted(selectors)))
+        else:
+            print("claims cleanup: no re-homed obligations to reclaim "
+                  "(the orphanage is empty).")
         return 0
     verb = "Reclaimed" if apply else "Would reclaim (dry-run; pass --apply)"
     print(f"claims cleanup -- {len(rows)} orphaned obligation(s):")
@@ -14902,9 +14910,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "OR 'settle <ref>' to mark it at-rest (settled) / released, "
                         "OR 'sweep' to reclaim provably-gone+safe obligations "
                         "(never-wedge), OR 'orphans' to list obligations re-homed "
-                        "by an --abandon finalize (pending cleanup), OR 'cleanup' "
-                        "to reclaim those re-homed obligations (delete the "
-                        "orphaned resource; --apply to act)")
+                        "by an --abandon finalize (pending cleanup), OR 'cleanup "
+                        "[<ref-or-source-worktree> ...]' to reclaim matching "
+                        "re-homed obligations (no selector = all; --apply to act)")
     p.add_argument("--remove", action="store_true",
                    help="with release: drop the claim entry entirely instead of "
                         "marking it released")

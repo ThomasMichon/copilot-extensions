@@ -31,10 +31,12 @@ import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 from agent_procutil import no_window_flags
 
 from . import config as cfg
+from . import repos as repos_mod
 from . import sweep as sweep_mod
 from . import tracking
 
@@ -160,8 +162,22 @@ def reclaim_worktree(
     parsed = tracking.parse_claim_ref(ref)
     if parsed is None or not parsed.worktree_id:
         return ReclaimResult("failed", f"unparseable worktree ref {ref!r}")
+    this_machine = getattr(config, "machine", None)
+    if parsed.machine and this_machine and parsed.machine != this_machine:
+        return ReclaimResult(
+            "skipped", f"cross-machine worktree (owned by {parsed.machine}); "
+                       "run claims cleanup there")
     repo = sweep_mod.repo_for_project(parsed.project, config)
-    if repo is None:
+    anchor = getattr(repo, "anchor", None) if repo is not None else None
+    if not anchor and parsed.project:
+        # The orphanage belongs to the closing project, so its loaded config
+        # need not enumerate every cross-project child. Fall back to the global
+        # repos registry -- the same source `repos find` / project binstubs use.
+        entry = repos_mod.find_repo(parsed.project)
+        candidate = entry.local_path() if entry is not None else None
+        if candidate and Path(candidate).is_dir():
+            anchor = candidate
+    if not anchor:
         return ReclaimResult(
             "failed", f"cannot resolve project {parsed.project!r} on this machine")
     if not apply:
@@ -170,7 +186,7 @@ def reclaim_worktree(
             f"would finalize worktree {parsed.worktree_id} in {parsed.project}")
     proc = _run_worktrees(
         ["finalize", parsed.worktree_id, "--abandon", "--json"],
-        cwd=repo.anchor)
+        cwd=anchor)
     if proc is None:
         return ReclaimResult("failed", "agent-worktrees binstub unavailable")
     if proc.returncode == 0:
@@ -219,18 +235,29 @@ def reclaim_orphan(
 
 def cleanup_orphanage(
     config: cfg.Config, *, apply: bool, project: str | None = None,
+    selectors: set[str] | None = None,
 ) -> list[dict]:
     """Run the cleanup consumer over the durable orphanage.
 
-    Reclaims every actionable entry (see :func:`reclaim_orphan`) and, on apply,
-    drops the successfully-reclaimed entries from the registry via
+    With ``selectors``, acts only on entries whose exact resource ``ref`` OR
+    ``source_worktree`` matches, so one closing agent can discharge its own
+    abandoned obligations without touching unrelated orphanage residents.
+    Otherwise reclaims every actionable entry (see :func:`reclaim_orphan`).
+    On apply, drops the successfully-reclaimed entries from the registry via
     :func:`tracking.remove_orphaned_obligations`. Returns one result row per
     entry: ``{kind, ref, source_worktree, status, detail}`` -- so a caller (the
     ``claims cleanup`` verb) can render text or JSON. Best-effort throughout.
     """
     rows: list[dict] = []
     reclaimed_keys: list[tuple[str | None, str | None]] = []
-    for entry in tracking.load_orphaned_obligations(project):
+    entries = tracking.load_orphaned_obligations(project)
+    if selectors:
+        entries = [
+            entry for entry in entries
+            if entry.get("ref") in selectors
+            or entry.get("source_worktree") in selectors
+        ]
+    for entry in entries:
         result = reclaim_orphan(entry, config, apply=apply)
         rows.append({
             "kind": entry.get("kind"),
