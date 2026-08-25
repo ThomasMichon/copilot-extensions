@@ -89,6 +89,24 @@ timeouts:
   command: 1800         # a single turn/command to complete
 ```
 
+### Remote Session Host authority
+
+A remote Session Host is the durable owner of its Copilot child. Each running
+host publishes a mode-0600 record under the remote user's mode-0700
+`~/.agent-bridge/session-hosts/` catalogue. The record names the bridge session,
+host/child PIDs and process-start identities, host port, protocol/build version,
+working directory, and credential-relay reverse forwards. It also carries the
+private ATTACH nonce; diagnostics must redact that field.
+
+After a frontend restart, agent-bridge first reattaches from its local HostIndex.
+If that row was lost but the session DB survived, it inspects the far-side
+record for an already-running CodeSpace, validates boot/PID identity, rebuilds
+the ACP and relay forwards, and adopts the same child. A transport failure is
+inconclusive and blocks duplicate spawn; only confirmed host death permits
+pruning, with an explicit process-group reap if the owned child survived.
+Startup inspection never wakes a stopped CodeSpace; explicit resume may wake
+and revalidate it.
+
 ### Session retention & garbage collection
 
 `sessions.db` is a *relay log* of cross-agent turns/events -- not the canonical

@@ -18,12 +18,13 @@ seam operations:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import posixpath
 import shlex
+import subprocess
 
 from agent_procutil import no_window_flags
-
 from ssh_manager import CodespaceConfigSource, ConnectionManager
 
 log = logging.getLogger("agent-bridge.session-host.codespace")
@@ -53,6 +54,7 @@ class CodeSpaceTransport:
         self._source = source or CodespaceConfigSource(codespace_name)
         self._manager = manager or ConnectionManager()
         self._connected = False
+        self._home_dir: str | None = None
 
     async def _ensure(self) -> None:
         if not self._connected:
@@ -72,6 +74,54 @@ class CodeSpaceTransport:
             timeout=30.0,
         )
         return "__EXISTS__" in (out or "")
+
+    async def home_dir(self) -> str:
+        if self._home_dir is not None:
+            return self._home_dir
+        rc, out, err = await self.run('printf "%s" "$HOME"', timeout=30.0)
+        home = (out or "").strip()
+        if rc != 0 or not home.startswith("/"):
+            raise RuntimeError(
+                f"Could not resolve remote home for {self._name}: {err or out}"
+            )
+        self._home_dir = home
+        return home
+
+    async def is_running(self) -> bool:
+        """Read CodeSpace state without opening SSH (never wakes the venue)."""
+
+        def _list() -> subprocess.CompletedProcess:
+            env = getattr(self._source, "_gh_env", None)
+            return subprocess.run(
+                [
+                    "gh",
+                    "codespace",
+                    "list",
+                    "--json",
+                    "name,state",
+                    "--limit",
+                    "100",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=30.0,
+                env=env,
+                creationflags=_creation_flags(),
+            )
+
+        result = await asyncio.to_thread(_list)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Could not list CodeSpaces before recovery: {result.stderr.strip()}"
+            )
+        try:
+            rows = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("gh codespace list returned invalid JSON") from exc
+        return any(
+            row.get("name") == self._name and row.get("state") == "Available"
+            for row in rows
+        )
 
     async def push_file(self, local_path: str, remote_path: str) -> None:
         # scp (under gh cp) will not create the destination dir -- ensure it.

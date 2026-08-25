@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import os
 
 import pytest
@@ -854,6 +855,568 @@ def test_host_index_from_state_file(tmp_path):
     assert rec.port == 9000
     assert rec.host_version == "v1"
     assert rec.state_file == str(state)
+
+
+def test_host_index_from_remote_authority_state(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    state = tmp_path / "host.json"
+    state.write_text(json.dumps({
+        "version": 2,
+        "session_id": "s1",
+        "pid": 111,
+        "host_pid": 111,
+        "child_pid": 222,
+        "port": 9000,
+        "host_version": "v2",
+        "protocol_version": 3,
+        "nonce": "nonce",
+        "created_at": 123.0,
+        "child_executable": "bash",
+        "cwd": "/workspaces/repo",
+    }))
+    rec = HostRecord.from_state_file("s1", state)
+    assert rec.host_version == "v2"
+    assert rec.protocol_version == 3
+    assert rec.nonce == "nonce"
+    assert rec.created_at == 123.0
+    assert rec.extra["child_executable"] == "bash"
+    assert rec.extra["cwd"] == "/workspaces/repo"
+
+
+def test_remote_authority_state_is_atomic_and_private(tmp_path):
+    catalog = tmp_path / "hosts"
+    state = catalog / "host-s1.json"
+    launcher._write_host_state(state, {"session_id": "s1", "nonce": "secret"})
+
+    assert json.loads(state.read_text())["session_id"] == "s1"
+    if os.name != "nt":
+        assert state.stat().st_mode & 0o777 == 0o600
+        assert catalog.stat().st_mode & 0o777 == 0o700
+
+
+def test_host_index_rejects_state_session_mismatch(tmp_path):
+    from agent_bridge.session_host.host_index import HostRecord
+
+    state = tmp_path / "host.json"
+    state.write_text(json.dumps({
+        "session_id": "other",
+        "pid": 111,
+        "child_pid": 222,
+        "port": 9000,
+    }))
+    with pytest.raises(ValueError, match="session mismatch"):
+        HostRecord.from_state_file("s1", state)
+
+
+@pytest.mark.asyncio
+async def test_manager_recovers_missing_index_from_remote_authority(
+    session_manager,
+    monkeypatch,
+):
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+        codespace={
+            "name": "cs-one",
+            "repo": "org/repo",
+            "workspace_folder": "/workspaces/repo",
+        },
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    recovered = HostRecord(
+        session_id="s1",
+        port=0,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    )
+
+    class FakeSpawner:
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            assert session_id == "s1"
+            return recovered
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: FakeSpawner(),
+    )
+
+    assert await session_manager._recover_remote_host_records() == 1
+    assert session_manager._host_index.get("s1") == recovered
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_does_not_wake_stopped_codespace(
+    session_manager,
+    monkeypatch,
+):
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+
+    class StoppedSpawner:
+        async def can_inspect_without_wake(self):
+            return False
+
+        async def recover_record(self, session_id):
+            pytest.fail("stopped CodeSpace must not be inspected over SSH")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: StoppedSpawner(),
+    )
+
+    assert await session_manager._recover_remote_host_records() == 0
+    assert session_manager._host_index.get("s1") is None
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_skips_existing_stopped_codespace_record(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    class StoppedSpawner:
+        async def can_inspect_without_wake(self):
+            return False
+
+        async def recover_record(self, session_id):
+            pytest.fail("stopped CodeSpace must not be inspected over SSH")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: StoppedSpawner(),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    attach.assert_not_awaited()
+    assert session_manager._host_index.get("s1") is not None
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_skips_when_state_check_fails(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    class UnknownSpawner:
+        async def can_inspect_without_wake(self):
+            raise RuntimeError("control plane unavailable")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: UnknownSpawner(),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    attach.assert_not_awaited()
+    assert "s1" in session_manager._remote_recovery_skipped
+
+
+@pytest.mark.asyncio
+async def test_startup_attach_failure_retains_remote_authority(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(type="command", venue={"kind": "container"})
+    session = Session("s1", "one", target, "container:one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    record = HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    )
+    session_manager._host_index.register(record)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        AsyncMock(return_value=0),
+    )
+    attach = AsyncMock(return_value=False)
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    assert session_manager._host_index.get("s1") is not None
+    assert attach.await_args.kwargs["new_status"] is SessionStatus.IDLE
+    assert attach.await_args.kwargs["prune_on_fail"] is False
+
+
+@pytest.mark.asyncio
+async def test_confirmed_dead_remote_authority_is_pruned(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_host.spawner import RemoteHostDeadError
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    class DeadSpawner:
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            raise RemoteHostDeadError(session_id)
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: DeadSpawner(),
+    )
+    drop = AsyncMock()
+    monkeypatch.setattr(session_manager, "_drop_forward", drop)
+
+    assert await session_manager._recover_remote_host_records() == 0
+    assert session_manager._host_index.get("s1") is None
+    drop.assert_awaited_once_with("s1")
+
+
+@pytest.mark.asyncio
+async def test_resume_refuses_duplicate_after_inconclusive_remote_attach(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import (
+        RemoteHostRecoveryPendingError,
+        Session,
+    )
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session(
+        "s1",
+        "one",
+        SpawnTarget(type="command"),
+        "codespace:cs-one",
+    )
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+    monkeypatch.setattr(
+        session_manager,
+        "_reattach_one",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError, match="refusing"):
+        await session_manager._try_reattach_live_host(session)
+
+
+@pytest.mark.asyncio
+async def test_resume_revalidates_skipped_v2_remote_authority(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session(
+        "s1",
+        "one",
+        SpawnTarget(
+            type="command",
+            codespace={"name": "cs-one", "repo": "org/repo"},
+        ),
+        "codespace:cs-one",
+    )
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+    session_manager._remote_recovery_skipped.add("s1")
+
+    async def recover(*, allow_wake=False, session_ids=None):
+        assert allow_wake is True
+        assert session_ids == {"s1"}
+        session_manager._host_index.remove("s1")
+        session_manager._remote_recovery_skipped.discard("s1")
+        return 0
+
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        AsyncMock(side_effect=recover),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager._try_reattach_live_host(session) is False
+    attach.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_legacy_remote_record_keeps_fresh_spawn_fallback(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session(
+        "legacy",
+        "one",
+        SpawnTarget(type="command"),
+        "codespace:cs-one",
+    )
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["legacy"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="legacy",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+    ))
+    monkeypatch.setattr(
+        session_manager,
+        "_reattach_one",
+        AsyncMock(return_value=False),
+    )
+
+    assert await session_manager._try_reattach_live_host(session) is False
+
+
+@pytest.mark.asyncio
+async def test_codespace_resume_replacement_uses_new_session_host(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        spawn_command=["agent-codespaces", "ssh", "cs-one", "--stdio"],
+        codespace={
+            "name": "cs-one",
+            "repo": "org/repo",
+            "acp_command": "cd /workspaces/repo && copilot --acp --stdio",
+            "workspace_folder": "/workspaces/repo",
+        },
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.STOPPED
+    session.event_log = MagicMock()
+    session_manager._sessions["s1"] = session
+    monkeypatch.setattr(
+        session_manager,
+        "_try_reattach_live_host",
+        AsyncMock(return_value=False),
+    )
+    client = MagicMock()
+    client.pid = 1234
+    host_resume = AsyncMock(return_value=(client, "acp-1"))
+    monkeypatch.setattr(
+        session_manager,
+        "_resume_via_new_codespace_host",
+        host_resume,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.spawn",
+        AsyncMock(side_effect=AssertionError("raw stdio must not spawn")),
+    )
+
+    resumed = await session_manager.resume_session("s1")
+
+    assert resumed.status is SessionStatus.IDLE
+    assert resumed.client is client
+    host_resume.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_legacy_codespace_resume_replacement_uses_session_host(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        spawn_command=[
+            "agent-codespaces",
+            "ssh",
+            "cs-one",
+            "--stdio",
+            "--remote-cmd",
+            "cd /workspaces/repo && copilot --acp --stdio",
+        ],
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.STOPPED
+    session.event_log = MagicMock()
+    session_manager._sessions["s1"] = session
+    monkeypatch.setattr(
+        session_manager,
+        "_try_reattach_live_host",
+        AsyncMock(return_value=False),
+    )
+    client = MagicMock()
+    client.pid = 1234
+    connect = AsyncMock(return_value=(client, "acp-1"))
+    monkeypatch.setattr(
+        session_manager,
+        "_connect_via_session_host",
+        connect,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: MagicMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_codespace_ai_plugin_dirs",
+        lambda *args, **kwargs: [],
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_relay_launch_env",
+        lambda *args, **kwargs: ("", None),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.spawn",
+        AsyncMock(side_effect=AssertionError("raw stdio must not spawn")),
+    )
+
+    resumed = await session_manager.resume_session("s1")
+
+    assert resumed.status is SessionStatus.IDLE
+    connect.assert_awaited_once()
 
 
 def test_host_index_corrupt_file_is_ignored(tmp_path):

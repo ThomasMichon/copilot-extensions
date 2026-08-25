@@ -142,6 +142,32 @@ async def test_resolve_carries_venue_metadata():
 
 
 @pytest.mark.asyncio
+async def test_resolve_carries_structured_codespace_metadata():
+    fb = _Fallback()
+    metadata = {
+        "name": "cs-a",
+        "repo": "org/repo",
+        "acp_command": "cd /workspaces/repo && copilot --acp --stdio",
+        "workspace_folder": "/workspaces/repo",
+    }
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["agent-codespaces", "ssh", "cs-a", "--stdio"],
+            "user": "vscode",
+            "codespace": metadata,
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        target = await CliNamespaceResolver(
+            "codespace", "agent-codespaces", fb
+        ).resolve("cs-a")
+
+    assert target.codespace == metadata
+
+
+@pytest.mark.asyncio
 async def test_resolve_venue_none_when_absent():
     """A spec without workspace_folder/security_profile leaves venue None."""
     fb = _Fallback()

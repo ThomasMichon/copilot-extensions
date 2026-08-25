@@ -84,6 +84,8 @@ def launch_session_host(
     state_dir: str | os.PathLike[str] | None = None,
     ready_timeout: float = 90.0,
     nonce: str = "",
+    session_id: str = "",
+    host_version: str = "",
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
 ) -> HostHandle:
@@ -106,6 +108,10 @@ def launch_session_host(
 
     host_argv = [sys.executable, "-m", "agent_bridge.session_host",
                  "--port", "0", "--state-file", str(state_file)]
+    if session_id:
+        host_argv += ["--session-id", session_id]
+    if host_version:
+        host_argv += ["--host-version", host_version]
     if cwd:
         host_argv += ["--cwd", cwd]
     host_argv += ["--unexpected-reap-seconds", str(unexpected_reap_seconds)]
@@ -228,6 +234,9 @@ async def run_host(
     env: dict[str, str] | None = None,
     ready: asyncio.Event | None = None,
     nonce: str = "",
+    session_id: str = "",
+    host_version: str = "",
+    reverse_forwards: list[str] | None = None,
     unexpected_reap_seconds: float = 60.0,
     active_reap_seconds: float = 0.0,
 ) -> None:
@@ -248,13 +257,28 @@ async def run_host(
                        unexpected_reap_seconds=unexpected_reap_seconds,
                        active_reap_seconds=active_reap_seconds)
     bound_port = await host.serve(port=port)
-    if state_file is not None:
-        Path(state_file).write_text(json.dumps({
-            "pid": os.getpid(),
-            "child_pid": child.pid,
-            "port": bound_port,
-            "protocol_version": proto.PROTOCOL_VERSION,
-        }))
+    state_path = Path(state_file) if state_file is not None else None
+    state = {
+        "version": 2,
+        "session_id": session_id,
+        "pid": os.getpid(),
+        "host_pid": os.getpid(),
+        "child_pid": child.pid,
+        "port": bound_port,
+        "protocol_version": proto.PROTOCOL_VERSION,
+        "host_version": host_version,
+        "nonce": nonce,
+        "created_at": time.time(),
+        "state": "running",
+        "child_executable": child_argv[0] if child_argv else "",
+        "cwd": cwd or "",
+        "reverse_forwards": list(reverse_forwards or []),
+        "boot_id": _boot_id(),
+        "host_start_ticks": _process_start_ticks(os.getpid()),
+        "child_start_ticks": _process_start_ticks(child.pid),
+    }
+    if state_path is not None:
+        _write_host_state(state_path, state)
     if ready is not None:
         ready.set()
     try:
@@ -275,6 +299,53 @@ async def run_host(
                 pass
 
 
+def _boot_id() -> str:
+    if sys.platform.startswith("linux"):
+        try:
+            return Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        except OSError:
+            pass
+    return ""
+
+
+def _process_start_ticks(pid: int) -> str:
+    if sys.platform.startswith("linux") and pid > 1:
+        try:
+            return Path(f"/proc/{pid}/stat").read_text().split()[21]
+        except (OSError, IndexError):
+            pass
+    return ""
+
+
+def _write_host_state(
+    path: Path,
+    payload: dict,
+) -> bool:
+    """Atomically publish one mode-0600 Session Host authority record."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name != "nt":
+        path.parent.chmod(0o700)
+        stat = path.parent.stat()
+        if stat.st_uid != os.geteuid() or stat.st_mode & 0o777 != 0o700:
+            raise PermissionError(
+                f"unsafe Session Host catalogue directory: {path.parent}"
+            )
+    fd, temp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    try:
+        if hasattr(os, "fchmod"):
+            try:
+                os.fchmod(fd, 0o600)
+            except OSError:
+                pass
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle)
+        os.replace(temp, path)
+        return True
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="python -m agent_bridge.session_host",
@@ -282,6 +353,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--port", type=int, default=0)
     ap.add_argument("--state-file", default=None)
+    ap.add_argument("--session-id", default="")
+    ap.add_argument("--host-version", default="")
+    ap.add_argument("--reverse-forward", action="append", default=[])
     ap.add_argument("--cwd", default=None)
     ap.add_argument("--unexpected-reap-seconds", type=float, default=60.0)
     ap.add_argument("--active-reap-seconds", type=float, default=0.0)
@@ -296,10 +370,17 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("a child command is required after `--`")
 
     try:
-        asyncio.run(run_host(child_argv, port=args.port, state_file=args.state_file,
-                             cwd=args.cwd,
-                             unexpected_reap_seconds=args.unexpected_reap_seconds,
-                             active_reap_seconds=args.active_reap_seconds))
+        asyncio.run(run_host(
+            child_argv,
+            port=args.port,
+            state_file=args.state_file,
+            cwd=args.cwd,
+            session_id=args.session_id,
+            host_version=args.host_version,
+            reverse_forwards=args.reverse_forward,
+            unexpected_reap_seconds=args.unexpected_reap_seconds,
+            active_reap_seconds=args.active_reap_seconds,
+        ))
     except KeyboardInterrupt:
         return 0
     return 0
