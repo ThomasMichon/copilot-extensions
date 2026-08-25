@@ -56,8 +56,12 @@ class WarningTracker:
                 del self._seen[fingerprint]
 
         candidates: list[Finding] = []
+        processed: set[str] = set()
         for finding in ordered:
             fingerprint = finding.fingerprint()
+            if fingerprint in processed:
+                continue
+            processed.add(fingerprint)
             last = self._seen.get(fingerprint)
             if last is None or instant - last >= self.repeat_after_seconds:
                 candidates.append(finding)

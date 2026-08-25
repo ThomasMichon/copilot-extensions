@@ -15,6 +15,14 @@ T = TypeVar("T")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
+def _is_reparse(info: os.stat_result) -> bool:
+    """Whether a Windows stat result names a reparse point."""
+    return bool(
+        getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    )
+
+
 def _registry_finding(
     registry: str,
     directory: Path,
@@ -47,7 +55,7 @@ def scan_directory(
     """
     root = Path(directory)
     try:
-        mode = root.stat().st_mode
+        root_info = root.lstat()
     except FileNotFoundError:
         return ScanSnapshot(registry=registry, authority=ScanAuthority.ABSENT)
     except OSError as exc:
@@ -60,9 +68,16 @@ def scan_directory(
             findings=(finding,),
         )
 
-    if not stat.S_ISDIR(mode):
+    if (
+        not stat.S_ISDIR(root_info.st_mode)
+        or stat.S_ISLNK(root_info.st_mode)
+        or _is_reparse(root_info)
+    ):
         finding = _registry_finding(
-            registry, root, "registry-indeterminate", "registry path is not a directory"
+            registry,
+            root,
+            "registry-indeterminate",
+            "registry path must be a directory, not a link or reparse point",
         )
         return ScanSnapshot(
             registry=registry,
@@ -104,10 +119,11 @@ def scan_directory(
             decisions[key] = decision
             findings.extend(decision.findings)
             continue
-        is_reparse = bool(
-            getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
-        )
-        if not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode) or is_reparse:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or stat.S_ISLNK(info.st_mode)
+            or _is_reparse(info)
+        ):
             decision = EntryDecision.inactive(
                 Finding(
                     registry=registry,

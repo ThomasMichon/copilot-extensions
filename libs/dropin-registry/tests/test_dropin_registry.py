@@ -16,6 +16,7 @@ from dropin_registry import (
     atomic_write_text,
     scan_directory,
 )
+from dropin_registry.scan import _is_reparse
 
 
 def _finding(entry: str, reason: str, *, status: str = "inactive") -> Finding:
@@ -94,6 +95,29 @@ def test_scan_non_directory_is_indeterminate_and_keeps_previous(tmp_path):
     assert snapshot.authority is ScanAuthority.INDETERMINATE
     assert snapshot.findings[0].reason == "registry-indeterminate"
     assert snapshot.reconcile({"old": "value"}) == {"old": "value"}
+
+
+def test_broken_registry_symlink_is_indeterminate_not_absent(tmp_path):
+    root = tmp_path / "registry"
+    try:
+        root.symlink_to(tmp_path / "missing", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"directory symlink creation unavailable: {exc}")
+    snapshot = scan_directory(
+        root,
+        lambda _path: EntryDecision.active("unused"),
+        registry="demo.d",
+    )
+    assert snapshot.authority is ScanAuthority.INDETERMINATE
+    assert snapshot.reconcile({"old": "value"}) == {"old": "value"}
+
+
+def test_nonzero_reparse_tag_is_recognized():
+    class FakeStat:
+        st_file_attributes = 0
+        st_reparse_tag = 1
+
+    assert _is_reparse(FakeStat()) is True
 
 
 def test_complete_scan_is_sorted_and_isolates_entry_verdicts(tmp_path):
@@ -253,6 +277,16 @@ def test_warning_tracker_caps_deduplicates_and_reports_recovery():
 
     recovered = tracker.select(findings[:1], now=162)
     assert recovered.recovered == 4
+
+
+def test_warning_tracker_deduplicates_same_batch_when_repeat_is_zero():
+    finding = _finding("/same.json", "missing-target")
+    batch = WarningTracker(limit=10, repeat_after_seconds=0).select(
+        (finding, finding),
+        now=100,
+    )
+    assert batch.emitted == (finding,)
+    assert batch.suppressed == 0
 
 
 def test_warning_tracker_validates_limits():
