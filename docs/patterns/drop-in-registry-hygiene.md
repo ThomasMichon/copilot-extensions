@@ -142,7 +142,9 @@ Stable reason codes include at least:
 
 | Code | Meaning |
 |---|---|
-| `invalid-entry` | unreadable, malformed, or schema-invalid file |
+| `invalid-entry` | definitively malformed or schema-invalid file |
+| `entry-indeterminate` | entry could not be read/classified completely because of transient I/O or permissions |
+| `registry-indeterminate` | registry could not be enumerated completely; last-known desired state is retained |
 | `missing-target` | referenced file or command no longer exists |
 | `target-unusable` | target exists but cannot be read/executed |
 | `not-enabled` | attributed plugin is no longer enabled in scope |

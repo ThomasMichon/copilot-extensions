@@ -62,7 +62,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    surfaces the literal cause; it does not mask the symptom or silently degrade.
 7. **One canonical CLI per plugin.** A plugin owns exactly one binstub; a sibling
    that imports its package must not re-point that binstub (avoids version skew).
-8. **Sweep safely; doctor explicitly.** A plugin-owned `*.d` registry processes
+8. **Sweep safely; doctor explicitly.** A consumer-owned `*.d` registry processes
    each contribution independently, warns without aborting valid peers, and
    derives live state only from an authoritative current snapshot; an unreadable
    registry preserves last-known state rather than masquerading as empty.
