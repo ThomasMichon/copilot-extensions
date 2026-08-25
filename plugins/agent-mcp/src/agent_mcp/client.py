@@ -56,21 +56,29 @@ class UpstreamError(RuntimeError):
         self.data = data
 
 
-def _filter_tools(tools: list[dict], flt: ToolFilter) -> list[dict]:
+def filter_tools(tools: list[dict], flt: ToolFilter) -> list[dict]:
     """Apply the bridge config's allow/deny filter to a raw tool list."""
     if not flt.active:
         return list(tools)
-    import fnmatch
-
     kept = []
     for t in tools:
         name = t.get("name", "") if isinstance(t, dict) else ""
-        if flt.deny and any(fnmatch.fnmatchcase(name, p) for p in flt.deny):
-            continue
-        if flt.allow and not any(fnmatch.fnmatchcase(name, p) for p in flt.allow):
-            continue
-        kept.append(t)
+        if tool_visible(name, flt):
+            kept.append(t)
     return kept
+
+
+def tool_visible(name: str, flt: ToolFilter) -> bool:
+    """Whether ``name`` survives the bridge's top-level tool filter."""
+    if not flt.active:
+        return True
+    import fnmatch
+
+    if flt.deny and any(fnmatch.fnmatchcase(name, pattern) for pattern in flt.deny):
+        return False
+    return not flt.allow or any(
+        fnmatch.fnmatchcase(name, pattern) for pattern in flt.allow
+    )
 
 
 class OneShotSession:
@@ -310,7 +318,7 @@ class OneShotSession:
         if self._ctx is None:
             raise RuntimeError("OneShotSession used outside its async context")
         tools = await fetch_all_tools(self._paginated_request, self._ctx)
-        return _filter_tools(tools, self.cfg.tools)
+        return filter_tools(tools, self.cfg.tools)
 
     async def call_tool(self, name: str, arguments: dict) -> dict:
         """Invoke one tool; return the ``tools/call`` result mapping.
@@ -320,6 +328,11 @@ class OneShotSession:
         the exit code) -- only a protocol-level error raises.
         """
         client = self._need_client()
+        if not tool_visible(name, self.cfg.tools):
+            raise UpstreamError(
+                f"tools/call '{name}': blocked by bridge tools filter",
+                code=-32601,
+            )
         req = {
             "jsonrpc": "2.0",
             "id": client.new_id(),

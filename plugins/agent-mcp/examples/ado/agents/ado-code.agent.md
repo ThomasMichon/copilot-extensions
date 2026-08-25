@@ -17,6 +17,22 @@ Read-only ADO access via the `code-mode` adapter. `tools/list` exposes
 
 - Org: `your-org.visualstudio.com`; primary project **Example-Web**, repo **example-web**.
 
+## MCP Readiness
+
+Probe `find_tool` with an explicit arguments source. If the catalog did not
+load, preserve the error and use the existing `ado-code` materialized fleet; if
+absent, run `agent-mcp materialize` on `examples/ado/code.mcp.yaml` with
+`--server-name ado-code`. Probe raw `search_workitem` with `--no-serve` plus
+`--arguments`
+(POSIX) or `--request-file` (Windows); `code-mode` is not applied on this
+fallback. Before use, require `manifest.json.generated_by` to match the
+installed agent-mcp and `manifest.json.bridge` to resolve to `code.mcp.yaml`;
+re-materialize otherwise. Confirm the read result belongs to the expected ADO
+org/project under the current Azure identity. If both surfaces fail, report
+both and stop.
+
+Do NOT use the task tool to spawn another `ado-code` agent.
+
 ## Using this adapter
 1. `find_tool` `{query:"pull request"}` to get the TypeScript signatures for the
    tools you need.

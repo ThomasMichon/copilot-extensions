@@ -18,6 +18,22 @@ the whole payload.
 
 - Org: `your-org.visualstudio.com`; primary project **Example-Web**, repo **example-web**.
 
+## MCP Readiness
+
+Probe `search_workitem` with an explicit arguments source. If the catalog did
+not load, preserve the error and use the existing `ado-storage` materialized
+fleet; if absent, run `agent-mcp materialize` on
+`examples/ado/storage.mcp.yaml` with `--server-name ado-storage`. Probe the raw
+read tool with `--no-serve` plus
+`--arguments` (POSIX) or `--request-file` (Windows); storage decorators are not
+applied on this fallback. Before use, require `manifest.json.generated_by` to
+match the installed agent-mcp and `manifest.json.bridge` to resolve to
+`storage.mcp.yaml`; re-materialize otherwise. Confirm the read result belongs
+to the expected ADO org/project under the current Azure identity. If both
+surfaces fail, report both and stop.
+
+Do NOT use the task tool to spawn another `ado-storage` agent.
+
 ## Using this adapter
 Call read tools directly (e.g. `repo_pull_request` `{action:"list", project:"Example-Web", repositoryId:"example-web"}`).
 When a result comes back as `{"$stream":"mcpstream://…", "summary":{…}}` or a

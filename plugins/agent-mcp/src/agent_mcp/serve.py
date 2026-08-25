@@ -40,9 +40,11 @@ from pathlib import Path
 from .client import (
     OneShotSession,
     UpstreamError,
+    filter_tools,
     result_is_error,
     result_structured,
     result_text,
+    tool_visible,
 )
 from .config import BridgeConfig, load_config
 from .ipc import (
@@ -112,29 +114,42 @@ class WarmPool:
 
     def __init__(self, *, idle_timeout: float = _DEFAULT_IDLE_TIMEOUT) -> None:
         self._entries: dict[str, _WarmEntry] = {}
+        self._key_locks: dict[str, asyncio.Lock] = {}
         self._idle_timeout = idle_timeout
         self._guard = asyncio.Lock()  # guards the open/evict of the entry map
 
-    async def _entry_for(self, key: str, cfg: BridgeConfig) -> _WarmEntry:
-        entry = self._entries.get(key)
-        if entry is not None:
-            return entry
-        # Double-checked under the guard so two concurrent first-calls to the
-        # same bridge open exactly one session.
+    async def _key_lock(self, key: str) -> asyncio.Lock:
+        async with self._guard:
+            return self._key_locks.setdefault(key, asyncio.Lock())
+
+    async def _entry_for_locked(self, key: str, cfg: BridgeConfig) -> _WarmEntry:
+        """Select/open a config-matched entry while the key lock is held."""
         async with self._guard:
             entry = self._entries.get(key)
-            if entry is not None:
-                return entry
+            if entry is not None and entry.session.cfg != cfg:
+                self._entries.pop(key, None)
+        if entry is not None and entry.session.cfg != cfg:
+            await entry.session.__aexit__(None, None, None)
+            log.info("warm session replaced after config change: %s", key)
+            entry = None
+        if entry is None:
             session = OneShotSession(cfg)
             await session.__aenter__()
             entry = _WarmEntry(session)
-            self._entries[key] = entry
+            async with self._guard:
+                self._entries[key] = entry
             log.info("warm session opened: %s", key)
-            return entry
+        return entry
 
     async def call(self, key: str, cfg: BridgeConfig, tool: str, arguments: dict) -> dict:
-        entry = await self._entry_for(key, cfg)
-        async with entry.lock:
+        if not tool_visible(tool, cfg.tools):
+            raise UpstreamError(
+                f"tools/call '{tool}': blocked by bridge tools filter",
+                code=-32601,
+            )
+        key_lock = await self._key_lock(key)
+        async with key_lock:
+            entry = await self._entry_for_locked(key, cfg)
             entry.last_used = time.monotonic()
             try:
                 return await entry.session.call_tool(tool, arguments)
@@ -145,28 +160,38 @@ class WarmPool:
             except Exception:
                 # A transport-level failure likely means the upstream died;
                 # evict so the next call reopens a fresh session.
-                await self._evict(key)
+                await self._evict_locked(key, entry)
                 raise
 
     async def list(self, key: str, cfg: BridgeConfig) -> list[dict]:
-        entry = await self._entry_for(key, cfg)
-        async with entry.lock:
+        key_lock = await self._key_lock(key)
+        async with key_lock:
+            entry = await self._entry_for_locked(key, cfg)
             entry.last_used = time.monotonic()
             try:
-                return await entry.session.list_tools()
+                return filter_tools(await entry.session.list_tools(), cfg.tools)
             except UpstreamError:
                 raise
             except Exception:
-                await self._evict(key)
+                await self._evict_locked(key, entry)
                 raise
 
-    async def _evict(self, key: str) -> None:
+    async def _evict_locked(self, key: str, expected: _WarmEntry | None = None) -> None:
+        """Evict the current entry while the per-key lock is held."""
         async with self._guard:
+            entry = self._entries.get(key)
+            if expected is not None and entry is not expected:
+                return
             entry = self._entries.pop(key, None)
         if entry is not None:
             with contextlib.suppress(Exception):
                 await entry.session.__aexit__(None, None, None)
             log.info("warm session closed: %s", key)
+
+    async def _evict(self, key: str) -> None:
+        key_lock = await self._key_lock(key)
+        async with key_lock:
+            await self._evict_locked(key)
 
     async def sweep_idle(self) -> None:
         now = time.monotonic()

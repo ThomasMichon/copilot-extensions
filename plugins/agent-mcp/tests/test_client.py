@@ -9,9 +9,12 @@ from __future__ import annotations
 
 import sys
 
+import pytest
+
 from agent_mcp.__main__ import main
 from agent_mcp.client import (
     OneShotSession,
+    UpstreamError,
     result_is_error,
     result_structured,
     result_text,
@@ -114,6 +117,8 @@ async def test_oneshot_tool_filter():
     async with OneShotSession(_cfg({"tools": {"allow": ["greet"]}})) as sess:
         tools = await sess.list_tools()
         assert [t["name"] for t in tools] == ["greet"]
+        with pytest.raises(UpstreamError, match="blocked by bridge tools filter"):
+            await sess.call_tool("boom", {})
 
 
 def test_call_verb_success(tmp_path, capsys):
@@ -216,5 +221,4 @@ async def test_oneshot_tears_down_transport_when_init_fails():
             pass
     assert stuck.started
     assert stuck.closed  # __aexit__ is skipped on __aenter__ failure; we clean up anyway
-
 
