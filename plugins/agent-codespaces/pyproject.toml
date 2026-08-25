@@ -67,3 +67,6 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+markers = [
+    "guard: fast structural/contract guard tests run automatically in the pre-push hook; the full suite runs in CI",
+]
