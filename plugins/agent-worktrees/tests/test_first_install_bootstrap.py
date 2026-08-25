@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 PLUGIN = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.guard
 
 
 def test_session_start_prefers_payload_bootstrap_with_installed_fallback() -> None:

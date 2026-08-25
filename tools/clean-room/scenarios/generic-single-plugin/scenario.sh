@@ -52,10 +52,11 @@ PRIMARY_PLUGIN="${CR_PRIMARY_PLUGIN:-agent-codespaces}"
 EXPECT_DEPS="${CR_EXPECT_DEPS:-agent-bridge agent-worktrees}"
 UV_INDEX="${CR_UV_INDEX:-}"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
+MARKETPLACE_REPO_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MARKETPLACE_REPO")"
 if [ -d "$MARKETPLACE_REPO" ]; then
-    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": \"$MARKETPLACE_REPO\" } }"
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": $MARKETPLACE_REPO_JSON } }"
 else
-    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": \"$MARKETPLACE_REPO\" } }"
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": $MARKETPLACE_REPO_JSON } }"
 fi
 
 : "${CR_SCENARIO_NAME:=generic-single-plugin}"

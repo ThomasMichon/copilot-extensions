@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 INSTALL_SH = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
 INSTALL_PS1 = INSTALL_SH.with_suffix(".ps1")
+pytestmark = pytest.mark.guard
 
 
 def test_binstub_resolves_marker_only_runtime_after_provision() -> None:

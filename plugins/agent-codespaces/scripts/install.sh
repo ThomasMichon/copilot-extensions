@@ -528,7 +528,7 @@ _resolve_python() {
     _complete="$(ls -1t "$_root"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
     _candidate=""
     [ -n "$_complete" ] && _candidate="$(dirname "$_complete")/bin/python"
-    [ -n "$_candidate" ] && printf '%s\n' "$_candidate"
+    [ -x "$_candidate" ] && printf '%s\n' "$_candidate"
 }
 _python="$(_resolve_python)"
 # Fast path: runtime already provisioned.

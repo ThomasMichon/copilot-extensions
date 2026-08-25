@@ -28,10 +28,11 @@ MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
 UV_INDEX="${CR_UV_INDEX:-}"
 PLUGIN="agent-worktrees"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
+MARKETPLACE_REPO_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MARKETPLACE_REPO")"
 if [ -d "$MARKETPLACE_REPO" ]; then
-    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": \"$MARKETPLACE_REPO\" } }"
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": $MARKETPLACE_REPO_JSON } }"
 else
-    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": \"$MARKETPLACE_REPO\" } }"
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": $MARKETPLACE_REPO_JSON } }"
 fi
 
 : "${CR_SCENARIO_NAME:=agent-worktrees-solo}"
@@ -120,7 +121,7 @@ else
 fi
 
 # =========================================================================
-phase 4 "read verbs enumerate (repos / projects / list)"
+phase 4 "CLI read surface (registry / help / version)"
 if capture "read-repos-list" -- bash -lc "agent-worktrees repos list"; then
     pass "agent-worktrees repos list exits 0"
 else
