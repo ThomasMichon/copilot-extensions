@@ -23,8 +23,13 @@
 #                        default: copilot-extensions
 #   CR_PRIMARY_PLUGIN    the single plugin a naive user installs first
 #                        default: agent-codespaces
-#   CR_EXPECT_DEPS       space-separated plugins that SHOULD arrive with it
-#                        default: "agent-bridge agent-worktrees"
+#   CR_EXPECT_DEPS       space-separated OPTIONAL COMPANION plugins to probe.
+#                        default: "agent-bridge agent-worktrees". NOTE: the CLI
+#                        does NOT auto-install plugin dependencies (proven), and
+#                        these plugins are standalone -- companions compose
+#                        opportunistically (agent-bridge discovers providers;
+#                        agent-worktrees is an optional state-root base). So their
+#                        absence is recorded as INFO, never a failure.
 #   CR_UV_INDEX          OPT-IN uv index (uv-index fixture). When set, the deploy
 #                        stage points uv at this internal index so provisioning
 #                        succeeds on a governed box. Default UNSET -> the
@@ -116,14 +121,24 @@ else
 fi
 
 # =========================================================================
-phase 2 "dependency chain (does one install pull the rest?)"
+phase 2 "standalone install (no phantom dependency auto-pull)"
+# The Copilot CLI does NOT auto-install declared plugin dependencies (proven in
+# the clean-room: the plugin.json manifest has no `dependencies` field and a
+# declared entry is inert). And these plugins are standalone by design:
+# agent-codespaces / agent-containers are transport PROVIDERS that agent-bridge
+# optionally DISCOVERS -- they do not depend on it (`<primary> ssh` etc. work
+# without agent-bridge) -- and agent-worktrees is an OPTIONAL state-root base the
+# primary's touch points fall open without. So absent siblings are EXPECTED, not
+# a failure: record them as optional companions and assert the primary stands
+# alone.
 for dep in $EXPECT_DEPS; do
     if [ -d "$INSTALLED_ROOT/$dep" ]; then
-        pass "dependency present: $dep (auto-pulled)"
+        info "optional companion also present: $dep (independently installed)"
     else
-        fail "dependency ABSENT: $dep (installing $PRIMARY_PLUGIN did not bring it)"
+        info "optional companion absent (expected -- no auto-pull): $dep"
     fi
 done
+pass "$PRIMARY_PLUGIN installed standalone (companions compose opportunistically, are not auto-pulled)"
 info "installed-plugins dir: $(ls -1 "$INSTALLED_ROOT" 2>/dev/null | tr '\n' ' ' || echo '(none)')"
 
 # =========================================================================
@@ -176,11 +191,16 @@ if bash -lc 'command -v agent-codespaces >/dev/null'; then
 else
     fail "agent-codespaces NOT on login-shell PATH (~/.local/bin not exported at login)"
 fi
-# Cross-plugin shell-out that agent-codespaces relies on:
+# Optional composition (NOT a dependency): the primary is a transport provider
+# agent-bridge DISCOVERS rather than requires, and it falls open without the
+# optional agent-worktrees state-root base. Its absence is expected, not a
+# failure. (Standalone verb behavior is proven by the primary's own *-solo
+# scenario; assert it here WITHOUT invoking the binstub, so the deferred venv
+# stays unprovisioned for Phase 7's stamp-signal.)
 if bash -lc 'command -v agent-worktrees >/dev/null'; then
-    pass "agent-worktrees resolves on PATH (cross-plugin shell-outs will work)"
+    info "optional base agent-worktrees on PATH (account/state-root shell-outs will use it)"
 else
-    fail "agent-worktrees NOT on PATH (agent-codespaces account/state-root shell-outs fail open)"
+    pass "agent-worktrees absent -> $PRIMARY_PLUGIN composes opportunistically (degrade-safe; see its *-solo scenario)"
 fi
 
 # =========================================================================
@@ -203,17 +223,16 @@ else
 fi
 
 # =========================================================================
-phase 6 "register the current repo as a harness project"
-if command -v agent-worktrees >/dev/null 2>&1; then
-    ( cd "$HOME/harness-repo" && capture "register" -- agent-worktrees register harness-repo ) || true
+phase 6 "optional: register the repo as a harness project (needs the agent-worktrees base)"
+if bash -lc 'command -v agent-worktrees >/dev/null'; then
+    ( cd "$HOME/harness-repo" && capture "register" -- bash -lc 'agent-worktrees register harness-repo' ) || true
     if [ -f "$HOME/.agent-worktrees/projects.yaml" ] && grep -qi harness-repo "$HOME/.agent-worktrees/projects.yaml" 2>/dev/null; then
         pass "harness-repo registered (projects.yaml written)"
     else
         fail "harness-repo registration did not produce a projects.yaml entry"
     fi
 else
-    jam "repo-config" "cannot register: agent-worktrees binstub unavailable (see Phase 3/4)" \
-        "provision the runtime first (first-session deploy / setup)"
+    info "register is an agent-worktrees capability; the optional base is not installed -> N/A (standalone $PRIMARY_PLUGIN needs no project registration)"
 fi
 
 # =========================================================================
