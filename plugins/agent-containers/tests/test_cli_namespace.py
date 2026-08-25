@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import types
 from unittest.mock import patch
+
+from ssh_manager import SSHConfig
 
 from agent_containers.__main__ import main
 
@@ -57,3 +60,80 @@ def test_namespace_ensure_ready_ok_and_fail(capsys):
 
     with patch("agent_containers.resolver.ContainerResolver.ensure_ready", _fail):
         assert main(["namespace-ensure-ready", "example-web-1"]) == 1
+
+
+def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
+    config = types.SimpleNamespace(
+        relay_port=9857,
+        relay_deploy_ado=True,
+        credentials_for=lambda fleet: (True, True),
+        acp_command_for=lambda fleet: "copilot --acp --stdio",
+    )
+    fleet = types.SimpleNamespace(security_profile="trusted")
+    ssh = SSHConfig(
+        host_alias="agent-container-example",
+        user="vscode",
+        identity_file="/keys/id_ed25519",
+        config_file="/ssh/example.config",
+    )
+    with (
+        patch(
+            "agent_containers.__main__._trusted_session_host_context",
+            return_value=(config, fleet, "vscode", "/workspaces/example"),
+        ),
+        patch("agent_containers.__main__.prepare_ssh_config", return_value=ssh),
+        patch("agent_containers.__main__.cleanup_remote_envs"),
+        patch(
+            "agent_containers.__main__.container_environment",
+            return_value={"PATH": "/usr/bin"},
+        ),
+        patch("agent_containers.__main__.host_gh_token", return_value="github-secret"),
+        patch("agent_containers.__main__._relay_healthy", return_value=True),
+        patch(
+            "agent_containers.__main__.write_remote_env",
+            return_value="/tmp/agent-containers/env-123",
+        ) as write_env,
+        patch(
+            "agent_containers.__main__.build_remote_command",
+            return_value="source /tmp/agent-containers/env-123 && exec copilot",
+        ),
+        patch("agent_containers.container_shims.deploy") as deploy,
+        patch("agent_containers.relay_provider.token_for", return_value="relay-secret"),
+    ):
+        rc = main([
+            "session-host-prepare",
+            "example-web-1",
+            "--host-relay-port",
+            "61234",
+        ])
+
+    assert rc == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["reverse_forwards"] == ["9857:127.0.0.1:61234"]
+    assert result["remote_command"].startswith("source /tmp/")
+    assert "github-secret" not in json.dumps(result)
+    assert "relay-secret" not in json.dumps(result)
+    staged = write_env.call_args.args[2]
+    assert staged["GH_TOKEN"] == "github-secret"
+    assert staged["LC_GIT_CREDENTIAL_RELAY_TOKEN"] == "relay-secret"
+    deploy.assert_called_once_with("example-web-1", ado=True)
+
+
+def test_session_host_state_is_non_waking(capsys):
+    with (
+        patch(
+            "agent_containers.lifecycle.inspect_container",
+            return_value={
+                "Id": "abc123",
+                "State": {"Status": "running", "StartedAt": "now"},
+            },
+        ),
+    ):
+        assert main(["session-host-state", "example-web-1"]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "name": "example-web-1",
+        "state": "running",
+        "running": True,
+        "container_id": "abc123",
+        "started_at": "now",
+    }

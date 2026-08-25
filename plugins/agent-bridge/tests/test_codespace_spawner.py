@@ -253,6 +253,45 @@ async def test_codespace_spawner_ships_launches_forwards(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cleanup_confirmed", [True, False])
+async def test_post_launch_failure_requires_confirmed_remote_cleanup(
+    monkeypatch,
+    cleanup_confirmed,
+):
+    _patch_common(monkeypatch)
+
+    class PollFailureTransport(_FakeTransport):
+        async def run(self, command, *, timeout=60.0):
+            if command.startswith("cat "):
+                raise ConnectionError("transport dropped after launch")
+            if command.startswith("python3 -c "):
+                self.runs.append(command)
+                if cleanup_confirmed:
+                    return 0, "__REAPED__", ""
+                return 1, "", "cleanup unavailable"
+            return await super().run(command, timeout=timeout)
+
+    transport = PollFailureTransport({
+        "pid": 111,
+        "child_pid": 222,
+        "port": 51000,
+    })
+    spawner = sp.CodeSpaceSpawner(transport, ready_timeout=0.1)
+
+    expected = (
+        ConnectionError
+        if cleanup_confirmed
+        else sp.RemoteSpawnCleanupPendingError
+    )
+    with pytest.raises(expected):
+        await spawner.spawn(
+            ["copilot", "--acp", "--stdio"],
+            session_id="sess1",
+        )
+    assert any(command.startswith("python3 -c ") for command in transport.runs)
+
+
+@pytest.mark.asyncio
 async def test_codespace_spawner_recovers_remote_authority_record(monkeypatch):
     _patch_common(monkeypatch)
     state = {

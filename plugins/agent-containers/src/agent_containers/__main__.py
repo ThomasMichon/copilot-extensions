@@ -19,9 +19,11 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
-from pathlib import Path
+from dataclasses import asdict
+from pathlib import Path, PurePosixPath
 
 from agent_procutil import no_window_flags
 
@@ -38,6 +40,7 @@ from .ssh_transport import (
     build_remote_command,
     build_ssh_command,
     cleanup_remote_env,
+    cleanup_remote_envs,
     container_environment,
     prepare_ssh_config,
     write_remote_env,
@@ -105,6 +108,29 @@ def main(argv: list[str] | None = None) -> int:
         "--force", action="store_true",
         help="Terminate a live SSH holder and take over this trusted container",
     )
+
+    host_prepare = sub.add_parser(
+        "session-host-prepare",
+        help="Prepare trusted-container SSH/auth launch inputs for agent-bridge",
+    )
+    host_prepare.add_argument("name", help="Container name")
+    host_prepare.add_argument(
+        "--host-relay-port",
+        type=int,
+        default=None,
+        help="Agent-bridge's live host relay port",
+    )
+    host_state = sub.add_parser(
+        "session-host-state",
+        help="Print non-waking JSON lifecycle state for one container",
+    )
+    host_state.add_argument("name", help="Container name")
+    host_cleanup = sub.add_parser(
+        "session-host-cleanup",
+        help="Remove one launch-only trusted-container environment file",
+    )
+    host_cleanup.add_argument("name", help="Container name")
+    host_cleanup.add_argument("--remote-env", required=True)
 
     sub.add_parser("version", help="Show version")
 
@@ -174,6 +200,12 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_leases()
         if args.command == "exec":
             return _cmd_exec(args)
+        if args.command == "session-host-prepare":
+            return _cmd_session_host_prepare(args)
+        if args.command == "session-host-state":
+            return _cmd_session_host_state(args)
+        if args.command == "session-host-cleanup":
+            return _cmd_session_host_cleanup(args)
         if args.command == "version":
             print(f"agent-containers {__version__}")
             return 0
@@ -201,6 +233,138 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         return 130
+    return 0
+
+
+def _trusted_session_host_context(name: str):
+    """Resolve a trusted fleet member without launching its Session Host."""
+    from .lifecycle import get_container, inspect_container
+
+    config = load_config()
+    info = get_container(config, name)
+    if info is None:
+        raise RuntimeError(
+            f"Container '{name}' is not a discovered fleet member"
+        )
+    if info.state != "running":
+        raise RuntimeError(
+            f"Container '{name}' is not running (state={info.state!r})"
+        )
+    fleet = config.fleets.get(info.fleet or "")
+    if fleet is None:
+        raise RuntimeError(
+            f"Container '{name}' has no matching fleet configuration"
+        )
+    actual_profile = (
+        ((inspect_container(name).get("Config") or {}).get("Labels") or {})
+        .get(SECURITY_PROFILE_LABEL, "trusted")
+    )
+    if fleet.restricted or actual_profile == RESTRICTED_PROFILE:
+        raise RuntimeError(
+            f"Container '{name}' is restricted; Session Host projection is "
+            "trusted-fleet only"
+        )
+    user = fleet.exec_user or config.exec_user
+    workspace = fleet.workspace_folder or config.workspace_folder
+    return config, fleet, user, workspace
+
+
+def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
+    """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
+    from ._invoke import module_argv
+    from .container_shims import deploy as deploy_shims
+    from .relay_provider import token_for
+
+    config, fleet, user, workspace = _trusted_session_host_context(args.name)
+    ssh_config = prepare_ssh_config(args.name, user)
+    cleanup_remote_envs(args.name, user)
+    launch_env = container_environment(args.name, user)
+
+    forward, relay_enabled = config.credentials_for(fleet)
+    if forward:
+        github_token = host_gh_token()
+        if not github_token:
+            raise RuntimeError(
+                "forward_gh_token is enabled but `gh auth token` returned nothing"
+            )
+        launch_env["GH_TOKEN"] = github_token
+
+    reverse_forwards: list[str] = []
+    if relay_enabled:
+        if not args.host_relay_port or not 1 <= args.host_relay_port <= 65535:
+            raise RuntimeError(
+                "credential relay is enabled but no valid --host-relay-port "
+                "was supplied"
+            )
+        if not _relay_healthy(args.host_relay_port):
+            raise RuntimeError(
+                f"credential relay on 127.0.0.1:{args.host_relay_port} "
+                "did not answer the identity probe"
+            )
+        deploy_shims(args.name, ado=config.relay_deploy_ado)
+        launch_env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
+        launch_env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
+        launch_env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
+        reverse_forwards.append(
+            f"{config.relay_port}:127.0.0.1:{args.host_relay_port}"
+        )
+
+    remote_env = write_remote_env(args.name, user, launch_env)
+    remote_command = build_remote_command(
+        config.acp_command_for(fleet),
+        remote_env,
+    )
+    print(json.dumps({
+        "name": args.name,
+        "workspace_folder": workspace,
+        "security_profile": fleet.security_profile,
+        "user": user,
+        "ssh": asdict(ssh_config),
+        "remote_command": remote_command,
+        "remote_env": remote_env,
+        "reverse_forwards": reverse_forwards,
+        "state_command": [*module_argv(), "session-host-state", args.name],
+    }))
+    return 0
+
+
+def _cmd_session_host_state(args: argparse.Namespace) -> int:
+    """Emit lifecycle state without starting or attaching to the container."""
+    from .lifecycle import inspect_container
+
+    try:
+        details = inspect_container(args.name)
+    except RuntimeError as exc:
+        detail = str(exc)
+        if "No such object" not in detail and "No such container" not in detail:
+            raise
+        details = {}
+    state = str((details.get("State") or {}).get("Status") or "").lower()
+    print(json.dumps({
+        "name": args.name,
+        "state": state or "missing",
+        "running": state == "running",
+        "container_id": details.get("Id") or None,
+        "started_at": (details.get("State") or {}).get("StartedAt") or None,
+    }))
+    return 0
+
+
+def _cmd_session_host_cleanup(args: argparse.Namespace) -> int:
+    """Remove only a provider-created launch env path."""
+    _config, _fleet, user, _workspace = _trusted_session_host_context(args.name)
+    remote_env = PurePosixPath(args.remote_env)
+    if (
+        not remote_env.is_absolute()
+        or len(remote_env.parts) < 4
+        or remote_env.parts[-3:-1] != (".agent-containers", "launch")
+        or remote_env.suffix != ".env"
+        or not re.fullmatch(r"[0-9a-f]{32}", remote_env.stem)
+    ):
+        raise RuntimeError(
+            f"Refusing unsafe Session Host env cleanup path: {args.remote_env!r}"
+        )
+    cleanup_remote_env(args.name, user, str(remote_env))
     return 0
 
 

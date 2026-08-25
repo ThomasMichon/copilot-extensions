@@ -6,7 +6,8 @@
 - **Created:** 2026-08-22
 - **Status:** Active — **program/index effort** (steers the architecture + owns
   net-new symmetry pieces). WS-A's trusted-container dispatch/manual path now
-  uses OpenSSH and WS-C's credential relay now uses the same `-R` back-channel.
+  uses OpenSSH, WS-C's credential relay uses the same `-R` back-channel, and
+  trusted containers now run under agent-bridge-owned durable Session Hosts.
 - **Umbrella issue:** [#954](https://github.com/ThomasMichon/copilot-extensions/issues/954)
 - **Vision:** [`visions/venue-parity`](../../../visions/venue-parity/README.md) (child of [`visions/agent-fabric`](../../../visions/agent-fabric/README.md))
 
@@ -106,7 +107,11 @@ the rest:
   remote-agent tree before terminal failure is recorded. ✅ **Remote Session Host
   authority:** far-side hosts publish secure per-session ownership
   records so a restarted frontend can reconstruct and reattach without spawning
-  a duplicate child.
+  a duplicate child. ✅ **Trusted-container Session Host parity:** agent-bridge
+  now owns bundle staging, Host/child launch, TCP + relay forwards, target
+  ownership, authority recovery, resume/recreate, and confirmed-death cleanup
+  for both venue types. `agent-containers` supplies only lifecycle/readiness,
+  trust validation, the SSH endpoint, and launch-time auth preparation.
 - **WS-E — container-as-parity-harness.** Codify "reproduce the venue flow in a
   container" as accepted evidence for a CodeSpace fix.
 
@@ -202,3 +207,22 @@ the rest:
   local HostIndex row was deliberately removed and agent-bridge restarted, the
   frontend reconstructed the record from the far side, rebuilt ACP + relay
   forwards, reattached to the same PIDs, and completed another Copilot turn.
+- **2026-08-25 — trusted containers converged on Session Hosts.** Structured
+  trusted-container provider metadata now supplies a non-secret SSH descriptor
+  and narrow readiness/auth-preparation commands; restricted fleets still omit
+  the projection and retain direct execution. Agent-bridge's generic remote
+  spawner stages the Host bundle over SSH stdin, owns the `-L` ACP endpoint and
+  supervised `-R` relay, persists the far-side authority endpoint, and routes
+  initial launch, resume, recreate, and startup reconstruction through the same
+  Host path as CodeSpaces. Container state is tri-state: stopped/recreated is
+  authoritative death, while Docker/provider failure remains inconclusive and
+  blocks duplicate spawn. Partial launch and explicit reap retain target
+  ownership until identity-checked remote death is confirmed. Deployed
+  agent-bridge **0.4.0-dev356** + agent-containers **0.1.2-dev79** on dev6.
+  **Live proof:** session `dbbacaa8-823` published container Host PID 266 /
+  child PID 268 with relay metadata; after deleting only the local HostIndex row
+  and restarting agent-bridge, the frontend reconstructed the record, rebuilt
+  forwards, reattached to the same PIDs, and completed a second turn. Ending
+  the session removed both processes and released the container target lock.
+  **Next:** WS1 shared launch-policy/plugin staging and a formal reusable parity
+  probe.

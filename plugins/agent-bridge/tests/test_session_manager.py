@@ -376,6 +376,215 @@ class TestCodespaceSessionHostAcpCommand:
         assert remote_argv == ["bash", "-lc", acp_command]
 
 
+@pytest.mark.asyncio
+async def test_trusted_container_selects_remote_session_host(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    prepared = {
+        "name": "odsp-web-1",
+        "workspace_folder": "/workspaces/odsp-web",
+        "ssh": {"host_alias": "agent-container-odsp-web-1"},
+        "remote_command": (
+            "source /tmp/agent-containers/env-123 && "
+            "exec bash -lc 'copilot --acp --stdio'"
+        ),
+        "reverse_forwards": ["9857:127.0.0.1:61234"],
+        "state_command": ["agent-containers", "session-host-state", "odsp-web-1"],
+    }
+    captured = {}
+
+    async def fake_prepare(target, relay_port):
+        captured["prepare"] = (target, relay_port)
+        return prepared
+
+    async def fake_ensure(target):
+        captured["ensure"] = target
+
+    async def fake_cleanup(target, result):
+        captured["cleanup"] = (target, result)
+
+    def fake_build(target, **kwargs):
+        captured["build"] = (target, kwargs)
+        return object()
+
+    async def fake_connect(self, target, **kwargs):
+        captured["connect"] = kwargs
+        client = MagicMock()
+        client.is_running = True
+        client.pid = 12345
+        return client, "acp-container-123"
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "prepare_container_session_host",
+        fake_prepare,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.ensure_container_ready",
+        fake_ensure,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "cleanup_container_session_host",
+        fake_cleanup,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.build_container_spawner",
+        fake_build,
+    )
+    monkeypatch.setattr(
+        SessionManager, "_connect_via_session_host", fake_connect,
+    )
+    monkeypatch.setattr(
+        SessionManager, "_acquire_container_lock", lambda *args: None,
+    )
+    monkeypatch.setattr(
+        SessionManager, "_release_container_lock", lambda *args: None,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.relay_state.get_live_relay_port", lambda: 61234,
+    )
+    target = SpawnTarget(
+        type="command",
+        spawn_command=["agent-containers", "exec", "--stdio", "odsp-web-1"],
+        container={
+            "name": "odsp-web-1",
+            "workspace_folder": "/workspaces/odsp-web",
+            "security_profile": "trusted",
+            "ssh": {"host_alias": "agent-container-odsp-web-1"},
+            "provider_command": ["agent-containers"],
+        },
+    )
+    manager = SessionManager(tmp_db)
+
+    session = await manager.start_session(
+        target,
+        agent_name="container:odsp-web-1",
+    )
+
+    assert session.status == SessionStatus.IDLE
+    assert captured["ensure"]["name"] == "odsp-web-1"
+    assert captured["prepare"][1] == 61234
+    assert captured["build"][1]["prepared"] is prepared
+    assert captured["connect"]["remote_child_argv"] == [
+        "bash", "-lc", prepared["remote_command"],
+    ]
+    assert captured["connect"]["remote_cwd"] == "/workspaces/odsp-web"
+    assert captured["cleanup"][1] is prepared
+
+
+@pytest.mark.asyncio
+async def test_stopped_container_is_authoritative_remote_host_death(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    class FakeSpawner:
+        boundary = "container"
+
+        async def can_inspect_without_wake(self):
+            return False
+
+        async def recover_record(self, session_id):
+            raise AssertionError("stopped container must not be opened over SSH")
+
+    class FakeIndex:
+        def __init__(self):
+            self.removed = []
+            self.existing = SimpleNamespace(
+                extra={"remote_authority_v2": True},
+                resume_on_reattach=False,
+            )
+
+        def get(self, session_id):
+            return self.existing
+
+        def remove(self, session_id):
+            self.removed.append(session_id)
+
+        def register(self, record):
+            raise AssertionError("dead container record must not be registered")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "build_container_spawner",
+        lambda *args, **kwargs: FakeSpawner(),
+    )
+    manager = SessionManager(tmp_db)
+    manager._host_index = FakeIndex()
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "odsp-web-1",
+            "ssh": {"host_alias": "agent-container-odsp-web-1-a1b2c3d4e5f6"},
+            "provider_command": ["agent-containers"],
+        },
+    )
+    session = Session("session-1", "container", target)
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+
+    recovered = await manager._recover_remote_host_records(allow_wake=True)
+
+    assert recovered == 0
+    assert manager._host_index.removed == ["session-1"]
+    assert session.session_id not in manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_container_state_probe_failure_retains_remote_authority(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    class UnknownSpawner:
+        boundary = "container"
+
+        async def can_inspect_without_wake(self):
+            raise RuntimeError("Docker control plane unavailable")
+
+    class FakeIndex:
+        def __init__(self):
+            self.removed = []
+            self.existing = SimpleNamespace(
+                extra={"remote_authority_v2": True},
+                resume_on_reattach=False,
+            )
+
+        def get(self, session_id):
+            return self.existing
+
+        def remove(self, session_id):
+            self.removed.append(session_id)
+
+        def register(self, record):
+            raise AssertionError("unknown authority must not be replaced")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "build_container_spawner",
+        lambda *args, **kwargs: UnknownSpawner(),
+    )
+    manager = SessionManager(tmp_db)
+    manager._host_index = FakeIndex()
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "odsp-web-1",
+            "ssh": {"host_alias": "agent-container-odsp-web-1-a1b2c3d4e5f6"},
+            "provider_command": ["agent-containers"],
+        },
+    )
+    session = Session("session-1", "container", target)
+    session.acp_session_id = "acp-1"
+    manager._sessions[session.session_id] = session
+
+    recovered = await manager._recover_remote_host_records(allow_wake=True)
+
+    assert recovered == 0
+    assert manager._host_index.removed == []
+    assert session.session_id in manager._remote_recovery_inconclusive
+
+
 class TestRemoteForwardRelaySupervision:
     """Remote Session-Host reattach owns relay supervisors separately from -L."""
 
