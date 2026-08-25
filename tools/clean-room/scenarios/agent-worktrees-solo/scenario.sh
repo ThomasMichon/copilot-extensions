@@ -109,7 +109,7 @@ if bash -lc 'command -v agent-worktrees >/dev/null'; then
 else
     fail "agent-worktrees NOT on login-shell PATH (~/.local/bin not exported at login)"
 fi
-_ver="$(agent-worktrees --version 2>/dev/null)"
+_ver="$(bash -lc 'agent-worktrees --version' 2>/dev/null)"
 if [ -n "$(printf '%s' "$_ver" | tr -d ' \t\r\n')" ]; then
     pass "agent-worktrees --version -> $(printf '%s' "$_ver" | head -1)"
 else
@@ -117,33 +117,36 @@ else
 fi
 
 # =========================================================================
-phase 4 "read verbs enumerate (repos / projects / list)"
+phase 4 "read verbs enumerate (repos list / projects / list)"
+# Invoke through a login shell: the tool binstub lives in ~/.local/bin, which is
+# on the login PATH (as an agent's shell-outs see it) but NOT a bare exec PATH.
 _read_ok=0
-for verb in "repos" "projects" "list"; do
-    if capture "read-$verb" -- bash -lc "agent-worktrees $verb"; then
+for verb in "repos list" "projects" "list"; do
+    _label="read-$(printf '%s' "$verb" | tr ' ' '-')"
+    if capture "$_label" -- bash -lc "agent-worktrees $verb"; then
         pass "agent-worktrees $verb exits 0"
         _read_ok=1
     else
-        info "agent-worktrees $verb non-zero (see cr-logs/read-$verb.log)"
+        info "agent-worktrees $verb non-zero (see cr-logs/$_label.log)"
     fi
 done
-[ $_read_ok -eq 1 ] || fail "no agent-worktrees read verb (repos/projects/list) exited 0"
+[ $_read_ok -eq 1 ] || fail "no agent-worktrees read verb (repos list/projects/list) exited 0"
 
 # =========================================================================
 phase 5 "worktree round-trips (register -> create -> finalize)"
 if bash -lc 'command -v agent-worktrees >/dev/null'; then
-    ( cd "$HOME/wt-repo" && capture "register" -- agent-worktrees register wt-repo ) || true
+    ( cd "$HOME/wt-repo" && capture "register" -- bash -lc 'agent-worktrees register wt-repo' ) || true
     if [ -f "$HOME/.agent-worktrees/projects.yaml" ] && grep -qi wt-repo "$HOME/.agent-worktrees/projects.yaml" 2>/dev/null; then
         pass "register: wt-repo recognized (projects.yaml written)"
     else
         fail "register: no projects.yaml entry for wt-repo"
     fi
     # create (programmatic, no launch) -> capture the id -> finalize it.
-    ( cd "$HOME/wt-repo" && capture "create" -- agent-worktrees create --json ) || true
+    ( cd "$HOME/wt-repo" && capture "create" -- bash -lc 'agent-worktrees create --json' ) || true
     _wt_id="$(grep -oE '"id"[[:space:]]*:[[:space:]]*"[^"]+"' "$CR_LOGDIR/create.log" 2>/dev/null | head -1 | sed -E 's/.*"id"[^"]*"([^"]+)".*/\1/')"
     if [ -n "$_wt_id" ]; then
         pass "create: worktree carved ($_wt_id)"
-        ( cd "$HOME/wt-repo" && capture "finalize" -- agent-worktrees finalize "$_wt_id" --json ) || true
+        ( cd "$HOME/wt-repo" && capture "finalize" -- bash -lc "agent-worktrees finalize '$_wt_id' --json" ) || true
         if grep -qiE 'finaliz|prune|safe to' "$CR_LOGDIR/finalize.log" 2>/dev/null; then
             pass "finalize: $_wt_id round-tripped (create -> finalize)"
         else
