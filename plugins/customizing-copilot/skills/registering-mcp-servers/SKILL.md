@@ -107,6 +107,16 @@ when the plugin is enabled and are useful only when the plugin is deliberately
 adding main-agent tools; for domain-specific tools, prefer the per-agent
 `mcp-servers` block so the tools stay scoped to the sub-agent.
 
+For a plugin-backed stdio server, locate code with `${PLUGIN_ROOT}` in config or
+`COPILOT_PLUGIN_ROOT` in the child. The plugin loader defaults `cwd` to the
+plugin root even when it is omitted, while the runtime injects the current
+session as `COPILOT_AGENT_SESSION_ID`. It does **not** inject Copilot's target
+directory or advertise MCP roots. A server that needs repository access must
+take a validated tool argument, use an explicitly adopter-configured env value,
+or be registered at project scope instead. The full cross-surface contract and
+caveats are in
+[`references/plugin-runtime-context.md`](../../references/plugin-runtime-context.md).
+
 ## Environment-variable syntax
 
 All MCP configs support `$VAR`, `${VAR}`, and `${VAR:-default}` substitution in

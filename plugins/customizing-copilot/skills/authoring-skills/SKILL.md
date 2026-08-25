@@ -379,19 +379,21 @@ Two consequences shape how a plugin author writes them:
   cwd-gating is what lets one plugin **target its emission at the calling repo**
   (the whole premise of using a hook to replace a per-project instructions dir).
 - **Resolve the plugin's own files from the plugin root, not the session
-  repository.** The hook's `cwd` is the *session's* directory, not the plugin's.
-  Copilot CLI 1.0.26+ supplies `COPILOT_PLUGIN_ROOT`, `PLUGIN_ROOT`, and
-  `CLAUDE_PLUGIN_ROOT` to plugin command hooks with the plugin installation
-  directory; prefer `COPILOT_PLUGIN_ROOT`, keep the aliases for compatibility,
-  and build the script's absolute path from that root. This works for installed
-  marketplace payloads and in-repo directory-source plugins without hardcoding
-  `~/.copilot/installed-plugins/...` or rediscovering the target repository.
-  Guard the resolved script with `Test-Path` / `[ -f ]`, diagnose a missing root
-  or script to stderr, and emit `{}` so a partial install fails open. A deployed
-  runtime sidecar under `~/.<tool>/bin/` remains appropriate when the hook
-  intentionally calls runtime code rather than payload code. Keep it under the
-  perf budget below; do expensive work in a background process and have the hook
-  read a cheap state file.
+  repository.** Copilot CLI supplies `COPILOT_PLUGIN_ROOT`, `PLUGIN_ROOT`, and
+  `CLAUDE_PLUGIN_ROOT` to plugin command hooks, and an absent/empty hook `cwd`
+  defaults to that plugin payload root. Prefer `COPILOT_PLUGIN_ROOT`, keep the
+  aliases for compatibility, and build the script's absolute path from that
+  root. This works for installed marketplace payloads and in-repo
+  directory-source plugins without hardcoding
+  `~/.copilot/installed-plugins/...`.
+  The hook's **process CWD is therefore not the session target**: read `cwd` and
+  `sessionId` from the JSON payload on stdin, and use `COPILOT_PROJECT_DIR` when
+  the repository root is needed. Guard the resolved script with `Test-Path` /
+  `[ -f ]`, diagnose a missing root or script to stderr, and emit `{}` so a
+  partial install fails open. A deployed runtime sidecar under `~/.<tool>/bin/`
+  remains appropriate when the hook intentionally calls runtime code rather
+  than payload code. Keep it under the perf budget below; do expensive work in
+  a background process and have the hook read a cheap state file.
 - **The ACP transport and repo-scoped hooks — trust-gated, but usually fine.** A
   host that drives the agent over **ACP** (for example an ACP-mode bridge) creates
   a real session that loads plugin hooks, but ACP sessions **do not run the
@@ -408,6 +410,12 @@ Two consequences shape how a plugin author writes them:
   hooks are deferred and **never load over ACP at all**, trusted or not
   (confirmed) -- a hook that must run over ACP belongs in the plugin's own
   `hooks.json` or in user hooks, not `.github/hooks`.
+
+The complete path/CWD/session-ID contract for hooks, stdio MCP servers,
+JavaScript extensions, and plugin LSP servers is
+[`references/plugin-runtime-context.md`](../../references/plugin-runtime-context.md).
+Use that matrix whenever a plugin script needs both its payload location and the
+repository Copilot is targeting.
 
 ### sessionStart context injection
 

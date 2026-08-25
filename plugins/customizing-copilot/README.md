@@ -17,9 +17,9 @@ skill name) and Copilot loads the matching skill:
 
 | Skill | Use it when... | Covers |
 |-------|----------------|--------|
-| [authoring-skills](skills/authoring-skills/SKILL.md) | creating or auditing `SKILL.md`, hooks, or custom instructions | Skill locations and frontmatter, folder conventions, validation checklist, hooks, and custom-instruction surfaces |
+| [authoring-skills](skills/authoring-skills/SKILL.md) | creating or auditing `SKILL.md`, hooks, or custom instructions | Skill locations and frontmatter, folder conventions, validation checklist, hooks, custom-instruction surfaces, and portable plugin runtime context |
 | [defining-subagents](skills/defining-subagents/SKILL.md) | creating a `.agent.md` or delegating work to a custom agent | Agent frontmatter, tool aliases, invocation, per-agent MCP ownership, equivalent materialized CLI fallback, and anti-recursion / MCP-readiness guards |
-| [registering-mcp-servers](skills/registering-mcp-servers/SKILL.md) | adding or debugging MCP servers | Per-agent / project / global registration, config formats, env-var substitution, CLI commands, and server authoring |
+| [registering-mcp-servers](skills/registering-mcp-servers/SKILL.md) | adding or debugging MCP servers | Per-agent / project / global registration, config formats, env-var substitution, relocatable plugin servers, CLI commands, and server authoring |
 | [installing-plugins](skills/installing-plugins/SKILL.md) | enabling plugins or adding a marketplace | Repo-scoped `.github/copilot/settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), global installs, `.ai` directory marketplaces, payload-vs-runtime, and launch-time reconciliation |
 | [building-harnesses](skills/building-harnesses/SKILL.md) | building or auditing an agent control harness | Entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md): plugin set, repo adoption, `AGENTS.md`, delegation, validation, efforts, and visions |
 | [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, sub-agents, instructions, hooks, MCP configs, and loaded plugins |
@@ -75,6 +75,8 @@ Extensions API is not yet fully replaceable.
 Provides:
 
 - Seven skills and the bundled `reviewing-customizations` scanner.
+- A shared runtime-context reference for relocatable hook, MCP, extension, and
+  LSP entry points.
 - Guidance for both loose repo customizations and plugin-packaged
   customizations, including the in-repo `.ai` local marketplace pattern.
 - References to authoritative GitHub Copilot CLI docs and this repo's
