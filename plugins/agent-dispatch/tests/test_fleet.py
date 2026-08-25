@@ -371,6 +371,20 @@ def test_fleet_body_verdict_unknown_without_ssh(monkeypatch):
     assert embody.fleet_body_verdict("h", "sid") == "unknown"
 
 
+@pytest.mark.parametrize(
+    "payload,expected",
+    [
+        ('{"status":"running","liveness":"active"}', "ACTIVE"),
+        ('{"status":"running","liveness":"stalled"}', "STALLED"),
+        ('{"status":"idle","liveness":"idle"}', None),
+    ],
+)
+def test_fleet_body_activity_classifies(monkeypatch, payload, expected):
+    monkeypatch.setattr(embody.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(embody.subprocess, "run", _fake_status_run(0, payload))
+    assert embody.fleet_body_activity("Host-B", "sid-1") == expected
+
+
 def test_headless_call_encodes_fleet_body_recovery_handle():
     """A headless spawn whose create returned a session_id records a
     `fleet-body:<host>:<sid>` recovery handle (so the body is auto-recoverable)."""

@@ -590,6 +590,40 @@ def fleet_body_verdict(
     return _classify_body_status(proc)
 
 
+def fleet_body_activity(
+    host: str, session_id: str, *, timeout: float | None = None
+) -> str | None:
+    """Exact ACTIVE/STALLED state for a remote headless fleet body."""
+    from . import tracking
+
+    ssh = shutil.which("ssh")
+    if ssh is None or not host or not session_id:
+        return None
+    remote = f"agent-bridge --json status {shlex.quote(session_id)}"
+    cmd = [
+        ssh, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3",
+        host.strip().lower(), remote,
+    ]
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout if timeout is not None else 8.0,
+            **no_window_kwargs(),
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        session = json.loads((proc.stdout or "").strip())
+    except json.JSONDecodeError:
+        return None
+    return tracking.session_activity(session if isinstance(session, dict) else None)
+
+
 def local_body_verdict(session_id: str, *, timeout: float | None = None) -> str:
     """Tri-state liveness of a **local headless body** via *this* host's bridge.
 

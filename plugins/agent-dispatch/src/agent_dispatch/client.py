@@ -187,6 +187,16 @@ class DispatchClient:
             self._http.post(f"/tasks/{task_id}/heartbeat", json={"worker_id": worker_id})
         )
 
+    def set_activity(
+        self, task_id: str, activity: str | None, *, reservation_key: str
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/activity",
+                json={"activity": activity, "reservation_key": reservation_key},
+            )
+        )
+
     def progress(
         self,
         task_id: str,

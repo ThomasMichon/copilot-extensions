@@ -282,6 +282,11 @@ class WorkerBody(BaseModel):
     owner_session_id: str | None = None
 
 
+class ActivityBody(BaseModel):
+    activity: str | None = None
+    reservation_key: str
+
+
 class YieldBody(BaseModel):
     worker_id: str
     note: str | None = None
@@ -904,6 +909,14 @@ def create_app(
     @app.post("/tasks/{task_id}/heartbeat")
     def heartbeat(task_id: str, body: WorkerBody) -> dict:
         return _guard(lambda: queue.heartbeat(task_id, body.worker_id))
+
+    @app.post("/tasks/{task_id}/activity")
+    def activity(task_id: str, body: ActivityBody) -> dict:
+        return _guard(
+            lambda: queue.set_activity(
+                task_id, body.activity, reservation_key=body.reservation_key
+            )
+        )
 
     @app.post("/tasks/{task_id}/progress")
     def progress(task_id: str, body: ProgressBody) -> dict:

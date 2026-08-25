@@ -121,6 +121,30 @@ def test_progress_over_http(api):
     ).status_code == 409
 
 
+def test_activity_over_http(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    reservation = api.post(
+        "/spawn-reservations", json={"task_id": tid, "reserved_by": "sup"}
+    ).json()["reservation"]
+    key = reservation["key"]
+    api.post(
+        f"/spawn-reservations/{key}/spawned",
+        json={"session_handle": "local-body:s1"},
+    )
+    active = api.post(
+        f"/tasks/{tid}/activity",
+        json={"activity": "ACTIVE", "reservation_key": key},
+    )
+    assert active.status_code == 200
+    assert active.json()["activity"] == "ACTIVE"
+    assert active.json()["activity_updated_at"] is not None
+    invalid = api.post(
+        f"/tasks/{tid}/activity",
+        json={"activity": "IDLE", "reservation_key": key},
+    )
+    assert invalid.status_code == 409
+
+
 def test_goal_and_progress_log_over_http(api):
     # A goal-bearing task carries goal + done_criteria on the row...
     r = api.post(
@@ -311,7 +335,10 @@ def test_sse_stream_delivers_lifecycle_events(server_url):
 
     # Deterministic readiness: wait until the streamer's subscription is
     # registered server-side before producing events.
-    deadline = time.time() + 5
+    # Windows CI may be heavily loaded by sibling coordinator tests; the
+    # 0.3s sweep remains the behavior under test, while this is only the
+    # outer observation budget.
+    deadline = time.time() + 15
     while time.time() < deadline and mutator.health().get("subscribers", 0) < 1:
         time.sleep(0.05)
     assert mutator.health()["subscribers"] >= 1
@@ -428,7 +455,7 @@ def test_background_gc_auto_recovers_gone_owner(tmp_path, monkeypatch):
 
     monkeypatch.setattr("agent_dispatch.tracking.liveness_verdict", lambda *a, **k: "gone")
     q = TaskQueue(tmp_path / "tasks.db")
-    url, stop = _boot(create_app(q, sweep_interval=0.3))
+    url, stop = _boot(create_app(q, sweep_interval=0.3, enable_mcp=False))
     try:
         c = DispatchClient(url)
         tid = c.create("leased")["id"]

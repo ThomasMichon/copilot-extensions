@@ -1,7 +1,7 @@
 {
   "label": "Tasks",
   "after": "Worktrees",
-  "list": ["agent-dispatch", "inbox", "--machine", "{machine}", "--board"],
+  "list": ["agent-dispatch-board", "--machine", "{machine}"],
   "entry": {
     "id": "id",
     "title": "title",

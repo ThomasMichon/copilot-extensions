@@ -205,6 +205,22 @@ def embodiment_overlay(session: dict[str, Any] | None) -> dict[str, Any] | None:
     return overlay or None
 
 
+def session_activity(session: dict[str, Any] | None) -> str | None:
+    """Map an agent-bridge session snapshot to the task activity vocabulary."""
+    if not session:
+        return None
+    liveness = str(session.get("liveness") or "").lower()
+    status = str(session.get("status") or "").lower()
+    turn_state = str(session.get("turn_state") or "").lower()
+    if liveness == "stalled":
+        return "STALLED"
+    if liveness == "active" or turn_state == "running":
+        return "ACTIVE"
+    if status in {"starting", "running"} and liveness not in {"idle", "stalled"}:
+        return "ACTIVE"
+    return None
+
+
 def enrich_local_body_tasks(tasks: Any, reservations: Any) -> Any:
     """Overlay local headless ACP sessions using spawned reservation handles.
 

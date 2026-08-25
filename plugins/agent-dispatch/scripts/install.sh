@@ -216,6 +216,7 @@ VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
 STUB="$LOCAL_BIN/agent-dispatch"
+BOARD_STUB="$LOCAL_BIN/agent-dispatch-board"
 SYSTEMD_UNIT="agent-dispatch.service"
 SUPERVISOR_UNIT="agent-dispatch-supervisor.service"
 UNIT_DIR="$HOME/.config/systemd/user"
@@ -507,6 +508,14 @@ _ensure_uv_index() {
 # caller can extend its timeout), lock-serialized, fail-fast.
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
+    local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
+    if [[ -z "$machine" ]] && command -v agent-worktrees >/dev/null 2>&1; then
+        machine="$(agent-worktrees get machine 2>/dev/null | head -n1 || true)"
+    fi
+    [[ -n "$machine" ]] || machine="$(hostname 2>/dev/null || true)"
+    [[ -n "$machine" ]] &&
+        printf '%s' "$(printf '%s' "$machine" | tr '[:upper:]' '[:lower:]')" \
+            > "$INSTALL_DIR/machine"
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
@@ -565,7 +574,10 @@ fi
 exit "$_rc"
 STUBEOF
     chmod +x "$STUB"
+    sed 's/-m agent_dispatch /-m agent_dispatch.board_cli /g' "$STUB" > "$BOARD_STUB"
+    chmod +x "$BOARD_STUB"
     _ok "Binstub: $STUB (self-provisioning)"
+    _ok "Fast board binstub: $BOARD_STUB"
 }
 
 _ensure_runtime() {
@@ -1426,7 +1438,7 @@ do_uninstall() {
         systemctl --user daemon-reload 2>/dev/null || true
         _ok "Coordinator service removed"
     fi
-    rm -f "$STUB"; _ok "Binstub removed"
+    rm -f "$STUB" "$BOARD_STUB"; _ok "Binstubs removed"
     rm -f "$HOME/.agent-worktrees/pivots/agent-dispatch.json" 2>/dev/null || true
     if [[ "$PURGE" -eq 1 ]]; then
         rm -rf "$INSTALL_DIR"; _ok "Runtime purged: $INSTALL_DIR (config + DB deleted)"

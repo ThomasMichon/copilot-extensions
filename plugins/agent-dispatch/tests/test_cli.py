@@ -1456,30 +1456,33 @@ class TestInboxBoard:
         active = {
             "status": "started",
             "awaiting_steer": False,
-            "embodiment": {"turn_state": "running", "liveness": "active"},
+            "activity": "ACTIVE",
+            "activity_updated_at": 1000.0,
         }
         blocked_but_active = {**active, "awaiting_steer": True}
-        idle = {
+        idle = {"status": "started", "activity": None, "activity_updated_at": 1000.0}
+        stale_owner = {
             "status": "started",
-            "embodiment": {"turn_state": "idle", "liveness": "idle"},
+            "activity": "ACTIVE",
+            "activity_updated_at": 900.0,
         }
-        stale_owner = {"status": "started", "last_liveness": "live"}
 
         assert m._board_group(active) == "Started"
-        assert m._board_activity(active) == "ACTIVE"
+        assert m._board_activity(active, now=1001.0) == "ACTIVE"
         assert m._board_group(blocked_but_active) == "Blocked"
-        assert m._board_activity(blocked_but_active) == "ACTIVE"
-        assert m._board_activity(idle) is None
-        assert m._board_activity(stale_owner) is None
+        assert m._board_activity(blocked_but_active, now=1001.0) == "ACTIVE"
+        assert m._board_activity(idle, now=1001.0) is None
+        assert m._board_activity(stale_owner, now=1001.0) is None
 
     def test_stalled_turn_is_not_reported_active(self):
         from agent_dispatch import __main__ as m
 
         task = {
             "status": "started",
-            "embodiment": {"turn_state": "running", "liveness": "stalled"},
+            "activity": "STALLED",
+            "activity_updated_at": 1000.0,
         }
-        assert m._board_activity(task) == "STALLED"
+        assert m._board_activity(task, now=1001.0) == "STALLED"
 
     def test_picker_manifest_badges_activity_separately_from_group(self):
         import json
@@ -1489,6 +1492,9 @@ class TestInboxBoard:
             (Path(__file__).parents[1] / "pivots" / "agent-dispatch.json")
             .read_text(encoding="utf-8")
         )
+        assert manifest["list"] == [
+            "agent-dispatch-board", "--machine", "{machine}"
+        ]
         assert manifest["entry"]["group"] == "group"
         assert manifest["entry"]["badges"] == ["activity", "labels"]
 
