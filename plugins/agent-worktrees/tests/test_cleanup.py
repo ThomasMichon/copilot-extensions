@@ -143,10 +143,33 @@ def test_reclaim_worktree_apply_success_runs_in_anchor(monkeypatch):
         seen["cwd"] = cwd
         return _proc(0)
     monkeypatch.setattr(cleanup, "_run_worktrees", _run)
+    monkeypatch.setattr(
+        cleanup.tracking, "load_orphaned_obligations_strict",
+        lambda project=None: [])
     r = cleanup.reclaim_worktree("m/p/child", _config(), apply=True)
     assert r.status == "reclaimed"
     assert seen["cwd"] == "D:/child-anchor"
-    assert seen["args"] == ["finalize", "child", "--abandon", "--json"]
+    assert seen["args"] == [
+        "finalize", "child", "--abandon",
+        "--handoff-to", "claims-cleanup", "--json"]
+
+
+def test_reclaim_worktree_retains_parent_until_nested_handoff_accepted(
+        monkeypatch):
+    monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
+                        lambda project, config: _repo())
+    monkeypatch.setattr(cleanup, "_run_worktrees", lambda *a, **k: _proc(0))
+    monkeypatch.setattr(
+        cleanup.tracking, "load_orphaned_obligations_strict",
+        lambda project=None: [{
+            "source_worktree": "child",
+            "ref": "m/other/grandchild",
+            "handoff_to": "claims-cleanup",
+        }])
+    r = cleanup.reclaim_worktree("m/p/child", _config(), apply=True)
+    assert r.status == "failed"
+    assert "nested obligation" in r.detail
+    assert "claims cleanup child --apply" in r.detail
 
 
 def test_reclaim_worktree_finalize_refusal_retains(monkeypatch):
@@ -183,6 +206,9 @@ def test_reclaim_worktree_falls_back_to_global_repo_registry(
         return _proc(0)
 
     monkeypatch.setattr(cleanup, "_run_worktrees", _run)
+    monkeypatch.setattr(
+        cleanup.tracking, "load_orphaned_obligations_strict",
+        lambda project=None: [])
     r = cleanup.reclaim_worktree("m/dev.tmichon/child", _config(), apply=True)
     assert r.status == "reclaimed"
     assert seen["cwd"] == str(anchor)
@@ -212,6 +238,9 @@ def test_reclaim_orphan_worktree_dispatches(monkeypatch):
     monkeypatch.setattr(cleanup.sweep_mod, "repo_for_project",
                         lambda project, config: _repo())
     monkeypatch.setattr(cleanup, "_run_worktrees", lambda *a, **k: _proc(0))
+    monkeypatch.setattr(
+        cleanup.tracking, "load_orphaned_obligations_strict",
+        lambda project=None: [])
     entry = {"kind": "worktree", "ref": "m/p/child", "machine": "m"}
     r = cleanup.reclaim_orphan(entry, _config(machine="m"), apply=True)
     assert r.status == "reclaimed"

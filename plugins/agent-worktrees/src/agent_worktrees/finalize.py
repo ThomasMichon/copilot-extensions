@@ -143,8 +143,13 @@ def push_changes(
     if yaml_path.exists():
         try:
             record = tracking.load_record(yaml_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            output.err(
+                f"Cannot finalize {worktree_id}: its existing claim ledger "
+                f"is unreadable ({exc}). Repair the tracking record first; "
+                "creator ownership is preserved."
+            )
+            return False
 
     # Set title early so it survives even if push fails
     if title and record:
@@ -1056,8 +1061,8 @@ def _settle_parent_obligation(
 
     Same-machine only: when the parent lives on **this** machine its tracking
     YAML is directly updatable (``~/.{project}/worktrees/{id}.yaml``); a
-    cross-machine parent settles later via the lease disposition mirror / the
-    reclaim sweep. Fully best-effort and degrade-safe -- any failure (no
+    cross-machine parent settles later via the lease disposition mirror. Fully
+    best-effort and degrade-safe -- any failure (no
     owner_ref, unresolved/foreign parent, no matching claim, I/O error) is a
     silent no-op and never perturbs the finalize.
     """
@@ -1073,13 +1078,16 @@ def _settle_parent_obligation(
         )
         if not parent_path.exists():
             return
-        parent = tracking.load_record(parent_path)
-        child_ref = tracking.format_claim_ref(
-            config.machine, config.repo_name, worktree_id
-        )
-        settled = tracking.settle_resource_claim(
-            parent, child_ref, obligations.AT_REST, path=parent_path,
-        )
+        with tracking._RecordLock(parent_path, require_sidecar=True):
+            parent = tracking.load_record(parent_path)
+            child_ref = tracking.format_claim_ref(
+                config.machine, config.repo_name, worktree_id
+            )
+            settled = tracking.settle_resource_claim(
+                parent, child_ref, obligations.AT_REST, save=False,
+            )
+            if settled is not None:
+                tracking.save_record(parent, parent_path)
         if settled is not None:
             output.ok(
                 f"Settled parent {owner.worktree_id}'s claim on this worktree "
@@ -1094,6 +1102,7 @@ def _assert_obligations_settled(
     worktree_id: str,
     *,
     abandon: bool,
+    handoff_to: str | None = None,
 ) -> bool:
     """Obligation gate (resource-obligation-settlement Phase 2).
 
@@ -1103,58 +1112,43 @@ def _assert_obligations_settled(
     child has already flipped its claim to ``at-rest``/``released``). Behavior by
     :func:`obligations.gate_mode`:
 
-    * ``off``   -- skip entirely.
-    * ``warn``  -- surface unsettled obligations but **proceed**.
-    * ``block`` -- **refuse** (return False) while any obligation is unsettled,
-      unless ``abandon`` (the default, now that the per-kind settlement hooks +
-      reclaim sweep are proven).
+    The legacy ``off``/``warn``/``block`` setting no longer weakens ownership:
+    any unsettled resource **refuses** finalize unless ``abandon`` carries an
+    affirmative handoff target. The setting may still shape surrounding
+    diagnostics, but cannot release creator responsibility.
 
-    ``abandon`` overrides a block: it proceeds and re-homes the unsettled
-    obligations (the downstream ``release_all_resources`` marks the claims
-    released and surfaces them for cleanup/adoption). Returns True to proceed,
-    False to block the finalize. Degrade-safe: no record / no resources -> proceed.
+    ``abandon`` overrides a block only with a non-empty ``handoff_to`` recipient
+    or flow: it proceeds and re-homes the unsettled obligations (the downstream
+    ``release_all_resources`` marks the claims released and surfaces them for
+    the named cleanup/adoption flow). Returns True to proceed, False to block
+    the finalize. Degrade-safe: no record / no resources -> proceed.
 
-    Before deciding, it **self-heals** (dotfiles#1161): a blocking claim whose
-    holder is provably gone AND whose work is provably safe is auto-reclaimed
-    (flipped to ``abandoned`` via :func:`sweep.self_heal`), so a crashed/missed
-    settlement never wedges finalize forever -- the automatic complement to the
-    manual ``claims sweep`` verb.
+    Finalize never auto-reclaims a creator's children. A crashed/missed
+    settlement is handled explicitly through ``claims sweep`` or an
+    operator-directed handoff, preserving affirmative ownership.
     """
     if record is None:
         return True
-    mode = obligations.gate_mode()
-    if mode == obligations.OFF:
-        return True
-
-    # Self-heal (never-wedge, dotfiles#1161): before the gate can block, reclaim
-    # any blocking claim whose holder is provably GONE and whose work is provably
-    # SAFE -- a crashed/missed settlement must not wedge finalize forever. This
-    # is the automatic complement to the manual `claims sweep` verb, applied to
-    # this owner at the natural trigger. Conservative (only definitive gone+safe
-    # flips to `abandoned`) and best-effort (never let it break finalize).
-    try:
-        from . import config as _cfg
-        from . import sweep as _sweep
-        _config = _cfg.load_config()
-        _path = _cfg.tracking_dir() / f"{worktree_id}.yaml"
-        healed = _sweep.self_heal(record, _config, path=_path, save=True)
-        if healed:
-            output.warn(
-                f"Auto-reclaimed {len(healed)} unsettled obligation(s) of "
-                f"{worktree_id} whose holder is gone and work is safe "
-                f"(never-wedge sweep):"
-            )
-            for c in healed:
-                lbl = f"  · {c.kind}: {c.ref}"
-                if c.note:
-                    lbl += f" ({c.note})"
-                print(lbl)
-    except Exception:
-        pass
-
     unsettled = [c for c in record.resources if c.is_unsettled]
     if not unsettled:
         return True
+    pending = [c for c in unsettled if c.ref.startswith("pending-run:")]
+    if pending:
+        output.err(
+            f"Worktree {worktree_id} has {len(pending)} in-flight resource "
+            "creation reservation(s). Pending resources cannot be abandoned or "
+            "handed off before their real identity is journaled; wait for the "
+            "creating command or repair its pending claim."
+        )
+        return False
+    if abandon and not (handoff_to or "").strip():
+        output.err(
+            f"Worktree {worktree_id} cannot abandon {len(unsettled)} unsettled "
+            "obligation(s) without an affirmative handoff target. The creating "
+            "agent remains responsible: close them now, or after explicit "
+            "operator direction pass --abandon --handoff-to <recipient-or-flow>."
+        )
+        return False
 
     def _describe() -> None:
         for c in unsettled:
@@ -1163,12 +1157,11 @@ def _assert_obligations_settled(
                 label += f" ({c.note})"
             print(label)
 
-    if mode == obligations.BLOCK and not abandon:
+    if not abandon:
         output.err(
             f"Worktree {worktree_id} still owns {len(unsettled)} unsettled "
             f"resource obligation(s) -- finalize is blocked "
-            f"(obligation gate=block, the default; "
-            f"AGENT_WORKTREES_OBLIGATION_GATE=warn/off relaxes it):"
+            "(creator ownership cannot be disabled by obligation-gate mode):"
         )
         _describe()
         output.err(
@@ -1178,42 +1171,59 @@ def _assert_obligations_settled(
         )
         return False
 
-    verb = "Abandoning" if abandon else "Warning: finalizing with"
     output.warn(
-        f"{verb} {len(unsettled)} unsettled resource obligation(s) owned by "
+        f"Abandoning {len(unsettled)} unsettled resource obligation(s) owned by "
         f"{worktree_id}"
-        + (" -- re-homed for cleanup/adoption:" if abandon else
-           " (gate=warn) -- settle or --abandon them; review/clean:")
+        + f" -- handed to {(handoff_to or '').strip()}:"
     )
     _describe()
     return True
 
 
-def _rehome_abandoned_obligations(record, worktree_id: str, config) -> list[dict]:
+def _rehome_abandoned_obligations(
+    record, worktree_id: str, config, *, handoff_to: str,
+) -> bool:
     """Durably re-home an ``--abandon`` finalize's still-unsettled obligations.
 
     Selects the record's unsettled (blocking) claims -- the ones a plain finalize
     would refuse and ``--abandon`` is about to release -- and records each in the
     per-project orphanage (:func:`tracking.rehome_abandoned_obligations`) so the
     orphaned resource it named is not silently dropped. Logs what it re-homed.
-    Returns the entries written (empty when nothing was unsettled). Best-effort.
+    Returns True only when every unsettled claim is durably present with the
+    requested handoff target. A write/readback failure returns False so finalize
+    preserves the creator worktree and its claims.
     """
     abandoned = [c for c in record.resources if c.is_unsettled]
     if not abandoned:
-        return []
-    rehomed = tracking.rehome_abandoned_obligations(
-        abandoned, source_worktree=worktree_id, config=config)
-    if rehomed:
-        output.warn(
-            f"Re-homed {len(rehomed)} abandoned obligation(s) of {worktree_id} "
-            f"to the durable orphanage (not dropped) -- list via "
-            f"'agent-worktrees claims orphans':")
-        for c in abandoned:
-            lbl = f"  · {c.kind}: {c.ref}"
-            if c.note:
-                lbl += f" ({c.note})"
-            print(lbl)
-    return rehomed
+        return True
+    tracking.rehome_abandoned_obligations(
+        abandoned, source_worktree=worktree_id, config=config,
+        handoff_to=handoff_to)
+    persisted = {
+        (entry.get("source_worktree"), entry.get("ref"))
+        for entry in tracking.load_orphaned_obligations_strict()
+        if (entry.get("handoff_to") or "").strip() == handoff_to
+    }
+    expected = {(worktree_id, claim.ref) for claim in abandoned}
+    if not expected.issubset(persisted):
+        missing = sorted(ref for owner, ref in expected - persisted)
+        output.err(
+            "Affirmative handoff could not be durably persisted; finalize is "
+            "refused and creator ownership is preserved. Missing: "
+            + ", ".join(missing)
+        )
+        return False
+    output.warn(
+        f"Re-homed {len(abandoned)} abandoned obligation(s) of {worktree_id} "
+        f"to affirmative handoff target {handoff_to!r} via the durable "
+        f"orphanage (not dropped) -- list via "
+        f"'agent-worktrees claims orphans':")
+    for c in abandoned:
+        lbl = f"  · {c.kind}: {c.ref}"
+        if c.note:
+            lbl += f" ({c.note})"
+        print(lbl)
+    return True
 
 
 def validate_and_finalize(
@@ -1222,6 +1232,7 @@ def validate_and_finalize(
     *,
     dry_run: bool = False,
     abandon: bool = False,
+    handoff_to: str | None = None,
 ) -> bool:
     """Validate that worktree content is on upstream, then clean up.
 
@@ -1237,6 +1248,8 @@ def validate_and_finalize(
             still owns **unsettled** outbound resources, re-homing them (marking
             the claims released + surfacing them) rather than being blocked. The
             escape hatch for the resource-obligation-settlement finalize gate.
+        handoff_to: Required with ``abandon`` when obligations remain; the
+            affirmative recipient or flow recorded on every orphan entry.
 
     Returns:
         True on success, False if content is not yet on upstream.
@@ -1285,7 +1298,9 @@ def validate_and_finalize(
     # Runs BEFORE any destructive step so a blocking gate refuses cleanly. Read
     # is cheap + local (the ledger), no traversal. Enforcing (block) by default;
     # AGENT_WORKTREES_OBLIGATION_GATE=warn/off relaxes it, and --abandon overrides.
-    if not _assert_obligations_settled(record, worktree_id, abandon=abandon):
+    if not _assert_obligations_settled(
+        record, worktree_id, abandon=abandon, handoff_to=handoff_to,
+    ):
         return False
 
     # Fetch to get current upstream state
@@ -1343,6 +1358,48 @@ def validate_and_finalize(
                 f"Unmerged work detected on {branch}. "
                 f"Cannot finalize -- content is not on "
                 f"{repo.remote}/{repo.default_branch}."
+            )
+            return False
+
+    # Freeze the exact ownership set under the same record lock used by
+    # `claims add`: reload after the potentially-long fetch/content validation,
+    # re-check every claim, persist+verify the handoff, then mark the creator
+    # `finalizing`. Claim creation rejects that terminal transition, so no new
+    # resource can appear between this check and release_all_resources below.
+    if yaml_path.exists():
+        try:
+            with tracking._RecordLock(yaml_path, require_sidecar=True):
+                record = tracking.load_record(yaml_path)
+                unsettled = [c for c in record.resources if c.is_unsettled]
+                pending = [
+                    c for c in unsettled if c.ref.startswith("pending-run:")
+                ]
+                if pending:
+                    output.err(
+                        f"Worktree {worktree_id} acquired {len(pending)} "
+                        "in-flight resource creation reservation(s) before "
+                        "cleanup. Finalize is refused until each real resource "
+                        "identity is journaled."
+                    )
+                    return False
+                if unsettled and not abandon:
+                    output.err(
+                        f"Worktree {worktree_id} acquired {len(unsettled)} "
+                        "unsettled obligation(s) before cleanup; finalize is "
+                        "refused and creator ownership is preserved."
+                    )
+                    return False
+                if abandon and unsettled and not _rehome_abandoned_obligations(
+                    record, worktree_id, config,
+                    handoff_to=(handoff_to or "").strip(),
+                ):
+                    return False
+                record.status = "finalizing"
+                tracking.save_record(record, yaml_path)
+        except Exception as exc:
+            output.err(
+                f"Cannot freeze {worktree_id}'s claim ledger for finalize "
+                f"({exc}); creator ownership is preserved."
             )
             return False
 
@@ -1450,13 +1507,6 @@ def validate_and_finalize(
 
         # Update tracking
         if record:
-            # Durable re-home (resource-obligation-settlement, dotfiles#1161):
-            # an --abandon finalize is about to RELEASE its still-unsettled
-            # obligations. Before dropping them, re-home each to the durable
-            # per-project orphanage so the orphaned resource it named is recorded
-            # for later cleanup/adoption, not silently lost. Best-effort.
-            if abandon:
-                _rehome_abandoned_obligations(record, worktree_id, config)
             # Citadel E1b cascade (#877): a parent that owns outbound worktree
             # resources hands them back on finalize -- release the live claims so
             # the ledger stops asserting the parent holds them, and SURFACE the
@@ -1520,6 +1570,7 @@ def finalize(
     *,
     dry_run: bool = False,
     abandon: bool = False,
+    handoff_to: str | None = None,
 ) -> bool:
     """Legacy wrapper -- runs validate_and_finalize only.
 
@@ -1528,6 +1579,7 @@ def finalize(
     """
     return validate_and_finalize(
         worktree_id, config, dry_run=dry_run, abandon=abandon,
+        handoff_to=handoff_to,
     )
 
 
@@ -1595,6 +1647,3 @@ def _dry_run_finalize_preview(
     output.dry_run("Would update worktree YAML status: finalized")
     print()
     output.ok("Dry run complete -- no changes made")
-
-
-

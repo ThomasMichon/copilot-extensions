@@ -235,12 +235,15 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
   obligation -- including one owned on a different machine -- is reclaimed by
   reading the disposition mirror off the shared lease, so a clean disconnect
   anywhere unblocks it.
-- **Genuinely need to finalize anyway** -- `agent-worktrees finalize --abandon`
-  proceeds and **re-homes** the obligations to a durable orphanage for
-  cleanup/adoption (always logged), never dropping them. Use it deliberately, not
-  as a reflex. **This transfers ownership; it does not complete closeout. The
-  agent that passes `--abandon` remains responsible for every re-homed resource
-  until it is settled or explicitly handed to another owner.** Immediately:
+- **Genuinely cannot close the children yourself** -- ownership still stays with
+  the creating agent. Do **not** choose a handoff unilaterally: ask the operator.
+  Only after the operator explicitly names another recipient/flow may you run
+  `agent-worktrees finalize --abandon --handoff-to <recipient-or-flow>`.
+  `--abandon` without `--handoff-to` is refused. The command re-homes the
+  obligations to a durable orphanage with that recipient recorded; it never
+  drops them. **Creating-agent cleanup is the default; affirmative handoff is the
+  only exception.** The creating agent remains responsible until the named flow
+  accepts the transfer. Immediately:
   1. save the finalizing worktree id printed in the orphan entries;
   2. run `agent-worktrees claims cleanup <source-worktree-id>` as a dry-run;
   3. investigate each selected resource (child git/PR state, CodeSpace work,
@@ -252,12 +255,12 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
   Never run unfiltered `claims cleanup --apply` merely to clear your blocker:
   with no selector it acts on the **entire orphanage**, including unrelated
   agents' resources. Do not report the parent fully closed while its selected
-  orphan entries remain; if another agent/operator must continue them, name
-  every ref and make that responsibility transfer explicit.
+  orphan entries remain;   if the named recipient cannot accept them, return to the operator rather than
+  inventing a different flow.
 
-Inspect the ledger any time with `agent-worktrees claims show`. (Relax the gate
-for a session with `AGENT_WORKTREES_OBLIGATION_GATE=warn` -- surface but proceed
--- but prefer settling the resource.)
+Inspect the ledger any time with `agent-worktrees claims show`. Creator
+ownership is invariant: `AGENT_WORKTREES_OBLIGATION_GATE=warn|off` does not
+permit releasing unsettled resources without the affirmative handoff above.
 
 #### Resources you create **out-of-band** aren't auto-journaled — claim them by hand
 
