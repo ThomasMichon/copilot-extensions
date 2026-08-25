@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+import yaml
+
 from agent_worktrees.tracking import (
     ClaimRef,
     ResourceClaim,
@@ -209,6 +212,19 @@ class TestSaveLoadRoundTrip:
         save_record(loaded, path)
         assert b"\x07" not in path.read_bytes()
         assert load_record(path).summary == "poisoned"
+
+    def test_load_does_not_repair_non_reader_yaml_errors(
+        self, tmp_path: Path, monkeypatch
+    ):
+        path = tmp_path / "wt.yaml"
+        path.write_text("summary: [unterminated\n", encoding="utf-8")
+        monkeypatch.setattr(
+            "agent_worktrees.tracking._strip_control_chars",
+            lambda _text: pytest.fail("non-reader YAML errors must not be repaired"),
+        )
+
+        with pytest.raises(yaml.parser.ParserError):
+            load_record(path)
 
     def test_null_title(self, tmp_path: Path):
         rec = self._make_record(title=None)

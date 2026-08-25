@@ -793,7 +793,7 @@ def load_record(path: Path) -> WorktreeRecord:
     raw = _read_text_with_retry(path)
     try:
         data = yaml.safe_load(raw)
-    except yaml.YAMLError:
+    except yaml.reader.ReaderError:
         # dotfiles#1789: a stray C0 control char (e.g. BEL) persisted into a
         # value makes the YAML reader raise on every load, wedging all future
         # disposition writes. Self-heal by stripping the illegal control chars
