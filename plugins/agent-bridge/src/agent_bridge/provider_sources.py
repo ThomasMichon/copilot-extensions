@@ -131,7 +131,7 @@ def parse_manifest(data: object, *, source_path: str = "") -> ProviderManifest:
         or not isinstance(schema_version, int)
         or schema_version not in (0, 1)
     ):
-        raise ManifestError("`schema_version` must be 1 when present")
+        raise ManifestError("`schema_version` must be 0 or 1")
 
     plugin = data.get("plugin")
     plugin_root = data.get("plugin_root")
