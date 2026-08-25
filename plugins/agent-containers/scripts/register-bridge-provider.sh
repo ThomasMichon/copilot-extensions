@@ -39,16 +39,17 @@ else
 fi
 mkdir -p "$dir" 2>/dev/null || exit 0
 
-"$py" - "$template" "$binstub" "$dir/$name.json" <<'PY'
+"$py" - "$template" "$PluginDir" "$binstub" "$dir/$name.json" <<'PY'
 import json, os, sys
 
-template, binstub, out = sys.argv[1], sys.argv[2], sys.argv[3]
+template, plugin_root, binstub, out = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 try:
     with open(template, encoding="utf-8") as f:
         data = json.load(f)
 except Exception:
     sys.exit(0)
 
+data["plugin_root"] = os.path.realpath(plugin_root)
 data["command"] = [binstub]
 payload = json.dumps(data, indent=2, sort_keys=True) + "\n"
 

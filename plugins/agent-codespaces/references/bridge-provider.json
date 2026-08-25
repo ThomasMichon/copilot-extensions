@@ -1,4 +1,6 @@
 {
+  "schema_version": 1,
+  "plugin": "agent-codespaces@copilot-extensions",
   "namespace": "codespace",
   "restricted": false,
   "description": "GitHub Codespaces (agent-codespaces)"

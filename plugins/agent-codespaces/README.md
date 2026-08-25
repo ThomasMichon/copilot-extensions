@@ -179,6 +179,10 @@ discovers it there and registers the live `codespace:` namespace resolver, so
 CodeSpaces are addressable as `codespace:<name>` (raw or friendly) — listed and
 resolved live, with no expiry, including newly-created ones. There is **no
 `bridge register` step**; installing the plugin is all that's needed.
+The manifest is versioned and attributes its plugin source/root. If its binstub
+or payload disappears, bridge leaves the namespace inactive, warns without
+breaking other providers, and reports exact cleanup through
+`agent-bridge doctor`.
 
 The current bridge integration is process-boundary first, not PATH/import
 coupled: the manifest carries the absolute agent-codespaces binstub, and
