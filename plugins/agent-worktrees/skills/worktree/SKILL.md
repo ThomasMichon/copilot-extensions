@@ -238,9 +238,22 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
 - **Genuinely need to finalize anyway** -- `agent-worktrees finalize --abandon`
   proceeds and **re-homes** the obligations to a durable orphanage for
   cleanup/adoption (always logged), never dropping them. Use it deliberately, not
-  as a reflex. List the orphanage with `agent-worktrees claims orphans`; reclaim
-  the orphaned resources (delete the CodeSpace, finalize the cross-repo worktree)
-  with `agent-worktrees claims cleanup --apply`.
+  as a reflex. **This transfers ownership; it does not complete closeout. The
+  agent that passes `--abandon` remains responsible for every re-homed resource
+  until it is settled or explicitly handed to another owner.** Immediately:
+  1. save the finalizing worktree id printed in the orphan entries;
+  2. run `agent-worktrees claims cleanup <source-worktree-id>` as a dry-run;
+  3. investigate each selected resource (child git/PR state, CodeSpace work,
+     active sessions), then finalize/settle it through its owning lifecycle;
+  4. use `agent-worktrees claims cleanup <source-worktree-id> --apply` only for
+     the selected resources you intend to reclaim, and rerun the selective
+     dry-run until it reports no matches.
+
+  Never run unfiltered `claims cleanup --apply` merely to clear your blocker:
+  with no selector it acts on the **entire orphanage**, including unrelated
+  agents' resources. Do not report the parent fully closed while its selected
+  orphan entries remain; if another agent/operator must continue them, name
+  every ref and make that responsibility transfer explicit.
 
 Inspect the ledger any time with `agent-worktrees claims show`. (Relax the gate
 for a session with `AGENT_WORKTREES_OBLIGATION_GATE=warn` -- surface but proceed
