@@ -230,8 +230,8 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
   `agent-codespaces finalize <name>`.
 - **A bridge session** -- drive its worktree to final.
 - **A crashed/gone holder that never settled** -- `agent-worktrees claims sweep`
-  (dry-run) then `--apply` reclaims provably-gone-and-safe obligations. (Finalize
-  also **self-heals** this automatically before it blocks.) A stale *codespace*
+  (dry-run) then `--apply` explicitly reclaims provably-gone-and-safe
+  obligations. Finalize never auto-reclaims creator ownership. A stale *codespace*
   obligation -- including one owned on a different machine -- is reclaimed by
   reading the disposition mirror off the shared lease, so a clean disconnect
   anywhere unblocks it.
@@ -255,8 +255,8 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
   Never run unfiltered `claims cleanup --apply` merely to clear your blocker:
   with no selector it acts on the **entire orphanage**, including unrelated
   agents' resources. Do not report the parent fully closed while its selected
-  orphan entries remain;   if the named recipient cannot accept them, return to the operator rather than
-  inventing a different flow.
+  orphan entries remain; if the named recipient cannot accept them, return to
+  the operator rather than inventing a different flow.
 
 Inspect the ledger any time with `agent-worktrees claims show`. Creator
 ownership is invariant: `AGENT_WORKTREES_OBLIGATION_GATE=warn|off` does not

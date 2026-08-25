@@ -1079,13 +1079,12 @@ def _create_worktree_core(
             owner_guard = tracking._RecordLock(
                 owner_path, require_sidecar=True)
             owner_guard.__enter__()
-            if not _journal_owner_reciprocal_claim(
-                    config, worktree_id, owner_ref, owner_locked=True):
-                owner_guard.__exit__(None, None, None)
-                raise RuntimeError(
-                    f"owner {owner_ref} cannot accept a new worktree obligation")
 
     try:
+        if owner_guard is not None and not _journal_owner_reciprocal_claim(
+                config, worktree_id, owner_ref, owner_locked=True):
+            raise RuntimeError(
+                f"owner {owner_ref} cannot accept a new worktree obligation")
         print(f"Creating worktree on branch {branch}...", file=sys.stderr)
         git_ops.create_worktree(repo.anchor, worktree_path, branch, start_point)
 
