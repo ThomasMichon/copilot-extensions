@@ -81,7 +81,60 @@ class TestPreCommit:
         anchor, _ = anchor_and_worktree
         monkeypatch.chdir(anchor)
         monkeypatch.setattr(hooks, "_default_branch", lambda cwd: "master")
-        # In the anchor, in_worktree is False -> always allowed
+        # An UNREGISTERED (non-worktree-class) anchor is base-repo mode -> allowed.
+        assert hooks._pre_commit() == 0
+
+
+class TestAnchorCommitGuard:
+    """The session-independent anchor guard: a worktree-class repo's ANCHOR must
+    not receive direct commits (mirrors the Copilot preToolUse anchor_write_guard,
+    but at git level so it fires even when the plugin's hooks don't load)."""
+
+    @staticmethod
+    def _fake_entry():
+        import types
+        return types.SimpleNamespace(name="myrepo")
+
+    def test_resolver_matches_registered_anchor(self, anchor_and_worktree, monkeypatch):
+        anchor, _ = anchor_and_worktree
+        from agent_worktrees import repos
+        resolved = str(hooks._anchor_from_cwd(str(anchor)))
+        entry = repos.RepoEntry(name="myrepo", repo_class="worktree",
+                                paths={repos._current_platform(): resolved})
+        monkeypatch.setattr(repos, "list_repos", lambda class_filter=None: [entry])
+        got = hooks._worktree_class_anchor(str(anchor))
+        assert got is not None and got.name == "myrepo"
+
+    def test_blocks_worktree_class_anchor_commit(self, anchor_and_worktree, monkeypatch):
+        anchor, _ = anchor_and_worktree
+        monkeypatch.chdir(anchor)
+        monkeypatch.delenv("ANCHOR_WRITE_GUARD", raising=False)
+        monkeypatch.setattr(hooks, "_worktree_class_anchor", lambda cwd: self._fake_entry())
+        from agent_worktrees import allow_edits
+        monkeypatch.setattr(allow_edits, "is_active", lambda name: False)
+        assert hooks._pre_commit() == 1
+
+    def test_kill_switch_allows_anchor_commit(self, anchor_and_worktree, monkeypatch):
+        anchor, _ = anchor_and_worktree
+        monkeypatch.chdir(anchor)
+        monkeypatch.setattr(hooks, "_worktree_class_anchor", lambda cwd: self._fake_entry())
+        monkeypatch.setenv("ANCHOR_WRITE_GUARD", "off")
+        assert hooks._pre_commit() == 0
+
+    def test_break_glass_allows_anchor_commit(self, anchor_and_worktree, monkeypatch):
+        anchor, _ = anchor_and_worktree
+        monkeypatch.chdir(anchor)
+        monkeypatch.delenv("ANCHOR_WRITE_GUARD", raising=False)
+        monkeypatch.setattr(hooks, "_worktree_class_anchor", lambda cwd: self._fake_entry())
+        from agent_worktrees import allow_edits
+        monkeypatch.setattr(allow_edits, "is_active", lambda name: name == "myrepo")
+        assert hooks._pre_commit() == 0
+
+    def test_non_worktree_class_anchor_allowed(self, anchor_and_worktree, monkeypatch):
+        anchor, _ = anchor_and_worktree
+        monkeypatch.chdir(anchor)
+        monkeypatch.delenv("ANCHOR_WRITE_GUARD", raising=False)
+        monkeypatch.setattr(hooks, "_worktree_class_anchor", lambda cwd: None)
         assert hooks._pre_commit() == 0
 
 
