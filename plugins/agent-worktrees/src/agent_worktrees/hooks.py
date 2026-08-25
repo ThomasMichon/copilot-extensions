@@ -3,8 +3,11 @@
 Three nudges keep agents on the PR rails.  Each blocks a wrong action *and*
 prints a directive telling the agent what to do instead:
 
-- **pre-commit** -- block commits to the default branch from a worktree
-  (anchor commits are still allowed).
+- **pre-commit** -- block commits to the default branch from a worktree, AND
+  block direct commits in a **worktree-class repo's anchor** (the
+  session-independent, git-level counterpart of the Copilot ``anchor_write_guard``
+  preToolUse hook; honors ``ANCHOR_WRITE_GUARD=off`` and the ``repos
+  allow-edits`` break-glass). Singleton / base-repo anchors stay editable.
 - **pre-push** -- in PR mode, block direct pushes from a worktree (the
   legitimate ``create-pr`` / ``push-changes`` feature-branch push sets
   ``AGENT_WORKTREES_PR_PUSH=1`` to bypass).
@@ -165,10 +168,70 @@ def _err(msg: str) -> None:
     sys.stderr.flush()
 
 
+# Shared master kill-switch for the write-routing guard family -- honored by the
+# Copilot preToolUse ``anchor_write_guard`` too, so one env var disables both the
+# session hook and this git-level guard.
+def _anchor_guard_off() -> bool:
+    for var in ("ANCHOR_WRITE_GUARD", "CROSS_REPO_GUARD"):
+        if os.environ.get(var, "").strip().lower() in {"off", "0", "false", "no"}:
+            return True
+    return False
+
+
+def _worktree_class_anchor(cwd: str | Path):
+    """If *cwd*'s anchor is a **worktree-class** repo in the registry, return its
+    ``RepoEntry``; else None.
+
+    Resolves the anchor from git-common-dir (bare-hook safe) and matches it,
+    path-normalized, against the machine-local ``repos.yaml`` worktree-class
+    entries. Singleton / reference / unregistered anchors return None (they are
+    NOT guarded -- a singleton is edited in its anchor by design). Never raises.
+    """
+    try:
+        anchor = _anchor_from_cwd(cwd)
+        if anchor is None:
+            return None
+        from . import repos
+        target = os.path.normcase(os.path.normpath(str(anchor)))
+        for entry in repos.list_repos("worktree"):
+            lp = entry.local_path()
+            if lp and os.path.normcase(os.path.normpath(lp)) == target:
+                return entry
+        return None
+    except Exception:
+        return None
+
+
 def _pre_commit() -> int:
     cwd = os.getcwd()
     if not in_worktree(cwd):
-        return 0  # anchor commits are allowed (base-repo mode)
+        # In the ANCHOR (main checkout). A worktree-class repo's anchor must NOT
+        # receive direct commits -- work flows through a linked worktree + PR, so
+        # a stray anchor commit is a latent hazard (never lands through the flow;
+        # a dirty anchor blocks pulls). This is the session-independent, git-level
+        # counterpart of the Copilot preToolUse ``anchor_write_guard`` (which is
+        # absent whenever the plugin's hooks don't load). Singleton / base-repo /
+        # unregistered anchors are edited in place by design and stay allowed.
+        # Honors the shared kill-switch and the ``repos allow-edits`` break-glass.
+        if _anchor_guard_off():
+            return 0
+        entry = _worktree_class_anchor(cwd)
+        if entry is None:
+            return 0  # not a worktree-class anchor -> allow (base-repo mode)
+        from . import allow_edits
+        if allow_edits.is_active(entry.name):
+            return 0  # live break-glass grant
+        _err(
+            f"BLOCKED: '{entry.name}' is a worktree-class repo and you are in its "
+            f"ANCHOR (main checkout) -- do NOT commit directly in the anchor. A "
+            f"stray anchor commit bypasses the worktree + PR flow. Create/use a "
+            f"linked worktree and commit THERE: 'agent-worktrees create' (then "
+            f"work in the returned path). If a direct anchor commit is genuinely "
+            f"unavoidable (bootstrap/recovery), break glass: 'agent-worktrees "
+            f"repos allow-edits {entry.name} --reason \"<why>\"' (logged, "
+            f"time-boxed), then retry. (Disable: ANCHOR_WRITE_GUARD=off.)"
+        )
+        return 1
     branch = _current_branch(cwd)
     default_branch = _default_branch(cwd)
     if branch and default_branch and branch == default_branch:
