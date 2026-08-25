@@ -62,6 +62,12 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    surfaces the literal cause; it does not mask the symptom or silently degrade.
 7. **One canonical CLI per plugin.** A plugin owns exactly one binstub; a sibling
    that imports its package must not re-point that binstub (avoids version skew).
+8. **Sweep safely; doctor explicitly.** A plugin-owned `*.d` registry processes
+   each contribution independently, warns without aborting valid peers, and
+   derives live state only from an authoritative current snapshot; an unreadable
+   registry preserves last-known state rather than masquerading as empty.
+   Cleanup belongs to the consumer's report-first doctor command, never a
+   destructive startup sweep.
 
 ## Design invariants (binding contracts)
 
@@ -171,6 +177,18 @@ core of the principles above; a reviewer checks a change against these.
   O(worktrees × total sessions). (Serves *Vision picker §Features/programmatic-parity*,
   *§Behaviors/live-not-snapshot*; see
   [`session-state-access.md`](session-state-access.md).)
+- **Drop-in registries are non-blocking and doctorable.** A malformed, missing,
+  stale, disabled, or ambiguous `*.d` contribution can disable only itself:
+  every other valid entry still loads, the live desired set forgets entries that
+  are no longer valid after an authoritative scan, an indeterminate scan keeps
+  last-known state, and the consumer emits aggregate-bounded warnings with stable
+  reasons. The consumer's doctor surface reports exact
+  entry/target/remediation; routine discovery never deletes state, and auto-fix
+  is allowed only with a consumer-issued ownership receipt plus an immediate
+  file-identity recheck. (Serves *Vision plugin-services
+  §Features/self-auditing-drop-in-composition* and
+  §Behaviors/stale-drop-ins-are-inert-and-legible*; see
+  [`drop-in-registry-hygiene.md`](drop-in-registry-hygiene.md).)
 
 ## Patterns
 
@@ -186,6 +204,7 @@ the exemplars, and the vision it serves):
 | [install-vs-adopt-boundary](install-vs-adopt-boundary.md) | Which lifecycle verb may mutate what — `install`/`update` is machine-local (schema-migrate + warn), `register`/`adopt` is the only repo-mutating verb (repo config + git hooks), and ownership falls out of adoption |
 | [config-schema-migration](config-schema-migration.md) | How a machine-local YAML config gains an explicit `schema_version` + scripted `vN -> vN+1` migrate-by-rewrite (the vendored `config-migrate` primitive), applied lazily on read + eagerly on install/update, with a fixture-guarded backward-compat window |
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the provider-manifest registry pattern |
+| [drop-in-registry-hygiene](drop-in-registry-hygiene.md) | How cross-plugin `*.d` registries keep routine sweeps non-blocking while making malformed, missing, disabled, ambiguous, duplicate, and stale contributions visible and safely cleanable through consumer-owned doctor commands |
 | [runtime-self-provisioning](runtime-self-provisioning.md) | How a plugin provisions its own runtime with no manual step and **no dependency on a sibling launcher** — the layered bootstrap (self-provisioning binstub → sessionStart auto-stamp → skill-driven readiness self-check) + toolchain self-acquisition (vendored uv, pip-index bridge), reaching confined envs (Copilot app, cloud agent) |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
