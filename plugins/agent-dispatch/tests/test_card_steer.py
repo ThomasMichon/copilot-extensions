@@ -97,9 +97,61 @@ def test_parse_multichoice_with_other():
     assert f["allow_other"] is True
 
 
+def test_parse_choice_gated_followup():
+    fields = steering.parse_request_input(
+        "comments:choice[Accept,Reject],"
+        "reason:textarea?comments=Reject,"
+        "verdict:choice[Approve,Waiting for author,Reject]?comments=Accept"
+    )
+    assert fields == [
+        {"name": "comments", "type": "choice", "options": ["Accept", "Reject"]},
+        {
+            "name": "reason",
+            "type": "textarea",
+            "show_when": {"field": "comments", "equals": "Reject"},
+        },
+        {
+            "name": "verdict",
+            "type": "choice",
+            "options": ["Approve", "Waiting for author", "Reject"],
+            "show_when": {"field": "comments", "equals": "Accept"},
+        },
+    ]
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "reason:textarea?missing=Reject",
+        "feedback:textarea,reason:textarea?feedback=Reject",
+        "feedback:choice[Accept,Reject],reason:textarea?reason=Reject",
+        "feedback:choice[Accept,Reject],reason:textarea?feedback",
+        "feedback:choice[Accept,Reject],reason:textarea?feedback=Rejected",
+        (
+            "feedback:choice[Accept,Reject],"
+            "middle:choice[Yes,No]?feedback=Accept,"
+            "reason:textarea?middle=No"
+        ),
+    ],
+)
+def test_parse_rejects_bad_choice_gated_followup(spec):
+    with pytest.raises(steering.SteeringError):
+        steering.parse_request_input(spec)
+
+
 def test_parse_rejects_empty_multichoice():
     with pytest.raises(steering.SteeringError):
         steering.parse_request_input("d:multichoice[*]")  # * only -> no real options
+
+
+def test_parse_question_mark_inside_choice_option():
+    assert steering.parse_request_input("decision:choice[Proceed,Needs another look?]") == [
+        {
+            "name": "decision",
+            "type": "choice",
+            "options": ["Proceed", "Needs another look?"],
+        }
+    ]
 
 
 # -- build_card --------------------------------------------------------------
@@ -143,6 +195,17 @@ def test_validate_steer_multichoice_allow_other_free_member():
     # A free-text member survives (JSON array preserves commas) and is accepted.
     steering.validate_steer_fields(
         {"tags": _json.dumps(["perf", "a custom, comma'd tag"])}, form)
+
+
+def test_validate_steer_rejects_hidden_conditional_field():
+    form = steering.parse_request_input(
+        "comments:choice[Accept,Reject],reason:textarea?comments=Reject"
+    )
+    steering.validate_steer_fields(
+        {"comments": "Reject", "reason": "Revise comment 2."}, form)
+    with pytest.raises(steering.SteeringError):
+        steering.validate_steer_fields(
+            {"comments": "Accept", "reason": "This must not pass."}, form)
 
 
 # -- queue: set_card ---------------------------------------------------------

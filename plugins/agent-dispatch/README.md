@@ -548,16 +548,16 @@ suspends; the operator answers later through any surface, and the coordinator
 # The worker posts a card describing what it needs and suspends. A --request-input
 # form marks the task "awaiting-steer" (blocked on the operator):
 agent-dispatch card set <id> \
-  --title "Recommend Approve" --status "4 comments (2 nits)" \
+  --title "Confirm rollout plan" --status "Ready for operator direction" \
   --link "<url to the rich artifact>" --body @card.md \
-  --request-input "feedback:textarea,decision:choice[revise,post-approved,hold-all]"
+  --request-input "decision:choice[Proceed,Revise],notes:textarea?decision=Revise"
 
 # Anyone can see what's blocked on them and read a card + its steer inbox:
 agent-dispatch list --status started        # awaiting_steer=true rows are "needs you"
 agent-dispatch card show <id>
 
 # The operator answers; --wake nudges the owning worktree to resume (default on):
-agent-dispatch steer submit <id> --field feedback="post the nits" --field decision=post-approved
+agent-dispatch steer submit <id> --field decision=Proceed
 
 # The resumed worker consumes the answer and continues toward its goal:
 agent-dispatch steer take <id>              # -> {"steer": {"fields": {...}, "sender": ...}}
@@ -567,6 +567,12 @@ agent-dispatch steer take <id>              # -> {"steer": {"fields": {...}, "se
   `request_input`); the rich artifact lives elsewhere (a doc/PR the `link` points
   at) -- the card is only the glanceable brief + the form. `--request-input` is a
   compact field spec (`name[:text|textarea|choice[a,b,...]]`, comma-separated).
+  Append `?choice_field=value` to gate a follow-up field on a single-select
+  answer (for example, `reason:textarea?feedback=Reject`). Choice fields select
+  their first option by default, so a producer can put its recommendation first
+  while still offering the alternatives. Conditions are one level deep: their
+  source must be an unconditional choice, and the expected value must be one of
+  that choice's declared options.
 - **`steer submit`** appends the operator's answer to the task's append-only steer
   inbox and clears `awaiting_steer`; it is **not** worker-owned (the operator, or a
   surface acting for them, answers). After persistence, the coordinator asks
