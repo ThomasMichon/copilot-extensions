@@ -66,13 +66,14 @@ instead of a graceful degrade.
 ## 2. The self-sufficiency contract (the property under test)
 
 The cross-cutting property the clean room exists to enforce, per plugin: **every
-extension, installed solo, must (a) self-provision its runtime on first session and
-(b) surface readiness and guide the next correct step.** Fail-closed. Three
+extension, installed solo, must (a) stamp a callable binstub on first session,
+(b) self-provision its runtime on first use, and (c) surface readiness and guide
+the next correct step.** Fail-closed. Three
 mechanism components:
 
 1. **First-install on first session (not just reconcile).** The `bootstrap-check`
-   sessionStart hook must *deploy* the runtime when absent, not only version-match
-   an existing one.
+   sessionStart hook must perform the grace-window-cheap `stamp` when the runtime
+   is absent; the stamped binstub performs the expensive provision on first use.
 2. **Affirmative readiness confirmation.** Provisioning state is conveyed as a
    **positive "ready" signal** (emitted only when venv + version marker + binstub
    all check out); its **absence is treated as "not set up,"** never inferred from

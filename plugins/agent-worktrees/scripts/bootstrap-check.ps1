@@ -59,7 +59,6 @@ if (-not $VenvPython) { exit 0 }
 
 # --- Installed: check if package is stale ---
 if (-not (Test-Path $Manifest)) { exit 0 }
-
 try {
     $m = Get-Content $Manifest -Raw | ConvertFrom-Json
     $pluginDir = $m.plugin_source

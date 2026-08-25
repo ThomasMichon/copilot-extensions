@@ -632,12 +632,14 @@ function Deploy-SelfProvisioningBinstub {
 $env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-codespaces'
 function _resolve_cs_py {
-    $ver = ''
-    try { $ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-    $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-    if ($p -and (Test-Path -LiteralPath $p)) { return $p }
-    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+    foreach ($marker in @('current-version', 'last-known-good')) {
+        $ver = ''
+        try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
+        $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
+        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+    }
+    Get-ChildItem (Join-Path $_root 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTimeUtc | ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
         Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
 }
 $_py = _resolve_cs_py
@@ -651,7 +653,18 @@ if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.Write
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-codespaces eta_seconds=120 reason=first-use')
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+$mutex = [System.Threading.Mutex]::new($false, 'Local\Copilot.AgentCodespaces.Provision')
+$held = $false
+try {
+    try { $held = $mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { $held = $true }
+    $_py = _resolve_cs_py
+    if (-not $_py) {
+        & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+    }
+} finally {
+    if ($held) { try { $mutex.ReleaseMutex() } catch {} }
+    $mutex.Dispose()
+}
 $_py = _resolve_cs_py
 if ($_py) { & $_py -m agent_codespaces @args; exit $LASTEXITCODE }
 [Console]::Error.WriteLine('[agent-codespaces] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
@@ -666,36 +679,28 @@ setlocal
 set "PYTHONUTF8=1"
 set "_ROOT=%USERPROFILE%\.agent-codespaces"
 call :_resolve
-if not defined _PY goto _prov
-"%_PY%" -m agent_codespaces %*
-exit /b %ERRORLEVEL%
-:_prov
-if defined AGENT_CODESPACES_NO_SELFPROVISION goto _nope
-set "_SNAP="
-if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
-set "_INST=%_SNAP%\scripts\install.ps1"
-if not exist "%_INST%" goto _noinst
-echo [agent-codespaces] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
+if defined _PY (
+  "%_PY%" -m agent_codespaces %*
+  exit /b %ERRORLEVEL%
+)
 where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
-call :_resolve
-if not defined _PY goto _failprov
-"%_PY%" -m agent_codespaces %*
+if %ERRORLEVEL%==0 (
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0agent-codespaces.ps1" %*
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0agent-codespaces.ps1" %*
+)
 exit /b %ERRORLEVEL%
-:_noinst
-echo [agent-codespaces] cannot self-provision: snapshot installer not found.>&2
-exit /b 127
-:_nope
-echo [agent-codespaces] runtime not provisioned ^(AGENT_CODESPACES_NO_SELFPROVISION set^).>&2
-exit /b 1
-:_failprov
-echo [agent-codespaces] provisioning did not yield a runtime.>&2
-exit /b 1
 :_resolve
 set "_PY="
 set "_VER="
 if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
 if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if defined _PY goto :eof
+set "_VER="
+if exist "%_ROOT%\last-known-good" set /p _VER=<"%_ROOT%\last-known-good"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if defined _PY goto :eof
+for /f "delims=" %%f in ('dir /b /s /a-d /o-d "%_ROOT%\versions\*\.install-complete.json" 2^>nul') do if not defined _PY if exist "%%~dpfScripts\python.exe" set "_PY=%%~dpfScripts\python.exe"
 goto :eof
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
