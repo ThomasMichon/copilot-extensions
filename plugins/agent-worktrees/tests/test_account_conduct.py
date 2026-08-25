@@ -68,7 +68,8 @@ def test_worktree_conduct_fragment_migrated():
     assert "resolved and safe to prune" in text
     assert "finalize" in text
     assert "reflective cue" in text
-    assert "no status" in text.lower() and "timer" in text
+    assert "threshold-based status nudge" in text
+    assert "not a mandatory heartbeat" in text
     assert "status --history" in text
     assert "agent-worktrees:worktree" in text
     assert len(text.rstrip()) <= 1_800

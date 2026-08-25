@@ -16,6 +16,7 @@
 # Compatible with PowerShell 5.1+ and pwsh 7+.
 
 $ErrorActionPreference = 'SilentlyContinue'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
 function Emit-Empty {
     Write-Output '{}'
