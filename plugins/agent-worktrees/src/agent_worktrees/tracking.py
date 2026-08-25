@@ -2470,7 +2470,8 @@ def register_session(
         for entry in record.sessions:
             if entry.session_id == session_id:
                 entry.started_at = _now_iso()
-                entry.pid = pid
+                if pid:
+                    entry.pid = pid
                 if pane_id:
                     entry.pane_id = pane_id
                 entry.ended_at = None

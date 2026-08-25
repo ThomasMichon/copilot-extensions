@@ -299,6 +299,7 @@ export function buildSeedForStored(stored, { retry = true } = {}) {
     retry,
     oldPane: md.oldPane || null,
     worktree: md.worktree || null,
+    worktreeDir: md.worktreeDir || null,
     sessionId: md.sessionId || null,
   });
 }

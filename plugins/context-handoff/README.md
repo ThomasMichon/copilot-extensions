@@ -83,29 +83,30 @@ as warnings; they do not block the session.
 
 ## Live cutover is successor-consume-driven
 
-A live cutover (`continue_handoff`) spawns a seeded successor Copilot in a new
-mux window and cuts the operator over. It does **not** retire the predecessor on
-the predecessor's next idle. The stored handoff carries the predecessor pane id
-and session id; the successor's seeded first action is to call `consume_handoff`.
-That consume step loads the brief, marks file-backed handoffs spent, records the
-outgoing session as **`handed-off`** via `agent-worktrees conclude-session`, and
-retires the predecessor pane through `agent-worktrees handoff-cutover
---retire-pane`.
+A live cutover (`continue_handoff`) spawns a successor Copilot in a new mux
+window and passes the exact first prompt through Copilot's native `-i` argv
+before the process starts; it never relies on terminal readiness parsing or
+`send-keys`. The prompt begins with the task title (for useful successor title
+inference), names the intended worktree id and cwd, names the dispatch task, and
+gives the exact consume/bind/conclude/retire/complete commands. It does **not**
+retire the predecessor on the predecessor's next idle.
+
+The successor's first command loads the brief, durably binds the new session to
+the worktree, records the outgoing session as **`handed-off`** via
+`agent-worktrees conclude-session`, and retires the predecessor pane through
+`agent-worktrees handoff-cutover --retire-pane`.
 
 This keeps recovery safe: if the successor never comes up or never consumes the
 handoff, the predecessor pane remains available and the terminal is not closed.
 
-**Empty-successor recovery (`retry_handoff_cutover`).** A subtle failure mode:
-the cutover spawns the successor window and *types* the seed, but Copilot only
-creates a session (and fires `sessionStart`) once a first prompt is actually
-**submitted**. If that submission never lands, the new window holds a live
-Copilot at an empty prompt with **no session** — so no changeover is recorded and
-the predecessor stays live (closing the empty window drops the operator back onto
-it). Because the handoff is already stored, `retry_handoff_cutover` re-attempts
-the cutover **from that saved handoff without regenerating it**: it recovers the
-worktree's pending task/file, rebuilds the *identical* cutover seed (via the same
-`buildCutoverSeed` used by `save_handoff_prompt`), and spawns a fresh seeded
-successor. Run it from the predecessor.
+**Failed-successor recovery (`retry_handoff_cutover`).** The native `-i`
+transport is receipt-checked by the pane wrapper; a rejected flag or immediately
+exiting successor is reaped without retiring the predecessor. Because the
+handoff is already stored, `retry_handoff_cutover` re-attempts the cutover **from
+that saved handoff without regenerating it**: it recovers the worktree's pending
+task/file, rebuilds the *identical* cutover seed (via the same `buildCutoverSeed`
+used by `save_handoff_prompt`), and spawns a fresh seeded successor. Run it from
+the predecessor.
 
 **Extension-load race (self-healing seed).** A live cutover seeds the
 successor's **first turn**, which can run before the context-handoff extension

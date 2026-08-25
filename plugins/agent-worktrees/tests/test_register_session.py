@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
@@ -37,7 +38,13 @@ def _save_record(tracking_dir: Path, wt_id: str, wt_path: str) -> None:
 
 def _args(**kw) -> argparse.Namespace:
     base = dict(
-        worktree_id=None, session_id=None, cwd=None, stdin=False, pid=None, pane=None
+        worktree_id=None,
+        session_id=None,
+        cwd=None,
+        stdin=False,
+        pid=None,
+        pane=None,
+        emit_context=False,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -260,6 +267,126 @@ class TestBareResumeSessionBinding:
         assert rc == 0
         rec = load_record(tmp_tracking_dir / "wt-bound.yaml")
         assert rec.sessions[0].ended_at is not None
+
+
+class TestMuxRecoveredSessionBinding:
+    def test_home_cwd_recovers_worktree_pane_and_pid(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-mux", "/tmp/src/wt-mux")
+        monkeypatch.setattr(
+            m.sys,
+            "stdin",
+            io.StringIO('{"sessionId":"sess-mux","cwd":"/home/user"}'),
+        )
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda _cwd: None)
+        monkeypatch.setattr(
+            m.tracking, "find_worktree_id_by_cwd", lambda _cwd: None
+        )
+        monkeypatch.setattr(
+            m.sessions,
+            "mux_binding_for_session",
+            lambda _sid: {
+                "worktree_id": "wt-mux",
+                "session_name": "wt-wt-mux",
+                "pane_id": "%17",
+                "pane_pid": 200,
+                "copilot_pid": 300,
+            },
+        )
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id", lambda _wt: "test-project"
+        )
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.delenv("PSMUX_PANE", raising=False)
+
+        assert m.cmd_register_session(_args(stdin=True)) == 0
+
+        rec = load_record(tmp_tracking_dir / "wt-mux.yaml")
+        assert rec.sessions[0].session_id == "sess-mux"
+        assert rec.sessions[0].pane_id == "%17"
+        assert rec.sessions[0].pid == 300
+
+    def test_emits_authoritative_mux_context(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch, capfd
+    ):
+        _save_record(tmp_tracking_dir, "wt-mux", "/tmp/src/wt-mux")
+        monkeypatch.setattr(
+            m.sys,
+            "stdin",
+            io.StringIO('{"sessionId":"sess-mux","cwd":"/home/user"}'),
+        )
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda _cwd: None)
+        monkeypatch.setattr(
+            m.tracking, "find_worktree_id_by_cwd", lambda _cwd: None
+        )
+        monkeypatch.setattr(
+            m.sessions,
+            "mux_binding_for_session",
+            lambda _sid: {
+                "worktree_id": "wt-mux",
+                "session_name": "wt-wt-mux",
+                "pane_id": "%17",
+                "pane_pid": 200,
+                "copilot_pid": 300,
+            },
+        )
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id", lambda _wt: "test-project"
+        )
+        monkeypatch.delenv("TMUX_PANE", raising=False)
+        monkeypatch.delenv("PSMUX_PANE", raising=False)
+
+        assert m.cmd_register_session(
+            _args(stdin=True, emit_context=True)
+        ) == 0
+
+        out = json.loads(capfd.readouterr().out)
+        context = out["additionalContext"]
+        assert "inside mux session wt-wt-mux, pane %17" in context
+        assert "worktree id is wt-mux" in context
+        assert "run task commands from /tmp/src/wt-mux" in context
+
+
+class TestActivateProjectForWorktree:
+    def test_activates_unique_owning_project(self, tmp_path: Path, monkeypatch):
+        root = tmp_path / "projects"
+        record = root / "alpha" / "worktrees" / "wt-owned.yaml"
+        record.parent.mkdir(parents=True)
+        record.write_text("worktree_id: wt-owned\n", encoding="utf-8")
+        monkeypatch.setattr(
+            m.inst,
+            "read_projects_registry",
+            lambda: {"projects": {"alpha": {}, "beta": {}}},
+        )
+        monkeypatch.setattr(
+            m.cfg, "project_dir", lambda name=None: root / str(name)
+        )
+        m.cfg.set_active_project(None)
+
+        assert m._activate_project_for_worktree_id("wt-owned") == "alpha"
+        assert m.cfg.active_project() == "alpha"
+
+    def test_ambiguous_worktree_id_fails_closed(
+        self, tmp_path: Path, monkeypatch
+    ):
+        root = tmp_path / "projects"
+        for project in ("alpha", "beta"):
+            record = root / project / "worktrees" / "wt-duplicate.yaml"
+            record.parent.mkdir(parents=True)
+            record.write_text("worktree_id: wt-duplicate\n", encoding="utf-8")
+        monkeypatch.setattr(
+            m.inst,
+            "read_projects_registry",
+            lambda: {"projects": {"alpha": {}, "beta": {}}},
+        )
+        monkeypatch.setattr(
+            m.cfg, "project_dir", lambda name=None: root / str(name)
+        )
+        m.cfg.set_active_project(None)
+
+        assert m._activate_project_for_worktree_id("wt-duplicate") is None
+        assert m.cfg.active_project() is None
 
 
 def test_deregister_session_worktree_is_optional_for_hook_inference():

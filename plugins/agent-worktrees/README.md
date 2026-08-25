@@ -126,7 +126,7 @@ standalone-behavior changes.
 | Hook | Trigger | What it does |
 |------|---------|--------------|
 | `preToolUse` | Tool calls | Runs statelessness, cross-repo, and anchor-write guards from `~/.agent-worktrees/bin/` when deployed |
-| `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks |
+| `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
 | `sessionEnd` | Session end | Deregisters the session from the worktree record |
 
 The bundled live-pulse extension writes `substatus.json` beside Copilot session
