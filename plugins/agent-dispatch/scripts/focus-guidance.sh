@@ -3,10 +3,6 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev214"
-kernel="[owner: agent-dispatch@${plugin_version}]
-Before starting work likely to overlap another worktree, check \`agent-dispatch focus --list\`. At the start of substantial operator-led or task-less work, and when its direction changes, advertise it early with \`agent-dispatch focus \"<one-line subject>\"\`; this is shorthand for writing the same agent-worktrees status-core summary, not a separate store. Agent-worktrees conduct and regular \`agent-worktrees status --summary\` remain authoritative for ongoing disposition, and their normal update cadence still applies."
-
 emit_empty() {
     printf '{}'
     exit 0
@@ -16,6 +12,33 @@ python="$(command -v python3 || command -v python || true)"
 git="$(command -v git || true)"
 agent_worktrees="$(command -v agent-worktrees || true)"
 [[ -n "$python" && -n "$git" && -n "$agent_worktrees" ]] || emit_empty
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" ||
+    emit_empty
+plugin_version="$("$python" - "$script_dir/../plugin.json" 2>/dev/null <<'PY'
+import json
+import re
+import sys
+
+with open(sys.argv[1], "rb") as stream:
+    raw = stream.read(4097)
+if len(raw) > 4096 or b"\0" in raw:
+    raise ValueError
+manifest = json.loads(raw.decode("utf-8", errors="strict"))
+version = manifest.get("version") if isinstance(manifest, dict) else None
+if (
+    not isinstance(version, str)
+    or len(version) > 64
+    or re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-dev[0-9]+)?", version) is None
+):
+    raise ValueError
+print(version, end="")
+PY
+)" || emit_empty
+[[ -n "$plugin_version" ]] || emit_empty
+
+kernel="[owner: agent-dispatch@${plugin_version}]
+Before starting work likely to overlap another worktree, check \`agent-dispatch focus --list\`. At the start of substantial operator-led or task-less work, and when its direction changes, advertise it early with \`agent-dispatch focus \"<one-line subject>\"\`; this is shorthand for writing the same agent-worktrees status-core summary, not a separate store. Agent-worktrees conduct and regular \`agent-worktrees status --summary\` remain authoritative for ongoing disposition, and their normal update cadence still applies."
 
 git_env=(
     GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE
