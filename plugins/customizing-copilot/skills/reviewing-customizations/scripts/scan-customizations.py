@@ -18,7 +18,8 @@ Checks (all stdlib, no dependencies):
                             `--include-plugins`) collisions are detected across
                             LOCAL skills and installed-plugin skills too.
   4. anti-recursion      -- an agent that declares `mcp-servers` also carries an
-                            MCP-readiness probe and an anti-self-delegation line.
+                            MCP-readiness probe and an anti-self-delegation line;
+                            agent-mcp-backed agents name a materialized fallback.
   5. secrets             -- a secret-looking key is assigned a literal value
                             (not an env-var / placeholder) in a scanned file.
   6. raw IPs             -- an ssh/scp/rsync command targets a raw IPv4 literal
@@ -109,6 +110,36 @@ NEGATIVE_EXAMPLE = re.compile(
 # short window; deliberately lenient (a false negative is safer than crying wolf).
 ANTI_DELEGATE = re.compile(r"(?i)do\s*not\b.{0,80}?(task\s*tool|spawn|delegate)\b")
 MCP_READINESS = re.compile(r"(?i)mcp[\s_-]*readiness|readiness\s+(check|probe)")
+MCP_FALLBACK_ACTION = re.compile(
+    r"(?i)\b(use|invoke|run|switch|continue|fall\s+back)\b.{0,120}"
+    r"\b(materialized|fleets?|stubs?|agent-mcp\s+materialize)\b",
+)
+MCP_FALLBACK_DISABLED = re.compile(
+    r"(?i)materialized\s+(cli\s+)?fallback\s*:\s*disabled\b.{0,120}"
+    r"\b(gate|conditional|authorization)\b",
+)
+
+
+def has_mcp_fallback(text: str) -> bool:
+    """Whether readiness text affirmatively permits or explicitly disables it."""
+    if MCP_FALLBACK_DISABLED.search(text):
+        return True
+    for match in MCP_FALLBACK_ACTION.finditer(text):
+        clause_start = max(
+            text.rfind(".", 0, match.start()),
+            text.rfind("\n", 0, match.start()),
+        )
+        prefix = text[clause_start + 1:match.start()]
+        if re.search(
+            r"(?i)\b(do\s+not|don't|never|must\s+not|should\s+not|"
+            r"cannot|can't|may\s+not)\b",
+            prefix,
+        ):
+            continue
+        if re.search(r"(?i)\b(no|neither)\b", match.group(0)):
+            continue
+        return True
+    return False
 
 CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".psd1", ".env", ".ini", ".conf"}
 # Heavy / irrelevant trees to skip when walking a large monorepo.
@@ -539,16 +570,39 @@ def scan_agents(
                        "frontmatter missing `description`")
         if re.search(r"(?im)^\s*mcp-servers\s*:", frontmatter):
             flat = re.sub(r"\s+", " ", body)
+            readiness_match = re.search(
+                r"(?ims)^##\s+MCP\s+Readiness\b(.*?)(?=^##\s|\Z)",
+                body,
+            )
+            readiness = re.sub(
+                r"\s+", " ", readiness_match.group(1) if readiness_match else body,
+            )
             has_readiness = bool(MCP_READINESS.search(flat))
             has_anti = bool(ANTI_DELEGATE.search(flat))
+            uses_agent_mcp = bool(
+                re.search(
+                    r"(?im)^\s*command\s*:\s*['\"]?agent-mcp['\"]?"
+                    r"\s*(?:#.*)?$",
+                    frontmatter,
+                )
+            )
+            has_fallback = has_mcp_fallback(readiness)
             if not has_readiness:
                 report.add(BLOCKING, "anti-recursion", af,
                            "declares mcp-servers but has no MCP-readiness section "
-                           "(probe one tool on startup; report and stop on failure)")
+                           "(probe one tool on startup; preserve the exact error)")
             if not has_anti:
                 report.add(BLOCKING, "anti-recursion", af,
                            "declares mcp-servers but has no anti-self-delegation "
                            "line (\"do NOT spawn another <agent> agent\")")
+            if uses_agent_mcp and not has_fallback:
+                report.add(
+                    BLOCKING,
+                    "mcp-fallback",
+                    af,
+                    "uses agent-mcp but has no equivalent materialized CLI "
+                    "fallback over the same bridge config",
+                )
 
 
 def _walk_customization_files(root: Path):

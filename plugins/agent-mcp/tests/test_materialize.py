@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -173,6 +174,9 @@ def test_materialize_verb_then_stub_call(tmp_path, capsys):
     assert (server_dir / "bin" / "greet").is_symlink()
 
     manifest = server_dir / "manifest.json"
+    manifest_data = json.loads(manifest.read_text())
+    assert Path(manifest_data["bridge"]).is_absolute()
+    assert Path(manifest_data["bridge"]) == cfg.resolve()
     capsys.readouterr()  # drain
     rc = main(["call", "--manifest", str(manifest), "--stub", "greet",
                '{"name": "materialized"}'])
