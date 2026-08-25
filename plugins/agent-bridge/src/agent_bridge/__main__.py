@@ -2125,7 +2125,14 @@ def _submit_and_stream(
     """Submit *prompt* to *session_id* and stream the turn (shared by send/create)."""
     queue = getattr(args, "queue", False)
     result = client.submit_prompt(
-        session_id, prompt, queue=queue, caller_id=caller_id
+        session_id,
+        prompt,
+        queue=queue,
+        caller_id=caller_id,
+        request_timeout=_startup_request_timeout(
+            resume=True,
+            fresh_fallback=True,
+        ),
     )
 
     # Durable send-or-queue: the session was busy, so the prompt was persisted
@@ -2273,7 +2280,10 @@ def _resolve_target(
                 return target
             elif status == "stopped":
                 print(f"[>] Resuming stopped session {target}...")
-                client.resume_session(target)
+                client.resume_session(
+                    target,
+                    request_timeout=_startup_request_timeout(resume=True),
+                )
                 return target
             else:
                 # Busy (running/created/starting): the bridge can't accept a
@@ -2638,6 +2648,31 @@ def _phased_timeouts():
         return PhasedTimeouts()
 
 
+def _startup_request_timeout(
+    *,
+    resume: bool = False,
+    fresh_fallback: bool = False,
+) -> float:
+    """HTTP budget covering synchronous create/resume startup phases."""
+    from .session_manager import _MAX_RESUME_ROUNDS
+
+    timeouts = _phased_timeouts()
+    one_round = (
+        max(
+            timeouts.codespace_boot,
+            timeouts.ssh_connect,
+            timeouts.session_host_ready,
+        )
+        + timeouts.session_start
+        + timeouts.session_new
+        + 30.0
+    )
+    rounds = _MAX_RESUME_ROUNDS if resume else 1
+    if fresh_fallback:
+        rounds += 1
+    return one_round * rounds
+
+
 def _make_renderer(args: argparse.Namespace):
     """Build a StreamRenderer honoring --expand / color settings."""
     from .render import StreamRenderer
@@ -2702,7 +2737,10 @@ def _reuse_existing(client, session: dict, agent_name: str) -> str:
     if status == "stopped":
         print(f"[>] Resuming stopped session {sid} ({name})...")
         try:
-            client.resume_session(sid)
+            client.resume_session(
+                sid,
+                request_timeout=_startup_request_timeout(resume=True),
+            )
         except Exception:
             pass  # submit_prompt will surface a hard failure if it persists
     print(
@@ -2853,6 +2891,7 @@ def _start_agent_session(
             sender_repo=_sender_repo(), force_new=force_new,
             caller_owner_ref=_worktrees_get("owner-ref"),
             model=model, effort=effort,
+            request_timeout=_startup_request_timeout(),
         )
     except BridgeClientError as exc:
         # Session-lifecycle head guard: a create into an existing worktree whose
@@ -2991,11 +3030,39 @@ def _wait_for_idle(client, session_id: str, timeout: float = 30.0) -> None:
         if status == "idle":
             return
         if status in ("failed", "ended", "stopped"):
-            print(f"[FAIL] Session {session_id} entered {status}", file=sys.stderr)
+            detail = _session_failure_detail(client, session_id)
+            suffix = f": {detail}" if detail else ""
+            print(
+                f"[FAIL] Session {session_id} entered {status}{suffix}",
+                file=sys.stderr,
+            )
             sys.exit(1)
         time.sleep(0.5)
     print(f"[FAIL] Timed out waiting for session {session_id} to become idle", file=sys.stderr)
     sys.exit(1)
+
+
+def _session_failure_detail(client, session_id: str) -> str | None:
+    """Return the latest durable connect/error detail for a failed session."""
+    try:
+        events = client.read_range(session_id)
+    except Exception:
+        return None
+    for event in reversed(events):
+        data = event.get("data") or {}
+        if event.get("event") == "connect_failed":
+            message = str(data.get("message") or "").strip()
+            stage = data.get("stage")
+            stage_name = str(data.get("stage_name") or "").strip()
+            if message and stage is not None and stage_name:
+                return f"[stage {stage}/{stage_name}] {message}"
+            if message:
+                return message
+        if event.get("event") == "error":
+            message = str(data.get("message") or "").strip()
+            if message:
+                return message
+    return None
 
 
 def _stream_feed(
@@ -3343,7 +3410,10 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     #    is not an owned session id, so this 404s and we fall through.
     if not reclaim:
         try:
-            result = client.resume_session(target)
+            result = client.resume_session(
+                target,
+                request_timeout=_startup_request_timeout(resume=True),
+            )
             status = result.get("status", "")
             print(f"[OK] Session {target} resumed ({status})")
             return
@@ -3359,7 +3429,14 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     # 2. Treat the target as a worktree handle: load it (dormant = a note) or
     #    take it over (--force past a live holder = break-glass).
     try:
-        result = client.resume_worktree(target, reclaim=reclaim)
+        result = client.resume_worktree(
+            target,
+            reclaim=reclaim,
+            request_timeout=_startup_request_timeout(
+                resume=True,
+                fresh_fallback=True,
+            ),
+        )
     except BridgeClientError as exc:
         if exc.status == 409:
             detail = exc.detail

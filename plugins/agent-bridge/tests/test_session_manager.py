@@ -13,11 +13,11 @@ from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
 from agent_bridge.session_manager import (
+    _STALL_AFTER_S,
     Session,
     SessionManager,
     _default_cwd,
     _venue_workspace_cwd,
-    _STALL_AFTER_S,
 )
 from agent_bridge.transport import SpawnTarget
 
@@ -48,6 +48,58 @@ def _mock_agent_proc():
     proc.proc.stderr = MagicMock()
     proc.proc.stderr.readline = AsyncMock(return_value=b"")
     return proc
+
+
+@pytest.mark.asyncio
+async def test_failed_process_launch_reaps_wrapper_tree(session_manager, monkeypatch):
+    """A stage-7 failure must not leave a provider/SSH holder alive."""
+
+    class FakeAgentProcess:
+        def __init__(self):
+            self.proc = MagicMock()
+            self.proc.pid = 4242
+            self.alive = True
+            self.kill = AsyncMock(side_effect=self._mark_dead)
+
+        async def _mark_dead(self):
+            self.alive = False
+
+        @property
+        def pid(self):
+            return self.proc.pid
+
+    agent_proc = FakeAgentProcess()
+    client = MagicMock()
+    client.auto_approve = True
+    client.start = AsyncMock(side_effect=TimeoutError)
+    client.shutdown = AsyncMock()
+    client.stderr_tail.return_value = "provider launch stalled"
+
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.spawn",
+        AsyncMock(return_value=agent_proc),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.AcpClient",
+        MagicMock(return_value=client),
+    )
+
+    session = await session_manager.start_session(
+        SpawnTarget(
+            type="command",
+            spawn_command=["provider", "exec", "--stdio"],
+            venue={
+                "kind": "container",
+                "workspace_folder": "/workspaces/repo",
+            },
+        ),
+        agent_name="container:repo-1",
+    )
+
+    assert session.status is SessionStatus.FAILED
+    client.shutdown.assert_awaited_once()
+    agent_proc.kill.assert_awaited_once()
+    assert agent_proc.alive is False
 
 
 class TestDefaultCwd:

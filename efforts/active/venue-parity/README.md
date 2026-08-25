@@ -101,7 +101,9 @@ the rest:
   request-scoped authorization for the shared relay's Azure action, but no
   longer protects a host-network-exposed endpoint.
 - **WS-D — session/status/coordination parity.** Container dispatch gets the same
-  monitoring/coordination core codespaces use.
+  monitoring/coordination core codespaces use. **Failed-launch process hygiene
+  complete:** a process-owned ACP launch failure now reaps its provider/SSH/
+  remote-agent tree before terminal failure is recorded.
 - **WS-E — container-as-parity-harness.** Codify "reproduce the venue flow in a
   container" as accepted evidence for a CodeSpace fix.
 
@@ -168,3 +170,14 @@ the rest:
   fetched an Azure Storage token through container loopback without exposing
   the token. **Next:** exercise the #1763 forced-timeout/reaper case through this
   now-shared SSH process shape, then continue WS1 shared launch policy.
+- **2026-08-24 — failed-launch timeout/reaper parity.** Forced the trusted
+  container path to fail its ACP handshake at one second. The prior runtime left
+  the host provider/SSH tree, remote sshd/Copilot tree, and a live target-lock
+  holder; the new shared SessionManager cleanup shuts down the process-owned
+  client and whole tree before recording `failed`, so an immediate retry
+  reclaims only a dead lock tombstone and reaches launch. Portable cold-start
+  defaults are now boot=300s, handshake=240s, session/new=1200s. Synchronous
+  create, explicit resume, worktree resume, and prompt-triggered auto-resume use
+  phase-aware HTTP budgets covering every retry/fallback round, and terminal CLI
+  output includes the persisted connect stage/message. **Next:** WS1 shared
+  launch-policy relocation and the broader container parity corpus.

@@ -713,6 +713,7 @@ class BridgeClient:
         env: dict[str, str] | None = None,
         model: str | None = None,
         effort: str | None = None,
+        request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions
 
@@ -754,7 +755,12 @@ class BridgeClient:
         from .protocol import HTTP_PROTOCOL_VERSION
 
         body["protocol_version"] = HTTP_PROTOCOL_VERSION
-        return self._request("POST", "/api/v1/sessions", body) or {}
+        return self._request(
+            "POST",
+            "/api/v1/sessions",
+            body,
+            request_timeout=request_timeout,
+        ) or {}
 
     def submit_prompt(
         self,
@@ -763,6 +769,7 @@ class BridgeClient:
         *,
         queue: bool = False,
         caller_id: str | None = None,
+        request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/turns.
 
@@ -777,7 +784,10 @@ class BridgeClient:
             if caller_id:
                 payload["caller_id"] = caller_id
         return self._request(
-            "POST", f"/api/v1/sessions/{session_id}/turns", payload
+            "POST",
+            f"/api/v1/sessions/{session_id}/turns",
+            payload,
+            request_timeout=request_timeout,
         ) or {}
 
     def stop_session(
@@ -806,12 +816,25 @@ class BridgeClient:
             params=params or None,
         )
 
-    def resume_session(self, session_id: str) -> dict[str, Any]:
+    def resume_session(
+        self,
+        session_id: str,
+        *,
+        request_timeout: float | None = None,
+    ) -> dict[str, Any]:
         """POST /api/v1/sessions/{id}/resume"""
-        return self._request("POST", f"/api/v1/sessions/{session_id}/resume") or {}
+        return self._request(
+            "POST",
+            f"/api/v1/sessions/{session_id}/resume",
+            request_timeout=request_timeout,
+        ) or {}
 
     def resume_worktree(
-        self, worktree_id: str, *, reclaim: bool = False
+        self,
+        worktree_id: str,
+        *,
+        reclaim: bool = False,
+        request_timeout: float | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/worktrees/{id}/resume -- ensure a worktree has a live
         owned session (resume its latest, or start a fresh one if the worktree
@@ -828,6 +851,7 @@ class BridgeClient:
                 "POST",
                 f"/api/v1/worktrees/{worktree_id}/resume",
                 params=params,
+                request_timeout=request_timeout,
             )
             or {}
         )

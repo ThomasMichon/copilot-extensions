@@ -37,7 +37,7 @@ from .models import (
     ServiceConfig,
     SessionStatus,
 )
-from .transport import SpawnTarget, spawn, _agent_worktrees_python
+from .transport import AgentProcess, SpawnTarget, _agent_worktrees_python, spawn
 
 log = logging.getLogger("agent-bridge")
 
@@ -2488,6 +2488,35 @@ class SessionManager:
             if target.type == "command" or target.spawn_command
             else self._timeouts.ssh_connect
         )
+        client: AcpClient | None = None
+        agent_proc: AgentProcess | None = None
+        acp_sid: str | None = None
+
+        async def _cleanup_failed_process_launch() -> None:
+            """Reap a process-owned launch before recording terminal failure."""
+            if agent_proc is None:
+                return
+            pid = agent_proc.pid
+            if client is not None:
+                with contextlib.suppress(Exception):
+                    await client.shutdown()
+            # AcpClient.shutdown owns this same process, but retain the
+            # AgentProcess whole-tree kill as a fallback if shutdown failed or
+            # returned before a wrapper/SSH descendant exited.
+            if agent_proc.alive:
+                with contextlib.suppress(Exception):
+                    await agent_proc.kill()
+            session.client = None
+            session.event_log.append("failed_launch_cleanup", {
+                "pid": pid,
+                "reaped": not agent_proc.alive,
+            })
+            log.info(
+                "Reaped failed process-owned launch for session %s (pid=%s, alive=%s)",
+                session_id,
+                pid,
+                agent_proc.alive,
+            )
 
         try:
             cs_target = None
@@ -2758,6 +2787,7 @@ class SessionManager:
         except ConnectError as exc:
             # Structured failure: we know exactly which stage failed and
             # whether a retry could help -- never an opaque "agent died".
+            await _cleanup_failed_process_launch()
             session.status = SessionStatus.FAILED
             self._db.update_session_status(
                 session_id, SessionStatus.FAILED.value, time.time()
@@ -2782,6 +2812,7 @@ class SessionManager:
             # from an infra failure, and re-dispatch elsewhere or take over with
             # --force-claim. No claim was acquired, so there is nothing to
             # release here.
+            await _cleanup_failed_process_launch()
             session.status = SessionStatus.FAILED
             self._db.update_session_status(
                 session_id, SessionStatus.FAILED.value, time.time()
@@ -2798,6 +2829,7 @@ class SessionManager:
                 session_id, exc.codespace, exc.owner,
             )
         except Exception as exc:
+            await _cleanup_failed_process_launch()
             session.status = SessionStatus.FAILED
             self._db.update_session_status(
                 session_id, SessionStatus.FAILED.value, time.time()
