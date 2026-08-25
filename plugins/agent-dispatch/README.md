@@ -106,14 +106,18 @@ for the full supervisor/profile contract.
 The installer drops a pivot manifest at
 `~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
 picker grows a **Tasks** pivot (between Worktrees and Maintenance). It renders the
-status-grouped board from `agent-dispatch inbox --board` (Blocked / Proposed /
-Queued / Started / recently terminal). A separate **ACTIVE** badge appears only
+status-grouped board through the stdlib-only `agent-dispatch-board` API client
+(Blocked / Proposed / Queued / Started / recently terminal). A separate **ACTIVE** badge appears only
 when embodiment tracking reports an assigned agent executing a turn; **STALLED**
 marks a running turn with no recent activity. That execution badge is independent
-from lifecycle phase -- `Started` alone never implies a live agent. Enter opens a
-per-task action sub-menu. The seam is a filesystem manifest registry, not a
-Python import -- the plugins live in separate venvs -- so a stale or absent picker
-simply ignores it. Source: `pivots/agent-dispatch.json`.
+from lifecycle phase -- `Started` alone never implies a live agent. The
+background supervisor publishes this observation into coordinator-owned task
+state; the board client is a sub-second coordinator API read and expires
+observations older than 90 seconds, so the Picker never shells to
+agent-worktrees or agent-bridge. Enter
+opens a per-task action sub-menu. The seam is a filesystem manifest registry,
+not a Python import -- the plugins live in separate venvs -- so a stale or absent
+picker simply ignores it. Source: `pivots/agent-dispatch.json`.
 
 ### Running the coordinator as a service
 

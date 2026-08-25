@@ -68,6 +68,13 @@ class QueueBackedClient:
     def heartbeat(self, task_id, worker_id):
         return asdict(self._q.heartbeat(task_id, worker_id))
 
+    def set_activity(self, task_id, activity, *, reservation_key):
+        return asdict(
+            self._q.set_activity(
+                task_id, activity, reservation_key=reservation_key
+            )
+        )
+
     def yield_task(self, task_id, worker_id, *, note=None, exclude=None):
         return asdict(self._q.yield_task(task_id, worker_id, note=note, exclude=exclude))
 
@@ -1068,6 +1075,27 @@ def test_hold_live_leases_skips_unknown_fleet_body(q, client, monkeypatch):
     assert beats == []
 
 
+def test_supervisor_publishes_fleet_body_activity(q, client):
+    t = q.create("work")
+    spawn = _fleet_spawn("fleet-body:h:brg-activity")
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        heartbeat=False,
+        publish_activity=True,
+        fleet_activity_fn=lambda host, sid: "STALLED",
+        fleet_verdict_fn=lambda host, sid: "live",
+        recover=False,
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    assert q.get(t.id).activity == "ACTIVE"  # immediate spawn observation
+    assert sup.hold_live_leases() == 0
+    assert q.get(t.id).activity == "STALLED"
+
+
 # -- local headless-body recovery (confirmed-gone on THIS host, no SSH) --------
 #
 # The local analog of the fleet-body slice above: a headless body embodied on
@@ -1257,6 +1285,46 @@ def test_hold_live_leases_heartbeats_confirmed_live_local_body(q, client, monkey
     )
     assert sup.hold_live_leases() == 1
     assert beats == [(t.id, "local-o")]
+
+
+def test_supervisor_publishes_local_body_activity_while_task_is_queued(
+    q, client, monkeypatch
+):
+    """Activity is independent from phase: a spawned body may execute before it
+    claims, so a queued task can legitimately read ACTIVE."""
+    from agent_dispatch import tracking
+
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-activity")
+    sessions = [{
+        "session_id": "brg-activity",
+        "status": "running",
+        "liveness": "active",
+    }]
+    monkeypatch.setattr(tracking, "list_local_body_sessions", lambda: sessions)
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        heartbeat=False,
+        publish_activity=True,
+        recover=False,
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    assert q.get(t.id).status == Status.QUEUED
+    assert q.get(t.id).activity == "ACTIVE"
+
+    assert sup.hold_live_leases() == 0
+    assert q.get(t.id).activity == "ACTIVE"
+    sessions[0] = {
+        "session_id": "brg-activity",
+        "status": "idle",
+        "liveness": "idle",
+    }
+    assert sup.hold_live_leases() == 0
+    assert q.get(t.id).activity is None
 
 
 def test_hold_live_leases_skips_unknown_local_body(q, client, monkeypatch):

@@ -959,18 +959,27 @@ def _scope_repo(args: argparse.Namespace) -> str | None:
     return resolve_repo_selector(selector) if selector else resolve_repo()
 
 
-def _enrich(result: Any) -> Any:
+def _enrich(result: Any, *, resolve_repo_names: bool = True) -> Any:
     """Annotate task dict(s) with a display-only ``repo_name`` (the local name
     for the canonical ``repo`` remote, when the registry knows it), and parse the
     stored ``latest_progress`` JSON string into an object for clean at-a-glance
     output."""
-    from .identity import name_for_repo
+    def repo_display_name(repo: object) -> str | None:
+        value = str(repo or "").rstrip("/")
+        if not value:
+            return None
+        return value.rsplit("/", 1)[-1].removesuffix(".git") or None
 
     def one(d: Any) -> Any:
         if not isinstance(d, dict):
             return d
         if "repo" in d and "repo_name" not in d:
-            name = name_for_repo(d.get("repo"))
+            if resolve_repo_names:
+                from .identity import name_for_repo
+
+                name = name_for_repo(d.get("repo"))
+            else:
+                name = repo_display_name(d.get("repo"))
             if name:
                 d = {**d, "repo_name": name}
         lp = d.get("latest_progress")
@@ -984,7 +993,13 @@ def _enrich(result: Any) -> Any:
     if isinstance(result, list):
         return [one(x) for x in result]
     if isinstance(result, dict) and any(k in result for k in ("assigned", "owned")):
-        return {k: (_enrich(v) if isinstance(v, list) else v) for k, v in result.items()}
+        return {
+            k: (
+                _enrich(v, resolve_repo_names=resolve_repo_names)
+                if isinstance(v, list) else v
+            )
+            for k, v in result.items()
+        }
     return one(result)
 
 
@@ -1466,23 +1481,25 @@ def _board_group(task: dict) -> str:
     return "Started"
 
 
-def _board_activity(task: dict) -> str | None:
+_BOARD_ACTIVITY_TTL_SECONDS = 90.0
+
+
+def _board_activity(task: dict, *, now: float | None = None) -> str | None:
     """Independent live-execution badge for the picker task board.
 
     Lifecycle ``group`` answers where the task is (Blocked/Queued/Started/etc.).
     This badge answers whether its assigned embodiment is executing a turn now.
     It deliberately does not infer activity from ``status == started``.
     """
-    embodiment = task.get("embodiment")
-    if not isinstance(embodiment, dict):
+    activity = task.get("activity")
+    if activity not in {"ACTIVE", "STALLED"}:
         return None
-    liveness = str(embodiment.get("liveness") or "").lower()
-    turn_state = str(embodiment.get("turn_state") or "").lower()
-    if liveness == "stalled":
-        return "STALLED"
-    if liveness == "active" or turn_state == "running":
-        return "ACTIVE"
-    return None
+    try:
+        observed = float(task.get("activity_updated_at"))
+        current = time.time() if now is None else float(now)
+    except (TypeError, ValueError):
+        return None
+    return activity if current - observed <= _BOARD_ACTIVITY_TTL_SECONDS else None
 
 
 def _board_sort_key(task: dict) -> tuple:
@@ -1555,20 +1572,19 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
         status = "proposed,queued,claimed,started,completed,abandoned,dead_letter"
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
-            reservations = c.list_reservations(state="spawned", limit=500)
         inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
-        cutoff = _time.time() - max(0, getattr(args, "recent_mins", 120)) * 60
+        now = _time.time()
+        cutoff = now - max(0, getattr(args, "recent_mins", 120)) * 60
         inbox = [t for t in inbox if _board_keep(t, cutoff)]
         inbox.sort(key=_board_sort_key)
-        from . import tracking
-
-        inbox = tracking.enrich_tasks(_enrich(inbox))
-        inbox = tracking.enrich_local_body_tasks(inbox, reservations)
+        # Pure coordinator-state rendering: no agent-worktrees/agent-bridge
+        # subprocesses on the Picker read path.
+        inbox = _enrich(inbox, resolve_repo_names=False)
         inbox = [
             {
                 **t,
                 "group": _board_group(t),
-                "activity": _board_activity(t),
+                "activity": _board_activity(t, now=now),
             }
             for t in inbox
         ]
@@ -2464,6 +2480,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
                 getattr(args, "label_max_attempts", None)
             ),
             heartbeat=not args.no_heartbeat,
+            publish_activity=True,
             reactive=not getattr(args, "no_reactive", False),
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             capacity_gate=capacity_gate,
