@@ -45,6 +45,14 @@ can attribute the bytes:
 {"additionalContext":"[owner: example-plugin@1.2.3]\n<concise guidance kernel>"}
 ```
 
+Locate a payload-owned producer from the plugin-root environment that Copilot
+CLI supplies to plugin hooks (`COPILOT_PLUGIN_ROOT`, with `PLUGIN_ROOT` and
+`CLAUDE_PLUGIN_ROOT` as compatibility aliases). Do not use the session cwd or
+target repository to rediscover the plugin's own code. The start payload's
+`cwd` is for applicability gating; the plugin root is for locating the
+producer. A missing root or producer emits a diagnostic to stderr and fails
+open with `{}`.
+
 The kernel contains only policy that must remain active throughout the session.
 Detailed mechanics stay in an on-demand skill or a dedicated file named by a
 backtick faux-link so the agent can read it when needed. This preserves the
