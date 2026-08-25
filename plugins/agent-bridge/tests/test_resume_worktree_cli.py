@@ -24,13 +24,19 @@ class _FakeClient:
         self.session_calls: list[str] = []
         self.worktree_calls: list[tuple[str, bool]] = []
 
-    def resume_session(self, session_id):
+    def resume_session(self, session_id, *, request_timeout=None):
         self.session_calls.append(session_id)
         if isinstance(self._session_resume, Exception):
             raise self._session_resume
         return self._session_resume
 
-    def resume_worktree(self, worktree_id, *, reclaim=False):
+    def resume_worktree(
+        self,
+        worktree_id,
+        *,
+        reclaim=False,
+        request_timeout=None,
+    ):
         self.worktree_calls.append((worktree_id, reclaim))
         if isinstance(self._worktree_resume, Exception):
             raise self._worktree_resume

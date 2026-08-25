@@ -516,7 +516,7 @@ class PhasedTimeouts(BaseModel):
     """
 
     codespace_boot: float = Field(
-        default=180.0,
+        default=300.0,
         description="Max seconds to wait for a Shutdown codespace to boot.",
     )
     ssh_connect: float = Field(
@@ -525,12 +525,12 @@ class PhasedTimeouts(BaseModel):
         "to a target -- patient for wake-on-LAN / ProxyJump / slow boot.",
     )
     session_start: float = Field(
-        default=60.0,
+        default=240.0,
         description="Max seconds for the ACP handshake (client start/streams + "
         "initialize) of a freshly spawned session.",
     )
     session_new: float = Field(
-        default=180.0,
+        default=1200.0,
         description="Max seconds for the cold ACP session/new call. Distinct "
         "from (and larger than) session_start because a first session/new on a "
         "large workspace loads the workspace + skills/instructions and can far "
