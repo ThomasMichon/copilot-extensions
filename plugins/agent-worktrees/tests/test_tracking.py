@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+import yaml
+
 from agent_worktrees.tracking import (
     ClaimRef,
     ResourceClaim,
@@ -11,6 +14,7 @@ from agent_worktrees.tracking import (
     WorktreeRecord,
     _RecordLock,
     _atomic_write,
+    _strip_control_chars,
     add_resource_claim,
     cap_title,
     create_new_record,
@@ -191,6 +195,43 @@ class TestSaveLoadRoundTrip:
         save_record(rec, path)
         loaded = load_record(path)
         assert loaded.title == "Fix: handle edge case #42 & more"
+
+    def test_load_repairs_control_poison_and_next_save_persists_repair(
+        self, tmp_path: Path
+    ):
+        rec = self._make_record(summary="poisoned")
+        path = tmp_path / "wt.yaml"
+        save_record(rec, path)
+        path.write_bytes(path.read_bytes().replace(b"poisoned", b"poi\x07soned"))
+
+        loaded = load_record(path)
+
+        assert loaded.summary == "poisoned"
+        assert b"\x07" in path.read_bytes()
+
+        save_record(loaded, path)
+        assert b"\x07" not in path.read_bytes()
+        assert load_record(path).summary == "poisoned"
+
+    def test_load_does_not_repair_non_reader_yaml_errors(
+        self, tmp_path: Path, monkeypatch
+    ):
+        path = tmp_path / "wt.yaml"
+        path.write_text("summary: [unterminated\n", encoding="utf-8")
+        monkeypatch.setattr(
+            "agent_worktrees.tracking._strip_control_chars",
+            lambda _text: pytest.fail("non-reader YAML errors must not be repaired"),
+        )
+
+        with pytest.raises(yaml.parser.ParserError):
+            load_record(path)
+
+    def test_load_rejects_repaired_non_mapping_yaml(self, tmp_path: Path):
+        path = tmp_path / "wt.yaml"
+        path.write_bytes(b"\x07not-a-record")
+
+        with pytest.raises(yaml.YAMLError, match="must be a YAML mapping"):
+            load_record(path)
 
     def test_null_title(self, tmp_path: Path):
         rec = self._make_record(title=None)
@@ -1833,6 +1874,30 @@ class TestSetDisposition:
         assert stored.startswith("Session a900")     # keeps the leading text
         assert load_record(p).title_asserted is True
 
+    def test_summary_strips_illegal_controls_before_write(
+        self, tmp_path: Path, monkeypatch
+    ):
+        rec = self._rec()
+        p = tmp_path / "wt.yaml"
+        monkeypatch.setattr(
+            "agent_worktrees.tracking.save_record",
+            lambda record, path=None: save_record(record, p),
+        )
+
+        set_disposition(
+            rec,
+            summary=" \x00alpha\x07\tbeta\nline\rend\x0b\x0c\x1f\x7f ",
+        )
+
+        assert rec.summary == "alpha\tbeta line\rend"
+        raw = p.read_bytes()
+        assert not any(
+            byte in raw
+            for byte in (*range(0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0x7F)
+        )
+        assert b"\t" in raw
+        assert b"\r" in raw
+
 
 class TestCapTitle:
     """`cap_title` -- agent titles must fit the mux bar + Picker rows (TITLE_MAX)."""
@@ -1845,8 +1910,11 @@ class TestCapTitle:
     def test_short_title_unchanged(self):
         assert cap_title("Fix relay port") == "Fix relay port"
 
-    def test_newlines_collapsed_and_stripped(self):
-        assert cap_title("  fix\nthe bug  ") == "fix the bug"
+    def test_terminal_whitespace_collapsed_and_stripped(self):
+        assert cap_title("  fix\tthe\r\nbug  ") == "fix the bug"
+
+    def test_illegal_controls_removed(self):
+        assert cap_title("\x07Fix\x0b relay\x1f port\x7f") == "Fix relay port"
 
     def test_long_title_truncated_with_ellipsis(self):
         from agent_worktrees.tracking import TITLE_MAX
@@ -1858,6 +1926,16 @@ class TestCapTitle:
         from agent_worktrees.tracking import TITLE_MAX
         exact = "y" * TITLE_MAX
         assert cap_title(exact) == exact  # == TITLE_MAX chars, no ellipsis
+
+
+def test_strip_control_chars_preserves_yaml_whitespace():
+    illegal = "".join(
+        chr(code)
+        for code in (*range(0x09), 0x0B, 0x0C, *range(0x0E, 0x20), 0x7F)
+    )
+
+    assert _strip_control_chars(None) is None
+    assert _strip_control_chars(f"a{illegal}\tb\nc\rd") == "a\tb\nc\rd"
 
 
 class TestForwardCompatContract:
