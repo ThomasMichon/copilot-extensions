@@ -1,6 +1,14 @@
-# Bootstrap hook -- runs on session start via hooks.json
-# Auto-updates the agent-worktrees runtime payload when stale.
-# If not installed, prints a hint (full install requires interactive setup).
+# Bootstrap hook -- runs on session start via hooks.json. hooks.json runs the
+# PLUGIN PAYLOAD copy first, falling back to the deployed ~/.agent-worktrees\bin
+# copy. Two jobs, both grace-window-cheap:
+#   1. FIRST install (runtime not provisioned yet): fire the installer's cheap
+#      'stamp' action so the self-provisioning agent-worktrees TOOL binstub lands
+#      on PATH THIS session; the binstub builds the versioned venv on first use
+#      (#1236/#1393). No venv build on the hook. Only fires from the plugin
+#      payload (install.ps1 is a sibling) when the installer declares a 'stamp'
+#      action; otherwise a setup hint (deployed-copy fallback).
+#   2. RECONCILE (already provisioned via the full launcher install): refresh the
+#      deployed lib-copy package when the source commit drifts.
 # Compatible with PowerShell 5.1+ and pwsh 7+.
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -12,14 +20,42 @@ $_r         = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
 $VenvPython = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 
-# --- Not installed: hint only (install needs interactive machine selection) ---
-if (-not $VenvPython) {
+# Is the tools-half runtime already provisioned? (#581/#1393: a `.venv` link OR a
+# current-version marker whose slot python exists.) A tools-half box has no
+# full-launcher resolve-runtime.ps1 (so $VenvPython is null) yet IS provisioned;
+# don't mistake it for "not installed" and re-stamp/nag every session.
+function Test-AwProvisioned {
+    if (Test-Path (Join-Path $InstallDir '.venv')) { return $true }
+    $cvMarker = Join-Path $InstallDir 'current-version'
+    if (Test-Path $cvMarker) {
+        $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
+        if ($cv -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { return $true }
+    }
+    return $false
+}
+
+# --- FIRST install (nothing provisioned yet): fire the installer's cheap 'stamp'
+#     so the self-provisioning tool binstub lands on PATH this session; it builds
+#     the versioned venv on first use (#1236/#1393). ---
+if ((-not $VenvPython) -and (-not (Test-AwProvisioned))) {
+    $installer = Join-Path $PSScriptRoot 'install.ps1'
+    if ((Test-Path $installer) -and (Select-String -Path $installer -Pattern "'stamp'" -Quiet)) {
+        $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+        $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+        & $exe -NoProfile -ExecutionPolicy Bypass -File $installer stamp *> $null
+        exit 0
+    }
+    # Deployed-copy fallback on a still-unprovisioned box -> setup hint.
     Write-Host ''
     Write-Host '[agent-worktrees] Runtime not installed.' -ForegroundColor Yellow
     Write-Host '  Ask Copilot to ''set up agent-worktrees'' to bootstrap the runtime.' -ForegroundColor DarkGray
     Write-Host ''
     exit 0
 }
+
+# Provisioned via the tools-half (versioned slot) but the full-launcher resolver
+# isn't deployed -> nothing to reconcile via the legacy lib-copy path; no-op.
+if (-not $VenvPython) { exit 0 }
 
 # --- Installed: check if package is stale ---
 if (-not (Test-Path $Manifest)) { exit 0 }
