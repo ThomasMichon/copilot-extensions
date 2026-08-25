@@ -425,7 +425,7 @@ def run_cli(
     Centralized so providers share one subprocess shape and tests can patch a
     single seam.  The caller inspects ``returncode``/``stdout``/``stderr``.
 
-    Two Windows-robustness guards keep the "never raises" contract:
+    Three guards keep the "never raises" contract:
 
     - **PATHEXT resolution.** ``args[0]`` is resolved via ``shutil.which`` so a
       batch shim (``az`` -> ``az.cmd``, ``gh`` -> ``gh.cmd``) is found. Bare
@@ -435,12 +435,17 @@ def run_cli(
       spawn error is surfaced as ``returncode=127`` so it never aborts an
       unrelated command (e.g. ``create-pr``'s git work that already succeeded);
       the caller turns the non-zero result into a ``ProviderError`` it handles.
+    - **Timeouts become sanitized results.** ``TimeoutExpired`` retains and
+      formats its complete argv, which may include provider authentication
+      headers. Convert it to ``returncode=124`` at this boundary and never retain
+      secret-bearing command metadata in the returned result.
     """
     full_env = {**os.environ, **(env or {})}
     exe = shutil.which(args[0], path=full_env.get("PATH")) or args[0]
     resolved = [exe, *args[1:]]
+    sanitized = _sanitize_cli_args(resolved)
     try:
-        return subprocess.run(
+        result = subprocess.run(
             resolved,
             capture_output=True,
             text=True,
@@ -449,10 +454,51 @@ def run_cli(
             timeout=timeout,
             check=False,
         )
+        return subprocess.CompletedProcess(
+            args=sanitized,
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=sanitized,
+            returncode=124,
+            stdout="",
+            stderr=f"provider command timed out after {timeout}s",
+        )
     except (FileNotFoundError, OSError) as exc:
         return subprocess.CompletedProcess(
-            args=resolved, returncode=127, stdout="", stderr=str(exc),
+            args=sanitized, returncode=127, stdout="", stderr=str(exc),
         )
+
+
+def _sanitize_cli_args(args: list[str]) -> list[str]:
+    """Return argv safe for result metadata, logs, and exception formatting."""
+    sanitized: list[str] = []
+    redact_next = False
+    secret_flags = {"--api-key", "--password", "--token"}
+    for arg in args:
+        if redact_next:
+            sanitized.append("[REDACTED]")
+            redact_next = False
+            continue
+
+        lower = arg.casefold()
+        if lower in secret_flags:
+            sanitized.append(arg)
+            redact_next = True
+        elif lower.startswith("authorization:"):
+            sanitized.append("Authorization: [REDACTED]")
+        elif lower.startswith("authorization="):
+            sanitized.append("authorization=[REDACTED]")
+        elif lower.startswith("http.extraheader="):
+            sanitized.append("http.extraheader=[REDACTED]")
+        elif any(lower.startswith(f"{flag}=") for flag in secret_flags):
+            sanitized.append(f"{arg.split('=', 1)[0]}=[REDACTED]")
+        else:
+            sanitized.append(arg)
+    return sanitized
 
 
 # Registry -- name -> provider class.  Imported lazily so a missing provider
