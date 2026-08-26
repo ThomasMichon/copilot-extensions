@@ -19,7 +19,8 @@ description: >
 # Context Handoff Setup
 
 The **context-handoff extension** (the live context-window monitor: token
-tracking + 55%/70% nudges + `generate_handoff_prompt` /
+tracking + cost-aware 150K/250K caps with 55%/70% small-window fallbacks +
+`generate_handoff_prompt` /
 `save_handoff_prompt` / `continue_handoff` tools, plus `/handoff-continue` and
 `/resume-handoff`) is **plugin-contributed** -- there is no runtime install
 step. The Copilot CLI discovers it directly from the plugin's `extensions/` dir

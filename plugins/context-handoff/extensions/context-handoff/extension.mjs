@@ -43,12 +43,7 @@ import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { leadFrom, buildCutoverSeed } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
-
-// --- Configuration ---
-// Context utilization thresholds (0.0-1.0)
-// Background compaction defaults to 0.80, so we warn well before that.
-const SOFT_UTILIZATION_THRESHOLD = 0.55;  // Gentle reminder
-const HARD_UTILIZATION_THRESHOLD = 0.70;  // Urgent reminder
+import { contextPressure, formatContextUsage } from "./thresholds.mjs";
 
 // --- State ---
 const state = {
@@ -1549,24 +1544,25 @@ session.on("session.idle", () => {
   if (!pendingNudge) return;
   const level = pendingNudge;
   pendingNudge = null;
-  const pct = Math.round(state.lastUtilization * 100);
-  const tokens =
-    `${state.currentTokens.toLocaleString()} / ${state.tokenLimit.toLocaleString()} tokens`;
+  const usage = formatContextUsage(state.currentTokens, state.tokenLimit);
   // The nudge JUST hands the agent to the context-handoff skill -- it does NOT
   // prescribe individual tool calls (generate_handoff_prompt/save_handoff_prompt/
   // continue_handoff) or a "write a file" outcome. The skill owns the sequencing;
   // under a mux session that means the autonomous live cutover (spin up a
   // successor Copilot in place, end the turn), not a paste prompt.
   const msg = level === "hard"
-    ? `[Context Handoff -- automated] Context window is ${pct}% full (${tokens}). ` +
-      `Auto-compaction triggers at ~80%. Invoke the context-handoff skill now to ` +
+    ? `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
+      `(${usage.tokens}). ` +
+      `The cost-aware hard threshold was reached; auto-compaction still triggers ` +
+      `at ~80%. Invoke the context-handoff skill now to ` +
       `hand off before context is lost -- under a mux session it cuts over to a ` +
       `fresh successor Copilot in place, automatically (no copy/paste); otherwise ` +
       `it stores the handoff and hands you a short resume prompt.`
-    : `[Context Handoff -- automated] Context window is ${pct}% full (${tokens}). ` +
-      `Consider invoking the context-handoff skill soon to hand off -- under a mux ` +
-      `session it cuts over to a fresh successor Copilot in place. No rush -- ` +
-      `finish your current task first.`;
+    : `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
+      `(${usage.tokens}). ` +
+      `The cost-aware soft threshold was reached. Invoke the context-handoff skill ` +
+      `at the next clean boundary -- under a mux session it cuts over to a fresh ` +
+      `successor Copilot in place.`;
   session.send(msg).catch((e) =>
     session.log(`[Context Handoff] nudge send failed: ${e.message}`, { level: "warning" })
   );
@@ -1586,49 +1582,54 @@ session.on("session.usage_info", (event) => {
   state.messagesLength = d.messagesLength;
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
 
-  const pct = Math.round(state.lastUtilization * 100);
+  const pressure = contextPressure(d.currentTokens, d.tokenLimit);
+  const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
 
   // Queue an agent-facing nudge once per threshold, delivered on the next
   // idle via session.send() (see the session.idle handler above). This is the
   // agent-visible counterpart to the user-visible logs below.
-  if (state.lastUtilization >= HARD_UTILIZATION_THRESHOLD &&
+  if (pressure.hard &&
       !state.hardReminderSent && !state.handoffGenerated) {
     state.hardReminderSent = true;
     state.softReminderSent = true;  // hard implies soft
     pendingNudge = "hard";
-  } else if (state.lastUtilization >= SOFT_UTILIZATION_THRESHOLD &&
+  } else if (pressure.soft &&
       !state.softReminderSent && !state.handoffGenerated) {
     state.softReminderSent = true;
     pendingNudge = "soft";
   }
 
   // Soft reminder at threshold (user-visible log only -- agent nudged via session.send on idle)
-  if (state.lastUtilization >= SOFT_UTILIZATION_THRESHOLD &&
+  if (pressure.soft &&
       !state.softLogShown && !state.handoffGenerated) {
     state.softLogShown = true;
     session.log(
-      `[Context Handoff] Context utilization at ${pct}% ` +
-      `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens; ` +
+      `[Context Handoff] Context utilization ${usage.utilization} ` +
+      `(${usage.tokens}; ` +
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
       `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Consider handing off soon (invoke the context-handoff skill).`,
+      `Cost-aware threshold ${Math.round(pressure.softThreshold).toLocaleString()} ` +
+      `tokens reached. Hand off at the next clean boundary ` +
+      `(invoke the context-handoff skill).`,
       { level: "warning" }
     );
   }
 
   // Hard reminder at threshold (user-visible log only -- agent nudged via session.send on idle)
-  if (state.lastUtilization >= HARD_UTILIZATION_THRESHOLD &&
+  if (pressure.hard &&
       !state.hardLogShown && !state.handoffGenerated) {
     state.hardLogShown = true;
     state.softLogShown = true;  // hard implies soft
     session.log(
-      `[Context Handoff] ⚠️ Context utilization at ${pct}% ` +
-      `(${d.currentTokens.toLocaleString()} / ${d.tokenLimit.toLocaleString()} tokens; ` +
+      `[Context Handoff] ⚠️ Context utilization ${usage.utilization} ` +
+      `(${usage.tokens}; ` +
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
       `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Auto-compaction triggers at ~80%. Hand off NOW -- invoke the context-handoff skill.`,
+      `Cost-aware hard threshold ${Math.round(pressure.hardThreshold).toLocaleString()} ` +
+      `tokens reached; auto-compaction still triggers at ~80%. ` +
+      `Hand off NOW -- invoke the context-handoff skill.`,
       { level: "warning" }
     );
   }
