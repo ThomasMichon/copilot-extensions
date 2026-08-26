@@ -24,6 +24,29 @@ def _make_payload(root: Path, mkt: str, name: str, *, claude_layout: bool = Fals
     return d
 
 
+def _make_local_payload(repo: Path, mkt: str, name: str) -> Path:
+    marketplace = repo / ".ai"
+    plugin = marketplace / name
+    (marketplace / ".claude-plugin").mkdir(parents=True)
+    plugin.mkdir(parents=True)
+    (marketplace / ".claude-plugin" / "marketplace.json").write_text(
+        '{"name": "%s", "plugins": [{"name": "%s", "source": "./%s"}]}'
+        % (mkt, name, name),
+        encoding="utf-8",
+    )
+    (plugin / "plugin.json").write_text(
+        '{"name": "%s"}' % name, encoding="utf-8"
+    )
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.json").write_text(
+        '{"extraKnownMarketplaces": {"%s": {"source": '
+        '{"source": "directory", "path": "./.ai"}}}}' % mkt,
+        encoding="utf-8",
+    )
+    return plugin
+
+
 def test_parse_source():
     assert ps.parse_source("example-web-codespace@example-marketplace") == (
         "example-web-codespace", "example-marketplace",
@@ -71,6 +94,73 @@ def test_host_payload_dir_claude_layout_scan_fallback(tmp_path: Path):
     assert got == tmp_path / "installed-plugins" / "actual-mkt" / "figma"
 
 
+def test_host_payload_dir_prefers_repo_local_marketplace(tmp_path: Path):
+    repo = tmp_path / "repo"
+    local = _make_local_payload(repo, "dotfiles-plugins", "figma")
+    _make_payload(tmp_path, "dotfiles-plugins", "figma")
+    got = ps.host_payload_dir(
+        "figma@dotfiles-plugins",
+        copilot_home=tmp_path,
+        repo_roots=[repo],
+    )
+    assert got == local
+
+
+def test_host_payload_dir_honors_first_marketplace_definition(tmp_path: Path):
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    _make_local_payload(first, "dotfiles-plugins", "other")
+    _make_local_payload(second, "dotfiles-plugins", "figma")
+    got = ps.host_payload_dir(
+        "figma@dotfiles-plugins",
+        copilot_home=tmp_path / "home",
+        repo_roots=[first, second],
+    )
+    assert got is None
+
+
+def test_local_marketplace_claim_blocks_stale_installed_fallback(tmp_path: Path):
+    first = tmp_path / "first"
+    _make_local_payload(first, "dotfiles-plugins", "other")
+    stale = _make_payload(tmp_path, "dotfiles-plugins", "figma")
+    assert stale.is_dir()
+    got = ps.host_payload_dir(
+        "figma@dotfiles-plugins",
+        copilot_home=tmp_path,
+        repo_roots=[first],
+    )
+    assert got is None
+
+
+def test_host_payload_dir_rejects_plugin_outside_marketplace(tmp_path: Path):
+    repo = tmp_path / "repo"
+    marketplace = repo / ".ai"
+    outside = repo / "outside"
+    (marketplace / ".claude-plugin").mkdir(parents=True)
+    outside.mkdir()
+    (outside / "plugin.json").write_text('{"name": "figma"}', encoding="utf-8")
+    (marketplace / ".claude-plugin" / "marketplace.json").write_text(
+        '{"name": "dotfiles-plugins", "plugins": '
+        '[{"name": "figma", "source": "../outside"}]}',
+        encoding="utf-8",
+    )
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.json").write_text(
+        '{"extraKnownMarketplaces": {"dotfiles-plugins": {"source": '
+        '{"source": "directory", "path": "./.ai"}}}}',
+        encoding="utf-8",
+    )
+    assert (
+        ps.host_payload_dir(
+            "figma@dotfiles-plugins",
+            copilot_home=tmp_path / "home",
+            repo_roots=[repo],
+        )
+        is None
+    )
+
+
 def test_build_stage_command_roundtrips(tmp_path: Path):
     payload = _make_payload(tmp_path, "mkt", "p")
     dest = ps.dest_dir("p@mkt")
@@ -88,6 +178,23 @@ def test_build_stage_command_roundtrips(tmp_path: Path):
         names = set(tf.getnames())
     assert "./plugin.json" in names
     assert "./skills/demo/SKILL.md" in names
+
+
+def test_build_stage_command_excludes_local_junk_and_secrets(tmp_path: Path):
+    payload = _make_payload(tmp_path, "mkt", "p")
+    (payload / ".env").write_text("SECRET=value", encoding="utf-8")
+    (payload / ".env.example").write_text("SECRET=", encoding="utf-8")
+    cache = payload / "node_modules" / "package"
+    cache.mkdir(parents=True)
+    (cache / "index.js").write_text("junk", encoding="utf-8")
+    _cmd, payload_b64 = ps.build_stage_command(payload, ps.dest_dir("p@mkt"))
+    with tarfile.open(
+        fileobj=io.BytesIO(base64.b64decode(payload_b64)), mode="r:gz"
+    ) as tf:
+        names = set(tf.getnames())
+    assert "./.env" not in names
+    assert "./.env.example" in names
+    assert not any("node_modules" in name for name in names)
 
 
 def test_build_stage_command_large_payload_keeps_command_tiny(tmp_path: Path):

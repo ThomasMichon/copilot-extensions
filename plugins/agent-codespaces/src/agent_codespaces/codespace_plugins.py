@@ -138,6 +138,61 @@ def iter_installed_manifests(
             yield name, plugin_dir, manifest
 
 
+def iter_installed_manifest_sources(
+    copilot_home: Path | None = None,
+) -> Iterator[tuple[str, str, Path, dict[str, Any]]]:
+    """Yield marketplace-qualified identities for installed plugin manifests."""
+    root = (copilot_home or default_copilot_home()) / "installed-plugins"
+    if not root.is_dir():
+        return
+    for marketplace_dir in sorted(root.iterdir()):
+        if not marketplace_dir.is_dir():
+            continue
+        for plugin_dir in sorted(marketplace_dir.iterdir()):
+            if not plugin_dir.is_dir():
+                continue
+            manifest = _read_plugin_manifest(plugin_dir)
+            if manifest is None:
+                continue
+            source_name = plugin_dir.name
+            display_name = str(manifest.get("name") or source_name)
+            source = f"{source_name}@{marketplace_dir.name}"
+            yield source, display_name, plugin_dir, manifest
+
+
+def iter_local_manifests(
+    repo_roots: Iterable[Path],
+) -> Iterator[tuple[str, str, Path, dict[str, Any]]]:
+    """Yield enabled manifests from the effective multi-root local settings."""
+    try:
+        from plugin_resolve import read_repo_settings
+        from .plugin_staging import local_payload_dir
+    except Exception:
+        return
+
+    roots = list(repo_roots)
+    enabled: dict[str, bool] = {}
+    for repo_root in roots:
+        enabled.update(read_repo_settings(repo_root).enabled)
+
+    seen: set[Path] = set()
+    for source, is_enabled in enabled.items():
+        if not is_enabled:
+            continue
+        payload_dir = local_payload_dir(source, roots)
+        if payload_dir is None:
+            continue
+        payload_dir = payload_dir.resolve()
+        if payload_dir in seen:
+            continue
+        seen.add(payload_dir)
+        manifest = _read_plugin_manifest(payload_dir)
+        if manifest is None:
+            continue
+        name = plugin_name(source) or str(manifest.get("name") or payload_dir.name)
+        yield source, name, payload_dir, manifest
+
+
 def plugin_names_from_enabled(ep: Any) -> set[str] | None:
     """Plugin names from an ``enabledPlugins`` map (keys ``"<name>@<marketplace>"``).
 
@@ -347,6 +402,7 @@ def resolve_codespace_plugins(
     only_enabled: bool = True,
     extra_specs: Iterable[CodespacePluginSpec] = (),
     enabled_names: set[str] | None = None,
+    repo_roots: Iterable[Path] = (),
 ) -> list[CodespacePluginSpec]:
     """Resolve the CodeSpace-scoped plugins to inject into ``workspace_repo``'s CodeSpace.
 
@@ -380,7 +436,13 @@ def resolve_codespace_plugins(
         enabled = None
 
     merged: dict[str, CodespacePluginSpec] = {}
-    for name, _pdir, manifest in iter_installed_manifests(home):
+    manifests = {
+        source: (name, pdir, manifest)
+        for source, name, pdir, manifest in iter_installed_manifest_sources(home)
+    }
+    for source, name, pdir, manifest in iter_local_manifests(repo_roots):
+        manifests[source] = (name, pdir, manifest)
+    for _source, (name, _pdir, manifest) in manifests.items():
         if enabled is not None and name not in enabled:
             continue
         for spec in parse_codespace_plugins(manifest, declared_by=name):
@@ -420,8 +482,17 @@ def _main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="Emit JSON.")
     args = parser.parse_args(argv)
 
+    from .config import load_merged_config, repo_copilot_settings
+
+    config = load_merged_config()
+    repo_settings = repo_copilot_settings(config.source_paths)
+    operator_specs = parse_operator_plugins(config.codespace_plugins)
     specs = resolve_codespace_plugins(
-        args.workspace_repo, only_enabled=not args.all
+        args.workspace_repo,
+        only_enabled=not args.all,
+        extra_specs=operator_specs,
+        enabled_names=plugin_names_from_enabled(repo_settings["enabledPlugins"]),
+        repo_roots=config.source_paths,
     )
     if args.json:
         print(json.dumps([s.to_dict() for s in specs], indent=2))

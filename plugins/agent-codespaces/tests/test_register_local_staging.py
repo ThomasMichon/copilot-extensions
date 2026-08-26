@@ -65,8 +65,9 @@ async def test_local_specs_staged_remote_specs_registered(monkeypatch):
 
     staged_sources: list[str] = []
 
-    async def _fake_stage(manager, name, sources):
+    async def _fake_stage(manager, name, sources, **kwargs):
         staged_sources.extend(sources)
+        assert kwargs["repo_roots"] == ()
         return [f"$HOME/.acp-staged-plugins/{s.split('@')[0]}" for s in sources]
 
     monkeypatch.setattr(m, "_stage_plugins", _fake_stage)
@@ -103,7 +104,7 @@ async def test_all_local_no_register_command(monkeypatch):
         lambda repo, **kw: [CodespacePluginSpec(source="figma@dotfiles-plugins")],
     )
 
-    async def _fake_stage(manager, name, sources):
+    async def _fake_stage(manager, name, sources, **kwargs):
         return ["$HOME/.acp-staged-plugins/figma"]
 
     monkeypatch.setattr(m, "_stage_plugins", _fake_stage)
