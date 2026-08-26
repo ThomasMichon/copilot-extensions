@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-mcp",
+  "module": "agent_mcp",
+  "runtimeRoot": ".agent-mcp",
+  "noSelfProvisionEnv": "AGENT_MCP_NO_SELFPROVISION",
+  "purpose": "Wrap authenticate and materialize MCP servers",
+  "installer": "init",
+  "windowsCatalogShim": "cmd",
+  "provisionMode": "direct"
+}

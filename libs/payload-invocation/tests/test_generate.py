@@ -134,6 +134,55 @@ def test_commands_schema_preserves_plugin_identity_with_one_command(
     assert '"id":"example-helper"' in catalog
 
 
+def test_manifest_can_select_cmd_for_windows_catalog(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["windowsCatalogShim"] = "cmd"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    generated = generator.expected_files(manifest)
+    catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.ps1"]
+    assert r"bin\agent-example.cmd" in catalog
+    assert "shell = 'cmd'" in catalog
+
+
+def test_manifest_rejects_unknown_windows_catalog_shim(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["windowsCatalogShim"] = "exe"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid windowsCatalogShim"):
+        generator.load_manifest(manifest)
+
+
+def test_manifest_can_provision_directly_from_self_staging_installer(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["provisionMode"] = "direct"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    generated = generator.expected_files(manifest)
+    posix = generated[manifest.parent / "bin" / "agent-example"]
+    powershell = generated[manifest.parent / "bin" / "agent-example.ps1"]
+    assert 'bash "$_installer" provision' in posix
+    assert "payload-dir" not in posix
+    assert "$_installer provision" in powershell
+    assert "payload-dir" not in powershell
+
+
+def test_manifest_rejects_unknown_provision_mode(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["provisionMode"] = "ambient"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid provisionMode"):
+        generator.load_manifest(manifest)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog execution test")
 def test_posix_catalog_emits_every_command_id(tmp_path: Path) -> None:
     manifest = _multi_manifest(tmp_path)
@@ -322,6 +371,7 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
         "agent-containers",
         "agent-logger",
         "agent-machines",
+        "agent-mcp",
         "agent-ssh",
     ],
 )
@@ -565,12 +615,22 @@ def test_first_use_provision_is_serialized(tmp_path: Path) -> None:
 
     home = tmp_path / "home"
     home.mkdir()
+    shadow_bin = tmp_path / "shadow-bin"
+    shadow_bin.mkdir()
+    shadow_marker = tmp_path / "shadow-called"
+    shadow = shadow_bin / "agent-example"
+    shadow.write_text(
+        f'#!/bin/sh\nprintf called > "{shadow_marker}"\nexit 99\n',
+        encoding="utf-8",
+    )
+    shadow.chmod(0o755)
     env = os.environ.copy()
     env.update(
         {
             "HOME": str(home),
             "COPILOT_PLUGIN_ROOT": str(plugin),
             "COPILOT_EXT_NO_FLOCK": "1",
+            "PATH": f"{shadow_bin}{os.pathsep}{env['PATH']}",
         }
     )
     lock = home / ".agent-example" / ".provision.lock.pid"
@@ -591,6 +651,7 @@ def test_first_use_provision_is_serialized(tmp_path: Path) -> None:
         encoding="utf-8"
     )
     assert count.splitlines() == ["provision"]
+    assert not shadow_marker.exists()
 
 
 def test_windows_templates_preserve_context_and_release_payload_cwd(

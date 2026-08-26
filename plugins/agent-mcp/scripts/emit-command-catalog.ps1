@@ -9,8 +9,8 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
     exit 0
 }
 
-$commandPath = Join-Path $selfRoot '@@OUTPUT_DIR_PS@@\@@COMMAND@@@@WINDOWS_CATALOG_SUFFIX@@'
-$installerPath = Join-Path $selfRoot 'scripts\@@INSTALLER@@.ps1'
+$commandPath = Join-Path $selfRoot 'bin\agent-mcp.cmd'
+$installerPath = Join-Path $selfRoot 'scripts\init.ps1'
 $availability = if (
     (Test-Path -LiteralPath $commandPath) -and
     (Test-Path -LiteralPath $installerPath)
@@ -18,14 +18,14 @@ $availability = if (
 $catalog = [ordered]@{
     schema = 'copilot-extensions.session-command-catalog'
     version = 1
-    plugin = '@@COMMAND@@'
+    plugin = 'agent-mcp'
     payload = [ordered]@{ provenance = 'payload-local' }
     commands = @(
         [ordered]@{
-            id = '@@COMMAND@@'
+            id = 'agent-mcp'
             argv = @($commandPath)
-            shell = '@@WINDOWS_CATALOG_SHELL@@'
-            purpose = '@@PURPOSE@@'
+            shell = 'cmd'
+            purpose = 'Wrap authenticate and materialize MCP servers'
             availability = $availability
         }
     )
@@ -33,7 +33,7 @@ $catalog = [ordered]@{
 $catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
 $fence = '```'
 $context = @(
-    '## @@COMMAND@@ session command catalog'
+    '## agent-mcp session command catalog'
     ''
     'Invoke the exact `argv` below. Do not search `PATH` or substitute a same-named command from another payload.'
     ''

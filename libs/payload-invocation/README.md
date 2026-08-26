@@ -24,7 +24,15 @@ Generated shims:
 `outputDir` defaults to `bin` and may name a nested payload-only directory when
 a plugin still uses its historical top-level `bin/` files as legacy global
 wrapper sources. Catalog emitters always publish the exact generated command
-path.
+path. `windowsCatalogShim` defaults to `powershell`; a plugin whose stdio
+contract requires entry through a native process may select `cmd`, in which case
+the Windows catalog names the generated `.cmd` and reports `shell: "cmd"`.
+Callers invoke that path through the platform shell and should pass structured
+input through stdin or a request file rather than inline CMD arguments.
+`provisionMode` defaults to `snapshot`, where first use stamps the owning
+payload and provisions through its published snapshot. A self-staging installer
+may select `direct`; the payload shim then invokes that same installer with
+`provision` and never consults a shared snapshot pointer.
 
 The initial manifest keeps a legacy runtime-root name because installation-cell
 runtime placement belongs to Phase 3. Replacing that root with the installation

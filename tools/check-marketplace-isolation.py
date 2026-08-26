@@ -482,9 +482,17 @@ def _line_findings(
     ):
         add("global-plugin-binstub", "global command directory may be shared by cells")
 
-    if number in python_launch_lines or patterns.path_lookup.search(code) or (
-        patterns.command.search(code)
-        and (_PROCESS_LAUNCH.search(code) or patterns.process_launch.search(code))
+    payload_manifest_declaration = (
+        path.name == "payload-invocation.json"
+        and '"command"' in code
+    )
+    if not payload_manifest_declaration and (
+        number in python_launch_lines
+        or patterns.path_lookup.search(code)
+        or (
+            patterns.command.search(code)
+            and (_PROCESS_LAUNCH.search(code) or patterns.process_launch.search(code))
+        )
     ):
         add("path-sibling-launch", "plugin command may resolve through ambient PATH")
 

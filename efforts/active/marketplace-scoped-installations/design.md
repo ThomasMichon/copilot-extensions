@@ -98,7 +98,7 @@ The command catalog uses this initial contract:
   "commands": [{
     "id": "<command>",
     "argv": ["<absolute-payload-command>"],
-    "shell": "direct",
+    "shell": "direct|cmd",
     "availability": "ready|unavailable"
   }]
 }
@@ -106,6 +106,9 @@ The command catalog uses this initial contract:
 
 Consumers append arguments to the supplied `argv`; they never reconstruct the
 path from `payload`, search `PATH`, or substitute another same-named command.
+`shell: "direct"` names an executable payload entry point. `shell: "cmd"` names
+a payload-local CMD launcher that must be invoked through the Windows shell;
+structured input uses stdin or a request file rather than inline CMD JSON.
 
 Project binstubs remain in `~/.local/bin` and forward to an absolute,
 payload-local agent-worktrees shim. An ownership receipt binds the project

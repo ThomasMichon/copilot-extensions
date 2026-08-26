@@ -22,6 +22,8 @@ _ENV = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
 _OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
 _INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
+_WINDOWS_CATALOG_SHIMS = {"powershell", "cmd"}
+_PROVISION_MODES = {"snapshot", "direct"}
 
 
 def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
@@ -95,8 +97,18 @@ def load_manifest(path: Path) -> dict[str, object]:
     installer = data.get("installer", "install")
     if not isinstance(installer, str) or not _INSTALLER.fullmatch(installer):
         raise ValueError(f"{path}: invalid installer: {installer!r}")
+    windows_catalog_shim = data.get("windowsCatalogShim", "powershell")
+    if windows_catalog_shim not in _WINDOWS_CATALOG_SHIMS:
+        raise ValueError(
+            f"{path}: invalid windowsCatalogShim: {windows_catalog_shim!r}"
+        )
+    provision_mode = data.get("provisionMode", "snapshot")
+    if provision_mode not in _PROVISION_MODES:
+        raise ValueError(f"{path}: invalid provisionMode: {provision_mode!r}")
     data["outputDir"] = output_dir
     data["installer"] = installer
+    data["windowsCatalogShim"] = windows_catalog_shim
+    data["provisionMode"] = provision_mode
     data["plugin"] = plugin
     data["commands"] = commands
     data["multiCommandManifest"] = raw_commands is not None
@@ -124,11 +136,68 @@ def render(
         }
         for item in commands
     ]
+    windows_catalog_suffix = (
+        ".cmd" if data["windowsCatalogShim"] == "cmd" else ".ps1"
+    )
+    windows_catalog_shell = (
+        "cmd" if data["windowsCatalogShim"] == "cmd" else "direct"
+    )
+    installer_name = str(data["installer"])
+    if data["provisionMode"] == "direct":
+        provision_posix = 'bash "$_installer" provision >&2'
+        provision_powershell = (
+            "& $_hostExe -NoProfile -ExecutionPolicy Bypass -File "
+            "$_installer provision 2>&1 |\n"
+            "    ForEach-Object { [Console]::Error.WriteLine($_) }\n"
+            "$_provisionRc = $LASTEXITCODE"
+        )
+    else:
+        provision_posix = (
+            'bash "$_installer" stamp >&2\n'
+            '_snapshot="$(cat "$_runtime_root/payload-dir" 2>/dev/null || true)"\n'
+            f'_snapshot_installer="$_snapshot/scripts/{installer_name}.sh"\n'
+            'if [ ! -f "$_snapshot_installer" ]; then\n'
+            "    printf '[%s] stamped snapshot installer not found: %s\\n' \\\n"
+            '        "$_command" "$_snapshot_installer" >&2\n'
+            "    exit 127\n"
+            "fi\n"
+            'bash "$_snapshot_installer" provision >&2'
+        )
+        provision_powershell = (
+            "& $_hostExe -NoProfile -ExecutionPolicy Bypass -File "
+            "$_installer stamp 2>&1 |\n"
+            "    ForEach-Object { [Console]::Error.WriteLine($_) }\n"
+            "$_provisionRc = $LASTEXITCODE\n\n"
+            "        if ($_provisionRc -eq 0) {\n"
+            "            $_snapshot = ''\n"
+            "            try { $_snapshot = "
+            "([IO.File]::ReadAllText((Join-Path $_runtimeRoot "
+            "'payload-dir'))).Trim() } catch {}\n"
+            "            $_snapshotInstaller = if ($_snapshot) { "
+            f"Join-Path $_snapshot 'scripts\\{installer_name}.ps1' "
+            "} else { '' }\n"
+            "            if (-not ($_snapshotInstaller -and "
+            "(Test-Path -LiteralPath $_snapshotInstaller))) {\n"
+            "                [Console]::Error.WriteLine("
+            '"[$_command] stamped snapshot installer not found: '
+            '$_snapshotInstaller")\n'
+            "                $_provisionRc = 127\n"
+            "            } else {\n"
+            "                & $_hostExe -NoProfile -ExecutionPolicy Bypass "
+            "-File $_snapshotInstaller provision 2>&1 |\n"
+            "                    ForEach-Object { "
+            "[Console]::Error.WriteLine($_) }\n"
+            "                $_provisionRc = $LASTEXITCODE\n"
+            "            }\n"
+            "        }"
+        )
     catalog_specs_ps = [
         {
             "id": item["command"],
             "relativePath": (
-                f"{output_dir}/{item['command']}.ps1".replace("/", "\\")
+                f"{output_dir}/{item['command']}{windows_catalog_suffix}".replace(
+                    "/", "\\"
+                )
             ),
             "purpose": item["purpose"],
         }
@@ -147,6 +216,10 @@ def render(
         "PAYLOAD_UP_PS": payload_up.replace("/", "\\"),
         "PAYLOAD_UP_WIN": payload_up.replace("/", "\\"),
         "INSTALLER": str(data["installer"]),
+        "WINDOWS_CATALOG_SUFFIX": windows_catalog_suffix,
+        "WINDOWS_CATALOG_SHELL": windows_catalog_shell,
+        "PROVISION_POSIX": provision_posix,
+        "PROVISION_POWERSHELL": provision_powershell,
         "CATALOG_SPECS_JSON": json.dumps(
             catalog_specs, ensure_ascii=True, separators=(",", ":")
         ),

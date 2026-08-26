@@ -15,9 +15,12 @@ worktree/repo resolver, and needs no resident daemon. The optional `serve`
 command only warms repeated shell `call`/materialized-stub usage; it is not part
 of normal agent wiring.
 
-1. Enable/install the `agent-mcp` plugin so the `agent-mcp` binstub is on `PATH`
-   (if the binstub is missing, run `scripts/init.* stamp`; the first real call
-   may self-provision the runtime).
+1. Enable/install the `agent-mcp` plugin. Session-facing skills receive an exact
+   payload-local command through the session command catalog; static MCP
+   frontmatter and generated materialized fleets continue using the
+   compatibility global wrapper because they start outside that session
+   context. If the wrapper is missing, run `scripts/init.* stamp`; the first
+   real call may self-provision the runtime.
 2. Write one bridge config (`.mcp.yaml`/`.json`) that names the upstream
    `server`, `auth`, and any filters/decorators.
 3. Point the consuming agent at that file:
@@ -26,13 +29,19 @@ of normal agent wiring.
 mcp-servers:
   my-upstream:
     type: stdio
-    command: agent-mcp
+    command: agent-mcp # marketplace-isolation: allow mcp-server-startup
     args: ['bridge', '--config', '.github/agents/my-upstream.mcp.yaml']
     tools: ['*']
 ```
 
 For setup steps use the bundled **`agent-mcp`** skill; for per-machine tuning of
 an existing bridge use **`customizing-bridges`**.
+
+The literal `mcp-servers.command` above is deliberate. Copilot starts the stdio
+server from repository-committed, machine-portable frontmatter that has no
+plugin-root interpolation contract and may run before or independently of
+session command-catalog context. That surface cannot consume the payload-local
+argv until the host provides a plugin-root-capable MCP launcher contract.
 
 ## Reliable agents: one bridge, two surfaces
 
@@ -739,7 +748,7 @@ tool itself — something a static `filter`/`transform` can't see.
 mcp-servers:
   ado-remote-mcp:
     type: stdio
-    command: agent-mcp            # cross-platform: same on Linux/WSL and Windows
+    command: agent-mcp            # marketplace-isolation: allow mcp-server-startup
     args: ['bridge', '--config', '.github/agents/ado.mcp.yaml']
     tools: ['*']
 ```
@@ -750,6 +759,16 @@ mcp-servers:
 > the stdio MCP child. (A `.ps1` shim would win PowerShell's command discovery but
 > doesn't reliably stream stdin -- hence the deliberate `.cmd`-only layout.) On
 > Linux/WSL the binstub is the usual bash script.
+
+This remains an explicit startup compatibility boundary: static
+`mcp-servers.command` cannot consume a session command catalog.
+
+On Windows the session catalog names the payload-local `.cmd`, not its sibling
+`.ps1`, so shell pipelines enter through a native process and preserve stdio.
+Operator-facing commands elsewhere in this README intentionally use the
+compatibility global wrapper; agent-facing skills use the exact catalog argv.
+Because CMD reparses argv, Windows agent-facing calls pass structured input
+through stdin or `--request-file`, never as inline JSON.
 
 ## Troubleshooting
 
