@@ -38,9 +38,10 @@ into a coordination problem.
 
 ## Concepts & Components
 
-- **Plugin runtime** — the self-contained venv + binstub a runtime plugin's own
-  installer deploys under `~/.agent-*`, per the shared **install contract**. The
-  runtime, not a git checkout, is what executes.
+- **Plugin runtime** — the self-contained versioned runtime and invocation
+  surface a runtime plugin's own installer deploys inside its marketplace
+  installation cell, per the shared **install contract**. The installed runtime,
+  not a git checkout or an ambient command with the same name, is what executes.
 - **Drop-in contribution registry** — a consumer-owned `*.d` directory through
   which independently-installed plugins contribute manifests, pointers, or
   config fragments without importing across runtimes or editing one shared file.

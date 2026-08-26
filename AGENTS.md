@@ -24,6 +24,7 @@ repo via the Copilot CLI marketplace.
 | Understand **how the suite works today** (as-is) | `docs/architecture.md` |
 | See **how we build plugins here** (reusable design) | `docs/patterns/README.md` |
 | See **what a subject should ultimately be** (intent) | `visions/README.md` |
+| Plan or resume a **stretch of work** | `efforts/README.md` + the **`efforts:planning-efforts`** skill |
 | **Make a change and land it correctly** | the **`copilot-extensions-harness:contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
 | **Test** a plugin | `TESTING.md` |
 | Decide **where config lives** (repo vs machine) | `docs/configuration.md` |
@@ -106,7 +107,17 @@ to-do.
   changes; delta-closure state lives in the issues/efforts.
 
 See `visions/README.md` for the local conventions (organization, issue/effort
-linkage) and the `envisioning` / `carve-vision-effort` skills for the workflow.
+linkage), the `visions:envisioning` skill for standing intent, and the
+`efforts:planning-efforts` skill for the campaigns carved from it.
+
+### Efforts — active campaigns and coordination
+
+Stretches of planned work live under `efforts/active/<slug>/`, governed by the
+`efforts:planning-efforts` skill and the local addendum in `efforts/README.md`.
+Start or resume a substantial implementation campaign there rather than creating
+a standalone plan document. GitHub issues remain the discrete tracking and
+coordination tokens; the effort connects those issues to phased implementation,
+participants, validation, and an append-only journal.
 
 ### Architecture patterns — how we build it
 

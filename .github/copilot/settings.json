@@ -6,6 +6,8 @@
   },
   "enabledPlugins": {
     "copilot-extensions-harness@copilot-extensions": true,
-    "customizing-copilot@copilot-extensions": true
+    "customizing-copilot@copilot-extensions": true,
+    "efforts@copilot-extensions": true,
+    "visions@copilot-extensions": true
   }
 }

@@ -21,6 +21,13 @@ install, run, compose, update, roll back, adopt projects, and uninstall as if th
 other copies did not exist. Coexistence is structural: no operator arbitrates
 paths, commands, services, locks, endpoints, or state ownership by hand.
 
+**copilot-extensions** is the durable concept name for the installation home and
+service ecosystem described here. A marketplace named `copilot-extensions` is
+one source for that ecosystem, not the owner or definition of the concept.
+Other marketplaces can provide independent installation cells without changing
+what the host-level concept is called or being mistaken for the primary
+marketplace's cell.
+
 ## Concepts & Components
 
 - **Marketplace installation identity** — the stable identity formed from a
@@ -30,6 +37,10 @@ paths, commands, services, locks, endpoints, or state ownership by hand.
 - **Installation cell** — the marketplace-scoped ownership boundary containing
   that marketplace's plugin runtimes, mutable and durable state, lifecycle and
   discovery artifacts, and machine-local project-adoption state.
+- **copilot-extensions installation home** — the durable user-level home that
+  contains and enumerates marketplace installation cells. Its identity is
+  source-neutral even when one marketplace has the same `copilot-extensions`
+  name.
 - **Cell-local invocation surface** — the callable surface through which a
   plugin's skills, hooks, services, and peers reach the runtime in their own
   installation cell without claiming a machine-global command name.
@@ -44,6 +55,13 @@ Every runtime, configuration store, durable data store, cache, registry,
 discovery record, and lifecycle artifact that an installation owns belongs to
 its marketplace installation cell. Two same-named plugin copies never share
 writable machine-local state by accident.
+
+### source-neutral-installation-home
+The host presents one durable copilot-extensions installation concept while
+keeping each marketplace cell independently attributable. Adding a marketplace,
+renaming a source, or choosing a different provider does not redefine the
+host-level concept or collapse two cells merely because one source shares its
+name.
 
 ### independent-lifecycle
 Each installation can provision, start, update, roll back, repair, and uninstall
@@ -161,6 +179,9 @@ local transports do not weaken or change installation identity.
 - **No automatic fork of committed project configuration.** This model
   separates machine-local adoption state; it does not silently create parallel
   copies of repository-owned configuration.
+- **The primary marketplace does not own the concept name.** A marketplace named
+  `copilot-extensions` is not privileged to absorb, alias, or overwrite cells
+  from other sources.
 
 ## See Also
 
@@ -180,6 +201,10 @@ local transports do not weaken or change installation identity.
 
 ## Provenance
 
+- **2026-08-25** — Clarified `copilot-extensions` as the durable, source-neutral
+  installation-home concept even though the primary marketplace carries the same
+  name. This keeps the user-facing concept stable while independent marketplaces
+  remain distinct cells.
 - **2026-08-25** — Authored from the requirement that independently versioned
   marketplaces can ship same-named plugin ecosystems to one host without
   contending for runtime, state, lifecycle, discovery, adoption, or invocation
