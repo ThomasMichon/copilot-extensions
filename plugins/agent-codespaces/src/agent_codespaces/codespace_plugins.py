@@ -409,6 +409,7 @@ def resolve_codespace_plugins(
     only_enabled: bool = True,
     extra_specs: Iterable[CodespacePluginSpec] = (),
     enabled_names: set[str] | None = None,
+    enabled_sources: dict[str, Any] | None = None,
     repo_roots: Iterable[Path] = (),
 ) -> list[CodespacePluginSpec]:
     """Resolve the CodeSpace-scoped plugins to inject into ``workspace_repo``'s CodeSpace.
@@ -451,8 +452,12 @@ def resolve_codespace_plugins(
         manifests[source] = (name, pdir, manifest)
     for source, (name, _pdir, manifest) in manifests.items():
         enabled_name = plugin_name(source) or name
-        if enabled is not None and enabled_name not in enabled:
-            continue
+        if only_enabled:
+            if enabled_sources is not None:
+                if enabled_sources.get(source) is not True:
+                    continue
+            elif enabled is not None and enabled_name not in enabled:
+                continue
         for spec in parse_codespace_plugins(manifest, declared_by=name):
             if not repo_matches(spec.for_workspace_repo, workspace_repo):
                 continue
@@ -500,6 +505,7 @@ def _main(argv: list[str] | None = None) -> int:
         only_enabled=not args.all,
         extra_specs=operator_specs,
         enabled_names=plugin_names_from_enabled(repo_settings["enabledPlugins"]),
+        enabled_sources=repo_settings["enabledPlugins"],
         repo_roots=config.source_paths,
     )
     if args.json:
