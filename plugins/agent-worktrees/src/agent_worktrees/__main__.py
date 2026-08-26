@@ -14090,6 +14090,18 @@ def cmd_related_dispatch(argv: list[str]) -> int:
                 print(f"  {t['name']:<24} {t['slug'] or t['remote'] or '-'}")
         return 0
 
+    # `related` remains callable outside an adopted project for ambient hooks
+    # and installed-plugin grafts. When CWD (or --repo) does identify an adopted
+    # project, activate it so load_config() can include its knowledge overlay.
+    if not cfg.active_project():
+        explicit = _related_opt(rest, "--repo")
+        if explicit:
+            _activate_project_for_path(explicit)
+        else:
+            project, _assumed = _resolve_active_project(None)
+            if project:
+                cfg.set_active_project(project)
+
     anchor = _related_anchor(rest)
     if not anchor:
         output.err(
