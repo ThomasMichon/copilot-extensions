@@ -111,6 +111,14 @@ def test_inventory_categories(tmp_path: Path) -> None:
         _write(
             root,
             "plugins/example/skills/example/SKILL.md",
+            "session-sync run --prune\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
             "Session-sync is machine-local.\n",
         ),
         root,

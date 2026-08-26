@@ -143,6 +143,13 @@ def _command_patterns(root: Path) -> CommandPatterns:
     )
     alternatives = [r"agent-[a-z0-9-]+", *(re.escape(command) for command in payload_commands)]
     token = "(?:" + "|".join(alternatives) + ")"
+    plain_payload = (
+        "|^\\s*(?-i:(?:"
+        + "|".join(re.escape(command) for command in payload_commands)
+        + "))\\s+\\S+"
+        if payload_commands
+        else ""
+    )
     return CommandPatterns(
         payload_commands=frozenset(all_payload_commands),
         token=token,
@@ -160,9 +167,12 @@ def _command_patterns(root: Path) -> CommandPatterns:
             re.IGNORECASE,
         ),
         inline=re.compile(
-            rf"""`{token}\s+[^`]+`"""
-            rf"""|^\s*[-*]\s+{token}\s+\S+"""
-            r"""|^\s*agent-[a-z0-9-]+\s+\S+""",
+            (
+                rf"""`{token}\s+[^`]+`"""
+                rf"""|^\s*[-*]\s+{token}\s+\S+"""
+                r"""|^\s*agent-[a-z0-9-]+\s+\S+"""
+                + plain_payload
+            ),
             re.IGNORECASE,
         ),
         fence=re.compile(
