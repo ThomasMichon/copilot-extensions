@@ -1,0 +1,10 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-machines",
+  "module": "agent_machines",
+  "runtimeRoot": ".agent-machines",
+  "noSelfProvisionEnv": "AGENT_MACHINES_NO_SELFPROVISION",
+  "purpose": "Discover validate and restore declared machine state",
+  "installer": "init"
+}

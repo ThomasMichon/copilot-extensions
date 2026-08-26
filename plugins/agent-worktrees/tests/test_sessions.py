@@ -158,6 +158,9 @@ class TestMuxBindingForSession:
             "agent_worktrees.sessions._windows_process_start_time",
             lambda pid: {100: 1, 200: 2, 300: 3}.get(pid),
         )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.platform.system", lambda: "Windows"
+        )
 
         class _Result:
             returncode = 0
@@ -197,6 +200,9 @@ class TestMuxBindingForSession:
             "agent_worktrees.sessions._windows_process_start_time",
             lambda pid: {100: 1, 200: 2, 300: 3}.get(pid),
         )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.platform.system", lambda: "Windows"
+        )
 
         class _Result:
             returncode = 0
@@ -230,6 +236,9 @@ class TestMuxBindingForSession:
             "agent_worktrees.sessions._windows_process_start_time",
             # PID 100 was created after its alleged child 200: it was reused.
             lambda pid: {100: 4, 200: 2, 300: 3}.get(pid),
+        )
+        monkeypatch.setattr(
+            "agent_worktrees.sessions.platform.system", lambda: "Windows"
         )
 
         class _Result:

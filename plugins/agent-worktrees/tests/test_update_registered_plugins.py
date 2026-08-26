@@ -330,7 +330,10 @@ def test_ordering_plugins_before_services(monkeypatch, payload_result, expected_
     )
 
     args = types.SimpleNamespace(
-        recreate_venv=False, skip_modules=None, no_anchor_sync=False
+        recreate_venv=False,
+        skip_modules=None,
+        no_anchor_sync=False,
+        no_manager=True,
     )
     rc = m.cmd_update(args)
     assert rc == expected_rc

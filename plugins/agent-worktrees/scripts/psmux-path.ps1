@@ -13,10 +13,14 @@ function Test-AwPsmuxPackagePath {
     )
     $pathN = ConvertTo-AwNormalizedPath $Path
     $rootN = ConvertTo-AwNormalizedPath $PackageRoot
-    if (-not $pathN.StartsWith("$rootN\", [StringComparison]::OrdinalIgnoreCase)) {
+    if (-not $pathN.StartsWith($rootN, [StringComparison]::OrdinalIgnoreCase)) {
         return $false
     }
-    $relative = $pathN.Substring($rootN.Length).TrimStart('\', '/')
+    $relative = $pathN.Substring($rootN.Length)
+    if (-not ($relative.StartsWith('\') -or $relative.StartsWith('/'))) {
+        return $false
+    }
+    $relative = $relative.TrimStart('\', '/')
     $top = ($relative -split '[\\/]')[0]
     return $top.StartsWith('marlocarlo.psmux_', [StringComparison]::OrdinalIgnoreCase)
 }

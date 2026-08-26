@@ -10,10 +10,13 @@ description: >-
 
 # agent-ssh (core + transport-provider contract)
 
-> **Before you start — readiness (standalone runtime).** agent-ssh does not
-> require agent-worktrees, agent-bridge, or a harness. It has its own installer
-> and self-provisioning binstub. If `agent-ssh` is not on PATH, stamp the binstub
-> from the plugin payload or checkout:
+> **Before you start — readiness (standalone runtime).** The runtime does not
+> require agent-worktrees, agent-bridge, or a harness. In an agent session,
+> invoke the exact `argv` from the agent-ssh session command catalog; the
+> payload-local command self-provisions on first use. Do not search `PATH` or
+> substitute a same-named command from another payload. Outside an agent
+> session, stamp a management binstub from an explicitly chosen payload or
+> checkout:
 >
 > ```powershell
 > pwsh -File .\scripts\install.ps1 stamp   # Windows, from plugins\agent-ssh
@@ -32,27 +35,27 @@ plugins and register against the same contract.
 
 ## What lives here
 
-- **SSH-profile emitter** (`agent-ssh emit-profile`) -- renders `Host <name>`
+- **SSH-profile emitter** (`<catalog argv[0]> emit-profile`) -- renders `Host <name>`
   blocks from a normalized registry. The ProxyCommand recipe comes from the
   transport's `module.yaml`, not from hardcoded transport logic.
 - **Coexistence layout** -- a single managed `Include ~/.ssh/config.d/*` plus a
   per-transport drop-in `50-agent-ssh-<module>.conf`. Each transport owns only
   its own fragment.
-- **Reachability verification** (`agent-ssh verify`) -- probes the active SSH
+- **Reachability verification** (`<catalog argv[0]> verify`) -- probes the active SSH
   profile by machine name and exits non-zero on missing names or unreachable
   aliases.
 - **Transport-provider contract** (`contract/`) -- schemas and public exemplars
   for provider plugins.
-- **Live introspection** (`agent-ssh explore`) -- read-only SSH probe of a
+- **Live introspection** (`<catalog argv[0]> explore`) -- read-only SSH probe of a
   reachable target's fabric runtimes, repos, and derived agents.
-- **Mesh status** (`agent-ssh mesh-status`) -- render the calling repo's SSH
+- **Mesh status** (`<catalog argv[0]> mesh-status`) -- render the calling repo's SSH
   machine mesh from its `machines.yaml` (per-host role, reachability, aliases).
   Config-driven and read-only; no probe.
 
 ## Emit a profile
 
 ```bash
-agent-ssh emit-profile registry.yaml --module transport/module.yaml
+<catalog argv[0]> emit-profile registry.yaml --module transport/module.yaml
 ```
 
 Use `--print` to inspect the fragment without writing it. Use `--config-d` and
@@ -61,7 +64,7 @@ Use `--print` to inspect the fragment without writing it. Use `--config-d` and
 ## Verify reachability
 
 ```bash
-agent-ssh verify --timeout 8 machine-a machine-b
+<catalog argv[0]> verify --timeout 8 machine-a machine-b
 ```
 
 A failure is fail-safe: the host is not considered reachable until the probe
@@ -70,12 +73,12 @@ succeeds.
 ## Explore a machine
 
 ```bash
-agent-ssh explore <ssh-target> [--json] [--timeout 10]
+<catalog argv[0]> explore <ssh-target> [--json] [--timeout 10]
 ```
 
 Introspects a **reachable** target over SSH and reports, by convention, what the
 machine offers the fabric: its checked-out repos and **where** they live (read
-live from the machine's own repo registry, `agent-worktrees repos list --json`),
+live from the machine's own project registry),
 which of those **back an agent**, each repo's declared **purpose** (`role` +
 `summary`, read from the in-repo `.agent-worktrees/related.yaml` catalog(s)
 checked out on the machine), whether the fabric runtimes (`agent-worktrees`
@@ -91,7 +94,7 @@ PowerShell-host probe is a follow-on.
 ## Show the machine mesh
 
 ```bash
-agent-ssh mesh-status [--path machines.yaml] [--json] [--summary]
+<catalog argv[0]> mesh-status [--path machines.yaml] [--json] [--summary]
 ```
 
 Renders the **calling repo's** SSH machine mesh from its `machines.yaml` — for
@@ -101,7 +104,7 @@ each machine: `display_name`, `role`, `environment`, declared reachability
 `machines.yaml` from the current git repo (or `--path`) and says nothing when the
 repo ships none, so one repo's mesh never leaks into another. **Read-only** — it
 parses config, it does not probe; `ssh.ready` is the operator's declared state,
-so use `agent-ssh verify <alias>` to probe a host live.
+so use `<catalog argv[0]> verify <alias>` to probe a host live.
 
 A cwd-gated `sessionStart` hook (`scripts/emit-mesh-pointer.*`) emits only a
 **succinct pointer** to this command when the repo has a `machines.yaml`, rather
@@ -115,6 +118,6 @@ Ship a `module.yaml` conforming to `contract/module.schema.json`. Provide a
 profile, manages the managed Include, and verifies reachability.
 
 `entrypoints` in a transport module are metadata for installers/orchestrators;
-`agent-ssh emit-profile` and `agent-ssh verify` do not run transport setup
+`<catalog argv[0]> emit-profile` and `<catalog argv[0]> verify` do not run transport setup
 scripts. Use the relevant transport skill (`setting-up-ssh-host`,
 `setting-up-ssh-client`, or provider-owned docs) for install/provision steps.

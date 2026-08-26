@@ -10,7 +10,11 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
 }
 
 $commandPath = Join-Path $selfRoot 'bin\payload\agent-worktrees.ps1'
-$availability = if (Test-Path -LiteralPath $commandPath) { 'ready' } else { 'unavailable' }
+$installerPath = Join-Path $selfRoot 'scripts\install.ps1'
+$availability = if (
+    (Test-Path -LiteralPath $commandPath) -and
+    (Test-Path -LiteralPath $installerPath)
+) { 'ready' } else { 'unavailable' }
 $catalog = [ordered]@{
     schema = 'copilot-extensions.session-command-catalog'
     version = 1

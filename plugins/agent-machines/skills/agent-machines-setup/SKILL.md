@@ -18,19 +18,23 @@ description: >
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
 > The runtime can run standalone. Discovery uses agent-worktrees registries when
-> they exist, but missing registries just mean "no packages discovered." If the
-> binstub is missing, stamp it from the installed payload; the first command then
-> builds the venv on demand.
+> they exist, but missing registries just mean "no packages discovered." In an
+> agent session, invoke the exact `argv` from the agent-machines session command
+> catalog; the payload-local command provisions the runtime on first use. Do not
+> search `PATH` or substitute a same-named command from another payload.
+>
+> Outside an agent session, stamp a management binstub from an explicitly chosen
+> payload; the first command then builds the venv on demand.
 >
 > Windows:
 > ```powershell
-> $s = Get-ChildItem "$env:USERPROFILE\.copilot\installed-plugins\*\agent-machines\scripts\init.ps1" | Select-Object -First 1
-> & $s.FullName stamp
+> $s = Join-Path '<explicit-payload-path>' 'scripts\init.ps1'
+> & $s stamp
 > ```
 >
 > POSIX:
 > ```bash
-> bash "$(ls ~/.copilot/installed-plugins/*/agent-machines/scripts/init.sh | head -1)" stamp
+> bash "<explicit-payload-path>/scripts/init.sh" stamp
 > ```
 >
 > The first call may take ~30–120s. POSIX emits `::agent-provisioning::`; Windows
@@ -53,7 +57,8 @@ scripts/init.sh          # Linux / WSL / macOS
 Verify:
 
 ```
-agent-machines version
+<catalog argv[0]> version                    # inside an agent session
+<management-binstub-path> version            # outside a session
 ```
 
 ## Author a requirement package
@@ -91,4 +96,4 @@ plugins (`agent-worktrees`, `agent-machines`); if a package manages
 `extraKnownMarketplaces`, include the bootstrap-critical `copilot-extensions`
 marketplace or the validator errors.
 
-Run `agent-machines validate` after authoring to catch conflicts.
+Run `<catalog argv[0]> validate` after authoring to catch conflicts.

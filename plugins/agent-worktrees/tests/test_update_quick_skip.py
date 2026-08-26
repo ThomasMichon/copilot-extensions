@@ -34,6 +34,7 @@ def _args(force: bool = False) -> argparse.Namespace:
         skip_modules=None,
         no_anchor_sync=True,
         force=force,
+        no_manager=True,
     )
 
 

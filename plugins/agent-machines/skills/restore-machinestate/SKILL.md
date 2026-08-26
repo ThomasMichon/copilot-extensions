@@ -18,18 +18,23 @@ description: >
 
 # restore-machinestate
 
-`agent-machines` converges the current machine to desired state declared in
+The agent-machines runtime converges the current machine to desired state declared in
 **requirement packages** carried by adopted repos at `.github/machine-state/`.
 Restore is **machine-scoped**: it reconciles the union of every discovered
-package, not one anchor repo. The CLI itself is standalone; if the
-agent-worktrees registries are absent, discovery returns no packages instead of
+package, not one anchor repo. The CLI itself is standalone; if the project
+registries are absent, discovery returns no packages instead of
 failing.
+
+Invoke the exact `argv` from the agent-machines session command catalog. Append
+the arguments shown below to that `argv`; do not search `PATH` or substitute a
+same-named command from another payload. If the catalog reports the command as
+unavailable, surface that failure rather than improvising an install.
 
 ## Workflow
 
 1. **Discover** what applies here:
    ```
-   agent-machines discover
+   <catalog argv[0]> discover
    ```
    Lists the registered repos that carry gated requirement packages for this
    machine. The candidate set is `~/.agent-worktrees/projects.yaml`; paths are
@@ -37,22 +42,22 @@ failing.
 
 2. **Plan** (read-only) -- the managed surfaces and a content drift key:
    ```
-   agent-machines plan
+   <catalog argv[0]> plan
    ```
 
 3. **Validate** -- detect cross-package conflicts before applying:
    ```
-   agent-machines validate
+   <catalog argv[0]> validate
    ```
    Scalar `enforce` disagreements and bootstrap-floor violations are errors; the
    validator reports, it does not auto-arbitrate. Fix conflicting packages.
 
 4. **Restore** -- deliberate + reviewable (dry-run is the default):
    ```
-   agent-machines restore                       # DRY-RUN: what would change and why
-   agent-machines restore --only ssh            # preview one section
-   agent-machines restore --only ssh --apply    # apply just that section
-   agent-machines restore --apply               # apply everything
+   <catalog argv[0]> restore                       # DRY-RUN: what would change and why
+   <catalog argv[0]> restore --only ssh            # preview one section
+   <catalog argv[0]> restore --only ssh --apply    # apply just that section
+   <catalog argv[0]> restore --apply               # apply everything
    ```
    Restore previews by default; `--apply` makes changes; `--only` scopes to named
    surfaces/modules so you review and apply section by section. Surfaces back up

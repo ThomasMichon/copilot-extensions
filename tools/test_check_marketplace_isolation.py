@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parent / "check-marketplace-isolation.py"
+REPO = SCRIPT.parent.parent
 
 _spec = importlib.util.spec_from_file_location("check_marketplace_isolation", SCRIPT)
 cmi = importlib.util.module_from_spec(_spec)
@@ -67,6 +68,17 @@ def test_inventory_categories(tmp_path: Path) -> None:
         ),
         root,
     ) == ["bare-agent-command"]
+
+
+def test_payload_catalog_adopter_skills_avoid_bare_global_commands() -> None:
+    for plugin in ("agent-machines", "agent-ssh"):
+        findings = [
+            finding
+            for skill in (REPO / "plugins" / plugin / "skills").rglob("*.md")
+            for finding in cmi._scan_file(skill, REPO)
+            if finding.category == "bare-agent-command"
+        ]
+        assert findings == [], plugin
 
 
 def test_common_python_powershell_and_javascript_forms(tmp_path: Path) -> None:

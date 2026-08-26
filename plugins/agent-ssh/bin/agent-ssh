@@ -3,10 +3,10 @@
 set -eu
 
 export PYTHONUTF8=1
-_command="@@COMMAND@@"
-_module="@@MODULE@@"
+_command="agent-ssh"
+_module="agent_ssh"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
-_payload_root="$(CDPATH= cd -- "$_self_dir/@@PAYLOAD_UP@@" && pwd -P)"
+_payload_root="$(CDPATH= cd -- "$_self_dir/.." && pwd -P)"
 
 if [ -n "${COPILOT_PLUGIN_ROOT:-}" ]; then
     _context_root="$(CDPATH= cd -- "$COPILOT_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
@@ -32,7 +32,7 @@ case "$PWD/" in
         ;;
 esac
 
-_runtime_root="$HOME/@@RUNTIME_ROOT@@"
+_runtime_root="$HOME/.agent-ssh"
 _resolver="$_payload_root/scripts/resolve-runtime.sh"
 _resolve_runtime() {
     AGENT_RT_PY=""
@@ -48,9 +48,9 @@ _resolve_runtime
 if [ -n "${AGENT_RT_PY:-}" ]; then
     exec "$AGENT_RT_PY" -m "$_module" "$@"
 fi
-if [ -n "${@@NO_SELFPROVISION_ENV@@:-}" ]; then
+if [ -n "${AGENT_SSH_NO_SELFPROVISION:-}" ]; then
     printf '[%s] runtime not provisioned (%s set).\n' \
-        "$_command" "@@NO_SELFPROVISION_ENV@@" >&2
+        "$_command" "AGENT_SSH_NO_SELFPROVISION" >&2
     exit 1
 fi
 
@@ -93,7 +93,7 @@ if [ -n "${AGENT_RT_PY:-}" ]; then
     exec "$AGENT_RT_PY" -m "$_module" "$@"
 fi
 
-_installer="$_payload_root/scripts/@@INSTALLER@@.sh"
+_installer="$_payload_root/scripts/install.sh"
 if [ ! -f "$_installer" ]; then
     printf '[%s] payload installer not found: %s\n' "$_command" "$_installer" >&2
     exit 127
@@ -105,7 +105,7 @@ printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use\n' \
     "$_command" >&2
 bash "$_installer" stamp >&2
 _snapshot="$(cat "$_runtime_root/payload-dir" 2>/dev/null || true)"
-_snapshot_installer="$_snapshot/scripts/@@INSTALLER@@.sh"
+_snapshot_installer="$_snapshot/scripts/install.sh"
 if [ ! -f "$_snapshot_installer" ]; then
     printf '[%s] stamped snapshot installer not found: %s\n' \
         "$_command" "$_snapshot_installer" >&2
