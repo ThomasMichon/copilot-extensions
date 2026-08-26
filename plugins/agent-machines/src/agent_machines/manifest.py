@@ -43,9 +43,10 @@ BOOTSTRAP_CRITICAL_MARKETPLACES = ("copilot-extensions",)
 
 #: Declarative-resource types the schema recognizes. All four are fully
 #: handled today -- ``package``, ``file`` (whole-file and managed-block),
-#: ``registry`` (Windows), and ``feature`` (Windows optional features /
-#: capabilities and Linux/WSL units). See ``resources.py`` for the handlers.
-KNOWN_RESOURCE_TYPES = ("package", "file", "registry", "feature")
+#: ``registry`` (Windows), ``feature`` (Windows optional features /
+#: capabilities and Linux/WSL units), and ``power-setting`` (Windows power
+#: schemes). See ``resources.py`` for the handlers.
+KNOWN_RESOURCE_TYPES = ("package", "file", "registry", "feature", "power-setting")
 
 #: Minimal required identity fields per resource type (checked at load).
 REQUIRED_FIELDS = {
@@ -53,6 +54,7 @@ REQUIRED_FIELDS = {
     "file": ("path",),
     "registry": ("path",),
     "feature": ("id", "manager"),
+    "power-setting": ("subgroup", "setting"),
 }
 
 #: Accepted values for a resource's ``state`` / ``strategy`` selectors.
@@ -71,6 +73,43 @@ REGISTRY_VALUE_TYPES = (
 FEATURE_MANAGER_NAMES = (
     "windows-optional-feature", "windows-capability", "linux-systemd",
 )
+
+#: Friendly values accepted by the Windows ``power-setting`` resource. Numeric
+#: values remain available for settings whose index is not one of these actions.
+POWER_SETTING_SYMBOLS = {
+    "do-nothing": 0,
+    "sleep": 1,
+    "hibernate": 2,
+    "shut-down": 3,
+    "turn-off-display": 4,
+}
+
+#: Stable aliases used by the documented power-setting examples. Canonical
+#: identity prevents an alias and its GUID from bypassing collision detection.
+POWER_GUID_ALIASES = {
+    "scheme_balanced": "381b4222-f694-41f0-9685-ff5bb260df2e",
+    "scheme_min": "8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c",
+    "scheme_max": "a1841308-3541-4fab-bc81-f71556f20b4a",
+    "sub_buttons": "4f971e89-eebd-4455-a8de-9e59040e7347",
+    "lidaction": "5ca83367-6e45-459f-a27b-476b1d01c936",
+    "pbuttonaction": "7648efa3-dd9c-4e3e-b566-50f929386280",
+}
+
+POWER_SETTING_ALLOWED_VALUES = {
+    POWER_GUID_ALIASES["lidaction"]: frozenset(range(4)),
+    POWER_GUID_ALIASES["pbuttonaction"]: frozenset(range(5)),
+}
+
+
+def canonical_power_token(value: Any) -> str:
+    folded = str(value).casefold()
+    return POWER_GUID_ALIASES.get(folded, folded)
+
+
+def normalize_power_setting_value(value: Any) -> int:
+    if isinstance(value, str) and value in POWER_SETTING_SYMBOLS:
+        return POWER_SETTING_SYMBOLS[value]
+    return int(value, 0) if isinstance(value, str) else int(value)
 
 
 class ManifestError(ValueError):
@@ -217,6 +256,48 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
                 raise ManifestError(
                     f"{path}: feature manager {mgr!r} must be one of {FEATURE_MANAGER_NAMES}"
                 )
+        if rtype == "power-setting":
+            if "state" in res:
+                raise ManifestError(
+                    f"{path}: power-setting resource does not support 'state'; "
+                    "declare the desired AC/DC indexes instead"
+                )
+            if "ac" not in res and "dc" not in res:
+                raise ManifestError(
+                    f"{path}: power-setting resource requires at least one of 'ac' or 'dc'"
+                )
+            for power_source in ("ac", "dc"):
+                if power_source not in res:
+                    continue
+                value = res[power_source]
+                valid = (
+                    isinstance(value, int)
+                    and not isinstance(value, bool)
+                    and 0 <= value <= 0xFFFFFFFF
+                )
+                if isinstance(value, str):
+                    valid = value in POWER_SETTING_SYMBOLS
+                    if not valid:
+                        try:
+                            parsed = int(value, 0)
+                            valid = 0 <= parsed <= 0xFFFFFFFF
+                        except ValueError:
+                            valid = False
+                if not valid:
+                    accepted = ", ".join(POWER_SETTING_SYMBOLS)
+                    raise ManifestError(
+                        f"{path}: power-setting {power_source!r} value {value!r} "
+                        f"must be an unsigned integer or one of: {accepted}"
+                    )
+                normalized = normalize_power_setting_value(value)
+                setting = canonical_power_token(res["setting"])
+                allowed = POWER_SETTING_ALLOWED_VALUES.get(setting)
+                if allowed is not None and normalized not in allowed:
+                    raise ManifestError(
+                        f"{path}: power-setting {power_source!r} value {value!r} "
+                        f"is not supported by setting {res['setting']!r}; "
+                        f"allowed indexes are {sorted(allowed)}"
+                    )
         process_guard = res.get("process_guard")
         if process_guard is not None:
             if rtype != "package":

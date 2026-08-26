@@ -156,6 +156,38 @@ Apply detects current state first and acts only when it differs. On an
 unsupported platform, an unknown manager, or a missing backend binary, the
 resource is skipped with a reason (never a hard failure).
 
+### `power-setting`
+
+Converge one setting in a Windows power scheme. Identity is
+`(scheme, subgroup, setting)`, case-folded with the documented fixed aliases
+(`SCHEME_BALANCED`, `SCHEME_MIN`, `SCHEME_MAX`, `SUB_BUTTONS`, `LIDACTION`, and
+`PBUTTONACTION`) canonicalized to GUIDs so alias/GUID declarations collide.
+The dynamic `SCHEME_CURRENT` alias remains its own identity because its GUID is
+live machine state rather than a manifest constant.
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `power-setting` |
+| `subgroup` | yes | Power subgroup GUID or alias, such as `SUB_BUTTONS`. |
+| `setting` | yes | Power-setting GUID or alias, such as `LIDACTION`. |
+| `scheme` | no | Scheme GUID or alias; defaults to `SCHEME_CURRENT`. |
+| `id` | no | Display id (defaults to `subgroup/setting`). |
+| `ac` | one of AC/DC | Desired plugged-in value index. |
+| `dc` | one of AC/DC | Desired battery value index. |
+
+Values may be unsigned integers (for arbitrary settings) or the friendly action
+names `do-nothing`, `sleep`, `hibernate`, `shut-down`, and
+`turn-off-display`. The friendly names map to the standard action indexes 0-4
+and should be used only for settings whose documented values are those actions.
+
+Apply reads hidden and visible settings with `powercfg /QH`, changes only the
+drifted AC/DC side, reactivates the scheme only when it is active, and queries
+again to verify the exact stored postcondition. If a write or activation fails,
+the handler restores any indexes it already changed so the next restore still
+sees drift and retries. A failed query or post-apply mismatch is an error rather
+than a success-shaped fallback. `state` is not supported: power settings are
+always declarations of desired AC/DC indexes.
+
 ## Path anchors
 
 | Anchor | Resolves to |
@@ -186,6 +218,7 @@ compatible**:
 | registry `present` + `absent` | error |
 | registry conflicting `value` or `value_type` | error |
 | feature `present` + `absent` | error |
+| power setting conflicting `ac` or `dc` value | error |
 
 The deterministic pick is stable regardless of package order, so plans and drift
 keys are reproducible. Errors block `restore`; advisories do not.
@@ -210,8 +243,9 @@ Resources appear in every verb:
 
 To move a common fact out of a per-repo restore script and into resources:
 
-1. Identify the fact's *identity* -- a package `(manager, id)` or a config file
-   `path`. If two repos already manage it, they will now collide-check.
+1. Identify the fact's *identity* -- a package `(manager, id)`, a config file
+   `path`, or a power setting `(scheme, subgroup, setting)`. If two repos already
+   manage it, they will now collision-check.
 2. Add a `resources:` entry to the requirement package that should own it, gated
    to the right machines.
 3. Delete the imperative step from the repo-local module (or leave the module

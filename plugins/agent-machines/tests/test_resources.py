@@ -1093,6 +1093,250 @@ def test_feature_missing_binary_skips(tmp_path, monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# power-setting handler (Windows, driven through the injected runner)
+# --------------------------------------------------------------------------- #
+def _power_query(ac: int, dc: int) -> RunOutcome:
+    return RunOutcome(
+        0,
+        f"    Current AC Power Setting Index: 0x{ac:08x}\n"
+        f"    Current DC Power Setting Index: 0x{dc:08x}\n",
+        "",
+    )
+
+
+def test_power_setting_requires_value_and_validates_symbols(tmp_path):
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/a", [{
+            "type": "power-setting",
+            "subgroup": "SUB_BUTTONS",
+            "setting": "PBUTTONACTION",
+        }])
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/b", [{
+            "type": "power-setting",
+            "subgroup": "SUB_BUTTONS",
+            "setting": "PBUTTONACTION",
+            "ac": "reboot",
+        }])
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/c", [{
+            "type": "power-setting",
+            "subgroup": "SUB_BUTTONS",
+            "setting": "LIDACTION",
+            "ac": "turn-off-display",
+        }])
+    with pytest.raises(ManifestError):
+        _pkg(tmp_path, "acme/d", [{
+            "type": "power-setting",
+            "subgroup": "SUB_BUTTONS",
+            "setting": "LIDACTION",
+            "ac": 0,
+            "state": "absent",
+        }])
+
+
+def test_power_setting_merges_ac_dc_and_normalizes_symbols(tmp_path):
+    a = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "PBUTTONACTION",
+        "ac": "hibernate",
+    }])
+    b = _pkg(tmp_path, "acme/b", [{
+        "type": "power-setting",
+        "subgroup": "sub_buttons",
+        "setting": "pbuttonaction",
+        "dc": 2,
+    }])
+    resolved, findings = resolve_resources([a, b], "box-1", "windows")
+    assert not findings
+    power = next(r for r in resolved if r.type == "power-setting")
+    assert power.desired["ac"] == 2
+    assert power.desired["dc"] == 2
+
+
+def test_power_setting_conflicting_source_value_errors(tmp_path):
+    a = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "LIDACTION",
+        "dc": "sleep",
+    }])
+    b = _pkg(tmp_path, "acme/b", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "LIDACTION",
+        "dc": "hibernate",
+    }])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any(
+        finding.level == "error" and "conflicting DC values" in finding.message
+        for finding in findings
+    )
+
+
+def test_power_setting_alias_and_guid_share_collision_identity(tmp_path):
+    a = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "PBUTTONACTION",
+        "ac": "sleep",
+    }])
+    b = _pkg(tmp_path, "acme/b", [{
+        "type": "power-setting",
+        "subgroup": "4f971e89-eebd-4455-a8de-9e59040e7347",
+        "setting": "7648efa3-dd9c-4e3e-b566-50f929386280",
+        "ac": "hibernate",
+    }])
+    findings = detect_conflicts([a, b], "box-1", "windows")
+    assert any("conflicting AC values" in finding.message for finding in findings)
+
+
+def test_power_setting_apply_sets_and_verifies(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/Windows/System32/powercfg.exe")
+
+    class PowerRunner:
+        def __init__(self):
+            self.ac = 1
+            self.dc = 2
+            self.calls = []
+
+        def __call__(self, argv):
+            self.calls.append(argv)
+            if argv[1] == "/QH":
+                return _power_query(self.ac, self.dc)
+            if argv[1] == "/SETACVALUEINDEX":
+                self.ac = int(argv[-1])
+            elif argv[1] == "/SETDCVALUEINDEX":
+                self.dc = int(argv[-1])
+            return RunOutcome(0, "", "")
+
+    runner = PowerRunner()
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "id": "power-button",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "PBUTTONACTION",
+        "ac": "hibernate",
+        "dc": "hibernate",
+    }])
+    results = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )
+    result = next(r for r in results if r.type == "power-setting")
+    assert result.changed and result.ok and result.detail == "applied and verified"
+    assert any(call[1] == "/SETACVALUEINDEX" for call in runner.calls)
+    assert not any(call[1] == "/SETDCVALUEINDEX" for call in runner.calls)
+    assert any(call[1] == "/SETACTIVE" for call in runner.calls)
+    assert runner.ac == runner.dc == 2
+
+
+def test_power_setting_already_correct_no_change(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/powercfg.exe")
+    localized = RunOutcome(
+        0,
+        "    Valor maximo: 0xffffffff\n"
+        "    Indice actual de CA: 0x00000000\n"
+        "    Indice actual de CC: 0x00000001\n",
+        "",
+    )
+    runner = FakeRunner(script={("powercfg", "/QH"): localized})
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "LIDACTION",
+        "ac": "do-nothing",
+        "dc": "sleep",
+    }])
+    results = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )
+    result = next(r for r in results if r.type == "power-setting")
+    assert not result.changed and result.action == "none"
+    assert len(runner.calls) == 1
+
+
+def test_power_setting_non_current_scheme_does_not_activate(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/powercfg.exe")
+    runner = FakeRunner(script={
+        ("powercfg", "/QH"): _power_query(1, 1),
+        ("powercfg", "/GETACTIVESCHEME"): RunOutcome(
+            0,
+            "Power Scheme GUID: 381b4222-f694-41f0-9685-ff5bb260df2e\n",
+            "",
+        ),
+    })
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "scheme": "SCHEME_MAX",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "PBUTTONACTION",
+        "ac": "hibernate",
+    }])
+    results = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True
+    )
+    result = next(r for r in results if r.type == "power-setting")
+    assert result.changed and result.dry_run
+    assert any(command[1] == "/SETACVALUEINDEX" for command in result.commands)
+    assert not any(command[1] == "/SETACTIVE" for command in result.commands)
+    assert [call[1] for call in runner.calls] == ["/QH", "/GETACTIVESCHEME"]
+
+
+def test_power_setting_post_apply_mismatch_is_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/powercfg.exe")
+    runner = FakeRunner(script={("powercfg", "/QH"): _power_query(1, 1)})
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "PBUTTONACTION",
+        "ac": "hibernate",
+    }])
+    results = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=False
+    )
+    result = next(r for r in results if r.type == "power-setting")
+    assert result.status == "error"
+    assert "did not match for: ac" in result.detail
+
+
+def test_power_setting_query_failure_is_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(R.shutil, "which", lambda _b: "C:/powercfg.exe")
+    runner = FakeRunner(script={
+        ("powercfg", "/QH"): RunOutcome(1, "", "invalid setting")
+    })
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "LIDACTION",
+        "ac": 0,
+    }])
+    results = apply_resources(
+        [pkg], "box-1", "windows", _ctx(tmp_path, runner), dry_run=True
+    )
+    result = next(r for r in results if r.type == "power-setting")
+    assert result.status == "error"
+    assert "could not read" in result.detail
+
+
+def test_power_setting_filtered_on_linux(tmp_path):
+    pkg = _pkg(tmp_path, "acme/a", [{
+        "type": "power-setting",
+        "subgroup": "SUB_BUTTONS",
+        "setting": "LIDACTION",
+        "ac": 0,
+    }])
+    results = apply_resources(
+        [pkg],
+        "box-1",
+        "linux",
+        _ctx(tmp_path, FakeRunner(), plat="linux"),
+        dry_run=True,
+    )
+    assert not [r for r in results if r.type == "power-setting"]
+
+
+# --------------------------------------------------------------------------- #
 # PSMux acceptance case -- the exact adopter fixture
 # --------------------------------------------------------------------------- #
 def test_psmux_acceptance_fixture(tmp_path, monkeypatch):

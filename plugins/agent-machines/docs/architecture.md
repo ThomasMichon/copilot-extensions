@@ -115,7 +115,7 @@ converge itself, so facts like "this package must be installed and pinned" or
 "this config file must exist" move out of opaque per-repo scripts and into
 reviewable data. A package declares them under a top-level `resources:` list.
 
-Four types are fully handled:
+Five types are fully handled:
 
 | Type | Identity | Behavior |
 | --- | --- | --- |
@@ -123,6 +123,7 @@ Four types are fully handled:
 | `file` | `(path, block)` | Converge a config file: whole-file `enforce`/`ensure-present` (`text`/`json`) or a `managed-block` that owns only a marked block. |
 | `registry` | `(key, value-name)` | Converge a Windows registry value via `reg.exe` (typed value/state). |
 | `feature` | `(manager, id)` | Enable/disable a Windows optional feature/capability (DISM) or a Linux/WSL unit (`systemctl`), selected by a `manager` field. |
+| `power-setting` | `(scheme, subgroup, setting)` | Converge AC/DC indexes through `powercfg`, reactivate only when targeting the active Windows scheme, and verify the stored postcondition. |
 
 Identity for a `file` carries a `block` id (empty for whole-file strategies), so
 distinct managed blocks in one file are separate, compatible resources while a
