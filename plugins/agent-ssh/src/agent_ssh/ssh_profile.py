@@ -237,6 +237,8 @@ def _chmod(path: Path, mode: int) -> None:
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
+            if not detail:
+                detail = f"icacls exited {result.returncode}"
             raise OSError(f"failed to harden Windows ACL for {path}: {detail}")
         return
     try:
