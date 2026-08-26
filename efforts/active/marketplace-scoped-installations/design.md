@@ -157,6 +157,9 @@ endpoints published through the cell's rendezvous state.
 Remote execution carries the context explicitly. It never reconstructs the
 target from `~/.agent-*` paths on the remote host.
 
+The detailed Phase 3 contract is
+[`phase-3-installation-context.md`](phase-3-installation-context.md).
+
 ## Affected production surfaces
 
 ### Shared canonical libraries and guards
