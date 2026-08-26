@@ -155,6 +155,34 @@ def test_project_requiring_command_no_project_routes_to_help(monkeypatch, capsys
     assert "Could not resolve a project for 'list'" in err
 
 
+def test_related_dispatch_activates_project_context_from_cwd(monkeypatch):
+    m.cfg.set_active_project(None)
+    seen = {}
+
+    def fake_resolve(project):
+        seen["project_override"] = project
+        return "demo", None
+
+    def fake_sources(anchor):
+        seen["active_project"] = m.cfg.active_project()
+        seen["anchor"] = anchor
+        return [anchor]
+
+    monkeypatch.setattr(m, "_resolve_active_project", fake_resolve)
+    monkeypatch.setattr(m, "_related_anchor", lambda _rest: "/repo")
+    monkeypatch.setattr(m, "_related_config_source_anchors", fake_sources)
+
+    try:
+        assert m.cmd_related_dispatch(["list", "--json"]) == 0
+        assert seen == {
+            "project_override": None,
+            "active_project": "demo",
+            "anchor": "/repo",
+        }
+    finally:
+        m.cfg.set_active_project(None)
+
+
 @pytest.mark.parametrize(
     ("argv", "command"),
     [
