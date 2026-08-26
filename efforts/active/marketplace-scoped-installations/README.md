@@ -124,6 +124,10 @@ reachable when their ownership is explicit.
   before either platform makes the new root operative.
 - [ ] Introduce a self-contained, vendorable installation-context primitive
   separate from versioned interpreter resolution.
+  - [x] Land the non-operative Windows/PowerShell resolver, receipt validator,
+    portable source-identity fixtures, and CI tests.
+  - [ ] Add the corresponding Python/POSIX primitive and prove fixture parity
+    before any runtime root becomes operative.
 - [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
   identity through stamp, snapshot, provision, cutover, rollback, and uninstall.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
@@ -276,3 +280,14 @@ See [`design.md`](design.md).
   an installed marketplace slot from its own payload boundary without Python or
   a global command; management surfaces may enrich that identity with a
   normalized source fingerprint, but never silently remap an occupied slot.
+
+### 2026-08-26 — Non-operative Windows foundation
+
+- Added the canonical installation-context library's Windows slice: portable
+  source-identity vectors, a PowerShell 5.1+/pwsh resolver and strict receipt
+  validator, and focused CI coverage.
+- Kept the slice read-only. It computes source-derived cells and durable paths,
+  fails closed on missing or conflicting provenance, and reports explicit
+  rebind requirements without creating or activating any runtime state.
+- Left Python/POSIX parity, vendoring, receipt mutation, locking, runtime-root
+  activation, and the two exemplars to later Phase 3 slices.

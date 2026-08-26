@@ -1,0 +1,74 @@
+{
+  "schema": "copilot-extensions.source-identity-vectors",
+  "version": 1,
+  "encoding": "UTF-8-no-BOM",
+  "lineEnding": "LF",
+  "fieldOrder": ["version", "kind", "source", "ref"],
+  "vectors": [
+    {
+      "name": "github",
+      "descriptor": {
+        "source": "github",
+        "repo": "Example-Org/Example-Marketplace.git"
+      },
+      "marketplaceKey": "Example",
+      "normalized": {
+        "kind": "github",
+        "canonical": "github:example-org/example-marketplace",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:6:github\nsource:38:github:example-org/example-marketplace\nref:0:\n",
+      "sha256": "9caa0da95f327099983348a3d2353fa93e57ef6428b69f354cc3bdc76ada0894",
+      "marketplaceId": "example--9caa0da95f327099"
+    },
+    {
+      "name": "git-url-with-username",
+      "descriptor": {
+        "source": "git",
+        "url": "https://build-user@Example.COM/Org/Repo.git",
+        "ref": "release/One"
+      },
+      "marketplaceKey": "Corp Git",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/Org/Repo",
+        "ref": "release/One"
+      },
+      "record": "version:1:1\nkind:3:git\nsource:32:git:https://example.com/Org/Repo\nref:11:release/One\n",
+      "sha256": "22c1380840c88801bc99a968c3012bf8293c62c63d0912438676094382a0c285",
+      "marketplaceId": "corp-git--22c1380840c88801"
+    },
+    {
+      "name": "percent-encoded-git-url",
+      "descriptor": {
+        "source": "git",
+        "url": "ssh://git@example.com/Org/%52epo.git"
+      },
+      "marketplaceKey": "Encoded",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ssh://example.com/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:30:git:ssh://example.com/Org/Repo\nref:0:\n",
+      "sha256": "109954f59049bb6879719891403bcaaa6fec79c2e33fbecabfb89dab379f34c7",
+      "marketplaceId": "encoded--109954f59049bb68"
+    },
+    {
+      "name": "opaque-management-source",
+      "descriptor": {
+        "source": "opaque",
+        "id": "urn:example:marketplace:alpha"
+      },
+      "marketplaceKey": "Managed",
+      "normalized": {
+        "kind": "opaque",
+        "canonical": "opaque:urn:example:marketplace:alpha",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:6:opaque\nsource:36:opaque:urn:example:marketplace:alpha\nref:0:\n",
+      "sha256": "df64acc01b0b1745783194abaf31b08b73e4e38bb812c6168b89656efbb9a6ac",
+      "marketplaceId": "managed--df64acc01b0b1745"
+    }
+  ]
+}
