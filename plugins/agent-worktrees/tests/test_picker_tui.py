@@ -5881,6 +5881,7 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     gate = threading.Event()
     started = threading.Event()
     thread_errors = []
+    original_excepthook = threading.excepthook
 
     def _gated_verify(ns):
         started.set()
@@ -5891,6 +5892,8 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     def _capture_thread_error(args):
         if args.thread.name == "pivot-action:Actions":
             thread_errors.append(args.exc_value)
+            return
+        original_excepthook(args)
 
     monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
     monkeypatch.setattr(threading, "excepthook", _capture_thread_error)
