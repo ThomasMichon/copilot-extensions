@@ -5,7 +5,7 @@
   spanning worktrees, machines, CodeSpaces, and containers.
 - **Scope:** branch (links per-plugin child visions as they are authored)
 - **Status:** Active
-- **Last revised:** 2026-08-07
+- **Last revised:** 2026-08-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/harness-runbook.md`](../../docs/harness-runbook.md) · each plugin's
   `docs/architecture.md`
@@ -233,6 +233,20 @@ system — not a rigid taxonomy; a resource that blurs the line is placed by whi
 worktree originated it. The ledger makes a worktree's true footprint
 first-class: a resource is never an anonymous orphan, and a worktree is never a
 black box about what it is using elsewhere.
+
+Responsibility begins with the worktree that creates or adopts a resource and
+stays with that creator through settlement or cleanup. A message, continuation
+baton, or sender shutdown never transfers ownership by implication. When work
+must move, the source may offer an exact **claim bundle** to a qualified consumer
+worktree, but its claims remain authoritative and finalize-blocking until that
+consumer affirmatively accepts. Acceptance is one atomic, all-or-nothing
+transition across both sides of each claim: the source's forward ledger, the
+consumer's forward ledger, and the resource-side owner or fenced lease holder.
+Only after that transition commits may the source release responsibility, and
+the consumer's own finalize gate immediately inherits it. Decline, cancellation,
+an unsupported claim, or a crash leaves the source authoritative; cross-machine
+acceptance succeeds only with synchronous reservation at the remote ownership
+authority, never through a best-effort local fallback.
 
 ### resource-leasing
 Where `resource-claims` makes a worktree's footprint **legible**, resource
