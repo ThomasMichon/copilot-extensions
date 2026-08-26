@@ -4233,7 +4233,9 @@ def cmd_create_pr(args: argparse.Namespace) -> int:
             open_pr=(False if getattr(args, "no_open", False) else None),
             hold=getattr(args, "hold", False),
             draft=getattr(args, "draft", False),
-            attribution=(not getattr(args, "no_attribution", False)),
+            attribution=(
+                False if getattr(args, "no_attribution", False) else None
+            ),
             dry_run=args.dry_run,
         )
 
@@ -14750,7 +14752,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--new", action="store_true",
                    help="Force a brand-new PR (fresh branch) even if a live PR is open")
     p.add_argument("--body", default=None,
-                   help="PR body text (a source-attribution marker is appended)")
+                   help="PR body text (the repo may append source attribution "
+                        "when pr.source_attribution is enabled)")
     p.add_argument("--body-file", default=None, dest="body_file",
                    help="Read the PR body from a file")
     p.add_argument("--no-open", action="store_true", dest="no_open",
@@ -14763,7 +14766,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Deprecated alias for --draft (the old do-not-merge "
                         "label hold is retired in favour of native draft state).")
     p.add_argument("--no-attribution", action="store_true", dest="no_attribution",
-                   help="Do not embed the source-worktree attribution marker in the PR body")
+                   help="Omit source-worktree attribution even when the repo "
+                        "enables pr.source_attribution")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")

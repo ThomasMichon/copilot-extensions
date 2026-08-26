@@ -260,13 +260,15 @@ onto a merged branch. See *Multiple PRs per worktree* below.
 credentials (`pr.api_base`, `pr.token_command`/`pr.token_env`) and
 `pr.auto_open` is on, `create-pr` **opens the PR itself** right after the push
 -- via the provider CLI (`curl` for Gitea, `gh` for GitHub, `az` for Azure
-DevOps) -- embeds a hidden source-worktree attribution marker in the body, and
-**auto-records** the url/number on the worktree (no manual `set-pr`). Useful
-flags: `--no-open` (push only), `--no-attribution` (omit the marker),
-`--body`/`--body-file`, `--repo owner/name`. If the provider call fails the
-branch is still pushed, and the result carries `pr_open_error` so you can fall
-back to Steps 2-3 below. A repo **without** provider credentials configured
-uses the manual flow unchanged.
+DevOps) -- and **auto-records** the url/number on the worktree (no manual
+`set-pr`). A closed-circuit repo may additionally set
+`pr.source_attribution: true` to embed a hidden marker containing the raw source
+worktree, machine, session, and head SHA. The marker is **off by default** and
+must stay off for public PRs. Useful flags: `--no-open` (push only),
+`--no-attribution` (suppress a configured marker), `--body`/`--body-file`,
+`--repo owner/name`. If the provider call fails the branch is still pushed, and
+the result carries `pr_open_error` so you can fall back to Steps 2-3 below. A
+repo **without** provider credentials configured uses the manual flow unchanged.
 
 > **Trust the result -- do not open a second PR.** When `create-pr` returns
 > `pr_opened: true` (or any `number`/`url`), the PR is already open and recorded
@@ -457,4 +459,3 @@ command**. Start the normal `create` workflow for a fresh worktree, then use
 your provider git-ops skill to fetch the surviving remote feature branch and
 re-establish the rebase chain. The CLI stays provider-agnostic; recovery is
 ordinary git owned by you.
-
