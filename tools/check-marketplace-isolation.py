@@ -183,7 +183,9 @@ def _strip_c_block_comments(line: str, in_block: bool) -> tuple[str, bool]:
     return "".join(out), in_block
 
 
-def _strip_inline_comment(line: str, marker: str) -> str:
+def _strip_inline_comment(
+    line: str, marker: str, *, backslash_escapes_single: bool = False
+) -> str:
     """Strip an inline comment marker outside single or double quotes."""
     quote = ""
     escaped = False
@@ -194,7 +196,9 @@ def _strip_inline_comment(line: str, marker: str) -> str:
             escaped = False
             index += 1
             continue
-        if char == "\\" and quote == '"':
+        if char == "\\" and (
+            quote == '"' or (quote == "'" and backslash_escapes_single)
+        ):
             escaped = True
             index += 1
             continue
@@ -440,7 +444,9 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
             code, in_ps_block = _strip_ps_block_comments(line, in_ps_block)
         if is_javascript:
             code, in_js_block = _strip_c_block_comments(code, in_js_block)
-            code = _strip_inline_comment(code, "//")
+            code = _strip_inline_comment(
+                code, "//", backslash_escapes_single=True
+            )
         elif uses_hash_comments:
             code = _strip_inline_comment(code, "#")
         stripped = code.strip()

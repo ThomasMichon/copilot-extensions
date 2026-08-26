@@ -202,12 +202,13 @@ def test_inline_comments_are_not_flagged(tmp_path: Path) -> None:
         root,
         "plugins/example/extensions/example/index.mjs",
         'const root = "cell"; // execSync("agent-peer status");\n'
-        'const other = "cell"; /* ~/.agent-example */\n',
+        'const other = "cell"; /* ~/.agent-example */\n'
+        "const label = 'it\\'s // data'; execSync(\"agent-peer status\");\n",
     )
     assert _categories(shell, root) == []
     assert _categories(powershell, root) == []
     assert _categories(yaml, root) == []
-    assert _categories(javascript, root) == []
+    assert _categories(javascript, root) == ["path-sibling-launch"]
 
 
 def test_python_docstrings_and_inline_comments_are_not_flagged(tmp_path: Path) -> None:
