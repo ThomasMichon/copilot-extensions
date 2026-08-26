@@ -111,6 +111,10 @@ _JS_PROCESS_API = re.compile(
     r"""\b(?:exec|execFile|spawn)(?:Sync)?\s*\(""",
     re.IGNORECASE,
 )
+_MULTILINE_INLINE_COMMAND = re.compile(
+    r"(?<!`)`(?!`)\s*agent-[a-z0-9-]+[ \t]+[^`\n]+\n[^`]*(?<!`)`(?!`)",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -475,6 +479,24 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
                 launch_lines,
             )
         )
+
+    if is_md:
+        for match in _MULTILINE_INLINE_COMMAND.finditer(text):
+            snippet = " ".join(match.group(0).split())[:200]
+            start = text.rfind("\n", 0, match.start()) + 1
+            end = text.find("\n", match.end())
+            span = text[start:] if end == -1 else text[start:end]
+            if _ALLOW_REASON.search(span):
+                continue
+            findings.append(
+                Finding(
+                    "bare-agent-command",
+                    relative,
+                    text.count("\n", 0, match.start()) + 1,
+                    snippet,
+                    "operative multiline instruction uses a bare global plugin command",
+                )
+            )
 
     return findings
 

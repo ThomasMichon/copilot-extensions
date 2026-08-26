@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -26,6 +27,12 @@ def _manifest(tmp_path: Path) -> Path:
     scripts.mkdir()
     (scripts / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
     (scripts / "install.ps1").write_text("# generated fixture\n", encoding="utf-8")
+    (scripts / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY=""\n', encoding="utf-8"
+    )
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = $null\n", encoding="utf-8"
+    )
     path.write_text(
         json.dumps(
             {
@@ -107,6 +114,15 @@ def test_manifest_selects_and_requires_installer_entrypoint(tmp_path: Path) -> N
     assert "'scripts\\init.ps1'" in powershell
 
 
+@pytest.mark.parametrize("suffix", [".sh", ".ps1"])
+def test_manifest_requires_runtime_resolver_pair(tmp_path: Path, suffix: str) -> None:
+    manifest = _manifest(tmp_path)
+    (manifest.parent / "scripts" / f"resolve-runtime{suffix}").unlink()
+
+    with pytest.raises(ValueError, match="runtime resolver not found"):
+        generator.expected_files(manifest)
+
+
 def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -118,8 +134,10 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
     assert 'command_path="$self_root/bin/payload/agent-example"' in catalog
 
 
-@pytest.mark.parametrize("plugin", ["agent-containers", "agent-machines", "agent-ssh"])
-def test_service_free_adopters_publish_payload_catalogs(plugin: str) -> None:
+@pytest.mark.parametrize(
+    "plugin", ["agent-codespaces", "agent-containers", "agent-machines", "agent-ssh"]
+)
+def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
     plugin_root = REPO / "plugins" / plugin
     manifest = plugin_root / "payload-invocation.json"
     data = generator.load_manifest(manifest)
@@ -137,6 +155,36 @@ def test_service_free_adopters_publish_payload_catalogs(plugin: str) -> None:
         ]
         assert len(catalog_hooks) == 1
         assert "COPILOT_PLUGIN_ROOT" in catalog_hooks[0][shell]
+
+
+def test_skill_catalog_references_name_payload_adopters() -> None:
+    reference = re.compile(r"<(agent-[a-z0-9-]+) catalog argv\[0\]>")
+    references: dict[str, list[Path]] = {}
+    for skill in (REPO / "plugins").glob("*/skills/**/*.md"):
+        for plugin in reference.findall(skill.read_text(encoding="utf-8")):
+            references.setdefault(plugin, []).append(skill.relative_to(REPO))
+
+    missing = {
+        plugin: paths
+        for plugin, paths in references.items()
+        if not (REPO / "plugins" / plugin / "payload-invocation.json").is_file()
+    }
+    assert missing == {}
+    missing_hooks = {}
+    for plugin, paths in references.items():
+        hooks_path = REPO / "plugins" / plugin / "hooks.json"
+        if not hooks_path.is_file():
+            missing_hooks[plugin] = paths
+            continue
+        hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+        session_hooks = hooks.get("hooks", {}).get("sessionStart", [])
+        if not any(
+            "emit-command-catalog" in hook.get("bash", "")
+            and "emit-command-catalog" in hook.get("powershell", "")
+            for hook in session_hooks
+        ):
+            missing_hooks[plugin] = paths
+    assert missing_hooks == {}
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")

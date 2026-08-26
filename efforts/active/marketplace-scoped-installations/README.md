@@ -245,3 +245,10 @@ See [`design.md`](design.md).
   manifest-driven and fail-open catalogs explicit; native Windows validation
   also closed PSMux ancestry, PATH repair, and SSH ACL defects exposed by the
   final head.
+- The next remote-venue batch merged in
+  [#1128](https://github.com/ThomasMichon/copilot-extensions/pull/1128), adding
+  a payload-local agent-containers command and converting its agent-facing
+  container operations to catalog invocation. The following agent-codespaces
+  slice corrects its bridge-dispatch examples back to the explicit
+  agent-bridge management command; bridge provider registration and dispatch
+  have not yet adopted session catalogs.

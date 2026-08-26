@@ -17,8 +17,9 @@ integration. Read and follow that skill rather than reproducing those mechanics
 here.
 
 Use the exact `argv` from the agent-containers session command catalog for
-container operations and the exact `argv` from the agent-bridge catalog for
-dispatch. Append the arguments shown below; never substitute a same-named
+container operations. For dispatch, follow the `agent-bridge` skill; its
+current management command remains an explicit compatibility boundary. Append
+the arguments shown below; never substitute a same-named agent-containers
 command found through `PATH`.
 
 ## State contract
@@ -51,7 +52,7 @@ Dispatch through the bridge's container resolver, not by entering the container
 directly:
 
 ```bash
-<agent-bridge catalog argv[0]> send container:<name> "<task>"
+agent-bridge send container:<name> "<task>" # marketplace-isolation: allow agent-bridge-management
 ```
 
 Follow the `agent-bridge` skill for session and follow-up mechanics. Follow

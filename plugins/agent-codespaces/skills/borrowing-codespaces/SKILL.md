@@ -29,11 +29,11 @@ binding* (recording the borrow in the effort file, the dispatch/monitoring loop)
 is owned by the control-plane delegation skill (e.g. `dispatching-work` /
 `working-cross-repo`), which calls these commands.
 
-> **Before you start — readiness (no agent-worktrees required).** If
-> `command -v agent-codespaces` fails, deploy its binstub first (it self-provisions
-> on first call): `bash "$(ls ~/.copilot/installed-plugins/*/agent-codespaces/scripts/install.sh | head -1)" stamp`.
-> The first call may take ~30–120s to provision — let it finish. Full detail:
-> `codespaces-setup` § *Readiness*.
+Use the exact `argv` from the agent-codespaces session command catalog for
+CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
+worktree operations. Append the arguments shown below; never substitute a
+same-named command found through `PATH`. Full readiness detail:
+`codespaces-setup` § *Readiness*.
 
 > **CodeSpace vs container:** a CodeSpace is the default for cloud feature work;
 > borrow a **local container** (`borrowing-containers` / `agent-containers:containers-fleet`) for
@@ -51,9 +51,9 @@ to it concurrently. A CodeSpace is addressed **by name** (unlike the container
 fleet, there is no "pick a free one").
 
 ```bash
-agent-codespaces borrow <effort> <codespace>   # check out (prints the name)
-agent-codespaces release <effort|codespace>    # check in
-agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
+<agent-codespaces catalog argv[0]> borrow <effort> <codespace>   # check out
+<agent-codespaces catalog argv[0]> release <effort|codespace>    # check in
+<agent-codespaces catalog argv[0]> leases                         # current holders
 ```
 
 - **Idempotent** for the same effort (refreshes the heartbeat, preserves
@@ -67,46 +67,52 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
 
 ### Check-out / check-in wiring (automatic)
 
-- **Check-out on connect:** `agent-codespaces ssh <name> --effort <effort>`
+- **Check-out on connect:** `<agent-codespaces catalog argv[0]> ssh <name> --effort <effort>`
   records/refreshes the lease before connecting. It is **non-blocking** — a
   conflicting live lease **warns** but still connects; use `borrow --force` to
   take over explicitly. (`ssh --force`, the SSH-lock takeover, also forces the
   lease takeover.)
-- **Check-in on teardown:** `agent-codespaces finalize <name>` (recover + stop +
-  mark `recovered`), `agent-codespaces finalize <name> --delete`, and
-  `agent-codespaces delete <name>` **auto-release** the lease. Releasing by
+- **Check-in on teardown:** `<agent-codespaces catalog argv[0]> finalize <name>`
+  (recover + stop + mark `recovered`),
+  `<agent-codespaces catalog argv[0]> finalize <name> --delete`, and
+  `<agent-codespaces catalog argv[0]> delete <name>` **auto-release** the lease. Releasing by
   effort name frees whatever CodeSpace it held.
 
 > **A borrowed CodeSpace is an obligation on the borrowing worktree.** On borrow,
-> `agent-codespaces ssh` journals an `active` `codespace` claim onto the borrowing
+> the catalog command's `ssh` action journals an `active` `codespace` claim onto the borrowing
 > worktree's ledger (resource-obligation-settlement); on **disconnect** the
 > cleanliness probe stamps it **`at-rest`** when the box has no unpushed/unmerged
 > work — and **mirrors that disposition onto the CodeSpace's shared exclusion
 > lease** (`lease renew … --disposition at-rest`) so the settle is visible
-> **cross-machine**. That claim is why the worktree's `agent-worktrees finalize`
+> **cross-machine**. That claim is why the worktree's
+> `<agent-worktrees catalog argv[0]> finalize`
 > **blocks by default** while the CodeSpace still carries live work — settle it
-> (disconnect a clean box, or `agent-codespaces finalize <name>` to recover,
+> (disconnect a clean box, or
+> `<agent-codespaces catalog argv[0]> finalize <name>` to recover,
 > stop, mark `recovered`, and release it) before finalizing the worktree, or
-> `agent-worktrees finalize --abandon` to re-home it deliberately (then
-> `agent-worktrees claims cleanup --apply` reclaims the orphaned box).
-> Inspect with `agent-worktrees claims show`.
+> `<agent-worktrees catalog argv[0]> finalize --abandon` to re-home it
+> deliberately (then `<agent-worktrees catalog argv[0]> claims cleanup --apply`
+> reclaims the orphaned box). Inspect with
+> `<agent-worktrees catalog argv[0]> claims show`.
 >
 > **Never-wedge:** if the disconnect settle was missed (a crash, or a
-> **bridge-driven** box dispatched without an `agent-codespaces ssh` session), or
+> **bridge-driven** box dispatched without the catalog command's `ssh` action), or
 > the owner is on **another machine**, agent-worktrees' reclaim sweep reads the
 > lease's mirrored disposition and settles the stale claim — so a clean
 > interaction *anywhere* unblocks the owner's finalize. No manual step needed;
-> `agent-worktrees claims sweep` forces it on demand.
+> `<agent-worktrees catalog argv[0]> claims sweep` forces it on demand.
 
 > **Cross-machine coordination (v2 — atomic, shipped):** the host-local lease is
 > the same-machine **L1** fast path; cross-machine exclusion is now an **atomic
-> Git-ref compare-and-swap L2 lease** (`agent-worktrees lease`, the
+> Git-ref compare-and-swap L2 lease**
+> (`<agent-worktrees catalog argv[0]> lease`, the
 > `git-ref-resource-leases` effort) keyed by the CodeSpace, stored as **hidden
 > refs** (`refs/agent-worktrees/leases/v1/*`) in the **harness's own repo** — no
-> branches, no commits, no new service. `agent-codespaces ssh --effort`/`claim`
+> branches, no commits, no new service. The catalog command's
+> `ssh --effort` / `claim`
 > takes the L2 lease *before* the local write, so a live claim on **another
 > machine** raises a `ClaimConflict` naming the remote holder (unless `--force`);
-> `agent-codespaces pool --json` overlays the cross-machine L2 holder per
+> `<agent-codespaces catalog argv[0]> pool --json` overlays the cross-machine L2 holder per
 > CodeSpace. Holder identity is the qualified **ClaimRef**
 > (`machine/project/worktree_id`). **Degrade-safe:** no store origin / no
 > `agent-worktrees` → L2 is skipped and behavior is exactly the same-box advisory
@@ -119,7 +125,8 @@ agent-codespaces leases                         # CODESPACE  EFFORT  HOST  PID
 > harnesses contending for one shared CodeSpace — is fenced **on the resource
 > itself**: on connect, `agent-codespaces` reads a lockfile marker inside the
 > CodeSpace (`~/.agent-lease`) naming the writing **harness identity** (its lease
-> store origin URL, from `agent-worktrees get lease-origin`) + the holder ClaimRef
+> store origin URL, from
+> `<agent-worktrees catalog argv[0]> get lease-origin`) + the holder ClaimRef
 > + a TTL. A **fresh foreign-harness** marker **refuses** the connect (`[BUSY]`,
 > unless `--force-claim`); an absent / stale / same-harness marker is overwritten
 > with our own. Degrade-safe: no identity / unreadable marker / any failure →
@@ -134,8 +141,8 @@ for a dead CodeSpace (which would trigger a wasteful redundant create). Use the
 patient waiter instead of a fixed short timeout:
 
 ```bash
-agent-codespaces wait <name>                 # up to 20 min by default
-agent-codespaces wait <name> --timeout 1800  # widen the ceiling
+<agent-codespaces catalog argv[0]> wait <name>                 # up to 20 min by default
+<agent-codespaces catalog argv[0]> wait <name> --timeout 1800  # widen the ceiling
 ```
 
 It **distinguishes "still provisioning" from "genuinely dead":**
@@ -147,10 +154,11 @@ It **distinguishes "still provisioning" from "genuinely dead":**
 - **Timeout** while still pending (Provisioning/Starting/Queued/…) → exit `124`
   — it may still be coming up; **wait longer**, don't declare it dead.
 
-**Backgrounding a slow boot:** run `agent-codespaces wait <name> --timeout 1800`
+**Backgrounding a slow boot:** run
+`<agent-codespaces catalog argv[0]> wait <name> --timeout 1800`
 as a background task and continue other work; you'll be notified when it exits.
 A `Shutdown` (stopped-but-healthy) CodeSpace is treated as *pending* — it boots
-on connect via `agent-codespaces ssh`, so prefer connecting over polling once
+on connect via the catalog command's `ssh` action, so prefer connecting over polling once
 you know it exists.
 
 ---
@@ -162,7 +170,7 @@ which effort holds which CodeSpace, and flag any lease whose effort is no longer
 active (a candidate for `release`):
 
 ```bash
-agent-codespaces leases
+<agent-codespaces catalog argv[0]> leases
 ```
 
 ---
@@ -171,11 +179,11 @@ agent-codespaces leases
 
 - **You already hold it — don't steer clear of your OWN claim.** `leases` and
   `pool` mark a CodeSpace held by **this** worktree with **`(you)`**. Re-entry is
-  **idempotent**: re-running `agent-codespaces ssh`/`claim` on a box you already
+  **idempotent**: re-running the catalog command with `ssh` / `claim` on a box you already
   hold renews it — it does **not** bounce (fixed in dotfiles#1362; a same-owner
   L2 re-acquire is adopted, not conflicted). So if you see a claim on a box you
   need, first check whether it's yours (`leases`/`pool` `(you)`, or compare the
-  holder to `agent-worktrees get owner-ref`) and **reuse it** rather than
+  holder to `<agent-worktrees catalog argv[0]> get owner-ref`) and **reuse it** rather than
   creating a duplicate or `--force-claim`-ing yourself. A `[BUSY]` conflict now
   reports the **real** holder (worktree/host/pid) — only a genuinely *different*
   live worktree bounces you.

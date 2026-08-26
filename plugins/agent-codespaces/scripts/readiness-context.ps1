@@ -5,10 +5,10 @@ Emits an AFFIRMATIVE readiness confirmation as {"additionalContext": "..."} so a
 session (especially one where ONLY this plugin was installed) knows whether the
 plugin's CLI is actually usable, or what to do next.
 
-FAIL-CLOSED: only an explicit READY -- binstub present AND a current-version
-marker AND the versioned venv interpreter all found -- is reported ready.
-Anything else is reported NOT READY with the next step. Absence of an affirmative
-"ready" is treated as "not set up"; never infer ready from the absence of error.
+READY means either the payload-local self-provisioning command is usable or a
+legacy management binstub has a complete runtime. Anything else is reported
+NOT READY with the next step. Absence of an affirmative "ready" is treated as
+"not set up"; never infer ready from the absence of error.
 
 MUST run even when the plugin's OWN runtime is not provisioned (the case it
 reports), so it is pure PowerShell + stdlib python (only to read plugin.json's
@@ -33,6 +33,8 @@ $name = $name.Trim()
 $InstallDir = Join-Path $HOME ".$name"
 $Binstub    = Join-Path $HOME ".local/bin/$name"
 $BinstubWin = Join-Path $HOME ".local/bin/$name.cmd"
+$PayloadCommand = Join-Path $PluginDir "bin/$name.ps1"
+$PayloadInstaller = Join-Path $PluginDir 'scripts/install.ps1'
 $ver = ''
 $verFile = Join-Path $InstallDir 'current-version'
 if (Test-Path $verFile) { $ver = (Get-Content $verFile -Raw).Trim() }
@@ -46,8 +48,14 @@ if ($ver) {
   }
 }
 $binOk = (Test-Path $Binstub) -or (Test-Path $BinstubWin)
+if ((Test-Path $PayloadCommand) -and (Test-Path $PayloadInstaller)) {
+  if ($venvOk) {
+    Emit "$name`: READY -- payload-local command available; runtime $ver provisioned."
+  }
+  Emit "$name`: READY -- payload-local command available; runtime provisions on first use."
+}
 if ($binOk -and $venvOk) {
-  Emit "$name`: READY -- runtime $ver provisioned; the '$name' CLI is on PATH and usable."
+  Emit "$name`: READY -- legacy management command available; runtime $ver provisioned."
 }
 
 $setup = "bash `"$PluginDir/scripts/install.sh`" install (or scripts/install.ps1 install on Windows)"

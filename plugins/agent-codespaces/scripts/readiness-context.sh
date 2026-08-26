@@ -5,12 +5,10 @@
 # a session (especially one where ONLY this plugin was installed) knows whether
 # the plugin's CLI is actually usable, or what to do next.
 #
-# FAIL-CLOSED by design: only an explicit READY -- binstub present AND a
-# current-version marker AND the versioned venv interpreter all found -- is
-# reported ready. Anything else (a hook that half-ran, a background provision
-# still in flight, a fresh install with no runtime) is reported NOT READY with
-# the next correct step. Absence of an affirmative "ready" is treated as "not
-# set up"; never infer ready from the mere absence of an error.
+# READY means either the payload-local self-provisioning command is usable or a
+# legacy management binstub has a complete runtime. Anything else is reported
+# NOT READY with the next correct step. Absence of an affirmative "ready" is
+# treated as "not set up"; never infer ready from the mere absence of an error.
 #
 # MUST run even when the plugin's OWN runtime is not provisioned -- that is
 # exactly the case it exists to report -- so it is pure shell + stdlib python
@@ -32,6 +30,8 @@ name=""
 
 InstallDir="$HOME/.$name"
 Binstub="$HOME/.local/bin/$name"
+PayloadCommand="$PluginDir/bin/$name"
+PayloadInstaller="$PluginDir/scripts/install.sh"
 ver=""
 [ -f "$InstallDir/current-version" ] && ver="$(tr -d ' \t\r\n' < "$InstallDir/current-version" 2>/dev/null)"
 
@@ -44,8 +44,14 @@ if [ -n "$ver" ]; then
     [ -x "$InstallDir/$sub" ] && { venv_ok=1; break; }
   done
 fi
+if [ -x "$PayloadCommand" ] && [ -f "$PayloadInstaller" ]; then
+  if [ "$venv_ok" = 1 ]; then
+    emit "$name: READY -- payload-local command available; runtime $ver provisioned."
+  fi
+  emit "$name: READY -- payload-local command available; runtime provisions on first use."
+fi
 if [ -x "$Binstub" ] && [ "$venv_ok" = 1 ]; then
-  emit "$name: READY -- runtime $ver provisioned; the '$name' CLI is on PATH and usable."
+  emit "$name: READY -- legacy management command available; runtime $ver provisioned."
 fi
 
 # NOT READY (fail-closed). Distinguish an in-flight/incomplete provision from a fresh install.

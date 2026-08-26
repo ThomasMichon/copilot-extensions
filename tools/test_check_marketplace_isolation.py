@@ -68,10 +68,35 @@ def test_inventory_categories(tmp_path: Path) -> None:
         ),
         root,
     ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
+            "Run `agent-example verify\n<name>` before continuing.\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
+            "```\nagent-example verify\n<name>\n```\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
+            "Run `agent-example verify\n<name>` before continuing. "
+            "<!-- marketplace-isolation: allow legacy-management -->\n",
+        ),
+        root,
+    ) == []
 
 
 def test_payload_catalog_adopter_skills_avoid_bare_global_commands() -> None:
-    for plugin in ("agent-containers", "agent-machines", "agent-ssh"):
+    for plugin in ("agent-codespaces", "agent-containers", "agent-machines", "agent-ssh"):
         findings = [
             finding
             for skill in (REPO / "plugins" / plugin / "skills").rglob("*.md")
