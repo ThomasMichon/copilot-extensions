@@ -12,20 +12,16 @@ description: >
 
 # Session Sync Setup
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-logger provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `agent-logger` is not on PATH, deploy
-> this plugin's own binstub first; it then self-provisions on first call.
->
-> - Windows:
->   `pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions\agent-logger\scripts\install.ps1" stamp`
-> - Linux/WSL:
->   `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
->
-> Then run `agent-logger version` once. The first call provisions the runtime
-> (~30–120s; watch for `::agent-provisioning::`) and deploys `session-sync` and
-> the other auxiliary tools. If it reports a provisioning failure (e.g. missing
-> uv / network), surface the exact message — don't improvise a toolchain install.
+> **Before you start — payload-local readiness.**
+> Use command ids `agent-logger` and `session-sync` from the agent-logger
+> session command catalog. Invoke each exact `argv`; never search `PATH`, scan
+> installed marketplaces, or invoke the legacy venv path. The first call
+> provisions the shared runtime (~30–120s; watch for
+> `::agent-provisioning::`). Surface an exact failure instead of improvising a
+> toolchain install.
+> If either catalog entry is absent or unavailable, fail closed and ask the
+> operator to select this payload explicitly through the host's plugin
+> management surface.
 
 `session-sync` pushes raw Copilot session data from `~/.copilot` to a
 configurable **target**, under a `{machine}/` subpath, so any consumer sees
@@ -85,7 +81,8 @@ Optional sync controls:
 Session-sync is machine-local, but log organization can be repo-local. A
 repository may commit `.agent-logger.yaml` (or `.agent-logger.yml`,
 `.config/agent-logger.yaml`, `.config/agent-logger.yml`) at its git root with
-only a `log:` block. `prepare-session-log --json` layers that block over the
+only a `log:` block. The catalog's `prepare-session-log` command with `--json`
+layers that block over the
 machine-local config and passes it through the manifest:
 
 ```yaml
@@ -125,16 +122,17 @@ Repo-local config cannot change `sync:` targets; those remain in
 `note_marker`, `template`, `narration_style`, `exemplars`, and
 `closing_remark` are accepted under `log:`. Invalid YAML, unknown
 fields/placeholders, unsupported schema versions, unsafe paths, and invalid
-timezones fail explicitly. Run `agent-logger organization` to inspect the
+timezones fail explicitly. Run
+`<agent-logger catalog "agent-logger" argv[0]> organization` to inspect the
 manifest-ready result.
 
 ## Verify
 
 ```
-session-sync status     # show resolved machine, source, target, retention
-session-sync doctor     # check the target is reachable/usable (no transfer)
-session-sync run --dry-run --verbose
-session-sync run --prune
+<agent-logger catalog "session-sync" argv[0]> status
+<agent-logger catalog "session-sync" argv[0]> doctor
+<agent-logger catalog "session-sync" argv[0]> run --dry-run --verbose
+<agent-logger catalog "session-sync" argv[0]> run --prune
 ```
 
 `doctor` reports per-check `[ok]`/`[FAIL]` lines. For `onedrive`, a `FAIL`
@@ -160,7 +158,7 @@ sync:
 A session is *cold* when it is at least `min_age_days` old (from
 `workspace.yaml` timestamps, never filesystem mtime) and -- when
 `require_untracked_worktree` -- it does **not** belong to a *tracked* worktree:
-one that `agent-worktrees list` still renders in the picker (pruning a worktree
+one that the agent-worktrees `list` action still renders in the picker (pruning a worktree
 deletes its directory and `.<repo>` registry entry together, dropping it from
 that set; the fallback when agent-worktrees is absent is on-disk existence of
 the worktree dir, reliable for the same reason). Because the picker only renders
@@ -174,32 +172,33 @@ bundle so listing/selection never decompresses; readers (`ramp-up-session`,
 `collate-session`) resolve and read archived sessions transparently.
 
 Two-pair model -- the compressed store syncs to the hub alongside the
-uncompressed tree. **When `compact.enabled`, the scheduled `session-sync run`
+uncompressed tree. **When `compact.enabled`, the scheduled session-sync `run`
 performs the whole lifecycle itself** (no separate command needed):
 
 ```
-session-sync run           # scheduled service: on-device compact + reclaim,
-                           #   push (Pair A), push archive store to
-                           #   {machine}/archived/ (Pair B), compact the hub-only
-                           #   backlog, and reconcile away uncompressed duplicates
-session-sync compact       # (manual) on-device compaction only
-session-sync compact-hub   # (manual) hub backlog compaction + reconcile only
+<agent-logger catalog "session-sync" argv[0]> run
+<agent-logger catalog "session-sync" argv[0]> compact
+<agent-logger catalog "session-sync" argv[0]> compact-hub
 ```
 
 Both `compact`/`compact-hub` remain for manual/`--dry-run` use, but the deployed
-4-hourly `session-sync run --prune` already drives everything from config.
+4-hourly management launcher invokes session-sync with `run --prune` from the
+installed runtime.
 
 Both `compact` and `compact-hub` are idempotent and take the sync lock, so they
 never race the scheduled push. Add `--dry-run` to preview.
 
 ## Troubleshoot
 
-- **Runtime not ready:** run `agent-logger version` and keep the exact
+- **Runtime not ready:** run
+  `<agent-logger catalog "agent-logger" argv[0]> version` and keep the exact
   self-provisioning error if it fails. The plugin owns uv acquisition on
   Linux/WSL; on Windows, a missing signed Python may be reported by the
   installer.
-- **Target unreachable:** run `session-sync doctor`; fix the first `[FAIL]`
-  before retrying `session-sync run --dry-run --verbose`.
+- **Target unreachable:** run
+  `<agent-logger catalog "session-sync" argv[0]> doctor`; fix the first `[FAIL]`
+  before retrying
+  `<agent-logger catalog "session-sync" argv[0]> run --dry-run --verbose`.
 - **Scheduled sync not firing:** use the plugin installer status command first:
   `pwsh -File plugins\agent-logger\scripts\install.ps1 status` or
   `bash plugins/agent-logger/scripts/install.sh status`. On Windows the task is
@@ -213,7 +212,10 @@ never race the scheduled push. Add `--dry-run` to preview.
 ## Schedule (deployed service)
 
 Installed via the plugin's installers, which register a 4-hourly run of
-`session-sync run --prune`:
+the session-sync `run --prune` management action:
+
+This timer/task launch is an explicit service-management boundary; session
+catalogs do not replace it in this phase.
 
 - **Windows:** `pwsh -File plugins\agent-logger\scripts\install.ps1 install`
   (Scheduled Task).

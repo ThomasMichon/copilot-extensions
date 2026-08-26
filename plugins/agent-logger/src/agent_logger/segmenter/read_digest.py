@@ -336,6 +336,7 @@ def cmd_previous(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
+        prog="read-session-digest",
         description="Read collated session digest files.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,

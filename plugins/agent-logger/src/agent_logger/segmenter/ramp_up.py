@@ -271,8 +271,8 @@ def _render_candidate_list(worktree_root: str, sessions: list[dict[str, Any]]) -
             parts.append(f"- **Auto-summary:** {s['summary']}")
         parts.append("")
     parts.append(
-        "Ramp up the most recent with `ramp-up-session` (no `--list`), or a "
-        "specific one with `--session <id>`."
+        "Ramp up the most recent by rerunning the caller-supplied ramp command "
+        "without `--list`, or select a specific one with `--session <id>`."
     )
     return "\n".join(parts)
 
@@ -329,20 +329,22 @@ def _render_brief(
     parts.append("## Read More\n")
     parts.append(
         f"The full transcript was collated (ephemerally) to `{digest_dir}`. "
-        "Read deeper with:"
+        "Read deeper with the caller-supplied `digest_argv0` path and these "
+        "arguments:"
     )
     parts.append("")
     parts.append("```")
-    parts.append(f"read-session-digest {session['id']} list")
-    parts.append(f"read-session-digest {session['id']} context")
-    parts.append(f"read-session-digest {session['id']} segment <N>")
-    parts.append(f"read-session-digest {session['id']} grep --pattern <regex>")
+    parts.append(f"{session['id']} list")
+    parts.append(f"{session['id']} context")
+    parts.append(f"{session['id']} segment <N>")
+    parts.append(f"{session['id']} grep --pattern <regex>")
     parts.append("```")
     if other_count:
         parts.append("")
         parts.append(
             f"_There are {other_count} older session(s) for this worktree; "
-            "list them with `ramp-up-session <worktree> --list`._"
+            "list them by rerunning the caller-supplied ramp command with "
+            "`<worktree> --list`._"
         )
     parts.append("")
     parts.append("## Take Over\n")
@@ -362,6 +364,7 @@ def _render_brief(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
+        prog="ramp-up-session",
         description="Ramp up into a dormant worktree's Copilot session.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,

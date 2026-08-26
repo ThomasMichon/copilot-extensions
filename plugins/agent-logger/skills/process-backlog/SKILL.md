@@ -13,12 +13,15 @@ description: >
 
 # Process Backlog (local, no service)
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> Ensure `agent-logger` is on PATH and run `agent-logger version` once. If it is
-> missing, stamp this plugin's own binstub (`install.ps1 stamp` on Windows or
-> `install.sh stamp` on Linux/WSL from the installed plugin payload), then retry;
-> the first call self-provisions the runtime and deploys `collate-session`,
-> `read-session-digest`, and `prepare-session-log`.
+> **Before you start — payload-local readiness.**
+> Use command id `agent-logger` from the agent-logger session command catalog
+> for organization and chronicle actions. The writer sub-agent uses the
+> `collate-session` and `read-session-digest` entries from that same catalog.
+> Invoke each exact `argv`; never search `PATH` or substitute a same-named
+> command from another payload. The first call provisions the shared runtime.
+> If either catalog entry is absent or unavailable, fail closed and ask the
+> operator to select this payload explicitly through the host's plugin
+> management surface.
 
 Turn a backlog of unlogged Copilot sessions into Markdown logs on this
 machine -- the no-service alternative to a chronicle runner. Logs are
@@ -31,13 +34,14 @@ plain unless repository organization config supplies optional voice seams.
 
 For a single current session, prefer the `log-session` skill. For automated,
 scheduled fleet processing, use a host-owned chronicle runner around
-`agent-logger chronicle tick`.
+`<agent-logger catalog "agent-logger" argv[0]> chronicle tick`.
 
 ## Procedure
 
 ### 1. Load repository organization
 
-From the target repository/worktree root, run `agent-logger organization`.
+From the target repository/worktree root, run
+`<agent-logger catalog "agent-logger" argv[0]> organization`.
 Use the returned `manifest` object for output location, naming/template, note
 marker, and optional voice seams. Invalid config is an explicit error.
 
@@ -93,7 +97,8 @@ Full example: [`references/manifest.json`](references/manifest.json). Shape:
 }
 ```
 
-Copy those fields exactly from `agent-logger organization`.
+Copy those fields exactly from
+`<agent-logger catalog "agent-logger" argv[0]> organization`.
 
 Cap the batch to a sensible size (e.g. 1-2 substantial sessions or one compact
 day) so both the agent's context and the returned full-content bundle remain
@@ -102,9 +107,19 @@ bounded; repeat for more.
 ### 5. Delegate
 
 Spawn the **session-log-writer** agent (`agent_type:
-"agent-logger:session-log-writer"`) synchronously with the manifest path. In
-batch mode it triages each session (standalone / digest / skip) and returns a
-JSON render bundle. It does not write files.
+"agent-logger:session-log-writer"`) synchronously. Resolve command ids
+`collate-session` and `read-session-digest` from this session's agent-logger
+catalog and include the same keys required by the writer:
+
+```text
+Manifest: <manifest-path>
+collate_argv0: <agent-logger catalog "collate-session" argv[0]>
+digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
+```
+
+Require the writer to forward `digest_argv0` into every explore sub-agent
+prompt. In batch mode it triages each session (standalone / digest / skip) and
+returns a JSON render bundle. It does not write files.
 
 ### 6. Persist and report
 

@@ -1028,6 +1028,7 @@ def write_segments(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
+        prog="collate-session",
         description="Collate Copilot CLI session artifacts into a structured digest.",
     )
     parser.add_argument(

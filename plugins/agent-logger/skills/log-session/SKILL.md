@@ -12,21 +12,16 @@ description: >
 
 # Log Session (interactive)
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-logger provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `agent-logger` is not on PATH, deploy
-> this plugin's own binstub first; it then self-provisions on first call.
->
-> - Windows:
->   `pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions\agent-logger\scripts\install.ps1" stamp`
-> - Linux/WSL:
->   `bash "$(ls ~/.copilot/installed-plugins/*/agent-logger/scripts/install.sh | head -1)" stamp`
->
-> Then run `agent-logger version` once. The first call provisions the runtime
-> (~30–120s; watch for `::agent-provisioning::`) and deploys the auxiliary tools
-> (`session-sync`, `collate-session`, `prepare-session-log`, …). If it reports a
-> provisioning failure (e.g. missing uv / network), surface the exact message —
-> don't improvise a toolchain install.
+> **Before you start — payload-local readiness.**
+> Use the exact `argv` for command id `prepare-session-log` from the
+> agent-logger session command catalog. Append the arguments shown below; never
+> search `PATH`, scan installed marketplaces, or invoke the legacy venv path.
+> The payload-local command provisions the shared runtime on first use
+> (~30–120s; watch for `::agent-provisioning::`). Surface an exact provisioning
+> failure instead of improvising a toolchain install.
+> If the catalog is absent or the command is unavailable, fail closed and ask
+> the operator to select this payload explicitly through the host's plugin
+> management surface; do not fall back to a global command.
 
 Write a structured Markdown log for the **current** session, now. This skill
 is the interactive, single-session entry point to the
@@ -41,19 +36,7 @@ Run the prep tool to detect machine, generate a cutoff, render the output
 path, layer any repo-local organization config, and create the log directory:
 
 ```
-prepare-session-log --json --title "<Title>" --session "<Session ID>"
-```
-
-`prepare-session-log` is deployed as a binstub in `~/.local/bin` by the
-agent-logger installer. If it is not on PATH (payload installed but the
-runtime installer hasn't run, or `~/.local/bin` isn't on PATH), invoke it via
-the deployed venv interpreter instead:
-
-```
-# POSIX
-~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.prepare_log --json --title "<Title>" --session "<Session ID>"
-# Windows
-~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.prepare_log --json --title "<Title>" --session "<Session ID>"
+<agent-logger catalog "prepare-session-log" argv[0]> --json --title "<Title>" --session "<Session ID>"
 ```
 
 Pass the session ID from the session context (omit `--session` to
@@ -110,7 +93,7 @@ explicit error. Do not silently fall back when validation fails.
 > configurable root: set the **user-level** `log.root` (in
 > `~/.agent-logger/config.yaml`, which may be absolute) to the bound
 > **knowledge** repo's logs directory — resolvable on this machine with
-> `agent-worktrees state-root` (append `/logs`). The harness setup flow writes
+> `<agent-worktrees catalog argv[0]> state-root` (append `/logs`). The harness setup flow writes
 > this per machine; the repo-local `.agent-logger.yaml` `root` stays relative
 > (it can only point inside the launch repo, so it cannot cross into the
 > knowledge repo). For a non-stateless repo, the default `repo_root/logs` is
@@ -150,9 +133,20 @@ is thorough or should receive an append-only supplement.
 ### 3. Delegate
 
 Spawn the **session-log-writer** agent (`agent_type:
-"agent-logger:session-log-writer"`) synchronously with the manifest file path in
-the prompt. The agent is intentionally read-only: it collates, reads the digest,
-and returns a complete artifact block for the exact `target_log_path`.
+"agent-logger:session-log-writer"`) synchronously. Resolve command ids
+`collate-session` and `read-session-digest` from this session's agent-logger
+catalog and include their exact `argv[0]` values with the manifest path:
+
+```text
+Manifest: <manifest-path>
+collate_argv0: <agent-logger catalog "collate-session" argv[0]>
+digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
+```
+
+The writer must forward the exact digest-reader path into every explore
+sub-agent prompt it creates. The agent is intentionally read-only: it collates,
+reads the digest, and returns a complete artifact block for the exact
+`target_log_path`.
 
 ### 4. Persist and present
 

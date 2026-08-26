@@ -47,14 +47,13 @@ The caller passes, in its prompt:
 
 ### 1. Produce the base brief
 
-Run the ramp-up tool (deployed as a binstub; fall back to the venv module if it
-is not on PATH):
+The invocation prompt must include exact `ramp_argv0` and `digest_argv0` paths
+resolved from the caller's agent-logger
+session catalog. Refuse to run if either is absent. Never search `PATH` or
+invoke a legacy venv module.
 
 ```
-ramp-up-session <suffix> [--machine <name>] [--session <id>] --tail-turns 10
-# fallback (local only):
-#   ~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <suffix> ... (Windows)
-#   ~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <suffix> ...        (POSIX)
+<ramp-up-session argv[0] from caller> <suffix> [--machine <name>] [--session <id>] --tail-turns 10
 ```
 
 This prints the session **metadata** (including the resolved worktree path), the
@@ -65,15 +64,17 @@ id. When `--machine` names another host, all of this runs *there* over SSH and
 is relayed back — the digest and the worktree both live on that host, so any
 deeper reads (step 2) and git checks (step 3) must be run there too
 (`ssh <machine> read-session-digest ...`, `ssh <machine> git -C <path> ...`).
+Those far-side SSH commands remain an explicit remote-management boundary until
+installation context is carried across remote execution.
 
 ### 2. Read deeper — only as needed, within budget
 
 Use the existing digest reader against the session id. Be surgical:
 
 ```
-read-session-digest <id> list                      # see how big it is
-read-session-digest <id> grep --pattern <regex>    # find the task, errors, decisions, paths
-read-session-digest <id> segment <N>               # pull ONE relevant segment
+<read-session-digest argv[0] from caller> <id> list
+<read-session-digest argv[0] from caller> <id> grep --pattern <regex>
+<read-session-digest argv[0] from caller> <id> segment <N>
 ```
 
 Good greps: the task/goal, `error|fail|blocked`, an effort/issue/PR reference, a
@@ -127,5 +128,6 @@ grep that the main session may want to re-run for detail.>
 ```
 
 Keep it tight. The main session will act on this briefing directly, and may
-call `read-session-digest <id> ...` itself for any detail you flagged — so
+call the catalog's `read-session-digest` entry itself for any detail you
+flagged — so
 point at where detail lives rather than inlining it.
