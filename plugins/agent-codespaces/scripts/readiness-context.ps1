@@ -51,8 +51,9 @@ $binOk = (Test-Path $Binstub) -or (Test-Path $BinstubWin)
 if ((Test-Path $PayloadCommand) -and (Test-Path $PayloadInstaller)) {
   if ($venvOk) {
     Emit "$name`: READY -- payload-local command available; runtime $ver provisioned."
+  } else {
+    Emit "$name`: READY -- payload-local command available; runtime provisions on first use."
   }
-  Emit "$name`: READY -- payload-local command available; runtime provisions on first use."
 }
 if ($binOk -and $venvOk) {
   Emit "$name`: READY -- legacy management command available; runtime $ver provisioned."

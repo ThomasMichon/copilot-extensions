@@ -47,8 +47,9 @@ fi
 if [ -x "$PayloadCommand" ] && [ -f "$PayloadInstaller" ]; then
   if [ "$venv_ok" = 1 ]; then
     emit "$name: READY -- payload-local command available; runtime $ver provisioned."
+  else
+    emit "$name: READY -- payload-local command available; runtime provisions on first use."
   fi
-  emit "$name: READY -- payload-local command available; runtime provisions on first use."
 fi
 if [ -x "$Binstub" ] && [ "$venv_ok" = 1 ]; then
   emit "$name: READY -- legacy management command available; runtime $ver provisioned."
