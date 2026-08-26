@@ -40,6 +40,8 @@ def test_fragment_present_and_shaped():
     # frontmatter (it is not scanned as a *.instructions.md file).
     assert not text.lstrip().startswith(m._INSTRUCTION_MARKER)
     assert "github/copilot-agent-runtime#13492" in text
+    assert "github/copilot-agent-runtime#13494" in text
+    assert "waiting for that fix to reach the installed Copilot CLI" in text
     assert "Bare resume" in text
 
 
