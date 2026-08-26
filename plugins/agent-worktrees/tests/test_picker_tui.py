@@ -5885,7 +5885,7 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
 
     def _gated_verify(ns):
         started.set()
-        gate.wait(5)
+        gate.wait()
         return types.SimpleNamespace(
             mux_live=False, mux_clients=0, live_session_ids=[], bare=False)
 
@@ -5901,27 +5901,31 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
     async def run():
         app = PickerApp(src, live=False)
         worker = None
-        async with app.run_test(size=(118, 36)) as pilot:
-            scr = app.query_one(PickerScreen)
-            scr.machine_idx = scr.local_index()
-            await pilot.pause()
-            recs = scr.list_records()
-            scr.sel = ("L", next(
-                i for i, rec in enumerate(recs) if rec["id4"] == "stop"))
-            scr._open_submenu()
-            assert await asyncio.to_thread(started.wait, 1)
-            worker = next(
-                thread for thread in threading.enumerate()
-                if thread.name == "pivot-action:Actions" and thread.is_alive())
-            await pilot.pause()
-            menu = _sub_menu(scr)
-            assert menu is not None
-            assert menu._actions[0] == "Resume"
-            await pilot.press("enter")
-            await pilot.pause()
+        try:
+            async with app.run_test(size=(118, 36)) as pilot:
+                scr = app.query_one(PickerScreen)
+                scr.machine_idx = scr.local_index()
+                await pilot.pause()
+                recs = scr.list_records()
+                scr.sel = ("L", next(
+                    i for i, rec in enumerate(recs) if rec["id4"] == "stop"))
+                scr._open_submenu()
+                assert await asyncio.to_thread(started.wait, 1)
+                worker = next(
+                    thread for thread in threading.enumerate()
+                    if thread.name == "pivot-action:Actions" and thread.is_alive())
+                await pilot.pause()
+                menu = _sub_menu(scr)
+                assert menu is not None
+                assert menu._actions[0] == "Resume"
+                await pilot.press("enter")
+                await pilot.pause()
 
-        assert app.result["action"] == "resume"
-        gate.set()
+            assert app.result["action"] == "resume"
+        finally:
+            gate.set()
+
+        assert worker is not None
         await asyncio.to_thread(worker.join, 2)
         assert not worker.is_alive()
         assert thread_errors == []
