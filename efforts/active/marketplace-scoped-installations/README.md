@@ -222,3 +222,9 @@ See [`design.md`](design.md).
   74 PATH-based sibling launches, 88 fixed service identities, and 717
   operative bare commands. The guard remains non-blocking until the producing
   phases burn down those categories.
+- Started Phase 2 with a non-breaking payload-invocation foundation and an
+  agent-index pilot: canonical POSIX/PowerShell/CMD generation, checked-in
+  payload shims, a session command catalog carrying exact `argv`, and operative
+  skill guidance that no longer relies on ambient command lookup. The legacy
+  global wrapper remains a compatibility surface until explicit management
+  context is available for out-of-session callers.

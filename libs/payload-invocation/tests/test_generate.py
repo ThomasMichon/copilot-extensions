@@ -1,0 +1,273 @@
+"""Tests for canonical payload-local command generation."""
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+SCRIPT = Path(__file__).resolve().parents[1] / "generate.py"
+_spec = importlib.util.spec_from_file_location("payload_invocation_generate", SCRIPT)
+generator = importlib.util.module_from_spec(_spec)
+assert _spec and _spec.loader
+_spec.loader.exec_module(generator)
+
+
+def _manifest(tmp_path: Path) -> Path:
+    path = tmp_path / "plugin" / "payload-invocation.json"
+    path.parent.mkdir()
+    path.write_text(
+        json.dumps(
+            {
+                "schema": "copilot-extensions.payload-invocation",
+                "version": 1,
+                "command": "agent-example",
+                "module": "agent_example",
+                "runtimeRoot": ".agent-example",
+                "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    assert generator.process_manifest(manifest, check=False) == []
+    generated = generator.expected_files(manifest)
+    assert {path.name for path in generated} == {
+        "agent-example",
+        "agent-example.cmd",
+        "agent-example.ps1",
+    }
+    for path, expected in generated.items():
+        assert path.read_text(encoding="utf-8") == expected
+        assert ".local/bin" not in expected
+        assert "installed-plugins/*" not in expected
+    assert (manifest.parent / "bin" / "agent-example").stat().st_mode & 0o100
+
+
+def test_check_detects_drift(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    assert generator.process_manifest(manifest, check=True) == []
+    (manifest.parent / "bin" / "agent-example.ps1").write_text(
+        "stale\n", encoding="utf-8"
+    )
+    assert generator.process_manifest(manifest, check=True)
+
+
+def test_manifest_validation_fails_closed(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["command"] = "../agent-example"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    try:
+        generator.load_manifest(manifest)
+    except ValueError as error:
+        assert "invalid command" in str(error)
+    else:
+        raise AssertionError("invalid command was accepted")
+
+
+def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    (scripts / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY="$AGENT_RT_ROOT/versions/test/bin/python"\n',
+        encoding="utf-8",
+    )
+
+    home = tmp_path / "home"
+    fake_python = home / ".agent-example" / "versions" / "test" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$PWD|$*"\nexit 23\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    project = tmp_path / "project"
+    project.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "COPILOT_PROJECT_DIR": str(project),
+        }
+    )
+    result = subprocess.run(
+        [str(plugin / "bin" / "agent-example"), "search", "two words"],
+        cwd=plugin,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 23
+    assert result.stdout.strip() == f"{project}|-m agent_example search two words"
+
+
+def test_posix_shim_rejects_conflicting_payload_context(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    other = tmp_path / "other"
+    other.mkdir()
+    env = os.environ.copy()
+    env.update({"HOME": str(tmp_path / "home"), "COPILOT_PLUGIN_ROOT": str(other)})
+    result = subprocess.run(
+        [str(plugin / "bin" / "agent-example"), "status"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 126
+    assert "payload context mismatch" in result.stderr
+
+
+def test_first_use_provision_is_serialized(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    (scripts / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY=""\n'
+        'p="$AGENT_RT_ROOT/versions/test/bin/python"\n'
+        '[ -x "$p" ] && AGENT_RT_PY="$p"\n'
+        "true\n",
+        encoding="utf-8",
+    )
+    installer = scripts / "install.sh"
+    installer.write_text(
+        '#!/bin/bash\nset -eu\nroot="$HOME/.agent-example"\n'
+        'plugin="$(cd "$(dirname "$0")/.." && pwd)"\n'
+        'case "$1" in\n'
+        '  stamp) mkdir -p "$root"; printf "%s\\n" "$plugin" > "$root/payload-dir" ;;\n'
+        '  provision)\n'
+        '    printf "provision\\n" >> "$root/provision-count"\n'
+        '    sleep 0.5\n'
+        '    mkdir -p "$root/versions/test/bin"\n'
+        '    printf "%s\\n" "#!/bin/sh" "exit 0" > "$root/versions/test/bin/python"\n'
+        '    chmod +x "$root/versions/test/bin/python" ;;\n'
+        'esac\n',
+        encoding="utf-8",
+    )
+    installer.chmod(0o755)
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "COPILOT_EXT_NO_FLOCK": "1",
+        }
+    )
+    lock = home / ".agent-example" / ".provision.lock.pid"
+    lock.parent.mkdir(parents=True)
+    lock.symlink_to("999999999")
+    command = [str(plugin / "bin" / "agent-example"), "status"]
+    first = subprocess.Popen(
+        command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    second = subprocess.Popen(
+        command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    _first_out, first_err = first.communicate(timeout=10)
+    _second_out, second_err = second.communicate(timeout=10)
+    assert first.returncode == 0, first_err
+    assert second.returncode == 0, second_err
+    count = (home / ".agent-example" / "provision-count").read_text(
+        encoding="utf-8"
+    )
+    assert count.splitlines() == ["provision"]
+
+
+def test_windows_templates_preserve_context_and_release_payload_cwd(
+    tmp_path: Path,
+) -> None:
+    manifest = _manifest(tmp_path)
+    generated = generator.expected_files(manifest)
+    powershell = next(
+        content for path, content in generated.items() if path.suffix == ".ps1"
+    )
+    cmd = next(
+        content for path, content in generated.items() if path.suffix == ".cmd"
+    )
+    assert "[IO.Directory]::SetCurrentDirectory($_outside)" in powershell
+    assert "StartsWith($_payloadPrefix" in powershell
+    assert "[IO.FileShare]::None" in powershell
+    assert "if not defined COPILOT_PLUGIN_ROOT" in cmd
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
+    tmp_path: Path,
+) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = Join-Path $env:AGENT_RT_ROOT 'versions/test/bin/python'\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    fake_python = home / ".agent-example" / "versions" / "test" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$PWD|$*"\nexit 0\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    project = tmp_path / "project"
+    sibling = tmp_path / "plugin-backup"
+    project.mkdir()
+    sibling.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "COPILOT_PROJECT_DIR": str(project),
+        }
+    )
+    command = [
+        pwsh,
+        "-NoProfile",
+        "-File",
+        str(plugin / "bin" / "agent-example.ps1"),
+        "status",
+    ]
+    sibling_result = subprocess.run(
+        command, cwd=sibling, env=env, capture_output=True, text=True, check=True
+    )
+    assert sibling_result.stdout.strip() == (
+        f"{sibling}|-m agent_example status"
+    )
+    payload_result = subprocess.run(
+        command, cwd=plugin, env=env, capture_output=True, text=True, check=True
+    )
+    assert payload_result.stdout.strip() == (
+        f"{project}|-m agent_example status"
+    )

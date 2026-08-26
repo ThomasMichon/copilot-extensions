@@ -16,69 +16,71 @@ service, or retrieval through its read CLI.
 ## Readiness
 
 - The plugin self-provisions. A new session's hook stamps a self-provisioning
-`agent-index` binstub when needed; the first binstub call provisions the runtime
+payload command when needed; the first command call provisions the runtime
 (`::agent-provisioning::`, usually ~30-120s). If the command is missing, the
-stamp/PATH step did not run; surface that exact failure rather than improvising
-an install.
-- `agent-index status` is the first health check. It reports service reachability,
+session command catalog reports it as unavailable; surface that exact failure
+rather than searching `PATH` or improvising an install.
+- `<catalog argv[0]> status` is the first health check. It reports service reachability,
 version, index availability, total chunks, per-source coverage, and indexing
 state.
-- `agent-index role` tells whether this machine is a `host` (local daemon) or a
+- `<catalog argv[0]> role` tells whether this machine is a `host` (local daemon) or a
 `client` (read commands route to the designated indexer over SSH).
 
 ## Retrieval path
 
-agent-index is a uniform retrieval capability **every agent calls directly via
-the `agent-index` CLI** — there is no sub-agent and no MCP-tool wrapper. The
-sessionStart scope-binding hook injects how-to-search guidance (covered scopes +
-the commands below) into each session's context. The read subcommands:
+The agent-index capability is a uniform retrieval surface **every agent calls through the
+exact `argv` in its session command catalog** — there is no sub-agent, MCP-tool
+wrapper, or ambient command lookup. Append the arguments shown below to the
+catalog `argv`. The read subcommands:
 
-- `agent-index search "<query>" [--source S] [--language L] [--repo R] [--limit N] --json`
+- `<catalog argv[0]> search "<query>" [--source S] [--language L] [--repo R] [--limit N] --json`
   — meaning + lexical hybrid search. Use for conceptual/code/doc searches when
   exact tokens are unknown. Each hit has `chunk_id`, `source`, `file_path`,
   `line_start`/`line_end`, `content`.
-- `agent-index similar <chunk_id> [--source S] [--limit N]` — pivot from a
+- `<catalog argv[0]> similar <chunk_id> [--source S] [--limit N]` — pivot from a
   returned hit into related material.
-- `agent-index clusters [--source S] [--bucket B] [--exact-dupes-only] [--limit N]`
+- `<catalog argv[0]> clusters [--source S] [--bucket B] [--exact-dupes-only] [--limit N]`
   — list near-duplicate clusters.
-- `agent-index status` — health and coverage map; probe this before relying on
+- `<catalog argv[0]> status` — health and coverage map; probe this before relying on
   results.
 
-Reindexing is **not** a retrieval action: `agent-index index` is an
+Reindexing is **not** a retrieval action: `<catalog argv[0]> index` is an
 operator/runtime step, never an agent side effect.
 
 ## CLI/operator path
 
 Use the CLI directly when operating the runtime:
 
-- Setup/routing: `agent-index setup --single`, `agent-index setup --indexer
-  <machine> --ssh <alias>`, `agent-index role`, `agent-index capability --json`.
-- Service: `agent-index start`, `agent-index stop`, `agent-index status`,
-  `agent-index deploy --recover`.
-- Index refresh: `agent-index index [--source S] [--full]`. Incremental is the
+- Setup/routing: `<catalog argv[0]> setup --single`, `<catalog argv[0]> setup
+  --indexer <machine> --ssh <alias>`, `<catalog argv[0]> role`,
+  `<catalog argv[0]> capability --json`.
+- Service: `<catalog argv[0]> start`, `<catalog argv[0]> stop`,
+  `<catalog argv[0]> status`, `<catalog argv[0]> deploy --recover`.
+- Index refresh: `<catalog argv[0]> index [--source S] [--full]`. Incremental is the
 default; `--full` is explicit.
-- Engine daemon: `agent-index engine status|start|stop|run`.
+- Engine daemon: `<catalog argv[0]> engine status|start|stop|run`.
 
 ## Scope and fallback
 
 - The session-start scope-binding hook emits configured scopes from the current
 repo's `.agent-index/config.yaml` `corpus.sources` when present.
-- For a plain repo with no corpus config, `agent-index index` defaults to the
+- For a plain repo with no corpus config, the catalog command's `index`
+subcommand defaults to the
 current git checkout (`git`) and its commits.
 - Use direct `grep`/`glob` for exact strings, files outside indexed scopes, or when
-`agent-index status` shows the index is unavailable.
+the catalog command's `status` subcommand shows the index is unavailable.
 - Query-time trust-domain enforcement is not implemented; when a request is
 clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
 
 ## Troubleshooting
 
-- Service down on a host: run/check `agent-index status`; session-start
+- Service down on a host: run/check `<catalog argv[0]> status`; session-start
 `ensure-service` should start the user-mode daemon in the background.
 - Client cannot search: run inside a repo with `.agent-index/config.yaml`
 `indexer.ssh` or set `AGENT_INDEX_REPO`; the CLI read transport needs a project
 to choose the SSH target.
-- Engine issues: `agent-index engine status` shows durable engine health, PID,
+- Engine issues: `<catalog argv[0]> engine status` shows durable engine health, PID,
 endpoint, and venv provisioning state.
-- Interrupted cutover: `agent-index deploy --recover`.
+- Interrupted cutover: `<catalog argv[0]> deploy --recover`.
 
 Architecture details live in `plugins/agent-index/docs/architecture.md`.
