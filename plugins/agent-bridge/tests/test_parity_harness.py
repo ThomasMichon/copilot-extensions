@@ -6,7 +6,9 @@ import json
 
 import pytest
 
+from agent_bridge import __main__ as cli
 from agent_bridge import parity_harness as parity
+from agent_bridge.session_host.host_index import HostIndex, HostRecord
 
 
 class FakeClient:
@@ -23,6 +25,10 @@ class FakeClient:
         self.events = []
         self.ended = False
         self.prompts = []
+        self.stop_calls = 0
+        self.resume_calls = 0
+        self.refresh_calls = 0
+        self.other_sessions = []
 
     def start_session(self, **kwargs):
         return {"session_id": "session-1", "name": "parity"}
@@ -85,17 +91,23 @@ class FakeClient:
         return {"queued": False}
 
     def stop_session(self, session_id):
+        self.stop_calls += 1
         self.session["status"] = "stopped"
 
     def resume_session(self, session_id, *, request_timeout=None):
+        self.resume_calls += 1
         self.session["status"] = "idle"
         return dict(self.session)
+
+    def refresh_endpoint(self):
+        self.refresh_calls += 1
+        return True
 
     def end_session(self, session_id, *, force=False):
         self.ended = True
 
     def list_sessions(self):
-        return [dict(self.session)]
+        return [dict(self.session), *self.other_sessions]
 
 
 def test_parity_run_emits_redacted_evidence_and_reattaches_same_child():
@@ -166,6 +178,165 @@ def test_start_timeout_cleans_unique_caller_session():
         )
 
     assert client.ended is True
+
+
+def test_frontend_restart_fault_gates_same_host_and_child():
+    client = FakeClient()
+
+    def fault_handler(session_id, timeout):
+        assert session_id == "session-1"
+        assert timeout == 1
+        return {
+            "frontend_pid_before": 100,
+            "frontend_pid_after": 200,
+            "host_index_target_removed": True,
+            "initial_host_pid": 300,
+            "recovered_host_pid": 300,
+            "initial_child_pid": 123,
+            "recovered_child_pid": 123,
+            "recovered_from_remote_authority": True,
+        }
+
+    result = parity.run(
+        client,
+        "container:example-1",
+        startup_timeout=1,
+        turn_timeout=1,
+        fault="frontend-restart-hostindex-loss",
+        fault_handler=fault_handler,
+    )
+
+    assert result.ok is True
+    assert result.initial_host_pid == 300
+    assert result.resumed_host_pid == 300
+    assert result.checks["frontend_restarted"] is True
+    assert result.checks["host_index_target_removed"] is True
+    assert result.checks["recovered_from_remote_authority"] is True
+    assert result.checks["same_host"] is True
+    assert result.checks["same_child"] is True
+    assert client.stop_calls == 0
+    assert client.resume_calls == 0
+    assert client.refresh_calls == 1
+
+
+def test_frontend_restart_fault_refuses_other_active_session():
+    client = FakeClient()
+    client.other_sessions = [{"session_id": "other", "status": "idle"}]
+
+    with pytest.raises(parity.ParityFailure, match="another managed session"):
+        parity.run(
+            client,
+            "container:example-1",
+            startup_timeout=1,
+            turn_timeout=1,
+            fault="frontend-restart-hostindex-loss",
+            fault_handler=lambda _session_id, _timeout: {},
+        )
+
+    assert client.ended is True
+
+
+def test_frontend_restart_fault_removes_only_target_and_recovers_from_authority(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    index_path = tmp_path / "hosts" / "index.json"
+    initial = HostRecord(
+        session_id="session-1",
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="container",
+        extra={"remote_authority_v2": True},
+    )
+    other = HostRecord(
+        session_id="other",
+        port=5001,
+        host_pid=301,
+        child_pid=124,
+        boundary="container",
+        extra={"remote_authority_v2": True},
+    )
+    index = HostIndex(index_path)
+    index.register(initial)
+    index.register(other)
+
+    state = {"running": True, "pid": 100}
+
+    def stop():
+        print("stopping frontend")
+        state["running"] = False
+
+    def start():
+        print("starting frontend")
+        state["running"] = True
+        state["pid"] = 200
+        HostIndex(index_path).register(HostRecord(
+            session_id=initial.session_id,
+            port=initial.port,
+            host_pid=initial.host_pid,
+            child_pid=initial.child_pid,
+            boundary=initial.boundary,
+            extra={
+                "remote_authority_v2": True,
+                "recovered_from_remote": True,
+            },
+        ))
+
+    monkeypatch.setattr("agent_bridge.config.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_service_stop", stop)
+    monkeypatch.setattr(cli, "_service_start", start)
+    monkeypatch.setattr(cli, "_service_is_running", lambda: state["running"])
+    monkeypatch.setattr(cli, "_read_pid_file", lambda: state["pid"])
+
+    result = cli._fault_frontend_restart_hostindex_loss("session-1", 1)
+
+    assert result["frontend_pid_before"] == 100
+    assert result["frontend_pid_after"] == 200
+    assert result["initial_host_pid"] == result["recovered_host_pid"] == 300
+    assert result["initial_child_pid"] == result["recovered_child_pid"] == 123
+    assert result["recovered_from_remote_authority"] is True
+    assert HostIndex(index_path).get("other") == other
+    assert capsys.readouterr().out == ""
+
+
+def test_frontend_restart_fault_restores_frontend_when_mutation_fails(
+    tmp_path,
+    monkeypatch,
+):
+    index_path = tmp_path / "hosts" / "index.json"
+    HostIndex(index_path).register(HostRecord(
+        session_id="session-1",
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="container",
+        extra={"remote_authority_v2": True},
+    ))
+    state = {"running": True, "starts": 0}
+
+    def stop():
+        state["running"] = False
+
+    def start():
+        state["running"] = True
+        state["starts"] += 1
+
+    def fail_remove(_self, _session_id):
+        raise OSError("write failed")
+
+    monkeypatch.setattr("agent_bridge.config.config_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "_service_stop", stop)
+    monkeypatch.setattr(cli, "_service_start", start)
+    monkeypatch.setattr(cli, "_service_is_running", lambda: state["running"])
+    monkeypatch.setattr(cli, "_read_pid_file", lambda: 100)
+    monkeypatch.setattr(HostIndex, "remove", fail_remove)
+
+    with pytest.raises(OSError, match="write failed"):
+        cli._fault_frontend_restart_hostindex_loss("session-1", 1)
+
+    assert state == {"running": True, "starts": 1}
 
 
 def test_quality_prompt_rejects_credentialed_ado_url():
