@@ -442,8 +442,9 @@ def resolve_codespace_plugins(
     }
     for source, name, pdir, manifest in iter_local_manifests(repo_roots):
         manifests[source] = (name, pdir, manifest)
-    for _source, (name, _pdir, manifest) in manifests.items():
-        if enabled is not None and name not in enabled:
+    for source, (name, _pdir, manifest) in manifests.items():
+        enabled_name = plugin_name(source) or name
+        if enabled is not None and enabled_name not in enabled:
             continue
         for spec in parse_codespace_plugins(manifest, declared_by=name):
             if not repo_matches(spec.for_workspace_repo, workspace_repo):

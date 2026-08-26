@@ -197,6 +197,24 @@ def test_same_name_from_distinct_marketplaces_keeps_both_declarations(tmp_path):
     ]
 
 
+def test_installed_manifest_uses_source_name_for_enablement(tmp_path):
+    _install_plugin(
+        tmp_path,
+        "example-marketplace",
+        "example-web-harness",
+        codespace_plugins=[{"source": "example-web-agent@example-marketplace"}],
+        extra={"name": "renamed-in-manifest"},
+    )
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path,
+        enabled_names={"example-web-harness"},
+    )
+    assert [spec.source for spec in specs] == [
+        "example-web-agent@example-marketplace"
+    ]
+
+
 def test_iter_installed_manifests_claude_layout_carries_codespace_plugins(tmp_path):
     # A Claude-layout harness plugin declaring codespacePlugins is swept too.
     _install_plugin(
