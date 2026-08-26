@@ -181,6 +181,35 @@ def test_comments_and_allow_markers_are_not_flagged(tmp_path: Path) -> None:
     assert _categories(powershell, root) == []
 
 
+def test_inline_comments_are_not_flagged(tmp_path: Path) -> None:
+    root = tmp_path
+    shell = _write(
+        root,
+        "plugins/example/scripts/install.sh",
+        'root="$HOME/cell"  # old root was "$HOME/.agent-example"\n',
+    )
+    powershell = _write(
+        root,
+        "plugins/example/scripts/install.ps1",
+        "$root = Join-Path $HOME 'cell'  # old: ~/.agent-example\n",
+    )
+    yaml = _write(
+        root,
+        "plugins/example/hooks.yaml",
+        "root: cell  # old: ~/.agent-example\n",
+    )
+    javascript = _write(
+        root,
+        "plugins/example/extensions/example/index.mjs",
+        'const root = "cell"; // execSync("agent-peer status");\n'
+        'const other = "cell"; /* ~/.agent-example */\n',
+    )
+    assert _categories(shell, root) == []
+    assert _categories(powershell, root) == []
+    assert _categories(yaml, root) == []
+    assert _categories(javascript, root) == []
+
+
 def test_python_docstrings_and_inline_comments_are_not_flagged(tmp_path: Path) -> None:
     root = tmp_path
     path = _write(

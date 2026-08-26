@@ -31,7 +31,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 | Shape | What it is | Examples |
 |-------|-----------|----------|
 | **Payload-only** | Skills / hooks / a session extension; enabling the plugin is the whole install — no runtime | efforts, visions, context-handoff, customizing-copilot, harness-* |
-| **Runtime CLI** | Installation-cell runtime + payload-local shim, invoked on demand; no daemon | agent-mcp, agent-containers |
+| **Runtime CLI** | Target: installation-cell runtime + payload-local shim, invoked on demand; legacy implementations still use a global binstub during migration | agent-mcp, agent-containers (migration targets) |
 | **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision | agent-bridge, agent-dispatch, agent-vault |
 | **Namespace-provider** | A plugin that registers a namespace with a sibling service via a filesystem **manifest** (its binstub driven over a process boundary), rather than running its own daemon | agent-codespaces / agent-containers (providers to agent-bridge) |
 

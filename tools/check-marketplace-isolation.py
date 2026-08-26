@@ -161,6 +161,60 @@ def _strip_ps_block_comments(line: str, in_block: bool) -> tuple[str, bool]:
     return "".join(out), in_block
 
 
+def _strip_c_block_comments(line: str, in_block: bool) -> tuple[str, bool]:
+    """Remove JavaScript ``/* ... */`` comment spans from one line."""
+    out: list[str] = []
+    index = 0
+    while index < len(line):
+        if in_block:
+            end = line.find("*/", index)
+            if end == -1:
+                return "".join(out), True
+            in_block = False
+            index = end + 2
+            continue
+        start = line.find("/*", index)
+        if start == -1:
+            out.append(line[index:])
+            return "".join(out), False
+        out.append(line[index:start])
+        in_block = True
+        index = start + 2
+    return "".join(out), in_block
+
+
+def _strip_inline_comment(line: str, marker: str) -> str:
+    """Strip an inline comment marker outside single or double quotes."""
+    quote = ""
+    escaped = False
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if escaped:
+            escaped = False
+            index += 1
+            continue
+        if char == "\\" and quote == '"':
+            escaped = True
+            index += 1
+            continue
+        if quote:
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            index += 1
+            continue
+        if line.startswith(marker, index) and (
+            index == 0 or line[index - 1].isspace()
+        ):
+            return line[:index]
+        index += 1
+    return line
+
+
 def _python_code_lines(text: str) -> list[str]:
     """Return Python source lines with comments and docstrings blanked."""
     lines = text.splitlines()
@@ -358,11 +412,20 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
     is_md = path.suffix.lower() == ".md"
     is_python = path.suffix.lower() == ".py"
     is_javascript = path.suffix.lower() in {".cjs", ".js", ".mjs"}
+    uses_hash_comments = path.suffix.lower() in {
+        ".ps1",
+        ".psd1",
+        ".psm1",
+        ".sh",
+        ".yaml",
+        ".yml",
+    }
     code_lines = _python_code_lines(text) if is_python else None
     launch_lines = _python_launch_lines(text) if is_python else set()
     if is_javascript:
         launch_lines = _javascript_launch_lines(text)
     in_ps_block = False
+    in_js_block = False
     in_fence = False
     findings: list[Finding] = []
     relative = path.relative_to(root).as_posix()
@@ -375,6 +438,11 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
         code = code_lines[number - 1] if code_lines is not None else line
         if is_ps:
             code, in_ps_block = _strip_ps_block_comments(line, in_ps_block)
+        if is_javascript:
+            code, in_js_block = _strip_c_block_comments(code, in_js_block)
+            code = _strip_inline_comment(code, "//")
+        elif uses_hash_comments:
+            code = _strip_inline_comment(code, "#")
         stripped = code.strip()
         if not stripped:
             continue
