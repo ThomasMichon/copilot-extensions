@@ -73,6 +73,8 @@ def test_hooks_emit_payload_command_catalog() -> None:
     )
     assert "COPILOT_PLUGIN_ROOT" in catalog["bash"]
     assert "COPILOT_PLUGIN_ROOT" in catalog["powershell"]
+    assert "printf '{}'" in catalog["bash"]
+    assert "Write('{}')" in catalog["powershell"]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX payload command test")
