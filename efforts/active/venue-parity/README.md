@@ -115,21 +115,21 @@ the rest:
 - **WS-E — container-as-parity-harness.** Codify "reproduce the venue flow in a
   container" as accepted evidence for a CodeSpace fix.
 
-## Plan (first slice)
+## Ordered remaining execution (2026-08-25)
 
-1. **Map the launch seams** in agent-codespaces (`model_launch` / `plugin_staging`
-   / `codespace_plugins` / `codespace_register` / cwd-resolution) and where
-   `__main__` / `resolver` call them.
-2. **Define the venue interface** the core needs to run that logic against the
-   venue's repo cwd (remote FS read for `.ai` resolution; the concrete workspace
-   path; the model-flag application point).
-3. **Move the logic into agent-bridge** (a dispatch-core module, or a shared lib
-   if it must run in the provider venv), leaving venue providers to supply the
-   interface + venue-in-context plugins.
-4. **Wire agent-containers** to the same core path (it currently does none of it).
-5. **Validate in a container:** dispatch into a fleet container and confirm the
-   agent reports the host model, loads the repo's `.ai` skills, and runs from the
-   concrete repo cwd — the same probe used for the codespace diagnostic.
+| Order | Slice | Work | Exit gate |
+|---|---|---|---|
+| **P0** | **Credential-consumer parity** | Define one trusted-venue launch-auth contract. Containers bootstrap GitHub from the host token and ADO/Azure from the relay; CodeSpaces surface their ambient identity behind the same bridge inputs. Configure a non-interactive Git helper for the launched child instead of relying on ambient venue config. | A Session-Host turn proves `gh` identity, GitHub Git credentials, ADO Git credentials, and an Azure token request without printing tokens. Missing relay/token fails explicitly rather than prompting. |
+| **P1** | **Shared launch policy (WS1)** | Map the remaining CodeSpace-only repo-local plugin/cwd seams; move remote workspace inspection, enabled `.ai` directory-marketplace resolution, and `--plugin-dir` assembly into agent-bridge. Keep model/effort on the already-shared ACP config-option path. | The same bridge policy produces equivalent cwd + repo-own plugin arguments for a trusted container and a CodeSpace; restricted containers receive none. |
+| **P2** | **Formal parity harness** | Productize the manual container proof as a repeatable scenario matrix: normal launch, auth, failed handshake, relay interruption, frontend restart, HostIndex loss, stopped/recreated venue, resume/recreate, lock retention, and end cleanup. | One command emits redacted evidence and a pass/fail result; shared-flow fixes require the container matrix plus a narrow CodeSpace smoke. |
+| **P3** | **Lifecycle/resource parity** | Generalize meaningful idle-stop, finalize/prune, capacity, claim, and restart semantics behind venue lifecycle capabilities. Preserve real differences: CodeSpace budget/cold boot versus local disk/RAM/container start. | Shared policy consumes declared capabilities; no `codespace` branch decides a behavior a container can support. |
+| **P4** | **Reliability corpus burn-down** | Drive generic #1761/#1765/#145 failure shapes through P2, land fixes in shared process/session code, and isolate only the irreducible `gh codespace ssh`/cloud-idle tails. | Generic process and turn-continuity checks are green in containers; remaining issues name a CodeSpace-only primitive, not a shared failure. |
+| **P5** | **Remote-core cleanup** | Rename `CodeSpaceSpawner` and related CodeSpace-shaped generic helpers to remote-venue terminology; move the remaining CodeSpace-only provisioning hook out of the generic spawner. | Shared remote Session Host modules contain no venue-name branch; providers supply all genuine venue-specific behavior through the transport contract. |
+
+The order is intentional: P0 supplies the auth guarantee every later probe
+needs; P1 establishes the final shared launch inputs; P2 freezes those contracts
+as executable evidence before P3/P4 alter lifecycle and failure behavior; P5 is
+last so naming follows the proven abstraction rather than predicting it.
 
 ## Validation Plan
 
@@ -226,3 +226,17 @@ the rest:
   the session removed both processes and released the container target lock.
   **Next:** WS1 shared launch-policy/plugin staging and a formal reusable parity
   probe.
+- **2026-08-25 — P0 credential-consumer parity completed.** The earlier
+  Session-Host proof had a serving relay but `git credential fill` failed
+  because the trusted container had no configured Git helper and the optional
+  `ado-auth-helper` was not deployed. Trusted launches now always deploy the
+  relay helper and activate it through launch-only `GIT_CONFIG_*` entries: an
+  empty helper resets ambient config, `/usr/local/bin/ado-auth-helper` is
+  authoritative, and `GIT_TERMINAL_PROMPT=0` prevents a headless fallback.
+  GitHub Git credentials come from the explicit launch `GH_TOKEN`; ADO Git
+  requests proxy through the SSH-forwarded host relay. No persistent container
+  Git config is modified. Deployed candidate agent-containers
+  **0.1.2-dev80**. **Live gate:** Session Host `37006ac0-e06` proved nonempty
+  GitHub and ADO credential fills, an authenticated ADO `git ls-remote` (exit
+  0), and an Azure Storage token request (nonempty) without emitting credential
+  values. **Next:** P1 shared launch policy.
