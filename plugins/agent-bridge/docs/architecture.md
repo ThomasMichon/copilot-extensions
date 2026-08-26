@@ -190,7 +190,7 @@ downstream agent.
 | Action | Description |
 |--------|-------------|
 | `stamp` | Fast first-install path: snapshot the payload and write the self-provisioning binstub; defers venv/service work to first use. |
-| `provision` | First-use path invoked by the binstub when no runtime slot exists; equivalent to a full install from the stamped snapshot. **Also the explicit, elevation-aware scheduled-task (re)provision/repair path** — run it from an elevated shell to change an S4U/boot task's mode or repair a broken/never-ran task (routine `update` never does this). |
+| `provision` | First-use path invoked by the binstub when no runtime slot exists; equivalent to a full install from the stamped snapshot. When a runtime already exists, it reconciles only the Windows scheduled task without rebuilding the slot or restarting the daemon. A never-ran S4U task automatically enters the self-elevating repair path; routine `update` never rewrites it. |
 | `install` | Full deploy: versioned venv slot, package/libs, binstub, service, manifest |
 | `update` | Build/verify a new versioned slot, activate it, then perform installer-driven graceful cutover when a daemon is live; falls back to drain/stop/start on failure. |
 | `start` | Start the service (`--passive` for a cutover spare -- see below) |
@@ -223,7 +223,9 @@ updates rarely — in practice never — touch it:
   when an operator runs the self-elevating **`scripts/repair-scheduled-task.ps1`**
   (it raises its own UAC prompt, removes the stale task, and registers the clean
   interactive task — reusing the existing action verbatim, and deliberately *not*
-  starting an elevated daemon) or `install.ps1 provision` (elevated) — never
+  starting an elevated daemon) or `install.ps1 provision` — which invokes that
+  repair automatically for a never-ran S4U task and otherwise performs ordinary
+  task reconciliation without touching the runtime or daemon. This never happens
   silently during a version update. If a routine step ever does need such a
   change it leaves the existing task intact and prints the one command to run.
 - **Meanwhile the daemon self-heals** regardless of the task: any daemon-touching

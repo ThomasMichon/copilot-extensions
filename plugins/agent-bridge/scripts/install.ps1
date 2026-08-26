@@ -11,6 +11,7 @@
 
     Run from the plugin directory or via the Copilot CLI plugin mechanism:
       pwsh -File plugins\agent-bridge\scripts\install.ps1 install
+      pwsh -File plugins\agent-bridge\scripts\install.ps1 provision
       pwsh -File plugins\agent-bridge\scripts\install.ps1 status
       pwsh -File plugins\agent-bridge\scripts\install.ps1 update
 
@@ -1055,6 +1056,13 @@ function Get-ScheduledTaskLastResult {
     }
 }
 
+function Get-ScheduledTaskRepairScript {
+    if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+        return (Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'scripts\repair-scheduled-task.ps1')
+    }
+    return (Join-Path $PSScriptRoot 'repair-scheduled-task.ps1')
+}
+
 function Resolve-DaemonLogonMode {
     <# Decide whether the daemon's scheduled task runs non-interactively ("run
        whether the user is logged on or not", boot-triggered) or in the default
@@ -1154,7 +1162,7 @@ function Ensure-ScheduledTask {
 
        Deliberate (re)provisioning, mode flips (interactive <-> S4U), and repair of
        a broken/never-ran task are the explicit, elevation-aware `provision`
-       action's job (Invoke-Install -> Register-ScheduledTask_), never a routine
+       action's job (Invoke-Provision -> Register-ScheduledTask_), never a routine
        update. #>
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
@@ -1364,11 +1372,7 @@ Set-Content -Path `$pidFile -Value `$proc.Id
             }
         } else {
             Write-Warn "Scheduled task write failed ($($_.Exception.Message.Trim())) -- the existing task was left intact."
-            $__repair = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
-                Join-Path $env:COPILOT_PLUGIN_STAGED_FROM 'scripts\repair-scheduled-task.ps1'
-            } else {
-                Join-Path $PSScriptRoot 'repair-scheduled-task.ps1'
-            }
+            $__repair = Get-ScheduledTaskRepairScript
             Write-Warn "This change (switching an elevated/S4U task to interactive, or repairing a broken one) needs elevation. Run the self-elevating repair ONCE (it prompts for UAC and fixes the task without starting an elevated daemon):"
             Write-Warn "    pwsh -File `"$__repair`""
             Write-Warn "Routine updates do not touch the task; the daemon self-heals on demand meanwhile ('agent-bridge start' or any daemon-touching command)."
@@ -1770,6 +1774,52 @@ function Invoke-Install {
     Invoke-Start
 }
 
+function Invoke-Provision {
+    Write-Host ''
+    Write-Host '=== agent-bridge provision ===' -ForegroundColor Cyan
+    Write-Host ''
+
+    if (-not (Test-Path $LinkPython)) {
+        # Preserve the self-provisioning binstub contract: `provision` is the
+        # first-use full install when no runtime exists. The task-only path below
+        # applies once a healthy runtime is already present.
+        Invoke-Install
+        return
+    }
+
+    # A never-ran S4U task cannot be flipped to the default interactive
+    # principal from a normal shell. Route that exact recovery through the
+    # existing self-elevating repair instead of rebuilding or restarting the
+    # already-healthy runtime.
+    $explicitNonInteractive = $NonInteractive -or
+        ($env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))
+    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if (-not $explicitNonInteractive -and $existing -and
+        ($existing.Principal.LogonType -eq 'S4U') -and
+        ((Get-ScheduledTaskLastResult -Name $TaskName) -eq $ScheduledTaskHasNotRunResult)) {
+        $repair = Get-ScheduledTaskRepairScript
+        if (-not (Test-Path -LiteralPath $repair)) {
+            Write-Fail "Scheduled-task repair script not found: $repair"
+            exit 1
+        }
+
+        Write-Step 'Repairing never-ran S4U scheduled task as the default interactive AtLogOn task...'
+        $pwsh = Get-PwshPath
+        & $pwsh -NoProfile -ExecutionPolicy Bypass -File $repair
+        $repairExit = $LASTEXITCODE
+        if ($repairExit -ne 0) {
+            Write-Fail "Scheduled-task repair failed (exit $repairExit)"
+            exit $repairExit
+        }
+        return
+    }
+
+    # Missing tasks, action/trigger drift, and explicitly requested S4U mode all
+    # use the normal reconciliation path. This intentionally does not touch the
+    # immutable runtime slot or daemon lifecycle.
+    Register-ScheduledTask_
+}
+
 function Invoke-Uninstall {
     Write-Host ''
     Write-Host '=== agent-bridge uninstall ===' -ForegroundColor Cyan
@@ -1884,7 +1934,7 @@ function Invoke-Start {
                 ($lastTaskResult -eq $ScheduledTaskHasNotRunResult)) {
                 Write-Warn "Task Scheduler accepted the start request but did not launch the action (LastTaskResult=$lastTaskResult / SCHED_S_TASK_HAS_NOT_RUN)"
                 Write-Warn '  This likely means Windows could not acquire the S4U logon token at startup (for example, the account authority was unavailable).'
-                Write-Warn '  Clear AGENT_BRIDGE_NONINTERACTIVE and run "install.ps1 update" to replace it with the default interactive AtLogOn task.'
+                Write-Warn '  Clear AGENT_BRIDGE_NONINTERACTIVE and run "install.ps1 provision" to replace it with the default interactive AtLogOn task.'
                 return
             }
             Write-Warn 'agent-bridge did not become healthy within 30s via the scheduled task -- check agent-bridge-err.log'
@@ -2470,7 +2520,7 @@ try {
         'status'    { Invoke-Status }
         'update'    { Invoke-Update }
         'stamp'     { Invoke-Stamp }
-        'provision' { Invoke-Install }
+        'provision' { Invoke-Provision }
     }
 } finally {
     # Release the install lock on any exit path (the OS also drops it on process

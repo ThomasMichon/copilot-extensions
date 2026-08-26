@@ -25,7 +25,9 @@
     context would leave an ELEVATED daemon running (wrong -- the daemon must run
     as the normal user). The daemon self-heals on demand meanwhile (any
     `agent-bridge` command boots it), and the repaired task starts it at the next
-    logon. Run this once; routine updates then leave the healthy task untouched.
+    logon. The installer's `provision` action invokes this repair when it detects
+    a never-ran S4U task. Run this once; routine updates then leave the healthy
+    task untouched.
 
 .NOTES
     The task's action/contract is owned by install.ps1's Register-ScheduledTask_;
@@ -169,7 +171,7 @@ if ($oldAction -and $oldAction.Execute) {
         -WorkingDirectory $oldAction.WorkingDirectory
 } else {
     if (-not (Test-Path -LiteralPath $Supervisor)) {
-        Write-Error "Supervisor script not found at '$Supervisor'. Install agent-bridge first (`install.ps1 provision`), then re-run this repair."
+        Write-Error "Supervisor script not found at '$Supervisor'. Install agent-bridge first (`install.ps1 install`), then re-run this repair."
         exit 2
     }
     $pwshPath = Resolve-PwshPath
