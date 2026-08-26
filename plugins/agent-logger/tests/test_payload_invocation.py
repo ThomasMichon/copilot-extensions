@@ -80,6 +80,7 @@ def test_auxiliary_help_uses_public_command_name(module: str, command: str) -> N
         for value in (str(PLUGIN / "src"), env.get("PYTHONPATH", ""))
         if value
     )
+    env["PYTHONUTF8"] = "1"
     result = subprocess.run(
         [sys.executable, "-m", module, "--help"],
         env=env,
