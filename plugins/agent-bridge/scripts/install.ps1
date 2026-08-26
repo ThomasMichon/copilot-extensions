@@ -1780,8 +1780,11 @@ function Invoke-Provision {
     Write-Host ''
 
     if (-not (Test-Path $LinkPython)) {
-        Write-Fail 'agent-bridge not installed. Run: install.ps1 install'
-        exit 1
+        # Preserve the self-provisioning binstub contract: `provision` is the
+        # first-use full install when no runtime exists. The task-only path below
+        # applies once a healthy runtime is already present.
+        Invoke-Install
+        return
     }
 
     # A never-ran S4U task cannot be flipped to the default interactive

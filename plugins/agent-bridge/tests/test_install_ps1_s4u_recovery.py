@@ -67,8 +67,12 @@ def test_provision_has_a_dedicated_runtime_preserving_path():
     assert "'provision' { Invoke-Provision }" in text
 
     body = _function_body("Invoke-Provision")
-    assert "Register-ScheduledTask_" in body
-    assert "Invoke-Install" not in body
+    missing_runtime = body.index("if (-not (Test-Path $LinkPython))")
+    install = body.index("Invoke-Install", missing_runtime)
+    return_after_install = body.index("return", install)
+    register = body.index("Register-ScheduledTask_", return_after_install)
+
+    assert missing_runtime < install < return_after_install < register
     assert "Test-SlotContentCurrent" not in body
     assert "Invoke-Start" not in body
     assert "New-SignedVenv" not in body
