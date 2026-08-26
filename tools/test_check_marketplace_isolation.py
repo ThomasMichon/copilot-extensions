@@ -187,6 +187,7 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
         "agent-containers",
         "agent-logger",
         "agent-machines",
+        "agent-mcp",
         "agent-ssh",
     ):
         findings = [
@@ -198,6 +199,17 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
             if finding.category == "bare-agent-command"
         ]
         assert findings == [], plugin
+
+
+def test_payload_manifest_command_is_a_declaration_not_a_path_launch(
+    tmp_path: Path,
+) -> None:
+    manifest = _write(
+        tmp_path,
+        "plugins/example/payload-invocation.json",
+        '{"command": "agent-example", "runtimeRoot": ".agent-example"}\n',
+    )
+    assert _categories(manifest, tmp_path) == ["unqualified-runtime-root"]
 
 
 def test_common_python_powershell_and_javascript_forms(tmp_path: Path) -> None:

@@ -21,7 +21,7 @@ $commands = @(
         [ordered]@{
             id = [string]$spec.id
             argv = @($commandPath)
-            shell = 'direct'
+            shell = '@@WINDOWS_CATALOG_SHELL@@'
             purpose = [string]$spec.purpose
             availability = $availability
         }
