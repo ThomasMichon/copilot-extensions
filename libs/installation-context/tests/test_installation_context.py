@@ -371,6 +371,29 @@ def test_empty_directory_source_path_fails_closed(tmp_path: Path) -> None:
     assert not durable.exists()
 
 
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+@pytest.mark.parametrize(
+    "descriptor",
+    [
+        {"source": "directory", "stableId": "   "},
+        {"source": "directory", "canonical": "directory-id:"},
+    ],
+)
+def test_empty_stable_directory_id_fails_closed(
+    descriptor: dict[str, str],
+) -> None:
+    result = _run_ps(
+        "source-id",
+        "-SourceJson",
+        json.dumps(descriptor),
+        "-MarketplaceKey",
+        "directory",
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "requires a non-empty" in result.stderr
+
+
 @pytest.mark.skipif(
     os.name != "nt" or POWERSHELL is None,
     reason="Missing-drive behavior requires native Windows",
@@ -637,7 +660,8 @@ def test_existing_source_cell_requires_explicit_rebind_intent(
     )
     assert result.returncode != 0
     assert "explicit rebind or new-cell intent is required" in result.stderr
-    assert not (durable / "marketplaces" / "new-key").exists()
+    expected_new_id = f"new-key--{str(vector['sha256'])[:16]}"
+    assert not (durable / "marketplaces" / expected_new_id).exists()
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")

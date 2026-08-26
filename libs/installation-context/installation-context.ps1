@@ -273,10 +273,14 @@ function Normalize-Source(
             }
         }
         'directory' {
-            $stableId = [string](Get-PropertyValue $Descriptor 'stableId' '')
+            $stableId = ([string](Get-PropertyValue $Descriptor 'stableId' '')).Trim()
             if ($canonicalInput) {
                 if ($canonicalInput.StartsWith('directory-id:', [StringComparison]::Ordinal)) {
-                    $canonical = $canonicalInput
+                    $receiptStableId = $canonicalInput.Substring(13).Trim()
+                    if (-not $receiptStableId) {
+                        Fail 'A canonical directory-id source requires a non-empty id.'
+                    }
+                    $canonical = "directory-id:$receiptStableId"
                 }
                 elseif ($canonicalInput.StartsWith('directory:', [StringComparison]::Ordinal)) {
                     $receiptDirectory = $canonicalInput.Substring(10)
