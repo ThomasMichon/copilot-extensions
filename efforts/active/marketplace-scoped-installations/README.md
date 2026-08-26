@@ -119,6 +119,9 @@ reachable when their ownership is explicit.
 
 ### Phase 3 — Installation context and exemplars ([#1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104))
 
+- [ ] Land the reviewed
+  [installation-context and dual-cell proposal](phase-3-installation-context.md)
+  before either platform makes the new root operative.
 - [ ] Introduce a self-contained, vendorable installation-context primitive
   separate from versioned interpreter resolution.
 - [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
@@ -252,3 +255,16 @@ See [`design.md`](design.md).
   slice corrects its bridge-dispatch examples back to the explicit
   agent-bridge management command; bridge provider registration and dispatch
   have not yet adopted session catalogs.
+
+### 2026-08-26 — Phase 3 proposal resumed
+
+- Kept the active Linux/WSL lane on Phase 2 payload-local invocation and moved
+  shared architecture work to the non-overlapping Phase 3 proposal.
+- Selected agent-machines as the CLI-only exemplar and agent-index as the
+  service-bearing exemplar: both already have payload-local commands, while
+  together they exercise simple runtime placement, durable state, endpoint
+  publication, service identity, update, and rollback.
+- Defined the pre-runtime bootstrap boundary: the payload-local shim can derive
+  an installed marketplace slot from its own payload boundary without Python or
+  a global command; management surfaces may enrich that identity with a
+  normalized source fingerprint, but never silently remap an occupied slot.
