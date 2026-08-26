@@ -126,7 +126,7 @@ continue to work unchanged.
 | `doctor` | Diagnose (and with `--fix`, repair) this project's worktree/session **record + session-state** health: corrupt tracking records, empty session registries + missing titles (backfill), stale `active`+`completed_at` status, orphaned 0-user-message session shells (`--gc-sessions`, destructive), and cwd/path misalignment (report-only). Read-only by default; `--json` for the report |
 | `status` | Show worktree git status; **write mode** (`--summary "<one-liner>"` / `--title "<headline>"` / `--follow-up` / `--resolved`) annotates THIS worktree's Picker disposition; **history mode** (`--history` `[--limit N]` `[--json]`) prints this worktree's durable disposition trajectory (summary/title over time). A `postToolUse` hook nudges you to refresh it as work drifts (`AGENT_WORKTREES_NUDGE=off` to silence) |
 | `recent-messages` | Show a worktree's latest session's last N conversation messages (`--worktree <id>` `--limit N`, JSON) -- the read-side companion to the disposition summary; reads `events.jsonl` directly. Backs the picker's **Messages** viewer |
-| `list-sessions` | List a worktree's Copilot sessions with metadata (JSON) |
+| `list-sessions` | List Copilot sessions with resolved worktree interface/origin metadata (JSON); `--worktree <id>` scopes to one worktree and `--all-projects` enumerates every adopted project |
 | `head-session` | Project-agnostic read of a worktree's asserted current session/head pointer (JSON; fail-open when untracked) |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for session conclusion and handoff succession links (JSON) |
 | `session-transcript` | Emit a Copilot session's renderable transcript events by session id (JSON) |
