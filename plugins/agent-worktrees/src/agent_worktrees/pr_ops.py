@@ -236,7 +236,7 @@ def create_pr(
     open_pr: bool | None = None,
     hold: bool = False,
     draft: bool = False,
-    attribution: bool = True,
+    attribution: bool | None = None,
     dry_run: bool = False,
 ) -> dict:
     """Squash worktree commits, create + push a feature branch for a PR.
@@ -246,11 +246,13 @@ def create_pr(
 
     When a provider is configured and ``pr.auto_open`` is on (and ``open_pr``
     is not False), the matching provider plugin **opens the PR** right after
-    the push -- embedding a hidden source-worktree attribution marker in the
-    body and **auto-recording** the resulting url/number on the worktree (no
-    skippable manual ``set-pr``).  Provider failure is non-fatal: the feature
-    branch is already pushed, so the result carries ``pr_open_error`` and the
-    agent can fall back to delegating PR creation manually.
+    the push and **auto-recording** the resulting url/number on the worktree (no
+    skippable manual ``set-pr``). Repos that explicitly enable
+    ``pr.source_attribution`` also receive a hidden source-worktree marker in
+    the body; it is off by default because its raw machine/worktree/session
+    values are unsuitable for public PRs. Provider failure is non-fatal: the
+    feature branch is already pushed, so the result carries ``pr_open_error``
+    and the agent can fall back to delegating PR creation manually.
 
     A worktree can track multiple PRs.  When the active PR is **terminal**
     (merged/closed) -- or ``new`` is set, or none exists -- a *fresh* PR is
@@ -627,8 +629,9 @@ def create_pr(
         result["rerun"] = True
 
     # 8. Auto-open the PR via the configured provider plugin (Phase 2/3):
-    #    open the PR, embed the source-worktree attribution marker, and
-    #    auto-record the url/number on the worktree. Non-fatal on failure --
+    #    open the PR, optionally embed the source-worktree attribution marker
+    #    when the repo opts in, and auto-record the url/number on the worktree.
+    #    Non-fatal on failure --
     #    the branch is already pushed, so the agent can fall back to a manual
     #    provider sub-agent + set-pr. If the target PR is already open on the
     #    provider, its number/url is surfaced (never re-created) so the caller
@@ -653,7 +656,7 @@ def _open_via_provider(
     head_sha: str,
     *,
     draft: bool = False,
-    attribution: bool = True,
+    attribution: bool = False,
 ) -> None:
     """Open the PR through the provider plugin and auto-record it (best-effort)."""
     from . import providers
@@ -731,7 +734,7 @@ def _finish_auto_open(
     head_sha: str,
     open_pr: bool | None,
     draft: bool,
-    attribution: bool,
+    attribution: bool | None,
 ) -> None:
     """Open the PR (when pending) or surface an already-open PR's number/url.
 
@@ -748,9 +751,12 @@ def _finish_auto_open(
     if not want_open or target_pr is None:
         return
     if target_pr.number is None:
+        want_attribution = (
+            prcfg.source_attribution if attribution is None else attribution
+        )
         _open_via_provider(
             result, config, record, target_pr, title, body, worktree_id,
-            head_sha, draft=draft, attribution=attribution,
+            head_sha, draft=draft, attribution=want_attribution,
         )
         return
     # The PR is already open on the provider -- report it so the caller trusts
@@ -1375,7 +1381,7 @@ def _push_existing_feature(
     body: str | None,
     open_pr: bool | None,
     draft: bool,
-    attribution: bool,
+    attribution: bool | None,
 ) -> dict:
     """Re-run helper: push an already-created feature branch and record state.
 

@@ -171,6 +171,10 @@ public face:
   world-readable -- write them self-contained, with no downstream-private names,
   systems, or context. The proprietary "why" stays in the driver's own private
   planning, which links to the public issue.
+- **PR metadata is public too, including hidden HTML comments.** This repo keeps
+  `pr.source_attribution: false`; never publish raw machine, worktree, or session
+  identifiers in a PR title, body, commit message, label, or generated marker.
+  Closed-circuit repos may opt in to source attribution in their own config.
 
 PR merges to `main` are single-writer: update from `origin/main` before
 publication or merge and re-check the version bump in case a concurrent merge

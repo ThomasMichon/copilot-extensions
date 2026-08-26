@@ -1202,12 +1202,13 @@ class _FakeReadyProvider:
 
 
 class TestCreatePRAutoOpen:
-    def _enable_open(self, config):
+    def _enable_open(self, config, *, source_attribution=False):
         import dataclasses
         repo = config.repos["ext"]
         pr = dataclasses.replace(
             repo.pr, auto_open=True, api_base="https://h/gitea",
             token_env="EXT_TOKEN", labels=("auto-merge", "source:{machine}"),
+            source_attribution=source_attribution,
         )
         return dataclasses.replace(
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
@@ -1216,7 +1217,7 @@ class TestCreatePRAutoOpen:
     def test_auto_open_records_pr_and_embeds_marker(self, pr_repo, monkeypatch):
         from agent_worktrees import providers
         config, wid, _wt, _ = pr_repo
-        config = self._enable_open(config)
+        config = self._enable_open(config, source_attribution=True)
         monkeypatch.setenv("EXT_TOKEN", "tok")
         fake = _FakeProvider()
         monkeypatch.setattr(providers, "get_provider", lambda name: fake)
@@ -1242,6 +1243,35 @@ class TestCreatePRAutoOpen:
         # Labels templated with the machine.
         assert "source:test" in scope.labels
         assert fake.captured["token"] == "tok"
+
+    def test_auto_open_omits_marker_by_default(self, pr_repo, monkeypatch):
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        config = self._enable_open(config)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(wid, config, title="Add feature")
+
+        assert res["success"] is True
+        assert res["pr_opened"] is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
+
+    def test_no_attribution_overrides_repo_opt_in(self, pr_repo, monkeypatch):
+        from agent_worktrees import providers
+        config, wid, _wt, _ = pr_repo
+        config = self._enable_open(config, source_attribution=True)
+        monkeypatch.setenv("EXT_TOKEN", "tok")
+        fake = _FakeProvider()
+        monkeypatch.setattr(providers, "get_provider", lambda name: fake)
+
+        res = pr_ops.create_pr(
+            wid, config, title="Add feature", attribution=False,
+        )
+
+        assert res["success"] is True
+        assert attribution.parse_marker(fake.captured["scope"].body) is None
 
     def test_auto_open_draft_marks_scope_draft(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo
