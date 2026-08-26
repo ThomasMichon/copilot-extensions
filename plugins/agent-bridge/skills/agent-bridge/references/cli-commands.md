@@ -227,6 +227,42 @@ agent-bridge status
 agent-bridge version
 ```
 
+### Remote Venue Parity Acceptance
+
+`parity` creates an isolated bridge session, runs a redacted quality/auth probe,
+stops and resumes the session, verifies ACP continuity plus a live resumed
+child, completes another turn, and ends the session. (An explicit idle stop may
+reap and recreate the child; same-child PID is reserved for the frontend-loss
+recovery scenario.) Target identity and
+expected workspace/capability are always caller-supplied; no product repo or
+credential endpoint is hardcoded.
+
+```bash
+# Baseline cwd + repo-local capability + same-child reattach
+agent-bridge parity container:example-1 \
+  --expect-workspace /workspaces/example-web \
+  --expect-capability example-local-skill
+
+# Add credential-consumer checks. Values are captured privately; JSON contains
+# booleans only, never tokens or helper output.
+agent-bridge parity container:example-1 \
+  --expect-workspace /workspaces/example-web \
+  --auth \
+  --ado-url https://example.visualstudio.com/Project/_git/repo \
+  --azure-scope https://storage.azure.com/.default \
+  --json
+
+# Narrow no-regression smoke against an explicitly chosen idle CodeSpace.
+agent-bridge parity codespace:example-codespace \
+  --expect-workspace /workspaces/example-web \
+  --expect-capability example-local-skill
+```
+
+The command refuses any one-session venue that already has a bridge session
+rather than taking it over. Use a dedicated target with no existing session.
+`--keep-session` is diagnostic break glass; normal runs always clean up in
+`finally` (and retained sessions keep their redacted probe event log).
+
 ### Graceful Redeploy (routing table + drain + installer-driven cutover)
 
 A redeploy no longer has to hard-kill live work. Clients resolve the daemon
