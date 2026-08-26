@@ -255,6 +255,14 @@ See [`design.md`](design.md).
   slice corrects its bridge-dispatch examples back to the explicit
   agent-bridge management command; bridge provider registration and dispatch
   have not yet adopted session catalogs.
+- The agent-codespaces slice merged in
+  [#1129](https://github.com/ThomasMichon/copilot-extensions/pull/1129), adding
+  payload-local lifecycle commands and catalog guidance while preserving the
+  bridge provider, connection owner, scheduled work, and remote launchers as
+  explicit management boundaries. Linux and native Windows validation covered
+  the final review head. The same validation exposed a fallback provisioning
+  lock race, tracked separately in
+  [#1132](https://github.com/ThomasMichon/copilot-extensions/issues/1132).
 
 ### 2026-08-26 — Phase 3 proposal resumed
 

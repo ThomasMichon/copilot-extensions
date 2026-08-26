@@ -94,13 +94,98 @@ def test_inventory_categories(tmp_path: Path) -> None:
         root,
     ) == []
 
+    _write(
+        root,
+        "plugins/example/payload-invocation.json",
+        '{"commands":[{"command":"session-sync"}]}\n',
+    )
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
+            "Run `session-sync run --prune` now.\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
+            "Session-sync is machine-local.\n",
+        ),
+        root,
+    ) == []
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
+            "- session-sync run --prune\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/src/example/runtime.py",
+            'subprocess.run(["session-sync", "run"], check=True)\n',
+        ),
+        root,
+    ) == ["path-sibling-launch"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/src/example/runtime.py",
+            'cmd = ["session-sync", "run"]\nsubprocess.run(cmd, check=True)\n',
+        ),
+        root,
+    ) == ["path-sibling-launch"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/src/example/runtime.py",
+            "subprocess.run(\n"
+            '    ["session-sync", "run"],\n'
+            "    check=True,\n"
+            ")\n",
+        ),
+        root,
+    ) == ["path-sibling-launch"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/src/example/runtime.js",
+            "function launch(cmd) { return spawn(cmd, []); }\n"
+            'launch("session-sync");\n',
+        ),
+        root,
+    ) == ["path-sibling-launch"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/src/example/runtime.js",
+            "function launch(cmd) { return spawn(cmd, []); }\n"
+            "launch(\n"
+            '  "session-sync"\n'
+            ");\n",
+        ),
+        root,
+    ) == ["path-sibling-launch"]
 
-def test_payload_catalog_adopter_skills_avoid_bare_global_commands() -> None:
-    for plugin in ("agent-codespaces", "agent-containers", "agent-machines", "agent-ssh"):
+
+def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> None:
+    for plugin in (
+        "agent-codespaces",
+        "agent-containers",
+        "agent-logger",
+        "agent-machines",
+        "agent-ssh",
+    ):
         findings = [
             finding
-            for skill in (REPO / "plugins" / plugin / "skills").rglob("*.md")
-            for finding in cmi._scan_file(skill, REPO)
+            for surface in ("skills", "agents")
+            if (REPO / "plugins" / plugin / surface).is_dir()
+            for capability in (REPO / "plugins" / plugin / surface).rglob("*.md")
+            for finding in cmi._scan_file(capability, REPO)
             if finding.category == "bare-agent-command"
         ]
         assert findings == [], plugin

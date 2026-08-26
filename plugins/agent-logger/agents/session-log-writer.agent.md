@@ -85,26 +85,17 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 
 ## Tool policy
 
-- **Invoke segmenter tools by binstub name** -- `collate-session`,
-  `read-session-digest`. The agent-logger installer deploys these as binstubs
-  in `~/.local/bin`, so they are on PATH once the runtime is installed.
-- **If a binstub is not on PATH** (payload installed but the runtime installer
-  hasn't run, or `~/.local/bin` isn't on PATH), fall back to the deployed venv
-  interpreter with `-m`:
-  ```
-  # POSIX
-  ~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.collate <session_path> --nas --segment-size 80000
-  # Windows
-  ~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.collate <session_path> --nas --segment-size 80000
-  ```
-  The module names are `agent_logger.segmenter.collate` and
-  `agent_logger.segmenter.read_digest`. Never call the underlying `.py` files
-  with a system `python` / `uv run` -- they need the venv's dependencies.
+- **Require caller-supplied payload commands.** The invocation prompt must
+  include `collate_argv0` and `digest_argv0` paths resolved from the caller's
+  session catalog for agent-logger. Refuse to run
+  if either is absent. Never search `PATH`, substitute another payload's
+  command, or invoke a legacy venv interpreter.
 - **Collate from the manifest's `session_path`.** Example:
   ```
-  collate-session <session_path> --nas --segment-size 80000
+  <collate-session argv[0] from caller> <session_path> --nas --segment-size 80000
   ```
-- **Read collated data with `read-session-digest <session-id> ...`.**
+- **Read collated data with**
+  `<read-session-digest argv[0] from caller> <session-id> ...`.
 - **Remain read-only.** Custom sub-agents may be governed by a higher-priority
   no-file-output policy. Render complete artifacts and return them to the caller;
   do not attempt `create`, `edit`, `apply_patch`, or shell-based file writes.
@@ -117,7 +108,7 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 
 For each session, run:
 ```
-collate-session <session_path> --nas --segment-size 80000
+<collate-session argv[0] from caller> <session_path> --nas --segment-size 80000
 ```
 If collation fails (missing events, corrupt data), skip the session and note
 the failure.
@@ -144,13 +135,15 @@ include a short failure entry rather than inventing details.
 
 ### 3. Read session data
 
-- `read-session-digest <session-id> context` -- metadata, checkpoints,
+- `<read-session-digest argv[0] from caller> <session-id> context`
+  -- metadata, checkpoints,
   stats, segment inventory.
 - **Always** summarize a session's segments through an **explore** sub-agent
   -- never read a session's raw segments directly into this agent's own
   context. Dispatch **one explore sub-agent per session** (in parallel across
-  sessions); each runs `read-session-digest <session-id> list` then
-  `read-session-digest <session-id> segment <N>` for every segment and returns
+  sessions). Include the exact caller-supplied `digest_argv0` path in every
+  explore prompt; each sub-agent runs it with `<session-id> list`,
+  then with `<session-id> segment <N>` for every segment and returns
   a summary (output contract: workstreams, files changed, key commands,
   failures/workarounds, decisions, follow-ups; no prose intro, no
   personality). Aggregate those summaries here. This holds a single large

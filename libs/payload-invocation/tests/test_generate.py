@@ -50,6 +50,25 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
+def _multi_manifest(tmp_path: Path) -> Path:
+    path = _manifest(tmp_path)
+    data = json.loads(path.read_text(encoding="utf-8"))
+    primary = {
+        field: data.pop(field) for field in ("command", "module", "purpose")
+    }
+    data["plugin"] = "agent-example"
+    data["commands"] = [
+        primary,
+        {
+            "command": "example-helper",
+            "module": "agent_example.helper",
+            "purpose": "Exercise an example helper",
+        },
+    ]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -70,6 +89,118 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
         assert (
             manifest.parent / "scripts" / "emit-command-catalog.sh"
         ).stat().st_mode & 0o100
+
+
+def test_generates_multiple_commands_and_one_catalog(tmp_path: Path) -> None:
+    manifest = _multi_manifest(tmp_path)
+    assert generator.process_manifest(manifest, check=False) == []
+    generated = generator.expected_files(manifest)
+    assert {path.name for path in generated} == {
+        "agent-example",
+        "agent-example.cmd",
+        "agent-example.ps1",
+        "example-helper",
+        "example-helper.cmd",
+        "example-helper.ps1",
+        "emit-command-catalog.ps1",
+        "emit-command-catalog.sh",
+    }
+    helper = generated[manifest.parent / "bin" / "example-helper"]
+    assert '_command="example-helper"' in helper
+    assert '_module="agent_example.helper"' in helper
+    catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
+    assert '"id":"agent-example"' in catalog
+    assert '"id":"example-helper"' in catalog
+    assert '"plugin": "agent-example"' in catalog
+
+
+def test_commands_schema_preserves_plugin_identity_with_one_command(
+    tmp_path: Path,
+) -> None:
+    manifest = _multi_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["commands"] = [
+        {
+            "command": "example-helper",
+            "module": "agent_example.helper",
+            "purpose": "Exercise an example helper",
+        }
+    ]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    generated = generator.expected_files(manifest)
+    catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
+    assert '"plugin": "agent-example"' in catalog
+    assert '"id":"example-helper"' in catalog
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX catalog execution test")
+def test_posix_catalog_emits_every_command_id(tmp_path: Path) -> None:
+    manifest = _multi_manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    (manifest.parent / "plugin.json").write_text(
+        '{"name":"agent-example"}\n', encoding="utf-8"
+    )
+    env = os.environ.copy()
+    env["COPILOT_PLUGIN_ROOT"] = str(manifest.parent)
+    result = subprocess.run(
+        [str(manifest.parent / "scripts" / "emit-command-catalog.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    outer = json.loads(result.stdout)
+    match = re.search(r"```json\n(.*?)\n```", outer["additionalContext"], re.S)
+    assert match
+    catalog = json.loads(match.group(1))
+    assert catalog["plugin"] == "agent-example"
+    assert [command["id"] for command in catalog["commands"]] == [
+        "agent-example",
+        "example-helper",
+    ]
+    assert all(command["availability"] == "ready" for command in catalog["commands"])
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_powershell_catalog_emits_every_command_id(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _multi_manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    (manifest.parent / "plugin.json").write_text(
+        '{"name":"agent-example"}\n', encoding="utf-8"
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "COPILOT_PLUGIN_ROOT": str(manifest.parent),
+            "USERPROFILE": str(tmp_path / "home"),
+        }
+    )
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(manifest.parent / "scripts" / "emit-command-catalog.ps1"),
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    outer = json.loads(result.stdout)
+    match = re.search(r"```json\n(.*?)\n```", outer["additionalContext"], re.S)
+    assert match
+    catalog = json.loads(match.group(1))
+    assert catalog["plugin"] == "agent-example"
+    assert [command["id"] for command in catalog["commands"]] == [
+        "agent-example",
+        "example-helper",
+    ]
+    assert all(command["argv"][0].endswith(".ps1") for command in catalog["commands"])
+    assert all(command["availability"] == "ready" for command in catalog["commands"])
 
 
 def test_check_detects_drift(tmp_path: Path) -> None:
@@ -93,6 +224,56 @@ def test_manifest_validation_fails_closed(tmp_path: Path) -> None:
         assert "invalid command" in str(error)
     else:
         raise AssertionError("invalid command was accepted")
+
+    legacy_root = tmp_path / "legacy-plugin"
+    legacy_root.mkdir()
+    manifest = _manifest(legacy_root)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["plugin"] = "agent-different"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="legacy plugin must equal command"):
+        generator.load_manifest(manifest)
+
+
+def test_multi_command_manifest_rejects_ambiguous_or_duplicate_commands(
+    tmp_path: Path,
+) -> None:
+    manifest = _multi_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["command"] = "agent-example"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="cannot be combined"):
+        generator.load_manifest(manifest)
+
+    data.pop("command")
+    data["commands"].append(dict(data["commands"][0]))
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    with pytest.raises(ValueError, match="duplicate command"):
+        generator.load_manifest(manifest)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["install", "resolve-runtime", "emit-command-catalog"],
+)
+def test_manifest_rejects_generated_script_collisions(
+    tmp_path: Path,
+    command: str,
+) -> None:
+    manifest = _multi_manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["outputDir"] = "scripts"
+    data["commands"] = [
+        {
+            "command": command,
+            "module": "agent_example.helper",
+            "purpose": "Exercise a colliding command",
+        }
+    ]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="generated path collision"):
+        generator.expected_files(manifest)
 
 
 def test_manifest_selects_and_requires_installer_entrypoint(tmp_path: Path) -> None:
@@ -135,17 +316,29 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "plugin", ["agent-codespaces", "agent-containers", "agent-machines", "agent-ssh"]
+    "plugin",
+    [
+        "agent-codespaces",
+        "agent-containers",
+        "agent-logger",
+        "agent-machines",
+        "agent-ssh",
+    ],
 )
 def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
     plugin_root = REPO / "plugins" / plugin
     manifest = plugin_root / "payload-invocation.json"
     data = generator.load_manifest(manifest)
-    assert data["command"] == plugin
+    assert data["plugin"] == plugin
+    command_ids = {
+        command["command"] for command in data["commands"]
+    }
+    assert plugin in command_ids
 
     generated = generator.expected_files(manifest)
     assert generator.process_manifest(manifest, check=True) == []
-    assert plugin_root / "bin" / plugin in generated
+    for command_id in command_ids:
+        assert plugin_root / "bin" / command_id in generated
 
     hooks = json.loads((plugin_root / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]
@@ -158,11 +351,20 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
 
 
 def test_skill_catalog_references_name_payload_adopters() -> None:
-    reference = re.compile(r"<(agent-[a-z0-9-]+) catalog argv\[0\]>")
-    references: dict[str, list[Path]] = {}
-    for skill in (REPO / "plugins").glob("*/skills/**/*.md"):
-        for plugin in reference.findall(skill.read_text(encoding="utf-8")):
-            references.setdefault(plugin, []).append(skill.relative_to(REPO))
+    reference = re.compile(
+        r'<(agent-[a-z0-9-]+) catalog(?: "([a-z][a-z0-9-]*)")? argv\[0\]>'
+    )
+    references: dict[str, dict[str, list[Path]]] = {}
+    capability_paths = [
+        *(REPO / "plugins").glob("*/skills/**/*.md"),
+        *(REPO / "plugins").glob("*/agents/**/*.md"),
+    ]
+    for skill in capability_paths:
+        for plugin, command in reference.findall(skill.read_text(encoding="utf-8")):
+            command_id = command or plugin
+            references.setdefault(plugin, {}).setdefault(command_id, []).append(
+                skill.relative_to(REPO)
+            )
 
     missing = {
         plugin: paths
@@ -170,6 +372,22 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
         if not (REPO / "plugins" / plugin / "payload-invocation.json").is_file()
     }
     assert missing == {}
+    missing_commands = {}
+    for plugin, command_paths in references.items():
+        manifest = generator.load_manifest(
+            REPO / "plugins" / plugin / "payload-invocation.json"
+        )
+        command_ids = {
+            command["command"] for command in manifest["commands"]
+        }
+        unknown = {
+            command: paths
+            for command, paths in command_paths.items()
+            if command not in command_ids
+        }
+        if unknown:
+            missing_commands[plugin] = unknown
+    assert missing_commands == {}
     missing_hooks = {}
     for plugin, paths in references.items():
         hooks_path = REPO / "plugins" / plugin / "hooks.json"
@@ -254,6 +472,42 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
     )
     assert result.returncode == 23
     assert result.stdout.strip() == f"{project}|-m agent_example search two words"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
+def test_multi_command_shim_dispatches_its_own_module(tmp_path: Path) -> None:
+    manifest = _multi_manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    plugin = manifest.parent
+    (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
+    scripts = plugin / "scripts"
+    (scripts / "resolve-runtime.sh").write_text(
+        'AGENT_RT_PY="$AGENT_RT_ROOT/versions/test/bin/python"\n',
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    fake_python = home / ".agent-example" / "versions" / "test" / "bin" / "python"
+    fake_python.parent.mkdir(parents=True)
+    fake_python.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*"\nexit 0\n',
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+        }
+    )
+    result = subprocess.run(
+        [str(plugin / "bin" / "example-helper"), "two words"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "-m agent_example.helper two words"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")

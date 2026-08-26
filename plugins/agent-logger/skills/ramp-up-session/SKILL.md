@@ -16,12 +16,14 @@ description: >
 
 # Session Ramp-Up
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> Ensure `agent-logger` is on PATH and run `agent-logger version` once. If it is
-> missing, stamp this plugin's own binstub (`install.ps1 stamp` on Windows or
-> `install.sh stamp` on Linux/WSL from the installed plugin payload), then retry;
-> the first call self-provisions the runtime and deploys `ramp-up-session` and
-> `read-session-digest`.
+> **Before you start — payload-local readiness.**
+> Use command ids `ramp-up-session` and `read-session-digest` from the
+> agent-logger session command catalog. Invoke each exact `argv`; never search
+> `PATH`, scan installed marketplaces, or invoke the legacy venv path. The first
+> call provisions the shared runtime.
+> If either catalog entry is absent or unavailable, fail closed and ask the
+> operator to select this payload explicitly through the host's plugin
+> management surface.
 
 Resume the *work* of a session that can no longer be resumed the normal way.
 Every Copilot session records its raw event stream at
@@ -67,11 +69,15 @@ focus) in the prompt, e.g.:
 Ramp into the dormant session for worktree <SUFFIX> [on machine <NAME>].
 [Optionally: session <UUID>.]
 Focus: <what to resume, if the operator said>.
+ramp_argv0: <agent-logger catalog "ramp-up-session" argv[0]>
+digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
 Return the bounded Ramp-Up Briefing.
 ```
 
-The agent runs `ramp-up-session <suffix> [--machine <name>]`, reads the digest
-surgically (`read-session-digest`), inspects the worktree's git state,
+Resolve both command ids from this session's agent-logger catalog before
+spawning the agent. The agent invokes the supplied `ramp-up-session` path with
+`<suffix> [--machine <name>]`, reads the digest surgically through the
+supplied `read-session-digest` path, inspects the worktree's git state,
 reconciles intent vs. reality, and returns only the briefing — no raw
 transcript.
 
@@ -80,7 +86,8 @@ transcript.
 Read the returned briefing (it's small by design). Present a few-line situation
 summary to the operator — what the session was doing, what landed, what remains
 — then **continue the work** from where it stopped. For any detail the briefing
-flags, call `read-session-digest <id> ...` yourself (see below) rather than
+flags, call the catalog's `read-session-digest` entry yourself (see below)
+rather than
 re-reading the whole session. If the takeover needs a decision only the operator
 can make, surface it; otherwise proceed.
 
@@ -99,27 +106,18 @@ If the operator hasn't said which worktree, ask.
 ### 2. List candidates (optional but recommended)
 
 ```
-ramp-up-session <suffix> --list
-ramp-up-session <suffix> --machine <name> --list     # a worktree on another host
-```
-
-`ramp-up-session` is deployed as a binstub in `~/.local/bin` by the
-agent-logger installer. If it is not on PATH (payload installed but the runtime
-installer hasn't run, or `~/.local/bin` isn't on PATH), invoke it via the
-deployed venv interpreter instead:
-
-```
-# POSIX
-~/.agent-logger/.venv/bin/python -m agent_logger.segmenter.ramp_up <suffix> --list
-# Windows
-~/.agent-logger/.venv/Scripts/python.exe -m agent_logger.segmenter.ramp_up <suffix> --list
+<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --list
+<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --machine <name> --list
 ```
 
 A bare suffix is hunted down in the local session store by matching worktree
 directory names ending in `-<suffix>`. With `--machine <name>` naming another
 host, the hunt is delegated over `ssh <name>` (a session's raw data lives on the
-machine that produced it). This enumerates the matching sessions, most recent
-first. Pick the one to take over (usually the most recent).
+machine that produced it). That far-side SSH launch remains an explicit
+out-of-session management boundary until installation context is carried over
+remote execution; the local command still comes from this payload's catalog.
+This enumerates the matching sessions, most recent first. Pick the one to take
+over (usually the most recent).
 
 ### 3. Produce the takeover brief
 
@@ -127,10 +125,10 @@ Ramp up the most recent session (omit `--list`), or a specific one with
 `--session <id>`:
 
 ```
-ramp-up-session <suffix>
-ramp-up-session <suffix> --machine <name>            # a worktree on another host
-ramp-up-session <suffix> --session <id>              # a specific session
-ramp-up-session <suffix> --tail-turns 10             # surface more trailing turns
+<agent-logger catalog "ramp-up-session" argv[0]> <suffix>
+<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --machine <name>
+<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --session <id>
+<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --tail-turns 10
 ```
 
 The brief contains:
@@ -150,10 +148,10 @@ The full transcript was collated ephemerally. Read more with the existing
 digest reader (no deployment-specific paths, temp-store aware):
 
 ```
-read-session-digest <id> context
-read-session-digest <id> list
-read-session-digest <id> segment <N>
-read-session-digest <id> grep --pattern <regex>
+<agent-logger catalog "read-session-digest" argv[0]> <id> context
+<agent-logger catalog "read-session-digest" argv[0]> <id> list
+<agent-logger catalog "read-session-digest" argv[0]> <id> segment <N>
+<agent-logger catalog "read-session-digest" argv[0]> <id> grep --pattern <regex>
 ```
 
 Use `grep` to find the last decision, an error, a file path, or the task the
