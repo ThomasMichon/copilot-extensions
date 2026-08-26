@@ -135,6 +135,9 @@ class PRConfig:
     token_command: str = ""
     labels: tuple[str, ...] = ()
     auto_open: bool = False        # opt-in: open the PR via the provider after push
+    # Embed raw worktree/machine/session provenance in a hidden PR-body marker.
+    # Closed-circuit systems may opt in; public repos should leave this false.
+    source_attribution: bool = False
     # Review-vocabulary binding (the "multi-machine system hook" for the pr-* command
     # family: pr-watch / pr-merge / pr-status). The plugin ships these EMPTY so
     # it stays provider-generic -- a repo with no binding gets a no-op, never a
@@ -1330,6 +1333,7 @@ def _parse_pr(raw: Any) -> PRConfig:
         token_command=str(raw.get("token_command", "")),
         labels=labels,
         auto_open=bool(raw.get("auto_open", False)),
+        source_attribution=bool(raw.get("source_attribution", False)),
         automerge_label=str(raw.get("automerge_label", "")).strip(),
         hold_labels=_str_tuple(raw.get("hold_labels", ())),
         wip_title_prefixes=_str_tuple(raw.get("wip_title_prefixes", ())),

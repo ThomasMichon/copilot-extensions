@@ -162,6 +162,7 @@ class TestDataModels:
         pr = cfg.PRConfig()
         assert pr.enabled is False
         assert pr.provider == "gitea"
+        assert pr.source_attribution is False
         # Auto-complete completion defaults.
         assert pr.approval_required is True
         assert pr.squash is True
@@ -208,7 +209,8 @@ class TestPRConfigParsing:
             "      enabled: true\n"
             "      provider: github\n"
             "      strategy: keep-alive\n"
-            "      branch_prefix: pr\n",
+            "      branch_prefix: pr\n"
+            "      source_attribution: true\n",
         )
         conf = cfg.load_config(cfgfile)
         pr = conf.repos["ext"].pr
@@ -217,6 +219,7 @@ class TestPRConfigParsing:
         assert pr.provider == "github"
         assert pr.strategy == "keep-alive"
         assert pr.branch_prefix == "pr"
+        assert pr.source_attribution is True
 
     def test_pr_autocomplete_block_parsed(self, tmp_path: Path):
         cfgfile = tmp_path / "config.yaml"
@@ -1193,4 +1196,3 @@ def test_overlay_branch_overrides_registry_fallback(
     )
     c = cfg.load_config(ml)
     assert c.default_repo.default_branch == "develop"  # overlay wins
-

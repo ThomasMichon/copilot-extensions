@@ -78,8 +78,10 @@ These repo-specific rules must be followed by any change:
 
 - **Public repo — stay identifier-neutral.** This repository is public. Do not
   introduce internal organization/account/project names, private hostnames, or
-  personal aliases in code, docs, comments, or examples. Use neutral
-  placeholders.
+  personal aliases in code, docs, comments, examples, or PR metadata. Hidden
+  HTML comments are still public. This repo must keep
+  `pr.source_attribution: false`; closed-circuit repos may opt in through their
+  own config. Use neutral placeholders.
 
 - **Terminal status bars must not compute on the render path.** Nothing in a
   tmux/psmux `status-left` / `status-right` may spawn a process per render (no
@@ -107,7 +109,9 @@ Directives for the **automatic code-review agent** when reviewing a pull request
   `.ps1`), flag a missing matching change to its `.ps1` (or `.sh`) counterpart.
 - **Identifier neutrality.** Flag any newly introduced internal
   organization/account/project names, private hostnames, or personal aliases —
-  this repository is public.
+  this repository is public. PR titles, bodies, labels, commit messages, and
+  hidden comments count; flag any attempt to enable `pr.source_attribution`
+  here.
 - **ruff signal, not noise.** Hold changed Python to at least the `F`/`E9`
   groups; do not block on pre-existing style debt in code the PR did not touch.
 - **Make every comment count.** Copilot review comments (it does not approve or

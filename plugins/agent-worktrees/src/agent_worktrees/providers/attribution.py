@@ -1,9 +1,11 @@
-"""Source-worktree attribution markers embedded in PR bodies.
+"""Optional source-worktree attribution markers embedded in PR bodies.
 
-A PR opened by agent-worktrees carries a durable, hidden HTML-comment marker
-naming the **source worktree** (+ machine / session / head SHA).  This makes
-any PR traceable back to its origin without session-store archaeology -- the
-gap that motivated this effort (PR #1059 had no traceable source).
+When a closed-circuit repo opts in with ``pr.source_attribution: true``, a PR
+opened by agent-worktrees carries a durable, hidden HTML-comment marker naming
+the **source worktree** (+ machine / session / head SHA). This makes the PR
+traceable back to its origin without session-store archaeology. The marker is
+off by default because hidden PR metadata is still public and raw machine,
+worktree, and session identifiers are inappropriate for public repositories.
 
 The marker is a single HTML comment, invisible in rendered Markdown:
 

@@ -67,6 +67,9 @@ pr:
   required: true
   provider: github
   auto_open: true
+  # Hidden source markers carry raw machine/worktree/session identifiers.
+  # This public repo must never publish them; closed-circuit repos may opt in.
+  source_attribution: false
   strategy: detach
   # PR-flow legibility matrix (surfaced as reminders by the pr-* verbs) -->
   # classifies this repo as `pr-self-merge`.
