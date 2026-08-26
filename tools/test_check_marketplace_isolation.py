@@ -181,6 +181,7 @@ def test_inventory_categories(tmp_path: Path) -> None:
 
 
 def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> None:
+    patterns = cmi._command_patterns(REPO)
     for plugin in (
         "agent-codespaces",
         "agent-containers",
@@ -193,7 +194,7 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
             for surface in ("skills", "agents")
             if (REPO / "plugins" / plugin / surface).is_dir()
             for capability in (REPO / "plugins" / plugin / surface).rglob("*.md")
-            for finding in cmi._scan_file(capability, REPO)
+            for finding in cmi._scan_file(capability, REPO, patterns)
             if finding.category == "bare-agent-command"
         ]
         assert findings == [], plugin
