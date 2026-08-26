@@ -132,6 +132,24 @@ def test_local_marketplace_claim_blocks_stale_installed_fallback(tmp_path: Path)
     assert got is None
 
 
+def test_remote_marketplace_uses_installed_payload_fallback(tmp_path: Path):
+    repo = tmp_path / "repo"
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.json").write_text(
+        '{"extraKnownMarketplaces": {"copilot-extensions": {"source": '
+        '{"source": "github", "repo": "owner/repo"}}}}',
+        encoding="utf-8",
+    )
+    installed = _make_payload(tmp_path, "copilot-extensions", "agent-worktrees")
+    got = ps.host_payload_dir(
+        "agent-worktrees@copilot-extensions",
+        copilot_home=tmp_path,
+        repo_roots=[repo],
+    )
+    assert got == installed
+
+
 def test_host_payload_dir_rejects_plugin_outside_marketplace(tmp_path: Path):
     repo = tmp_path / "repo"
     marketplace = repo / ".ai"

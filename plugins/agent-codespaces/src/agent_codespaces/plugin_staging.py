@@ -103,6 +103,7 @@ def _local_payload_result(
             plugin_dir,
             read_repo_settings,
         )
+        from plugin_resolve.conventions import LOCAL_MARKETPLACE_SOURCE_KINDS
     except ImportError as exc:
         log.warning(
             "Cannot resolve repo-local plugin %s because plugin_resolve is "
@@ -124,6 +125,18 @@ def _local_payload_result(
             winning_index = index
             break
     if winning_settings is None or winning_root is None:
+        return False, None
+
+    marketplace_entry = winning_settings.marketplaces[marketplace]
+    marketplace_source = (
+        marketplace_entry.get("source")
+        if isinstance(marketplace_entry, dict)
+        else None
+    )
+    if not (
+        isinstance(marketplace_source, dict)
+        and marketplace_source.get("source") in LOCAL_MARKETPLACE_SOURCE_KINDS
+    ):
         return False, None
 
     marketplace_root = local_marketplace_path(
