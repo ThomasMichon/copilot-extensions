@@ -1475,14 +1475,6 @@ def _build_launch_cmd(
     ):
         cmd.append("--allow-all")
 
-    # Disable Copilot's process sandbox for worktree launches.  Newer Copilot
-    # builds force a "sandbox" mode that breaks worktree sessions; --no-sandbox
-    # opts back out.  Added alongside --allow-all (skip ACP -- agent-bridge
-    # spawns its own ACP copilot) and never duplicated if the caller already
-    # supplied it.
-    if not is_acp and "--no-sandbox" not in passthrough:
-        cmd.append("--no-sandbox")
-
     return cmd
 
 
