@@ -812,7 +812,8 @@ try {
         $pointer = $Context
         if (-not $pointer) { $pointer = $env:COPILOT_EXTENSIONS_CONTEXT }
         if ($pointer) {
-            $payloadExpectation = $PayloadRoot
+            $payloadExpectation = $ExpectedPayloadRoot
+            if (-not $payloadExpectation) { $payloadExpectation = $PayloadRoot }
             if (-not $payloadExpectation) { $payloadExpectation = $env:COPILOT_PLUGIN_ROOT }
             $pluginExpectation = $PluginId
             if (-not $pluginExpectation) { $pluginExpectation = $ExpectedPluginId }

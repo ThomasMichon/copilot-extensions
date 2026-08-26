@@ -548,6 +548,27 @@ def test_resolve_rejects_unbound_inherited_context(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_resolve_context_honors_expected_payload_root(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    wrong_payload = tmp_path / "wrong-payload"
+    wrong_payload.mkdir()
+    result = _run_ps(
+        "resolve",
+        "-Context",
+        layout["install"],
+        "-DurableHome",
+        layout["durable"],
+        "-ExpectedPluginId",
+        layout["plugin_id"],
+        "-ExpectedPayloadRoot",
+        wrong_payload,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "Expected payload" in result.stderr
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_escaping_relative_root_is_rejected(tmp_path: Path) -> None:
     layout = _receipt_layout(tmp_path)
     receipt = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
