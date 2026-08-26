@@ -112,6 +112,15 @@ Machine-local project state lives under the adopting cell's `repos/` tree. A
 normalized remote identity plus a collision-resistant suffix is the canonical
 key; repository basename remains display metadata only.
 
+Host-provided plugin-data directories are useful inputs but not the identity
+contract. Hooks and LSP servers receive `COPILOT_PLUGIN_DATA`; Agent Plugins
+specification MCP servers also receive `PLUGIN_DATA`; legacy MCP servers and
+JavaScript extensions do not receive an equivalent automatic directory. A
+surface may use the supplied directory only when the host proves that it is
+qualified by globally distinguishing marketplace provenance. All other
+surfaces resolve the same installation context explicitly, so isolation does
+not depend on a variable that is absent from part of the plugin runtime.
+
 ## Runtime isolation requirements
 
 Every process receives immutable installation context containing marketplace,
@@ -220,3 +229,26 @@ The acceptance test is two marketplace cells with the same plugin names running
 simultaneously through install, first use, service start, project adoption,
 update, rollback, repair, and uninstall without observing or modifying one
 another.
+
+## Report-only inventory guard
+
+`tools/check-marketplace-isolation.py` scans operative plugin surfaces:
+install/lifecycle scripts, checked-in binstubs, runtime source, hooks,
+extensions, skills, and agent prompts. It excludes tests, fixtures, snapshots,
+and descriptive plugin docs so the baseline measures behavior-producing or
+agent-operative surfaces rather than historical prose.
+
+The stable categories are:
+
+- `unqualified-runtime-root`
+- `global-plugin-binstub`
+- `path-sibling-launch`
+- `fixed-service-identity`
+- `bare-agent-command`
+
+Default output is a concise category summary and always exits zero. `--verbose`
+adds file/line findings, `--json` emits the complete machine-readable inventory,
+and `--strict` is reserved for Phase 6 after all producing phases conform. An
+intentional compatibility seam uses
+`marketplace-isolation: allow <reason>`; a reasonless suppression remains a
+finding.

@@ -45,7 +45,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install tooling
-        run: python -m pip install --upgrade pip pyyaml ruff
+        run: python -m pip install --upgrade pip pytest pyyaml ruff
       - name: Version consistency
         run: python tools/check-version-consistency.py
       - name: Version bump (touched plugins must bump; PR diff only)
@@ -64,6 +64,14 @@ jobs:
         # chain, never a `.venv`/`venv` link and never a PATH python. --strict
         # fails the build on any regression now that the migration has landed.
         run: python tools/check-runtime-resolution.py --strict
+      - name: Marketplace isolation inventory (report-only)
+        # Phase 1 of #1096 inventories legacy unqualified roots, generic global
+        # plugin commands, PATH-based sibling launches, fixed lifecycle
+        # identities, and operative bare commands. It becomes strict only after
+        # the producing migration phases have landed.
+        run: python tools/check-marketplace-isolation.py
+      - name: Marketplace isolation guard tests
+        run: python -m pytest -q tools/test_check_marketplace_isolation.py
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a
         # second interpreter can surface Default Terminal windows on Windows.

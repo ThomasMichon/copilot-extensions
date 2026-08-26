@@ -481,6 +481,12 @@ The repo ships git hooks under `tools/hooks/`:
   `plugin.json` / `pyproject.toml` / its `marketplace.json` entry — a one-file
   bump wedges the Picker's update indicator).
 
+CI also runs `tools/check-marketplace-isolation.py` in report-only mode. It
+inventories legacy unqualified runtime roots, generic global plugin commands,
+PATH-based sibling launches, fixed lifecycle identities, and operative bare
+commands while the marketplace-installation-cell migration is active. Do not
+enable `--strict` until the producing phases in #1096 have removed the baseline.
+
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:
 
