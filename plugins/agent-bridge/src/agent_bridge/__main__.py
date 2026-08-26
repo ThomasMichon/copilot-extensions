@@ -1616,6 +1616,74 @@ def _cmd_undrain(args: argparse.Namespace) -> None:
     print("Drain gate released; accepting new work.")
 
 
+def _cmd_parity(args: argparse.Namespace) -> None:
+    """Run the redacted remote-venue acceptance harness."""
+    from .client import BridgeClientError
+    from .parity_harness import ParityFailure, run
+
+    if (args.ado_url or args.azure_scope) and not args.auth:
+        message = "--ado-url/--azure-scope require --auth"
+        if args.json:
+            _json_out({"ok": False, "target": args.target, "error": message})
+        else:
+            print(f"[FAIL] venue parity: {message}", file=sys.stderr)
+        sys.exit(2)
+    client = _get_client()
+    try:
+        evidence = run(
+            client,
+            args.target,
+            expected_workspace=args.expect_workspace,
+            expected_capability=args.expect_capability,
+            auth=args.auth,
+            ado_url=args.ado_url,
+            azure_scope=args.azure_scope,
+            startup_timeout=args.startup_timeout,
+            turn_timeout=args.turn_timeout,
+            keep_session=args.keep_session,
+        )
+    except ParityFailure as exc:
+        result = (
+            exc.evidence.to_dict()
+            if exc.evidence is not None
+            else {"ok": False, "target": args.target}
+        )
+        result["ok"] = False
+        result["error"] = str(exc)
+        if args.json:
+            _json_out(result)
+        else:
+            print(f"[FAIL] venue parity: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except BridgeClientError as exc:
+        result = {
+            "ok": False,
+            "target": args.target,
+            "error": exc.detail,
+            "status": exc.status,
+        }
+        if args.json:
+            _json_out(result)
+        else:
+            print(
+                f"[FAIL] venue parity: HTTP {exc.status}: {exc.detail}",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+    result = evidence.to_dict()
+    if args.json:
+        _json_out(result)
+        return
+    print(f"[OK] venue parity: {args.target}")
+    print(
+        f"  session={result['session_id']} "
+        f"pid={result['initial_child_pid']} "
+        f"acp={result['initial_acp_session_id']}"
+    )
+    for name, ok in result["checks"].items():
+        print(f"  {'PASS' if ok else 'FAIL'} {name}")
+
+
 def _passive_daemon_creationflags() -> int:
     """Windows process-creation flags for the detached passive daemon.
 
@@ -4059,6 +4127,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit structured provider findings",
     )
     doctor_p.set_defaults(func=_cmd_doctor)
+
+    parity_p = sub.add_parser(
+        "parity",
+        help="Run redacted launch/auth/reattach acceptance for a remote venue",
+    )
+    parity_p.add_argument("target", help="Remote agent target (container: or codespace:)")
+    parity_p.add_argument("--expect-workspace")
+    parity_p.add_argument("--expect-capability")
+    parity_p.add_argument(
+        "--auth",
+        action="store_true",
+        help="Require redacted GitHub credential and gh API checks",
+    )
+    parity_p.add_argument(
+        "--ado-url",
+        help="ADO Git URL to check with credential fill + ls-remote (values redacted)",
+    )
+    parity_p.add_argument(
+        "--azure-scope",
+        help="Azure scope to mint through azure-auth-helper (value redacted)",
+    )
+    parity_p.add_argument("--startup-timeout", type=float, default=600.0)
+    parity_p.add_argument("--turn-timeout", type=float, default=600.0)
+    parity_p.add_argument("--keep-session", action="store_true")
+    parity_p.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Emit structured redacted evidence",
+    )
+    parity_p.set_defaults(func=_cmd_parity)
 
     service_p = sub.add_parser(
         "service",

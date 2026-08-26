@@ -268,3 +268,21 @@ last so naming follows the proven abstraction rather than predicting it.
   MCP configuration without persisting possible secrets. Candidate versions:
   agent-bridge **0.4.0-dev361**, agent-containers **0.1.2-dev81**. **Next:** P2
   formal parity harness.
+- **2026-08-26 — P2 executable parity harness foundation.** Agent-bridge dev363
+  adds `agent-bridge parity <container:|codespace:>`: one isolated session runs
+  a shell-side redacted cwd/auth probe, reports already-loaded repo capabilities,
+  waits for a real `turn_complete`, verifies ACP continuity and a live child
+  across explicit stop/resume, completes another turn, and cleans up in
+  `finally`. Credential subprocesses are captured inside Python and emit
+  booleans only; the harness rejects credential-shaped durable event content.
+  Expectations remain host-side, streamed agent chunks are accumulated, busy
+  one-session venues fail cleanly, and failed starts are cleaned by a unique
+  caller id. **Live gates:** a trusted container passed workspace, repo
+  capability, GitHub, ADO Git, Azure, resume, and second-turn checks; a fresh
+  CodeSpace passed workspace, repo capability, resume, and second-turn checks.
+  Both emitted structured redacted JSON and left no session behind. Explicit
+  idle stop may recreate the child while preserving ACP identity, so same-child
+  PID is correctly reserved for the forthcoming frontend-loss/HostIndex
+  scenario. **Next:** add destructive P2 scenarios for frontend restart +
+  HostIndex loss, relay interruption, failed handshake rollback, and venue
+  stop/recreate.
