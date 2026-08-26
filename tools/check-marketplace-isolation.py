@@ -48,11 +48,16 @@ _SKIP_PARTS = {
     "__pycache__",
     ".pytest_cache",
     ".ruff_cache",
+    ".venv",
+    "build",
+    "dist",
     "docs",
     "examples",
     "fixtures",
+    "node_modules",
     "snapshots",
     "tests",
+    "venv",
 }
 
 _UNQUALIFIED_ROOT = re.compile(

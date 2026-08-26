@@ -251,6 +251,16 @@ def test_scan_scope_excludes_tests_and_docs(tmp_path: Path) -> None:
     )
     _write(
         root,
+        "plugins/example/.venv/lib/runtime.py",
+        'root = "~/.agent-example"\n',
+    )
+    _write(
+        root,
+        "plugins/example/libs/example/build/generated.py",
+        'subprocess.run(["agent-example", "status"])\n',
+    )
+    _write(
+        root,
         "plugins/example/hooks.json",
         '{"hooks": {"sessionStart": [{"command": "agent-example status"}]}}\n',
     )

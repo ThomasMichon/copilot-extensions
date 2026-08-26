@@ -13,16 +13,11 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from .procutil import no_window_kwargs as _no_window_kwargs
+
 GROUPS = ("Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned")
 TERMINAL = frozenset({"Completed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
-
-
-def _no_window_kwargs() -> dict:
-    if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NO_WINDOW}
-    return {}
-
 
 def _local_machine() -> str | None:
     value = os.environ.get("AGENT_DISPATCH_SUPERVISE_MACHINE")
