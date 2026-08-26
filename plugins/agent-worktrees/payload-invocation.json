@@ -1,0 +1,10 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-worktrees",
+  "module": "agent_worktrees",
+  "runtimeRoot": ".agent-worktrees",
+  "noSelfProvisionEnv": "AGENT_WORKTREES_NO_SELFPROVISION",
+  "purpose": "Manage worktrees and project lifecycle",
+  "outputDir": "bin/payload"
+}

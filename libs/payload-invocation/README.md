@@ -3,10 +3,10 @@
 Canonical generator for payload-local plugin command shims.
 
 A runtime plugin declares `payload-invocation.json`; the generator renders
-equivalent POSIX, PowerShell, and CMD entry points into that plugin's checked-in
-`bin/` directory. The installed marketplace payload therefore carries the
-command that invokes its own runtime instead of relying on a same-named global
-command found through `PATH`.
+equivalent POSIX, PowerShell, and CMD entry points plus POSIX/PowerShell session
+command-catalog emitters. The installed marketplace payload therefore carries
+the command that invokes its own runtime instead of relying on a same-named
+global command found through `PATH`.
 
 ## Contract
 
@@ -20,6 +20,11 @@ Generated shims:
 - self-provision only through the same payload's installer/snapshot;
 - never scan installed marketplaces or resolve a sibling command through
   `PATH`.
+
+`outputDir` defaults to `bin` and may name a nested payload-only directory when
+a plugin still uses its historical top-level `bin/` files as legacy global
+wrapper sources. Catalog emitters always publish the exact generated command
+path.
 
 The initial manifest keeps a legacy runtime-root name because installation-cell
 runtime placement belongs to Phase 3. Replacing that root with the installation
