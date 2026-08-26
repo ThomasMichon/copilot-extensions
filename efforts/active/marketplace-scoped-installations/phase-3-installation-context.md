@@ -79,7 +79,7 @@ Installed-payload locator evidence has this shape:
 
 ```text
 {
-  "kind": "installed-locator",
+  "kind": "installed",
   "copilotHome": "<canonical Copilot home>",
   "marketplaceKey": "<configured key>"
 }
@@ -89,7 +89,7 @@ A directory-marketplace locator has this shape:
 
 ```text
 {
-  "kind": "directory-locator",
+  "kind": "directory",
   "marketplaceRoot": "<canonical absolute root>",
   "marketplaceKey": "<optional configured key>"
 }
@@ -128,7 +128,7 @@ JSON. This avoids key-order, escaping, newline, and BOM differences between
 shell, PowerShell, and Python. A conceptual GitHub record is:
 
 ```text
-version:1
+version:1:1
 kind:6:github
 source:23:github:owner/repository
 ref:0:
