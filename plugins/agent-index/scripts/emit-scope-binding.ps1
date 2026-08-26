@@ -61,26 +61,27 @@ $rows = ($sources | ForEach-Object {
     }) -join "`n"
 
 $md = @"
-## agent-index retrieval — call the ``agent-index`` CLI directly
+## agent-index retrieval — use the session command catalog
 
-A semantic + lexical index of this harness is available to **every agent**. Run
-the **``agent-index``** CLI directly (no sub-agent, no MCP tool). It covers:
+A semantic + lexical index of this harness is available to **every agent**. Take
+``commands[id=agent-index].argv`` from the injected command catalog and append
+the arguments below (no sub-agent, no MCP tool, no PATH lookup). It covers:
 
 $rows
 
 **How to search:**
-- ``agent-index search "<natural-language or code query>" [--source <name>] [--language <lang>] [--repo <repo>] [--limit N] --json`` — ranked hits; each has ``chunk_id``, ``source``, ``file_path``, ``line_start``/``line_end``, ``content``.
-- ``agent-index similar <chunk_id> [--source <name>] [--limit N]`` — pivot 'more like this' from a hit.
-- ``agent-index clusters [--source <name>] [--exact-dupes-only] [--limit N]`` — near-duplicate groups.
-- ``agent-index status`` — index health + per-source coverage; probe once if results look sparse.
+- ``<catalog argv[0]> search "<natural-language or code query>" [--source <name>] [--language <lang>] [--repo <repo>] [--limit N] --json`` — ranked hits; each has ``chunk_id``, ``source``, ``file_path``, ``line_start``/``line_end``, ``content``.
+- ``<catalog argv[0]> similar <chunk_id> [--source <name>] [--limit N]`` — pivot 'more like this' from a hit.
+- ``<catalog argv[0]> clusters [--source <name>] [--exact-dupes-only] [--limit N]`` — near-duplicate groups.
+- ``<catalog argv[0]> status`` — index health + per-source coverage; probe once if results look sparse.
 
-**Prefer ``agent-index search``** over a broad ``grep``/``glob`` sweep when
+**Prefer the catalog command's ``search`` subcommand** over a broad ``grep``/``glob`` sweep when
 searching **within these scopes** by meaning/behavior, for the most-relevant few
 results across a large corpus, or to pivot from a hit. Pass ``--source`` to scope
 to one corpus (and to respect trust-domain boundaries, not yet enforced at query
 time). Fall back to ``grep``/``glob`` for exact-string hunts, files outside these
 scopes, or if the index is unavailable. Read-only: never reindex from an agent --
-that is the operator flow (``agent-index index``).
+that is the operator flow (``<catalog argv[0]> index``).
 "@
 
 Write-Output (@{ additionalContext = $md } | ConvertTo-Json -Compress -Depth 3)

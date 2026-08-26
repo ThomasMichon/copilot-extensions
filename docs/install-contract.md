@@ -52,6 +52,15 @@ complete.
    legacy activation is quiesced; uninstall removes only receipt-matching
    artifacts.
 
+Payload-local command shims are generated from the canonical templates in
+`libs/payload-invocation/`. Each adopting plugin commits a
+`payload-invocation.json` manifest plus generated POSIX, PowerShell, and CMD
+files under its own `bin/` payload. CI runs the generator in `--check` mode.
+During the Phase 2 transition, a generated shim may resolve a legacy runtime
+root only through its own payload's resolver; it may not scan marketplaces or
+fall through to a same-named global command. Phase 3 replaces that legacy root
+input with the installation context without changing the payload command.
+
 `COPILOT_PLUGIN_ROOT` is the authoritative immutable payload location on
 surfaces where the host supplies it. `COPILOT_PLUGIN_DATA` / `PLUGIN_DATA` is a
 candidate mutable root only when the host proves that it is qualified by

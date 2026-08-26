@@ -1,0 +1,8 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-index",
+  "module": "agent_index",
+  "runtimeRoot": ".agent-index",
+  "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION"
+}

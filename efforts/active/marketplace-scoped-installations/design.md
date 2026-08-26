@@ -87,6 +87,26 @@ therefore emits a session command catalog from a hook that receives
 `COPILOT_PLUGIN_ROOT`. Operative skill instructions refer to that exact command
 entry rather than assuming a global executable.
 
+The command catalog uses this initial contract:
+
+```json
+{
+  "schema": "copilot-extensions.session-command-catalog",
+  "version": 1,
+  "plugin": "<plugin>",
+  "payload": {"provenance": "payload-local"},
+  "commands": [{
+    "id": "<command>",
+    "argv": ["<absolute-payload-command>"],
+    "shell": "direct",
+    "availability": "ready|unavailable"
+  }]
+}
+```
+
+Consumers append arguments to the supplied `argv`; they never reconstruct the
+path from `payload`, search `PATH`, or substitute another same-named command.
+
 Project binstubs remain in `~/.local/bin` and forward to an absolute,
 payload-local agent-worktrees shim. An ownership receipt binds the project
 command to marketplace identity, repository identity, and payload/runtime

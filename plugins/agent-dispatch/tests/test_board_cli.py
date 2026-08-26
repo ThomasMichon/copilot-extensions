@@ -110,12 +110,15 @@ def test_main_reports_missing_endpoint_without_traceback(
 
 def test_remote_machine_falls_back_to_full_cli(monkeypatch):
     monkeypatch.setattr(board_cli, "_local_machine", lambda: "m1")
+    monkeypatch.setattr(
+        board_cli, "_no_window_kwargs", lambda: {"creationflags": 123}
+    )
     captured = {}
 
     def run(command, check, **kwargs):
         captured["command"] = command
         assert check is False
-        assert isinstance(kwargs, dict)
+        assert kwargs == {"creationflags": 123}
         return types.SimpleNamespace(returncode=7)
 
     monkeypatch.setattr(board_cli.subprocess, "run", run)

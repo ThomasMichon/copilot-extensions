@@ -72,6 +72,13 @@ jobs:
         run: python tools/check-marketplace-isolation.py
       - name: Marketplace isolation guard tests
         run: python -m pytest -q tools/test_check_marketplace_isolation.py
+      - name: Payload invocation generated files
+        run: python libs/payload-invocation/generate.py --all --check
+      - name: Payload invocation foundation tests
+        run: >-
+          python -m pytest -q
+          libs/payload-invocation/tests/test_generate.py
+          plugins/agent-index/tests/test_command_catalog.py
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a
         # second interpreter can surface Default Terminal windows on Windows.
