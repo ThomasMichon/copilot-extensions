@@ -202,7 +202,7 @@ def test_frontend_restart_fault_gates_same_host_and_child():
         "container:example-1",
         startup_timeout=1,
         turn_timeout=1,
-        fault="frontend-restart-hostindex-loss",
+        fault=parity.FRONTEND_RESTART_HOSTINDEX_LOSS,
         fault_handler=fault_handler,
     )
 
@@ -223,13 +223,16 @@ def test_frontend_restart_fault_refuses_other_active_session():
     client = FakeClient()
     client.other_sessions = [{"session_id": "other", "status": "idle"}]
 
-    with pytest.raises(parity.ParityFailure, match="another managed session"):
+    with pytest.raises(
+        parity.ParityFailure,
+        match="another managed session is active: other",
+    ):
         parity.run(
             client,
             "container:example-1",
             startup_timeout=1,
             turn_timeout=1,
-            fault="frontend-restart-hostindex-loss",
+            fault=parity.FRONTEND_RESTART_HOSTINDEX_LOSS,
             fault_handler=lambda _session_id, _timeout: {},
         )
 

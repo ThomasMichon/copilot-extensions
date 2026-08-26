@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 from . import __version__
+from .parity_harness import FRONTEND_RESTART_HOSTINDEX_LOSS
 
 if TYPE_CHECKING:
     from .client import BridgeClientError
@@ -1619,11 +1620,7 @@ def _cmd_undrain(args: argparse.Namespace) -> None:
 def _cmd_parity(args: argparse.Namespace) -> None:
     """Run the redacted remote-venue acceptance harness."""
     from .client import BridgeClientError
-    from .parity_harness import (
-        _FRONTEND_RESTART_HOSTINDEX_LOSS,
-        ParityFailure,
-        run,
-    )
+    from .parity_harness import ParityFailure, run
 
     if (args.ado_url or args.azure_scope) and not args.auth:
         message = "--ado-url/--azure-scope require --auth"
@@ -1635,7 +1632,7 @@ def _cmd_parity(args: argparse.Namespace) -> None:
     client = _get_client()
     fault_handler = (
         _fault_frontend_restart_hostindex_loss
-        if args.fault == _FRONTEND_RESTART_HOSTINDEX_LOSS
+        if args.fault == FRONTEND_RESTART_HOSTINDEX_LOSS
         else None
     )
     try:
@@ -4237,7 +4234,7 @@ def build_parser() -> argparse.ArgumentParser:
     parity_p.add_argument("--keep-session", action="store_true")
     parity_p.add_argument(
         "--fault",
-        choices=["frontend-restart-hostindex-loss"],
+        choices=[FRONTEND_RESTART_HOSTINDEX_LOSS],
         help=(
             "Run an explicit destructive fault scenario. The frontend-restart "
             "scenario refuses other active managed sessions and removes only "

@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 _RESULT_MARKER = "VENUE_PARITY_JSON:"
 _PROBE_MARKER = "VENUE_PARITY_PROBE:"
 _REATTACH_MARKER = "VENUE_PARITY_REATTACH_OK"
-_FRONTEND_RESTART_HOSTINDEX_LOSS = "frontend-restart-hostindex-loss"
+FRONTEND_RESTART_HOSTINDEX_LOSS = "frontend-restart-hostindex-loss"
 _TERMINAL = {"failed", "ended", "stopped"}
 _INACTIVE_FOR_FAULT = _TERMINAL
 _SECRET_SHAPES = (
@@ -259,7 +259,7 @@ def run(
     fault_handler: Callable[[str, float], dict[str, Any]] | None = None,
 ) -> ParityEvidence:
     """Run baseline quality/auth plus same-child stop/resume acceptance."""
-    if fault not in {None, _FRONTEND_RESTART_HOSTINDEX_LOSS}:
+    if fault not in {None, FRONTEND_RESTART_HOSTINDEX_LOSS}:
         raise ParityFailure(f"unsupported parity fault: {fault}")
     if fault and fault_handler is None:
         raise ParityFailure(f"parity fault {fault!r} requires a fault handler")
@@ -365,7 +365,7 @@ def run(
                     probe.get("azure_token") is True
                 )
 
-        if fault == _FRONTEND_RESTART_HOSTINDEX_LOSS:
+        if fault == FRONTEND_RESTART_HOSTINDEX_LOSS:
             active_others = [
                 str(item.get("session_id") or "")
                 for item in client.list_sessions()
@@ -375,7 +375,8 @@ def run(
             if active_others:
                 raise ParityFailure(
                     "frontend restart fault refuses to run while another "
-                    "managed session is active",
+                    "managed session is active: "
+                    + ", ".join(active_others[:5]),
                     evidence=evidence,
                 )
             evidence.checks["exclusive_frontend_fault"] = True
