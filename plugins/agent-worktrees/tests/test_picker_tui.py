@@ -5864,6 +5864,75 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
+def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatch):
+    """A slow menu probe may finish after Resume has detached the picker screen."""
+    from agent_worktrees import config as _cfg
+    from agent_worktrees import sessions as _sessions
+    from agent_worktrees import tracking as _tracking
+
+    src = _verb_fixture_source()
+    wt_id = "anomalous-potato-win-20260627-stop"
+    tdir = tmp_path / "worktrees"
+    tdir.mkdir()
+    (tdir / f"{wt_id}.yaml").write_text("id: x\n", encoding="utf-8")
+    monkeypatch.setattr(_cfg, "tracking_dir", lambda: tdir)
+    monkeypatch.setattr(_tracking, "stamp_mux_live", lambda *a, **k: None)
+
+    gate = threading.Event()
+    started = threading.Event()
+    thread_errors = []
+    original_excepthook = threading.excepthook
+
+    def _gated_verify(ns):
+        started.set()
+        gate.wait()
+        return types.SimpleNamespace(
+            mux_live=False, mux_clients=0, live_session_ids=[], bare=False)
+
+    def _capture_thread_error(args):
+        if args.thread.name == "pivot-action:Actions":
+            thread_errors.append(args.exc_value)
+            return
+        original_excepthook(args)
+
+    monkeypatch.setattr(_sessions, "verify_worktree_active", _gated_verify)
+    monkeypatch.setattr(threading, "excepthook", _capture_thread_error)
+
+    async def run():
+        app = PickerApp(src, live=False)
+        worker = None
+        try:
+            async with app.run_test(size=(118, 36)) as pilot:
+                scr = app.query_one(PickerScreen)
+                scr.machine_idx = scr.local_index()
+                await pilot.pause()
+                recs = scr.list_records()
+                scr.sel = ("L", next(
+                    i for i, rec in enumerate(recs) if rec["id4"] == "stop"))
+                scr._open_submenu()
+                assert await asyncio.to_thread(started.wait, 1)
+                worker = next(
+                    thread for thread in threading.enumerate()
+                    if thread.name == "pivot-action:Actions" and thread.is_alive())
+                await pilot.pause()
+                menu = _sub_menu(scr)
+                assert menu is not None
+                assert menu._actions[0] == "Resume"
+                await pilot.press("enter")
+                await pilot.pause()
+
+            assert app.result["action"] == "resume"
+        finally:
+            gate.set()
+
+        assert worker is not None
+        await asyncio.to_thread(worker.join, 2)
+        assert not worker.is_alive()
+        assert thread_errors == []
+
+    asyncio.run(run())
+
+
 def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
     from agent_worktrees.picker_tui import pivots as pivots_mod
 
