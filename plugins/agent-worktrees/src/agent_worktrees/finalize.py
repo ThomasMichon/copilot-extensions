@@ -1128,6 +1128,25 @@ def _assert_obligations_settled(
     """
     if record is None:
         return True
+    try:
+        from . import claim_handoffs
+        source_ref = tracking.format_claim_ref(
+            record.machine, record.repo, record.worktree_id)
+        active_handoffs = claim_handoffs.active_bundle_ids_for_source(
+            source_ref)
+    except Exception as exc:
+        output.err(
+            f"Cannot verify claim-handoff registry for {worktree_id}; finalize "
+            f"is refused fail-closed ({exc}).")
+        return False
+    if active_handoffs:
+        output.err(
+            f"Worktree {worktree_id} owns {len(active_handoffs)} nonterminal "
+            "claim-handoff bundle(s); finalize is refused until each is "
+            "accepted, declined, or cancelled: "
+            + ", ".join(active_handoffs)
+        )
+        return False
     unsettled = [c for c in record.resources if c.is_unsettled]
     if not unsettled:
         return True
@@ -1138,6 +1157,14 @@ def _assert_obligations_settled(
             "creation reservation(s). Pending resources cannot be abandoned or "
             "handed off before their real identity is journaled; wait for the "
             "creating command or repair its pending claim."
+        )
+        return False
+    offered = [c for c in unsettled if c.handoff_bundle]
+    if offered:
+        output.err(
+            f"Worktree {worktree_id} has {len(offered)} claim(s) reserved in "
+            "offered handoff bundles. Offered responsibility cannot be settled, "
+            "abandoned, or released before consumer acceptance or decline/cancel."
         )
         return False
     if abandon and not (handoff_to or "").strip():
@@ -1267,8 +1294,27 @@ def validate_and_finalize(
     if yaml_path.exists():
         try:
             record = tracking.load_record(yaml_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            output.err(
+                f"Cannot finalize {worktree_id}: its existing claim ledger is "
+                f"unreadable ({exc}). Creator ownership is preserved.")
+            return False
+
+    try:
+        from . import claim_handoffs
+        source_ref = tracking.format_claim_ref(
+            config.machine, config.repo_name, worktree_id)
+        active_handoffs = claim_handoffs.active_bundle_ids_for_source(source_ref)
+    except Exception as exc:
+        output.err(
+            f"Cannot verify claim-handoff registry for {worktree_id}; finalize "
+            f"is refused fail-closed ({exc}).")
+        return False
+    if active_handoffs:
+        output.err(
+            f"Worktree {worktree_id} owns nonterminal claim-handoff bundles; "
+            "finalize is refused: " + ", ".join(active_handoffs))
+        return False
 
     wt_exists = Path(worktree_path).exists()
     pr_mode = bool(
@@ -1365,10 +1411,41 @@ def validate_and_finalize(
     # re-check every claim, persist+verify the handoff, then mark the creator
     # `finalizing`. Claim creation rejects that terminal transition, so no new
     # resource can appear between this check and release_all_resources below.
+    try:
+        active_handoffs = claim_handoffs.active_bundle_ids_for_source(source_ref)
+    except Exception as exc:
+        output.err(
+            f"Cannot verify claim-handoff registry before cleanup ({exc}); "
+            "finalize is refused.")
+        return False
+    if active_handoffs:
+        output.err(
+            f"Worktree {worktree_id} acquired/retains nonterminal "
+            "claim-handoff bundles before cleanup; finalize is refused: "
+            + ", ".join(active_handoffs))
+        return False
+
     if yaml_path.exists():
         try:
             with tracking._RecordLock(yaml_path, require_sidecar=True):
                 record = tracking.load_record(yaml_path)
+                try:
+                    from . import claim_handoffs
+                    source_ref = tracking.format_claim_ref(
+                        record.machine, record.repo, record.worktree_id)
+                    active_handoffs = (
+                        claim_handoffs.active_bundle_ids_for_source(source_ref))
+                except Exception as exc:
+                    output.err(
+                        f"Cannot verify claim-handoff registry before cleanup "
+                        f"({exc}); finalize is refused.")
+                    return False
+                if active_handoffs:
+                    output.err(
+                        f"Worktree {worktree_id} acquired/retains nonterminal "
+                        "claim-handoff bundles before cleanup; finalize is "
+                        "refused: " + ", ".join(active_handoffs))
+                    return False
                 unsettled = [c for c in record.resources if c.is_unsettled]
                 pending = [
                     c for c in unsettled if c.ref.startswith("pending-run:")
@@ -1379,6 +1456,14 @@ def validate_and_finalize(
                         "in-flight resource creation reservation(s) before "
                         "cleanup. Finalize is refused until each real resource "
                         "identity is journaled."
+                    )
+                    return False
+                offered = [c for c in unsettled if c.handoff_bundle]
+                if offered:
+                    output.err(
+                        f"Worktree {worktree_id} acquired {len(offered)} "
+                        "handoff-reserved claim(s) before cleanup. Finalize is "
+                        "refused until acceptance or decline/cancel resolves them."
                     )
                     return False
                 if unsettled and not abandon:
