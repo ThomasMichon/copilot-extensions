@@ -14,8 +14,9 @@ TEMPLATES = Path(__file__).resolve().parent / "templates"
 SCHEMA = "copilot-extensions.payload-invocation"
 VERSION = 1
 
-_COMMAND = re.compile(r"^agent-[a-z0-9-]+$")
-_MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_PLUGIN = re.compile(r"^agent-[a-z0-9-]+$")
+_COMMAND = re.compile(r"^[a-z][a-z0-9-]*$")
+_MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$")
 _RUNTIME_ROOT = re.compile(r"^\.[a-z0-9-]+$")
 _ENV = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
@@ -23,21 +24,67 @@ _OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
 _INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
-def load_manifest(path: Path) -> dict[str, str | int]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") != SCHEMA or data.get("version") != VERSION:
-        raise ValueError(f"{path}: expected {SCHEMA} version {VERSION}")
+def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{path}: invalid {label}: {value!r}")
     checks = {
         "command": _COMMAND,
         "module": _MODULE,
-        "runtimeRoot": _RUNTIME_ROOT,
-        "noSelfProvisionEnv": _ENV,
         "purpose": _PURPOSE,
     }
+    command: dict[str, str] = {}
     for field, pattern in checks.items():
+        field_value = value.get(field)
+        if not isinstance(field_value, str) or not pattern.fullmatch(field_value):
+            raise ValueError(f"{path}: invalid {label}.{field}: {field_value!r}")
+        command[field] = field_value
+    return command
+
+
+def load_manifest(path: Path) -> dict[str, object]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("schema") != SCHEMA or data.get("version") != VERSION:
+        raise ValueError(f"{path}: expected {SCHEMA} version {VERSION}")
+    shared_checks = {
+        "runtimeRoot": _RUNTIME_ROOT,
+        "noSelfProvisionEnv": _ENV,
+    }
+    for field, pattern in shared_checks.items():
         value = data.get(field)
         if not isinstance(value, str) or not pattern.fullmatch(value):
             raise ValueError(f"{path}: invalid {field}: {value!r}")
+
+    raw_commands = data.get("commands")
+    if raw_commands is None:
+        command = _load_command(
+            path,
+            {field: data.get(field) for field in ("command", "module", "purpose")},
+            label="command",
+        )
+        commands = [command]
+        plugin = data.get("plugin", command["command"])
+        if plugin != command["command"]:
+            raise ValueError(
+                f"{path}: legacy plugin must equal command; use commands[] for "
+                "distinct plugin identity"
+            )
+    else:
+        if any(field in data for field in ("command", "module", "purpose")):
+            raise ValueError(
+                f"{path}: commands cannot be combined with top-level command/module/purpose"
+            )
+        if not isinstance(raw_commands, list) or not raw_commands:
+            raise ValueError(f"{path}: commands must be a non-empty list")
+        commands = [
+            _load_command(path, value, label=f"commands[{index}]")
+            for index, value in enumerate(raw_commands)
+        ]
+        plugin = data.get("plugin")
+    if not isinstance(plugin, str) or not _PLUGIN.fullmatch(plugin):
+        raise ValueError(f"{path}: invalid plugin: {plugin!r}")
+    command_ids = [command["command"] for command in commands]
+    if len(command_ids) != len(set(command_ids)):
+        raise ValueError(f"{path}: duplicate command id")
     output_dir = data.get("outputDir", "bin")
     if (
         not isinstance(output_dir, str)
@@ -50,24 +97,62 @@ def load_manifest(path: Path) -> dict[str, str | int]:
         raise ValueError(f"{path}: invalid installer: {installer!r}")
     data["outputDir"] = output_dir
     data["installer"] = installer
+    data["plugin"] = plugin
+    data["commands"] = commands
+    data["multiCommandManifest"] = raw_commands is not None
     return data
 
 
-def render(template: str, data: dict[str, str | int]) -> str:
+def render(
+    template: str,
+    data: dict[str, object],
+    *,
+    command: dict[str, str] | None = None,
+) -> str:
+    commands = data["commands"]
+    assert isinstance(commands, list) and commands
+    selected = command or commands[0]
+    assert isinstance(selected, dict)
     output_parts = Path(str(data["outputDir"])).parts
     payload_up = "/".join(".." for _part in output_parts)
+    output_dir = str(data["outputDir"])
+    catalog_specs = [
+        {
+            "id": item["command"],
+            "relativePath": f"{output_dir}/{item['command']}",
+            "purpose": item["purpose"],
+        }
+        for item in commands
+    ]
+    catalog_specs_ps = [
+        {
+            "id": item["command"],
+            "relativePath": (
+                f"{output_dir}/{item['command']}.ps1".replace("/", "\\")
+            ),
+            "purpose": item["purpose"],
+        }
+        for item in commands
+    ]
     values = {
-        "COMMAND": str(data["command"]),
-        "MODULE": str(data["module"]),
+        "PLUGIN": str(data["plugin"]),
+        "COMMAND": str(selected["command"]),
+        "MODULE": str(selected["module"]),
         "RUNTIME_ROOT": str(data["runtimeRoot"]),
         "NO_SELFPROVISION_ENV": str(data["noSelfProvisionEnv"]),
-        "PURPOSE": str(data["purpose"]),
+        "PURPOSE": str(selected["purpose"]),
         "OUTPUT_DIR": str(data["outputDir"]),
         "OUTPUT_DIR_PS": str(data["outputDir"]).replace("/", "\\"),
         "PAYLOAD_UP": payload_up,
         "PAYLOAD_UP_PS": payload_up.replace("/", "\\"),
         "PAYLOAD_UP_WIN": payload_up.replace("/", "\\"),
         "INSTALLER": str(data["installer"]),
+        "CATALOG_SPECS_JSON": json.dumps(
+            catalog_specs, ensure_ascii=True, separators=(",", ":")
+        ),
+        "CATALOG_SPECS_JSON_PS": json.dumps(
+            catalog_specs_ps, ensure_ascii=True, separators=(",", ":")
+        ),
     }
     rendered = template
     for key, value in values.items():
@@ -81,6 +166,7 @@ def render(template: str, data: dict[str, str | int]) -> str:
 def expected_files(manifest: Path) -> dict[Path, str]:
     data = load_manifest(manifest)
     installer = str(data["installer"])
+    protected_paths: set[Path] = set()
     for suffix in (".sh", ".ps1"):
         installer_path = manifest.parent / "scripts" / f"{installer}{suffix}"
         if not installer_path.is_file():
@@ -88,19 +174,54 @@ def expected_files(manifest: Path) -> dict[Path, str]:
         resolver_path = manifest.parent / "scripts" / f"resolve-runtime{suffix}"
         if not resolver_path.is_file():
             raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
-    command = str(data["command"])
+        protected_paths.update((installer_path, resolver_path))
     output = manifest.parent / str(data["outputDir"])
-    template_names = {
-        output / command: "posix-shim.tmpl",
-        output / f"{command}.ps1": "powershell-shim.tmpl",
-        output / f"{command}.cmd": "cmd-shim.tmpl",
-        manifest.parent / "scripts" / "emit-command-catalog.sh": "catalog-posix.tmpl",
-        manifest.parent / "scripts" / "emit-command-catalog.ps1": "catalog-powershell.tmpl",
-    }
-    return {
-        path: render((TEMPLATES / template).read_text(encoding="utf-8"), data)
-        for path, template in template_names.items()
-    }
+    generated: dict[Path, str] = {}
+    commands = data["commands"]
+    assert isinstance(commands, list)
+    for command in commands:
+        assert isinstance(command, dict)
+        command_id = str(command["command"])
+        for path, template in (
+            (output / command_id, "posix-shim.tmpl"),
+            (output / f"{command_id}.ps1", "powershell-shim.tmpl"),
+            (output / f"{command_id}.cmd", "cmd-shim.tmpl"),
+        ):
+            if path in protected_paths:
+                raise ValueError(f"{manifest}: generated path collision: {path}")
+            if path in generated:
+                raise ValueError(f"{manifest}: duplicate generated path: {path}")
+            generated[path] = render(
+                (TEMPLATES / template).read_text(encoding="utf-8"),
+                data,
+                command=command,
+            )
+    catalog_prefix = "catalog-multi" if data["multiCommandManifest"] else "catalog"
+    catalog_outputs = (
+        (
+            manifest.parent / "scripts" / "emit-command-catalog.sh",
+            f"{catalog_prefix}-posix.tmpl",
+        ),
+        (
+            manifest.parent / "scripts" / "emit-command-catalog.ps1",
+            f"{catalog_prefix}-powershell.tmpl",
+        ),
+    )
+    protected_paths.update(path for path, _template in catalog_outputs)
+    command_paths = set(generated)
+    collisions = sorted(command_paths & protected_paths)
+    if collisions:
+        raise ValueError(
+            f"{manifest}: generated path collision: {', '.join(map(str, collisions))}"
+        )
+    for path, template in catalog_outputs:
+        if path in generated:
+            raise ValueError(f"{manifest}: duplicate generated path: {path}")
+        generated[path] = render(
+            (TEMPLATES / template).read_text(encoding="utf-8"),
+            data,
+        )
+    return generated
 
 
 def display_path(path: Path) -> str:

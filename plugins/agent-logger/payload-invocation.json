@@ -1,0 +1,39 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "plugin": "agent-logger",
+  "runtimeRoot": ".agent-logger",
+  "noSelfProvisionEnv": "AGENT_LOGGER_NO_SELFPROVISION",
+  "commands": [
+    {
+      "command": "agent-logger",
+      "module": "agent_logger",
+      "purpose": "Inspect agent logger configuration and chronicle state"
+    },
+    {
+      "command": "collate-session",
+      "module": "agent_logger.segmenter.collate",
+      "purpose": "Collate one Copilot session into digest segments"
+    },
+    {
+      "command": "read-session-digest",
+      "module": "agent_logger.segmenter.read_digest",
+      "purpose": "Read collated session digest data"
+    },
+    {
+      "command": "prepare-session-log",
+      "module": "agent_logger.segmenter.prepare_log",
+      "purpose": "Prepare one session log manifest and output path"
+    },
+    {
+      "command": "ramp-up-session",
+      "module": "agent_logger.segmenter.ramp_up",
+      "purpose": "Build a bounded takeover briefing for a dormant session"
+    },
+    {
+      "command": "session-sync",
+      "module": "agent_logger.sync.engine",
+      "purpose": "Sync archive and compact Copilot session data"
+    }
+  ]
+}

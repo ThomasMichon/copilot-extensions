@@ -65,13 +65,6 @@ _UNQUALIFIED_ROOT = re.compile(
     re.IGNORECASE,
 )
 _GLOBAL_BIN = re.compile(r"""\.local[\\/]bin""", re.IGNORECASE)
-_AGENT_COMMAND = re.compile(r"""(?<![\w.-])agent-[a-z0-9-]+(?=\s|["'`]|$)""",
-                            re.IGNORECASE)
-_PATH_LOOKUP = re.compile(
-    r"""command\s+-v\s+agent-|which\s+agent-|Get-Command\s+["']?agent-"""
-    r"""|shutil\.which\(\s*["']agent-""",
-    re.IGNORECASE,
-)
 _PROCESS_LAUNCH = re.compile(
     r"""subprocess\.(?:run|call|check_call|check_output|Popen)"""
     r"""|create_subprocess_(?:exec|shell)|Start-Process|exec\s+agent-"""
@@ -90,14 +83,6 @@ _FIXED_ENDPOINT = re.compile(
     r"""(?:127\.0\.0\.1|localhost):\d{2,5}|["'][^"']*agent-[^"']*\.sock["']""",
     re.IGNORECASE,
 )
-_INLINE_COMMAND = re.compile(
-    r"""`agent-[a-z0-9-]+\s+[^`]+`|^\s*(?:[-*]\s+)?agent-[a-z0-9-]+\s+\S+""",
-    re.IGNORECASE,
-)
-_FENCE_COMMAND = re.compile(
-    r"""^\s*(?:(?:\$|PS>|>)\s+)?(?:exec\s+)?agent-[a-z0-9-]+\s+\S+""",
-    re.IGNORECASE,
-)
 _CELL_QUALIFIER = re.compile(
     r"""marketplace(?:_id)?|installation(?:_id)?|cell(?:_id)?""",
     re.IGNORECASE,
@@ -111,12 +96,6 @@ _JS_PROCESS_API = re.compile(
     r"""\b(?:exec|execFile|spawn)(?:Sync)?\s*\(""",
     re.IGNORECASE,
 )
-_MULTILINE_INLINE_COMMAND = re.compile(
-    r"(?<!`)`(?!`)\s*agent-[a-z0-9-]+[ \t]+[^`\n]+\n[^`]*(?<!`)`(?!`)",
-    re.IGNORECASE,
-)
-
-
 @dataclass(frozen=True)
 class Finding:
     category: str
@@ -124,6 +103,87 @@ class Finding:
     line: int
     text: str
     reason: str
+
+
+@dataclass(frozen=True)
+class CommandPatterns:
+    payload_commands: frozenset[str]
+    token: str
+    command: re.Pattern[str]
+    path_lookup: re.Pattern[str]
+    process_launch: re.Pattern[str]
+    inline: re.Pattern[str]
+    fence: re.Pattern[str]
+    multiline_inline: re.Pattern[str]
+
+
+def _payload_commands(root: Path) -> set[str]:
+    commands: set[str] = set()
+    for manifest in (root / "plugins").glob("*/payload-invocation.json"):
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        raw_commands = data.get("commands")
+        if isinstance(raw_commands, list):
+            for command in raw_commands:
+                if isinstance(command, dict) and isinstance(command.get("command"), str):
+                    commands.add(command["command"])
+        elif isinstance(data.get("command"), str):
+            commands.add(data["command"])
+    return commands
+
+
+def _command_patterns(root: Path) -> CommandPatterns:
+    all_payload_commands = _payload_commands(root)
+    payload_commands = sorted(
+        command
+        for command in all_payload_commands
+        if not command.startswith("agent-")
+    )
+    alternatives = [r"agent-[a-z0-9-]+", *(re.escape(command) for command in payload_commands)]
+    token = "(?:" + "|".join(alternatives) + ")"
+    plain_payload = (
+        "|^\\s*(?-i:(?:"
+        + "|".join(re.escape(command) for command in payload_commands)
+        + "))\\s+\\S+"
+        if payload_commands
+        else ""
+    )
+    return CommandPatterns(
+        payload_commands=frozenset(all_payload_commands),
+        token=token,
+        command=re.compile(
+            rf"""(?<![\w.-]){token}(?=\s|["'`]|$)""",
+            re.IGNORECASE,
+        ),
+        path_lookup=re.compile(
+            rf"""(?:command\s+-v|which|Get-Command)\s+["']?{token}"""
+            rf"""|shutil\.which\(\s*["']{token}""",
+            re.IGNORECASE,
+        ),
+        process_launch=re.compile(
+            rf"""\bexec\s+{token}|&\s*["']?{token}""",
+            re.IGNORECASE,
+        ),
+        inline=re.compile(
+            (
+                rf"""`{token}\s+[^`]+`"""
+                rf"""|^\s*[-*]\s+{token}\s+\S+"""
+                r"""|^\s*agent-[a-z0-9-]+\s+\S+"""
+                + plain_payload
+            ),
+            re.IGNORECASE,
+        ),
+        fence=re.compile(
+            rf"""^\s*(?:(?:\$|PS>|>)\s+)?(?:exec\s+)?{token}\s+\S+""",
+            re.IGNORECASE,
+        ),
+        multiline_inline=re.compile(
+            rf"""(?<!`)`(?!`)\s*{token}[ \t]+[^`\n]+\n[^`]*(?<!`)`(?!`)""",
+            re.IGNORECASE,
+        ),
+    )
 
 
 def _iter_targets(root: Path) -> list[Path]:
@@ -268,7 +328,7 @@ def _python_code_lines(text: str) -> list[str]:
     return lines
 
 
-def _python_launch_lines(text: str) -> set[int]:
+def _python_launch_lines(text: str, payload_commands: frozenset[str]) -> set[int]:
     """Return lines where an agent command argv is built for a later launch."""
     try:
         tree = ast.parse(text)
@@ -277,6 +337,7 @@ def _python_launch_lines(text: str) -> set[int]:
 
     command_assignments: dict[str, int] = {}
     launched_names: set[str] = set()
+    direct_launch_lines: set[int] = set()
     launch_methods = {
         "call",
         "check_call",
@@ -296,7 +357,10 @@ def _python_launch_lines(text: str) -> set[int]:
                 and value.elts
                 and isinstance(value.elts[0], ast.Constant)
                 and isinstance(value.elts[0].value, str)
-                and value.elts[0].value.startswith("agent-")
+                and (
+                    value.elts[0].value.startswith("agent-")
+                    or value.elts[0].value in payload_commands
+                )
             ):
                 for target in targets:
                     if isinstance(target, ast.Name):
@@ -315,15 +379,33 @@ def _python_launch_lines(text: str) -> set[int]:
         for argument in node.args:
             if isinstance(argument, ast.Name):
                 launched_names.add(argument.id)
+                continue
+            command_node: ast.AST | None = None
+            if (
+                isinstance(argument, (ast.List, ast.Tuple))
+                and argument.elts
+            ):
+                command_node = argument.elts[0]
+            elif isinstance(argument, ast.Constant):
+                command_node = argument
+            if (
+                isinstance(command_node, ast.Constant)
+                and isinstance(command_node.value, str)
+                and (
+                    command_node.value.startswith("agent-")
+                    or command_node.value in payload_commands
+                )
+            ):
+                direct_launch_lines.add(command_node.lineno)
 
-    return {
+    return direct_launch_lines | {
         line
         for name, line in command_assignments.items()
         if name in launched_names
     }
 
 
-def _javascript_launch_lines(text: str) -> set[int]:
+def _javascript_launch_lines(text: str, command_token: str) -> set[int]:
     """Return wrapper call lines whose command resolves through a process API."""
     lines = text.splitlines()
     wrappers: set[str] = set()
@@ -347,21 +429,25 @@ def _javascript_launch_lines(text: str) -> set[int]:
         return set()
     call = re.compile(
         rf"""\b(?:{'|'.join(re.escape(name) for name in sorted(wrappers))})"""
-        r"""\s*\(\s*["']agent-[a-z0-9-]+["']""",
+        rf"""\s*\(\s*["']{command_token}["']""",
         re.IGNORECASE,
     )
     return {
-        number
-        for number, line in enumerate(lines, 1)
-        if call.search(line)
+        text.count("\n", 0, match.start()) + 1
+        for match in call.finditer(text)
     }
 
 
-def _is_markdown_command(path: Path, line: str, in_fence: bool) -> bool:
+def _is_markdown_command(
+    path: Path,
+    line: str,
+    in_fence: bool,
+    patterns: CommandPatterns,
+) -> bool:
     if path.suffix.lower() != ".md":
         return False
-    return (in_fence and bool(_FENCE_COMMAND.search(line))) or bool(
-        _INLINE_COMMAND.search(line)
+    return (in_fence and bool(patterns.fence.search(line))) or bool(
+        patterns.inline.search(line)
     )
 
 
@@ -373,6 +459,7 @@ def _line_findings(
     code: str,
     in_fence: bool,
     python_launch_lines: set[int],
+    patterns: CommandPatterns,
 ) -> list[Finding]:
     if _ALLOW_REASON.search(line):
         return []
@@ -389,14 +476,15 @@ def _line_findings(
         add("unqualified-runtime-root", "plugin-owned path is not cell-qualified")
 
     if _GLOBAL_BIN.search(code) and (
-        _AGENT_COMMAND.search(code)
+        patterns.command.search(code)
         or path.parent.name in {"bin", "scripts"}
         or "binstub" in code.lower()
     ):
         add("global-plugin-binstub", "global command directory may be shared by cells")
 
-    if number in python_launch_lines or _PATH_LOOKUP.search(code) or (
-        _AGENT_COMMAND.search(code) and _PROCESS_LAUNCH.search(code)
+    if number in python_launch_lines or patterns.path_lookup.search(code) or (
+        patterns.command.search(code)
+        and (_PROCESS_LAUNCH.search(code) or patterns.process_launch.search(code))
     ):
         add("path-sibling-launch", "plugin command may resolve through ambient PATH")
 
@@ -406,7 +494,7 @@ def _line_findings(
     ):
         add("fixed-service-identity", "lifecycle or endpoint identity is not cell-qualified")
 
-    if _is_markdown_command(path, line, in_fence):
+    if _is_markdown_command(path, line, in_fence, patterns):
         add("bare-agent-command", "operative instruction uses a bare global plugin command")
 
     if ALLOW in line.lower() and not _ALLOW_REASON.search(line):
@@ -415,7 +503,11 @@ def _line_findings(
     return findings
 
 
-def _scan_file(path: Path, root: Path) -> list[Finding]:
+def _scan_file(
+    path: Path,
+    root: Path,
+    patterns: CommandPatterns | None = None,
+) -> list[Finding]:
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -433,10 +525,15 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
         ".yaml",
         ".yml",
     }
+    patterns = patterns or _command_patterns(root)
     code_lines = _python_code_lines(text) if is_python else None
-    launch_lines = _python_launch_lines(text) if is_python else set()
+    launch_lines = (
+        _python_launch_lines(text, patterns.payload_commands)
+        if is_python
+        else set()
+    )
     if is_javascript:
-        launch_lines = _javascript_launch_lines(text)
+        launch_lines = _javascript_launch_lines(text, patterns.token)
     in_ps_block = False
     in_js_block = False
     in_fence = False
@@ -477,11 +574,12 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
                 code,
                 in_fence,
                 launch_lines,
+                patterns,
             )
         )
 
     if is_md:
-        for match in _MULTILINE_INLINE_COMMAND.finditer(text):
+        for match in patterns.multiline_inline.finditer(text):
             snippet = " ".join(match.group(0).split())[:200]
             start = text.rfind("\n", 0, match.start()) + 1
             end = text.find("\n", match.end())
@@ -503,9 +601,10 @@ def _scan_file(path: Path, root: Path) -> list[Finding]:
 
 def scan(root: Path = REPO) -> tuple[int, list[Finding]]:
     targets = _iter_targets(root)
+    patterns = _command_patterns(root)
     findings: list[Finding] = []
     for path in targets:
-        findings.extend(_scan_file(path, root))
+        findings.extend(_scan_file(path, root, patterns))
     return len(targets), findings
 
 

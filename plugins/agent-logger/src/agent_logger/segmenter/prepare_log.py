@@ -118,7 +118,10 @@ def find_current_session() -> tuple[str, Path]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare session log metadata.")
+    parser = argparse.ArgumentParser(
+        prog="prepare-session-log",
+        description="Prepare session log metadata.",
+    )
     parser.add_argument("--title", default=None, help="Log title (used in filename)")
     parser.add_argument("--session", default="current", help="Session UUID or 'current'")
     parser.add_argument("--log-root", default=None, help="Root dir for logs (default: config/CWD)")

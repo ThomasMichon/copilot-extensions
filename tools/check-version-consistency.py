@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Enforce that each plugin's version is identical across all the files that
-carry it (CONTRIBUTING.md § "Where the version lives — ALL THREE must be bumped
-together").
+"""Enforce that each plugin's version is identical across all files that carry it.
 
 For every plugin ``<p>`` the version must agree across:
   1. ``plugins/<p>/plugin.json``            -> ``version``           (always)
@@ -10,6 +8,8 @@ For every plugin ``<p>`` the version must agree across:
      this file)
   3. ``.github/plugin/marketplace.json``    -> the ``plugins[]`` entry matched
      **by name** -> ``version``             (always)
+  4. ``plugins/<p>/src/*/_build_info.py``   -> ``__version__``       (when that
+     file declares a source-version fallback)
 
 Why this guard exists: a version bump that touches only one file (e.g. #65
 bumped pyproject.toml to dev219 but left plugin.json/marketplace.json at dev218)
@@ -24,6 +24,7 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 """
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -55,6 +56,41 @@ def _pyproject_version(path: Path) -> str | None:
         return None
     m = _PYPROJECT_VERSION.search(text)
     return m.group(1) if m else None
+
+
+def _build_info_version(
+    path: Path,
+) -> tuple[bool, str | None, str | None]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return False, None, "cannot read file"
+    if "__version__" not in text:
+        return False, None, None
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return True, None, None
+    for node in ast.walk(tree):
+        targets: list[ast.expr] = []
+        value: ast.expr | None = None
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        if (
+            value is not None
+            and any(
+                isinstance(target, ast.Name) and target.id == "__version__"
+                for target in targets
+            )
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+        ):
+            return True, value.value, None
+    return True, None, None
 
 
 def main() -> int:
@@ -92,6 +128,22 @@ def main() -> int:
                     f"{name}: pyproject.toml present but no [project].version found"
                 )
 
+        for build_info in sorted(plugin_dir.glob("src/*/_build_info.py")):
+            declares_version, build_ver, read_error = _build_info_version(build_info)
+            label = build_info.relative_to(plugin_dir).as_posix()
+            if read_error:
+                violations.append(f"{name}: cannot read {label}")
+                continue
+            if not declares_version:
+                continue
+            if build_ver:
+                sources[label] = build_ver
+            else:
+                violations.append(
+                    f"{name}: {label} declares __version__ but has no constant "
+                    "string assignment"
+                )
+
         if name in mkt_versions:
             if mkt_versions[name]:
                 sources["marketplace.json"] = mkt_versions[name]
@@ -109,13 +161,14 @@ def main() -> int:
             print(f"  - {v}", file=sys.stderr)
         print(
             "\nEvery plugin's version must agree across plugin.json, "
-            "pyproject.toml (runtime plugins), and its marketplace.json entry. "
+            "pyproject.toml (runtime plugins), marketplace.json entry, and any "
+            "checked-in _build_info.py fallback. "
             "See CONTRIBUTING.md § 'Where the version lives'.",
             file=sys.stderr,
         )
         return 1
 
-    print("check-version-consistency: all plugin version triplets agree.")
+    print("check-version-consistency: all plugin version surfaces agree.")
     return 0
 
 

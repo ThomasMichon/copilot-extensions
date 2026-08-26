@@ -237,7 +237,8 @@ Before a CodeSpace is destroyed, its Copilot session history (`~/.copilot`
 session-state) should be recovered — a deleted CodeSpace's transcripts are
 gone forever. `finalize` pulls the session-state off the CodeSpace and lands
 it in the agent-logger storage hub (under `.codespaces/<name>/`), reusing
-agent-logger's `session-sync push`. Only the `session-state` tree and the
+agent-logger's `session-sync push` management entry point. <!-- marketplace-isolation: allow logger-management -->
+Only the `session-state` tree and the
 `session-store.db` index are pulled — never credentials, keys, or settings.
 
 ```bash
