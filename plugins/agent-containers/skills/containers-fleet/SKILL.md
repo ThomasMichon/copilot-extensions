@@ -152,7 +152,7 @@ cleanup drift.
 ## Dispatch work
 
 ```bash
-<agent-bridge catalog argv[0]> send container:myrepo-1 "run the unit tests in packages/foo"
+agent-bridge send container:myrepo-1 "run the unit tests in packages/foo" # marketplace-isolation: allow agent-bridge-management
 ```
 
 The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`

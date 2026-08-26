@@ -85,6 +85,9 @@ def expected_files(manifest: Path) -> dict[Path, str]:
         installer_path = manifest.parent / "scripts" / f"{installer}{suffix}"
         if not installer_path.is_file():
             raise ValueError(f"{manifest}: installer not found: {installer_path}")
+        resolver_path = manifest.parent / "scripts" / f"resolve-runtime{suffix}"
+        if not resolver_path.is_file():
+            raise ValueError(f"{manifest}: runtime resolver not found: {resolver_path}")
     command = str(data["command"])
     output = manifest.parent / str(data["outputDir"])
     template_names = {

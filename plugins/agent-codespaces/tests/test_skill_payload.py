@@ -1,5 +1,6 @@
 # ruff: noqa: S101
 
+import json
 from pathlib import Path
 
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
@@ -20,6 +21,37 @@ def _read(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def test_session_start_hooks_use_payload_root_and_fail_open():
+    hooks = json.loads((PLUGIN_ROOT / "hooks.json").read_text(encoding="utf-8"))
+    session_hooks = hooks["hooks"]["sessionStart"]
+    expected_order = [
+        "readiness-context",
+        "bootstrap-check",
+        "emit-command-catalog",
+        "register-bridge-provider",
+        "emit-codespace-map",
+    ]
+
+    assert len(session_hooks) == 5
+    assert [
+        next(name for name in expected_order if name in hook["bash"])
+        for hook in session_hooks
+    ] == expected_order
+    for hook in session_hooks:
+        for shell in ("bash", "powershell"):
+            command = hook[shell]
+            assert "COPILOT_PLUGIN_ROOT" in command
+            assert "'{}'" in command
+
+
+def test_provider_management_boundary_stays_explicit():
+    text = _read("codespaces-lifecycle")
+    normalized = " ".join(text.split())
+
+    assert "registered **management entry point**" in text
+    assert "Session command catalogs do not replace this provider/supervisor boundary" in normalized
+
+
 def test_cleaning_codespaces_skill_contract():
     text = _read("cleaning-codespaces")
     lowered = text.lower()
@@ -35,10 +67,11 @@ def test_cleaning_codespaces_skill_contract():
     assert "explicit confirmation" in lowered
     assert "optional repository export hook" in lowered
     assert "user's state repo" in lowered
-    assert "agent-codespaces finalize <name> --delete" in text
-    assert "agent-codespaces mark <name> prunable" in text
-    assert "agent-codespaces prune" in text
-    assert "agent-containers release <effort-slug>" in text
+    assert "<agent-codespaces catalog argv[0]> finalize <name> --delete" in text
+    assert "<agent-codespaces catalog argv[0]> mark <name> prunable" in text
+    assert "<agent-codespaces catalog argv[0]> prune" in text
+    assert "<agent-containers catalog argv[0]> release <effort-slug>" in text
+    assert "never substitute a same-named command" in lowered
 
     assert not any(term in lowered for term in FORBIDDEN)
 
@@ -66,7 +99,8 @@ def test_recovering_codespaces_skill_contract():
         "phase 7: restore",
     ):
         assert phase in lowered
-    assert "agent-codespaces delete <name> --force" in text
+    assert "<agent-codespaces catalog argv[0]> delete <name> --force" in text
+    assert "never substitute a same-named command" in lowered
     assert "<owner/repo>" in text
     assert "configured source-control provider" in lowered
 

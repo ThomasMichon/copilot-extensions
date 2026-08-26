@@ -19,6 +19,10 @@ semantics. `agent-bridge` owns session liveness and reattachment.
 `borrowing-codespaces` owns claims and lease semantics. This skill supplies only
 the destructive-recovery safety gates and ordered orchestration.
 
+Use the exact `argv` from the agent-codespaces session command catalog for
+CodeSpace operations. Append the arguments shown below; never substitute a same-named command
+found through `PATH`.
+
 ## Diagnose: disconnect or corruption
 
 Use lifecycle and bridge status before touching the resource:
@@ -78,7 +82,7 @@ When normal finalization cannot operate on a proven-corrupt resource and the
 audit gates passed:
 
 ```bash
-agent-codespaces delete <name> --force
+<agent-codespaces catalog argv[0]> delete <name> --force
 ```
 
 Use the lifecycle's normal finalize/delete path whenever it remains available.
