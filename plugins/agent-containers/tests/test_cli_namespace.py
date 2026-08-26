@@ -116,6 +116,9 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
     staged = write_env.call_args.args[2]
     assert staged["GH_TOKEN"] == "github-secret"
     assert staged["LC_GIT_CREDENTIAL_RELAY_TOKEN"] == "relay-secret"
+    assert staged["GIT_CONFIG_COUNT"] == "2"
+    assert staged["GIT_CONFIG_VALUE_1"] == "/usr/local/bin/ado-auth-helper"
+    assert staged["GIT_TERMINAL_PROMPT"] == "0"
     deploy.assert_called_once_with("example-web-1", ado=True)
 
 

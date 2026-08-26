@@ -272,7 +272,10 @@ def _trusted_session_host_context(name: str):
 def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     """Prepare endpoint + auth inputs; agent-bridge owns the Host lifecycle."""
     from ._invoke import module_argv
-    from .container_shims import deploy as deploy_shims
+    from .container_shims import (
+        deploy as deploy_shims,
+        git_credential_environment,
+    )
     from .relay_provider import token_for
 
     config, fleet, user, workspace = _trusted_session_host_context(args.name)
@@ -301,10 +304,11 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
                 f"credential relay on 127.0.0.1:{args.host_relay_port} "
                 "did not answer the identity probe"
             )
-        deploy_shims(args.name, ado=config.relay_deploy_ado)
+        deploy_shims(args.name, ado=True)
         launch_env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
         launch_env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
         launch_env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
+        launch_env.update(git_credential_environment())
         reverse_forwards.append(
             f"{config.relay_port}:127.0.0.1:{args.host_relay_port}"
         )
@@ -775,7 +779,10 @@ def _launch_container_agent(
     relay_env: list[str] = []
     reverse_forwards: list[str] = []
     if relay_enabled:
-        from .container_shims import deploy as deploy_shims
+        from .container_shims import (
+            deploy as deploy_shims,
+            git_credential_environment,
+        )
         from .relay_provider import token_for
 
         host_relay_port = _require_live_relay_port()
@@ -786,14 +793,21 @@ def _launch_container_agent(
                 "restart agent-bridge or set relay.enabled: false in "
                 "containers.yaml"
             )
-        deploy_shims(args.name, ado=config.relay_deploy_ado)
+        deploy_shims(args.name, ado=True)
         env["LC_GIT_CREDENTIAL_RELAY_HOST"] = "127.0.0.1"
         env["LC_GIT_CREDENTIAL_RELAY"] = str(config.relay_port)
         env["LC_GIT_CREDENTIAL_RELAY_TOKEN"] = token_for(args.name)
+        env.update(git_credential_environment())
         relay_env = [
             "LC_GIT_CREDENTIAL_RELAY_HOST",
             "LC_GIT_CREDENTIAL_RELAY",
             "LC_GIT_CREDENTIAL_RELAY_TOKEN",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_KEY_1",
+            "GIT_CONFIG_VALUE_1",
+            "GIT_TERMINAL_PROMPT",
         ]
         reverse_forwards = [
             f"127.0.0.1:{config.relay_port}:127.0.0.1:{host_relay_port}"

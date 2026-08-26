@@ -306,9 +306,10 @@ class ContainersConfig:
     # Container-loopback listen port for SSH -R. The host destination is
     # agent-bridge's independently published live relay port.
     relay_port: int = 9857
-    # Also deploy ado-auth-helper (ADO PAT / git credential relay). Off by
-    # default to avoid disturbing already-working in-container ADO auth.
-    relay_deploy_ado: bool = False
+    # Legacy compatibility switch. Trusted launches now always deploy the
+    # helper and activate it through launch-only Git config, so persistent
+    # in-container auth configuration is not disturbed.
+    relay_deploy_ado: bool = True
     # Azure scopes the relay may mint tokens for. "*" = any scope (gated behind
     # the per-container relay token; mirrors agent-codespaces). Faithfully serves
     # whatever scope the official `azure-auth-helper get-access-token "<scope>"`
