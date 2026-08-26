@@ -851,9 +851,9 @@ def _force_kill_agent_bridge_tree(pid: int) -> None:
     if sys.platform == "win32":
         _kill_pid(pid)  # taskkill /F /T
         return
-    try:
-        os.killpg(pid, _signal.SIGKILL)
-    except OSError:
+    from .procgroup import safe_killpg
+
+    if not safe_killpg(pid, _signal.SIGKILL):
         try:
             os.kill(pid, _signal.SIGKILL)
         except OSError:

@@ -131,3 +131,29 @@ def test_retired_pid_reused_by_other_process_is_not_killed(monkeypatch):
 
     assert m._ensure_retired_daemon_exited(333) == (True, False)
     assert killed == []
+
+
+def test_posix_force_retire_uses_safe_process_group(monkeypatch):
+    import signal
+
+    from agent_bridge import procgroup
+
+    calls = []
+    monkeypatch.setattr(m.sys, "platform", "linux")
+    monkeypatch.setattr(signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(
+        procgroup,
+        "safe_killpg",
+        lambda pid, sig: calls.append((pid, sig)) or True,
+    )
+    monkeypatch.setattr(
+        m.os,
+        "kill",
+        lambda *args: (_ for _ in ()).throw(
+            AssertionError("direct kill must not run after group delivery")
+        ),
+    )
+
+    m._force_kill_agent_bridge_tree(444)
+
+    assert calls and calls[0][0] == 444

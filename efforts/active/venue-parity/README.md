@@ -248,12 +248,12 @@ last so naming follows the proven abstraction rather than predicting it.
   `--plugin-dir` paths to the child command. Container child argv is assembled
   from the provider's current raw ACP command plus its launch-only environment,
   so resume/recreate does not freeze stale fleet configuration. **Live gates:**
-  container session `ccbac5eb-a57` ran from `/workspaces/odsp-web` with the
-  odsp-web killswitch capabilities loaded; fresh CodeSpace session
-  `83367d34-bd5` ran from the same cwd with a repo-local capability loaded.
+  a live container ran from `/workspaces/example-web` with repo-local
+  capabilities loaded; a fresh CodeSpace ran from the same cwd with a
+  repo-local capability loaded.
   Model/effort remain on the shared ACP config-option path.
 - **2026-08-25 — P1 reliability detour: CodeSpace 500s traced to stale
-  daemons.** Worktree `194c`'s CodeSpace and remote Copilot process were healthy;
+  daemons.** The affected CodeSpace and remote Copilot process were healthy;
   the 500s were local `POST /live-sessions/.../events` failures. Five retired
   daemon generations (dev340/344/345/354/356) still listened and wrote the
   shared SQLite DB, producing `sqlite3.OperationalError: database is locked`.
