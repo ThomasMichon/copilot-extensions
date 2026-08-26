@@ -2048,7 +2048,7 @@ def mux_binding_for_session(
             seen.add(cur)
             ancestry.add(cur)
             parent = table[cur]["ppid"]
-            if mux_bin == "psmux":
+            if mux_bin == "psmux" and platform.system() == "Windows":
                 child_started = _windows_process_start_time(cur)
                 parent_started = _windows_process_start_time(parent)
                 # Windows retains a creator PID after that process exits. If the
