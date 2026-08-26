@@ -267,6 +267,12 @@ See [`design.md`](design.md).
   the final review head. The same validation exposed a fallback provisioning
   lock race, tracked separately in
   [#1132](https://github.com/ThomasMichon/copilot-extensions/issues/1132).
+- The agent-logger slice merged in
+  [#1135](https://github.com/ThomasMichon/copilot-extensions/pull/1135), extending
+  the payload-invocation manifest to multiple commands and moving six
+  agent-facing logger entry points to exact catalog argv. Scheduled sync,
+  installer management, and far-side SSH launches remain explicit management
+  boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 

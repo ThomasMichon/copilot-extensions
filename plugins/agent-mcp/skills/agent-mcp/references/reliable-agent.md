@@ -8,6 +8,13 @@ Use one reviewed agent-mcp bridge config to expose two equivalent surfaces:
 The fallback is reliable only when both surfaces preserve the same auth source,
 identity, tool filter, and authorization boundary.
 
+Use the exact `argv[0]` from the agent-mcp session command catalog for every
+shell operation below. Replace `<agent-mcp catalog argv[0]>` with that path;
+in PowerShell invoke it as `& "<agent-mcp catalog argv[0]>" <args>`. Never
+search `PATH` for a same-named command. If session-start hooks did not publish
+the catalog, use the compatibility readiness path from the **`agent-mcp`**
+skill before continuing.
+
 ## Bridge and agent
 
 ```yaml
@@ -35,7 +42,7 @@ tools: ["*"]
 mcp-servers:
   service-mcp:
     type: stdio
-    command: agent-mcp
+    command: agent-mcp # marketplace-isolation: allow mcp-server-startup
     args: [bridge, --config, .github/agents/service.mcp.yaml]
     tools: ["*"]
 ---
@@ -61,7 +68,8 @@ Keep the anti-self-delegation line literal enough for customization scanners.
 The fallback is not permission to call the product API directly.
 
 Top-level `tools:` is the authorization boundary shared by bridge and CLI
-calls. Decorator stacks are not applied by `agent-mcp call`/`materialize`.
+calls. Decorator stacks are not applied by the payload-local command's
+`call`/`materialize` operations.
 Duplicate static name restrictions in top-level `tools:`. Conditional
 authorization (`gate` or argument-dependent redaction) cannot be represented
 there and therefore forbids materialized fallback. Shape-only decorators such
@@ -83,7 +91,7 @@ POSIX:
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
-agent-mcp materialize \
+<agent-mcp catalog argv[0]> materialize \
   "$ROOT/.github/agents/service.mcp.yaml" \
   --server-name service
 
@@ -96,7 +104,7 @@ PowerShell:
 
 ```powershell
 $root = git rev-parse --show-toplevel
-agent-mcp materialize `
+& "<agent-mcp catalog argv[0]>" materialize `
   "$root\.github\agents\service.mcp.yaml" `
   --server-name service `
   --windows
@@ -127,6 +135,10 @@ Do not pipe or pass inline JSON through Windows `.ps1`/`.cmd` shims: the
 PowerShell shim does not forward pipeline input, and cmd.exe reparses quotes and
 metacharacters. Use `.ps1 --request-file`.
 
+The payload-local agent-mcp catalog likewise names a `.cmd` on Windows to
+preserve stdio. Pass structured call arguments with `--request-file`; do not
+place raw JSON or metacharacter-bearing paths inline on its CMD command line.
+
 ## Failure classification
 
 | Failure | Response |
@@ -142,13 +154,15 @@ metacharacters. Use `.ps1 --request-file`.
 
 ## Warmth and cold starts
 
-Materialized stubs invoke `agent-mcp call`. By default they attach to
-`agent-mcp serve` when its endpoint is available and fall back to a stateless
-one-shot session otherwise. The resident daemon keeps one warm session per
-bridge identity, reducing npm/uvx launch and protocol negotiation cost:
+Materialized stubs intentionally invoke the global management wrapper because
+their generated fleet can outlive the session catalog. <!-- marketplace-isolation: allow materialized-stub-management -->
+That compatibility wrapper attaches to the optional warmth daemon when its
+endpoint is available and otherwise starts a stateless one-shot session. The
+resident daemon keeps one warm session per bridge identity, reducing npm/uvx
+launch and protocol negotiation cost:
 
 ```bash
-agent-mcp serve
+<agent-mcp catalog argv[0]> serve
 ```
 
 Warmth is an optimization, not the default for identity-sensitive fallback.
@@ -160,10 +174,16 @@ explicitly evicts the warm session. A fleet can rescue a Copilot-side MCP
 registration/session failure; it cannot rescue an upstream that does not answer
 agent-mcp's own negotiation.
 
+Until materialized fleets gain attributable management context, their global
+wrapper lookup can still select a different installation cell through ambient
+`PATH`. Treat the fleet as a legacy compatibility boundary, not as
+cross-cell-safe invocation.
+
 ## Deployment and drift
 
-`agent-mcp materialize` is intentionally mechanical: it plates the upstream
-catalog into `index.md`, per-tool sidecars, `manifest.json`, and platform stubs.
+The payload-local command's `materialize` operation is intentionally
+mechanical: it plates the upstream catalog into `index.md`, per-tool sidecars,
+`manifest.json`, and platform stubs.
 A repository or plugin that relies on standing fleets should own an idempotent
 deploy step that:
 
@@ -175,9 +195,10 @@ deploy step that:
 - validates that each MCP-backed agent names an identity-matched fallback.
 
 At agent runtime, a fleet is definitely stale when its expected stub is missing
-or `manifest.json.generated_by` differs from `agent-mcp --version`. Detecting
-bridge config/schema/overlay drift requires the deploy-owned effective-config
-digest above;
+or `manifest.json.generated_by` differs from
+`<agent-mcp catalog argv[0]> --version`. Detecting bridge
+config/schema/overlay drift requires the deploy-owned effective-config digest
+above;
 agent-mcp's base manifest does not currently record one.
 
 Never let a low-privilege agent select an admin fleet merely because both expose

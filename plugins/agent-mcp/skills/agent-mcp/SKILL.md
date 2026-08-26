@@ -12,15 +12,24 @@ description: >-
 
 # agent-mcp
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-mcp provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `agent-mcp` is not on `PATH`, deploy
-> its binstub first (it then self-provisions on first call): on POSIX,
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-mcp/scripts/init.sh | head -1)" stamp`;
-> on Windows, run the installed `scripts\init.ps1 stamp`.
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install.
+> **Before you start — use the payload-local session command.**
+> The agent-mcp session command catalog supplies an exact `argv[0]` owned by
+> this plugin payload. For every shell invocation below, replace
+> `<agent-mcp catalog argv[0]>` with that exact path; do not search `PATH` or
+> substitute a same-named command from another payload. In PowerShell, invoke
+> it as `& "<agent-mcp catalog argv[0]>" <args>` so paths containing spaces stay
+> one command token. The shim provisions its own runtime on first use and works
+> without agent-worktrees. If the catalog is unavailable because the host did
+> not run session-start hooks, use the
+> compatibility readiness path only after resolving exactly one installed
+> agent-mcp payload. On POSIX, enumerate
+> `~/.copilot/installed-plugins/*/agent-mcp/scripts/init.sh`, fail if more than
+> one exists, then run the sole path with `stamp`; on Windows, apply the same
+> single-match rule to `scripts\init.ps1`. Never choose the first match from
+> multiple marketplaces. Then use the wrapper the installer reports. The first
+> runtime call may take ~30–120s (watch for
+> `::agent-provisioning::`); let it finish. Preserve any provisioning failure
+> exactly instead of improvising a toolchain install.
 
 `agent-mcp` wraps one upstream MCP server as a local **stdio** MCP server and
 injects host credentials, driven by a single per-bridge config file. It is
@@ -85,7 +94,8 @@ auth:
 tools: { allow: ["repo_*", "wit_*"], deny: [] }    # optional upstream filter
 ```
 
-Validate before wiring: `agent-mcp validate .github/agents/ado.mcp.yaml`.
+Validate before wiring:
+`<agent-mcp catalog argv[0]> validate .github/agents/ado.mcp.yaml`.
 
 > **MCP 2.x (dual-era).** agent-mcp speaks both the **modern** stateless
 > revision (`2026-07-28`+ — per-request `_meta`, no `initialize`/session,
@@ -113,7 +123,7 @@ tools: ["*"]
 mcp-servers:
   ado-remote-mcp:
     type: stdio
-    command: agent-mcp              # cross-platform (Linux/WSL + Windows)
+    command: agent-mcp              # marketplace-isolation: allow mcp-server-startup
     args: ['bridge', '--config', '.github/agents/ado.mcp.yaml']
     tools: ['*']
 ---
@@ -122,6 +132,13 @@ mcp-servers:
 The `--config` path is resolved relative to the process cwd, which is the repo
 root when Copilot spawns the sub-agent's MCP server -- so an in-repo relative
 path just works.
+
+The literal `mcp-servers.command` is an explicit startup compatibility
+boundary. Repository-committed agent frontmatter must stay machine-portable,
+has no plugin-root interpolation contract, and may be launched before or
+independently of session command-catalog context. It therefore cannot consume
+`<agent-mcp catalog argv[0]>`. Keep it literal until the host offers a
+plugin-root-capable MCP launcher contract.
 
 **3. Verify end-to-end** by invoking the sub-agent and having it call an upstream
 tool (e.g. fetch a repo). A clean way to prove the bridge -- not a stale runtime
@@ -133,9 +150,10 @@ read-only stub after catalog failure, preserve identity and top-level `tools:`
 filtering, and stop only after both surfaces fail. Decorator-only restrictions
 are not applied by the CLI path, and frontmatter-only env is not inherited.
 Use an existing fleet first; re-materialize when the expected stub is absent or
-`manifest.json.generated_by` differs from `agent-mcp --version` (config drift
-needs a deploy-owned digest). Use `--no-serve` for identity-sensitive fallback
-calls. The complete reusable agent
+`manifest.json.generated_by` differs from
+`<agent-mcp catalog argv[0]> --version` (config drift needs a deploy-owned
+digest). Use `--no-serve` for identity-sensitive fallback calls. The complete
+reusable agent
 template, Windows/POSIX commands, failure matrix, warmth guidance, and drift
 contract live in
 [Reliable MCP-backed sub-agent](references/reliable-agent.md).
@@ -234,10 +252,10 @@ Rules:
 
 - Only valid for `type: http`. Every `${name}` in the URL must have a matching
   `url_secrets` source, and vice versa — a mismatch is a load-time config error.
-- Resolution is **lazy** (first connect), so `agent-mcp validate` / `status`
-  never touch the credential source. If the source can't be resolved at connect
-  (e.g. the vault is locked), the bridge fails loudly rather than connecting to a
-  half-formed URL.
+- Resolution is **lazy** (first connect), so the payload-local command's
+  `validate` / `status` operations never touch the credential source. If the
+  source can't be resolved at connect (e.g. the vault is locked), the bridge
+  fails loudly rather than connecting to a half-formed URL.
 - Prefer this over a machine-local override whenever the secret is the *only*
   per-host difference — the committed config then works on every host with no
   override file.
@@ -320,26 +338,29 @@ reliable default.
 ## Commands
 
 ```
-agent-mcp bridge --config FILE    # run the bridge from an in-repo config (preferred)
-agent-mcp bridge <name>           # run a named bridge (~/.agent-mcp/bridges/<name>.*)
-agent-mcp validate <name|FILE>    # parse + schema-check
-agent-mcp status                  # prerequisites + named/plugin-shipped bridges
-agent-mcp call <bridge> <tool> [JSON]     # one-shot: invoke one upstream tool
-agent-mcp materialize <bridge>            # project the catalog into a CLI stub fleet
-agent-mcp serve [--socket PATH]           # optional warmth daemon for repeated call/stub use
+<agent-mcp catalog argv[0]> bridge --config FILE    # run an in-repo bridge
+<agent-mcp catalog argv[0]> bridge <name>           # run a named bridge
+<agent-mcp catalog argv[0]> validate <name|FILE>    # parse + schema-check
+<agent-mcp catalog argv[0]> status                  # prerequisites + bridges
+<agent-mcp catalog argv[0]> call <bridge> <tool> [JSON]
+<agent-mcp catalog argv[0]> materialize <bridge>
+<agent-mcp catalog argv[0]> serve [--socket PATH]
 ```
 
 ## Troubleshooting checklist
 
-- Start with `agent-mcp validate <name-or-config>`; it loads the same in-repo,
-  named, plugin-shipped, and machine-overlay config path as `bridge`/`call`, but
-  does not contact the upstream or credential source.
-- Reproduce outside Copilot with `agent-mcp --log-level debug call <bridge>
-  <tool> '<arguments-json>'`. A `server/discover` rejection in `auto` is normal
-  for a legacy server; set `server.protocol: legacy` to skip that probe.
-- Separate runtime provisioning from bridge config: if `agent-mcp` is missing,
-  stamp/install the binstub first; if it prints `::agent-provisioning::`, let the
-  first-use provision finish and preserve the exact failure.
+- Start with `<agent-mcp catalog argv[0]> validate <name-or-config>`; it loads
+  the same in-repo, named, plugin-shipped, and machine-overlay config path as
+  `bridge`/`call`, but does not contact the upstream or credential source.
+- Reproduce outside Copilot with
+  `<agent-mcp catalog argv[0]> --log-level debug call <bridge> <tool>
+  '<arguments-json>'`. A `server/discover` rejection in `auto` is normal for a
+  legacy server; set `server.protocol: legacy` to skip that probe.
+- Separate runtime provisioning from bridge config: catalog `availability`
+  reports whether the payload shim and installer exist, not whether the runtime
+  is already built. If invocation prints `::agent-provisioning::`, let first-use
+  provisioning finish and preserve the exact failure. If the catalog entry is
+  absent, follow the readiness path above.
 - Credential failures differ by transport: `server.url_secrets` fail before HTTP
   connect; `command` auth logs command-not-found/timeout/non-zero exit; HTTP gets
   a 401/error path with one retry, while stdio/cli children must report missing
@@ -361,10 +382,15 @@ of speaking JSON-RPC.
   (the wait is bounded by the config `timeout`).
 
   ```sh
-  agent-mcp call gitea list_issues '{"owner":"me","repo":"x"}'
-  echo '{"owner":"me","repo":"x"}' | agent-mcp call gitea list_issues
-  agent-mcp call gitea create_issue --request-file req.json   # req.json: {"arguments": {...}}
+  # POSIX. On Windows, put structured arguments in a request file.
+  <agent-mcp catalog argv[0]> call gitea list_issues '{"owner":"me","repo":"x"}'
+  echo '{"owner":"me","repo":"x"}' | <agent-mcp catalog argv[0]> call gitea list_issues
+  <agent-mcp catalog argv[0]> call gitea create_issue --request-file req.json
   ```
+
+  The Windows catalog intentionally names the payload `.cmd` so stdio reaches
+  the child through a native process. Do not pass inline JSON through CMD;
+  provide it on stdin or with `--request-file` at a simple temporary path.
 
 - **`materialize`** projects the whole `tools/list` catalog into a discoverable,
   pipeable command fleet under `~/.agent-mcp/materialized/<server>/`:
@@ -378,11 +404,16 @@ of speaking JSON-RPC.
 
   Generation is **purely mechanical** -- sidecars plate the raw MCP definition,
   stubs accept the raw `arguments` JSON (no `--flag` synthesis), and nothing is
-  guessed by a model. Each stub forwards to `agent-mcp call`, so a materialized
-  tool is invocable by name and pipes like any CLI:
+  guessed by a model. Each stub intentionally forwards through the legacy
+  global management wrapper because a generated fleet can outlive the session
+  catalog. <!-- marketplace-isolation: allow materialized-stub-management -->
+  The stub is therefore an explicit compatibility boundary, not a
+  payload-local invocation claim. Until materialized fleets gain attributable
+  management context, ambient `PATH` can still select a different installation
+  cell; do not treat this fallback as cross-cell-safe.
 
   ```sh
-  agent-mcp materialize gitea               # writes ~/.agent-mcp/materialized/gitea/
+  <agent-mcp catalog argv[0]> materialize gitea
   list_issues '{"owner":"me","repo":"x"}' | jq '.[].number'
   ```
 

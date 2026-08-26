@@ -5,7 +5,7 @@ tools: ["*"]
 mcp-servers:
   ado-remote-mcp:
     type: stdio
-    command: agent-mcp
+    command: agent-mcp # marketplace-isolation: allow mcp-server-startup
     args: ['bridge', '--config', 'examples/ado/storage.mcp.yaml']
     tools: ['*']
 ---
@@ -20,9 +20,16 @@ the whole payload.
 
 ## MCP Readiness
 
+Resolve `<agent-mcp catalog argv[0]>` from the session command catalog. If the
+catalog entry is absent, invoke exactly the bare startup command declared in
+this agent's `mcp-servers.command` as an explicit compatibility fallback; do
+not hand-locate or substitute another payload. In that branch, use the bare
+startup command wherever the instructions below show
+`<agent-mcp catalog argv[0]>`.
+
 Probe `search_workitem` with an explicit arguments source. If the catalog did
 not load, preserve the error and use the existing `ado-storage` materialized
-fleet; if absent, run `agent-mcp materialize` on
+fleet; if absent, run `<agent-mcp catalog argv[0]> materialize` on
 `examples/ado/storage.mcp.yaml` with `--server-name ado-storage`. Probe the raw
 read tool with `--no-serve` plus
 `--arguments` (POSIX) or `--request-file` (Windows); storage decorators are not
