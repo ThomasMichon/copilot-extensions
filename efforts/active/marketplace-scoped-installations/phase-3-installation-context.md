@@ -1,8 +1,7 @@
 # Phase 3 — Installation Context and Dual-Cell Exemplars
 
-Back to the [effort](README.md) · parent
-[architecture](design.md) · implementation issue
-[#1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104).
+[Effort](README.md) · [Architecture](design.md) ·
+[Implementation issue #1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104)
 
 ## Status
 
