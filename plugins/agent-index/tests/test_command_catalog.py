@@ -22,6 +22,7 @@ def test_posix_catalog_uses_exact_payload_command() -> None:
         env=env,
     )
     envelope = json.loads(result.stdout)
+    assert "\r" not in envelope["additionalContext"]
     match = re.search(r"```json\n(.*)\n```", envelope["additionalContext"])
     assert match
     catalog = json.loads(match.group(1))

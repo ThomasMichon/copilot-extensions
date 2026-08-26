@@ -36,5 +36,6 @@ Invoke the exact ``argv`` below. Do not search ``PATH`` or substitute a same-nam
 $catalogJson
 ``````
 "@
-Write-Output (@{ additionalContext = $context.Trim() } | ConvertTo-Json -Compress -Depth 3)
+$context = ($context.Trim() -replace "`r`n?", "`n")
+Write-Output (@{ additionalContext = $context } | ConvertTo-Json -Compress -Depth 3)
 exit 0
