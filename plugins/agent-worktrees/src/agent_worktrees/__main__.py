@@ -15919,6 +15919,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sp.add_argument("--worktree", "--worktree-id", dest="worktree_id", default=None,
                     help="Worktree ID to scope to (default: all worktrees)")
+    sp.add_argument(
+        "--all-projects",
+        action="store_true",
+        help="Enumerate sessions across every adopted project",
+    )
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
@@ -17001,24 +17006,59 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     """List a worktree's Copilot sessions with metadata as JSON.
 
     Scopes to a single worktree with ``--worktree ID``; without it,
-    enumerates sessions across all tracked worktrees.  Each session entry
-    is decorated with its ``worktree_id``.  Always emits the versioned
-    JSON envelope (machine-facing -- consumed by agent-bridge).
+    enumerates sessions across tracked worktrees in the current project.
+    ``--all-projects`` instead reads every adopted project's tracking
+    directory. Each session entry carries its ``worktree_id`` plus the
+    worktree's resolved interface and origin. Always emits the versioned JSON
+    envelope (machine-facing -- consumed by agent-bridge).
     """
-    tracking_path = cfg.tracking_dir()
     wt_id = getattr(args, "worktree_id", None)
-    records = tracking.list_records(tracking_path)
+    all_projects = bool(getattr(args, "all_projects", False))
+    if all_projects:
+        records = []
+        for tracking_path in _all_tracking_dirs():
+            try:
+                records.extend(tracking.list_records(tracking_path))
+            except Exception:
+                continue
+    else:
+        records = tracking.list_records(cfg.tracking_dir())
     if wt_id:
         records = [r for r in records if r.worktree_id == wt_id]
         if not records:
             return _json_error(f"No worktree found: {wt_id}")
 
-    result: list[dict] = []
+    by_session: dict[str, dict] = {}
     head_session: str | None = None
     for rec in records:
         for s in sessions.list_worktree_sessions(rec):
-            s["worktree_id"] = rec.worktree_id
-            result.append(s)
+            row = dict(s)
+            row["worktree_id"] = rec.worktree_id
+            row["interface"] = rec.resolved_interface
+            row["origin"] = rec.resolved_origin
+            session_id = row.get("id")
+            if not isinstance(session_id, str) or not session_id:
+                continue
+            existing = by_session.get(session_id)
+            if existing is None:
+                by_session[session_id] = row
+                continue
+            if (
+                existing.get("interface") != row["interface"]
+                or existing.get("origin") != row["origin"]
+            ):
+                existing["interface"] = "unknown"
+                existing["origin"] = "unknown"
+                existing["provenance_conflict"] = True
+            if row.get("is_head") and not existing.get("is_head"):
+                preserved = {
+                    key: existing[key]
+                    for key in ("interface", "origin", "provenance_conflict")
+                    if key in existing
+                }
+                existing.clear()
+                existing.update(row)
+                existing.update(preserved)
     # session-lifecycle: when scoped to ONE worktree, surface its asserted head
     # on the envelope so a consumer (agent-bridge -> Neuron Forge) can resolve
     # the current session without re-deriving it. Per-session ``is_head`` (from
@@ -17027,7 +17067,10 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     if wt_id and records:
         head_session = records[0].resolved_head_session
 
-    _json_output({"sessions": result, "head_session": head_session})
+    _json_output({
+        "sessions": list(by_session.values()),
+        "head_session": head_session,
+    })
     return 0
 
 
@@ -17864,6 +17907,16 @@ _NO_PROJECT_COMMANDS = {
     "session-lock", "machine-context", "reconcile-binstubs",
     "register-project-entry", "terminal-fragment",
 }
+
+
+def _is_no_project_invocation(args_list: list[str]) -> bool:
+    """Whether this exact argv can run without resolving one project."""
+    if not args_list:
+        return False
+    command = args_list[0]
+    if command in _NO_PROJECT_COMMANDS or command.startswith("-"):
+        return True
+    return command == "list-sessions" and "--all-projects" in args_list[1:]
 
 
 # Machine-global verbs where ``--project`` can NEVER matter: the pure registries
@@ -19384,10 +19437,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
-    _needs_project = not (
-        args_list
-        and (args_list[0] in _NO_PROJECT_COMMANDS or args_list[0].startswith("-"))
-    )
+    _needs_project = not _is_no_project_invocation(args_list)
 
     if _proj:
         _project, _assumed = _resolve_active_project(_proj)
@@ -19443,8 +19493,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # A project-requiring subcommand without any project context → balk
     # helpfully instead of raising a bare RuntimeError deep in load_config.
-    if not has_project and args_list[0] not in _NO_PROJECT_COMMANDS \
-            and not args_list[0].startswith("-"):
+    if not has_project and not _is_no_project_invocation(args_list):
         return cmd_help_unrouted(requested=args_list[0])
 
     # --version / -V → print version + build info + boot provenance

@@ -591,3 +591,131 @@ class TestListSessionsEnvelopeHead:
         # Per-session is_head covers the all-worktrees case; the envelope head is
         # only meaningful when scoped to one worktree.
         assert captured["head_session"] is None
+
+    def test_all_projects_carries_resolved_provenance(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import sessions as S
+
+        project_a = tmp_path / "project-a"
+        project_b = tmp_path / "project-b"
+        project_a.mkdir()
+        project_b.mkdir()
+        first = WorktreeRecord(
+            worktree_id="wt-a",
+            branch="worktree/wt-a",
+            worktree_path="/tmp/wt-a",
+            repo="a",
+            machine="test",
+            platform="wsl",
+            started_at="t",
+            last_resumed_at="t",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[SessionEntry("session-a", "t")],
+            kind="bridge",
+            origin="user",
+        )
+        second = WorktreeRecord(
+            worktree_id="wt-b",
+            branch="worktree/wt-b",
+            worktree_path="/tmp/wt-b",
+            repo="b",
+            machine="test",
+            platform="wsl",
+            started_at="t",
+            last_resumed_at="t",
+            resume_count=0,
+            title=None,
+            status="active",
+            completed_at=None,
+            sessions=[SessionEntry("session-b", "t")],
+            kind="system",
+        )
+        save_record(first, project_a / "wt-a.yaml")
+        save_record(second, project_b / "wt-b.yaml")
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [project_a, project_b])
+        monkeypatch.setattr(
+            S,
+            "list_worktree_sessions",
+            lambda record: [{"id": entry.session_id} for entry in record.sessions],
+        )
+        captured: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+
+        rc = m.cmd_list_sessions(argparse.Namespace(
+            worktree_id=None,
+            all_projects=True,
+            json=True,
+        ))
+
+        assert rc == 0
+        assert captured["sessions"] == [
+            {
+                "id": "session-a",
+                "worktree_id": "wt-a",
+                "interface": "acp",
+                "origin": "user",
+            },
+            {
+                "id": "session-b",
+                "worktree_id": "wt-b",
+                "interface": "cli",
+                "origin": "system",
+            },
+        ]
+
+    def test_conflicting_duplicate_session_provenance_is_unknown(
+        self, tmp_path: Path, monkeypatch
+    ):
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import sessions as S
+
+        project_a = tmp_path / "project-a"
+        project_b = tmp_path / "project-b"
+        project_a.mkdir()
+        project_b.mkdir()
+        for project, worktree_id, kind in (
+            (project_a, "wt-a", "session"),
+            (project_b, "wt-b", "system"),
+        ):
+            record = WorktreeRecord(
+                worktree_id=worktree_id,
+                branch=f"worktree/{worktree_id}",
+                worktree_path=f"/tmp/{worktree_id}",
+                repo="example",
+                machine="test",
+                platform="wsl",
+                started_at="t",
+                last_resumed_at="t",
+                resume_count=0,
+                title=None,
+                status="active",
+                completed_at=None,
+                sessions=[SessionEntry("shared-session", "t")],
+                kind=kind,
+            )
+            save_record(record, project / f"{worktree_id}.yaml")
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [project_a, project_b])
+        monkeypatch.setattr(
+            S,
+            "list_worktree_sessions",
+            lambda record: [{"id": entry.session_id} for entry in record.sessions],
+        )
+        captured: dict = {}
+        monkeypatch.setattr(m, "_json_output", lambda data: captured.update(data))
+
+        rc = m.cmd_list_sessions(argparse.Namespace(
+            worktree_id=None,
+            all_projects=True,
+            json=True,
+        ))
+
+        assert rc == 0
+        assert len(captured["sessions"]) == 1
+        assert captured["sessions"][0]["interface"] == "unknown"
+        assert captured["sessions"][0]["origin"] == "unknown"
+        assert captured["sessions"][0]["provenance_conflict"] is True
