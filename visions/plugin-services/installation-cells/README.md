@@ -31,9 +31,10 @@ marketplace's cell.
 ## Concepts & Components
 
 - **Marketplace installation identity** — the stable identity formed from a
-  plugin's marketplace provenance and plugin identity. It survives changes in
-  working directory, launch path, process environment, and active runtime
-  version.
+  plugin's globally distinguishing marketplace provenance and plugin identity.
+  Display names and publisher-chosen aliases are labels, not identity. The
+  installation identity survives changes in working directory, launch path,
+  process environment, and active runtime version.
 - **Installation cell** — the marketplace-scoped ownership boundary containing
   that marketplace's plugin runtimes, mutable and durable state, lifecycle and
   discovery artifacts, and machine-local project-adoption state.
@@ -47,6 +48,10 @@ marketplace's cell.
 - **Same-cell composition** — optional cooperation among sibling plugins that
   share one marketplace installation identity. A peer in another installation
   cell is a separate ecosystem, not an interchangeable sibling.
+- **Explicit management context** — the installation identity supplied to an
+  installer, reconciler, repair tool, bootstrap flow, or other management
+  surface that does not originate inside an attributable plugin payload or
+  runtime.
 
 ## Features
 
@@ -89,9 +94,10 @@ selectable rather than resolved by load order.
 ### provenance-safe-transition
 An existing unscoped installation can become marketplace-scoped only when its
 ownership is attributable to that marketplace. Ambiguous legacy state is
-preserved, remains operable, and is surfaced for deliberate resolution; one
-marketplace never claims or rewrites another installation's state as a
-convenience migration.
+preserved, remains explicitly recoverable, and is surfaced for deliberate
+resolution; one marketplace never claims or rewrites another installation's
+state as a convenience migration. Once a cell claims a context, legacy ambient
+activation for that context no longer runs in parallel.
 
 ## Behaviors
 
@@ -108,17 +114,24 @@ marketplace is never captured through ambient command lookup or a shared
 registry.
 
 ### provenance-carried-end-to-end
-An operation inherits installation identity from the artifact that initiated
-it: the payload that supplied a skill or hook, the runtime that spawned a peer
-call, or the adoption record that addresses a project. Identity is carried
-through every process and remote boundary; a machine-global "active
-marketplace" setting is never a correctness dependency.
+An operation either inherits installation identity from the attributable
+artifact that initiated it or receives an explicit management context. Payloads,
+runtimes, adoption records, installers, reconcilers, bootstrap flows, and remote
+operations carry that identity through every process and venue boundary.
+Working directory, ambient command lookup, and a machine-global "active
+marketplace" setting never select a cell by accident.
 
 ### ambient-activation-is-owner-gated
 A hook, guard, reconciler, or other host-triggered entry point acts only when
 its installation cell owns the current context. Non-owning cells stand down
 without error and without provisioning, mutating state, emitting duplicate
 policy, or affecting the owning cell.
+
+### legacy-activation-is-quiescent
+After a marketplace-scoped cell claims a context, legacy hooks, services,
+reconcilers, scheduled work, and exclusivity claims for that context remain
+inactive. An explicit recovery path may keep legacy state usable without
+allowing old and cell-scoped activation paths to operate concurrently.
 
 ### stable-installation-identity
 The chosen installation cell is explicit and stable across shell environments,
@@ -137,6 +150,13 @@ A failed install, corrupt runtime, stopped service, update, rollback, repair, or
 uninstall affects only its owning installation cell. Cleanup requires
 installation-specific ownership evidence and never sweeps another cell's
 artifacts.
+
+### orphaned-cell-containment
+If a marketplace payload becomes unavailable or is disabled while its installed
+runtime or state remains, the orphaned cell stays attributable, inactive unless
+explicitly addressed, and available for diagnosis, repair, or ownership-checked
+cleanup. Another marketplace never captures or activates it merely because the
+original payload is absent.
 
 ### ownership-is-legible
 Commands, services, state, logs, diagnostics, and doctor surfaces identify the
@@ -201,6 +221,9 @@ local transports do not weaken or change installation identity.
 
 ## Provenance
 
+- **2026-08-25** — Strengthened the intent around globally distinguishing
+  provenance, explicit non-payload management context, quiescent legacy
+  activation, and orphaned-cell containment.
 - **2026-08-25** — Clarified `copilot-extensions` as the durable, source-neutral
   installation-home concept even though the primary marketplace carries the same
   name. This keeps the user-facing concept stable while independent marketplaces
