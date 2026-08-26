@@ -296,6 +296,9 @@ function Normalize-Source(
             }
             else {
                 $directoryPath = [string](Get-PropertyValue $Descriptor 'path' '')
+                if ([string]::IsNullOrWhiteSpace($directoryPath)) {
+                    Fail 'A directory source requires a non-empty path or stableId.'
+                }
                 if (-not [IO.Path]::IsPathRooted($directoryPath)) {
                     if (-not $BaseDirectory) {
                         Fail 'A relative directory source requires a declaration base directory.'
@@ -605,7 +608,8 @@ function Validate-NamespaceReceipt(
     if ((Get-PropertyValue $namespace 'marketplaceId') -ne $marketplaceId) {
         Fail "Namespace receipt '$actualReceipt' does not match its cell directory."
     }
-    if ($marketplaceId -notmatch '^(.+)--([0-9a-f]{16})$') {
+    $idMatch = [regex]::Match($marketplaceId, '^(.+)--([0-9a-f]{16})$')
+    if (-not $idMatch.Success) {
         Fail "Invalid source-derived marketplace id '$marketplaceId'."
     }
     Assert-PositiveInteger (Get-PropertyValue $namespace 'generation') 'namespace.json generation'
@@ -616,7 +620,7 @@ function Validate-NamespaceReceipt(
         canonical = Get-PropertyValue $sourceReceipt 'canonical'
         ref = Get-PropertyValue $sourceReceipt 'ref' ''
     }) '' -FromReceipt
-    $identity = Source-Identity $normalized $Matches[1]
+    $identity = Source-Identity $normalized $idMatch.Groups[1].Value
     if ($identity.marketplaceId -ne $marketplaceId) {
         Fail "Namespace receipt '$actualReceipt' id does not match its normalized source."
     }

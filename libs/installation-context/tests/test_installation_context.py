@@ -359,6 +359,18 @@ def test_missing_installed_provenance_fails_closed(tmp_path: Path) -> None:
     assert not durable.exists()
 
 
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_empty_directory_source_path_fails_closed(tmp_path: Path) -> None:
+    copilot, payload, durable = _installed_layout(
+        tmp_path,
+        {"source": "directory"},
+    )
+    result = _resolve(copilot, payload, durable, check=False)
+    assert result.returncode != 0
+    assert "requires a non-empty path or stableId" in result.stderr
+    assert not durable.exists()
+
+
 @pytest.mark.skipif(
     os.name != "nt" or POWERSHELL is None,
     reason="Missing-drive behavior requires native Windows",
