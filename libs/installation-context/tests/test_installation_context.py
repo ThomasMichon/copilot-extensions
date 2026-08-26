@@ -224,6 +224,18 @@ def test_fixture_constants_are_independently_reproducible() -> None:
         assert not FIXTURES.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
+def test_discovery_paths_use_cross_platform_separators() -> None:
+    script = SCRIPT.read_text(encoding="utf-8")
+    for windows_only_relative in (
+        r".claude\settings",
+        r".github\copilot\settings",
+        r".github\plugin\marketplace",
+        r".plugin\marketplace",
+        r".claude-plugin\marketplace",
+    ):
+        assert windows_only_relative not in script
+
+
 @pytest.mark.parametrize("powershell_host", POWERSHELL_HOSTS or [None])
 def test_powershell_matches_portable_source_vectors(
     powershell_host: str | None,

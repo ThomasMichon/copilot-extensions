@@ -385,10 +385,10 @@ function Get-Declarations([string]$Key, [string]$ResolvedCopilotHome, [string]$R
     )
     if ($ResolvedProjectRoot) {
         foreach ($relativeSettings in @(
-            '.claude\settings.json',
-            '.claude\settings.local.json',
-            '.github\copilot\settings.json',
-            '.github\copilot\settings.local.json'
+            '.claude/settings.json',
+            '.claude/settings.local.json',
+            '.github/copilot/settings.json',
+            '.github/copilot/settings.local.json'
         )) {
             $settingsPaths += [pscustomobject]@{
                 path = (Join-Path $ResolvedProjectRoot $relativeSettings)
@@ -459,10 +459,10 @@ function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedP
     $cursor = $ResolvedPayload
     while ($cursor) {
         foreach ($relativeManifest in @(
-            '.github\plugin\marketplace.json',
+            '.github/plugin/marketplace.json',
             'marketplace.json',
-            '.plugin\marketplace.json',
-            '.claude-plugin\marketplace.json'
+            '.plugin/marketplace.json',
+            '.claude-plugin/marketplace.json'
         )) {
             $manifestPath = Join-Path $cursor $relativeManifest
             if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
