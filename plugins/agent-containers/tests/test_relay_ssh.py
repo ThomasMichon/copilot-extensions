@@ -167,7 +167,7 @@ def test_trusted_launch_uses_loopback_reverse_forward(monkeypatch):
         "copilot --acp --stdio",
     ) == 0
 
-    assert seen["deployed"] == ("repo-1", False)
+    assert seen["deployed"] == ("repo-1", True)
     assert seen["reverse_forwards"] == [
         "127.0.0.1:9857:127.0.0.1:61234"
     ]
@@ -176,6 +176,12 @@ def test_trusted_launch_uses_loopback_reverse_forward(monkeypatch):
     assert (
         seen["launch_env"]["LC_GIT_CREDENTIAL_RELAY_TOKEN"] == "relay-secret"  # noqa: S105
     )
+    assert seen["launch_env"]["GIT_CONFIG_COUNT"] == "2"
+    assert (
+        seen["launch_env"]["GIT_CONFIG_VALUE_1"]
+        == "/usr/local/bin/ado-auth-helper"
+    )
+    assert seen["launch_env"]["GIT_TERMINAL_PROMPT"] == "0"
 
 
 def test_trusted_launch_refuses_missing_host_relay(monkeypatch):

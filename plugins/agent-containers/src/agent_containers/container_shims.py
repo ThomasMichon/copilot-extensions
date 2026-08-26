@@ -23,6 +23,7 @@ log = logging.getLogger("agent-containers.shims")
 _BIN = "/usr/local/bin"
 RELAY_CLIENT_PATH = f"{_BIN}/credential-relay-client"
 AZURE_HELPER_PATH = f"{_BIN}/azure-auth-helper"
+ADO_HELPER_PATH = f"{_BIN}/ado-auth-helper"
 
 # Generic relay client: speaks the credential-relay wire protocol to the host,
 # reading endpoint + token from the environment injected by the exec wrapper.
@@ -95,6 +96,26 @@ def main():
         data = sys.stdin.read()
         if not data.endswith("\n\n"):
             data = data.rstrip("\n") + "\n\n"
+        fields = {}
+        for line in data.splitlines():
+            if "=" in line:
+                key, value = line.split("=", 1)
+                fields[key] = value
+        # Containers bootstrap GitHub identity explicitly through GH_TOKEN.
+        # Serve that token locally instead of asking the host relay/GCM, whose
+        # active account may differ from the token selected for this launch.
+        if (
+            kind == "ado"
+            and fields.get("host", "").lower() == "github.com"
+            and os.environ.get("GH_TOKEN")
+        ):
+            sys.stdout.write(
+                "protocol=https\n"
+                "host=github.com\n"
+                "username=x-access-token\n"
+                "password=%s\n\n" % os.environ["GH_TOKEN"]
+            )
+            return 0
         sys.stdout.write(_send(data))
         return 0
     return 0  # store / erase / unknown
@@ -128,15 +149,28 @@ def _docker_write(container: str, path: str, content: str, mode: str = "755") ->
         )
 
 
-def deploy(container: str, *, ado: bool = False) -> None:
+def git_credential_environment() -> dict[str, str]:
+    """Launch-only Git config that makes the trusted helper authoritative."""
+    return {
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "",
+        "GIT_CONFIG_KEY_1": "credential.helper",
+        "GIT_CONFIG_VALUE_1": ADO_HELPER_PATH,
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+def deploy(container: str, *, ado: bool = True) -> None:
     """Deploy the relay client + azure-auth-helper (idempotent) into ``container``.
 
-    ``ado`` additionally deploys ado-auth-helper for ADO PAT / git credential
-    relay (off by default to avoid disturbing already-working in-container ADO
-    auth; the Azure helper is the dev-deploy fix).
+    ``ado`` deploys the trusted launch's Git/ADO credential helper. It defaults
+    on because the launch-only Git config returned by
+    :func:`git_credential_environment` makes that helper authoritative without
+    modifying the container user's persistent Git configuration.
     """
     _docker_write(container, RELAY_CLIENT_PATH, RELAY_CLIENT)
     _docker_write(container, AZURE_HELPER_PATH, AZURE_HELPER)
     if ado:
-        _docker_write(container, f"{_BIN}/ado-auth-helper", ADO_HELPER)
+        _docker_write(container, ADO_HELPER_PATH, ADO_HELPER)
     log.info("Deployed relay shims into container '%s' (ado=%s)", container, ado)

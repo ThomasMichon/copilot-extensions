@@ -19,7 +19,6 @@ relay:
   enabled: true
   host: host.docker.internal
   port: 9857
-  deploy_ado: false                   # optional ado-auth-helper shim
   azure_resources:
     - "*"                             # any Azure scope, gated by per-container token
 
