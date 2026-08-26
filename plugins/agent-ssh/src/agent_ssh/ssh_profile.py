@@ -204,8 +204,12 @@ def _chmod(path: Path, mode: int) -> None:
     inheritance and grant only the current user via ``icacls`` instead.
     """
     if os.name == "nt":
+        system_root = os.environ.get("SystemRoot")
+        if not system_root:
+            raise OSError("SystemRoot is unavailable; cannot harden Windows ACL")
+        system32 = Path(system_root) / "System32"
         identity = subprocess.run(
-            ["whoami"],
+            [str(system32 / "whoami.exe")],
             capture_output=True,
             text=True,
             check=False,
@@ -220,7 +224,13 @@ def _chmod(path: Path, mode: int) -> None:
         # Directories need (OI)(CI) so children inherit the user-only ACL.
         grant = f"{principal}:(OI)(CI)F" if path.is_dir() else f"{principal}:F"
         result = subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", grant],
+            [
+                str(system32 / "icacls.exe"),
+                str(path),
+                "/inheritance:r",
+                "/grant:r",
+                grant,
+            ],
             check=False,
             capture_output=True,
             text=True,
