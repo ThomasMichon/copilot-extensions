@@ -3,9 +3,9 @@
 - **Subject:** The copilot-extensions plugin **service model** — how
   installer-deployed plugin runtimes expose, coordinate, and are reached as
   local services on a user's machine.
-- **Scope:** branch (links per-plugin child visions as they are authored)
+- **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-08-24
+- **Last revised:** 2026-08-25
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
@@ -73,6 +73,11 @@ into a coordination problem.
 - **Install contract** — the uniform deploy/version/footprint agreement every
   runtime plugin follows, so services deploy, update, and are audited the same
   way. See [`docs/install-contract.md`](../../docs/install-contract.md).
+- **Marketplace-scoped installation** — the ownership boundary that lets
+  independently versioned marketplaces ship same-named plugin ecosystems to one
+  host without contending for runtime, state, lifecycle, adoption, discovery, or
+  invocation resources. See the
+  [Marketplace Installation Cells](installation-cells/README.md) child vision.
 - **Per-plugin visions** — concrete leaves under `visions/plugins/<name>/` refine
   this model for a specific service. Linked from here as they are authored.
 
@@ -316,17 +321,19 @@ request, double-runs a scheduled job, or opens a window with no live service.
 spec-level, not fixed here.
 
 ### single-instance-lease
-At most **one live daemon owns a given service on a host at a time**, and that
-ownership is **explicit and reclaimable**. A service acquires a host-local lease
-before it becomes the active endpoint; a process that cannot acquire it **stands
-down** rather than racing an incumbent. Ownership is **liveness-reconciled, not
+At most **one live daemon owns a given service within one marketplace
+installation cell on a host at a time**, and that ownership is **explicit and
+reclaimable**. A service acquires a cell-scoped host-local lease before it
+becomes the active endpoint; a process that cannot acquire it **stands down**
+rather than racing an incumbent. Ownership is **liveness-reconciled, not
 timer-guessed**: a lease held by a dead process is reclaimable, and a still-live
 owner is never displaced by accident. This makes "one active per service per
-host" a property the system can **assert and repair** — so a cutover reconciles
-the **full set** against the lease, retiring every predecessor it replaces *and*
-every stray that a plain restart would otherwise strand, and no drained-but-live
-daemon lingers holding a port or memory. The mechanism (a lock file, a named
-mutex, an OS-native single-instance guard) is spec-level; the guarantee is not.
+installation cell per host" a property the system can **assert and repair** —
+so a cutover reconciles the **full set** against the lease, retiring every
+predecessor it replaces *and* every stray that a plain restart would otherwise
+strand, and no drained-but-live daemon lingers holding a port or memory. The
+mechanism (a lock file, a named mutex, an OS-native single-instance guard) is
+spec-level; the guarantee is not.
 
 ### work-coalescing-singleton
 Where many callers would otherwise each spawn a short-lived worker for the **same
@@ -371,8 +378,9 @@ credentials.** Guarded by the *single-instance-lease*, cut over by
 ## See Also
 
 - Parent vision: [visions index](../README.md)
-- Child visions: none yet (per-plugin service visions will live under
-  `visions/plugins/<name>/`)
+- Child visions:
+  [Marketplace Installation Cells](installation-cells/README.md) · per-plugin
+  service visions live under `visions/plugins/<name>/`
 - Reality docs: [`docs/architecture.md`](../../docs/architecture.md) (install
   topology, the ports table, communication paths) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · per-plugin
@@ -380,6 +388,11 @@ credentials.** Guarded by the *single-instance-lease*, cut over by
 
 ## Provenance
 
+- **2026-08-25** — Added the
+  [Marketplace Installation Cells](installation-cells/README.md) child vision.
+  It generalizes the requirement that independently versioned marketplaces can
+  ship same-named plugin ecosystems to one host without sharing runtime, state,
+  lifecycle, discovery, adoption, or invocation ownership.
 - **2026-08-24** — Added the **drop-in contribution registry** concept,
   **self-auditing-drop-in-composition** feature, and
   **stale-drop-ins-are-inert-and-legible** behavior. Mined from a suite-wide
