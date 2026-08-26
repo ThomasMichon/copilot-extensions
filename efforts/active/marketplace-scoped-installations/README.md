@@ -228,3 +228,9 @@ See [`design.md`](design.md).
   skill guidance that no longer relies on ambient command lookup. The legacy
   global wrapper remains a compatibility surface until explicit management
   context is available for out-of-session callers.
+- The first Phase 2 pilot merged in
+  [#1120](https://github.com/ThomasMichon/copilot-extensions/pull/1120).
+  The next serial slice moved command-catalog generation into the shared
+  payload-invocation templates and added an agent-worktrees payload-only command
+  under `bin/payload/`, leaving its historical top-level wrapper available for
+  legacy global deployment until project-command ownership migration lands.

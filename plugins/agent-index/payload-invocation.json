@@ -4,5 +4,6 @@
   "command": "agent-index",
   "module": "agent_index",
   "runtimeRoot": ".agent-index",
-  "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION"
+  "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION",
+  "purpose": "Search and operate the semantic index"
 }

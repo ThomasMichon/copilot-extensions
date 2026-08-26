@@ -14,7 +14,7 @@ context_root="$(cd "$context_root" 2>/dev/null && pwd -P)" || {
     exit 0
 }
 
-command_path="$self_root/bin/agent-index"
+command_path="$self_root/bin/payload/agent-worktrees"
 availability="unavailable"
 [ -x "$command_path" ] && availability="ready"
 py="$(command -v python3 || command -v python || true)"
@@ -30,20 +30,20 @@ import os
 catalog = {
     "schema": "copilot-extensions.session-command-catalog",
     "version": 1,
-    "plugin": "agent-index",
+    "plugin": "agent-worktrees",
     "payload": {"provenance": "payload-local"},
     "commands": [
         {
-            "id": "agent-index",
+            "id": "agent-worktrees",
             "argv": [os.environ["COMMAND_PATH"]],
             "shell": "direct",
-            "purpose": "Search and operate the semantic index",
+            "purpose": "Manage worktrees and project lifecycle",
             "availability": os.environ["AVAILABILITY"],
         }
     ],
 }
 context = (
-    "## agent-index session command catalog\n\n"
+    "## agent-worktrees session command catalog\n\n"
     "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
     "same-named command from another payload.\n\n"
     "```json\n"
