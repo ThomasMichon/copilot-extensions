@@ -306,10 +306,6 @@ class ContainersConfig:
     # Container-loopback listen port for SSH -R. The host destination is
     # agent-bridge's independently published live relay port.
     relay_port: int = 9857
-    # Legacy compatibility switch. Trusted launches now always deploy the
-    # helper and activate it through launch-only Git config, so persistent
-    # in-container auth configuration is not disturbed.
-    relay_deploy_ado: bool = True
     # Azure scopes the relay may mint tokens for. "*" = any scope (gated behind
     # the per-container relay token; mirrors agent-codespaces). Faithfully serves
     # whatever scope the official `azure-auth-helper get-access-token "<scope>"`
@@ -490,7 +486,11 @@ def load_config() -> ContainersConfig:
         config.relay_enabled = bool(relay.get("enabled", config.relay_enabled))
         config.relay_host = relay.get("host", config.relay_host)
         config.relay_port = int(relay.get("port", config.relay_port))
-        config.relay_deploy_ado = bool(relay.get("deploy_ado", config.relay_deploy_ado))
+        if "deploy_ado" in relay:
+            log.warning(
+                "relay.deploy_ado is deprecated and ignored; trusted launches "
+                "always deploy the launch-scoped Git/ADO helper"
+            )
         if isinstance(relay.get("azure_resources"), list):
             config.relay_azure_resources = [str(r) for r in relay["azure_resources"]]
     if "image_prefixes" in data and isinstance(data["image_prefixes"], list):

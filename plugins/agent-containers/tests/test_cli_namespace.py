@@ -65,7 +65,6 @@ def test_namespace_ensure_ready_ok_and_fail(capsys):
 def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
     config = types.SimpleNamespace(
         relay_port=9857,
-        relay_deploy_ado=True,
         credentials_for=lambda fleet: (True, True),
         acp_command_for=lambda fleet: "copilot --acp --stdio",
     )
