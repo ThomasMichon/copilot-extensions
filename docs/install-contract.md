@@ -11,6 +11,58 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
+## Marketplace installation-cell contract
+
+The prescriptive ownership boundary is a **marketplace installation cell**.
+Plugin name and version alone never select a writable runtime or lifecycle
+artifact. The normative model is defined by
+[`patterns/marketplace-installation-cells.md`](patterns/marketplace-installation-cells.md);
+the requirements below bind installers before the staged runtime migration is
+complete.
+
+1. An installer resolves a validated installation context before writing
+   machine-local state. Payload-originated installs inherit attributable
+   marketplace provenance; reconciliation, repair, bootstrap, and other
+   out-of-payload management callers supply it explicitly.
+2. Runtime slots, snapshots, markers, manifests, state, run files, logs,
+   endpoints, providers, and machine-local project adoption belong beneath the
+   resolved cell and plugin subtree. No new installer may introduce an
+   unqualified `~/.agent-*` root.
+3. The stable identity is `(marketplace-id, plugin-id)`. `marketplace-id`
+   includes a normalized source fingerprint; a marketplace display name or
+   transient Copilot cache path is evidence, not identity.
+4. `namespace.json` records source-to-cell identity and `install.json` records
+   plugin ownership. Deploy manifests, generated commands, endpoints, provider
+   records, services, tasks, units, leases, and cleanup metadata carry the same
+   identity or a verifiable receipt reference.
+5. Child and remote processes receive an immutable context with marketplace,
+   plugin, payload, runtime, state, endpoint, provider, log, cache, and
+   repository roots. Launchers replace conflicting legacy root variables rather
+   than inheriting them.
+6. Generic plugin shims live in their owning payload and dispatch directly to
+   that cell's runtime. Machine-global commands are limited to attributable
+   project entry points with ownership receipts; installers never compete for a
+   global generic plugin command last-writer-wins.
+7. Missing, ambiguous, or mismatched provenance fails closed. Same-cell sibling
+   discovery is explicit, and a same-named peer from another cell is never
+   selected through `PATH`, a wildcard installed-plugin scan, or a shared
+   registry.
+8. Legacy unqualified state is read only through an explicit compatibility
+   resolver. Migration names the destination cell and writes ownership before
+   legacy activation is quiesced; uninstall removes only receipt-matching
+   artifacts.
+
+`COPILOT_PLUGIN_ROOT` is the authoritative immutable payload location on
+surfaces where the host supplies it. `COPILOT_PLUGIN_DATA` / `PLUGIN_DATA` is a
+candidate mutable root only when the host proves that it is qualified by
+globally distinguishing marketplace provenance; the variable's presence does
+not replace installation identity, and not every plugin surface receives it.
+
+> **Transition note.** Concrete `~/.agent-*` and `~/.local/bin/agent-*` examples
+> later in this document describe the currently deployed legacy layout. They
+> remain valid only for unchanged legacy installers during the phased migration.
+> New or migrated installer surfaces follow the cell contract above.
+
 ## Plugin update ≠ runtime install
 
 `copilot plugin update <name>` only refreshes the plugin's **marketplace
