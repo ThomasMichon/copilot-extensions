@@ -41,8 +41,9 @@ for relaxing disclosure or sanitization.
   *The following contribution was assisted using Copilot.*
   ```
 
-- For an operator-owned repository, disclosure is optional unless operator
-  policy sets `disclosure=always`.
+- For a verified operator-owned repository, **omit disclosure by default**.
+  Add it only when the operator explicitly requests disclosure for that
+  contribution or operator policy sets `disclosure=always`.
 - The operator-owned carve-out changes disclosure only. Persona-neutral public
   writing, sanitization, target-repository conventions, and live
   post-publication auditing still apply to every public repository, including

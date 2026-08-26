@@ -28,8 +28,8 @@ The ambient policy requires agents to:
 - determine audience and repository ownership before publishing;
 - prominently disclose AI assistance at the top of contributions to another
   party's repository;
-- make disclosure optional in operator-owned repositories unless operator
-  policy tightens it to always;
+- omit disclosure by default in **verified** operator-owned repositories unless
+  the operator explicitly requests it or policy tightens it to always;
 - keep public artifacts persona-neutral and scrub private identifiers,
   credentials, paths, hosts, accounts, record IDs, and private rationale;
 - write public contributions in first-person singular and follow target-repo

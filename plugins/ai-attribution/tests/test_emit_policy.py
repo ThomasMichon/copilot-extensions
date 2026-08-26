@@ -206,10 +206,10 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev1] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev2] Before publishing"
     )
     assert "another party's repo require" in context
-    assert "operator's own repos is optional" in context
+    assert "verified operator-owned repo, omit disclosure" in context
     assert "own-repo carve-out changes disclosure only" in context
     assert "persona-neutral" in context
     assert "Audit the live published surface" in context
@@ -253,7 +253,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev1]"
+            "[owner: ai-attribution@0.1.0-dev2]"
         )
 
 
@@ -382,7 +382,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev1]"
+                "[owner: ai-attribution@0.1.0-dev2]"
             )
         else:
             assert result.stdout == "{}"
@@ -846,6 +846,7 @@ def test_host_and_owner_match_case_insensitively_for_ssh_remote(
     )
     context = _context(_run(_native_hook(), repo, home))
     assert "configured public account `github.com/example-owner`" in context
+    assert "verify ownership before omitting disclosure" in context
 
 
 @pytest.mark.skipif(not shutil.which("pwsh"), reason="pwsh is not installed")

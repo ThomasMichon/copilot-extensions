@@ -1,7 +1,7 @@
 # Emit the ai-attribution ambient policy for the session-start repository.
 
 $ErrorActionPreference = 'SilentlyContinue'
-$script:PluginVersion = '0.1.0-dev1'
+$script:PluginVersion = '0.1.0-dev2'
 $script:MaxPayloadBytes = 65536
 $script:MaxConfigBytes = 65536
 $script:MaxConfigLines = 200
@@ -472,7 +472,7 @@ function Invoke-Policy {
     if ($script:Disclosure -eq 'always') {
         $Kernel += 'Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. '
     } else {
-        $Kernel += "Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; disclosure in the operator's own repos is optional. "
+        $Kernel += "Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; in a verified operator-owned repo, omit disclosure unless the operator explicitly requests it. "
     }
     $Kernel += 'The own-repo carve-out changes disclosure only: every public artifact, including one in an operator-owned repo, must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. '
 
@@ -480,7 +480,7 @@ function Invoke-Policy {
     if (-not $Account) {
         $Kernel += 'Ownership for the session-start repository is unresolved; treat it as third-party until verified. '
     } elseif (Test-OwnedAccount $Account) {
-        $Kernel += "The session-start repository remote matches configured public account ``$($Account.ToLowerInvariant())``; this local hint is not proof, so verify ownership before using the disclosure-only own-repo exception. "
+        $Kernel += "The session-start repository remote matches configured public account ``$($Account.ToLowerInvariant())``; this local hint is not proof, so verify ownership before omitting disclosure under the own-repo exception. "
     } elseif ($script:OwnedAccounts.Count -gt 0) {
         $Kernel += 'The session-start repository remote does not match a configured operator account; treat it as third-party unless ownership is verified. '
     } else {

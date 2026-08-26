@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev1"
+plugin_version="0.1.0-dev2"
 max_payload_bytes=65536
 max_config_bytes=65536
 max_config_lines=200
@@ -649,7 +649,7 @@ main() {
     if [[ "$disclosure" == "always" ]]; then
         kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. "
     else
-        kernel+="Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; disclosure in the operator's own repos is optional. "
+        kernel+="Contributions to another party's repo require a prominent one-line italicized AI-assistance disclosure at the top; in a verified operator-owned repo, omit disclosure unless the operator explicitly requests it. "
     fi
     kernel+="The own-repo carve-out changes disclosure only: every public artifact, including one in an operator-owned repo, must remain persona-neutral, use first-person singular and target-repo conventions, and be scrubbed of private/internal identifiers, credentials, paths, hosts, accounts, record IDs, and private rationale; use generic placeholders. Audit the live published surface after publication. "
 
@@ -657,7 +657,7 @@ main() {
     if [[ -z "$account" ]]; then
         kernel+="Ownership for the session-start repository is unresolved; treat it as third-party until verified. "
     elif account_is_owned "$account"; then
-        kernel+="The session-start repository remote matches configured public account \`${account,,}\`; this local hint is not proof, so verify ownership before using the disclosure-only own-repo exception. "
+        kernel+="The session-start repository remote matches configured public account \`${account,,}\`; this local hint is not proof, so verify ownership before omitting disclosure under the own-repo exception. "
     elif [[ -n "$owned_accounts" ]]; then
         kernel+="The session-start repository remote does not match a configured operator account; treat it as third-party unless ownership is verified. "
     else

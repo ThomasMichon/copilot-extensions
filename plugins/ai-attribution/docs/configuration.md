@@ -34,7 +34,7 @@ modules.
 
 | Key | Authority | Repeatable | Meaning |
 |-----|-----------|------------|---------|
-| `disclosure=third-party` | Operator only | No | Default: require disclosure for another party's repo; operator-owned repos may omit it. |
+| `disclosure=third-party` | Operator only | No | Default: require disclosure for another party's repo; verified operator-owned repos omit it unless explicitly requested for the contribution. |
 | `disclosure=always` | Operator only | No | Tightening: require disclosure for every contribution. Once selected by a discovered layer, a later layer cannot weaken it. |
 | `owned_account=<public host>/<public account>` | Operator only | Yes | Host-qualified public forge account used as a local remote hint, for example `github.com/example-owner`. Host and owner must both match the remote, case-insensitively; the value remains a hint, not proof. |
 | `contribution_guide=<repo-relative path>` | Target repo only | Yes | Additive pointer to an existing regular file under the target repository, with no symlink/reparse-point path component. It cannot override plugin/operator policy. |
@@ -99,14 +99,15 @@ owner-marked region idempotently: update the single region in place, never appen
 duplicates or copy the full plugin policy.
 
 <!-- ai-attribution:static-fallback:start -->
-**Fallback policy `[owner: ai-attribution@0.1.0-dev1]`:** Before publishing,
+**Fallback policy `[owner: ai-attribution@0.1.0-dev2]`:** Before publishing,
 classify the audience and repository ownership. Disclose AI assistance
-prominently for another party's repository; the operator-owned carve-out is
-disclosure-only. Every public artifact, including one in an operator-owned
-repository, must remain persona-neutral and be scrubbed of credentials, private
+prominently for another party's repository. In a verified operator-owned
+repository, omit disclosure unless the operator explicitly requests it or
+policy requires it; this carve-out changes disclosure only. Every public
+artifact must remain persona-neutral and be scrubbed of credentials, private
 identifiers, hosts, paths, accounts, record IDs, and private rationale. Use
-generic placeholders, follow the target repository's conventions, and audit
-the live published surface after publication.
+generic placeholders, follow the target repository's conventions, and audit the
+live published surface after publication.
 <!-- ai-attribution:static-fallback:end -->
 
 Do not remove or shrink a fuller pre-existing static publication policy until
