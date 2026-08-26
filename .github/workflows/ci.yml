@@ -77,7 +77,7 @@ jobs:
       - name: Payload invocation foundation tests
         run: >-
           python -m pytest -q
-          libs/payload-invocation/tests/test_generate.py
+          libs/payload-invocation/tests
           plugins/agent-index/tests/test_command_catalog.py
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a

@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -29,6 +30,7 @@ def _manifest(tmp_path: Path) -> Path:
                 "module": "agent_example",
                 "runtimeRoot": ".agent-example",
                 "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
+                "purpose": "Exercise an example runtime",
             }
         ),
         encoding="utf-8",
@@ -44,12 +46,18 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
         "agent-example",
         "agent-example.cmd",
         "agent-example.ps1",
+        "emit-command-catalog.ps1",
+        "emit-command-catalog.sh",
     }
     for path, expected in generated.items():
         assert path.read_text(encoding="utf-8") == expected
         assert ".local/bin" not in expected
         assert "installed-plugins/*" not in expected
-    assert (manifest.parent / "bin" / "agent-example").stat().st_mode & 0o100
+    if os.name != "nt":
+        assert (manifest.parent / "bin" / "agent-example").stat().st_mode & 0o100
+        assert (
+            manifest.parent / "scripts" / "emit-command-catalog.sh"
+        ).stat().st_mode & 0o100
 
 
 def test_check_detects_drift(tmp_path: Path) -> None:
@@ -75,13 +83,28 @@ def test_manifest_validation_fails_closed(tmp_path: Path) -> None:
         raise AssertionError("invalid command was accepted")
 
 
+def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["outputDir"] = "bin/payload"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    generated = generator.expected_files(manifest)
+    assert manifest.parent / "bin" / "payload" / "agent-example" in generated
+    catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
+    assert 'command_path="$self_root/bin/payload/agent-example"' in catalog
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
 def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["outputDir"] = "bin/payload"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
     generator.process_manifest(manifest, check=False)
     plugin = manifest.parent
     (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
     scripts = plugin / "scripts"
-    scripts.mkdir()
+    scripts.mkdir(exist_ok=True)
     (scripts / "resolve-runtime.sh").write_text(
         'AGENT_RT_PY="$AGENT_RT_ROOT/versions/test/bin/python"\n',
         encoding="utf-8",
@@ -106,7 +129,7 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
         }
     )
     result = subprocess.run(
-        [str(plugin / "bin" / "agent-example"), "search", "two words"],
+        [str(plugin / "bin" / "payload" / "agent-example"), "search", "two words"],
         cwd=plugin,
         env=env,
         capture_output=True,
@@ -117,6 +140,7 @@ def test_posix_shim_preserves_args_exit_and_project_cwd(tmp_path: Path) -> None:
     assert result.stdout.strip() == f"{project}|-m agent_example search two words"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
 def test_posix_shim_rejects_conflicting_payload_context(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
@@ -137,13 +161,14 @@ def test_posix_shim_rejects_conflicting_payload_context(tmp_path: Path) -> None:
     assert "payload context mismatch" in result.stderr
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")
 def test_first_use_provision_is_serialized(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
     plugin = manifest.parent
     (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
     scripts = plugin / "scripts"
-    scripts.mkdir()
+    scripts.mkdir(exist_ok=True)
     (scripts / "resolve-runtime.sh").write_text(
         'AGENT_RT_PY=""\n'
         'p="$AGENT_RT_ROOT/versions/test/bin/python"\n'
@@ -222,23 +247,29 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     pwsh = shutil.which("pwsh")
     assert pwsh
     manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["outputDir"] = "bin/payload"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
     generator.process_manifest(manifest, check=False)
     plugin = manifest.parent
     (plugin / "plugin.json").write_text('{"name":"agent-example"}\n', encoding="utf-8")
     scripts = plugin / "scripts"
-    scripts.mkdir()
+    scripts.mkdir(exist_ok=True)
+    python_literal = str(Path(sys.executable)).replace("'", "''")
     (scripts / "resolve-runtime.ps1").write_text(
-        "$AgentRtPy = Join-Path $env:AGENT_RT_ROOT 'versions/test/bin/python'\n",
+        f"$AgentRtPy = '{python_literal}'\n",
+        encoding="utf-8",
+    )
+    module_dir = tmp_path / "modules"
+    module_dir.mkdir()
+    (module_dir / "agent_example.py").write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "print(f\"{Path.cwd()}|{' '.join(sys.argv[1:])}\")\n",
         encoding="utf-8",
     )
     home = tmp_path / "home"
-    fake_python = home / ".agent-example" / "versions" / "test" / "bin" / "python"
-    fake_python.parent.mkdir(parents=True)
-    fake_python.write_text(
-        '#!/bin/sh\nprintf "%s\\n" "$PWD|$*"\nexit 0\n',
-        encoding="utf-8",
-    )
-    fake_python.chmod(0o755)
+    home.mkdir()
     project = tmp_path / "project"
     sibling = tmp_path / "plugin-backup"
     project.mkdir()
@@ -250,24 +281,25 @@ def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
             "USERPROFILE": str(home),
             "COPILOT_PLUGIN_ROOT": str(plugin),
             "COPILOT_PROJECT_DIR": str(project),
+            "PYTHONPATH": str(module_dir),
         }
     )
     command = [
         pwsh,
         "-NoProfile",
         "-File",
-        str(plugin / "bin" / "agent-example.ps1"),
+        str(plugin / "bin" / "payload" / "agent-example.ps1"),
         "status",
     ]
     sibling_result = subprocess.run(
         command, cwd=sibling, env=env, capture_output=True, text=True, check=True
     )
     assert sibling_result.stdout.strip() == (
-        f"{sibling}|-m agent_example status"
+        f"{sibling}|status"
     )
     payload_result = subprocess.run(
         command, cwd=plugin, env=env, capture_output=True, text=True, check=True
     )
     assert payload_result.stdout.strip() == (
-        f"{project}|-m agent_example status"
+        f"{project}|status"
     )

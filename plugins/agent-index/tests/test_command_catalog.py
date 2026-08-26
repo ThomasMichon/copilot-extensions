@@ -13,6 +13,7 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")
 def test_posix_catalog_uses_exact_payload_command() -> None:
     env = os.environ.copy()
     env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
@@ -35,6 +36,7 @@ def test_posix_catalog_uses_exact_payload_command() -> None:
     assert command["availability"] == "ready"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")
 def test_catalog_rejects_conflicting_payload_context() -> None:
     env = os.environ.copy()
     env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN.parent)
