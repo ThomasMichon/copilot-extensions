@@ -7,21 +7,21 @@
 
 export const SOFT_TOKEN_CAP = 150_000;
 export const HARD_TOKEN_CAP = 250_000;
-export const SOFT_UTILIZATION_THRESHOLD = 0.55;
-export const HARD_UTILIZATION_THRESHOLD = 0.70;
+export const SOFT_UTILIZATION_PERCENT = 55;
+export const HARD_UTILIZATION_PERCENT = 70;
 
 export function contextPressure(currentTokens, tokenLimit) {
   const validLimit = Number.isFinite(tokenLimit) && tokenLimit > 0;
   const softThreshold = validLimit
     ? Math.min(
       SOFT_TOKEN_CAP,
-      Math.round(tokenLimit * SOFT_UTILIZATION_THRESHOLD),
+      Math.ceil(tokenLimit * SOFT_UTILIZATION_PERCENT / 100),
     )
     : SOFT_TOKEN_CAP;
   const hardThreshold = validLimit
     ? Math.min(
       HARD_TOKEN_CAP,
-      Math.round(tokenLimit * HARD_UTILIZATION_THRESHOLD),
+      Math.ceil(tokenLimit * HARD_UTILIZATION_PERCENT / 100),
     )
     : HARD_TOKEN_CAP;
   return {
@@ -29,5 +29,19 @@ export function contextPressure(currentTokens, tokenLimit) {
     hardThreshold,
     soft: currentTokens >= softThreshold,
     hard: currentTokens >= hardThreshold,
+  };
+}
+
+export function formatContextUsage(currentTokens, tokenLimit) {
+  if (Number.isFinite(tokenLimit) && tokenLimit > 0) {
+    return {
+      utilization: `${Math.round(currentTokens / tokenLimit * 100)}%`,
+      tokens:
+        `${currentTokens.toLocaleString()} / ${tokenLimit.toLocaleString()} tokens`,
+    };
+  }
+  return {
+    utilization: "unknown",
+    tokens: `${currentTokens.toLocaleString()} tokens; limit unknown`,
   };
 }
