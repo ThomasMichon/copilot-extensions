@@ -288,6 +288,33 @@ class TestConcurrencyGuard:
         assert excinfo.value.existing_session_id == first.session_id
 
     @pytest.mark.asyncio
+    async def test_stopped_session_without_acp_is_replaced(
+        self, session_manager, _patch_spawn, _patch_acp
+    ) -> None:
+        """A zero-turn failed start is replaced with freshly resolved target data."""
+        first = await session_manager.start_session(
+            self._command_target(),
+            agent_name="codespace:cs-name",
+        )
+        await session_manager.stop_session(first.session_id)
+        first.acp_session_id = None
+        session_manager._db.update_session_acp_id(first.session_id, None)
+        refreshed = self._command_target()
+        refreshed.cwd = "/workspaces/current"
+
+        second = await session_manager.start_session(
+            refreshed,
+            agent_name="codespace:cs-name",
+        )
+
+        assert second.status == SessionStatus.IDLE
+        assert second.session_id != first.session_id
+        assert second.target.cwd == "/workspaces/current"
+        assert first.session_id not in {
+            session.session_id for session in session_manager.list_sessions()
+        }
+
+    @pytest.mark.asyncio
     async def test_ended_session_does_not_block(
         self, session_manager, _patch_spawn, _patch_acp
     ) -> None:
@@ -328,9 +355,14 @@ async def _start_codespace_session(tmp_db, monkeypatch):
         "agent_bridge.session_manager._resolve_relay_launch_env",
         lambda *args, **kwargs: ("", None),
     )
+    transport = object()
     monkeypatch.setattr(
         "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
-        lambda *args, **kwargs: object(),
+        lambda *args, **kwargs: SimpleNamespace(transport=transport),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        AsyncMock(return_value=[]),
     )
     manager = SessionManager(tmp_db)
     captured: dict[str, list[str] | None] = {}
@@ -389,6 +421,10 @@ async def test_trusted_container_selects_remote_session_host(
             "source /tmp/agent-containers/env-123 && "
             "exec bash -lc 'copilot --acp --stdio'"
         ),
+        "remote_env": "/tmp/agent-containers/env-123",
+        "acp_command": (
+            "cd /workspaces/odsp-web && copilot --acp --stdio"
+        ),
         "reverse_forwards": ["9857:127.0.0.1:61234"],
         "state_command": ["agent-containers", "session-host-state", "odsp-web-1"],
     }
@@ -404,9 +440,19 @@ async def test_trusted_container_selects_remote_session_host(
     async def fake_cleanup(target, result):
         captured["cleanup"] = (target, result)
 
+    transport = object()
+
     def fake_build(target, **kwargs):
         captured["build"] = (target, kwargs)
-        return object()
+        return SimpleNamespace(transport=transport)
+
+    async def fake_plugin_dirs(selected_transport, venue_name, repo_dir):
+        captured["plugin_resolve"] = (
+            selected_transport,
+            venue_name,
+            repo_dir,
+        )
+        return ["/workspaces/odsp-web/.ai/odsp-web-agent"]
 
     async def fake_connect(self, target, **kwargs):
         captured["connect"] = kwargs
@@ -437,6 +483,10 @@ async def test_trusted_container_selects_remote_session_host(
         SessionManager, "_connect_via_session_host", fake_connect,
     )
     monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        fake_plugin_dirs,
+    )
+    monkeypatch.setattr(
         SessionManager, "_acquire_container_lock", lambda *args: None,
     )
     monkeypatch.setattr(
@@ -454,6 +504,9 @@ async def test_trusted_container_selects_remote_session_host(
             "security_profile": "trusted",
             "ssh": {"host_alias": "agent-container-odsp-web-1"},
             "provider_command": ["agent-containers"],
+            "acp_command": (
+                "cd /workspaces/odsp-web && copilot --acp --stdio"
+            ),
         },
     )
     manager = SessionManager(tmp_db)
@@ -468,9 +521,19 @@ async def test_trusted_container_selects_remote_session_host(
     assert captured["prepare"][1] == 61234
     assert captured["build"][1]["prepared"] is prepared
     assert captured["connect"]["remote_child_argv"] == [
-        "bash", "-lc", prepared["remote_command"],
+        "bash",
+        "-lc",
+        ". /tmp/agent-containers/env-123; "
+        "rm -f /tmp/agent-containers/env-123; "
+        "cd /workspaces/odsp-web && copilot --acp --stdio "
+        "--plugin-dir=/workspaces/odsp-web/.ai/odsp-web-agent",
     ]
     assert captured["connect"]["remote_cwd"] == "/workspaces/odsp-web"
+    assert captured["plugin_resolve"] == (
+        transport,
+        "container:odsp-web-1",
+        "/workspaces/odsp-web",
+    )
     assert captured["cleanup"][1] is prepared
 
 
@@ -1052,6 +1115,39 @@ class TestResumeSession:
 
         with pytest.raises(RuntimeError, match="no ACP session ID"):
             await session_manager.resume_session(session.session_id)
+
+    @pytest.mark.asyncio
+    async def test_auto_recreate_missing_acp_id(
+        self,
+        session_manager,
+        spawn_target,
+        _patch_spawn,
+        _patch_acp,
+        mock_acp_client,
+    ) -> None:
+        session = await session_manager.start_session(spawn_target)
+        await session_manager.stop_session(session.session_id)
+        session.acp_session_id = None
+        session.mcp_servers = [{"name": "test-mcp", "command": "server"}]
+        session_manager._db.update_session_acp_id(session.session_id, None)
+
+        with patch.object(
+            session_manager,
+            "_try_reattach_live_host",
+            AsyncMock(return_value=False),
+        ):
+            resumed = await session_manager.resume_session(
+                session.session_id,
+                allow_recreate=True,
+            )
+
+        assert resumed.status == SessionStatus.IDLE
+        assert resumed.acp_session_id == "acp-test-123"
+        mock_acp_client.new_session.assert_awaited_once()
+        assert mock_acp_client.new_session.await_args.kwargs["mcp_servers"] == [
+            {"name": "test-mcp", "command": "server"}
+        ]
+        mock_acp_client.load_session.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_resume_failure_reverts_to_stopped(
@@ -1906,7 +2002,11 @@ class TestCodespaceExclusiveClaim:
                      caller_id=None):
         monkeypatch.setattr(
             "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
-            lambda *a, **k: object(),
+            lambda *a, **k: SimpleNamespace(transport=object()),
+        )
+        monkeypatch.setattr(
+            "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+            AsyncMock(return_value=[]),
         )
         claim_calls: list[tuple[str, str]] = []
 

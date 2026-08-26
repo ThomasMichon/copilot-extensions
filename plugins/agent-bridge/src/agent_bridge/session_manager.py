@@ -15,6 +15,7 @@ import logging
 import os
 import random
 import re
+import shlex
 import shutil
 import subprocess
 import time
@@ -139,6 +140,62 @@ def _resolve_codespace_ai_plugin_dirs(
             "or missing) -- NOT staged: %s", codespace_name, unresolved,
         )
     return resolved
+
+
+async def _resolve_remote_ai_plugin_dirs(
+    transport: Any,
+    venue_name: str,
+    repo_dir: str | None,
+) -> list[str]:
+    """Resolve repo-own plugins through the selected remote venue transport."""
+    if not repo_dir:
+        return []
+    from . import repo_own_plugins_remote as rpr
+
+    resolved, unresolved = await rpr.resolve_remote_repo_ai_plugin_dirs_via(
+        transport.run,
+        repo_dir,
+    )
+    if resolved:
+        log.info(
+            "Resolved %d repo-own .ai plugin(s) for %s at %s: %s",
+            len(resolved),
+            venue_name,
+            repo_dir,
+            resolved,
+        )
+    if unresolved:
+        log.info(
+            "Repo-own plugins for %s were not remote-local directories: %s",
+            venue_name,
+            unresolved,
+        )
+    return resolved
+
+
+def _append_plugin_dirs(acp_command: str, plugin_dirs: list[str]) -> str:
+    """Append shell-safe Copilot ``--plugin-dir`` arguments."""
+    return acp_command + "".join(
+        f" --plugin-dir={shlex.quote(directory)}"
+        for directory in plugin_dirs
+    )
+
+
+def _container_remote_child_argv(
+    container_target: dict[str, Any],
+    prepared: dict[str, Any],
+    plugin_dirs: list[str],
+) -> list[str]:
+    """Build the far-side child command from provider env + bridge policy."""
+    acp_command = _append_plugin_dirs(
+        str(prepared.get("acp_command") or container_target["acp_command"]),
+        plugin_dirs,
+    )
+    remote_env = prepared.get("remote_env")
+    if remote_env:
+        env_path = shlex.quote(str(remote_env))
+        acp_command = f". {env_path}; rm -f {env_path}; {acp_command}"
+    return ["bash", "-lc", acp_command]
 
 
 # ``agent-codespaces claim`` exits with this code on a live claim conflict
@@ -559,6 +616,10 @@ class Session:
         self.subscriber_count = 0
         self.event_log: EventLog | None = None
         self.acp_session_id: str | None = None
+        # Effective per-session MCP configuration for any within-daemon fresh
+        # recreation. Deliberately in-memory only: MCP definitions may contain
+        # launch credentials and must not be serialized into sessions.db.
+        self.mcp_servers: list[dict[str, Any]] = []
         # Structured milestone markers the dispatched agent has reported via
         # `PROGRESS: key=value` lines (e.g. build=ok, commit=<sha>, pr=<id>) --
         # captured from agent_message text and surfaced in status (#46.3).
@@ -2364,6 +2425,16 @@ class SessionManager:
                     ),
                     active_reap_seconds=self._session_host_active_reap_seconds,
                 )
+                remote_cwd = (
+                    prepared.get("workspace_folder")
+                    or container_target.get("workspace_folder")
+                    or None
+                )
+                plugin_dirs = await _resolve_remote_ai_plugin_dirs(
+                    spawner.transport,
+                    f"container:{container_target['name']}",
+                    remote_cwd,
+                )
                 tracker = ConnectTracker(
                     session.event_log.append,
                     session_id=session.session_id,
@@ -2374,15 +2445,14 @@ class SessionManager:
                     session_id=session.session_id,
                     on_acp_event=on_acp_event,
                     permission_callback=permission_callback,
+                    mcp_servers=session.mcp_servers,
                     spawner=spawner,
-                    remote_child_argv=[
-                        "bash", "-lc", prepared["remote_command"],
-                    ],
-                    remote_cwd=(
-                        prepared.get("workspace_folder")
-                        or container_target.get("workspace_folder")
-                        or None
+                    remote_child_argv=_container_remote_child_argv(
+                        container_target,
+                        prepared,
+                        plugin_dirs,
                     ),
+                    remote_cwd=remote_cwd,
                     load_session_id=(
                         session.acp_session_id if load_existing else None
                     ),
@@ -2425,13 +2495,6 @@ class SessionManager:
             get_live_relay_port(),
         )
         acp_command = cs_target["acp_command"]
-        ai_plugin_dirs = _resolve_codespace_ai_plugin_dirs(
-            cs_target["name"],
-            cs_target.get("repo") or None,
-            repo_dir=cs_target.get("workspace_folder") or None,
-        )
-        for directory in ai_plugin_dirs:
-            acp_command += f' --plugin-dir="{directory}"'
         spawner = build_codespace_spawner(
             cs_target["name"],
             cs_target.get("repo") or "",
@@ -2439,6 +2502,12 @@ class SessionManager:
             unexpected_reap_seconds=self._session_host_unexpected_reap_seconds,
             active_reap_seconds=self._session_host_active_reap_seconds,
         )
+        ai_plugin_dirs = await _resolve_remote_ai_plugin_dirs(
+            spawner.transport,
+            f"codespace:{cs_target['name']}",
+            cs_target.get("workspace_folder") or None,
+        )
+        acp_command = _append_plugin_dirs(acp_command, ai_plugin_dirs)
         tracker = ConnectTracker(
             session.event_log.append,
             session_id=session.session_id,
@@ -2449,6 +2518,7 @@ class SessionManager:
             session_id=session.session_id,
             on_acp_event=on_acp_event,
             permission_callback=permission_callback,
+            mcp_servers=session.mcp_servers,
             spawner=spawner,
             remote_child_argv=["bash", "-lc", relay_prelude + acp_command],
             remote_cwd=cs_target.get("workspace_folder") or None,
@@ -3023,6 +3093,23 @@ class SessionManager:
         ws_key = _workspace_key(agent_name, target, caller_id)
         if ws_key is not None:
             existing = self._find_active_session(ws_key)
+            if (
+                existing is not None
+                and existing.status == SessionStatus.STOPPED
+                and not existing.acp_session_id
+            ):
+                # A zero-turn/failed-start incumbent has no ACP identity to
+                # preserve and may carry stale provider metadata. Remove it
+                # before the fresh target is registered, so the caller's new
+                # provider resolution (workspace, Session Host transport,
+                # launch policy) is not discarded by the workspace guard.
+                log.info(
+                    "Replacing stopped session %s with no ACP identity for %s",
+                    existing.session_id,
+                    agent_name,
+                )
+                await self.end_session(existing.session_id, force=True)
+                existing = self._find_active_session(ws_key)
             if existing is not None:
                 raise SessionConflictError(
                     agent_name=agent_name or "",
@@ -3037,6 +3124,9 @@ class SessionManager:
         # AcpClient._apply_model_config).
         session.model_override = model
         session.effort_override = effort
+        session.mcp_servers = [
+            dict(server) for server in (mcp_servers or [])
+        ]
         session.event_log = EventLog(
             db=self._db,
             session_id=session_id,
@@ -3176,6 +3266,16 @@ class SessionManager:
                         ),
                         active_reap_seconds=self._session_host_active_reap_seconds,
                     )
+                    remote_cwd = (
+                        prepared.get("workspace_folder")
+                        or container_target.get("workspace_folder")
+                        or None
+                    )
+                    plugin_dirs = await _resolve_remote_ai_plugin_dirs(
+                        container_spawner.transport,
+                        f"container:{container_target['name']}",
+                        remote_cwd,
+                    )
                     client, acp_sid = await self._connect_via_session_host(
                         target,
                         tracker=tracker,
@@ -3184,14 +3284,12 @@ class SessionManager:
                         permission_callback=permission_callback,
                         mcp_servers=mcp_servers,
                         spawner=container_spawner,
-                        remote_child_argv=[
-                            "bash", "-lc", prepared["remote_command"],
-                        ],
-                        remote_cwd=(
-                            prepared.get("workspace_folder")
-                            or container_target.get("workspace_folder")
-                            or None
+                        remote_child_argv=_container_remote_child_argv(
+                            container_target,
+                            prepared,
+                            plugin_dirs,
                         ),
+                        remote_cwd=remote_cwd,
                         model=model,
                         effort=effort,
                     )
@@ -3297,12 +3395,15 @@ class SessionManager:
                 # ``/workspaces/<repo>/.ai/<name>`` needs no install/egress. The
                 # flags append to the tail of ``cd <repo> && copilot --acp …``, so
                 # they land on the ``copilot`` invocation.
-                ai_plugin_dirs = _resolve_codespace_ai_plugin_dirs(
-                    cs_target["name"], cs_target.get("repo") or None,
-                    repo_dir=cs_target.get("workspace_folder") or None,
+                ai_plugin_dirs = await _resolve_remote_ai_plugin_dirs(
+                    cs_spawner.transport,
+                    f"codespace:{cs_target['name']}",
+                    cs_target.get("workspace_folder") or None,
                 )
-                for d in ai_plugin_dirs:
-                    acp_command += f' --plugin-dir="{d}"'
+                acp_command = _append_plugin_dirs(
+                    acp_command,
+                    ai_plugin_dirs,
+                )
                 if ai_plugin_dirs:
                     log.info(
                         "Folded %d repo-own .ai --plugin-dir(s) into %s launch: %s",
@@ -3555,7 +3656,7 @@ class SessionManager:
                 raise ValueError(
                     f"Session {session_id} is {session.status.value}, not stopped"
                 )
-            if not session.acp_session_id:
+            if not session.acp_session_id and not allow_recreate:
                 raise RuntimeError(
                     f"Session {session_id} has no ACP session ID -- cannot resume"
                 )
@@ -3592,10 +3693,15 @@ class SessionManager:
             for attempt in range(1, _MAX_RESUME_ROUNDS + 1):
                 client = None
                 try:
+                    load_existing = bool(session.acp_session_id)
                     host_result = await self._resume_via_new_remote_host(
                         session,
                         on_acp_event=on_acp_event,
                         permission_callback=permission_callback,
+                        load_existing=load_existing,
+                    )
+                    resumed_acp_id = (
+                        host_result[1] if host_result is not None else None
                     )
                     client = host_result[0] if host_result is not None else None
                     if client is None:
@@ -3615,15 +3721,37 @@ class SessionManager:
                             client.start(agent_proc.proc),
                             timeout=self._timeouts.session_start,
                         )
-                        await asyncio.wait_for(
-                            client.load_session(
-                                cwd=(
-                                    session.target.cwd
-                                    or _default_cwd(session.target)
+                        if session.acp_session_id:
+                            await asyncio.wait_for(
+                                client.load_session(
+                                    cwd=(
+                                        session.target.cwd
+                                        or _default_cwd(session.target)
+                                    ),
+                                    session_id=session.acp_session_id,
                                 ),
-                                session_id=session.acp_session_id,
-                            ),
-                            timeout=self._timeouts.session_new,
+                                timeout=self._timeouts.session_new,
+                            )
+                            resumed_acp_id = session.acp_session_id
+                        else:
+                            resumed_acp_id = await asyncio.wait_for(
+                                client.new_session(
+                                    cwd=(
+                                        session.target.cwd
+                                        or _default_cwd(session.target)
+                                    ),
+                                    mcp_servers=session.mcp_servers,
+                                ),
+                                timeout=self._timeouts.session_new,
+                            )
+
+                    if resumed_acp_id and (
+                        resumed_acp_id != session.acp_session_id
+                    ):
+                        session.acp_session_id = resumed_acp_id
+                        self._db.update_session_acp_id(
+                            session_id,
+                            resumed_acp_id,
                         )
 
                     session.client = client
@@ -3756,6 +3884,7 @@ class SessionManager:
                                     or session.target.cwd
                                     or _default_cwd(session.target)
                                 ),
+                                mcp_servers=session.mcp_servers,
                             ),
                             timeout=self._timeouts.session_new,
                         )
@@ -3975,14 +4104,15 @@ class SessionManager:
 
         # Auto-resume if the process is dead but session is recoverable
         if not session.client or not session.client.is_running:
-            if not session.acp_session_id:
-                raise RuntimeError(
-                    f"Session {session_id} has no running process and no "
-                    "ACP session ID -- cannot auto-resume"
-                )
             log.info(
-                "Session %s (%s) process is dead -- auto-resuming",
-                session_id, session.name,
+                "Session %s (%s) process is dead -- auto-%s",
+                session_id,
+                session.name,
+                (
+                    "resuming"
+                    if session.acp_session_id
+                    else "creating a fresh ACP session"
+                ),
             )
             # Mark as STOPPED so resume_session accepts it
             session.status = SessionStatus.STOPPED
