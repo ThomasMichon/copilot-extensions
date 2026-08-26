@@ -359,6 +359,35 @@ def test_missing_installed_provenance_fails_closed(tmp_path: Path) -> None:
     assert not durable.exists()
 
 
+@pytest.mark.skipif(
+    os.name != "nt" or POWERSHELL is None,
+    reason="Missing-drive behavior requires native Windows",
+)
+def test_must_exist_rejects_missing_drive_root(tmp_path: Path) -> None:
+    missing_drive = next(
+        (
+            f"{letter}:\\"
+            for letter in "ZYXWVUTSRQPONMLKJIHGFED"
+            if not Path(f"{letter}:\\").exists()
+        ),
+        None,
+    )
+    if missing_drive is None:
+        pytest.skip("no unused drive letter is available")
+    result = _run_ps(
+        "resolve",
+        "-PayloadRoot",
+        missing_drive,
+        "-PluginId",
+        "agent-example",
+        "-SourceJson",
+        json.dumps({"source": "opaque", "id": "missing-drive"}),
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "Path does not exist" in result.stderr
+
+
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_directory_marketplace_manifest_must_resolve_payload(tmp_path: Path) -> None:
     marketplace = tmp_path / "marketplace"

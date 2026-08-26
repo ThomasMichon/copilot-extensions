@@ -22,10 +22,10 @@
       "marketplaceId": "example--9caa0da95f327099"
     },
     {
-      "name": "credentialed-git-url",
+      "name": "git-url-with-username",
       "descriptor": {
         "source": "git",
-        "url": "HTTPS://reader:secret@Example.COM/Org/Repo.git",
+        "url": "https://build-user@Example.COM/Org/Repo.git",
         "ref": "release/One"
       },
       "marketplaceKey": "Corp Git",

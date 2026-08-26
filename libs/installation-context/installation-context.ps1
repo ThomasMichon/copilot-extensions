@@ -91,6 +91,9 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
     if ([string]::IsNullOrWhiteSpace($Path)) { Fail 'A required path is empty.' }
     $expanded = [Environment]::ExpandEnvironmentVariables($Path)
     $fullPath = [IO.Path]::GetFullPath($expanded)
+    if ($MustExist -and -not (Test-Path -LiteralPath $fullPath)) {
+        Fail "Path does not exist: $Path"
+    }
     $existing = $fullPath
     $tail = New-Object Collections.Generic.List[string]
     while (-not (Test-Path -LiteralPath $existing)) {
@@ -100,9 +103,6 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
         $parent = Split-Path -Parent $existing
         if (-not $parent -or $parent -eq $existing) { break }
         $existing = $parent
-    }
-    if ($MustExist -and $tail.Count -gt 0) {
-        Fail "Path does not exist: $Path"
     }
     if (Test-Path -LiteralPath $existing) {
         if ($env:OS -eq 'Windows_NT') {
