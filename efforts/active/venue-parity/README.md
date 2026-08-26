@@ -240,3 +240,31 @@ last so naming follows the proven abstraction rather than predicting it.
   GitHub and ADO credential fills, an authenticated ADO `git ls-remote` (exit
   0), and an Azure Storage token request (nonempty) without emitting credential
   values. **Next:** P1 shared launch policy.
+- **2026-08-25 — P1 shared remote launch policy completed.** Repo-own plugin
+  resolution now runs through the already-selected remote transport instead of
+  a CodeSpace-shaped target-exec inference: agent-bridge ships and executes the
+  same canonical `plugin_resolve` payload through either `CodeSpaceTransport`
+  or `ContainerTransport`, then appends the resulting remote-local
+  `--plugin-dir` paths to the child command. Container child argv is assembled
+  from the provider's current raw ACP command plus its launch-only environment,
+  so resume/recreate does not freeze stale fleet configuration. **Live gates:**
+  container session `ccbac5eb-a57` ran from `/workspaces/odsp-web` with the
+  odsp-web killswitch capabilities loaded; fresh CodeSpace session
+  `83367d34-bd5` ran from the same cwd with a repo-local capability loaded.
+  Model/effort remain on the shared ACP config-option path.
+- **2026-08-25 — P1 reliability detour: CodeSpace 500s traced to stale
+  daemons.** Worktree `194c`'s CodeSpace and remote Copilot process were healthy;
+  the 500s were local `POST /live-sessions/.../events` failures. Five retired
+  daemon generations (dev340/344/345/354/356) still listened and wrote the
+  shared SQLite DB, producing `sqlite3.OperationalError: database is locked`.
+  After retiring only those identity-checked stale process trees, ingestion
+  recovered and the `194c` turn completed. Cutover now verifies the old
+  supervisor exits after `/shutdown`, force-reaps its verified tree after a
+  bound, and fails the deploy if split-brain remains; POSIX escalates to
+  process-group `SIGKILL`. Three subsequent cutovers left one generation.
+  The same detour fixed stopped zero-turn sessions: no-ACP incumbents are
+  replaced atomically with freshly resolved provider metadata rather than
+  revived through legacy raw stdio, while explicit recreate retains in-memory
+  MCP configuration without persisting possible secrets. Candidate versions:
+  agent-bridge **0.4.0-dev361**, agent-containers **0.1.2-dev81**. **Next:** P2
+  formal parity harness.

@@ -76,3 +76,58 @@ def test_reconcile_reads_new_daemon_from_routing_table(tmp_path, monkeypatch):
     )
     assert data["pid"] == 54321
     assert data["version"] == "9.9.9"
+
+
+def test_retired_daemon_exits_gracefully_without_kill(monkeypatch):
+    states = iter([True, False])
+    killed = []
+    monkeypatch.setattr(
+        m,
+        "_pid_is_agent_bridge",
+        lambda pid: next(states, False),
+    )
+    monkeypatch.setattr(m, "_force_kill_agent_bridge_tree", killed.append)
+
+    exited, forced = m._ensure_retired_daemon_exited(
+        111,
+        graceful_timeout=0.01,
+    )
+
+    assert exited is True
+    assert forced is False
+    assert killed == []
+
+
+def test_retired_daemon_process_tree_is_forced_after_grace(monkeypatch):
+    alive = {"value": True}
+    killed = []
+
+    def _kill(pid):
+        killed.append(pid)
+        alive["value"] = False
+
+    monkeypatch.setattr(
+        m,
+        "_pid_is_agent_bridge",
+        lambda pid: alive["value"],
+    )
+    monkeypatch.setattr(m, "_force_kill_agent_bridge_tree", _kill)
+
+    exited, forced = m._ensure_retired_daemon_exited(
+        222,
+        graceful_timeout=0,
+        forced_timeout=0,
+    )
+
+    assert exited is True
+    assert forced is True
+    assert killed == [222]
+
+
+def test_retired_pid_reused_by_other_process_is_not_killed(monkeypatch):
+    killed = []
+    monkeypatch.setattr(m, "_pid_is_agent_bridge", lambda pid: False)
+    monkeypatch.setattr(m, "_force_kill_agent_bridge_tree", killed.append)
+
+    assert m._ensure_retired_daemon_exited(333) == (True, False)
+    assert killed == []

@@ -380,6 +380,11 @@ class CodeSpaceSpawner:
         self._unexpected_reap_seconds = unexpected_reap_seconds
         self._active_reap_seconds = active_reap_seconds
 
+    @property
+    def transport(self) -> RemoteTransport:
+        """Remote execution seam used by shared pre-launch policy."""
+        return self._transport
+
     async def spawn(
         self,
         child_argv: list[str],
