@@ -795,6 +795,9 @@ try {
 
     if ($Action -eq 'source-id') {
         $descriptor = Read-SourceDescriptor
+        if ($null -eq $descriptor) {
+            Fail 'source-id requires -SourceJson or -SourceFile.'
+        }
         $normalized = Normalize-Source $descriptor ''
         $name = $MarketplaceKey
         if (-not $name) { $name = 'marketplace' }
@@ -834,6 +837,9 @@ try {
                 Fail 'The payload root must be absolute.'
             }
             $resolvedPayload = Canonical-Path $PayloadRoot -MustExist
+            if (-not (Test-Path -LiteralPath $resolvedPayload -PathType Container)) {
+                Fail "The payload root must be an existing directory: $resolvedPayload"
+            }
             if ($env:COPILOT_PLUGIN_ROOT -and -not (Paths-Equal $resolvedPayload $env:COPILOT_PLUGIN_ROOT)) {
                 Fail 'COPILOT_PLUGIN_ROOT conflicts with -PayloadRoot.'
             }

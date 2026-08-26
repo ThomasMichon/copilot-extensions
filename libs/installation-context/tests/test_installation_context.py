@@ -61,7 +61,14 @@ def _run_ps(
     selected_host = host or POWERSHELL
     if selected_host is None:
         raise RuntimeError("PowerShell is required for this test helper")
-    command = [selected_host, "-NoProfile", "-File", str(SCRIPT)]
+    command = [
+        selected_host,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(SCRIPT),
+    ]
     command.extend(str(argument) for argument in arguments)
     process_env = os.environ.copy()
     process_env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
@@ -225,6 +232,13 @@ def test_fixture_constants_are_independently_reproducible() -> None:
         assert not FIXTURES.read_bytes().startswith(b"\xef\xbb\xbf")
 
 
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_source_id_requires_a_descriptor() -> None:
+    result = _run_ps("source-id", check=False)
+    assert result.returncode != 0
+    assert "requires -SourceJson or -SourceFile" in result.stderr
+
+
 def test_discovery_paths_use_cross_platform_separators() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
     for windows_only_relative in (
@@ -370,6 +384,24 @@ def test_missing_installed_provenance_fails_closed(tmp_path: Path) -> None:
     assert result.returncode != 0
     assert "No user or explicit project" in result.stderr
     assert not durable.exists()
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_payload_root_must_be_a_directory(tmp_path: Path) -> None:
+    payload_file = tmp_path / "payload.txt"
+    payload_file.write_text("not a plugin directory", encoding="utf-8")
+    result = _run_ps(
+        "resolve",
+        "-PayloadRoot",
+        payload_file,
+        "-PluginId",
+        "agent-example",
+        "-SourceJson",
+        json.dumps({"source": "opaque", "id": "file-payload"}),
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "must be an existing directory" in result.stderr
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
