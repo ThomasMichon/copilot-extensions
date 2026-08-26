@@ -27,15 +27,15 @@ $catalog = [ordered]@{
     )
 }
 $catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
-$context = @"
-## agent-index session command catalog
-
-Invoke the exact ``argv`` below. Do not search ``PATH`` or substitute a same-named command from another payload.
-
-``````json
-$catalogJson
-``````
-"@
-$context = ($context.Trim() -replace "`r`n?", "`n")
+$fence = '```'
+$context = @(
+    '## agent-index session command catalog'
+    ''
+    'Invoke the exact `argv` below. Do not search `PATH` or substitute a same-named command from another payload.'
+    ''
+    "${fence}json"
+    $catalogJson
+    $fence
+) -join "`n"
 Write-Output (@{ additionalContext = $context } | ConvertTo-Json -Compress -Depth 3)
 exit 0

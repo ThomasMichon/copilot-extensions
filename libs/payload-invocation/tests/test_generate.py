@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 SCRIPT = Path(__file__).resolve().parents[1] / "generate.py"
 _spec = importlib.util.spec_from_file_location("payload_invocation_generate", SCRIPT)
 generator = importlib.util.module_from_spec(_spec)
@@ -213,12 +215,12 @@ def test_windows_templates_preserve_context_and_release_payload_cwd(
     assert "if not defined COPILOT_PLUGIN_ROOT" in cmd
 
 
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
 def test_powershell_shim_preserves_sibling_cwd_and_leaves_payload(
     tmp_path: Path,
 ) -> None:
     pwsh = shutil.which("pwsh")
-    if not pwsh:
-        return
+    assert pwsh
     manifest = _manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
     plugin = manifest.parent

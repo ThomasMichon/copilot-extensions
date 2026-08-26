@@ -8,6 +8,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 PLUGIN = Path(__file__).resolve().parents[1]
 
 
@@ -55,10 +57,10 @@ def test_powershell_catalog_declares_same_schema_and_command() -> None:
     assert "COPILOT_PLUGIN_ROOT" in source
 
 
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
 def test_powershell_catalog_uses_exact_payload_command() -> None:
     pwsh = shutil.which("pwsh")
-    if not pwsh:
-        return
+    assert pwsh
     env = os.environ.copy()
     env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
     result = subprocess.run(
