@@ -20,6 +20,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
+$utf8NoBom = New-Object Text.UTF8Encoding($false)
+$OutputEncoding = $utf8NoBom
+try { [Console]::OutputEncoding = $utf8NoBom } catch {}
 
 if ($env:OS -eq 'Windows_NT' -and -not ('CeFinalPath' -as [type])) {
     Add-Type -TypeDefinition @'

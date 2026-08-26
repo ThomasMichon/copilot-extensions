@@ -61,14 +61,10 @@ def _run_ps(
     selected_host = host or POWERSHELL
     if selected_host is None:
         raise RuntimeError("PowerShell is required for this test helper")
-    command = [
-        selected_host,
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(SCRIPT),
-    ]
+    command = [selected_host, "-NoProfile"]
+    if os.name == "nt":
+        command.extend(["-ExecutionPolicy", "Bypass"])
+    command.extend(["-File", str(SCRIPT)])
     command.extend(str(argument) for argument in arguments)
     process_env = os.environ.copy()
     process_env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
@@ -79,6 +75,7 @@ def _run_ps(
         command,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         env=process_env,
         check=False,
     )
@@ -237,6 +234,22 @@ def test_source_id_requires_a_descriptor() -> None:
     result = _run_ps("source-id", check=False)
     assert result.returncode != 0
     assert "requires -SourceJson or -SourceFile" in result.stderr
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_machine_json_is_utf8() -> None:
+    result = _run_ps(
+        "source-id",
+        "-SourceJson",
+        json.dumps(
+            {"source": "opaque", "id": "urn:example:caf\u00e9"},
+            ensure_ascii=False,
+        ),
+        "-MarketplaceKey",
+        "Unicode",
+    )
+    actual = json.loads(result.stdout)
+    assert actual["canonical"] == "opaque:urn:example:caf\u00e9"
 
 
 def test_discovery_paths_use_cross_platform_separators() -> None:
