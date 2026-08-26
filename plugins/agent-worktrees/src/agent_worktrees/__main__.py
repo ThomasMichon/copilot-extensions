@@ -69,6 +69,7 @@ from agent_procutil import detached_kwargs, windowless_python, no_window_flags
 
 from . import (
     activity,
+    claim_handoffs,
     disposition_history,
     git_ops,
     list_cache,
@@ -6711,6 +6712,8 @@ def cmd_claims(args: argparse.Namespace) -> int:
     worktree id for :func:`_claims_show`.
     """
     target = list(getattr(args, "target", None) or [])
+    if target and target[0] == "handoff":
+        return _claims_handoff(args, target[1:])
     if target and target[0] == "add":
         if len(target) < 3:
             if args.json:
@@ -6743,6 +6746,103 @@ def cmd_claims(args: argparse.Namespace) -> int:
         return _claims_orphans(args)
     worktree_id = target[0] if target else None
     return _claims_show(args, worktree_id)
+
+
+def _claim_handoff_actor(
+    config: cfg.Config, explicit_worktree: str | None
+) -> str:
+    worktree_id = _infer_worktree_id(explicit_worktree, config)
+    if not worktree_id:
+        raise claim_handoffs.ClaimHandoffError(
+            "cannot infer the acting worktree; run inside it or pass --worktree"
+        )
+    project = config.repo_name or cfg.project_name()
+    return tracking.format_claim_ref(config.machine, project, worktree_id)
+
+
+def _claims_handoff(args: argparse.Namespace, target: list[str]) -> int:
+    """Dispatch same-machine claim-bundle offer/show/decline/cancel."""
+    if not target:
+        msg = "claims handoff: missing action (offer|show|decline|cancel)"
+        if args.json:
+            return _json_error(msg, 2)
+        output.err(msg)
+        return 2
+    action = target[0]
+    if action not in {"offer", "show", "decline", "cancel"}:
+        msg = (
+            f"claims handoff: unknown action {action!r} "
+            "(expected offer|show|decline|cancel)"
+        )
+        if args.json:
+            return _json_error(msg)
+        output.err(msg)
+        return 1
+    try:
+        if action == "show":
+            if len(target) != 2:
+                raise claim_handoffs.ClaimHandoffError(
+                    "claims handoff show: usage 'show <bundle-id>'"
+                )
+            bundle = claim_handoffs.show(target[1])
+            created = None
+        else:
+            config = cfg.load_config()
+            actor = _claim_handoff_actor(
+                config, getattr(args, "release_worktree", None)
+            )
+            if action == "offer":
+                handoff_values = list(getattr(args, "handoff_to", None) or [])
+                if not handoff_values:
+                    raise claim_handoffs.ClaimHandoffError(
+                        "claims handoff offer requires --to "
+                        "<machine/project/worktree>"
+                    )
+                consumer, *trailing_refs = handoff_values
+                bundle, created = claim_handoffs.offer(
+                    actor,
+                    consumer,
+                    [*target[1:], *trailing_refs],
+                    machine=config.machine,
+                )
+            elif action in {"decline", "cancel"}:
+                if len(target) != 2:
+                    raise claim_handoffs.ClaimHandoffError(
+                        f"claims handoff {action}: usage "
+                        f"'{action} <bundle-id> --reason <text>'"
+                    )
+                bundle = claim_handoffs.transition(
+                    target[1],
+                    actor=actor,
+                    action="declined" if action == "decline" else "cancelled",
+                    reason=getattr(args, "reason", "") or "",
+                )
+                created = None
+    except claim_handoffs.ClaimHandoffError as exc:
+        if args.json:
+            return _json_error(str(exc))
+        output.err(str(exc))
+        return 1
+    payload = bundle.to_dict()
+    if created is not None:
+        payload["created"] = created
+    if args.json:
+        _json_output(payload)
+        return 0
+    refs = ", ".join(claim["ref"] for claim in bundle.claims)
+    if action == "show":
+        print(
+            f"Claim bundle {bundle.bundle_id}: {bundle.state}\n"
+            f"  source: {bundle.source}\n"
+            f"  consumer: {bundle.consumer}\n"
+            f"  claims: {refs}"
+        )
+    elif action == "offer":
+        verb = "offered" if created else "already offered"
+        print(f"Claim bundle {bundle.bundle_id} {verb} to {bundle.consumer}: {refs}")
+    else:
+        print(f"Claim bundle {bundle.bundle_id}: {bundle.state}")
+    return 0
 
 
 def _resolve_owner_ref_record_path(
@@ -6868,13 +6968,23 @@ def _claims_release(args: argparse.Namespace, ref: str) -> int:
         return 1
     # Foreground verb (#4547): claim release is a critical RMW held under the
     # blocking record lock (no I/O in the window).
-    with tracking._RecordLock(rec_path):
+    with tracking._RecordLock(rec_path, require_sidecar=True):
         rec = tracking.load_record(rec_path)
         match = next((c for c in rec.resources if c.ref == ref), None)
         if match is None:
             if args.json:
                 return _json_error(f"no outbound claim with ref: {ref}")
             output.err(f"no outbound claim with ref: {ref} on {wt_id}")
+            return 1
+        reservation = tracking.claim_handoff_reservation(rec, match)
+        if reservation:
+            msg = (
+                f"claim {ref} is reserved by offered handoff bundle "
+                f"{reservation}; accept, decline, or cancel it first"
+            )
+            if args.json:
+                return _json_error(msg)
+            output.err(msg)
             return 1
         remove = getattr(args, "remove", False)
         if remove:
@@ -6934,11 +7044,28 @@ def _claims_settle(args: argparse.Namespace, ref: str) -> int:
             return _json_error(f"worktree not found: {wt_id}")
         output.err(f"worktree not found: {wt_id}")
         return 1
-    rec = tracking.load_record(rec_path)
     disposition = (
         obligations.RELEASED if getattr(args, "released", False) else obligations.AT_REST
     )
-    settled = tracking.settle_resource_claim(rec, ref, disposition, path=rec_path)
+    with tracking._RecordLock(rec_path, require_sidecar=True):
+        rec = tracking.load_record(rec_path)
+        match = next((c for c in rec.resources if c.ref == ref), None)
+        reservation = (
+            tracking.claim_handoff_reservation(rec, match)
+            if match is not None else "")
+        if reservation:
+            msg = (
+                f"claim {ref} is reserved by offered handoff bundle "
+                f"{reservation}; accept, decline, or cancel it first"
+            )
+            if args.json:
+                return _json_error(msg)
+            output.err(msg)
+            return 1
+        settled = tracking.settle_resource_claim(
+            rec, ref, disposition, save=False)
+        if settled is not None:
+            tracking.save_record(rec, rec_path)
     if settled is None:
         if args.json:
             return _json_error(f"no outbound claim with ref: {ref}")
@@ -6985,11 +7112,46 @@ def _claims_sweep(args: argparse.Namespace) -> int:
     reclaimed: list[dict[str, str]] = []
     tdir = cfg.tracking_dir()
     for rec in tracking.list_records(tdir):
-        # Compute candidates without saving; apply-mode persists per record.
-        before = {c.ref: c.state for c in rec.resources}
-        flipped = tracking.sweep_abandoned_obligations(
-            rec, gone_of=gone_of, safe_of=safe_of, save=apply,
-        )
+        rec_path = tdir / f"{rec.worktree_id}.yaml"
+        # External liveness/safety probes may call leases, gh, or az. Compute
+        # their tri-state verdicts before the short record lock; after locking,
+        # reload and apply only to the same still-active/unreserved refs.
+        verdicts: dict[str, tuple[bool | None, bool | None]] = {}
+        for claim in rec.resources:
+            if (not claim.is_unsettled
+                    or tracking.claim_handoff_reservation(rec, claim)):
+                continue
+            try:
+                gone = gone_of(claim)
+            except Exception:
+                gone = None
+            try:
+                safe = safe_of(claim)
+            except Exception:
+                safe = None
+            verdicts[claim.ref] = (gone, safe)
+
+        def _gone(claim):
+            return verdicts.get(claim.ref, (None, None))[0]
+
+        def _safe(claim):
+            return verdicts.get(claim.ref, (None, None))[1]
+
+        if apply:
+            # Reload under the required sidecar lock so a sweep snapshot can
+            # never overwrite a concurrently committed handoff reservation.
+            with tracking._RecordLock(rec_path, require_sidecar=True):
+                rec = tracking.load_record(rec_path)
+                flipped = tracking.sweep_abandoned_obligations(
+                    rec, gone_of=_gone, safe_of=_safe, save=False,
+                )
+                if flipped:
+                    tracking.save_record(rec, rec_path)
+        else:
+            before = {c.ref: c.state for c in rec.resources}
+            flipped = tracking.sweep_abandoned_obligations(
+                rec, gone_of=_gone, safe_of=_safe, save=False,
+            )
         for c in flipped:
             reclaimed.append({"owner": rec.worktree_id, "kind": c.kind,
                               "ref": c.ref})
@@ -15078,6 +15240,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "deferred to the lease mirror). For a call-site (e.g. "
                         "agent-codespaces on CodeSpace borrow/disconnect) whose cwd "
                         "is not the borrowing worktree.")
+    p.add_argument("--to", nargs="+", default=None, dest="handoff_to",
+                   metavar="VALUE",
+                   help="with handoff offer: qualified consumer "
+                        "machine/project/worktree_id followed by claim refs; "
+                        "values end at the next option")
+    p.add_argument("--reason", default="",
+                   help="with handoff decline/cancel: required explanation")
     p.add_argument("--json", action="store_true",
                    help="JSON output mode (stdout is JSON only)")
 

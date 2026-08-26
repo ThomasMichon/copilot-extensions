@@ -13,6 +13,7 @@ from agent_worktrees.tracking import ResourceClaim
 def _record(*states: str) -> SimpleNamespace:
     """A duck-typed record carrying only the ``resources`` the gate reads."""
     return SimpleNamespace(
+        machine="m", repo="p", worktree_id="wt",
         resources=[ResourceClaim(kind="codespace", ref=f"cs-{i}", state=s)
                    for i, s in enumerate(states)],
     )
@@ -91,7 +92,7 @@ def test_finalize_parser_accepts_named_handoff_target():
 
 def test_pending_resource_creation_cannot_be_handed_off(monkeypatch, capsys):
     _gate(monkeypatch, "block")
-    rec = SimpleNamespace(resources=[
+    rec = SimpleNamespace(machine="m", repo="p", worktree_id="wt", resources=[
         ResourceClaim(
             kind="workdir", ref="pending-run:abc", state="active")
     ])
@@ -114,6 +115,7 @@ def test_only_unsettled_claims_count(monkeypatch):
 def _worktree_record(*states):
     from agent_worktrees.tracking import ResourceClaim
     return SimpleNamespace(
+        machine="m", repo="p", worktree_id="wt",
         resources=[ResourceClaim(kind="worktree", ref=f"m/p/c{i}", state=s)
                    for i, s in enumerate(states)])
 

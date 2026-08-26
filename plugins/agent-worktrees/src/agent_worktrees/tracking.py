@@ -286,6 +286,7 @@ class ResourceClaim:
     created_at: str = ""        # ISO timestamp the claim was journaled
     state: str = "active"       # disposition: active | at-rest | released
     note: str = ""              # optional human label
+    handoff_bundle: str = ""    # offered bundle reserving state mutation
 
     @property
     def is_live(self) -> bool:
@@ -623,6 +624,15 @@ def _now_iso() -> str:
 # replace's bounded retry below.
 _PATH_LOCKS: dict[str, threading.RLock] = {}
 _PATH_LOCKS_GUARD = threading.Lock()
+_THREAD_SIDECARS = threading.local()
+
+
+def _thread_sidecar_counts() -> dict[str, int]:
+    counts = getattr(_THREAD_SIDECARS, "counts", None)
+    if counts is None:
+        counts = {}
+        _THREAD_SIDECARS.counts = counts
+    return counts
 
 
 def _path_write_lock(path: Path) -> threading.RLock:
@@ -770,6 +780,7 @@ def _parse_claim_mapping(raw: dict) -> ResourceClaim:
         created_at=str(raw.get("created_at", "")),
         state=state,
         note=str(raw.get("note", "")),
+        handoff_bundle=str(raw.get("handoff_bundle", "")),
     )
 
 
@@ -784,6 +795,8 @@ def _claim_to_yaml_dict(claim: ResourceClaim) -> dict[str, object]:
         d["state"] = claim.state
     if claim.note:
         d["note"] = claim.note
+    if claim.handoff_bundle:
+        d["handoff_bundle"] = claim.handoff_bundle
     return d
 
 
@@ -1031,10 +1044,47 @@ def _yaml_scalar(v: str) -> str:
     return v
 
 
-def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
-    """Write a worktree tracking record to YAML (atomic)."""
+def _save_record_unlocked(
+    record: WorktreeRecord,
+    path: Path | None = None,
+    *,
+    preserve_handoff_reservations: bool = True,
+) -> None:
+    """Write a worktree tracking record to YAML (atomic).
+
+    Ordinary full-record writers may hold a stale in-memory snapshot. Preserve
+    every claim currently reserved by a handoff from the on-disk record,
+    including its exact metadata/disposition, so an unrelated save cannot erase
+    or mutate the offered bundle. The claim-handoff transaction alone passes
+    ``preserve_handoff_reservations=False`` while setting/clearing reservations
+    under the required record lock.
+    """
     if path is None:
         path = record.yaml_path
+    if preserve_handoff_reservations and path.exists():
+        current = load_record(path)
+        current_by_ref = {claim.ref: claim for claim in current.resources}
+        reserved = {
+            claim.ref: claim for claim in current.resources
+            if claim.handoff_bundle
+        }
+        merged: list[ResourceClaim] = []
+        for claim in record.resources:
+            authoritative = reserved.pop(claim.ref, None)
+            if authoritative is not None:
+                merged.append(authoritative)
+            else:
+                # Current disk state is also authoritative when a terminal
+                # transition cleared a reservation. Never let a stale
+                # writer resurrect its old bundle marker.
+                current_claim = current_by_ref.get(claim.ref)
+                if (claim.handoff_bundle and
+                        (current_claim is None
+                         or not current_claim.handoff_bundle)):
+                    claim.handoff_bundle = ""
+                merged.append(claim)
+        merged.extend(reserved.values())
+        record.resources = merged
 
     title_val = record.title or "null"
     # Quote titles that contain YAML-special characters (colons, etc.)
@@ -1187,6 +1237,23 @@ def save_record(record: WorktreeRecord, path: Path | None = None) -> None:
         )
 
     _atomic_write(path, content)
+
+
+def save_record(
+    record: WorktreeRecord,
+    path: Path | None = None,
+    *,
+    preserve_handoff_reservations: bool = True,
+) -> None:
+    """Locked cross-process CAS for one complete worktree record."""
+    if path is None:
+        path = record.yaml_path
+    with _RecordLock(path, require_sidecar=True):
+        _save_record_unlocked(
+            record,
+            path,
+            preserve_handoff_reservations=preserve_handoff_reservations,
+        )
 
 
 def list_records(
@@ -1913,6 +1980,26 @@ def load_or_create_anchor_record(
     )
 
 
+def claim_handoff_reservation(
+    record: WorktreeRecord, claim: ResourceClaim,
+) -> str:
+    """Resolve the authoritative nonterminal bundle reserving ``claim``.
+
+    The ledger field is a fast cache. The transaction registry is consulted
+    when the cache is absent so the crash window between intent and cache write
+    remains mutation-safe. Registry read failures fail closed.
+    """
+    if claim.handoff_bundle:
+        return claim.handoff_bundle
+    try:
+        from . import claim_handoffs
+        source = format_claim_ref(
+            record.machine, record.repo, record.worktree_id)
+        return claim_handoffs.active_bundle_for_claim(source, claim.ref)
+    except Exception:
+        return "unverified-handoff-registry"
+
+
 def add_resource_claim(
     record: WorktreeRecord,
     claim: ResourceClaim,
@@ -1931,6 +2018,18 @@ def add_resource_claim(
             "creator ownership is frozen")
     for existing in record.resources:
         if existing.ref == claim.ref:
+            reservation = claim_handoff_reservation(record, existing)
+            if reservation:
+                equivalent = (
+                    existing.kind == claim.kind
+                    and existing.state == claim.state
+                    and (not claim.note or existing.note == claim.note)
+                )
+                if equivalent:
+                    return existing
+                raise ValueError(
+                    f"claim {claim.ref} is reserved by handoff bundle "
+                    f"{reservation}")
             existing.kind = claim.kind
             existing.state = claim.state
             if claim.note:
@@ -1967,6 +2066,8 @@ def settle_resource_claim(
     match = next((c for c in record.resources if c.ref == ref), None)
     if match is None:
         return None
+    if claim_handoff_reservation(record, match):
+        return None
     match.state = obligations.normalize(disposition)
     if save:
         save_record(record, path)
@@ -2000,6 +2101,9 @@ def sweep_abandoned_obligations(
     reclaimed: list[ResourceClaim] = []
     for c in record.resources:
         if not c.is_unsettled:  # only active (blocking) obligations
+            continue
+        if claim_handoff_reservation(record, c):
+            # Offered claims stay creator-owned until accepted/declined.
             continue
         try:
             gone = gone_of(c)
@@ -2300,6 +2404,8 @@ class _RecordLock:
         self._timeout = timeout
         self._blocking = blocking
         self._require_sidecar = require_sidecar
+        self._sidecar_key = os.path.normcase(os.path.abspath(str(yaml_path)))
+        self._nested_sidecar = False
         self._fd: int | None = None
         self._plock: threading.RLock | None = None
         self._plock_held = False
@@ -2325,6 +2431,12 @@ class _RecordLock:
             return self
 
         try:
+            counts = _thread_sidecar_counts()
+            if counts.get(self._sidecar_key, 0) > 0:
+                counts[self._sidecar_key] += 1
+                self._nested_sidecar = True
+                self.acquired = True
+                return self
             self._lock_path.parent.mkdir(parents=True, exist_ok=True)
             self._fd = os.open(str(self._lock_path), os.O_CREAT | os.O_RDWR)
 
@@ -2341,6 +2453,9 @@ class _RecordLock:
                 # Sidecar held by another process -- best-effort skip: drop the
                 # fd and the in-process lock so we hold nothing.
                 self._release()
+            if self.acquired and self._held is not None:
+                counts[self._sidecar_key] = (
+                    counts.get(self._sidecar_key, 0) + 1)
             return self
         except BaseException:
             self._release()
@@ -2391,6 +2506,19 @@ class _RecordLock:
             time.sleep(0.05)
 
     def _release(self) -> None:
+        counts = _thread_sidecar_counts()
+        if self._nested_sidecar:
+            depth = counts.get(self._sidecar_key, 0)
+            if depth <= 1:
+                counts.pop(self._sidecar_key, None)
+            else:
+                counts[self._sidecar_key] = depth - 1
+            self._nested_sidecar = False
+            self.acquired = False
+            if self._plock_held and self._plock is not None:
+                self._plock.release()
+                self._plock_held = False
+            return
         try:
             if self._fd is not None:
                 try:
@@ -2409,6 +2537,12 @@ class _RecordLock:
                             pass
                     os.close(self._fd)
                 finally:
+                    if self._held is not None:
+                        depth = counts.get(self._sidecar_key, 0)
+                        if depth <= 1:
+                            counts.pop(self._sidecar_key, None)
+                        else:
+                            counts[self._sidecar_key] = depth - 1
                     self._fd = None
                     self._held = None
         finally:
