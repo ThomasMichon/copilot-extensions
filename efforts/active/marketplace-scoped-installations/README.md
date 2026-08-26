@@ -238,3 +238,10 @@ See [`design.md`](design.md).
   [#1123](https://github.com/ThomasMichon/copilot-extensions/pull/1123), with
   native Windows validation covering nested shims and catalog emitters on the
   final review head.
+- The next service-free batch merged in
+  [#1127](https://github.com/ThomasMichon/copilot-extensions/pull/1127), adding
+  payload-local commands and operative catalog guidance for agent-machines and
+  agent-ssh. Shared generator hardening made installer selection
+  manifest-driven and fail-open catalogs explicit; native Windows validation
+  also closed PSMux ancestry, PATH repair, and SSH ACL defects exposed by the
+  final head.

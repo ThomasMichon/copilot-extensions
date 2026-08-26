@@ -26,9 +26,10 @@ def test_borrowing_containers_skill_contract():
     assert "provisioning, readiness" in lowered
     assert "user's state repo" in lowered
     assert "**Container:**" in text
-    assert "agent-containers borrow <effort-slug>" in text
-    assert "agent-bridge send container:<name>" in text
-    assert "agent-containers release <effort-slug>" in text
-    assert "agent-containers leases" in text
+    assert "<agent-containers catalog argv[0]> borrow <effort-slug>" in text
+    assert "<agent-bridge catalog argv[0]> send container:<name>" in text
+    assert "<agent-containers catalog argv[0]> release <effort-slug>" in text
+    assert "<agent-containers catalog argv[0]> leases" in text
+    assert "never substitute a same-named" in text
 
     assert not any(term in lowered for term in FORBIDDEN)
