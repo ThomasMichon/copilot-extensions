@@ -1,0 +1,9 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-codespaces",
+  "module": "agent_codespaces",
+  "runtimeRoot": ".agent-codespaces",
+  "noSelfProvisionEnv": "AGENT_CODESPACES_NO_SELFPROVISION",
+  "purpose": "Manage GitHub Codespaces lifecycle transport and dispatch"
+}

@@ -22,30 +22,38 @@ description: >
 One-time setup and configuration for agent-codespaces. For day-to-day
 operations (SSH, listing, bridge), see the `codespaces-lifecycle` skill.
 
+Use the exact `argv` from the agent-codespaces session command catalog for
+CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
+related-repo management. For dispatch, follow the `agent-bridge` skill; its
+current management command remains an explicit compatibility boundary. Append
+the arguments shown below; never substitute a same-named agent-codespaces
+command found through `PATH`.
+
 ## Readiness — agent-codespaces provisions its own runtime (standalone)
 
-agent-codespaces is **self-provisioning and standalone**: it needs no
-agent-worktrees, no session launcher, and no manual install. It works anywhere
-its skills load and a shell is available — the Copilot CLI, the **GitHub Copilot
-app**, or a **cloud agent**. Before any agent-codespaces command, do this
-**readiness self-check** (treat "no explicit ready" as *not ready*):
+This plugin is **self-provisioning and standalone**: it needs no
+worktree manager or session launcher.
 
-1. **Is the CLI on PATH?** `command -v agent-codespaces`
-   - **Yes** → use it. The **first** call self-provisions the runtime (vendors
-     `uv` if missing, builds the venv), printing a `::agent-provisioning::` line
-     and progress — this can take ~30–120s; **let it finish, don't kill it**.
-   - A session-start hook may already have emitted `agent-codespaces: READY …`.
-2. **Not on PATH?** Deploy the binstub yourself (cheap — no venv build), then use
-   it (it self-provisions on first call):
-   ```bash
-   bash "$(ls ~/.copilot/installed-plugins/*/agent-codespaces/scripts/install.sh | head -1)" stamp
-   ```
-   `~/.local/bin/agent-codespaces` now exists. If `~/.local/bin` isn't on PATH,
-   call it by full path (or add it to PATH).
-3. **A call reports a provisioning failure** (e.g. `uv is required…`, a network/TLS
-   error)? **Surface the exact message and stop** — do not improvise a toolchain
-   install. On a governed box, provide the internal index
-   (`UV_DEFAULT_INDEX=<pip index-url>`) or install `uv`, then retry.
+In an agent session, invoke the exact `argv` from the session command catalog.
+The payload-local command provisions its runtime on first use (vendors `uv` if
+missing and builds the venv), printing a `::agent-provisioning::` line and
+progress. This can take ~30–120s; let it finish and do not kill it.
+
+If a host loads the skill but does not inject a session command catalog, do not
+fall back to ambient `PATH` or scan every installed marketplace. Select the
+payload explicitly through that host's plugin management surface, then invoke
+its payload-local command or stamp a management binstub from that chosen
+payload:
+
+- Windows:
+  `pwsh -NoProfile -ExecutionPolicy Bypass -File "<explicit-payload-path>\scripts\install.ps1" stamp`
+- POSIX:
+  `bash "<explicit-payload-path>/scripts/install.sh" stamp`
+
+If a call reports a provisioning failure (for example, `uv is required…` or a
+network/TLS error), surface the exact message and stop. Do not improvise a
+toolchain install. On a governed box, provide the internal index
+(`UV_DEFAULT_INDEX=<pip index-url>`) or install `uv`, then retry.
 
 This is agent-codespaces' own runtime readiness. Its vendored Python libraries
 (`ssh-manager`, `credential-relay`, `config-migrate`, `plugin-resolve`) are
@@ -54,7 +62,7 @@ only host tools/sibling services it cannot self-install.
 
 ## Most repos need no config -- start here
 
-agent-codespaces works **out of the box** on standard GitHub CodeSpaces by
+The runtime works **out of the box** on standard GitHub CodeSpaces by
 **convention**:
 
 - machine `largePremiumLinux`, location `EastUs`
@@ -67,9 +75,9 @@ So for a repo whose CodeSpaces match convention, there is **nothing to
 configure**:
 
 ```bash
-agent-codespaces create <your-org>/<standard-repo>   # just works
-agent-codespaces doctor                              # verify gh auth/scope
-agent-bridge send codespace:<name> "<task>"          # if agent-bridge is installed
+<agent-codespaces catalog argv[0]> create <your-org>/<standard-repo>
+<agent-codespaces catalog argv[0]> doctor
+agent-bridge send codespace:<name> "<task>" # marketplace-isolation: allow agent-bridge-management
 ```
 
 Add config **only** when a repo deviates from convention. The rest of this skill
@@ -83,7 +91,8 @@ is about that supplementary config.
   gh auth refresh -h github.com -s codespace   # default login scopes omit this
   ```
   Without the `codespace` scope, CodeSpace operations fail with
-  `HTTP 403 ... needs the "codespace" scope`. `agent-codespaces doctor` checks
+  `HTTP 403 ... needs the "codespace" scope`.
+  `<agent-codespaces catalog argv[0]> doctor` checks
   the ambient account and any mapped accounts and prints the exact remedy.
 - **agent-bridge** (optional sibling) -- needed for `codespace:<name>`
   dispatch and for the managed host credential relay. The agent-codespaces
@@ -116,7 +125,7 @@ From inside the repo:
 
 ```bash
 cd /path/to/your/repo
-agent-codespaces config init
+<agent-codespaces catalog argv[0]> config init
 ```
 
 `config init`:
@@ -132,7 +141,8 @@ file it writes is safe to delete.
 
 **Or author it by hand:** copy the annotated example,
 [`references/config.yaml`](references/config.yaml), to
-`.agent-codespaces/config.yaml` and adapt. Then `agent-codespaces config adopt`.
+`.agent-codespaces/config.yaml` and adapt. Then run
+`<agent-codespaces catalog argv[0]> config adopt`.
 
 > **Auto-discovery.** Running any `agent-codespaces` command *inside* a repo that
 > carries `.agent-codespaces/config.yaml` picks it up automatically -- adoption
@@ -145,7 +155,7 @@ back-compat fallback. Relocate it to the canonical location:
 
 ```bash
 cd /path/to/your/repo
-agent-codespaces config migrate     # moves codespaces.yaml -> .agent-codespaces/config.yaml
+<agent-codespaces catalog argv[0]> config migrate
 ```
 
 Adoption is unaffected (the manifest tracks the repo root, not the file). Commit
@@ -182,7 +192,7 @@ update the account dotfiles repo:
 
 1. Link it as a related repo (see the `agent-worktrees:agent-worktrees-related` skill):
    ```bash
-   agent-worktrees related add <your-user>/dotfiles --role tooling \
+   <agent-worktrees catalog argv[0]> related add <your-user>/dotfiles --role tooling \
      --summary "Account dotfiles repo cloned into every CodeSpace; hosts install.sh." \
      --delegate none
    ```
@@ -213,8 +223,8 @@ defaults:
 ### 5. Validate
 
 ```bash
-agent-codespaces config validate     # config resolves, repo blocks parse
-agent-codespaces config show         # show the merged, resolved config
+<agent-codespaces catalog argv[0]> config validate
+<agent-codespaces catalog argv[0]> config show
 ```
 
 ## Config Reference
@@ -357,9 +367,10 @@ Multiple repos can be adopted; config merges in memory:
 
 ## Session context map (additionalContext)
 
-agent-codespaces ships a `sessionStart` hook that injects a brief
+The plugin ships a `sessionStart` hook that injects a brief
 `additionalContext` map of the repos **delegated to CodeSpaces** -- derived from
-`agent-worktrees related list` (entries with `delegate: agent-codespaces`) -- so
+`<agent-worktrees catalog argv[0]> related list` (entries with
+`delegate: agent-codespaces`) -- so
 every session knows which repos have no local checkout and must be worked via a
 CodeSpace. Nothing to configure; it emits nothing outside a managed project or
 when no repo is CodeSpace-delegated.
@@ -367,24 +378,27 @@ when no repo is CodeSpace-delegated.
 ## CLI Reference
 
 ```bash
-agent-codespaces config init        # Scaffold .agent-codespaces/config.yaml (+ auto-adopt)
-agent-codespaces config adopt       # Register a repo's config for the daemon
-agent-codespaces config migrate     # Relocate legacy codespaces.yaml -> .agent-codespaces/config.yaml
-agent-codespaces config show        # Show resolved config
-agent-codespaces config validate    # Validate config
-agent-codespaces doctor             # Check gh auth + codespace scope
+<agent-codespaces catalog argv[0]> config init
+<agent-codespaces catalog argv[0]> config adopt
+<agent-codespaces catalog argv[0]> config migrate
+<agent-codespaces catalog argv[0]> config show
+<agent-codespaces catalog argv[0]> config validate
+<agent-codespaces catalog argv[0]> doctor
 ```
 
 ## Troubleshooting
 
 - **"No CodeSpace config found"** -- expected for a convention repo; only add a
   file when you need supplementary config.
-- **`gh` missing or auth/scope wrong** -- run `agent-codespaces doctor`; it
+- **`gh` missing or auth/scope wrong** -- run
+  `<agent-codespaces catalog argv[0]> doctor`; it
   reports missing `gh`, unauthenticated accounts, or a missing `codespace` scope
   with the exact `gh auth ...` command to run.
 - **No agent-bridge** -- setup is still valid. You lose `codespace:<name>`
-  dispatch and the managed credential relay, but `agent-codespaces list/create`
-  and `agent-codespaces ssh --no-relay --remote-cmd "echo ok"` still diagnose
+  dispatch and the managed credential relay, but the catalog command's
+  `list` / `create` actions and
+  `<agent-codespaces catalog argv[0]> ssh --no-relay --remote-cmd "echo ok"`
+  still diagnose
   CodeSpace reachability.
 - **Headless `create` prompts/hangs** -- the repo ships >1 devcontainer; pin
   `devcontainer_path` (per-repo or per-create).
