@@ -62,6 +62,72 @@ def _set_enabled(copilot_home: Path, *specs: str) -> None:
     )
 
 
+def _write_local_marketplace(repo: Path) -> None:
+    marketplace = repo / ".ai"
+    plugin = marketplace / "example-web-harness"
+    (marketplace / ".claude-plugin").mkdir(parents=True)
+    plugin.mkdir(parents=True)
+    (marketplace / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps(
+            {
+                "name": "local-marketplace",
+                "plugins": [
+                    {
+                        "name": "example-web-harness",
+                        "source": "./example-web-harness",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (plugin / "plugin.json").write_text(
+        json.dumps(
+            {
+                "name": "example-web-harness",
+                "codespacePlugins": [
+                    {"source": "example-web-agent@local-marketplace"}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True, exist_ok=True)
+    (settings / "settings.json").write_text(
+        json.dumps(
+            {
+                "extraKnownMarketplaces": {
+                    "local-marketplace": {
+                        "source": {"source": "directory", "path": "./.ai"}
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_local_enablement(repo: Path) -> None:
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True, exist_ok=True)
+    settings_path = settings / "settings.json"
+    data = (
+        json.loads(settings_path.read_text(encoding="utf-8"))
+        if settings_path.is_file()
+        else {}
+    )
+    data.setdefault("enabledPlugins", {})[
+        "example-web-harness@local-marketplace"
+    ] = True
+    settings_path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_local_harness(repo: Path) -> None:
+    _write_local_marketplace(repo)
+    _write_local_enablement(repo)
+
+
 # --------------------------------------------------------------------------
 # repo_matches
 # --------------------------------------------------------------------------
@@ -107,6 +173,48 @@ def test_iter_installed_manifests(tmp_path):
     assert names == {"repo-example-web", "agent-bridge", "figma"}
 
 
+def test_same_name_from_distinct_marketplaces_keeps_both_declarations(tmp_path):
+    _install_plugin(
+        tmp_path,
+        "marketplace-a",
+        "shared-harness",
+        codespace_plugins=[{"source": "agent-a@marketplace-a"}],
+    )
+    _install_plugin(
+        tmp_path,
+        "marketplace-b",
+        "shared-harness",
+        codespace_plugins=[{"source": "agent-b@marketplace-b"}],
+    )
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path,
+        enabled_names={"shared-harness"},
+    )
+    assert [spec.source for spec in specs] == [
+        "agent-a@marketplace-a",
+        "agent-b@marketplace-b",
+    ]
+
+
+def test_installed_manifest_uses_source_name_for_enablement(tmp_path):
+    _install_plugin(
+        tmp_path,
+        "example-marketplace",
+        "example-web-harness",
+        codespace_plugins=[{"source": "example-web-agent@example-marketplace"}],
+        extra={"name": "renamed-in-manifest"},
+    )
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path,
+        enabled_names={"example-web-harness"},
+    )
+    assert [spec.source for spec in specs] == [
+        "example-web-agent@example-marketplace"
+    ]
+
+
 def test_iter_installed_manifests_claude_layout_carries_codespace_plugins(tmp_path):
     # A Claude-layout harness plugin declaring codespacePlugins is swept too.
     _install_plugin(
@@ -117,6 +225,72 @@ def test_iter_installed_manifests_claude_layout_carries_codespace_plugins(tmp_pa
     _set_enabled(tmp_path, "example-web-harness@dotfiles-plugins")
     specs = resolve_codespace_plugins(None, copilot_home=tmp_path)
     assert [s.source for s in specs] == ["example-web-agent@dotfiles-plugins"]
+
+
+def test_repo_local_harness_manifest_carries_codespace_plugins(tmp_path):
+    repo = tmp_path / "repo"
+    _write_local_harness(repo)
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path / "home",
+        enabled_names={"example-web-harness"},
+        repo_roots=[repo],
+    )
+    assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
+
+
+def test_repo_local_manifest_uses_merged_multi_root_settings(tmp_path):
+    marketplace_repo = tmp_path / "marketplace"
+    enablement_repo = tmp_path / "enablement"
+    _write_local_marketplace(marketplace_repo)
+    _write_local_enablement(enablement_repo)
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path / "home",
+        enabled_names={"example-web-harness"},
+        repo_roots=[marketplace_repo, enablement_repo],
+    )
+    assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
+
+
+def test_repo_local_manifest_replaces_stale_installed_declarations(tmp_path):
+    _install_plugin(
+        tmp_path / "home",
+        "local-marketplace",
+        "example-web-harness",
+        codespace_plugins=[{"source": "stale-agent@local-marketplace"}],
+    )
+    repo = tmp_path / "repo"
+    _write_local_harness(repo)
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path / "home",
+        enabled_names={"example-web-harness"},
+        repo_roots=[repo],
+    )
+    assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
+
+
+def test_repo_local_manifest_uses_source_name_for_override(tmp_path):
+    _install_plugin(
+        tmp_path / "home",
+        "local-marketplace",
+        "example-web-harness",
+        codespace_plugins=[{"source": "stale-agent@local-marketplace"}],
+    )
+    repo = tmp_path / "repo"
+    _write_local_harness(repo)
+    manifest = repo / ".ai" / "example-web-harness" / "plugin.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["name"] = "renamed-in-manifest"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path / "home",
+        enabled_names={"example-web-harness"},
+        repo_roots=[repo],
+    )
+    assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
 
 
 # --------------------------------------------------------------------------

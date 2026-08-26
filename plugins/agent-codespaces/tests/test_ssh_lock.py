@@ -233,7 +233,7 @@ class TestDiagnosticRemoteCmd:
         async def record(name):
             calls.append(name)
 
-        async def empty_list(*_a):
+        async def empty_list(*_a, **_kw):
             return []
 
         monkeypatch.setattr(cli, "_provision_relay_helpers", lambda *_a: record("relay"))
