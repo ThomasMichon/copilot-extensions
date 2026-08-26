@@ -103,7 +103,13 @@ def _local_payload_result(
             plugin_dir,
             read_repo_settings,
         )
-    except Exception:
+    except ImportError as exc:
+        log.warning(
+            "Cannot resolve repo-local plugin %s because plugin_resolve is "
+            "unavailable: %s",
+            source,
+            exc,
+        )
         return False, None
 
     roots = list(repo_roots)
@@ -126,20 +132,15 @@ def _local_payload_result(
     if marketplace_root is None:
         return True, None
     marketplace_root = marketplace_root.resolve()
-    source_entry = winning_settings.marketplaces[marketplace].get("source")
-    configured_path = (
-        source_entry.get("path") if isinstance(source_entry, dict) else None
-    )
-    if isinstance(configured_path, str) and not Path(configured_path).is_absolute():
-        repo_root = Path(winning_root).resolve()
-        if not marketplace_root.is_relative_to(repo_root):
-            log.warning(
-                "Refusing local marketplace %s outside declaring repo %s: %s",
-                marketplace,
-                repo_root,
-                marketplace_root,
-            )
-            return True, None
+    repo_root = Path(winning_root).resolve()
+    if not marketplace_root.is_relative_to(repo_root):
+        log.warning(
+            "Refusing local marketplace %s outside declaring repo %s: %s",
+            marketplace,
+            repo_root,
+            marketplace_root,
+        )
+        return True, None
     manifest = load_marketplace(marketplace_root)
     payload = plugin_dir(manifest, name) if manifest is not None else None
     if payload is not None:

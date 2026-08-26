@@ -161,6 +161,36 @@ def test_host_payload_dir_rejects_plugin_outside_marketplace(tmp_path: Path):
     )
 
 
+def test_host_payload_dir_rejects_absolute_marketplace_outside_repo(tmp_path: Path):
+    repo = tmp_path / "repo"
+    marketplace = tmp_path / "external-marketplace"
+    plugin = marketplace / "figma"
+    (marketplace / ".claude-plugin").mkdir(parents=True)
+    plugin.mkdir()
+    (plugin / "plugin.json").write_text('{"name": "figma"}', encoding="utf-8")
+    (marketplace / ".claude-plugin" / "marketplace.json").write_text(
+        '{"name": "dotfiles-plugins", "plugins": '
+        '[{"name": "figma", "source": "./figma"}]}',
+        encoding="utf-8",
+    )
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.json").write_text(
+        '{"extraKnownMarketplaces": {"dotfiles-plugins": {"source": '
+        '{"source": "directory", "path": "%s"}}}}'
+        % str(marketplace).replace("\\", "\\\\"),
+        encoding="utf-8",
+    )
+    assert (
+        ps.host_payload_dir(
+            "figma@dotfiles-plugins",
+            copilot_home=tmp_path / "home",
+            repo_roots=[repo],
+        )
+        is None
+    )
+
+
 def test_build_stage_command_roundtrips(tmp_path: Path):
     payload = _make_payload(tmp_path, "mkt", "p")
     dest = ps.dest_dir("p@mkt")

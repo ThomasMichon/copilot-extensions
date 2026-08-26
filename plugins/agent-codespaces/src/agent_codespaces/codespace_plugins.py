@@ -32,12 +32,14 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import logging
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 MANIFEST_FIELD = "codespacePlugins"
+log = logging.getLogger("agent-codespaces")
 
 
 # --------------------------------------------------------------------------
@@ -167,7 +169,12 @@ def iter_local_manifests(
     try:
         from plugin_resolve import read_repo_settings
         from .plugin_staging import local_payload_dir
-    except Exception:
+    except ImportError as exc:
+        log.warning(
+            "Cannot discover repo-local CodeSpace plugins because local "
+            "marketplace resolution is unavailable: %s",
+            exc,
+        )
         return
 
     roots = list(repo_roots)
