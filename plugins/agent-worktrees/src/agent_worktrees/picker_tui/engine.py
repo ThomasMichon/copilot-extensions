@@ -4880,6 +4880,10 @@ class PickerScreen(Widget):
         if not quiet:
             self._busy_label = label
 
+        # Resolve the App while this screen is still attached. The worker may
+        # outlive picker exit, when MessagePump.app can no longer walk to it.
+        app = self.app
+
         def _worker():
             try:
                 result, err = work(), None
@@ -4906,12 +4910,10 @@ class PickerScreen(Widget):
                     except Exception as exc:
                         self.debug = f"{label} · applied with error: {str(exc)[:60]}"
 
-            app = getattr(self, "app", None)
-            if app is not None:
-                try:
-                    app.call_from_thread(_apply)
-                except Exception:
-                    pass
+            try:
+                app.call_from_thread(_apply)
+            except Exception:
+                pass
 
         threading.Thread(
             target=_worker, name=f"pivot-action:{label}", daemon=True
