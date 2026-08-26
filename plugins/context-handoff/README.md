@@ -6,7 +6,7 @@ This plugin ships two cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; logs threshold warnings and queues agent-facing `session.send()` nudges at 55% / 70% utilization, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time worktree-state file outside the repo checkout. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this worktree's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies cost-aware 150K / 250K token caps with 55% / 70% small-window safety fallbacks, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time worktree-state file outside the repo checkout. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this worktree's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why an extension (and not a pure plugin)
@@ -68,10 +68,14 @@ it does not load, confirm both requirements above and start a fresh session (the
 
 ## Thresholds
 
-| Utilization | Behavior |
-|-------------|----------|
-| 55% | Gentle reminder: "consider generating a handoff soon" |
-| 70% | Urgent reminder: "generate NOW, compaction at ~80%" |
+| Threshold | Behavior |
+|-----------|----------|
+| `min(150K tokens, 55% of window)` | Soft reminder: hand off at the next clean boundary |
+| `min(250K tokens, 70% of window)` | Urgent reminder: hand off now; compaction remains at ~80% |
+
+The absolute caps prevent large-window sessions from accumulating quadratic
+cache-read costs long before compaction pressure appears. The percentage
+fallbacks preserve the established safety margin for smaller context windows.
 
 Reminder state resets after a successful compaction.
 
