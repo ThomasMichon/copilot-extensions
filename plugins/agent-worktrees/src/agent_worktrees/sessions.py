@@ -1547,7 +1547,7 @@ def _stamp_mux_live_quiet(worktree_id: str, live: bool) -> None:
 _IDENTITY_ENV_VARS = ("WORKTREE_PROJECT", "WORKTREE_ID")
 
 # Space-free transport flags for a native Copilot
-# ``-i <prompt>`` launch. psmux flattens the pane command argv before
+# ``--interactive <prompt>`` launch. psmux flattens the pane command argv before
 # CreateProcess, so the multi-word prompt travels as base64 to the pane wrapper.
 # A receipt token lets the parent verify that the wrapper decoded and appended
 # the real argument before declaring the successor seeded.
@@ -2244,7 +2244,7 @@ def mux_new_window(
                 "prompt_status": prompt_status,
                 "cleanup": cleanup,
                 "error": (
-                    "successor did not confirm a stable native -i "
+                    "successor did not confirm a stable native interactive "
                     f"prompt launch (status: {prompt_status or 'no-receipt'})"
                 ),
             }
