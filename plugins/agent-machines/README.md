@@ -26,7 +26,8 @@ actions) and per-machine data stay in the consuming repo.
   runtime** only; it never applies machine state.
 - **Declarative resources.** Beyond Copilot settings, a package can declare typed
   `resources:` -- package-manager packages, config files (whole-file or a marked
-  `managed-block`), Windows registry values, and OS features -- that the
+  `managed-block`), Windows registry values, OS features, and Windows power
+  settings -- that the
   engine installs/pins/writes itself (with cross-package collision detection),
   instead of hiding them in per-repo scripts. See
   [`docs/resources.md`](docs/resources.md).
@@ -131,6 +132,13 @@ resources:
     content: |
       set -g prefix C-b
       set -g paste-detection off
+  - type: power-setting                # converge AC/DC values in a Windows scheme
+    id: lid-close
+    scheme: SCHEME_CURRENT
+    subgroup: SUB_BUTTONS
+    setting: LIDACTION
+    ac: do-nothing
+    dc: sleep
 ```
 
 Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
@@ -140,9 +148,9 @@ today.
 
 The top-level `resources:` list declares typed, identity-bearing machine state
 -- package-manager packages, canonical config files (whole-file or a marked
-`managed-block`), Windows registry values, and OS features (Windows optional
-features/capabilities and Linux/WSL units) -- that the engine converges itself,
-with cross-package collision detection. See
+`managed-block`), Windows registry values, OS features (Windows optional
+features/capabilities and Linux/WSL units), and Windows power settings -- that
+the engine converges itself, with cross-package collision detection. See
 [`docs/resources.md`](docs/resources.md) for the full schema and adopter guide.
 
 ## Troubleshooting

@@ -24,12 +24,13 @@ A requirement package declares resources under a top-level ``resources:`` list::
         content: |
           set -g mouse on
 
-Four kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
+Five kinds are fully handled: ``package`` (winget/apt/pipx/uv-tool/pip),
 ``file`` (whole-file *enforce*/*ensure-present* plus a *managed-block* strategy
 that owns only a marked block inside an otherwise user-owned file),
 ``registry`` (Windows registry values, via ``reg.exe``), and ``feature``
 (Windows optional features/capabilities via DISM and Linux/WSL units via
-``systemctl``, selected by a ``manager`` field). Adding a type is a new
+``systemctl``, selected by a ``manager`` field), plus ``power-setting`` (Windows
+power-scheme AC/DC values via ``powercfg``). Adding a type is a new
 ``ResourceHandler`` subclass registered in :data:`HANDLERS` -- nothing else in
 the engine changes.
 
@@ -37,7 +38,8 @@ the engine changes.
 only the unambiguously-compatible.** When two packages target the same resource
 identity -- ``(manager, id)`` for a package; ``(path, block)`` for a file (the
 block is empty for whole-file strategies); ``(key, value-name)`` for a registry
-value; ``(manager, id)`` for a feature -- compatible declarations are merged
+value; ``(manager, id)`` for a feature; or ``(scheme, subgroup, setting)`` for
+a power setting -- compatible declarations are merged
 deterministically; incompatible desired values, version pins, ownership, or
 strategies raise an ``error`` (or ``advisory``) finding. Distinct managed blocks
 in one file are compatible; a whole-file owner and a block on the same path are
@@ -58,7 +60,11 @@ from typing import Any
 
 from agent_procutil import no_window_kwargs
 
-from .manifest import RequirementPackage
+from .manifest import (
+    RequirementPackage,
+    canonical_power_token,
+    normalize_power_setting_value,
+)
 from .surfaces._common import backup_file, read_json, write_json_atomic
 
 _ANCHOR_RE = re.compile(r"^\$(HOME|REPO)(?:\(([^)]*)\))?(.*)$")
@@ -122,6 +128,12 @@ class ResolvedResource:
         if self.type == "feature":
             mgr = self.desired.get("manager", "")
             return f"{self.desired.get('state', 'present')} ({mgr})"
+        if self.type == "power-setting":
+            return " ".join(
+                f"{source}={self.desired[source]}"
+                for source in ("ac", "dc")
+                if source in self.desired
+            )
         return self.desired.get("state", "present")
 
 
@@ -1053,6 +1065,320 @@ class FeatureResourceHandler(ResourceHandler):
 
 
 # --------------------------------------------------------------------------- #
+# Windows power-setting handler (active power scheme, via powercfg)
+# --------------------------------------------------------------------------- #
+_TRAILING_HEX_RE = re.compile(r"0x([0-9a-f]+)\s*$", re.IGNORECASE | re.MULTILINE)
+_GUID_RE = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
+
+
+def _parse_power_query(out: RunOutcome) -> dict[str, Any]:
+    if out.returncode != 0:
+        return {"known": False, "ac": None, "dc": None}
+    # The current AC/DC indexes are the final two 0x-prefixed values in /QH
+    # output. Parsing by position avoids localized English labels.
+    indexes = _TRAILING_HEX_RE.findall(out.stdout)
+    if len(indexes) < 2:
+        return {"known": False, "ac": None, "dc": None}
+    return {
+        "known": True,
+        "ac": int(indexes[-2], 16),
+        "dc": int(indexes[-1], 16),
+    }
+
+
+def _parse_active_scheme(out: RunOutcome) -> str | None:
+    if out.returncode != 0:
+        return None
+    match = _GUID_RE.search(out.stdout)
+    return match.group(0).casefold() if match else None
+
+
+class PowerSettingResourceHandler(ResourceHandler):
+    TYPE = "power-setting"
+
+    def identity(self, decl: dict[str, Any]) -> tuple:
+        return (
+            self.TYPE,
+            canonical_power_token(decl.get("scheme", "SCHEME_CURRENT")),
+            canonical_power_token(decl.get("subgroup")),
+            canonical_power_token(decl.get("setting")),
+        )
+
+    def display_id(self, decl: dict[str, Any]) -> str:
+        return str(
+            decl.get("id")
+            or f"{decl.get('subgroup')}/{decl.get('setting')}"
+        )
+
+    def applies_on(self, decl: dict[str, Any], plat: str) -> bool:
+        return super().applies_on(decl, plat) and plat == "windows"
+
+    def merge(
+        self, decls: list[dict[str, Any]], owners: list[str]
+    ) -> tuple[dict[str, Any], list[ResourceFinding]]:
+        findings: list[ResourceFinding] = []
+        _, scheme, subgroup, setting = self.identity(decls[0])
+        label = f"{scheme}/{subgroup}/{setting}"
+        who = ", ".join(sorted(set(owners)))
+        desired: dict[str, Any] = {
+            "scheme": scheme,
+            "subgroup": subgroup,
+            "setting": setting,
+        }
+        for source in ("ac", "dc"):
+            values = {
+                normalize_power_setting_value(decl[source])
+                for decl in decls
+                if source in decl
+            }
+            if len(values) > 1:
+                findings.append(ResourceFinding(
+                    "error",
+                    "resource-conflict",
+                    f"power setting '{label}' has conflicting {source.upper()} "
+                    f"values {sorted(values)} across packages: {who}.",
+                ))
+            if values:
+                desired[source] = sorted(values)[0]
+        return desired, findings
+
+    def _detect(self, ctx: ResourceContext, desired: dict[str, Any]) -> dict[str, Any]:
+        argv = [
+            "powercfg",
+            "/QH",
+            desired["scheme"],
+            desired["subgroup"],
+            desired["setting"],
+        ]
+        try:
+            return _parse_power_query(ctx.runner(argv))
+        except (OSError, subprocess.SubprocessError):
+            return {"known": False, "ac": None, "dc": None}
+
+    def _target_is_active(
+        self, ctx: ResourceContext, desired: dict[str, Any]
+    ) -> bool | None:
+        if desired["scheme"] == "scheme_current":
+            return True
+        try:
+            active = _parse_active_scheme(
+                ctx.runner(["powercfg", "/GETACTIVESCHEME"])
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return None if active is None else active == desired["scheme"]
+
+    def _rollback(
+        self,
+        ctx: ResourceContext,
+        desired: dict[str, Any],
+        live: dict[str, Any],
+        sources: list[str],
+        target_active: bool,
+    ) -> list[str]:
+        failures: list[str] = []
+        verbs = {"ac": "/SETACVALUEINDEX", "dc": "/SETDCVALUEINDEX"}
+        for source in sources:
+            argv = [
+                "powercfg",
+                verbs[source],
+                desired["scheme"],
+                desired["subgroup"],
+                desired["setting"],
+                str(live[source]),
+            ]
+            try:
+                outcome = ctx.runner(argv)
+            except (OSError, subprocess.SubprocessError):
+                failures.append(source.upper())
+                continue
+            if outcome.returncode != 0:
+                failures.append(source.upper())
+        if target_active:
+            try:
+                outcome = ctx.runner(["powercfg", "/SETACTIVE", desired["scheme"]])
+            except (OSError, subprocess.SubprocessError):
+                failures.append("scheme activation")
+            else:
+                if outcome.returncode != 0:
+                    failures.append("scheme activation")
+        return failures
+
+    def apply(
+        self, resolved: ResolvedResource, ctx: ResourceContext, dry_run: bool
+    ) -> ResourceResult:
+        d = resolved.desired
+        if ctx.platform != "windows":
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                False,
+                dry_run,
+                "skip",
+                skipped_reason="power-setting resources apply on Windows only",
+            )
+        if shutil.which("powercfg") is None:
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                False,
+                dry_run,
+                "skip",
+                skipped_reason="'powercfg' not on PATH",
+            )
+
+        live = self._detect(ctx, d)
+        if not live["known"]:
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                False,
+                dry_run,
+                "error",
+                detail=(
+                    "could not read the current AC/DC values with "
+                    f"`powercfg /QH {d['scheme']} {d['subgroup']} {d['setting']}`"
+                ),
+            )
+
+        target_active = self._target_is_active(ctx, d)
+        if target_active is None:
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                False,
+                dry_run,
+                "error",
+                detail="could not determine the active power scheme",
+            )
+
+        setter_commands: list[tuple[str, list[str]]] = []
+        for source, verb in (("ac", "/SETACVALUEINDEX"), ("dc", "/SETDCVALUEINDEX")):
+            if source in d and live[source] != d[source]:
+                setter_commands.append((
+                    source,
+                    [
+                        "powercfg",
+                        verb,
+                        d["scheme"],
+                        d["subgroup"],
+                        d["setting"],
+                        str(d[source]),
+                    ],
+                ))
+        if not setter_commands:
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                False,
+                dry_run,
+                "none",
+                detail="up-to-date",
+            )
+        commands = [command for _, command in setter_commands]
+        if target_active:
+            commands.append(["powercfg", "/SETACTIVE", d["scheme"]])
+
+        if dry_run:
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                True,
+                True,
+                "set",
+                detail=" ; ".join(" ".join(command) for command in commands),
+                commands=commands,
+            )
+
+        applied_sources: list[str] = []
+        for source, argv in setter_commands:
+            out = ctx.runner(argv)
+            if out.returncode != 0:
+                rollback = ""
+                if applied_sources:
+                    rollback_failures = self._rollback(
+                        ctx, d, live, applied_sources, target_active
+                    )
+                    rollback = (
+                        f"; rollback failed for {', '.join(rollback_failures)}"
+                        if rollback_failures
+                        else "; prior index writes rolled back"
+                    )
+                return ResourceResult(
+                    self.TYPE,
+                    resolved.id,
+                    True,
+                    False,
+                    "error",
+                    commands=commands,
+                    detail=(
+                        f"`{' '.join(argv)}` exited {out.returncode}: "
+                        f"{(out.stderr or out.stdout).strip()[:200]}{rollback}"
+                    ),
+                )
+            applied_sources.append(source)
+
+        if target_active:
+            argv = ["powercfg", "/SETACTIVE", d["scheme"]]
+            out = ctx.runner(argv)
+            if out.returncode != 0:
+                rollback_failures = self._rollback(
+                    ctx, d, live, applied_sources, target_active
+                )
+                rollback = (
+                    f"; rollback failed for {', '.join(rollback_failures)}"
+                    if rollback_failures
+                    else "; index writes rolled back"
+                )
+                return ResourceResult(
+                    self.TYPE,
+                    resolved.id,
+                    True,
+                    False,
+                    "error",
+                    commands=commands,
+                    detail=(
+                        f"`{' '.join(argv)}` exited {out.returncode}: "
+                        f"{(out.stderr or out.stdout).strip()[:200]}{rollback}"
+                    ),
+                )
+
+        verified = self._detect(ctx, d)
+        mismatches = [
+            source
+            for source in ("ac", "dc")
+            if source in d and verified.get(source) != d[source]
+        ]
+        if not verified["known"] or mismatches:
+            detail = (
+                "post-apply query failed"
+                if not verified["known"]
+                else f"post-apply values did not match for: {', '.join(mismatches)}"
+            )
+            return ResourceResult(
+                self.TYPE,
+                resolved.id,
+                True,
+                False,
+                "error",
+                detail=detail,
+                commands=commands,
+            )
+        return ResourceResult(
+            self.TYPE,
+            resolved.id,
+            True,
+            False,
+            "set",
+            detail="applied and verified",
+            commands=commands,
+        )
+
+
+# --------------------------------------------------------------------------- #
 # Package-manager table (argv templates + detect parsers)
 # --------------------------------------------------------------------------- #
 def _winget_exact_row(out: RunOutcome, pkg_id: str) -> list[str] | None:
@@ -1199,6 +1525,7 @@ HANDLERS: dict[str, ResourceHandler] = {
     "file": FileResourceHandler(),
     "registry": RegistryResourceHandler(),
     "feature": FeatureResourceHandler(),
+    "power-setting": PowerSettingResourceHandler(),
 }
 
 
