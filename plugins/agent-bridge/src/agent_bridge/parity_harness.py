@@ -7,6 +7,7 @@ import re
 import shlex
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlparse
@@ -14,7 +15,9 @@ from urllib.parse import urlparse
 _RESULT_MARKER = "VENUE_PARITY_JSON:"
 _PROBE_MARKER = "VENUE_PARITY_PROBE:"
 _REATTACH_MARKER = "VENUE_PARITY_REATTACH_OK"
+FRONTEND_RESTART_HOSTINDEX_LOSS = "frontend-restart-hostindex-loss"
 _TERMINAL = {"failed", "ended", "stopped"}
+_INACTIVE_FOR_FAULT = _TERMINAL
 _SECRET_SHAPES = (
     re.compile(r"(?i)\b(?:password|token)=[^\s]+"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9_]{20,}\b"),
@@ -41,6 +44,8 @@ class ParityEvidence:
     session_id: str = ""
     initial_acp_session_id: str | None = None
     resumed_acp_session_id: str | None = None
+    initial_host_pid: int | None = None
+    resumed_host_pid: int | None = None
     initial_child_pid: int | None = None
     resumed_child_pid: int | None = None
     checks: dict[str, bool] = field(default_factory=dict)
@@ -57,6 +62,8 @@ class ParityEvidence:
             "session_id": self.session_id,
             "initial_acp_session_id": self.initial_acp_session_id,
             "resumed_acp_session_id": self.resumed_acp_session_id,
+            "initial_host_pid": self.initial_host_pid,
+            "resumed_host_pid": self.resumed_host_pid,
             "initial_child_pid": self.initial_child_pid,
             "resumed_child_pid": self.resumed_child_pid,
             "checks": self.checks,
@@ -248,8 +255,15 @@ def run(
     startup_timeout: float = 600.0,
     turn_timeout: float = 600.0,
     keep_session: bool = False,
+    fault: str | None = None,
+    fault_handler: Callable[[str, float], dict[str, Any]] | None = None,
 ) -> ParityEvidence:
     """Run baseline quality/auth plus same-child stop/resume acceptance."""
+    if fault not in {None, FRONTEND_RESTART_HOSTINDEX_LOSS}:
+        raise ParityFailure(f"unsupported parity fault: {fault}")
+    if fault and fault_handler is None:
+        raise ParityFailure(f"parity fault {fault!r} requires a fault handler")
+
     caller_id = f"venue-parity:{uuid.uuid4().hex}"
     evidence = ParityEvidence(target=target)
     session_id = ""
@@ -351,27 +365,103 @@ def run(
                     probe.get("azure_token") is True
                 )
 
-        client.stop_session(session_id)
-        _wait_for_status(client, session_id, {"stopped"}, startup_timeout)
-        client.resume_session(session_id, request_timeout=startup_timeout)
-        resumed = _wait_for_status(
-            client,
-            session_id,
-            {"idle"},
-            startup_timeout,
-        )
-        evidence.resumed_acp_session_id = resumed.get("acp_session_id")
-        evidence.resumed_child_pid = resumed.get("pid")
-        evidence.checks["same_acp_session"] = (
-            evidence.resumed_acp_session_id
-            == evidence.initial_acp_session_id
-        )
-        evidence.observed["child_reused_on_stop_resume"] = (
-            evidence.resumed_child_pid == evidence.initial_child_pid
-        )
-        evidence.checks["resumed_child_live"] = bool(
-            evidence.resumed_child_pid
-        )
+        if fault == FRONTEND_RESTART_HOSTINDEX_LOSS:
+            active_others = [
+                str(item.get("session_id") or "")
+                for item in client.list_sessions()
+                if item.get("session_id") != session_id
+                and str(item.get("status") or "") not in _INACTIVE_FOR_FAULT
+            ]
+            if active_others:
+                raise ParityFailure(
+                    "frontend restart fault refuses to run while another "
+                    "managed session is active: "
+                    + ", ".join(active_others[:5]),
+                    evidence=evidence,
+                )
+            evidence.checks["exclusive_frontend_fault"] = True
+            assert fault_handler is not None
+            try:
+                fault_result = fault_handler(session_id, startup_timeout)
+            except Exception as exc:
+                raise ParityFailure(
+                    f"frontend restart fault failed: {exc}",
+                    evidence=evidence,
+                ) from exc
+            client.refresh_endpoint()
+            resumed = _wait_for_status(
+                client,
+                session_id,
+                {"idle"},
+                startup_timeout,
+            )
+            evidence.initial_host_pid = fault_result.get("initial_host_pid")
+            evidence.resumed_host_pid = fault_result.get("recovered_host_pid")
+            evidence.resumed_acp_session_id = resumed.get("acp_session_id")
+            evidence.resumed_child_pid = resumed.get("pid")
+            evidence.observed.update({
+                "fault": fault,
+                "frontend_pid_changed": (
+                    fault_result.get("frontend_pid_before")
+                    != fault_result.get("frontend_pid_after")
+                ),
+                "host_index_target_removed": fault_result.get(
+                    "host_index_target_removed"
+                ),
+                "recovered_from_remote_authority": fault_result.get(
+                    "recovered_from_remote_authority"
+                ),
+            })
+            evidence.checks["frontend_restarted"] = (
+                evidence.observed["frontend_pid_changed"] is True
+            )
+            evidence.checks["host_index_target_removed"] = (
+                evidence.observed["host_index_target_removed"] is True
+            )
+            evidence.checks["recovered_from_remote_authority"] = (
+                evidence.observed["recovered_from_remote_authority"] is True
+            )
+            evidence.checks["same_acp_session"] = (
+                evidence.resumed_acp_session_id
+                == evidence.initial_acp_session_id
+            )
+            evidence.checks["same_host"] = (
+                evidence.initial_host_pid is not None
+                and evidence.resumed_host_pid == evidence.initial_host_pid
+            )
+            evidence.checks["same_child"] = (
+                evidence.initial_child_pid is not None
+                and evidence.resumed_child_pid == evidence.initial_child_pid
+                and fault_result.get("initial_child_pid")
+                == evidence.initial_child_pid
+                and fault_result.get("recovered_child_pid")
+                == evidence.initial_child_pid
+            )
+            evidence.checks["resumed_child_live"] = bool(
+                evidence.resumed_child_pid
+            )
+        else:
+            client.stop_session(session_id)
+            _wait_for_status(client, session_id, {"stopped"}, startup_timeout)
+            client.resume_session(session_id, request_timeout=startup_timeout)
+            resumed = _wait_for_status(
+                client,
+                session_id,
+                {"idle"},
+                startup_timeout,
+            )
+            evidence.resumed_acp_session_id = resumed.get("acp_session_id")
+            evidence.resumed_child_pid = resumed.get("pid")
+            evidence.checks["same_acp_session"] = (
+                evidence.resumed_acp_session_id
+                == evidence.initial_acp_session_id
+            )
+            evidence.observed["child_reused_on_stop_resume"] = (
+                evidence.resumed_child_pid == evidence.initial_child_pid
+            )
+            evidence.checks["resumed_child_live"] = bool(
+                evidence.resumed_child_pid
+            )
 
         client.submit_prompt(
             session_id,

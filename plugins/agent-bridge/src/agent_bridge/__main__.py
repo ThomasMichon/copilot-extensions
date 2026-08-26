@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any
 from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 from . import __version__
+from .parity_harness import FRONTEND_RESTART_HOSTINDEX_LOSS
 
 if TYPE_CHECKING:
     from .client import BridgeClientError
@@ -1629,6 +1630,11 @@ def _cmd_parity(args: argparse.Namespace) -> None:
             print(f"[FAIL] venue parity: {message}", file=sys.stderr)
         sys.exit(2)
     client = _get_client()
+    fault_handler = (
+        _fault_frontend_restart_hostindex_loss
+        if args.fault == FRONTEND_RESTART_HOSTINDEX_LOSS
+        else None
+    )
     try:
         evidence = run(
             client,
@@ -1641,6 +1647,8 @@ def _cmd_parity(args: argparse.Namespace) -> None:
             startup_timeout=args.startup_timeout,
             turn_timeout=args.turn_timeout,
             keep_session=args.keep_session,
+            fault=args.fault,
+            fault_handler=fault_handler,
         )
     except ParityFailure as exc:
         result = (
@@ -1682,6 +1690,79 @@ def _cmd_parity(args: argparse.Namespace) -> None:
     )
     for name, ok in result["checks"].items():
         print(f"  {'PASS' if ok else 'FAIL'} {name}")
+
+
+def _fault_frontend_restart_hostindex_loss(
+    session_id: str,
+    startup_timeout: float,
+) -> dict[str, Any]:
+    """Restart the frontend after dropping one harness-owned HostIndex row."""
+    import contextlib
+    import io
+    import time
+
+    from .config import config_dir
+    from .session_host.host_index import HostIndex
+
+    index_path = config_dir() / "hosts" / "index.json"
+    initial_record = HostIndex(index_path).get(session_id)
+    if initial_record is None:
+        raise RuntimeError("target session has no local HostIndex record")
+    if initial_record.boundary == "local":
+        raise RuntimeError("fault requires a remote Session Host boundary")
+    if not (initial_record.extra or {}).get("remote_authority_v2"):
+        raise RuntimeError("target session lacks far-side authority v2")
+
+    frontend_pid_before = _read_pid_file() or _pid_on_port(_service_port())
+    if not frontend_pid_before:
+        raise RuntimeError("could not identify the running frontend")
+
+    def quiet_service_call(action) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            action()
+
+    removed = False
+    try:
+        quiet_service_call(_service_stop)
+        if _service_is_running():
+            raise RuntimeError("frontend did not stop; HostIndex was not modified")
+        removed = HostIndex(index_path).remove(session_id)
+        if not removed:
+            raise RuntimeError("target HostIndex record disappeared before fault injection")
+    finally:
+        if not _service_is_running():
+            quiet_service_call(_service_start)
+
+    if not _service_is_running():
+        raise RuntimeError("frontend did not recover after restart")
+    frontend_pid_after = _read_pid_file() or _pid_on_port(_service_port())
+    if not frontend_pid_after:
+        raise RuntimeError("could not identify the restarted frontend")
+
+    deadline = time.monotonic() + startup_timeout
+    recovered = None
+    while time.monotonic() < deadline:
+        recovered = HostIndex(index_path).get(session_id)
+        if recovered is not None:
+            break
+        time.sleep(0.25)
+    if recovered is None:
+        raise RuntimeError("HostIndex record was not recovered from far-side authority")
+
+    return {
+        "frontend_pid_before": frontend_pid_before,
+        "frontend_pid_after": frontend_pid_after,
+        "host_index_target_removed": removed,
+        "initial_host_pid": initial_record.host_pid,
+        "recovered_host_pid": recovered.host_pid,
+        "initial_child_pid": initial_record.child_pid,
+        "recovered_child_pid": recovered.child_pid,
+        "recovered_from_remote_authority": bool(
+            (recovered.extra or {}).get("recovered_from_remote")
+            and (recovered.extra or {}).get("remote_authority_v2")
+        ),
+    }
 
 
 def _passive_daemon_creationflags() -> int:
@@ -4151,6 +4232,15 @@ def build_parser() -> argparse.ArgumentParser:
     parity_p.add_argument("--startup-timeout", type=float, default=600.0)
     parity_p.add_argument("--turn-timeout", type=float, default=600.0)
     parity_p.add_argument("--keep-session", action="store_true")
+    parity_p.add_argument(
+        "--fault",
+        choices=[FRONTEND_RESTART_HOSTINDEX_LOSS],
+        help=(
+            "Run an explicit destructive fault scenario. The frontend-restart "
+            "scenario refuses other active managed sessions and removes only "
+            "the harness-created session from the local HostIndex."
+        ),
+    )
     parity_p.add_argument(
         "--json",
         action="store_true",
