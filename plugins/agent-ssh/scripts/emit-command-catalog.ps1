@@ -9,8 +9,8 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
     exit 0
 }
 
-$commandPath = Join-Path $selfRoot '@@OUTPUT_DIR_PS@@\@@COMMAND@@.ps1'
-$installerPath = Join-Path $selfRoot 'scripts\@@INSTALLER@@.ps1'
+$commandPath = Join-Path $selfRoot 'bin\agent-ssh.ps1'
+$installerPath = Join-Path $selfRoot 'scripts\install.ps1'
 $availability = if (
     (Test-Path -LiteralPath $commandPath) -and
     (Test-Path -LiteralPath $installerPath)
@@ -18,14 +18,14 @@ $availability = if (
 $catalog = [ordered]@{
     schema = 'copilot-extensions.session-command-catalog'
     version = 1
-    plugin = '@@COMMAND@@'
+    plugin = 'agent-ssh'
     payload = [ordered]@{ provenance = 'payload-local' }
     commands = @(
         [ordered]@{
-            id = '@@COMMAND@@'
+            id = 'agent-ssh'
             argv = @($commandPath)
             shell = 'direct'
-            purpose = '@@PURPOSE@@'
+            purpose = 'Emit inspect and verify SSH fabric profiles'
             availability = $availability
         }
     )
@@ -33,7 +33,7 @@ $catalog = [ordered]@{
 $catalogJson = $catalog | ConvertTo-Json -Compress -Depth 6
 $fence = '```'
 $context = @(
-    '## @@COMMAND@@ session command catalog'
+    '## agent-ssh session command catalog'
     ''
     'Invoke the exact `argv` below. Do not search `PATH` or substitute a same-named command from another payload.'
     ''

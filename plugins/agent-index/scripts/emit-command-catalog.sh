@@ -15,15 +15,16 @@ context_root="$(cd "$context_root" 2>/dev/null && pwd -P)" || {
 }
 
 command_path="$self_root/bin/agent-index"
+installer_path="$self_root/scripts/install.sh"
 availability="unavailable"
-[ -x "$command_path" ] && availability="ready"
+[ -x "$command_path" ] && [ -f "$installer_path" ] && availability="ready"
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || {
     printf '%s\n' '{}'
     exit 0
 }
 
-COMMAND_PATH="$command_path" AVAILABILITY="$availability" "$py" <<'PY'
+if output="$(COMMAND_PATH="$command_path" AVAILABILITY="$availability" "$py" <<'PY'
 import json
 import os
 
@@ -52,3 +53,8 @@ context = (
 )
 print(json.dumps({"additionalContext": context}))
 PY
+)"; then
+    printf '%s\n' "$output"
+else
+    printf '%s\n' '{}'
+fi

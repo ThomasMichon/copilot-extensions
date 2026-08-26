@@ -14,8 +14,8 @@ context_root="$(cd "$context_root" 2>/dev/null && pwd -P)" || {
     exit 0
 }
 
-command_path="$self_root/@@OUTPUT_DIR@@/@@COMMAND@@"
-installer_path="$self_root/scripts/@@INSTALLER@@.sh"
+command_path="$self_root/bin/agent-ssh"
+installer_path="$self_root/scripts/install.sh"
 availability="unavailable"
 [ -x "$command_path" ] && [ -f "$installer_path" ] && availability="ready"
 py="$(command -v python3 || command -v python || true)"
@@ -31,20 +31,20 @@ import os
 catalog = {
     "schema": "copilot-extensions.session-command-catalog",
     "version": 1,
-    "plugin": "@@COMMAND@@",
+    "plugin": "agent-ssh",
     "payload": {"provenance": "payload-local"},
     "commands": [
         {
-            "id": "@@COMMAND@@",
+            "id": "agent-ssh",
             "argv": [os.environ["COMMAND_PATH"]],
             "shell": "direct",
-            "purpose": "@@PURPOSE@@",
+            "purpose": "Emit inspect and verify SSH fabric profiles",
             "availability": os.environ["AVAILABILITY"],
         }
     ],
 }
 context = (
-    "## @@COMMAND@@ session command catalog\n\n"
+    "## agent-ssh session command catalog\n\n"
     "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
     "same-named command from another payload.\n\n"
     "```json\n"

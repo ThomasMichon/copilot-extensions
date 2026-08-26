@@ -20,6 +20,7 @@ _RUNTIME_ROOT = re.compile(r"^\.[a-z0-9-]+$")
 _ENV = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
 _OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
+_INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
 
 
 def load_manifest(path: Path) -> dict[str, str | int]:
@@ -44,7 +45,11 @@ def load_manifest(path: Path) -> dict[str, str | int]:
         or ".." in Path(output_dir).parts
     ):
         raise ValueError(f"{path}: invalid outputDir: {output_dir!r}")
+    installer = data.get("installer", "install")
+    if not isinstance(installer, str) or not _INSTALLER.fullmatch(installer):
+        raise ValueError(f"{path}: invalid installer: {installer!r}")
     data["outputDir"] = output_dir
+    data["installer"] = installer
     return data
 
 
@@ -62,6 +67,7 @@ def render(template: str, data: dict[str, str | int]) -> str:
         "PAYLOAD_UP": payload_up,
         "PAYLOAD_UP_PS": payload_up.replace("/", "\\"),
         "PAYLOAD_UP_WIN": payload_up.replace("/", "\\"),
+        "INSTALLER": str(data["installer"]),
     }
     rendered = template
     for key, value in values.items():
@@ -74,6 +80,11 @@ def render(template: str, data: dict[str, str | int]) -> str:
 
 def expected_files(manifest: Path) -> dict[Path, str]:
     data = load_manifest(manifest)
+    installer = str(data["installer"])
+    for suffix in (".sh", ".ps1"):
+        installer_path = manifest.parent / "scripts" / f"{installer}{suffix}"
+        if not installer_path.is_file():
+            raise ValueError(f"{manifest}: installer not found: {installer_path}")
     command = str(data["command"])
     output = manifest.parent / str(data["outputDir"])
     template_names = {

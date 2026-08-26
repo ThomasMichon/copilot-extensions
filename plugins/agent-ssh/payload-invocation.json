@@ -1,0 +1,9 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-ssh",
+  "module": "agent_ssh",
+  "runtimeRoot": ".agent-ssh",
+  "noSelfProvisionEnv": "AGENT_SSH_NO_SELFPROVISION",
+  "purpose": "Emit inspect and verify SSH fabric profiles"
+}

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "generate.py"
+REPO = SCRIPT.parents[2]
 _spec = importlib.util.spec_from_file_location("payload_invocation_generate", SCRIPT)
 generator = importlib.util.module_from_spec(_spec)
 assert _spec and _spec.loader
@@ -21,6 +22,10 @@ _spec.loader.exec_module(generator)
 def _manifest(tmp_path: Path) -> Path:
     path = tmp_path / "plugin" / "payload-invocation.json"
     path.parent.mkdir()
+    scripts = path.parent / "scripts"
+    scripts.mkdir()
+    (scripts / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (scripts / "install.ps1").write_text("# generated fixture\n", encoding="utf-8")
     path.write_text(
         json.dumps(
             {
@@ -83,6 +88,25 @@ def test_manifest_validation_fails_closed(tmp_path: Path) -> None:
         raise AssertionError("invalid command was accepted")
 
 
+def test_manifest_selects_and_requires_installer_entrypoint(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["installer"] = "init"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="installer not found"):
+        generator.expected_files(manifest)
+
+    scripts = manifest.parent / "scripts"
+    (scripts / "init.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (scripts / "init.ps1").write_text("# generated fixture\n", encoding="utf-8")
+    generated = generator.expected_files(manifest)
+    posix = generated[manifest.parent / "bin" / "agent-example"]
+    powershell = generated[manifest.parent / "bin" / "agent-example.ps1"]
+    assert 'scripts/init.sh"' in posix
+    assert "'scripts\\init.ps1'" in powershell
+
+
 def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     data = json.loads(manifest.read_text(encoding="utf-8"))
@@ -92,6 +116,50 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
     assert manifest.parent / "bin" / "payload" / "agent-example" in generated
     catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
     assert 'command_path="$self_root/bin/payload/agent-example"' in catalog
+
+
+@pytest.mark.parametrize("plugin", ["agent-machines", "agent-ssh"])
+def test_service_free_adopters_publish_payload_catalogs(plugin: str) -> None:
+    plugin_root = REPO / "plugins" / plugin
+    manifest = plugin_root / "payload-invocation.json"
+    data = generator.load_manifest(manifest)
+    assert data["command"] == plugin
+
+    generated = generator.expected_files(manifest)
+    assert generator.process_manifest(manifest, check=True) == []
+    assert plugin_root / "bin" / plugin in generated
+
+    hooks = json.loads((plugin_root / "hooks.json").read_text(encoding="utf-8"))
+    session_hooks = hooks["hooks"]["sessionStart"]
+    for shell in ("bash", "powershell"):
+        catalog_hooks = [
+            hook for hook in session_hooks if "emit-command-catalog" in hook[shell]
+        ]
+        assert len(catalog_hooks) == 1
+        assert "COPILOT_PLUGIN_ROOT" in catalog_hooks[0][shell]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX catalog test")
+def test_posix_catalog_fails_open_when_python_fails(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    python = fake_bin / "python3"
+    python.write_text("#!/bin/sh\nexit 42\n", encoding="utf-8")
+    python.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env['PATH']}"
+    env["COPILOT_PLUGIN_ROOT"] = str(manifest.parent)
+    result = subprocess.run(
+        [str(manifest.parent / "scripts" / "emit-command-catalog.sh")],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0
+    assert result.stdout.strip() == "{}"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX shim test")

@@ -234,3 +234,7 @@ See [`design.md`](design.md).
   payload-invocation templates and added an agent-worktrees payload-only command
   under `bin/payload/`, leaving its historical top-level wrapper available for
   legacy global deployment until project-command ownership migration lands.
+- That shared-catalog slice merged in
+  [#1123](https://github.com/ThomasMichon/copilot-extensions/pull/1123), with
+  native Windows validation covering nested shims and catalog emitters on the
+  final review head.
