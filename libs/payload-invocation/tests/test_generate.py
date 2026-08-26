@@ -118,7 +118,7 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
     assert 'command_path="$self_root/bin/payload/agent-example"' in catalog
 
 
-@pytest.mark.parametrize("plugin", ["agent-machines", "agent-ssh"])
+@pytest.mark.parametrize("plugin", ["agent-containers", "agent-machines", "agent-ssh"])
 def test_service_free_adopters_publish_payload_catalogs(plugin: str) -> None:
     plugin_root = REPO / "plugins" / plugin
     manifest = plugin_root / "payload-invocation.json"

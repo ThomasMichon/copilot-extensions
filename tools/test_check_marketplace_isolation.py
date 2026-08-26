@@ -71,7 +71,7 @@ def test_inventory_categories(tmp_path: Path) -> None:
 
 
 def test_payload_catalog_adopter_skills_avoid_bare_global_commands() -> None:
-    for plugin in ("agent-machines", "agent-ssh"):
+    for plugin in ("agent-containers", "agent-machines", "agent-ssh"):
         findings = [
             finding
             for skill in (REPO / "plugins" / plugin / "skills").rglob("*.md")

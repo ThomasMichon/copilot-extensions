@@ -11,26 +11,28 @@ description: >-
 # Containers Fleet
 
 > **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-containers owns its own binstub/runtime and works standalone. If
-> `agent-containers version` is not found, stamp the binstub from the installed
-> plugin payload (the first real call then self-provisions the venv):
+> The runtime works standalone. In an agent session, invoke the exact `argv`
+> from the agent-containers session command catalog; the payload-local command
+> provisions on first use. Do not search `PATH` or substitute a same-named
+> command from another payload. Outside an agent session, stamp a management
+> binstub from an explicitly chosen payload:
 >
 > - Windows:
->   `pwsh -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.copilot\installed-plugins\copilot-extensions\agent-containers\scripts\init.ps1" stamp`
+>   `pwsh -NoProfile -ExecutionPolicy Bypass -File "<explicit-payload-path>\scripts\init.ps1" stamp`
 > - POSIX:
->   `bash "$(ls ~/.copilot/installed-plugins/*/agent-containers/scripts/init.sh | head -1)" stamp`
+>   `bash "<explicit-payload-path>/scripts/init.sh" stamp`
 >
 > The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
 > let it finish. If it reports a provisioning failure (e.g. missing uv / network),
 > surface the exact message — don't improvise a toolchain install. (Docker is a
 > separate prerequisite for fleet operations, not for provisioning the runtime.)
 
-`agent-containers` manages a persistent fleet of local Docker dev containers
+The agent-containers runtime manages a persistent fleet of local Docker dev containers
 and brokers exclusive *leases* so an effort can borrow one without two parallel
 worktrees driving the same container. Trusted containers are reached over
 OpenSSH, with `docker exec` used only as the local `ProxyCommand` bootstrap
 (Docker Desktop WSL2 backend), and run a Copilot ACP agent addressable via
-agent-bridge as `container:<name>` when agent-bridge is installed. Restricted
+the bridge as `container:<name>` when that sibling runtime is installed. Restricted
 fleets retain their direct, deny-by-construction `docker exec` boundary and
 receive no SSH key. Without agent-bridge, the fleet/lease CLI still works; only
 bridge dispatch is absent.
@@ -40,8 +42,8 @@ bridge dispatch is absent.
 Define the fleet in `containers.yaml`, then:
 
 ```bash
-agent-containers up myrepo --count 3      # create/top-up to 3 warm containers
-agent-containers fleet                   # list members + lease status
+<catalog argv[0]> up myrepo --count 3      # create/top-up to 3 warm containers
+<catalog argv[0]> fleet                   # list members + lease status
 ```
 
 Containers are kept warm (stopped, not destroyed). `down` stops them, `start`
@@ -135,27 +137,28 @@ contains them; machine-readable output reports names only.
 ## Borrow / release (effort owns a container)
 
 ```bash
-name=$(agent-containers borrow my-effort)   # lease a free container
-# ... dispatch work to container:$name ...
-agent-containers release my-effort          # free it when done
+<catalog argv[0]> borrow my-effort    # prints the leased container name
+# ... dispatch work to container:<printed-name> ...
+<catalog argv[0]> release my-effort   # free it when done
 ```
 
 Leases are **advisory** and persist across processes until `release` or TTL
 (default 24h). `borrow` will not hand out a container already leased to another
 effort; re-borrowing for the same effort is idempotent.
-Use `agent-containers leases` to inspect active leases. Release by either effort
+Use `<catalog argv[0]> leases` to inspect active leases. Release by either effort
 name or container name; a missing target returns non-zero so callers can notice
 cleanup drift.
 
 ## Dispatch work
 
 ```bash
-agent-bridge send container:myrepo-1 "run the unit tests in packages/foo"
+<agent-bridge catalog argv[0]> send container:myrepo-1 "run the unit tests in packages/foo"
 ```
 
 The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`
 lets agent-bridge discover `container:` without importing this package into the
-bridge venv. The resolver launches `agent-containers exec --stdio <name>`, which
+bridge venv. The resolver launches the `exec --stdio <name>` action through its registered
+management entry point, which
 then reaches a trusted container through OpenSSH and runs
 `copilot --acp --stdio --allow-all-tools`, staging the host `gh auth token`
 through stdin so the token is not persisted in bridge state, argv, or logs.
@@ -170,17 +173,17 @@ explicit `acp_command` and forwards neither host credential path.
 
 ## Troubleshooting
 
-- `agent-containers version` — binstub/runtime health.
-- `agent-containers fleet --json` — Docker reachability + fleet discovery.
-- `agent-containers leases` / `agent-containers release <target>` — stale lease
+- `<catalog argv[0]> version` — payload/runtime health.
+- `<catalog argv[0]> fleet --json` — Docker reachability + fleet discovery.
+- `<catalog argv[0]> leases` / `<catalog argv[0]> release <target>` — stale lease
   inspection and cleanup. Leases are advisory and TTL-reclaimed.
-- `agent-containers namespace-list` — bridge-facing provider CLI health. If
+- `<catalog argv[0]> namespace-list` — bridge-facing provider CLI health. If
   bridge dispatch cannot see containers, check that the provider manifest exists
   under `~/.agent-bridge/providers.d/` and points at the absolute binstub.
-- `agent-containers config-migrate` — migrate/stamp only the machine-local
+- `<catalog argv[0]> config-migrate` — migrate/stamp only the machine-local
   `~/.agent-containers/containers.yaml`; repo/cwd configs are never rewritten.
 
-There is no `agent-containers doctor` command today.
+There is no `doctor` action today.
 
 ## Notes
 

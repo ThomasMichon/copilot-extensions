@@ -1,0 +1,10 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-containers",
+  "module": "agent_containers",
+  "runtimeRoot": ".agent-containers",
+  "noSelfProvisionEnv": "AGENT_CONTAINERS_NO_SELFPROVISION",
+  "purpose": "Manage local container fleets leases and dispatch",
+  "installer": "init"
+}
