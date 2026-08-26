@@ -62,7 +62,7 @@ class TestBuildMuxNewWindowArgv:
             "id1", "/w", ["copilot", "-i", "hi"], None,
             mux="tmux", pane_wrapper=str(wrapper),
         )
-        # env -u ... bash <wrapper> --aw-wt <id> copilot -i hi
+        # env -u ... bash <wrapper> --aw-wt <id> copilot --interactive hi
         assert "bash" in argv
         b = argv.index("bash")
         assert argv[b + 1] == str(wrapper)
@@ -376,7 +376,7 @@ class TestPaneWrapperInitialPrompt:
         )
         assert result.returncode == 0, result.stderr
         assert json.loads(output.read_text("utf-8")) == [
-            "-i", prompt,
+            "--interactive", prompt,
         ]
         assert receipt.read_text("utf-8") == "launching"
         receipt.unlink()
@@ -717,7 +717,7 @@ class TestCmdHandoffCutover:
         assert out["seed_len"] == len("resume the multi word work")
         assert out["seeded"] is True
         # The launch cmd carries NO seed arg; the wrapper receives base64 through
-        # the mux window environment and appends native -i afterward.
+        # the mux window environment and appends native --interactive afterward.
         assert captured["cmd"] == ["copilot"]
         assert captured["kwargs"]["initial_prompt"] == (
             "resume the multi word work"

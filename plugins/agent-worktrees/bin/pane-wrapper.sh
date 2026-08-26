@@ -66,7 +66,7 @@ if [[ -n "$INITIAL_PROMPT_B64" ]]; then
         exit 2
     fi
     [[ -n "$RECEIPT_PATH" ]] || exit 2
-    set -- "$@" -i "$INITIAL_PROMPT"
+    set -- "$@" --interactive "$INITIAL_PROMPT"
     RECEIPT_DIR="$(dirname "$RECEIPT_PATH")"
     mkdir -p "$RECEIPT_DIR" || exit 2
     RECEIPT_TMP="$RECEIPT_PATH.$$.tmp"
@@ -81,7 +81,7 @@ END_TIME=$(date +%s)
 RUNTIME=$((END_TIME - START_TIME))
 
 # A prompt receipt is provisional until the child survives startup. If native
-# -i is rejected or the launcher fails immediately, overwrite it so
+# --interactive is rejected or the launcher fails immediately, overwrite it so
 # the parent keeps the predecessor and reaps this failed successor.
 if [[ -n "${RECEIPT_PATH:-}" ]] \
     && { [[ $EXIT_CODE -ne 0 ]] || [[ $RUNTIME -lt $PROMPT_STARTUP_GRACE ]]; }; then

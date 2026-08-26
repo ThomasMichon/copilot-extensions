@@ -127,7 +127,10 @@ if (-not [string]::IsNullOrWhiteSpace($initialPromptB64)) {
         if ([string]::IsNullOrWhiteSpace($receiptPath)) {
             throw 'missing initial-prompt receipt path'
         }
-        $rest += @('-i', $initialPrompt)
+        # Use the long form: when the child is a PowerShell script launcher,
+        # short -i is consumed by PowerShell's parameter binder and rejected as
+        # an ambiguous common-parameter abbreviation before ValueFromRemainingArguments.
+        $rest += @('--interactive', $initialPrompt)
         $receiptDir = Split-Path -Parent $receiptPath
         New-Item -ItemType Directory -Path $receiptDir -Force -ErrorAction Stop | Out-Null
         $receiptTmp = "$receiptPath.$PID.tmp"
@@ -148,7 +151,7 @@ if ($null -eq $exitCode) { $exitCode = 0 }
 $runtime = [int]((Get-Date) - $start).TotalSeconds
 
 # A prompt receipt is provisional until the child survives startup. If native
-# -i is rejected or the launcher fails immediately, overwrite it so
+# --interactive is rejected or the launcher fails immediately, overwrite it so
 # the parent keeps the predecessor and reaps this failed successor.
 if ($receiptPath -and (
         $exitCode -ne 0 -or $runtime -lt $promptStartupGrace
