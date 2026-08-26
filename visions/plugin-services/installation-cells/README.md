@@ -210,6 +210,7 @@ local transports do not weaken or change installation identity.
 - Reality docs: [`docs/architecture.md`](../../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../../docs/install-contract.md)
 - Patterns:
+  [`marketplace-installation-cells`](../../../docs/patterns/marketplace-installation-cells.md) ·
   [`a-la-carte-independence`](../../../docs/patterns/a-la-carte-independence.md) ·
   [`project-scoped-invocation`](../../../docs/patterns/project-scoped-invocation.md) ·
   [`install-vs-adopt-boundary`](../../../docs/patterns/install-vs-adopt-boundary.md) ·

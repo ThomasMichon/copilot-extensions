@@ -14,6 +14,15 @@
   `attributable-agent-capabilities`, `provenance-safe-transition`; and the
   corresponding Behaviors.
 - **Umbrella issue:** [#1096](https://github.com/ThomasMichon/copilot-extensions/issues/1096)
+- **Implementation issues:** [#1102](https://github.com/ThomasMichon/copilot-extensions/issues/1102) ·
+  [#1103](https://github.com/ThomasMichon/copilot-extensions/issues/1103) ·
+  [#1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104) ·
+  [#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105) ·
+  [#1106](https://github.com/ThomasMichon/copilot-extensions/issues/1106) ·
+  [#1107](https://github.com/ThomasMichon/copilot-extensions/issues/1107) ·
+  [#1108](https://github.com/ThomasMichon/copilot-extensions/issues/1108) ·
+  [#1109](https://github.com/ThomasMichon/copilot-extensions/issues/1109) ·
+  [#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110)
 
 ## Guiding Intent
 
@@ -32,16 +41,18 @@ space is reserved for attributable project entry points.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Windows implementation agent | Shared contracts, Windows launch/service behavior, orchestration, and PR sequencing | Isolated Windows worktrees and per-phase PRs |
-| Linux/WSL implementation agent | POSIX shims, filesystem/service behavior, and Linux clean-room validation | Isolated WSL worktrees and per-phase PRs |
+| Cross-platform implementation driver | Shared contracts, sequencing, and independently green per-phase PRs | One active implementation worktree and serial PRs |
+| Windows validation lane | Windows launch, payload replacement, task/pipe/mutex behavior, and clean-room validation | Isolated Windows validation before operative contracts become mandatory |
+| Linux/WSL validation lane | POSIX shims, filesystem/service behavior, systemd/socket behavior, and clean-room validation | Isolated Linux/WSL validation per operative phase |
 
 ## Coordination
 
 - **Topology:** independent per-phase PRs, sequenced by this effort and #1096.
-- **Host (owns sequencing):** Windows implementation agent.
-- **Delegates:** Linux/WSL implementation agent owns POSIX-focused slices and
-  validation; either participant may own a shared-library PR after recording it
-  in the journal.
+- **Host (owns sequencing):** the active cross-platform implementation driver;
+  Phase 1 is owned by the Linux/WSL lane.
+- **Delegates:** Windows and Linux/WSL validation remain required for operative
+  phases; either lane may own a shared-library PR after recording it in the
+  journal.
 - **Handoff:** each PR is independently green and leaves both operating-system
   lanes on a compatible contract. A platform-specific implementation may follow
   in the next PR only when the preceding PR is non-operative foundation and
@@ -84,19 +95,19 @@ reachable when their ownership is explicit.
 - [x] Record the target design, affected systems, migration boundary, and
   Windows/Linux participant model in this effort.
 
-### Phase 1 — Contract and inventory
+### Phase 1 — Contract and inventory ([#1102](https://github.com/ThomasMichon/copilot-extensions/issues/1102))
 
-- [ ] Add the prescriptive marketplace-installation-cell pattern and revise the
+- [x] Add the prescriptive marketplace-installation-cell pattern and revise the
   install/configuration contracts without changing runtime behavior.
-- [ ] Define the marketplace provenance, installation identity, ownership
+- [x] Define the marketplace provenance, installation identity, ownership
   receipt, repo identity, and process-propagation contracts.
-- [ ] Add report-only guards inventorying unqualified runtime roots, generic
+- [x] Add report-only guards inventorying unqualified runtime roots, generic
   global plugin binstubs, PATH-based sibling launches, fixed service identities,
   and bare agent-operative command instructions.
-- [ ] Split #1096 into reviewable implementation issues citing exact vision
+- [x] Split #1096 into reviewable implementation issues citing exact vision
   items and phase ownership.
 
-### Phase 2 — Payload-local invocation
+### Phase 2 — Payload-local invocation ([#1103](https://github.com/ThomasMichon/copilot-extensions/issues/1103))
 
 - [ ] Add checked-in, payload-local POSIX/PowerShell/CMD shims generated from
   canonical templates.
@@ -106,7 +117,7 @@ reachable when their ownership is explicit.
 - [ ] Make project binstubs pin their owning payload and reject silent ownership
   transfer.
 
-### Phase 3 — Installation context and exemplars
+### Phase 3 — Installation context and exemplars ([#1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104))
 
 - [ ] Introduce a self-contained, vendorable installation-context primitive
   separate from versioned interpreter resolution.
@@ -117,15 +128,19 @@ reachable when their ownership is explicit.
 
 ### Phase 4 — Runtime and state rollout
 
-- [ ] Convert agent-worktrees and its project/repo registries first so later
+- [ ] Convert agent-worktrees and its project/repo registries first
+  ([#1105](https://github.com/ThomasMichon/copilot-extensions/issues/1105)) so later
   reconciliation and project entry points are attributable.
-- [ ] Convert service-free runtimes in low-risk batches.
+- [ ] Convert service-free runtimes in low-risk batches
+  ([#1106](https://github.com/ThomasMichon/copilot-extensions/issues/1106)).
 - [ ] Convert remote venue and transport plugins, carrying installation identity
-  through SSH, CodeSpace, container, and staged-plugin boundaries.
+  through SSH, CodeSpace, container, and staged-plugin boundaries
+  ([#1107](https://github.com/ThomasMichon/copilot-extensions/issues/1107)).
 - [ ] Convert service-bearing plugins, qualifying service, lease, endpoint,
-  provider, log, and process identity.
+  provider, log, and process identity
+  ([#1108](https://github.com/ThomasMichon/copilot-extensions/issues/1108)).
 
-### Phase 5 — Repository configuration and adoption state
+### Phase 5 — Repository configuration and adoption state ([#1109](https://github.com/ThomasMichon/copilot-extensions/issues/1109))
 
 - [ ] Move committed plugin configuration toward
   `.copilot-extensions/<plugin>/...` with new-first, legacy-fallback reads.
@@ -134,7 +149,7 @@ reachable when their ownership is explicit.
 - [ ] Move machine-local project state beneath the adopting installation cell,
   keyed by stable remote identity rather than repository basename alone.
 
-### Phase 6 — Migration, enforcement, and cleanup
+### Phase 6 — Migration, enforcement, and cleanup ([#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110))
 
 - [ ] Provide an explicit legacy-state attribution/migration command; ambiguous
   `~/.agent-*` state is preserved and never claimed automatically.
@@ -189,3 +204,21 @@ See [`design.md`](design.md).
   marketplace-owned project state under `repos/`.
 - Bound the effort to paired Windows and Linux/WSL implementation lanes with
   independently green, sequential PRs.
+
+### 2026-08-25 — Phase 1 execution
+
+- Continued sequencing in the Linux/WSL lane after the original Windows host
+  was unavailable. Operative phases still require explicit Windows validation;
+  the lane change does not weaken the cross-platform gate.
+- Split #1096 into #1102–#1110, covering the Phase 1 contract/inventory,
+  payload-local invocation, installation context and exemplars,
+  agent-worktrees adoption state, service-free runtimes, remote
+  venues/transports, service identities, repository configuration, and
+  migration/enforcement.
+- Started #1102 with a prescriptive marketplace-installation-cell pattern,
+  install/configuration contract revisions, and a report-only inventory guard.
+- The first inventory baseline scans 900 operative files and reports 1,346
+  findings: 380 unqualified runtime roots, 87 global plugin-binstub surfaces,
+  74 PATH-based sibling launches, 88 fixed service identities, and 717
+  operative bare commands. The guard remains non-blocking until the producing
+  phases burn down those categories.

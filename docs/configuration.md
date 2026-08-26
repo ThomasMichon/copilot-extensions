@@ -6,9 +6,11 @@ the right one is the whole game:
 - **In the repo** — committed, shared by everyone who uses the repo, and it
   *travels with the repo*. Describes **how the repo is worked** (which plugins,
   what workflow, what topology).
-- **Machine-local / user-global** — under `~/` (`~/.copilot`, `~/.agent-*`,
-  `~/.{project}`), **per-user and per-machine**, and **never committed**. Holds
-  secrets, absolute paths, machine names, and personal preferences.
+- **Machine-local / user-global** — under `~/` (`~/.copilot`,
+  `~/.copilot-extensions/marketplaces/<marketplace-id>/`, and transitional
+  `~/.agent-*` / `~/.{project}` roots), **per-user and per-machine**, and
+  **never committed**. Holds secrets, absolute paths, machine identity, and
+  personal preferences.
 
 This split is not arbitrary — it follows the
 [install-vs-adopt boundary](patterns/install-vs-adopt-boundary.md): **`install` /
@@ -61,6 +63,37 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 | `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `~/.agent-*/deploy-manifest.json`, runtime state | Per-machine runtime footprint (version, source, venv) | `install` / `update` |
 
+### Marketplace installation cells
+
+The target machine-local contract qualifies plugin-owned configuration and
+state by globally distinguishing marketplace provenance:
+
+```text
+~/.copilot-extensions/
+  marketplaces/<marketplace-id>/
+    namespace.json
+    plugins/<plugin-id>/{install.json,state,run,logs,...}
+    repos/<stable-repo-id>/<plugin-id>/...
+```
+
+Committed repository policy remains distribution-neutral. New plugin-owned
+repository configuration converges on
+`<repo>/.copilot-extensions/<plugin-id>/...`; a marketplace-specific overlay is
+an explicit adoption decision, never an install-time fork of ordinary committed
+configuration.
+
+Machine-local project adoption belongs to the adopting cell and uses stable
+repository identity rather than basename alone. Two cells may adopt the same
+repository without sharing registry, worktree, session, lease, or generated
+invocation state. A singleton committed integration surface must carry
+attributable ownership or use an intentionally composable format.
+
+The `~/.agent-*` and `~/.{project}` rows above document the current legacy
+layout during migration. New-first, legacy-fallback readers may preserve a
+bounded compatibility window, but install/update never claims or merges
+unqualified state automatically. See
+[marketplace-installation-cells](patterns/marketplace-installation-cells.md).
+
 ## Two things that trip people up
 
 - **The same capability has both an in-repo and a user-global slot.** `agent-mcp`
@@ -86,6 +119,9 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
   §`install-adopt-boundary` / §`install-leaves-repos-unaltered`.
 - [Install Contract](install-contract.md) — the machine-local runtime deploy +
   schema-migration contract `install`/`update` honor.
+- [Pattern: marketplace-installation-cells](patterns/marketplace-installation-cells.md)
+  — how globally distinguishing provenance owns machine-local runtime,
+  configuration, adoption state, and lifecycle artifacts.
 - [Architecture § The control-harness repo](architecture.md#the-control-harness-repo)
   — how a control repo's committed config feeds the mesh plugins.
 - [agent-worktrees Configuration Reference](../plugins/agent-worktrees/docs/config-reference.md)

@@ -31,7 +31,7 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 | Shape | What it is | Examples |
 |-------|-----------|----------|
 | **Payload-only** | Skills / hooks / a session extension; enabling the plugin is the whole install — no runtime | efforts, visions, context-handoff, customizing-copilot, harness-* |
-| **Runtime CLI** | venv + `~/.local/bin` binstub, invoked on demand; no daemon | agent-mcp, agent-containers |
+| **Runtime CLI** | Installation-cell runtime + payload-local shim, invoked on demand; no daemon | agent-mcp, agent-containers |
 | **Runtime service** | Runtime CLI **plus** a long-lived local service under platform-native supervision | agent-bridge, agent-dispatch, agent-vault |
 | **Namespace-provider** | A plugin that registers a namespace with a sibling service via a filesystem **manifest** (its binstub driven over a process boundary), rather than running its own daemon | agent-codespaces / agent-containers (providers to agent-bridge) |
 
@@ -50,9 +50,10 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
 2. **Compose gracefully.** When siblings *are* present, discover and use their
    optional capabilities without a mandatory central broker and without the user
    hand-wiring them. A missing sibling degrades a feature, never the whole plugin.
-3. **The runtime is the unit, not the checkout.** A plugin runs from its installed
-   runtime (`~/.agent-*` venv + binstub), deployed by its own installer per the
-   install contract. Nothing at run time depends on a git checkout of this repo.
+3. **The installation is the unit, not the checkout or plugin name.** A plugin
+   runs from the runtime owned by its marketplace installation cell, deployed by
+   its own installer per the install contract. Nothing at run time depends on a
+   git checkout of this repo, and a bare plugin name never selects mutable state.
 4. **Right-size the surface.** Payload-only < runtime CLI < runtime service.
    Don't add a daemon, a port, or a resolver a plugin doesn't need.
 5. **Cross-platform parity is a feature.** A plugin behaves the same on Windows
@@ -97,6 +98,13 @@ core of the principles above; a reviewer checks a change against these.
 - **Deploy through the pipeline, never edit the deployed copy.** Source lives in
   the repo; changes reach a runtime only via the installer + version bump. Editing
   `~/.copilot/installed-plugins/…` or a runtime dir is forbidden.
+- **Marketplace provenance qualifies every installation-owned artifact.** Plugin
+  name and version alone never select a runtime, mutable state, service, endpoint,
+  provider, project-adoption record, or lifecycle claim. An operation inherits a
+  validated installation context from its attributable payload/runtime or receives
+  an explicit management context; missing or mismatched provenance fails closed.
+  (Serves *Vision plugin-services/installation-cells*; see
+  [`marketplace-installation-cells.md`](marketplace-installation-cells.md).)
 - **Runtime installs are immutable and versioned.** An installer never mutates a
   runtime venv in place. A new version is built into its **own** directory beside
   the old one and the active version is published by an **atomic** `current-version`
@@ -208,6 +216,7 @@ the exemplars, and the vision it serves):
 | [runtime-self-provisioning](runtime-self-provisioning.md) | How a plugin provisions its own runtime with no manual step and **no dependency on a sibling launcher** — the layered bootstrap (self-provisioning binstub → sessionStart auto-stamp → skill-driven readiness self-check) + toolchain self-acquisition (vendored uv, pip-index bridge), reaching confined envs (Copilot app, cloud agent) |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
+| [marketplace-installation-cells](marketplace-installation-cells.md) | Qualify runtime, state, lifecycle, invocation, composition, project adoption, migration, and uninstall by globally distinguishing marketplace provenance so same-named plugin suites coexist safely |
 | [durable-vs-versioned-runtime](durable-vs-versioned-runtime.md) | When a plugin carries an expensive, warm, stateful runtime (heavy stack + loaded model) that must outlive routine service cutovers: a durable runtime + warm daemon on its own lifecycle, decoupled from the swappable versioned runtime, config-resolved + capability-matched per host |
 | [uniform-runtime-resolution](uniform-runtime-resolution.md) | Exactly one way to resolve+spawn a versioned runtime's interpreter — marker → `last-known-good` → newest complete slot, junction-free, never a `venv`/`.venv` link, never a PATH python — reachable identically from a binstub, a service unit, a hook, and an agent, so no two callers ever bind different slots |
 | [graceful-daemon-cutover](graceful-daemon-cutover.md) | How a long-lived local service updates its version **without killing in-flight, non-resumable work** — and **the installer drives the cutover automatically** (no externally-driven `deploy` command): the shared `zdd` active/passive primitive (routing-table flip + drain at a safe cutover point + breadcrumb recovery), the consumer contract each daemon implements, and per-plugin adoption (agent-bridge reference; agent-index service+engine; agent-dispatch repossession; agent-vault connection-owner) |

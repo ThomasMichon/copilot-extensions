@@ -32,6 +32,7 @@ contract, binding invariants) so `--guards` runs them in sub-second-per-plugin.
 ruff check --select F,E9 <touched .py files>   # fast lint (pyflakes + syntax)
 python tools/check-install-contract.py         # runtime-plugin install contract — zero violations
 python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
+python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
 ```
 
 ## Per-plugin coverage (unit suites)
