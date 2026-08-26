@@ -1311,7 +1311,10 @@ def _cmd_ssh(args: argparse.Namespace) -> int:
         plugin_dirs: list[str] = list(cs_plugin_dirs)
         if not args.no_relay and not minimal_provision:
             plugin_dirs += await _stage_plugins(
-                manager, args.name, getattr(args, "stage_plugins", []),
+                manager,
+                args.name,
+                getattr(args, "stage_plugins", []),
+                repo_roots=getattr(config, "source_paths", ()) or (),
             )
         # NB: the repo-own ``.ai`` lane is intentionally NOT folded here. A
         # CodeSpace ACP dispatch never runs through this front-owns-stdio ``ssh``
@@ -1497,12 +1500,18 @@ async def _settle_codespace_on_disconnect(
     return False
 
 
-async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
+async def _stage_plugins(
+    manager,
+    name: str,
+    sources: list[str],
+    *,
+    repo_roots=(),
+) -> list[str]:
     """Stage related-repo plugin payloads onto the CodeSpace over SSH.
 
-    For each ``name@marketplace`` source, tar+base64 the host's installed
-    payload and extract it into a per-plugin dir on the CodeSpace, returning the
-    remote ``--plugin-dir`` paths. Egress-free (no marketplace fetch on the
+    For each ``name@marketplace`` source, resolve a live repo-local directory
+    marketplace payload before installed state, then tar+base64 it into a
+    per-plugin dir on the CodeSpace. Egress-free (no marketplace fetch on the
     CodeSpace). Best-effort per source: a missing host payload or a failed
     transfer is logged and skipped, never raised.
     """
@@ -1512,11 +1521,11 @@ async def _stage_plugins(manager, name: str, sources: list[str]) -> list[str]:
 
     dirs: list[str] = []
     for source in sources:
-        payload = host_payload_dir(source)
+        payload = host_payload_dir(source, repo_roots=repo_roots)
         if payload is None:
             log.warning(
-                "Skipping plugin stage for %s: no host payload under "
-                "~/.copilot/installed-plugins (is it installed on the host?)",
+                "Skipping plugin stage for %s: no host payload in a repo-local "
+                "marketplace or ~/.copilot/installed-plugins",
                 source,
             )
             continue
@@ -1791,7 +1800,10 @@ async def _register_codespace_plugins(
             getattr(config, "codespace_plugins", []) or []
         )
         specs = resolve_codespace_plugins(
-            repo, extra_specs=operator_specs, enabled_names=enabled_names
+            repo,
+            extra_specs=operator_specs,
+            enabled_names=enabled_names,
+            repo_roots=getattr(config, "source_paths", ()) or (),
         )
 
         # Split by marketplace kind. A local (`.ai`/`directory`) marketplace is
@@ -1830,7 +1842,10 @@ async def _register_codespace_plugins(
         # their dirs into the launch. Best-effort per source (see _stage_plugins).
         if local_specs:
             staged = await _stage_plugins(
-                manager, name, [s.source for s in local_specs]
+                manager,
+                name,
+                [s.source for s in local_specs],
+                repo_roots=getattr(config, "source_paths", ()) or (),
             )
             if staged:
                 log.info(
