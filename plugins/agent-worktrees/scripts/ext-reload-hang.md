@@ -1,11 +1,14 @@
-# Known CLI bug: extension-reload "Loading…/Resuming…" hang (temporary)
+# CLI release pending: extension-reload "Loading…/Resuming…" hang (temporary)
 
-Applies while running Copilot CLI with worktree-based plugins that load at least
-one extension, on a CLI build predating the fix for
-github/copilot-agent-runtime#13492 (fix: github/copilot-agent-runtime#13494).
+The upstream fix for github/copilot-agent-runtime#13492 merged in
+github/copilot-agent-runtime#13494 on 2026-08-25. Keep this banner and its
+workarounds active while waiting for that fix to reach the installed Copilot CLI
+release. Once the deployed CLI contains the fix, this temporary warning and
+**Bare resume** workaround can be retired.
 
 A generation race in extension reload can leave the `extensions` env-loading
-participant incomplete, so startup never finishes. Account for:
+participant incomplete, so startup never finishes on affected builds. Until the
+installed CLI includes the merged fix, account for:
 
 1. A newly launched **headed** session with a queued startup prompt can hang on
    "Loading…" with the prompt queued **indefinitely** (it never submits). This
