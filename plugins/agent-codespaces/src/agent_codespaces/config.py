@@ -148,14 +148,14 @@ def cwd_repo_root() -> Path | None:
 
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            ["git", "rev-parse", "--show-toplevel"],
             cwd=Path.cwd(), capture_output=True, text=True,
         )
     except (OSError, subprocess.SubprocessError):
         return None
     if result.returncode != 0 or not (result.stdout or "").strip():
         return None
-    return Path(result.stdout.strip()).parent.resolve()
+    return Path(result.stdout.strip()).resolve()
 
 # Standard location GitHub Codespaces clones the account dotfiles repo into.
 # Canonical here (config is the layer both provision.py and the request-folder

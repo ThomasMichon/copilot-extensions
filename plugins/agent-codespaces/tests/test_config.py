@@ -15,10 +15,29 @@ from agent_codespaces.config import (
     CredentialsConfig,
     load_merged_config,
     load_repo_config,
+    cwd_repo_root,
     repo_copilot_settings,
     save_adopted_repos,
     validate_config,
 )
+
+
+def test_cwd_repo_root_uses_linked_worktree_root(tmp_path, monkeypatch):
+    worktree = tmp_path / "repo.worktrees" / "feature"
+    worktree.mkdir(parents=True)
+    calls = []
+
+    class Result:
+        returncode = 0
+        stdout = str(worktree)
+
+    def fake_run(args, **kwargs):
+        calls.append((args, kwargs))
+        return Result()
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    assert cwd_repo_root() == worktree.resolve()
+    assert calls[0][0] == ["git", "rev-parse", "--show-toplevel"]
 
 
 def test_repo_copilot_settings_merges_marketplaces_and_enablement(tmp_path):

@@ -1803,6 +1803,7 @@ async def _register_codespace_plugins(
             repo,
             extra_specs=operator_specs,
             enabled_names=enabled_names,
+            enabled_sources=repo_settings.get("enabledPlugins"),
             repo_roots=getattr(config, "source_paths", ()) or (),
         )
 

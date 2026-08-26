@@ -271,6 +271,29 @@ def test_repo_local_manifest_replaces_stale_installed_declarations(tmp_path):
     assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
 
 
+def test_qualified_false_disables_stale_marketplace_copy(tmp_path):
+    _install_plugin(
+        tmp_path / "home",
+        "legacy-marketplace",
+        "example-web-harness",
+        codespace_plugins=[{"source": "legacy-agent@legacy-marketplace"}],
+    )
+    repo = tmp_path / "repo"
+    _write_local_harness(repo)
+    enabled_sources = {
+        "example-web-harness@local-marketplace": True,
+        "example-web-harness@legacy-marketplace": False,
+    }
+    specs = resolve_codespace_plugins(
+        None,
+        copilot_home=tmp_path / "home",
+        enabled_names={"example-web-harness"},
+        enabled_sources=enabled_sources,
+        repo_roots=[repo],
+    )
+    assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
+
+
 def test_repo_local_manifest_uses_source_name_for_override(tmp_path):
     _install_plugin(
         tmp_path / "home",
