@@ -332,8 +332,14 @@ second call:
 agent-worktrees list-sessions --worktree <id> --json
 # {"head_session": "<sid>"|null,
 #  "sessions": [{"id": "<sid>", "state": "active"|"handed-off"|"concluded",
-#                "is_head": <bool>, ...}, ...]}
+#                "is_head": <bool>, "interface": "cli"|"acp",
+#                "origin": "user"|"system"|"delegate", ...}, ...]}
 ```
+
+For machine-level consumers, `list-sessions --all-projects --json` reads every
+adopted project's tracking directory and emits one row per session. Duplicate
+registrations with conflicting provenance fail closed to
+`interface=unknown`, `origin=unknown`, and `provenance_conflict=true`.
 
 Each session entry gains `state` (the asserted `SessionEntry.state`; `active`
 for legacy/backfill entries with no stamp) and `is_head` (marks the one session

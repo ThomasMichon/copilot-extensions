@@ -743,6 +743,39 @@ def test_bare_reap_sessions_without_project_balks_not_crashes(monkeypatch, capsy
     assert "Could not resolve a project" in capsys.readouterr().err
 
 
+def test_all_project_session_listing_runs_without_project(monkeypatch, capsys):
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+    seen = {}
+
+    def _ran(args):
+        seen["all_projects"] = args.all_projects
+        return 0
+
+    monkeypatch.setitem(m.COMMAND_MAP, "list-sessions", _ran)
+
+    rc = m.main(["list-sessions", "--all-projects", "--json"])
+
+    assert rc == 0
+    assert seen["all_projects"] is True
+    assert "Could not resolve a project" not in capsys.readouterr().err
+
+
+def test_project_scoped_session_listing_still_requires_project(monkeypatch, capsys):
+    monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
+    monkeypatch.setattr(m, "_git_toplevel", lambda p: None)
+
+    def _boom(args):
+        raise AssertionError("project-scoped list-sessions must not dispatch")
+
+    monkeypatch.setitem(m.COMMAND_MAP, "list-sessions", _boom)
+
+    rc = m.main(["list-sessions", "--json"])
+
+    assert rc == 1
+    assert "Could not resolve a project" in capsys.readouterr().err
+
+
 def test_reap_sessions_resolves_project_from_flag(monkeypatch):
     """A project binstub injects ``--project <name>``; reap-sessions then
     resolves it and runs (the test-chamber reap-sessions path)."""
