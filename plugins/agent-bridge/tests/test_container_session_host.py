@@ -8,6 +8,7 @@ import pytest
 
 from agent_bridge.session_host.container_transport import (
     ContainerTransport,
+    _run_provider,
     build_container_spawner,
 )
 
@@ -30,6 +31,42 @@ class _FakeManager:
     ):
         self.commands.append((name, command, timeout, input_bytes))
         return SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+
+@pytest.mark.asyncio
+async def test_provider_runner_wraps_windows_batch_argv(monkeypatch):
+    observed = {}
+    original = ["C:\\tools\\agent-containers.cmd", "session-host-prepare", "target"]
+    wrapped = ["cmd.exe", "/d", "/s", "/c", *original]
+
+    class _FakeProcess:
+        returncode = 0
+
+        async def communicate(self):
+            return b"prepared", b""
+
+    def wrap(command, env):
+        observed["unwrapped"] = command
+        observed["wrap_env"] = env
+        return wrapped
+
+    async def create(*argv, **kwargs):
+        observed["argv"] = list(argv)
+        observed["process_env"] = kwargs["env"]
+        return _FakeProcess()
+
+    monkeypatch.setattr("agent_bridge.transport._wrap_batch_for_windows", wrap)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.asyncio.create_subprocess_exec",
+        create,
+    )
+
+    rc, out, err = await _run_provider(original, timeout=1)
+
+    assert (rc, out, err) == (0, b"prepared", b"")
+    assert observed["unwrapped"] == original
+    assert observed["argv"] == wrapped
+    assert observed["process_env"] is observed["wrap_env"]
 
 
 @pytest.mark.asyncio

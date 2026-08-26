@@ -29,6 +29,10 @@ async def _run_provider(
     *,
     timeout: float,
 ) -> tuple[int, bytes, bytes]:
+    from ..transport import _wrap_batch_for_windows
+
+    env = os.environ.copy()
+    command = _wrap_batch_for_windows(list(command), env)
     proc = await asyncio.create_subprocess_exec(
         *command,
         stdin=asyncio.subprocess.DEVNULL,
@@ -36,6 +40,7 @@ async def _run_provider(
         stderr=asyncio.subprocess.PIPE,
         creationflags=no_window_flags(),
         start_new_session=os.name != "nt",
+        env=env,
     )
     try:
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
