@@ -28,6 +28,7 @@ class FakeClient:
         self.stop_calls = 0
         self.resume_calls = 0
         self.refresh_calls = 0
+        self.relay_fault_calls = 0
         self.other_sessions = []
 
     def start_session(self, **kwargs):
@@ -102,6 +103,17 @@ class FakeClient:
     def refresh_endpoint(self):
         self.refresh_calls += 1
         return True
+
+    def interrupt_relays_for_parity(self, session_id, *, timeout=90):
+        self.relay_fault_calls += 1
+        return {
+            "owner_count_before": 1,
+            "owner_count_after": 1,
+            "interrupted_count": 1,
+            "all_recovered": True,
+            "owner_identity_preserved": True,
+            "processes_replaced": True,
+        }
 
     def end_session(self, session_id, *, force=False):
         self.ended = True
@@ -340,6 +352,37 @@ def test_frontend_restart_fault_restores_frontend_when_mutation_fails(
         cli._fault_frontend_restart_hostindex_loss("session-1", 1)
 
     assert state == {"running": True, "starts": 1}
+
+
+def test_relay_interruption_fault_reprobes_credentials_without_duplication():
+    client = FakeClient()
+
+    result = parity.run(
+        client,
+        "container:example-1",
+        auth=True,
+        ado_url="https://example.visualstudio.com/Project/_git/repo",
+        azure_scope="https://storage.azure.com/.default",
+        startup_timeout=1,
+        turn_timeout=1,
+        fault=parity.RELAY_INTERRUPTION,
+    )
+
+    assert result.ok is True
+    assert result.checks["exclusive_relay_fault"] is True
+    assert result.checks["relay_interrupted"] is True
+    assert result.checks["relay_recovered"] is True
+    assert result.checks["no_duplicate_relay_owner"] is True
+    assert result.checks["relay_process_replaced"] is True
+    assert result.checks["credential_events_redacted"] is True
+    assert result.checks["relay_github_credential"] is True
+    assert result.checks["relay_ado_ls_remote"] is True
+    assert result.checks["relay_azure_token"] is True
+    assert result.checks["same_acp_session"] is True
+    assert result.checks["same_child"] is True
+    assert result.observed["relay_recovery_probe"]["azure_token"] is True
+    assert client.relay_fault_calls == 1
+    assert len(client.prompts) == 3
 
 
 def test_quality_prompt_rejects_credentialed_ado_url():

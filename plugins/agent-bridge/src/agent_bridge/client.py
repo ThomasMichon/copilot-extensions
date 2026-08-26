@@ -816,6 +816,20 @@ class BridgeClient:
             params=params or None,
         )
 
+    def interrupt_relays_for_parity(
+        self,
+        session_id: str,
+        *,
+        timeout: float = 90.0,
+    ) -> dict[str, Any]:
+        """Interrupt one harness-owned session's supervised credential relay."""
+        return self._request(
+            "POST",
+            f"/api/v1/sessions/{session_id}/parity/interrupt-relays",
+            params={"timeout": str(timeout)},
+            request_timeout=timeout + 15.0,
+        ) or {}
+
     def resume_session(
         self,
         session_id: str,
