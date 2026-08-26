@@ -110,6 +110,7 @@ def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
     result = json.loads(capsys.readouterr().out)
     assert result["reverse_forwards"] == ["9857:127.0.0.1:61234"]
     assert result["remote_command"].startswith("source /tmp/")
+    assert result["acp_command"] == "copilot --acp --stdio"
     assert "github-secret" not in json.dumps(result)
     assert "relay-secret" not in json.dumps(result)
     staged = write_env.call_args.args[2]

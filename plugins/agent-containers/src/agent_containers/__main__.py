@@ -314,8 +314,9 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         )
 
     remote_env = write_remote_env(args.name, user, launch_env)
+    acp_command = config.acp_command_for(fleet)
     remote_command = build_remote_command(
-        config.acp_command_for(fleet),
+        acp_command,
         remote_env,
     )
     print(json.dumps({
@@ -324,6 +325,7 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
         "security_profile": fleet.security_profile,
         "user": user,
         "ssh": asdict(ssh_config),
+        "acp_command": acp_command,
         "remote_command": remote_command,
         "remote_env": remote_env,
         "reverse_forwards": reverse_forwards,

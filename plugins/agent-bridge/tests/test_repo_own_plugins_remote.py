@@ -18,6 +18,8 @@ import tarfile
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from agent_bridge import repo_own_plugins_remote as aps
 from agent_bridge import target_exec as tx
 
@@ -173,3 +175,26 @@ def test_resolve_remote_best_effort_on_transport_error():
         assert aps.resolve_remote_repo_ai_plugin_dirs(
             {"agent_name": "codespace:x"}, "/ws",
         ) == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_resolve_remote_via_selected_transport():
+    payload = json.dumps({
+        "resolved": {"a@m": "/ws/.ai/a"},
+        "unresolved": ["b@remote"],
+    })
+    seen = {}
+
+    async def _run(command, *, timeout):
+        seen["has_cmd"] = "base64 -d" in command
+        seen["timeout"] = timeout
+        return 0, f"{aps.RESULT_MARKER}{payload}\n", ""
+
+    resolved, unresolved = await aps.resolve_remote_repo_ai_plugin_dirs_via(
+        _run,
+        "/ws",
+    )
+
+    assert resolved == ["/ws/.ai/a"]
+    assert unresolved == ["b@remote"]
+    assert seen == {"has_cmd": True, "timeout": 90.0}

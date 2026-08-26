@@ -28,6 +28,7 @@ import json
 import logging
 import shlex
 import tarfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from . import target_exec as tx
@@ -153,5 +154,33 @@ def resolve_remote_repo_ai_plugin_dirs(
         return [], []
     except Exception as exc:  # pragma: no cover - defensive
         log.warning("repo-own .ai resolve failed: %s", exc)
+        return [], []
+    return parse_resolve_result(output)
+
+
+async def resolve_remote_repo_ai_plugin_dirs_via(
+    run: Callable[..., Awaitable[tuple[int, str, str]]],
+    repo_dir: str,
+    *,
+    timeout: float = 90.0,
+) -> tuple[list[str], list[str]]:
+    """Resolve repo-own plugins through an already-selected remote transport.
+
+    Unlike :func:`resolve_remote_repo_ai_plugin_dirs`, this seam does not infer a
+    venue from an agent name or shell out to a provider. The caller supplies the
+    remote transport's async ``run`` operation, so CodeSpaces and trusted
+    containers execute the exact same resolver command.
+    """
+    if not repo_dir:
+        return [], []
+    pkg = find_plugin_resolve_pkg()
+    if pkg is None:
+        log.debug("repo-own .ai resolve skipped: plugin_resolve package not found")
+        return [], []
+    try:
+        command = build_resolve_command(tar_pkg_b64(pkg), repo_dir)
+        _rc, output, _err = await run(command, timeout=timeout)
+    except Exception as exc:
+        log.warning("repo-own .ai resolve transport failed: %s", exc)
         return [], []
     return parse_resolve_result(output)

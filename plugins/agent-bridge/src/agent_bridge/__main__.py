@@ -844,6 +844,56 @@ def _kill_pid(pid: int) -> None:
             pass
 
 
+def _force_kill_agent_bridge_tree(pid: int) -> None:
+    """Force-kill a verified retired daemon and its process group/tree."""
+    import signal as _signal
+
+    if sys.platform == "win32":
+        _kill_pid(pid)  # taskkill /F /T
+        return
+    from .procgroup import safe_killpg
+
+    if not safe_killpg(pid, _signal.SIGKILL):
+        try:
+            os.kill(pid, _signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def _ensure_retired_daemon_exited(
+    pid: int,
+    *,
+    graceful_timeout: float = 15.0,
+    forced_timeout: float = 10.0,
+) -> tuple[bool, bool]:
+    """Wait for a retired bridge, then force-reap its verified process tree.
+
+    The cutover's HTTP ``/shutdown`` is the graceful owner. This is the
+    post-commit backstop: a predecessor that remains alive can keep serving and
+    writing the shared SQLite DB, causing split-brain ``database is locked``
+    failures. Returns ``(exited, forced)``.
+    """
+    import time
+
+    if pid <= 0 or not _pid_is_agent_bridge(pid):
+        return True, False
+    deadline = time.monotonic() + max(0.0, graceful_timeout)
+    while time.monotonic() < deadline:
+        time.sleep(0.25)
+        if not _pid_is_agent_bridge(pid):
+            return True, False
+
+    # PID reuse safety: _kill_pid is reached only while the process still
+    # identifies as an agent_bridge module invocation.
+    _force_kill_agent_bridge_tree(pid)
+    deadline = time.monotonic() + max(0.0, forced_timeout)
+    while time.monotonic() < deadline:
+        time.sleep(0.1)
+        if not _pid_is_agent_bridge(pid):
+            return True, True
+    return not _pid_is_agent_bridge(pid), True
+
+
 def _pid_is_agent_bridge(pid: int) -> bool:
     """True if *pid* is a live process running the ``agent_bridge`` module.
 
@@ -1691,6 +1741,27 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
                 f"service marker reconciled -> pid {active.pid} "
                 f"(port {active.port})"
             )
+        old = res.old_endpoint
+        if (
+            old is not None
+            and old.pid
+            and (active is None or old.pid != active.pid)
+        ):
+            exited, forced = _ensure_retired_daemon_exited(old.pid)
+            if exited:
+                res.steps.append(
+                    f"old daemon exited pid={old.pid}"
+                    + (" (forced tree reap)" if forced else "")
+                )
+            else:
+                res.steps.append(
+                    f"FAILED: retired daemon pid={old.pid} is still alive"
+                )
+                res.ok = False
+                res.error = (
+                    f"retired daemon pid={old.pid} survived graceful and "
+                    "forced process-tree retirement; split-brain is possible"
+                )
 
     if args.json:
         _json_out(res.to_dict())
@@ -2815,6 +2886,10 @@ def _find_caller_session(client, agent_name: str, caller_id: str | None) -> dict
             s.get("agent_name") == agent_name
             and s.get("caller_id") == caller_id
             and s.get("status", "") in _REUSABLE_SESSION_STATES
+            and (
+                s.get("status", "") != "stopped"
+                or bool(s.get("acp_session_id"))
+            )
             and not s.get("read_only", False)
         ):
             return s

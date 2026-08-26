@@ -102,7 +102,7 @@ class FakeClient:
         return {"session_id": "fresh-sid", "name": "neat-forge"}
 
 
-def _sess(sid, *, agent, caller, status, turns=1):
+def _sess(sid, *, agent, caller, status, turns=1, acp_id="acp-1"):
     return {
         "session_id": sid,
         "name": f"name-{sid}",
@@ -110,6 +110,7 @@ def _sess(sid, *, agent, caller, status, turns=1):
         "caller_id": caller,
         "status": status,
         "turn_count": turns,
+        "acp_session_id": acp_id,
     }
 
 
@@ -128,6 +129,21 @@ def test_find_caller_session_includes_stopped():
     ])
     found = m._find_caller_session(client, "codespace:cs", "host-A")
     assert found is not None and found["session_id"] == "s1"
+
+
+def test_find_caller_session_skips_zero_turn_without_acp_identity():
+    client = FakeClient(sessions=[
+        _sess(
+            "s1",
+            agent="codespace:cs",
+            caller="host-A",
+            status="stopped",
+            turns=0,
+            acp_id=None,
+        ),
+    ])
+
+    assert m._find_caller_session(client, "codespace:cs", "host-A") is None
 
 
 def test_find_caller_session_excludes_other_caller():
