@@ -204,19 +204,30 @@ def _chmod(path: Path, mode: int) -> None:
     inheritance and grant only the current user via ``icacls`` instead.
     """
     if os.name == "nt":
-        user = os.environ.get("USERNAME")
-        if not user:
-            return
-        dom = os.environ.get("USERDOMAIN")
-        principal = f"{dom}\\{user}" if dom else user
+        identity = subprocess.run(
+            ["whoami"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        principal = identity.stdout.strip() if identity.returncode == 0 else ""
+        if not principal:
+            user = os.environ.get("USERNAME")
+            if not user:
+                raise OSError("cannot resolve the current Windows principal")
+            domain = os.environ.get("USERDOMAIN")
+            principal = f"{domain}\\{user}" if domain else user
         # Directories need (OI)(CI) so children inherit the user-only ACL.
         grant = f"{principal}:(OI)(CI)F" if path.is_dir() else f"{principal}:F"
-        subprocess.run(
+        result = subprocess.run(
             ["icacls", str(path), "/inheritance:r", "/grant:r", grant],
             check=False,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            raise OSError(f"failed to harden Windows ACL for {path}: {detail}")
         return
     try:
         os.chmod(path, mode)
