@@ -58,17 +58,19 @@ def _pyproject_version(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
-def _build_info_version(path: Path) -> tuple[bool, str | None]:
+def _build_info_version(
+    path: Path,
+) -> tuple[bool, str | None, str | None]:
     try:
         text = path.read_text(encoding="utf-8")
     except Exception:
-        return True, None
+        return False, None, "cannot read file"
     if "__version__" not in text:
-        return False, None
+        return False, None, None
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return True, None
+        return True, None, None
     for node in ast.walk(tree):
         targets: list[ast.expr] = []
         value: ast.expr | None = None
@@ -87,8 +89,8 @@ def _build_info_version(path: Path) -> tuple[bool, str | None]:
             and isinstance(value, ast.Constant)
             and isinstance(value.value, str)
         ):
-            return True, value.value
-    return True, None
+            return True, value.value, None
+    return True, None, None
 
 
 def main() -> int:
@@ -127,8 +129,11 @@ def main() -> int:
                 )
 
         for build_info in sorted(plugin_dir.glob("src/*/_build_info.py")):
-            declares_version, build_ver = _build_info_version(build_info)
+            declares_version, build_ver, read_error = _build_info_version(build_info)
             label = build_info.relative_to(plugin_dir).as_posix()
+            if read_error:
+                violations.append(f"{name}: cannot read {label}")
+                continue
             if not declares_version:
                 continue
             if build_ver:

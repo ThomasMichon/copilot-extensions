@@ -21,7 +21,7 @@ def _write(tmp_path: Path, text: str) -> Path:
 def test_build_info_version_accepts_constant_string_quotes(tmp_path: Path) -> None:
     assert checker._build_info_version(
         _write(tmp_path, "__version__ = '1.2.3'\n")
-    ) == (True, "1.2.3")
+    ) == (True, "1.2.3", None)
 
 
 def test_build_info_version_fails_closed_when_declared_but_invalid(
@@ -29,13 +29,24 @@ def test_build_info_version_fails_closed_when_declared_but_invalid(
 ) -> None:
     assert checker._build_info_version(
         _write(tmp_path, '"""__version__ is stamped below."""\n')
-    ) == (True, None)
+    ) == (True, None, None)
     assert checker._build_info_version(
         _write(tmp_path, "__version__ = compute_version()\n")
-    ) == (True, None)
+    ) == (True, None, None)
 
 
 def test_build_info_without_source_version_is_not_opted_in(tmp_path: Path) -> None:
     assert checker._build_info_version(
         _write(tmp_path, 'BUILD_INFO = {"version": ""}\n')
-    ) == (False, None)
+    ) == (False, None, None)
+
+
+def test_unreadable_build_info_reports_read_failure(tmp_path: Path) -> None:
+    unreadable = tmp_path / "_build_info.py"
+    unreadable.mkdir()
+
+    assert checker._build_info_version(unreadable) == (
+        False,
+        None,
+        "cannot read file",
+    )
