@@ -261,6 +261,13 @@ restart does not inherently close the child's pipes.
 - **Drain is still the safe cutover boundary.** The installer-driven cutover
   opens the drain gate on the old daemon so no new work enters it, then retires
   it once busy sessions have settled (or force proceeds when explicitly told to).
+- **Destructive recovery is executable and target-scoped.**
+  `agent-bridge parity <container:...|codespace:...> --fault
+  frontend-restart-hostindex-loss` stops the local frontend, removes only the
+  harness-created session's local HostIndex row, restarts the frontend, and
+  requires recovery from the far-side authority record to preserve the same
+  Session Host PID, ACP child PID, and ACP session id through a second turn. The
+  mode is explicit and refuses to run while another managed session is active.
 
 ## Zero-Downtime Redeploy
 
