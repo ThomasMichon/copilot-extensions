@@ -4837,7 +4837,9 @@ def test_run_spawns_ssh_off_console_on_windows(monkeypatch):
         seen.update(kwargs)
         return subprocess.CompletedProcess(argv, 0, "{}", "")
 
-    monkeypatch.setattr(data_ssh.os, "name", "nt")
+    monkeypatch.setattr(
+        data_ssh, "os", types.SimpleNamespace(**{**vars(data_ssh.os), "name": "nt"})
+    )
     monkeypatch.setattr(data_ssh, "_CREATE_NO_WINDOW", 0x08000000)
     monkeypatch.setattr(subprocess, "run", fake_run)
     data_ssh._run(["ssh", "host", "agent-worktrees list"], timeout=5)
@@ -4857,7 +4859,11 @@ def test_run_no_creationflags_on_posix(monkeypatch):
         seen.update(kwargs)
         return subprocess.CompletedProcess(argv, 0, "{}", "")
 
-    monkeypatch.setattr(data_ssh.os, "name", "posix")
+    monkeypatch.setattr(
+        data_ssh,
+        "os",
+        types.SimpleNamespace(**{**vars(data_ssh.os), "name": "posix"}),
+    )
     monkeypatch.setattr(subprocess, "run", fake_run)
     data_ssh._run(["ssh", "host", "agent-worktrees list"], timeout=5)
     assert "creationflags" not in seen
@@ -4884,7 +4890,9 @@ def test_spawn_spawns_ssh_off_console_on_windows(monkeypatch):
         def poll(self):
             return 0
 
-    monkeypatch.setattr(data_ssh.os, "name", "nt")
+    monkeypatch.setattr(
+        data_ssh, "os", types.SimpleNamespace(**{**vars(data_ssh.os), "name": "nt"})
+    )
     monkeypatch.setattr(data_ssh, "_CREATE_NO_WINDOW", 0x08000000)
     monkeypatch.setattr(subprocess, "Popen", _FakeProc)
     loader = data_ssh.LiveLoader(sources=[])
@@ -4905,8 +4913,12 @@ def test_maintenance_ssh_off_console_on_windows(monkeypatch):
         seen.update(kwargs)
         return subprocess.CompletedProcess(argv, 0, "{}", "")
 
-    monkeypatch.setattr(maintenance.os, "name", "nt")
-    monkeypatch.setattr(subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False)
+    monkeypatch.setattr(
+        maintenance,
+        "os",
+        types.SimpleNamespace(**{**vars(maintenance.os), "name": "nt"}),
+    )
+    monkeypatch.setattr(maintenance, "no_window_flags", lambda: 0x08000000)
     monkeypatch.setattr(subprocess, "run", fake_run)
     maintenance._ssh_json(["ssh", "host", "agent-worktrees sync"], timeout=5)
     assert seen.get("creationflags", 0) & 0x08000000

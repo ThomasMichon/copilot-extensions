@@ -2023,6 +2023,7 @@ def mux_binding_for_session(
     table = reclaim.build_process_table()
     if not table:
         return None
+    mux_bin = _mux_bin(mux)
 
     # Prefer the lock PID that is actually an ancestor of this sessionStart hook
     # process. This rejects a stale lock whose PID was reused by another live
@@ -2047,7 +2048,7 @@ def mux_binding_for_session(
             seen.add(cur)
             ancestry.add(cur)
             parent = table[cur]["ppid"]
-            if platform.system() == "Windows":
+            if mux_bin == "psmux":
                 child_started = _windows_process_start_time(cur)
                 parent_started = _windows_process_start_time(parent)
                 # Windows retains a creator PID after that process exits. If the
@@ -2062,7 +2063,6 @@ def mux_binding_for_session(
             cur = parent
         ancestry_by_pid[pid] = ancestry
 
-    mux_bin = _mux_bin(mux)
     try:
         result = subprocess.run(
             [

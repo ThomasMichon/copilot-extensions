@@ -12,7 +12,9 @@ real mux.
 from __future__ import annotations
 
 import argparse
+import types
 
+import agent_procutil
 import pytest
 
 from agent_worktrees import __main__ as m
@@ -429,7 +431,11 @@ def test_installers_invoke_monitor_restart_at_cutover():
 
 
 def test_windowless_python_prefers_pythonw_on_windows(monkeypatch, tmp_path):
-    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.setattr(
+        agent_procutil,
+        "os",
+        types.SimpleNamespace(**{**vars(agent_procutil.os), "name": "nt"}),
+    )
     (tmp_path / "python.exe").write_text("")
     pyw = tmp_path / "pythonw.exe"
     pyw.write_text("")
@@ -438,7 +444,11 @@ def test_windowless_python_prefers_pythonw_on_windows(monkeypatch, tmp_path):
 
 
 def test_windowless_python_falls_back_without_pythonw(monkeypatch, tmp_path):
-    monkeypatch.setattr(m.os, "name", "nt")
+    monkeypatch.setattr(
+        agent_procutil,
+        "os",
+        types.SimpleNamespace(**{**vars(agent_procutil.os), "name": "nt"}),
+    )
     py = tmp_path / "python.exe"
     py.write_text("")
     monkeypatch.setattr(m.sys, "executable", str(py))
@@ -446,7 +456,11 @@ def test_windowless_python_falls_back_without_pythonw(monkeypatch, tmp_path):
 
 
 def test_windowless_python_noop_off_windows(monkeypatch):
-    monkeypatch.setattr(m.os, "name", "posix")
+    monkeypatch.setattr(
+        agent_procutil,
+        "os",
+        types.SimpleNamespace(**{**vars(agent_procutil.os), "name": "posix"}),
+    )
     monkeypatch.setattr(m.sys, "executable", "/usr/bin/python3")
     assert m._windowless_python() == "/usr/bin/python3"
 
