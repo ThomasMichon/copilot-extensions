@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover so the predecessor is retired only after pickup",
-      "version": "0.1.0-dev41",
+      "version": "0.1.0-dev42",
       "source": "plugins/context-handoff"
     },
     {
