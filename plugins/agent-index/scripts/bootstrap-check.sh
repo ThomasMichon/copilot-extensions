@@ -19,9 +19,11 @@ if [ ! -f "$Manifest" ]; then
   # Not provisioned yet -- do the cheap FIRST install (stamp) so the binstub is
   # callable this session; it self-provisions the runtime on first use. Fully
   # back-compatible: only fires when the installer declares a 'stamp' action.
-  installer="$PluginDir/scripts/init.sh"
-  [ -f "$installer" ] || installer="$PluginDir/scripts/install.sh"
-  if [ -f "$installer" ] && grep -qE 'stamp[|)]|ACTION.*stamp' "$installer" 2>/dev/null; then
+  installer=""
+  for candidate in "$PluginDir/scripts/init.sh" "$PluginDir/scripts/install.sh"; do
+    if [ -f "$candidate" ] && grep -qE 'stamp[|)]|ACTION.*stamp' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
+  done
+  if [ -n "$installer" ]; then
     bash "$installer" stamp >/dev/null 2>&1 || true
   fi
   exit 0
