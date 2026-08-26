@@ -24,13 +24,13 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev79",
+      "version": "0.4.0-dev80",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted-fleet OpenSSH transport",
-      "version": "0.1.2-dev83",
+      "version": "0.1.2-dev84",
       "source": "plugins/agent-containers"
     },
     {
@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev66",
+      "version": "0.1.1-dev67",
       "source": "plugins/agent-logger"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue (seven-state model, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev218",
+      "version": "0.1.0-dev219",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -102,7 +102,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev82",
+      "version": "0.1.0-dev83",
       "source": "plugins/agent-index"
     },
     {
