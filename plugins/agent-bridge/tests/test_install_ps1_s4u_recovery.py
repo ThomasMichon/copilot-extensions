@@ -60,3 +60,28 @@ def test_requested_s4u_start_diagnoses_token_failure_and_recovery():
     assert requested_start < task_result < diagnosis
     assert "could not acquire the S4U logon token" in body[diagnosis:]
     assert "default interactive AtLogOn task" in body[diagnosis:]
+
+
+def test_provision_has_a_dedicated_runtime_preserving_path():
+    text = _text()
+    assert "'provision' { Invoke-Provision }" in text
+
+    body = _function_body("Invoke-Provision")
+    assert "Register-ScheduledTask_" in body
+    assert "Invoke-Install" not in body
+    assert "Test-SlotContentCurrent" not in body
+    assert "Invoke-Start" not in body
+    assert "New-SignedVenv" not in body
+
+
+def test_provision_routes_never_run_s4u_recovery_through_elevated_repair():
+    body = _function_body("Invoke-Provision")
+    explicit = body.index("$explicitNonInteractive")
+    s4u = body.index("($existing.Principal.LogonType -eq 'S4U')")
+    never_ran = body.index("$ScheduledTaskHasNotRunResult", s4u)
+    repair = body.index("$repair = Get-ScheduledTaskRepairScript", never_ran)
+    register = body.index("Register-ScheduledTask_", repair)
+
+    assert explicit < s4u < never_ran < repair < register
+    assert "& $pwsh -NoProfile -ExecutionPolicy Bypass -File $repair" in body
+    assert "if ($repairExit -ne 0)" in body
