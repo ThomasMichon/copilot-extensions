@@ -59,7 +59,8 @@ def _run_ps(
     host: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     selected_host = host or POWERSHELL
-    assert selected_host
+    if selected_host is None:
+        raise RuntimeError("PowerShell is required for this test helper")
     command = [selected_host, "-NoProfile", "-File", str(SCRIPT)]
     command.extend(str(argument) for argument in arguments)
     process_env = os.environ.copy()
