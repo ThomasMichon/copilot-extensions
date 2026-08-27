@@ -722,7 +722,12 @@ def test_project_identity_canonicalizes_registered_anchor(
     real = tmp_path / "real"
     real.mkdir()
     linked = tmp_path / "linked"
-    linked.symlink_to(real, target_is_directory=True)
+    try:
+        linked.symlink_to(real, target_is_directory=True)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) == 1314:
+            pytest.skip("Windows symlink privilege is unavailable")
+        raise
 
     class _Entry:
         remote = ""

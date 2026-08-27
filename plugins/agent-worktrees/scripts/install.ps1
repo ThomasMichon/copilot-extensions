@@ -596,6 +596,23 @@ function Test-ScriptSyntax {
     return $true
 }
 
+function Invoke-NativeCapture {
+    <# Windows PowerShell 5.1 promotes native stderr to NativeCommandError.
+       Scope ErrorActionPreference to Continue so callers can inspect the real
+       exit code and output, then restore the installer's fail-fast behavior. #>
+    param([Parameter(Mandatory)][scriptblock]$Command)
+
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $output = (& $Command 2>&1 | Out-String -Width 4096).Trim()
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
+}
+
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 # A runtime footprint's source is inferred from where the installer runs.
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
@@ -611,8 +628,10 @@ function Get-BootstrapPython {
         if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
     }
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
+        $result = Invoke-NativeCapture { & py -3 -c 'import sys; print(sys.executable)' }
+        if ($result.ExitCode -eq 0 -and $result.Output -and (Test-Path $result.Output)) {
+            return $result.Output
+        }
     }
     foreach ($cand in 'python3', 'python') {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
@@ -764,7 +783,12 @@ function Write-V3Manifest {
         runtime        = 'python'
     }
     $tmp = "$manifestPath.tmp"
-    $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path $tmp -Encoding UTF8
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText(
+        $tmp,
+        ($manifest | ConvertTo-Json -Depth 4),
+        $utf8NoBom
+    )
     Move-Item -Force -Path $tmp -Destination $manifestPath
     Write-ServiceOk "Deploy manifest written (source: $kind)"
 }
@@ -777,14 +801,160 @@ function Ensure-UvIndex {
        `_ensure_uv_index`. #>
     if ($env:UV_DEFAULT_INDEX -or $env:UV_INDEX_URL) { return }
     $idx = ''
-    try { $idx = (& pip config get global.index-url 2>$null | Out-String).Trim() } catch { $idx = '' }
+    if (Get-Command pip -CommandType Application -ErrorAction SilentlyContinue) {
+        $result = Invoke-NativeCapture { & pip config get global.index-url }
+        if ($result.ExitCode -eq 0) { $idx = $result.Output }
+    }
     if (-not $idx) {
-        try { $idx = (& python -m pip config get global.index-url 2>$null | Out-String).Trim() } catch { $idx = '' }
+        $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
+        $pythonPath = if ($python -and $python.Source -notmatch 'WindowsApps') {
+            $python.Source
+        } else {
+            Get-BootstrapPython
+        }
+        if ($pythonPath) {
+            $result = Invoke-NativeCapture { & $pythonPath -m pip config get global.index-url }
+            if ($result.ExitCode -eq 0) { $idx = $result.Output }
+        }
+    }
+    if (-not $idx) {
+        $configPaths = @($env:PIP_CONFIG_FILE)
+        if ($env:APPDATA) {
+            $configPaths += Join-Path $env:APPDATA 'pip\pip.ini'
+        }
+        if ($env:PROGRAMDATA) {
+            $configPaths += Join-Path $env:PROGRAMDATA 'pip\pip.ini'
+        }
+        foreach ($configPath in $configPaths) {
+            if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
+            $match = Select-String -LiteralPath $configPath `
+                -Pattern '^\s*index-url\s*=\s*(\S+)\s*$' |
+                Select-Object -First 1
+            if ($match) {
+                $idx = $match.Matches[0].Groups[1].Value
+                break
+            }
+        }
     }
     if ($idx) {
         $env:UV_DEFAULT_INDEX = $idx
         Write-ServiceChanged "uv index derived from pip config (governed-feed bridge)"
     }
+}
+
+function Ensure-Uv {
+    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    if ($existing) {
+        $result = Invoke-NativeCapture { & $existing.Source --version }
+        if ($result.ExitCode -eq 0) { return $true }
+    }
+
+    $toolDir = Join-Path $InstallDir 'tool'
+    $uvPath = Join-Path $toolDir 'uv.exe'
+    if (Test-Path -LiteralPath $uvPath) {
+        $result = Invoke-NativeCapture { & $uvPath --version }
+        if ($result.ExitCode -eq 0) {
+            $env:PATH = "$toolDir;$env:PATH"
+            return $true
+        }
+        Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
+    }
+
+    $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
+    $pythonPath = if ($python -and $python.Source -notmatch 'WindowsApps') {
+        $python.Source
+    } else {
+        ''
+    }
+    if (-not $pythonPath) {
+        $python = Get-Command python3 -CommandType Application -ErrorAction SilentlyContinue
+        if ($python -and $python.Source -notmatch 'WindowsApps') {
+            $pythonPath = $python.Source
+        }
+    }
+    if (-not $pythonPath) { $pythonPath = Get-BootstrapPython }
+    if (-not $pythonPath) {
+        Write-ServiceErr 'uv is absent and no Python is available to bootstrap it'
+        return $false
+    }
+
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) {
+        $env:PROCESSOR_ARCHITEW6432
+    } else {
+        $env:PROCESSOR_ARCHITECTURE
+    }
+    if ($arch -eq 'AMD64') {
+        $asset = 'uv-x86_64-pc-windows-msvc.zip'
+    } elseif ($arch -eq 'ARM64') {
+        $asset = 'uv-aarch64-pc-windows-msvc.zip'
+    } else {
+        Write-ServiceErr "uv bootstrap does not support Windows architecture: $arch"
+        return $false
+    }
+
+    Write-ServiceChanged "uv not found -- vendoring the official Windows release into $toolDir"
+    Ensure-InstallDir $toolDir
+    $urlTemplate = $env:AGENT_WORKTREES_UV_BOOTSTRAP_URL
+    if (-not $urlTemplate) {
+        $urlTemplate = 'https://github.com/astral-sh/uv/releases/latest/download/{asset}'
+    }
+    $url = $urlTemplate.Replace('{asset}', $asset)
+    $bootstrap = @'
+import os
+import pathlib
+import shutil
+import sys
+import tempfile
+import urllib.request
+import zipfile
+
+url, target = sys.argv[1:3]
+target = pathlib.Path(target)
+request = urllib.request.Request(url, headers={'User-Agent': 'agent-worktrees-bootstrap'})
+fd, archive = tempfile.mkstemp(suffix='.zip')
+os.close(fd)
+staging = pathlib.Path(tempfile.mkdtemp(prefix='uv-stage-', dir=target.parent))
+try:
+    with urllib.request.urlopen(request, timeout=120) as response, open(archive, 'wb') as out:
+        shutil.copyfileobj(response, out)
+    found = set()
+    with zipfile.ZipFile(archive) as bundle:
+        for member in bundle.namelist():
+            name = pathlib.PurePosixPath(member).name
+            if name not in {'uv.exe', 'uvx.exe'}:
+                continue
+            with bundle.open(member) as source, open(staging / name, 'wb') as out:
+                shutil.copyfileobj(source, out)
+            found.add(name)
+    if 'uv.exe' not in found:
+        raise RuntimeError('uv.exe was absent from the release archive')
+    target.mkdir(parents=True, exist_ok=True)
+    if (staging / 'uvx.exe').exists():
+        os.replace(staging / 'uvx.exe', target / 'uvx.exe')
+    os.replace(staging / 'uv.exe', target / 'uv.exe')
+finally:
+    try:
+        pathlib.Path(archive).unlink()
+    except FileNotFoundError:
+        pass
+    shutil.rmtree(staging, ignore_errors=True)
+'@
+    $result = Invoke-NativeCapture { & $pythonPath -c $bootstrap $url $toolDir }
+    if ($result.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $uvPath)) {
+        Write-ServiceErr "Failed to vendor uv: $($result.Output)"
+        return $false
+    }
+    $result = Invoke-NativeCapture { & $uvPath --version }
+    if ($result.ExitCode -ne 0) {
+        Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Write-ServiceErr "Vendored uv is not executable: $($result.Output)"
+        return $false
+    }
+    $env:PATH = "$toolDir;$env:PATH"
+    Write-ServiceOk "Vendored uv into $toolDir"
+    return $true
 }
 
 function Invoke-VenvPackageInstall {
@@ -818,25 +988,41 @@ function Invoke-VenvPackageInstall {
     try {
         if ($uvAvailable) {
             Ensure-UvIndex
-            $out = & uv pip install --python $VenvPython --reinstall-package $PkgName "$PkgDir" --quiet 2>&1 | Out-String
-            $rc = $LASTEXITCODE
+            $result = Invoke-NativeCapture {
+                & uv pip install --python $VenvPython `
+                    --reinstall-package $PkgName "$PkgDir" --quiet
+            }
+            $out = $result.Output
+            $rc = $result.ExitCode
         }
         if (-not $uvAvailable -or $rc -ne 0) {
             # Fallback only when uv is absent (or its install failed). pip may
             # itself fail here on a machine whose PATH carries an untrusted
             # junction (see the header) -- which is why uv is preferred.
-            $hasPip = $false
-            try { & $VenvPython -m pip --version *> $null; $hasPip = ($LASTEXITCODE -eq 0) } catch { $hasPip = $false }
+            $pipVersion = Invoke-NativeCapture { & $VenvPython -m pip --version }
+            $hasPip = $pipVersion.ExitCode -eq 0
             if ($hasPip) {
                 # 1) Resolve + install dependencies (idempotent once present).
-                $pipOut = & $VenvPython -m pip install "$PkgDir" --quiet 2>&1 | Out-String
-                if ($LASTEXITCODE -eq 0) {
+                $result = Invoke-NativeCapture {
+                    & $VenvPython -m pip install "$PkgDir" --quiet
+                }
+                $pipOut = $result.Output
+                $rc = $result.ExitCode
+                if ($rc -eq 0) {
                     # 2) Force just the local package's code to refresh (deps are
                     #    already satisfied) so unchanged dev versions still update.
-                    $pipOut += & $VenvPython -m pip install --force-reinstall --no-deps "$PkgDir" --quiet 2>&1 | Out-String
+                    $result = Invoke-NativeCapture {
+                        & $VenvPython -m pip install --force-reinstall `
+                            --no-deps "$PkgDir" --quiet
+                    }
+                    $pipOut = "$pipOut`n$($result.Output)".Trim()
+                    $rc = $result.ExitCode
                 }
-                $out = if ($out) { "$out`n$pipOut" } else { $pipOut }
-                $rc = $LASTEXITCODE
+                $out = if ($out) {
+                    @($out, $pipOut) -join [Environment]::NewLine
+                } else {
+                    $pipOut
+                }
             }
         }
     } finally {
@@ -1015,8 +1201,12 @@ function Get-SignedBasePython {
     # 1. py launcher (when present) -- newest first.
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in '3.13', '3.12', '3.11') {
-            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+            $result = Invoke-NativeCapture {
+                & py "-$v" -c 'import sys;print(sys.executable)'
+            }
+            if ($result.ExitCode -eq 0 -and $result.Output) {
+                $cands += $result.Output
+            }
         }
     }
 
@@ -1042,7 +1232,10 @@ function Get-SignedBasePython {
     foreach ($c in ($cands | Select-Object -Unique)) {
         if (-not (Test-Path $c)) { continue }
         # Must be a real interpreter >= 3.11 ...
-        $ver = (& $c -c "import sys;print('%d.%d' % sys.version_info[:2])" 2>$null | Out-String).Trim()
+        $result = Invoke-NativeCapture {
+            & $c -c 'import sys;print("%d.%d" % sys.version_info[:2])'
+        }
+        $ver = if ($result.ExitCode -eq 0) { $result.Output } else { '' }
         if (-not ($ver -match '^(\d+)\.(\d+)$')) { continue }
         if ([int]$Matches[1] -lt 3 -or ([int]$Matches[1] -eq 3 -and [int]$Matches[2] -lt 11)) { continue }
         # ... and SAC-trusted (Authenticode Valid).
@@ -1078,8 +1271,10 @@ function Deploy-Venv {
         $signedBase = Get-SignedBasePython
         $created = $false
         if ($signedBase) {
-            & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $VenvPython)) {
+            $result = Invoke-NativeCapture {
+                & $signedBase -m venv --copies $VenvDir
+            }
+            if ($result.ExitCode -eq 0 -and (Test-Path $VenvPython)) {
                 $created = $true
                 Write-ServiceOk "Venv created from signed Python ($signedBase)"
             } else {
@@ -1098,17 +1293,17 @@ function Deploy-Venv {
             Set-Location "$env:SystemDrive\"
             try {
                 $args_ = @('venv', $VenvDir, '--python', '3.11', '--allow-existing')
-                $result = & uv @args_ 2>&1
-                if ($LASTEXITCODE -ne 0) {
+                $uvResult = Invoke-NativeCapture { & uv @args_ }
+                if ($uvResult.ExitCode -ne 0) {
                     # Fallback: try without version constraint
                     $args_ = @('venv', $VenvDir, '--allow-existing')
-                    $result = & uv @args_ 2>&1
+                    $uvResult = Invoke-NativeCapture { & uv @args_ }
                 }
             } finally {
                 Set-Location $prevLoc
             }
-            if ($LASTEXITCODE -ne 0) {
-                Write-ServiceErr "Failed to create venv: $result"
+            if ($uvResult.ExitCode -ne 0) {
+                Write-ServiceErr "Failed to create venv: $($uvResult.Output)"
                 return $false
             }
             Write-ServiceOk "Venv created at $VenvDir"
@@ -1120,8 +1315,11 @@ function Deploy-Venv {
     # Ensure pyvenv.cfg exists (uv can sometimes omit it)
     $pyvenvCfg = Join-Path $VenvDir 'pyvenv.cfg'
     if (-not (Test-Path $pyvenvCfg)) {
-        $basePrefix = & $VenvPython -c "import sys; print(sys.base_prefix)" 2>$null
-        if ($basePrefix) {
+        $result = Invoke-NativeCapture {
+            & $VenvPython -c 'import sys; print(sys.base_prefix)'
+        }
+        if ($result.ExitCode -eq 0 -and $result.Output) {
+            $basePrefix = $result.Output
             @"
 home = $basePrefix\Scripts
 implementation = CPython
@@ -2210,19 +2408,29 @@ function Ensure-CopilotExperimental {
 
     try {
         $raw = Get-Content $settingsFile -Raw
-        $settings = $raw | ConvertFrom-Json -AsHashtable
+        $settings = $raw | ConvertFrom-Json
     } catch {
         Write-ServiceWarn "Could not parse $settingsFile -- skipping"
         return
     }
 
-    if ($settings.ContainsKey('experimental') -and $settings['experimental'] -eq $true) {
+    $experimental = $settings.PSObject.Properties['experimental']
+    if ($experimental -and $experimental.Value -eq $true) {
         Write-ServiceOk "Copilot experimental mode enabled"
         return
     }
 
-    $settings['experimental'] = $true
-    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding utf8NoBOM
+    if ($experimental) {
+        $settings.experimental = $true
+    } else {
+        $settings | Add-Member -NotePropertyName experimental -NotePropertyValue $true
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText(
+        $settingsFile,
+        ($settings | ConvertTo-Json -Depth 10),
+        $utf8NoBom
+    )
     Write-ServiceChanged "Copilot experimental mode enabled (required for extensions)"
 }
 
@@ -2396,10 +2604,12 @@ switch ($Action) {
         # `install`. Invoked by the self-provisioning binstub on first use. Mirrors
         # the POSIX install.sh `provision`.
         Write-ServiceHeader "Provisioning $ServiceName runtime (lean; tools only, no launcher/hooks)"
-        $provMissing = @()
-        try { git --version 2>&1 | Out-Null } catch { $provMissing += 'git' }
-        try { uv --version 2>&1 | Out-Null } catch { $provMissing += 'uv' }
-        if ($provMissing.Count -gt 0) { Write-ServiceErr "Missing prerequisites: $($provMissing -join ', ')"; exit 1 }
+        try { git --version 2>&1 | Out-Null } catch {
+            Write-ServiceErr 'Missing prerequisite: git'
+            exit 1
+        }
+        if (-not (Ensure-Uv)) { exit 1 }
+        Ensure-UvIndex
         foreach ($dir in @($InstallDir, $LocalBin)) { Ensure-InstallDir $dir }
         if (-not (Deploy-Venv)) { exit 1 }
         if (-not (Deploy-Package)) { exit 1 }
@@ -2423,7 +2633,7 @@ switch ($Action) {
         # Prereq checks
         $missingPrereqs = @()
         try { git --version 2>&1 | Out-Null } catch { $missingPrereqs += 'git' }
-        try { uv --version 2>&1 | Out-Null } catch { $missingPrereqs += 'uv' }
+        if (-not (Ensure-Uv)) { $missingPrereqs += 'uv' }
         if ($missingPrereqs.Count -gt 0) {
             Write-ServiceErr "Missing prerequisites: $($missingPrereqs -join ', ')"
             exit 1
