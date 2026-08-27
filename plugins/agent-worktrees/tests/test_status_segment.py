@@ -7,6 +7,7 @@ from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import git_ops, sessions, tracking
+from agent_worktrees.picker_tui import derive
 
 
 def _record(**kw):
@@ -103,6 +104,79 @@ def test_worktree_to_dict_title_none_without_summary():
     rec = _record(worktree_path="/w/wt", title=None)
     d = m._worktree_to_dict(rec, session_ctx=sessions.SessionContext())
     assert not (d["title"] and d["title"] != "null")
+
+
+# ---------------------------------------------------------------------------
+# Picker session ownership: the durable succession journal is authoritative on
+# cache-first and enriched rows; live mux/transcript metadata cannot replace it.
+# ---------------------------------------------------------------------------
+
+def _session_chain():
+    return [
+        tracking.SessionEntry(
+            "predecessor", "2026-08-01T00:00:00",
+            state="handed-off", successor="successor", pane_id="%1",
+        ),
+        tracking.SessionEntry(
+            "successor", "2026-08-01T01:00:00",
+            predecessor="predecessor", pane_id="%2",
+        ),
+    ]
+
+
+def test_worktree_to_dict_emits_saved_head_without_session_scan():
+    rec = _record(sessions=_session_chain(), head_session="successor")
+
+    d = m._worktree_to_dict(rec)
+
+    assert d["session_count"] == 2
+    assert d["last_session_id"] == "successor"
+    row = derive.norm(d, "machine", "windows")
+    assert row["sessionless"] is False
+    assert row["last_session_id"] == "successor"
+
+
+def test_worktree_to_dict_keeps_head_over_newer_transcript_and_mux():
+    rec = _record(
+        worktree_path="/w/wt",
+        sessions=_session_chain(),
+        head_session="successor",
+    )
+    ctx = sessions.SessionContext()
+    norm = m._normalize_path(rec.worktree_path)
+    ctx.session_count[norm] = 1
+    ctx.last_session_id[norm] = "predecessor"
+
+    d = m._worktree_to_dict(
+        rec,
+        session_ctx=ctx,
+        mux_info=sessions.MuxInfo(exists=True, clients=0),
+    )
+
+    assert d["session_count"] == 2
+    assert d["last_session_id"] == "successor"
+    assert d["mux_session"] is True
+
+
+def test_worktree_to_dict_does_not_resurrect_concluded_session():
+    rec = _record(
+        worktree_path="/w/wt",
+        sessions=[
+            tracking.SessionEntry(
+                "finished", "2026-08-01T00:00:00", state="concluded",
+            ),
+        ],
+        head_session="finished",
+    )
+    ctx = sessions.SessionContext()
+    norm = m._normalize_path(rec.worktree_path)
+    ctx.session_count[norm] = 1
+    ctx.last_session_id[norm] = "finished"
+
+    d = m._worktree_to_dict(rec, session_ctx=ctx)
+
+    assert d["session_count"] == 1
+    assert "last_session_id" not in d
 
 
 # ---------------------------------------------------------------------------
@@ -210,4 +284,3 @@ def test_render_without_persist_flag_never_writes(monkeypatch):
     m._render_status_segment(target)  # persist_title defaults False
     assert saved == []
     assert rec.title is None
-
