@@ -751,6 +751,107 @@ Write-ActivityLog -Event 'launcher_started' -WorktreeId $plan.worktree_id -Field
 
 $psmuxCmd = Get-Command psmux -ErrorAction SilentlyContinue
 
+function Write-AwMuxFailure {
+    param(
+        [Parameter(Mandatory)][string]$Reason,
+        [int]$ExitCode = 1
+    )
+    Write-ActivityLog -Event 'mux_failed' -WorktreeId $plan.worktree_id -Fields @(
+        'mux=psmux',
+        "reason=$Reason",
+        "exit_code=$ExitCode"
+    )
+}
+
+function Stop-AwOwnedPsmuxSession {
+    param([Parameter(Mandatory)][string]$Session)
+
+    # A failed `new-session` can leave a server and pane subtree running before
+    # the port file becomes discoverable. The launch id is injected into the
+    # server command line, so cleanup can prove ownership instead of killing a
+    # same-name session won by a concurrent launcher.
+    try {
+        if ([string]::IsNullOrWhiteSpace($script:LaunchId)) {
+            Write-SetupLog "psmux: cannot prove ownership of partial session $Session; leaving it intact" 'WARN'
+            return
+        }
+        $all = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $escapedSession = [regex]::Escape($Session)
+        $launchToken = "WORKTREE_LAUNCH_ID=$($script:LaunchId)"
+        $roots = @(
+            $all | Where-Object {
+                $_.Name -eq 'psmux.exe' -and
+                [string]$_.CommandLine -match "(?:^|\s)server\s+-s\s+$escapedSession(?:\s|$)" -and
+                [string]$_.CommandLine -like "*$launchToken*"
+            }
+        )
+        if (-not $roots) {
+            Write-SetupLog "psmux: no partial session owned by this launch was found for $Session" 'WARN'
+            return
+        }
+
+        $depth = @{}
+        $identity = @{}
+        $frontier = @()
+        foreach ($root in $roots) {
+            $pidValue = [int]$root.ProcessId
+            $depth[$pidValue] = 0
+            $identity[$pidValue] = $root
+            $frontier += $pidValue
+        }
+        while ($frontier.Count -gt 0) {
+            $next = @()
+            foreach ($parentPid in $frontier) {
+                foreach ($child in @($all | Where-Object {
+                    [int]$_.ParentProcessId -eq $parentPid
+                })) {
+                    $childPid = [int]$child.ProcessId
+                    if (-not $depth.ContainsKey($childPid)) {
+                        $depth[$childPid] = [int]$depth[$parentPid] + 1
+                        $identity[$childPid] = $child
+                        $next += $childPid
+                    }
+                }
+            }
+            $frontier = $next
+        }
+
+        foreach ($pidValue in @(
+            $depth.GetEnumerator() |
+                Sort-Object Value -Descending |
+                ForEach-Object { [int]$_.Key }
+        )) {
+            try {
+                $expected = $identity[$pidValue]
+                $process = [Diagnostics.Process]::GetProcessById($pidValue)
+                $expectedStart = ([datetime]$expected.CreationDate).ToUniversalTime()
+                $actualStart = $process.StartTime.ToUniversalTime()
+                $startDeltaMs = [Math]::Abs(($actualStart - $expectedStart).TotalMilliseconds)
+                $expectedName = [IO.Path]::GetFileNameWithoutExtension([string]$expected.Name)
+                if ($startDeltaMs -gt 1 -or
+                        -not $process.ProcessName.Equals(
+                            $expectedName, [StringComparison]::OrdinalIgnoreCase
+                        )) {
+                    Write-SetupLog "psmux: skipped reused process id $pidValue during cleanup" 'WARN'
+                    continue
+                }
+                $process.Kill()
+            } catch {}
+        }
+        Write-SetupLog "psmux: reaped session process tree owned by this launch for $Session" 'WARN'
+    } catch {
+        Write-SetupLog "psmux: failed to reap owned session $Session`: $($_.Exception.Message)" 'WARN'
+    }
+}
+
+if (-not $noMux -and -not $psmuxCmd) {
+    $message = 'psmux is required for interactive sessions but was not found. Use --no-mux to request a direct session explicitly.'
+    Write-SetupLog $message 'ERROR'
+    Write-AwMuxFailure -Reason 'not_found'
+    Write-Error $message -ErrorAction Continue
+    exit 1
+}
+
 # Resolve psmux to a *launchable* executable path. WinGet installs psmux as a
 # 0-byte App Execution Alias reparse stub at
 # %LOCALAPPDATA%\Microsoft\WinGet\Links\psmux.exe. PowerShell 7.4.x cannot
@@ -806,17 +907,25 @@ function Reset-SshConptyViewport {
 # Smart App Control / WDAC can block an unsigned psmux.exe, and PowerShell
 # 7.4.x cannot launch a WinGet reparse-stub psmux (resolved above). Either way
 # a blocked/unlaunchable psmux raises a *terminating* error rather than a
-# non-zero exit code, so the normal $LASTEXITCODE fallbacks never fire. Probe
-# once with a harmless has-session call against the resolved binary; if psmux
-# still cannot run, drop to a direct (un-multiplexed) launch instead of
-# crashing the session.
-if (-not $noMux -and $psmuxCmd) {
+# non-zero exit code. Probe with --version, whose zero-success contract avoids
+# confusing an expected "session absent" result with a launch failure. A direct
+# session is never an implicit recovery path; callers must request --no-mux.
+if (-not $noMux) {
+    $probeExit = 1
+    $probeError = ''
     try {
-        $null = & $script:AwPsmuxBin has-session -t '__aw_probe__' 2>&1
+        $null = & $script:AwPsmuxBin --version 2>&1
+        $probeExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
     } catch {
-        Write-Warning "psmux cannot be launched ($($_.Exception.Message.Split([Environment]::NewLine)[0].Trim())). Launching directly without a multiplexer."
-        Write-SetupLog "psmux unavailable (launch probe failed), falling back to direct launch: $($_.Exception.Message)" 'WARN'
-        $psmuxCmd = $null
+        $probeError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+    }
+    if ($probeExit -ne 0) {
+        $detail = if ($probeError) { ": $probeError" } else { '' }
+        $message = "psmux launch probe failed (exit code $probeExit)$detail. Use --no-mux to request a direct session explicitly."
+        Write-SetupLog $message 'ERROR'
+        Write-AwMuxFailure -Reason 'launch_probe_failed' -ExitCode $probeExit
+        Write-Error $message -ErrorAction Continue
+        exit $probeExit
     }
 }
 
@@ -919,7 +1028,7 @@ function Invoke-AwPsmuxPassthroughSafe {
         catch { Write-SetupLog "psmux: passthrough apply failed: $($_.Exception.Message)" 'WARN' }
     }
 }
-if (-not $noMux -and $psmuxCmd) {
+if (-not $noMux) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     $sessName = "wt-$wtId"
     Write-SetupLog "psmux: looking for session $sessName"
@@ -965,13 +1074,25 @@ if (-not $noMux -and $psmuxCmd) {
         # worktrees onto one session). Set-PsmuxLastSession must be the final
         # psmux-affecting action before attach.
         Set-PsmuxLastSession $sessName
-        Invoke-AwPsmuxAttach $sessName
-        if ($LASTEXITCODE -eq 0) {
+        $attachExit = 1
+        $attachError = ''
+        try {
+            Invoke-AwPsmuxAttach $sessName
+            $attachExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+        } catch [System.Management.Automation.PipelineStoppedException] {
+            $attachExit = 130
+        } catch {
+            $attachError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+        }
+        if ($attachExit -eq 0) {
             exit 0
         }
-        # Join failed — kill the stale session so we can recreate it
-        Write-Warning "Failed to join psmux session — killing stale session."
-        & $script:AwPsmuxBin kill-session -t $sessName 2>&1 | Out-Null
+        $detail = if ($attachError) { ": $attachError" } else { '' }
+        $message = "Failed to attach to existing psmux session '$sessName' (exit code $attachExit)$detail."
+        Write-SetupLog $message 'ERROR'
+        Write-AwMuxFailure -Reason 'attach_failed' -ExitCode $attachExit
+        Write-Error $message -ErrorAction Continue
+        exit $attachExit
     }
 
     # Build -e flags for env propagation into the psmux server.
@@ -1035,15 +1156,26 @@ if (-not $noMux -and $psmuxCmd) {
     $savedPsmuxSession = $env:PSMUX_SESSION; $env:PSMUX_SESSION = $null
     $savedTmux = $env:TMUX; $env:TMUX = $null
     $savedTmuxPane = $env:TMUX_PANE; $env:TMUX_PANE = $null
+    $newSessionExit = 1
+    $newSessionError = ''
     try {
         & $script:AwPsmuxBin new-session -d -s $sessName -c $plan.work_dir @envFlags @paneCmd
+        $newSessionExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
+    } catch {
+        $newSessionError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
     } finally {
         $env:PSMUX_SESSION = $savedPsmuxSession
         $env:TMUX = $savedTmux
         $env:TMUX_PANE = $savedTmuxPane
     }
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to create psmux session. Falling back to direct launch."
+    if ($newSessionExit -ne 0) {
+        Stop-AwOwnedPsmuxSession $sessName
+        $detail = if ($newSessionError) { ": $newSessionError" } else { '' }
+        $message = "Failed to create psmux session '$sessName' (exit code $newSessionExit)$detail. Use --no-mux to request a direct session explicitly."
+        Write-SetupLog $message 'ERROR'
+        Write-AwMuxFailure -Reason 'create_failed' -ExitCode $newSessionExit
+        Write-Error $message -ErrorAction Continue
+        exit $newSessionExit
     } else {
         Write-ActivityLog -Event 'mux_attached' -WorktreeId $plan.worktree_id -Fields @('mux=create')
         # Session created: stamp per-session options + start its status-bar
@@ -1060,13 +1192,27 @@ if (-not $noMux -and $psmuxCmd) {
         }
         Reset-SshConptyViewport
         Set-PsmuxLastSession $sessName
+        $attachExit = 1
+        $attachError = ''
         try {
             Invoke-AwPsmuxAttach $sessName
+            $attachExit = if ($null -eq $LASTEXITCODE) { 0 } else { [int]$LASTEXITCODE }
         } catch [System.Management.Automation.PipelineStoppedException] {
             # Defensive: only reachable if TreatControlCAsInput could not be set
             # (no console); with it set, a Ctrl+C never raises here -- it is
             # forwarded into the pane for Copilot to handle.
             Write-SetupLog "psmux attach interrupted (Ctrl+C)"
+            $attachExit = 130
+        } catch {
+            $attachError = $_.Exception.Message.Split([Environment]::NewLine)[0].Trim()
+        }
+        if ($attachExit -ne 0) {
+            $detail = if ($attachError) { ": $attachError" } else { '' }
+            $message = "Failed to attach to new psmux session '$sessName' (exit code $attachExit)$detail."
+            Write-SetupLog $message 'ERROR'
+            Write-AwMuxFailure -Reason 'attach_failed' -ExitCode $attachExit
+            Write-Error $message -ErrorAction Continue
+            exit $attachExit
         }
 
         # We're back — either the user detached or the session ended.
@@ -1097,9 +1243,17 @@ if (-not $noMux -and $psmuxCmd) {
     }
 }
 
-# ── Direct launch (no psmux, or psmux failed) ───────────────────────
+# ── Direct launch (explicit --no-mux only) ──────────────────────────
 # Wrap in try/finally so Ctrl+C (PipelineStoppedException) kills the
 # child but the launcher survives to check for handoff state.
+
+if (-not $noMux) {
+    $message = 'Internal launcher error: reached direct launch without --no-mux.'
+    Write-SetupLog $message 'ERROR'
+    Write-AwMuxFailure -Reason 'unexpected_fallthrough'
+    Write-Error $message -ErrorAction Continue
+    exit 1
+}
 
 Write-SetupLog "Handing off to setup script: $($cmd -join ' ')"
 Write-Host 'Launching Copilot...'

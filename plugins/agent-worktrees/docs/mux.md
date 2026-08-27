@@ -44,6 +44,11 @@ Rule of thumb: **interactive human work → muxed** (persistence + detach/rejoin
 path in your existing session. `--new` is explicitly **refused without a TTY**,
 so a tool call can never accidentally spawn an interactive mux — use `create`.
 
+An interactive launch **fails with an error** when its multiplexer is missing or
+cannot create the named session. It never silently starts a bare Copilot process
+instead. Use `--no-mux` (or `WORKTREE_NO_MUX=1`) only when you intentionally want
+the direct, non-persistent diagnostic path.
+
 > **Windows over SSH:** the interactive TUI picker auto-falls back to a simpler
 > flow (a ConPTY limitation), but the muxed-session model is the same. See
 > [picker.md](picker.md).

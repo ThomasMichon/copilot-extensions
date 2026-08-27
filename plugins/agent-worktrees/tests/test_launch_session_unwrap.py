@@ -208,3 +208,60 @@ def test_launchers_fast_reattach_skips_update_on_live_session():
     # The bash probe must key off the tmux session name and honor no-mux.
     assert 'tmux has-session -t "=wt-${_wtid}"' in sh
     assert 'WORKTREE_NO_MUX' in sh
+
+
+def test_launchers_fail_closed_without_explicit_no_mux():
+    """Mux discovery/creation failures must never start a duplicate bare
+    Copilot. Direct launch is reserved for the explicit no-mux contract."""
+    ps = _LAUNCH_PS1.read_text()
+    sh = _LAUNCH_SCRIPT.read_text()
+
+    assert "psmux is required for interactive sessions" in ps
+    assert "Write-AwMuxFailure -Reason 'launch_probe_failed'" in ps
+    assert "Write-AwMuxFailure -Reason 'create_failed'" in ps
+    assert "Direct launch (explicit --no-mux only)" in ps
+    assert "reached direct launch without --no-mux" in ps
+    assert "Falling back to direct launch" not in ps
+
+    assert "tmux is required for interactive sessions" in sh
+    assert "activity_log mux_failed" in sh
+    assert "reason=create_failed" in sh
+    assert "Direct launch (explicit --no-mux only)" in sh
+    assert "reached direct launch without --no-mux" in sh
+    assert "Falling back to direct launch" not in sh
+
+
+def test_windows_failed_psmux_creation_reaps_only_the_named_session():
+    """A partially-started PSMux server may own a live pane before returning
+    nonzero. Cleanup must target the exact failed session and its descendants."""
+    ps = _LAUNCH_PS1.read_text()
+    assert "function Stop-AwOwnedPsmuxSession" in ps
+    assert "[regex]::Escape($Session)" in ps
+    assert "server\\s+-s\\s+$escapedSession" in ps
+    assert "WORKTREE_LAUNCH_ID=$($script:LaunchId)" in ps
+    assert "Sort-Object Value -Descending" in ps
+    assert "[Diagnostics.Process]::GetProcessById($pidValue)" in ps
+    assert "$startDeltaMs -gt 1" in ps
+    assert ps.count("Stop-AwOwnedPsmuxSession $sessName") == 1
+
+
+def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
+    ps = _LAUNCH_PS1.read_text()
+    sh = _LAUNCH_SCRIPT.read_text()
+
+    assert "Failed to attach to existing psmux session" in ps
+    assert "Failed to attach to new psmux session" in ps
+    assert "Write-AwMuxFailure -Reason 'attach_failed'" in ps
+    assert "& $script:AwPsmuxBin --version" in ps
+    assert "Write-AwMuxFailure -Reason 'launch_probe_failed' -ExitCode $probeExit" in ps
+    assert "exit $probeExit" in ps
+
+    assert "_aw_owned_tmux_session_id" in sh
+    assert "display-message -p" in sh
+    assert "'#{session_id}'" in sh
+    assert 'show-environment -t "$session_id" WORKTREE_LAUNCH_ID' in sh
+    assert 'kill-session -t "$session_id"' in sh
+    assert "Failed to attach to existing tmux session" in sh
+    assert "Failed to attach to new tmux session" in sh
+    assert "reason=attach_failed" in sh
+    assert sh.count('_aw_cleanup_owned_tmux_session "$TMUX_SESS"') == 1

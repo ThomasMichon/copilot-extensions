@@ -610,9 +610,37 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     #
     # WSL delegation (action=wsl) skips tmux — handled on the Linux side.
     # --no-mux / WORKTREE_NO_MUX=1 bypasses tmux for debugging.
-    if [[ "$NO_MUX" != "1" && "$ACTION" == "exec" ]] && command -v tmux &>/dev/null; then
+    if [[ "$NO_MUX" != "1" && "$ACTION" == "exec" ]]; then
+        if ! command -v tmux &>/dev/null; then
+            setup_log ERROR "tmux is required for interactive sessions but was not found. Use --no-mux to request a direct session explicitly."
+            activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=not_found exit_code=1
+            echo "ERROR: tmux is required for interactive sessions but was not found. Use --no-mux to request a direct session explicitly." >&2
+            exit 1
+        fi
+
         TMUX_SESS="wt-${WORKTREE_ID:-base}"
         setup_log INFO "tmux: looking for session $TMUX_SESS"
+
+        _aw_owned_tmux_session_id() {
+            local sess="$1"
+            [[ -n "${LAUNCH_ID:-}" ]] || return 1
+            local session_id owner
+            session_id="$(tmux display-message -p -t "=$sess" '#{session_id}' 2>/dev/null)" || return 1
+            [[ -n "$session_id" ]] || return 1
+            owner="$(tmux show-environment -t "$session_id" WORKTREE_LAUNCH_ID 2>/dev/null)" || return 1
+            [[ "$owner" == "WORKTREE_LAUNCH_ID=$LAUNCH_ID" ]] || return 1
+            printf '%s\n' "$session_id"
+        }
+        _aw_cleanup_owned_tmux_session() {
+            local sess="$1"
+            local session_id
+            if session_id="$(_aw_owned_tmux_session_id "$sess")"; then
+                tmux kill-session -t "$session_id" >/dev/null 2>&1 || true
+                setup_log WARN "tmux: removed session owned by this launch: $sess"
+            else
+                setup_log WARN "tmux: cannot prove ownership of failed session $sess; leaving it intact"
+            fi
+        }
 
         # Per-session status bar + behaviors. agent-worktrees does NOT own your
         # global ~/.tmux.conf; instead we stamp these onto each session we
@@ -661,11 +689,20 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             # session picks up the current bar without us owning the global.
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_spawn_status_updater "$TMUX_SESS"
+            set +e
             if [[ -n "${TMUX:-}" ]]; then
-                exec tmux switch-client -t "=$TMUX_SESS"
+                tmux switch-client -t "=$TMUX_SESS"
             else
-                exec tmux attach-session -t "=$TMUX_SESS"
+                tmux attach-session -t "=$TMUX_SESS"
             fi
+            TMUX_ATTACH_EXIT=$?
+            set -e
+            if [[ "$TMUX_ATTACH_EXIT" -ne 0 ]]; then
+                setup_log ERROR "Failed to attach to existing tmux session $TMUX_SESS (exit $TMUX_ATTACH_EXIT)."
+                activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=attach_failed "exit_code=$TMUX_ATTACH_EXIT"
+                echo "ERROR: Failed to attach to existing tmux session '$TMUX_SESS' (exit code $TMUX_ATTACH_EXIT)." >&2
+            fi
+            exit "$TMUX_ATTACH_EXIT"
         fi
 
         # Create a new tmux session for this worktree.
@@ -673,9 +710,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         # (and session) exits when the process finishes — no lingering
         # shell.
         #
-        # Disable errexit for the entire tmux block — if any tmux
-        # command fails the script must NOT die (the binstub uses exec,
-        # so an unhandled exit kills the terminal).
+        # Disable errexit while creating the session so we can capture the
+        # literal exit code, clean up any partial session, and emit diagnostics
+        # before failing the launch.
         set +e
         setup_log INFO "tmux: creating session $TMUX_SESS"
         echo "Creating tmux session: $TMUX_SESS"
@@ -714,11 +751,17 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             PANE_CMD=("${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}")
         fi
 
-        if ! tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
+        tmux new-session -d -s "$TMUX_SESS" -c "${WORK_DIR:-.}" \
             "${TMUX_ENV_FLAGS[@]+"${TMUX_ENV_FLAGS[@]}"}" \
-            "${PANE_CMD[@]}"; then
-            echo "WARNING: Failed to create tmux session. Falling back to direct launch." >&2
+            "${PANE_CMD[@]}"
+        TMUX_CREATE_EXIT=$?
+        if [[ "$TMUX_CREATE_EXIT" -ne 0 ]]; then
+            _aw_cleanup_owned_tmux_session "$TMUX_SESS"
             set -e
+            setup_log ERROR "Failed to create tmux session $TMUX_SESS (exit $TMUX_CREATE_EXIT). Use --no-mux to request a direct session explicitly."
+            activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=create_failed "exit_code=$TMUX_CREATE_EXIT"
+            echo "ERROR: Failed to create tmux session '$TMUX_SESS' (exit code $TMUX_CREATE_EXIT). Use --no-mux to request a direct session explicitly." >&2
+            exit "$TMUX_CREATE_EXIT"
         else
 
             activity_log mux_attached "$WORKTREE_ID" mux=create
@@ -729,7 +772,14 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             else
                 tmux attach-session -t "=$TMUX_SESS"
             fi
+            TMUX_ATTACH_EXIT=$?
             set -e
+            if [[ "$TMUX_ATTACH_EXIT" -ne 0 ]]; then
+                setup_log ERROR "Failed to attach to new tmux session $TMUX_SESS (exit $TMUX_ATTACH_EXIT)."
+                activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=attach_failed "exit_code=$TMUX_ATTACH_EXIT"
+                echo "ERROR: Failed to attach to new tmux session '$TMUX_SESS' (exit code $TMUX_ATTACH_EXIT)." >&2
+                exit "$TMUX_ATTACH_EXIT"
+            fi
 
             # We're back — either the user detached or the session ended.
             # Only run post-exit if the session is truly gone (user exited
@@ -748,10 +798,16 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
             exit 0
         fi
-        # (fallthrough from failed new-session → non-tmux launch below)
     fi
 
-    # ── Non-tmux fallback (WSL, or tmux not installed) ────────────────
+    # ── Direct launch (explicit --no-mux only) ────────────────────────
+
+    if [[ "$NO_MUX" != "1" ]]; then
+        setup_log ERROR "Internal launcher error: reached direct launch without --no-mux."
+        activity_log mux_failed "$WORKTREE_ID" mux=tmux reason=unexpected_fallthrough exit_code=1
+        echo "ERROR: Internal launcher error: reached direct launch without --no-mux." >&2
+        exit 1
+    fi
 
     setup_log INFO "Handing off to setup script"
     echo "Launching Copilot..."
