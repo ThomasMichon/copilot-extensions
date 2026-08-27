@@ -92,6 +92,12 @@
       },
       {
         "type": "command",
+        "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\marketplace-overrides.ps1\"; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "s=\"$HOME/.agent-worktrees/bin/marketplace-overrides.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
+        "timeoutSec": 10
+      },
+      {
+        "type": "command",
         "powershell": "$s = \"$env:USERPROFILE\\.agent-worktrees\\bin\\provision-check.ps1\"; if (Test-Path $s) { Set-Location -LiteralPath $HOME; & $s } else { [Console]::Out.Write('{}') }",
         "bash": "s=\"$HOME/.agent-worktrees/bin/provision-check.sh\"; if [ -f \"$s\" ]; then cd \"$HOME\" && bash \"$s\"; else printf '{}'; fi",
         "timeoutSec": 15
