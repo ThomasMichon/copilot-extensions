@@ -1760,7 +1760,20 @@ def scan_pivot_registry(
     decisions = dict(snapshot.decisions)
     findings = list(snapshot.findings)
     owners: dict[str, str] = {}
-    for key in sorted(active_entries):
+    precedence = {
+        "operator": 0,
+        "managed-plugin": 1,
+        "legacy-plugin": 2,
+        "unknown-legacy": 3,
+    }
+    ordered_entries = sorted(
+        active_entries,
+        key=lambda key: (
+            precedence.get(active_entries[key].entry_class, 4),
+            key,
+        ),
+    )
+    for key in ordered_entries:
         contribution = active_entries[key]
         duplicate_of = next(
             (owners[identity] for identity in contribution.identities if identity in owners),

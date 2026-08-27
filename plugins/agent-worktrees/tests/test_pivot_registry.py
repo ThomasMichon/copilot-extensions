@@ -189,6 +189,36 @@ def test_materializer_refreshes_append_only_without_overwriting(tmp_path):
     )
 
 
+def test_operator_identity_wins_over_append_only_managed_sibling(tmp_path):
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    _command(root)
+    _template(root, label="Same")
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    operator_command = _command(tmp_path / "operator")
+    operator = registry / "sample.json"
+    operator.write_text(
+        json.dumps({"label": "Same", "list": [str(operator_command)]}),
+        encoding="utf-8",
+    )
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        activation_report=_active_report(source, root),
+    )
+
+    assert len(report.contributions) == 1
+    assert report.contributions[0].entry == operator
+    assert report.contributions[0].entry_class == "operator"
+    managed_duplicate = next(
+        finding
+        for finding in report.findings
+        if finding.reason == "duplicate"
+    )
+    assert managed_duplicate.entry != str(operator)
+
+
 def test_absent_entry_publication_race_never_overwrites_operator(
     tmp_path, monkeypatch
 ):
