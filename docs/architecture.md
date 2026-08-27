@@ -1,9 +1,11 @@
 # Architecture Overview
 
 How the nineteen copilot-extensions plugins fit together — install topology,
-runtimes, ports, and the credential relay. **Eleven ship a runtime** (a `uv`-built
-venv under `~/.agent-*` plus a `~/.local/bin` binstub, deployed by the plugin's
-own installer); **eight are payload-only** — `efforts` (skills), `visions`
+runtimes, ports, and the credential relay. **Eleven ship a runtime** (currently
+a `uv`-built venv under legacy `~/.agent-*`, deployed by the plugin's own
+installer) plus generated payload-local agent commands and session command
+glossaries; compatibility management wrappers remain in `~/.local/bin` during
+the installation-cell migration. **Eight are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills), `wsl-setup` (skills), and
 `harness-knowledge` (skills), and `ai-attribution` (hook + skill) deploy
@@ -12,9 +14,9 @@ internals, follow the links in each section.
 
 ## The plugins
 
-### Runtime plugins (installer-deployed venv + binstub)
+### Runtime plugins (installer-deployed runtime + payload-local commands)
 
-| Plugin | Kind | Runtime home | Binstub | Lifecycle |
+| Plugin | Kind | Legacy runtime home | Global command surface (legacy wrapper / project binstubs) | Lifecycle |
 |--------|------|--------------|---------|-----------|
 | [agent-worktrees](../plugins/agent-worktrees/) | Session plugin (skills + `sessionStart` hook) | `~/.agent-worktrees/` | `~/.local/bin/agent-worktrees` + per-project binstubs | Per session (launched by binstub); runtime auto-updates on session start |
 | [agent-bridge](../plugins/agent-bridge/) | Persistent HTTP service | `~/.agent-bridge/` | `~/.local/bin/agent-bridge` | Always-on daemon (Windows scheduled task / Linux systemd user unit) |
@@ -44,10 +46,20 @@ internals, follow the links in each section.
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
 with `uv venv` + `uv pip install <plugin_dir>`. `copilot plugin install/update`
-only moves the marketplace payload; the runtime venv/binstub/service is deployed
-(and updated) by that installer step. The repo uses **`uv`/`uv pip`** throughout
+only moves the marketplace payload; the runtime venv, compatibility management
+wrapper, and service are deployed (and updated) by that installer step. The
+payload-local agent shims move with the payload itself. The repo uses
+**`uv`/`uv pip`** throughout
 — not `uvx`, `uv tool install`, or `pipx`. The full payload-vs-runtime contract
 lives in [install-contract.md](install-contract.md).
+
+Every runtime `agent-*` plugin also carries `payload-invocation.json`, generated
+POSIX/PowerShell/CMD shims under its payload `bin/` or manifest `outputDir`, and
+`emit-command-catalog` hooks. Agent-facing skills resolve logical commands
+through that attributable session glossary rather than ambient `PATH`.
+`~/.local/bin/agent-*` remains a legacy management compatibility surface while
+runtime roots are still unqualified; repo/project binstubs remain the intended
+machine-global command surface.
 
 
 ## Install topology — marketplace to local paths
@@ -87,7 +99,8 @@ flowchart TB
       RI["~/.agent-index/<br/>versions/ • current-version • service + engine"]
       RK["~/.agent-machines/<br/>versions/ • current-version"]
     end
-    BIN["~/.local/bin/<br/>agent-worktrees • agent-bridge • agent-codespaces • agent-containers • agent-mcp • agent-ssh • agent-logger • agent-dispatch • agent-vault • agent-index • agent-machines"]
+    CAT["sessionStart command glossaries<br/>logical command → exact payload shim"]
+    BIN["~/.local/bin/<br/>legacy agent-* management wrappers + project binstubs"]
     MP --> AW --> RW
     MP --> AB --> RB
     MP --> AC --> RC
@@ -100,6 +113,17 @@ flowchart TB
     MP --> AI --> RI
     MP --> AK --> RK
     MP --> PO
+    AW --> CAT
+    AB --> CAT
+    AC --> CAT
+    AN --> CAT
+    AM --> CAT
+    AS --> CAT
+    AL --> CAT
+    AD --> CAT
+    AV --> CAT
+    AI --> CAT
+    AK --> CAT
     RW --> BIN
     RB --> BIN
     RC --> BIN
@@ -110,8 +134,8 @@ flowchart TB
     RV --> BIN
     RI --> BIN
     RK --> BIN
-    AC -.->|providers.d/ manifest → binstub over process boundary| RB
-    AN -.->|providers.d/ manifest → binstub over process boundary| RB
+    AC -.->|providers.d/ manifest → provider command over process boundary| RB
+    AN -.->|providers.d/ manifest → provider command over process boundary| RB
 ```
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
@@ -119,20 +143,46 @@ flowchart TB
 > `ai-attribution` — deploys entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
-Key rule: the **agent-codespaces and agent-containers binstubs are owned by
-their own runtimes** (`~/.agent-codespaces`, `~/.agent-containers`). agent-bridge
-sources their `codespace:` / `container:` namespaces from a **filesystem provider
-registry** — it does **not** import their packages. Each provider drops a small
-JSON manifest into `~/.agent-bridge/providers.d/<name>.json` from its own
-`sessionStart` bootstrap hook (carrying the namespace and an **absolute** binstub
-command), and the daemon scans that directory and drives the provider's binstub
+### Agent-facing invocation and command glossaries
+
+The payload that contributes an operational skill also contributes the command
+that skill uses. `hooks.json` emits a small structured catalog mapping each
+logical command id to the exact payload-local `argv`; consumers append arguments
+and never reconstruct the path, scan installed marketplaces, or substitute a
+same-named global wrapper.
+
+Static prose may refer to a sibling's logical command, but never to that
+sibling's payload or runtime path. The sibling owns and emits its mapping. A
+missing or ambiguous mapping is unavailable, not a reason to fall back to
+`PATH`.
+
+Command glossaries are static breadcrumbs. They contain command ownership and,
+at most, stable bounded machine/repository pivots. Worktrees, sessions, leases,
+health, providers, and live agents are queried on demand because an initial
+snapshot would stale immediately. In particular, agent-bridge emits its command
+mapping rather than a worktree/session catalog; its CLI discovers the live
+service endpoint and topology when invoked.
+
+The complete authoring pattern is
+[runtime-agent-plugin](patterns/runtime-agent-plugin.md). The current roster is
+guarded by `libs/payload-invocation/tests/test_agent_plugin_coverage.py`.
+
+Key rule: the **agent-codespaces and agent-containers commands are owned by
+their own plugins**; agent-bridge never re-points or imports them. Bridge
+provider registration is an explicit management boundary and currently requires
+the legacy machine-global `~/.local/bin/<name>` wrapper, not a session-glossary
+entry; registration skips the provider when that wrapper is absent. Each
+provider drops a small JSON manifest into
+`~/.agent-bridge/providers.d/<name>.json` from its own `sessionStart` bootstrap
+hook, and the daemon scans that directory and drives the provider command
 **over a process boundary** (`<command> namespace-list` / `namespace-resolve …`).
 The daemon runs from its own isolated versioned venv where a provider package is
 neither importable nor on `PATH`, so this seam never depends on importing the
 provider — a malformed or missing manifest is simply skipped with a warning
 (discovery never raises). This keeps one canonical CLI per plugin and avoids
-version skew. agent-mcp is standalone: no bridge integration, no resolver —
-agents invoke its binstub directly.
+version skew. agent-mcp is standalone: no bridge integration or resolver. Its
+agent-facing skills use the payload command glossary; static `mcp-servers`
+startup remains an explicit compatibility boundary during migration.
 
 ## Ports
 
