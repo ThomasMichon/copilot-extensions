@@ -24,6 +24,10 @@ from ssh_manager import ConnectionManager, SSHConfig
 log = logging.getLogger("agent-bridge.session-host.container")
 
 
+class ContainerRecreateAfterRemovalError(RuntimeError):
+    """The provider removed the old identity before replacement failed."""
+
+
 async def _run_provider(
     command: list[str],
     *,
@@ -136,10 +140,114 @@ async def ensure_container_ready(target: dict[str, Any]) -> None:
         timeout=120.0,
     )
     if rc != 0:
+        try:
+            failure = json.loads(out.decode()) if out else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            failure = {}
+        if (
+            isinstance(failure, dict)
+            and failure.get("old_container_removed") is True
+        ):
+            raise ContainerRecreateAfterRemovalError(
+                str(failure.get("error") or "container replacement failed")
+            )
         raise RuntimeError(
             "agent-containers could not make the Session Host venue ready "
             f"(rc={rc}): {(err or out).decode(errors='replace').strip()}"
         )
+
+
+async def container_state(target: dict[str, Any]) -> dict[str, Any]:
+    """Read one container's non-waking lifecycle identity through its provider."""
+    from ..transport import _reresolve_stale_interpreter
+
+    command = _reresolve_stale_interpreter(
+        list(target.get("state_command") or [])
+    )
+    if not command:
+        provider = _reresolve_stale_interpreter(
+            list(target.get("provider_command") or [])
+        )
+        name = str(target.get("name") or "")
+        command = [*provider, "session-host-state", name]
+    rc, out, err = await _run_provider(command, timeout=45.0)
+    if rc != 0:
+        raise RuntimeError(
+            "agent-containers could not inspect the target "
+            f"(rc={rc}): {(err or out).decode(errors='replace').strip()}"
+        )
+    try:
+        result = json.loads(out.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "agent-containers returned invalid container state"
+        ) from exc
+    if not isinstance(result, dict):
+        raise RuntimeError("agent-containers returned non-object container state")
+    return result
+
+
+async def recreate_container_for_parity(
+    target: dict[str, Any],
+    *,
+    expected_container_id: str,
+    timeout: float,
+) -> dict[str, Any]:
+    """Identity-check and recreate one container through the provider seam."""
+    from ..transport import _reresolve_stale_interpreter
+
+    command = _reresolve_stale_interpreter(
+        list(target.get("provider_command") or [])
+    )
+    name = str(target.get("name") or "")
+    if not command or not name:
+        raise RuntimeError("trusted container metadata lacks provider command/name")
+    rc, out, err = await _run_provider(
+        [
+            *command,
+            "namespace-recreate",
+            name,
+            "--expected-container-id",
+            expected_container_id,
+        ],
+        timeout=timeout,
+    )
+    if rc != 0:
+        try:
+            failure = json.loads(out.decode()) if out else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            failure = {}
+        if (
+            isinstance(failure, dict)
+            and failure.get("old_container_removed") is True
+        ):
+            raise ContainerRecreateAfterRemovalError(
+                str(failure.get("error") or "container replacement failed")
+            )
+        raise RuntimeError(
+            "agent-containers target recreation failed "
+            f"(rc={rc}): {(err or out).decode(errors='replace').strip()}"
+        )
+    try:
+        result = json.loads(out.decode())
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "agent-containers target recreation returned invalid JSON"
+        ) from exc
+    new_container_id = str(result.get("new_container_id") or "")
+    if (
+        not isinstance(result, dict)
+        or result.get("name") != name
+        or result.get("old_container_id") != expected_container_id
+        or not re.fullmatch(r"[0-9a-fA-F]{12,64}", new_container_id)
+        or new_container_id.lower() == expected_container_id.lower()
+        or result.get("identity_changed") is not True
+        or result.get("running") is not True
+    ):
+        raise RuntimeError(
+            "agent-containers target recreation did not confirm replacement"
+        )
+    return result
 
 
 async def cleanup_container_session_host(

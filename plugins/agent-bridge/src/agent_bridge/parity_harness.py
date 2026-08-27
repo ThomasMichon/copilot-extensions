@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 _RESULT_MARKER = "VENUE_PARITY_JSON:"
 _PROBE_MARKER = "VENUE_PARITY_PROBE:"
 _REATTACH_MARKER = "VENUE_PARITY_REATTACH_OK"
-from .protocol import FAILED_ACP_HANDSHAKE_FAULT
+from .protocol import CONTAINER_RECREATE_FAULT, FAILED_ACP_HANDSHAKE_FAULT
 
 FRONTEND_RESTART_HOSTINDEX_LOSS = "frontend-restart-hostindex-loss"
 RELAY_INTERRUPTION = "relay-interruption"
@@ -276,6 +276,7 @@ def run(
         FRONTEND_RESTART_HOSTINDEX_LOSS,
         RELAY_INTERRUPTION,
         FAILED_ACP_HANDSHAKE_FAULT,
+        CONTAINER_RECREATE_FAULT,
     }:
         raise ParityFailure(f"unsupported parity fault: {fault}")
     if fault == FRONTEND_RESTART_HOSTINDEX_LOSS and fault_handler is None:
@@ -632,6 +633,150 @@ def run(
             evidence.checks["resumed_child_live"] = bool(
                 evidence.resumed_child_pid
             )
+        elif fault == CONTAINER_RECREATE_FAULT:
+            active_others = _active_other_session_ids(client, session_id)
+            if active_others:
+                raise ParityFailure(
+                    "container recreation fault refuses to run while another "
+                    "managed session is active: "
+                    + ", ".join(active_others[:5]),
+                    evidence=evidence,
+                )
+            evidence.checks["exclusive_container_fault"] = True
+            try:
+                fault_result = client.recreate_container_for_parity(
+                    session_id,
+                    timeout=startup_timeout,
+                )
+            except Exception as exc:
+                raise ParityFailure(
+                    f"container recreation fault failed: {exc}",
+                    evidence=evidence,
+                ) from exc
+            replacement_session_id = str(
+                fault_result.get("replacement_session_id") or ""
+            )
+            if not replacement_session_id:
+                raise ParityFailure(
+                    "container recreation omitted the replacement session",
+                    evidence=evidence,
+                )
+            session_id = replacement_session_id
+            evidence.session_id = replacement_session_id
+            resumed = _wait_for_status(
+                client,
+                session_id,
+                {"idle"},
+                startup_timeout,
+            )
+            last_id = 0
+            evidence.initial_host_pid = fault_result.get("old_host_pid")
+            evidence.resumed_host_pid = fault_result.get(
+                "replacement_host_pid"
+            )
+            evidence.resumed_acp_session_id = resumed.get("acp_session_id")
+            evidence.resumed_child_pid = resumed.get("pid")
+            evidence.observed.update({
+                "fault": fault,
+                "container_identity_changed": fault_result.get(
+                    "container_identity_changed"
+                ),
+            })
+            for name in (
+                "container_identity_changed",
+                "old_session_removed",
+                "old_host_index_removed",
+                "old_forward_removed",
+                "old_relay_removed",
+                "target_lock_transferred",
+            ):
+                evidence.checks[name] = fault_result.get(name) is True
+            evidence.checks["fresh_acp_session"] = (
+                evidence.resumed_acp_session_id
+                and evidence.resumed_acp_session_id
+                != evidence.initial_acp_session_id
+                and fault_result.get("old_acp_session_id")
+                == evidence.initial_acp_session_id
+            )
+            evidence.checks["fresh_host"] = (
+                evidence.initial_host_pid is not None
+                and evidence.resumed_host_pid is not None
+                and evidence.resumed_host_pid != evidence.initial_host_pid
+            )
+            evidence.checks["fresh_child"] = (
+                evidence.initial_child_pid is not None
+                and evidence.resumed_child_pid is not None
+                and evidence.resumed_child_pid != evidence.initial_child_pid
+                and fault_result.get("old_child_pid")
+                == evidence.initial_child_pid
+            )
+            evidence.checks["resumed_child_live"] = bool(
+                evidence.resumed_child_pid
+            )
+
+            client.submit_prompt(
+                session_id,
+                _quality_prompt(
+                    auth=auth,
+                    ado_url=ado_url,
+                    azure_scope=azure_scope,
+                ),
+                request_timeout=turn_timeout,
+            )
+            replacement_message, replacement_probe, last_id = _wait_for_turn(
+                client,
+                session_id,
+                after_event_id=last_id,
+                timeout=turn_timeout,
+            )
+            replacement_reported = _parse_result(replacement_message)
+            if replacement_probe is None:
+                raise ParityFailure(
+                    "replacement turn omitted the redacted probe marker",
+                    evidence=evidence,
+                )
+            replacement_capabilities = [
+                str(item)
+                for item in (replacement_reported.get("capabilities") or [])
+            ]
+            evidence.observed["replacement_probe"] = {
+                "cwd": replacement_probe.get("cwd"),
+                "capabilities": replacement_capabilities,
+                "github_credential": replacement_probe.get(
+                    "github_credential"
+                ),
+                "github_api": replacement_probe.get("github_api"),
+                "ado_credential": replacement_probe.get("ado_credential"),
+                "ado_ls_remote": replacement_probe.get("ado_ls_remote"),
+                "azure_token": replacement_probe.get("azure_token"),
+            }
+            if expected_workspace is not None:
+                evidence.checks["replacement_workspace"] = (
+                    replacement_probe.get("cwd") == expected_workspace
+                )
+            if expected_capability is not None:
+                evidence.checks["replacement_capability"] = any(
+                    expected_capability in item
+                    for item in replacement_capabilities
+                )
+            if auth:
+                evidence.checks["replacement_github_credential"] = (
+                    replacement_probe.get("github_credential") is True
+                )
+                evidence.checks["replacement_github_api"] = (
+                    replacement_probe.get("github_api") is True
+                )
+                if ado_url:
+                    evidence.checks["replacement_ado_credential"] = (
+                        replacement_probe.get("ado_credential") is True
+                    )
+                    evidence.checks["replacement_ado_ls_remote"] = (
+                        replacement_probe.get("ado_ls_remote") is True
+                    )
+                if azure_scope:
+                    evidence.checks["replacement_azure_token"] = (
+                        replacement_probe.get("azure_token") is True
+                    )
         else:
             client.stop_session(session_id)
             _wait_for_status(client, session_id, {"stopped"}, startup_timeout)

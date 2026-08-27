@@ -2290,6 +2290,203 @@ class SessionManager:
             f"session relay did not recover within {timeout:.0f}s"
         )
 
+    async def recreate_container_for_parity(
+        self,
+        session_id: str,
+        *,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """Recreate one parity container and replace its bridge session."""
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        if not str(session.caller_id or "").startswith("venue-parity:"):
+            raise PermissionError(
+                "container recreation is restricted to venue-parity sessions"
+            )
+        if session.status is not SessionStatus.IDLE:
+            raise RuntimeError("container recreation requires an idle session")
+        container_target = (
+            session.target.container
+            if isinstance(session.target.container, dict)
+            else None
+        )
+        if (
+            not container_target
+            or container_target.get("security_profile") != "trusted"
+        ):
+            raise RuntimeError(
+                "container recreation requires a trusted container target"
+            )
+        active_states = {
+            SessionStatus.CREATED,
+            SessionStatus.STARTING,
+            SessionStatus.RUNNING,
+            SessionStatus.IDLE,
+            SessionStatus.STOPPING,
+        }
+        active_others = [
+            item.session_id
+            for item in self._sessions.values()
+            if item.session_id != session.session_id
+            and item.status in active_states
+        ]
+        if active_others:
+            raise RuntimeError(
+                "container recreation refuses another active managed session: "
+                + ", ".join(active_others[:5])
+            )
+        if self._host_index is None:
+            raise RuntimeError("container session has no HostIndex")
+        old_host = self._host_index.get(session.session_id)
+        if old_host is None or old_host.boundary != "container":
+            raise RuntimeError(
+                "container session has no authoritative container Host record"
+            )
+        replacement_target = SpawnTarget.from_json(session.target.to_json())
+        old_session_id = session.session_id
+        old_acp_session_id = session.acp_session_id
+        old_child_pid = session.pid
+        old_host_pid = old_host.host_pid
+
+        from .session_host.container_transport import (
+            ContainerRecreateAfterRemovalError,
+            container_state,
+            recreate_container_for_parity,
+        )
+
+        before = await container_state(container_target)
+        old_container_id = str(before.get("container_id") or "")
+        if (
+            before.get("name") != container_target.get("name")
+            or before.get("running") is not True
+            or not old_container_id
+        ):
+            raise RuntimeError(
+                "container lifecycle state is not authoritative before recreation"
+            )
+        try:
+            replacement = await recreate_container_for_parity(
+                container_target,
+                expected_container_id=old_container_id,
+                timeout=timeout,
+            )
+        except ContainerRecreateAfterRemovalError:
+            container_target["authoritative_identity_removed"] = True
+            self._db.update_session_target(
+                old_session_id,
+                session.target.to_json(),
+                session.target.cwd,
+            )
+            session.status = SessionStatus.FAILED
+            self._db.update_session_status(
+                old_session_id,
+                SessionStatus.FAILED.value,
+                time.time(),
+            )
+            if session.event_log:
+                session.event_log.append("container_recreate_failed", {
+                    "message": (
+                        "The original container identity was removed before "
+                        "replacement failed; target ownership is retained."
+                    ),
+                })
+            raise
+        container_target["authoritative_identity_removed"] = True
+        self._db.update_session_target(
+            old_session_id,
+            session.target.to_json(),
+            session.target.cwd,
+        )
+        session.status = SessionStatus.FAILED
+        self._db.update_session_status(
+            old_session_id,
+            SessionStatus.FAILED.value,
+            time.time(),
+        )
+        if session.event_log:
+            session.event_log.append("container_recreated", {
+                "message": "The original container identity was replaced.",
+            })
+
+        new_session = await self.start_session(
+            replacement_target,
+            agent_name=session.agent_name,
+            caller_id=session.caller_id,
+            mcp_servers=[
+                dict(server) for server in session.mcp_servers
+            ],
+            model=session.model_override,
+            effort=session.effort_override,
+            replace_session_id=old_session_id,
+            retain_container_lock_on_failure=True,
+        )
+        if new_session.status is not SessionStatus.IDLE:
+            new_container = (
+                new_session.target.container
+                if isinstance(new_session.target.container, dict)
+                else {}
+            )
+            if (
+                self._host_index.get(new_session.session_id) is None
+                and new_container.get("launch_pending_session_id")
+                != new_session.session_id
+            ):
+                new_container["recreate_failed_without_host"] = True
+                self._db.update_session_target(
+                    new_session.session_id,
+                    new_session.target.to_json(),
+                    new_session.target.cwd,
+                )
+            raise RuntimeError(
+                f"replacement container session {new_session.session_id} "
+                "failed to reach idle and retains target ownership"
+            )
+        new_host = self._host_index.get(new_session.session_id)
+        if new_host is None or new_host.boundary != "container":
+            raise RuntimeError(
+                "replacement container session has no Host record"
+            )
+
+        await self._stop_relays(old_session_id)
+        forward = self._forwards.pop(old_session_id, None)
+        if forward is not None:
+            with contextlib.suppress(Exception):
+                await forward.cancel()
+        self._host_index.remove(old_session_id)
+        await self.end_session(old_session_id, force=True)
+
+        name = str(container_target["name"])
+        return {
+            "old_session_id": old_session_id,
+            "replacement_session_id": new_session.session_id,
+            "old_acp_session_id": old_acp_session_id,
+            "replacement_acp_session_id": new_session.acp_session_id,
+            "old_container_id": old_container_id,
+            "replacement_container_id": replacement["new_container_id"],
+            "old_host_pid": old_host_pid,
+            "replacement_host_pid": new_host.host_pid,
+            "old_child_pid": old_child_pid,
+            "replacement_child_pid": new_session.pid,
+            "container_identity_changed": (
+                replacement["new_container_id"] != old_container_id
+            ),
+            "old_session_removed": (
+                old_session_id not in self._sessions
+                and self._db.get_session(old_session_id) is None
+            ),
+            "old_host_index_removed": (
+                self._host_index.get(old_session_id) is None
+            ),
+            "old_forward_removed": old_session_id not in self._forwards,
+            "old_relay_removed": old_session_id not in self._relays,
+            "target_lock_transferred": (
+                self._container_lock_sessions.get(new_session.session_id)
+                == name
+                and old_session_id not in self._container_lock_sessions
+            ),
+        }
+
     def _acquire_container_lock(self, session_id: str, name: str) -> None:
         if session_id in self._container_lock_sessions:
             return
@@ -2305,6 +2502,28 @@ class SessionManager:
         lock.acquire()
         self._container_locks[name] = (lock, session_id)
         self._container_lock_sessions[session_id] = name
+
+    def _transfer_container_lock(
+        self,
+        old_session_id: str,
+        new_session_id: str,
+        name: str,
+    ) -> None:
+        """Move one held container target lock without an unlocked window."""
+        entry = self._container_locks.get(name)
+        if (
+            self._container_lock_sessions.get(old_session_id) != name
+            or entry is None
+            or entry[1] != old_session_id
+        ):
+            raise RuntimeError(
+                f"Container '{name}' is not owned by bridge session "
+                f"{old_session_id}"
+            )
+        lock, _owner = entry
+        self._container_lock_sessions.pop(old_session_id, None)
+        self._container_lock_sessions[new_session_id] = name
+        self._container_locks[name] = (lock, new_session_id)
 
     def _release_container_lock(self, session_id: str) -> None:
         name = self._container_lock_sessions.pop(session_id, None)
@@ -2998,7 +3217,7 @@ class SessionManager:
         self._remote_reap_tasks.add(task)
         task.add_done_callback(self._remote_reap_tasks.discard)
 
-    async def _remote_reap(self, rec: Any, endpoint: dict) -> None:
+    async def _remote_reap(self, rec: Any, endpoint: dict) -> bool:
         from ssh_manager import ConnectionManager
 
         from .session_host.endpoints import ssh_config_from_endpoint
@@ -3068,6 +3287,7 @@ class SessionManager:
             if confirmed_dead:
                 self._set_container_launch_pending(rec.session_id, False)
                 self._release_container_lock(rec.session_id)
+        return confirmed_dead
 
     def sweep_stranded_hosts(self) -> int:
         """Reap stranded incompatible Session Hosts that are now reapable.
@@ -3222,6 +3442,8 @@ class SessionManager:
         model: str | None = None,
         effort: str | None = None,
         parity_fault: str | None = None,
+        replace_session_id: str | None = None,
+        retain_container_lock_on_failure: bool = False,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -3303,7 +3525,10 @@ class SessionManager:
                 )
                 await self.end_session(existing.session_id, force=True)
                 existing = self._find_active_session(ws_key)
-            if existing is not None:
+            if (
+                existing is not None
+                and existing.session_id != replace_session_id
+            ):
                 raise SessionConflictError(
                     agent_name=agent_name or "",
                     existing_session_id=existing.session_id,
@@ -3438,9 +3663,16 @@ class SessionManager:
                 )
                 from .session_host.spawner import RemoteSpawnCleanupPendingError
 
-                self._acquire_container_lock(
-                    session_id, container_target["name"],
-                )
+                if replace_session_id:
+                    self._transfer_container_lock(
+                        replace_session_id,
+                        session_id,
+                        container_target["name"],
+                    )
+                else:
+                    self._acquire_container_lock(
+                        session_id, container_target["name"],
+                    )
                 prepared = None
                 try:
                     await ensure_container_ready(container_target)
@@ -3515,7 +3747,10 @@ class SessionManager:
                                     provisional,
                                     "incomplete container Session Host launch",
                                 )
-                    elif not parity_fault:
+                    elif (
+                        not parity_fault
+                        and not retain_container_lock_on_failure
+                    ):
                         self._release_container_lock(session_id)
                     raise
                 finally:
@@ -5137,6 +5372,43 @@ class SessionManager:
         if not force and session.has_active_background_tasks:
             raise SessionBusyError(session_id, session.active_background_tasks)
 
+        container = (
+            session.target.container
+            if isinstance(session.target.container, dict)
+            else {}
+        )
+        explicit_absence = (
+            container.get("authoritative_identity_removed") is True
+            or container.get("recreate_failed_without_host") is True
+        )
+        if (
+            container
+            and session_id in self._container_lock_sessions
+            and self._host_index is not None
+            and self._host_index.get(session_id) is None
+            and not explicit_absence
+        ):
+            self._remote_recovery_inconclusive.discard(session_id)
+            try:
+                await self._recover_remote_host_records(
+                    allow_wake=True,
+                    session_ids={session_id},
+                )
+            except Exception as exc:
+                self._remote_recovery_inconclusive.add(session_id)
+                raise RemoteHostRecoveryPendingError(
+                    "Container Session Host cleanup could not inspect remote "
+                    f"authority for {session_id}; retained target ownership"
+                ) from exc
+            if (
+                self._host_index.get(session_id) is None
+                and session_id in self._remote_recovery_inconclusive
+            ):
+                raise RemoteHostRecoveryPendingError(
+                    "Container Session Host cleanup is inconclusive; retained "
+                    f"session {session_id} and target ownership"
+                )
+
         await self._quiesce_session(session)
 
         # Session-Host mode: an explicit end is a *sanctioned terminate*, so it
@@ -5144,10 +5416,61 @@ class SessionManager:
         # detaches to keep the child reattachable. Without this the host + child
         # survive with a dangling index record and are never collected (#1786;
         # goal 1: termination is intentional, not inadvertent).
+        rec = None
         if self._host_index is not None:
             rec = self._host_index.get(session_id)
             if rec is not None:
-                self._reap_host_record(rec, "session ended")
+                container = (
+                    session.target.container
+                    if isinstance(session.target.container, dict)
+                    else {}
+                )
+                if (
+                    rec.boundary == "container"
+                    and container.get("authoritative_identity_removed") is True
+                ):
+                    self._kill_forward_sync(session_id)
+                    with contextlib.suppress(Exception):
+                        self._host_index.remove(session_id)
+                elif rec.boundary == "container":
+                    self._kill_forward_sync(
+                        session_id,
+                        release_container_lock=False,
+                    )
+                    confirmed_dead = await self._remote_reap(
+                        rec,
+                        getattr(rec, "endpoint", None) or {},
+                    )
+                    if not confirmed_dead:
+                        session.status = SessionStatus.FAILED
+                        self._db.update_session_status(
+                            session_id,
+                            SessionStatus.FAILED.value,
+                            time.time(),
+                        )
+                        raise RemoteHostRecoveryPendingError(
+                            "Container Session Host reap is inconclusive; "
+                            f"retained session {session_id} and target ownership"
+                        )
+                    with contextlib.suppress(Exception):
+                        self._host_index.remove(session_id)
+                    with contextlib.suppress(Exception):
+                        from . import bridge_lock
+                        bridge_lock.remove_sync(session_id)
+                else:
+                    self._reap_host_record(rec, "session ended")
+
+        if (
+            container
+            and container.get("launch_pending_session_id") != session_id
+            and (
+                (self._host_index is not None and rec is None)
+                or
+                container.get("authoritative_identity_removed") is True
+                or container.get("recreate_failed_without_host") is True
+            )
+        ):
+            self._release_container_lock(session_id)
 
         session.status = SessionStatus.ENDED
         with contextlib.suppress(Exception):
