@@ -9,33 +9,10 @@
 export PYTHONUTF8=1
 _awroot="$HOME/.agent-worktrees"
 _aw_exec_resolved() {
-  for _marker in current-version last-known-good; do
-    _awver=""
-    [ -f "$_awroot/$_marker" ] && _awver=$(tr -d ' \t\r\n' < "$_awroot/$_marker")
-    _awslot="$_awroot/versions/$_awver"
-    if [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
-      exec "$_awslot/bin/agent-worktrees" "$@"
-    elif [ -n "$_awver" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
-      exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
-    fi
-  done
-  # Marker absent/stale: newest COMPLETE slot only. A bare interpreter can exist
-  # before package installation/health checks finish and must never be launched.
-  _awcand=""
-  _awmode=""
-  _complete="$(ls -1t "$_awroot"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
-  if [ -n "$_complete" ]; then
-    _awslot=$(dirname "$_complete")
-    if [ -x "$_awslot/bin/agent-worktrees" ]; then
-      _awcand="$_awslot/bin/agent-worktrees"
-      _awmode=console
-    elif [ -x "$_awslot/Scripts/python.exe" ]; then
-      _awcand="$_awslot/Scripts/python.exe"
-      _awmode=python
-    fi
-  fi
-  if [ "$_awmode" = console ]; then exec "$_awcand" "$@"; fi
-  if [ "$_awmode" = python ]; then exec "$_awcand" -m agent_worktrees "$@"; fi
+  AW_PY=""
+  [ -f "$_awroot/bin/resolve-runtime.sh" ] || return 1
+  . "$_awroot/bin/resolve-runtime.sh"
+  [ -n "$AW_PY" ] && exec "$AW_PY" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
 

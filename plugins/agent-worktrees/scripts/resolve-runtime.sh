@@ -25,13 +25,55 @@ AW_PY=""
 _awr="$HOME/.agent-worktrees"
 _awv=""
 
-# -- helper: set AW_PY from a version's slot python, if executable --
+_aw_marker_valid() {
+  [ -n "$1" ] || return 1
+  awk -v expected="$1" '
+    NR != 1 { bad = 1 }
+    NR == 1 {
+      if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$/) {
+        bad = 1; next
+      }
+      version = $0
+      sub(/^\{"version": "/, "", version)
+      sub(/".*$/, "", version)
+    }
+    END { exit !(NR == 1 && !bad && version == expected) }
+  ' "$_awr/versions/$1/.install-complete.json" 2>/dev/null
+}
+
+# -- helper: set AW_PY from a complete version's slot python --
 _aw_try_slot() {
   [ -n "$1" ] || return 1
+  _aw_marker_valid "$1" || return 1
   for _sub in bin/python Scripts/python.exe; do
     if [ -x "$_awr/versions/$1/$_sub" ]; then AW_PY="$_awr/versions/$1/$_sub"; return 0; fi
   done
   return 1
+}
+
+_aw_version_key() {
+  awk '
+    {
+      original = $0
+      if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
+        count = split(original, part, /[.-]/)
+        phase = (count == 4) ? 0 : 1
+        dev = (count == 4) ? part[4] : "dev0"
+        sub(/^dev/, "", dev)
+        printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
+          part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
+        next
+      }
+      key = ""; rest = $0
+      while (match(rest, /[0-9]+/)) {
+        key = key substr(rest, 1, RSTART - 1)
+        number = substr(rest, RSTART, RLENGTH)
+        key = key sprintf("%020d", number + 0)
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      print "1:" key rest "\t" original
+    }
+  '
 }
 
 # Tier 1: the `current-version` marker (source of truth; atomically written).
@@ -46,12 +88,17 @@ if [ -z "$AW_PY" ] && [ -f "$_awr/last-known-good" ]; then
   _aw_try_slot "$_awlkg"
 fi
 
-# Tier 3: true first-run (no marker, no last-known-good) -> newest installed slot.
+# Tier 3: true first-run -> newest complete installed slot.
 if [ -z "$AW_PY" ]; then
-  for _p in "$_awr"/versions/*/bin/python "$_awr"/versions/*/Scripts/python.exe; do
-    [ -x "$_p" ] && AW_PY="$_p"
+  for _awv in $(
+    for _slot in "$_awr"/versions/*; do
+      [ -d "$_slot" ] || continue
+      printf '%s\n' "${_slot##*/}"
+    done | _aw_version_key | LC_ALL=C sort | cut -f2-
+  ); do
+    _aw_try_slot "$_awv" || true
   done
 fi
 AGENT_RT_PY="$AW_PY"
-unset _awr _awv _awlkg _sub _p 2>/dev/null || true
-unset -f _aw_try_slot 2>/dev/null || true
+unset _awr _awv _awlkg _sub _slot 2>/dev/null || true
+unset -f _aw_marker_valid _aw_try_slot _aw_version_key 2>/dev/null || true

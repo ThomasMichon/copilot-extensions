@@ -61,31 +61,19 @@ LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 # marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
 # `.venv` symlink is retired (#1106).
 RUNTIME_DIR="$HOME/.agent-worktrees"
-
-PYTHON=""
-if [[ -f "$RUNTIME_DIR/current-version" ]]; then
-    _ver="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version")"
-    if [[ -n "$_ver" && -x "$RUNTIME_DIR/versions/$_ver/bin/python" ]]; then
-        PYTHON="$RUNTIME_DIR/versions/$_ver/bin/python"
-    fi
+AW_PY=""
+if [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]]; then
+    # shellcheck source=../scripts/resolve-runtime.sh
+    source "$RUNTIME_DIR/bin/resolve-runtime.sh"
 fi
-if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
-    for _d in $(ls -1 "$RUNTIME_DIR/versions" 2>/dev/null | sort -r); do
-        if [[ -x "$RUNTIME_DIR/versions/$_d/bin/python" ]]; then
-            PYTHON="$RUNTIME_DIR/versions/$_d/bin/python"; break
-        fi
-    done
-fi
+PYTHON="$AW_PY"
 
-resolve_current_runtime_python() {
-    local version="" python=""
-    [[ -f "$RUNTIME_DIR/current-version" ]] || return 1
-    version="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version" 2>/dev/null)" \
-        || return 1
-    [[ -n "$version" ]] || return 1
-    python="$RUNTIME_DIR/versions/$version/bin/python"
-    [[ -f "$python" && -x "$python" ]] || return 1
-    printf '%s\n' "$python"
+resolve_runtime_python() {
+    AW_PY=""
+    [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]] || return 1
+    source "$RUNTIME_DIR/bin/resolve-runtime.sh"
+    [[ -n "$AW_PY" ]] || return 1
+    printf '%s\n' "$AW_PY"
 }
 
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then
@@ -563,9 +551,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     # Compose the paired private knowledge repo's plugin settings into the
     # harness worktree before Copilot starts and performs plugin discovery.
     # status_path is the real worktree during Bare resume (work_dir is HOME).
-    if ! _REFRESHED_PYTHON="$(resolve_current_runtime_python)"; then
-        setup_log ERROR "Current agent-worktrees runtime is unavailable after update apply; expected a valid current-version slot under $RUNTIME_DIR"
-        printf 'ERROR: Current agent-worktrees runtime is unavailable after update apply; expected a valid current-version slot under %s\n' \
+    if ! _REFRESHED_PYTHON="$(resolve_runtime_python)"; then
+        setup_log ERROR "Agent-worktrees runtime is unavailable after update apply; expected a complete slot under $RUNTIME_DIR"
+        printf 'ERROR: Agent-worktrees runtime is unavailable after update apply; expected a complete slot under %s\n' \
             "$RUNTIME_DIR" >&2
         exit 1
     fi

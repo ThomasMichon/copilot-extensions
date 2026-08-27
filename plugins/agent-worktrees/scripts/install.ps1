@@ -1419,19 +1419,12 @@ function Deploy-Binstub {
 set "PYTHONUTF8=1"
 rem Context resolves from CWD / --project (git-like); the binstub names its
 rem project via --project, not an ambient env var.
-rem Resolve the .venv reparse target and launch the slot python directly, never
-rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.
-set "_ROOT=%USERPROFILE%\.agent-worktrees"
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if not exist "%_PY%" goto :_aw_fallback
-"%_PY%" -m agent_worktrees --project $ProjectName %*
-exit /b %ERRORLEVEL%
-:_aw_fallback
-rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT
-set "WORKTREE_PROJECT=$ProjectName"
-"%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0$ProjectName.ps1" %*
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0$ProjectName.ps1" %*
+)
 exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
@@ -1451,11 +1444,10 @@ $env:PYTHONUTF8 = '1'
 # Resolve the runtime slot python via the junction-free current-version marker
 # (the .venv junction is retired -- #637/#1085/#1106).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
-$_py = ''
-$_ver = ''
-try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-$_py = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
-if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
+$AwPy = $null
+$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+if (Test-Path -LiteralPath $_resolver -PathType Leaf) { . $_resolver }
+$_py = $AwPy
 if (Test-Path $_py) {
     & $_py -m agent_worktrees --project '%%PROJECT%%' @args
     exit $LASTEXITCODE

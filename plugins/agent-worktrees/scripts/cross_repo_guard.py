@@ -48,6 +48,7 @@ Escape hatches / modes:
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -339,34 +340,30 @@ def _runtime_argv(root: Path | None = None) -> list[str] | None:
     runtime slot python directly instead, matching the binstubs' own authoritative
     ``current-version`` marker model (junction-free; dotfiles #581/#1085).
 
-    Order: ``current-version`` marker -> ``versions/<ver>`` slot python; else the
-    newest ``versions/*`` slot; else the legacy ``.venv`` reparse target (read,
-    never traversed -- dotfiles #637 -- with any ``\\??\\``/``\\\\?\\`` prefix
-    stripped); else a PATH binstub as a last-resort belt.
+    Uses the sibling canonical ``versioned_runtime.py`` resolver for
+    current-version, last-known-good, and version-aware newest-complete fallback;
+    then tries the legacy ``.venv`` reparse target (read, never traversed --
+    dotfiles #637); then a PATH binstub as a last-resort belt.
     """
     root = root or (Path(os.path.expanduser("~")) / ".agent-worktrees")
 
-    # 1. current-version marker (authoritative; junction-free).
     try:
-        ver = (root / "current-version").read_text("utf-8").strip()
-    except OSError:
-        ver = ""
-    if ver:
-        p = _slot_python(root / "versions" / ver)
-        if p.exists():
+        helper = Path(__file__).with_name("versioned_runtime.py")
+        spec = importlib.util.spec_from_file_location(
+            "_cross_repo_versioned_runtime", helper
+        )
+        if spec is not None and spec.loader is not None:
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            p = module.resolve_python(root)
+        else:
+            p = None
+        if p is not None and p.exists():
             return [str(p), "-m", "agent_worktrees"]
+    except Exception:
+        pass
 
-    # 2. newest versions/* slot that has a python.
-    try:
-        slots = sorted((root / "versions").iterdir())
-    except OSError:
-        slots = []
-    for slot in reversed(slots):
-        p = _slot_python(slot)
-        if p.exists():
-            return [str(p), "-m", "agent_worktrees"]
-
-    # 3. legacy .venv reparse target (read the link, never traverse it).
+    # Legacy .venv reparse target (read the link, never traverse it).
     try:
         target = _strip_nt_prefix(os.readlink(str(root / ".venv")))
     except OSError:
@@ -376,7 +373,7 @@ def _runtime_argv(root: Path | None = None) -> list[str] | None:
         if p.exists():
             return [str(p), "-m", "agent_worktrees"]
 
-    # 4. last-resort belt: a PATH binstub (rarely reached).
+    # Last-resort belt: a PATH binstub (rarely reached).
     exe = shutil.which("agent-worktrees")
     return [exe] if exe else None
 

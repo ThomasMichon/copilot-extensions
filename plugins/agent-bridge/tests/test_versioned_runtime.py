@@ -7,6 +7,7 @@ packaged into the venv), so it is loaded here by file path via importlib.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -53,6 +54,252 @@ def test_slot_creates_version_dir(tmp_path):
     d = vr.slot(tmp_path, "1.0.0")
     assert d == vr.version_dir(tmp_path, "1.0.0")
     assert d.is_dir()
+
+
+def test_slot_clean_is_vacuous_when_target_does_not_exist(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        vr,
+        "_versions_with_live_process",
+        lambda root: (_ for _ in ()).throw(AssertionError("must not scan processes")),
+    )
+
+    assert vr.slot(tmp_path, "1.0.0", clean_incomplete=True).is_dir()
+
+
+def test_slot_cleans_incomplete_current_and_detaches_markers(tmp_path, monkeypatch):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    rebuilt = vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert rebuilt.is_dir()
+    assert not (rebuilt / "marker.txt").exists()
+    assert not (tmp_path / vr.CURRENT_VERSION_FILE).exists()
+    assert not (tmp_path / vr.LAST_KNOWN_GOOD_FILE).exists()
+    assert not list(tmp_path.glob(".*.stale-*"))
+    assert current == rebuilt
+
+
+def test_slot_preserves_live_incomplete_current_and_fails(tmp_path, monkeypatch):
+    current = _install(tmp_path, "1.0.0")
+    completion = current / vr.COMPLETE_MARKER
+    completion.write_text("{malformed", encoding="utf-8")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+
+    def live_after_withdrawal(root):
+        assert not completion.exists()
+        assert not (root / vr.CURRENT_VERSION_FILE).exists()
+        assert not (root / vr.LAST_KNOWN_GOOD_FILE).exists()
+        return {"1.0.0"}
+
+    monkeypatch.setattr(vr, "_versions_with_live_process", live_after_withdrawal)
+
+    with pytest.raises(RuntimeError, match="still in use"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert (current / "marker.txt").is_file()
+    assert completion.read_text(encoding="utf-8") == "{malformed"
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+    assert (tmp_path / vr.LAST_KNOWN_GOOD_FILE).read_text().strip() == "1.0.0"
+
+
+def test_slot_cleanup_preserves_concurrently_replaced_marker(tmp_path, monkeypatch):
+    _install(tmp_path, "1.0.0")
+    _install(tmp_path, "2.0.0")
+    current = tmp_path / vr.CURRENT_VERSION_FILE
+    current.write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+    real_replace = vr.os.replace
+    raced = False
+
+    def replace_with_race(src, dst):
+        nonlocal raced
+        if Path(src) == current and not raced:
+            raced = True
+            current.write_text("2.0.0\n", encoding="utf-8")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(vr.os, "replace", replace_with_race)
+
+    vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert raced
+    assert current.read_text(encoding="utf-8").strip() == "2.0.0"
+
+
+def test_current_incomplete_slot_is_retained_without_process_enumeration(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert (current / "marker.txt").is_file()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+
+
+def test_stale_recorded_owner_allows_cleanup_without_process_enumeration(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.RUNNING_VERSION_FILE).write_text(
+        json.dumps({"version": "1.0.0", "pid": 424242}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+    monkeypatch.setattr(vr, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    rebuilt = vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert rebuilt.is_dir()
+    assert not (rebuilt / "marker.txt").exists()
+    assert not (tmp_path / vr.CURRENT_VERSION_FILE).exists()
+    assert current == rebuilt
+
+
+def test_unknown_recorded_owner_retains_current_without_process_enumeration(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.RUNNING_VERSION_FILE).write_text(
+        json.dumps([
+            {"version": "1.0.0", "pid": 424242},
+            {"version": "1.0.0"},
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+    monkeypatch.setattr(vr, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert (current / "marker.txt").is_file()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+
+
+def test_duplicate_marker_cleanup_restores_state_on_conservative_failure(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    duplicate = '{"version": "1.0.0", "version": "1.0.0"}'
+    marker.write_text(duplicate, encoding="utf-8")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+
+    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert current.is_dir()
+    assert marker.read_text(encoding="utf-8") == duplicate
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+
+
+def _write_slot_python(root: Path, version: str) -> Path:
+    subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
+    python = vr.version_dir(root, version) / subpath
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
+    if os.name != "nt":
+        python.chmod(0o755)
+    return python
+
+
+def test_resolve_python_falls_through_incomplete_marker_slots(tmp_path):
+    current_python = _write_slot_python(tmp_path, "2.0.0")
+    lkg_python = _write_slot_python(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("2.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+    vr.mark_complete(tmp_path, "1.0.0")
+
+    assert vr.resolve_python(tmp_path) == lkg_python
+    assert vr.resolve_python(tmp_path) != current_python
+
+
+def test_resolve_python_rejects_every_incomplete_slot(tmp_path):
+    _write_slot_python(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+
+    assert vr.resolve_python(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not-json",
+        '{"version": "wrong"}',
+        '{"version": "1.0.0", "version": "1.0.0"}',
+        '{"version": "1.0.0"}',
+        '{"version": "1.0.0", "completed_at": "x"}',
+        '{"version": "1.0.0", "completed_at": 1, "pid": 1}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": "1"}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": true}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": 1, "extra": 1}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": 1, "payload_hash": 1}',
+    ],
+)
+def test_is_complete_rejects_invalid_or_ambiguous_version_marker(tmp_path, marker):
+    _write_slot_python(tmp_path, "1.0.0")
+    vr.marker_path(tmp_path, "1.0.0").write_text(marker, encoding="utf-8")
+
+    assert not vr.is_complete(tmp_path, "1.0.0")
+    assert vr.resolve_python(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        {
+            "version": "1.0.0",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        },
+        {
+            "pid": 1,
+            "version": "1.0.0",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "payload_hash": "abc",
+        },
+    ],
+)
+def test_is_complete_accepts_canonical_schema_regardless_of_field_order(
+    tmp_path, marker
+):
+    python = _write_slot_python(tmp_path, "1.0.0")
+    vr.marker_path(tmp_path, "1.0.0").write_text(
+        json.dumps(marker), encoding="utf-8"
+    )
+
+    assert vr.is_complete(tmp_path, "1.0.0")
+    assert vr.resolve_python(tmp_path) == python
+
+
+def test_mark_complete_writes_canonical_marker(tmp_path):
+    _write_slot_python(tmp_path, "1.0.0")
+
+    path = vr.mark_complete(
+        tmp_path, "1.0.0", payload_hash="abc", pid=123
+    )
+
+    assert vr.read_marker(tmp_path, "1.0.0") == {
+        "version": "1.0.0",
+        "completed_at": json.loads(path.read_text())["completed_at"],
+        "pid": 123,
+        "payload_hash": "abc",
+    }
 
 
 def test_activate_points_current_at_version(tmp_path):
@@ -155,8 +402,30 @@ def test_list_versions_sorted(tmp_path):
     _install(tmp_path, "0.4.0-dev10")
     _install(tmp_path, "0.4.0-dev2")
     got = vr.list_versions(tmp_path)
-    # PEP 440-aware ordering: dev2 < dev9 < dev10
+    # Supported-version numeric ordering: dev2 < dev9 < dev10.
     assert got == ["0.4.0-dev2", "0.4.0-dev9", "0.4.0-dev10"]
+
+
+def test_version_key_is_stdlib_and_orders_supported_dev_versions(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def without_packaging(name, *args, **kwargs):
+        if name == "packaging" or name.startswith("packaging."):
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_packaging)
+
+    assert sorted(
+        ["0.4.0-dev10", "0.4.0-dev2", "0.4.0-dev9"],
+        key=vr._version_key,
+    ) == ["0.4.0-dev2", "0.4.0-dev9", "0.4.0-dev10"]
+    assert sorted(
+        ["0.4.0", "0.4.0-dev10", "0.4.0-dev9"],
+        key=vr._version_key,
+    ) == ["0.4.0-dev9", "0.4.0-dev10", "0.4.0"]
 
 
 # ---------------------------------------------------------------------------

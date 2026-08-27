@@ -12,15 +12,10 @@ $env:PYTHONUTF8 = '1'
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 function _resolve_aw_py {
-    foreach ($marker in @('current-version', 'last-known-good')) {
-        $ver = ''
-        try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
-        $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
-    }
-    Get-ChildItem (Join-Path $_root 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc | ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+    $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) { return $null }
+    . $resolver
+    return $AwPy
 }
 $_py = _resolve_aw_py
 if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }

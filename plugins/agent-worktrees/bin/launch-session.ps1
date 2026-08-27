@@ -170,35 +170,22 @@ if ($RecoveryMode) {
 # #637, and prone to drift; a marker file never is). Fallback: the newest
 # installed slot only -- the `.venv` link is retired (#1106).
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
-function Resolve-CurrentRuntimePython {
-    try {
-        $version = ([IO.File]::ReadAllText(
-            (Join-Path $RuntimeDir 'current-version')
-        )).Trim()
-        if (-not $version) { return $null }
-        $python = Join-Path $RuntimeDir (
-            'versions\' + $version + '\Scripts\python.exe'
-        )
-        if (Test-Path -LiteralPath $python -PathType Leaf) { return $python }
-    } catch {}
-    return $null
+$AwPy = $null
+$runtimeResolver = Join-Path $RuntimeDir 'bin\resolve-runtime.ps1'
+if (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) {
+    . $runtimeResolver
 }
 
-$VenvPython = $null
-try {
-    $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'current-version'))).Trim()
-    if ($_ver) {
-        $_p = Join-Path $RuntimeDir ('versions\' + $_ver + '\Scripts\python.exe')
-        if (Test-Path -LiteralPath $_p) { $VenvPython = $_p }
+function Resolve-RuntimePython {
+    $AwPy = $null
+    if (-not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf)) {
+        return $null
     }
-} catch {}
-if (-not $VenvPython) {
-    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name |
-        ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } |
-        Select-Object -Last 1
+    . $runtimeResolver
+    return $AwPy
 }
+
+$VenvPython = $AwPy
 
 if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
     Write-SetupLog "Venv resolved: $RuntimeDir"
@@ -628,11 +615,11 @@ Set-Location $plan.work_dir
 # Compose the paired private knowledge repo's plugin settings into the harness
 # worktree before Copilot starts and performs plugin discovery. status_path is
 # the real worktree during Bare resume (work_dir is HOME).
-$refreshedVenvPython = Resolve-CurrentRuntimePython
+$refreshedVenvPython = Resolve-RuntimePython
 if (-not $refreshedVenvPython) {
     $runtimeMessage = (
-        'Current agent-worktrees runtime is unavailable after update apply; ' +
-        "expected a valid current-version slot under $RuntimeDir"
+        'Agent-worktrees runtime is unavailable after update apply; ' +
+        "expected a complete slot under $RuntimeDir"
     )
     Write-SetupLog $runtimeMessage 'ERROR'
     [Console]::Error.WriteLine("ERROR: $runtimeMessage")

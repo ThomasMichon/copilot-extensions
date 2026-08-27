@@ -41,6 +41,14 @@ def test_powershell_resolver_exports_payload_invocation_contract(tmp_path):
     slot_python = runtime / "versions" / "1.2.3" / "Scripts" / "python.exe"
     slot_python.parent.mkdir(parents=True)
     slot_python.touch()
+    (slot_python.parents[1] / ".install-complete.json").write_text(
+        json.dumps({
+            "version": "1.2.3",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
+    )
     (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
     resolver = _SCRIPTS / "resolve-runtime.ps1"
     home_literal = str(tmp_path).replace("'", "''")
@@ -109,6 +117,10 @@ def test_binstubs_are_marker_only():
         if not p.is_file():
             continue
         text = p.read_text(encoding="utf-8")
+        if name.endswith(".cmd"):
+            assert name.replace(".cmd", ".ps1") in text
+            assert "powershell" in text
+            continue
         assert "current-version" in text, f"{name} must resolve via the marker"
         assert not re.search(r"\.venv[/\\](bin|Scripts)", text), (
             f"{name} still resolves python through a .venv link"
@@ -136,9 +148,22 @@ def test_installer_records_last_known_good(installer: str):
 
 
 def _make_slot(root: Path, version: str) -> None:
-    slot = root / ".agent-worktrees" / "versions" / version / "bin"
-    slot.mkdir(parents=True, exist_ok=True)
-    py = slot / "python"
+    runtime = root / ".agent-worktrees"
+    slot = runtime / "versions" / version
+    runtime_bin = runtime / "bin"
+    runtime_bin.mkdir(parents=True, exist_ok=True)
+    for name in ("resolve-runtime.sh", "resolve-runtime.ps1"):
+        shutil.copy2(_SCRIPTS / name, runtime_bin / name)
+    (slot / "bin").mkdir(parents=True, exist_ok=True)
+    (slot / ".install-complete.json").write_text(
+        json.dumps({
+            "version": version,
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
+    )
+    py = slot / "bin" / "python"
     py.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     py.chmod(0o755)
 
@@ -158,6 +183,38 @@ def _resolve(home: Path) -> str:
         f"resolver exited {out.returncode}: {out.stderr.strip()}"
     )
     return out.stdout.strip()
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
+def test_resolver_rejects_incomplete_marker_slot(tmp_path):
+    _make_slot(tmp_path, "1.2.3")
+    runtime = tmp_path / ".agent-worktrees"
+    (runtime / "versions" / "1.2.3" / ".install-complete.json").unlink()
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+
+    assert _resolve(tmp_path) == ""
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not-json",
+        '{"version": "wrong", "completed_at": "x", "pid": 1}',
+        '{"version": "1.2.3", "version": "1.2.3", "completed_at": "x", "pid": 1}',
+        '{"\\u0076ersion": "wrong", "version": "1.2.3", "completed_at": "x", "pid": 1}',
+        '{"version": "1.2.3", "completed_at": "x", "pid": 01}',
+    ],
+)
+def test_resolver_rejects_invalid_marker_json(tmp_path, marker):
+    _make_slot(tmp_path, "1.2.3")
+    runtime = tmp_path / ".agent-worktrees"
+    (runtime / "versions" / "1.2.3" / ".install-complete.json").write_text(
+        marker, encoding="utf-8"
+    )
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+
+    assert _resolve(tmp_path) == ""
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
@@ -220,9 +277,71 @@ def test_resolver_stale_marker_falls_to_last_known_good(tmp_path):
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
 def test_resolver_tier3_newest_on_true_first_run(tmp_path):
     # No marker and no last-known-good -> newest installed slot.
+    _make_slot(tmp_path, "0.1.0-dev9")
+    _make_slot(tmp_path, "0.1.0-dev10")
+    assert _resolve(tmp_path).endswith("versions/0.1.0-dev10/bin/python")
     _make_slot(tmp_path, "0.1.0")
-    _make_slot(tmp_path, "0.2.0")
-    assert _resolve(tmp_path).endswith("versions/0.2.0/bin/python")
+    assert _resolve(tmp_path).endswith("versions/0.1.0/bin/python")
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh binstub")
+def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
+    import os
+    import subprocess
+
+    runtime = tmp_path / ".agent-worktrees"
+    for version in ("1.5.3-dev9", "1.5.3-dev10"):
+        slot = runtime / "versions" / version
+        command = slot / "bin" / "agent-worktrees"
+        command.parent.mkdir(parents=True)
+        command.write_text(
+            f"#!/bin/sh\nprintf '%s' '{version}'\n", encoding="utf-8"
+        )
+        command.chmod(0o755)
+        (slot / ".install-complete.json").write_text(
+            json.dumps({
+                "version": version,
+                "completed_at": "2026-08-27T00:00:00Z",
+                "pid": 1,
+            }),
+            encoding="utf-8",
+        )
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+
+    result = subprocess.run(
+        [str(_BIN / "agent-worktrees"), "status"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "1.5.3-dev10"
+
+    slot = runtime / "versions" / "1.5.3"
+    command = slot / "bin" / "agent-worktrees"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\nprintf '%s' '1.5.3'\n", encoding="utf-8")
+    command.chmod(0o755)
+    (slot / ".install-complete.json").write_text(
+        json.dumps({
+            "version": "1.5.3",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [str(_BIN / "agent-worktrees"), "status"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "1.5.3"
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")

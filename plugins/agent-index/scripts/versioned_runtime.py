@@ -52,6 +52,7 @@ import argparse
 import errno
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -105,16 +106,20 @@ def list_versions(root: Path) -> list[str]:
 
 
 def _version_key(v: str):
-    """Best-effort ordering key (PEP 440 when available, else raw string)."""
-    try:
-        from packaging.version import InvalidVersion, Version
-
-        try:
-            return (0, Version(v))
-        except InvalidVersion:
-            return (1, v)
-    except Exception:
-        return (1, v)
+    """Stdlib-only ordering key for supported ``X.Y.Z[-devN]`` versions."""
+    supported = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", v)
+    if supported:
+        major, minor, patch, dev = supported.groups()
+        return (
+            0,
+            int(major),
+            int(minor),
+            int(patch),
+            1 if dev is None else 0,
+            int(dev or 0),
+        )
+    tokens = re.split(r"(\d+)", v.casefold())
+    return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
 
 
 # --------------------------------------------------------------------------
@@ -251,33 +256,34 @@ def resolve_python(root: Path) -> Path | None:
     1. the ``current-version`` marker (the source of truth, written atomically);
     2. ``last-known-good`` -- the last version ``activate()`` published -- when
        the marker is missing/unreadable or names an unresolvable slot;
-    3. the newest **complete** installed slot (true first-run / torn marker),
-       then any newest slot as a final belt.
+    3. the newest complete installed slot (true first-run / torn marker).
 
     Never resolves through a ``venv``/``.venv`` link (a reparse point on Windows
     that RedirectionGuard blocks) and **never** falls back to a PATH python -- an
     unresolved runtime returns ``None`` so the caller degrades deliberately
     (e.g. self-provisions) rather than silently binding the system interpreter.
+    Every tier requires a valid completion marker, so a partially built slot is
+    never selected merely because it contains an interpreter-shaped file.
     """
     # Tier 1: the current-version marker.
-    p = slot_python(root, current_version(root) or "")
-    if p is not None:
-        return p
+    current = current_version(root) or ""
+    if is_complete(root, current):
+        p = slot_python(root, current)
+        if p is not None:
+            return p
     # Tier 2: the last activated version (its slot, having been active, survives).
-    p = slot_python(root, read_last_known_good(root) or "")
-    if p is not None:
-        return p
-    # Tier 3: newest complete slot, then any newest slot.
+    lkg = read_last_known_good(root) or ""
+    if is_complete(root, lkg):
+        p = slot_python(root, lkg)
+        if p is not None:
+            return p
+    # Tier 3: newest complete slot.
     versions = list_versions(root)  # sorted, newest last
     for ver in reversed(versions):
         if is_complete(root, ver):
             p = slot_python(root, ver)
             if p is not None:
                 return p
-    for ver in reversed(versions):
-        p = slot_python(root, ver)
-        if p is not None:
-            return p
     return None
 
 
@@ -378,6 +384,66 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     return vdir
 
 
+def _detach_file(path: Path) -> tuple[Path, Path] | None:
+    """Atomically move ``path`` aside and return ``(detached, original)``."""
+    detached = path.with_name(
+        f".{path.name}.stale-{os.getpid()}-{time.time_ns()}"
+    )
+    try:
+        os.replace(path, detached)
+    except FileNotFoundError:
+        return None
+    return detached, path
+
+
+def _discard_detached(pair: tuple[Path, Path] | None) -> None:
+    if pair is None:
+        return
+    try:
+        pair[0].unlink()
+    except OSError:
+        pass
+
+
+def _restore_detached(pair: tuple[Path, Path] | None) -> None:
+    """Restore a detached marker without overwriting a concurrent publisher."""
+    if pair is None:
+        return
+    detached, original = pair
+    try:
+        os.link(detached, original)
+    except FileExistsError:
+        pass
+    except OSError:
+        if not original.exists():
+            os.replace(detached, original)
+            return
+    _discard_detached(pair)
+
+
+def _detach_marker_reference(
+    root: Path, name: str, version: str
+) -> tuple[Path, Path] | None:
+    """Atomically detach a marker only while it references ``version``."""
+    marker = root / name
+    try:
+        if marker.read_text(encoding="utf-8").strip() != version:
+            return None
+    except (OSError, UnicodeError):
+        return None
+    pair = _detach_file(marker)
+    if pair is None:
+        return None
+    try:
+        still_references = pair[0].read_text(encoding="utf-8").strip() == version
+    except (OSError, UnicodeError):
+        still_references = False
+    if not still_references:
+        _restore_detached(pair)
+        return None
+    return pair
+
+
 def slot(root: Path, version: str, *, clean_incomplete: bool = False,
          link_name: str = CURRENT_LINK) -> Path:
     """Ensure ``versions/<version>`` exists (empty is fine) and return it.
@@ -386,15 +452,51 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
     NOT marked complete -- a failed/partial/watchdog-killed prior build -- remove
     it first so the caller builds a FRESH venv rather than reusing a corpse via
     ``uv venv --allow-existing`` (which can inherit half-installed packages). A
-    complete slot is left intact (idempotent, fast re-run). The **current
-    (active)** slot is NEVER tossed even when unmarked -- a legacy slot predates
-    the marker convention yet still backs the live daemon.
+    complete slot is left intact (idempotent, fast re-run). An incomplete slot
+    is protected only while a live process owns it. Otherwise any
+    ``current-version`` / ``last-known-good`` references are atomically detached
+    before the slot is removed, including when the malformed slot is current.
     """
     vdir = version_dir(root, version)
-    if (clean_incomplete and vdir.is_dir()
-            and current_version(root, link_name) != version
-            and not is_complete(root, version)):
-        shutil.rmtree(vdir, ignore_errors=True)
+    if clean_incomplete and vdir.is_dir() and not is_complete(root, version):
+        was_current = current_version(root, link_name) == version
+        completion_pair = _detach_file(marker_path(root, version))
+        detached = [completion_pair]
+        detached.extend([
+            _detach_marker_reference(root, CURRENT_VERSION_FILE, version),
+            _detach_marker_reference(root, LAST_KNOWN_GOOD_FILE, version),
+        ])
+        detached_completion_is_valid = False
+        if completion_pair is not None:
+            try:
+                detached_completion_is_valid = (
+                    validate_marker(_load_unique_json(completion_pair[0]), version)
+                    is not None
+                )
+            except (OSError, UnicodeError, ValueError):
+                pass
+        if detached_completion_is_valid or is_complete(root, version):
+            for pair in reversed(detached):
+                _restore_detached(pair)
+            return vdir
+        if (was_current and not _reliable_process_enumeration()
+                and not _recorded_ownership_is_stale(root, version)):
+            for pair in reversed(detached):
+                _restore_detached(pair)
+            raise RuntimeError(
+                f"cannot safely clean current incomplete runtime slot "
+                f"without reliable process enumeration: {vdir}"
+            )
+        if version in _versions_with_live_process(root):
+            for pair in reversed(detached):
+                _restore_detached(pair)
+            raise RuntimeError(f"incomplete runtime slot is still in use: {vdir}")
+        if not _remove_slot(vdir, label="slot"):
+            for pair in reversed(detached):
+                _restore_detached(pair)
+            raise RuntimeError(f"could not remove incomplete runtime slot: {vdir}")
+        for pair in detached:
+            _discard_detached(pair)
     vdir.mkdir(parents=True, exist_ok=True)
     return vdir
 
@@ -521,6 +623,38 @@ def _iter_all_pids() -> list[int]:
         return [int(e) for e in os.listdir("/proc") if e.isdigit()]
     except OSError:
         return []
+
+
+def _reliable_process_enumeration() -> bool:
+    """Whether this host can enumerate processes for slot-image attribution."""
+    return os.name == "nt" or Path("/proc").is_dir()
+
+
+def _recorded_ownership_is_stale(root: Path, version: str) -> bool:
+    """Whether explicit ownership records exist for ``version`` and are all dead."""
+    try:
+        data = json.loads((root / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    entries = data if isinstance(data, list) else [data]
+    matching: list[int] = []
+    found_version = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        recorded_version = entry.get("version")
+        if not isinstance(recorded_version, str):
+            continue
+        if _norm_version(recorded_version) != _norm_version(version):
+            continue
+        found_version = True
+        pid = entry.get("pid")
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        matching.append(pid)
+    return found_version and bool(matching) and all(
+        not _pid_alive(pid) for pid in matching
+    )
 
 
 def _pid_cmdline_argv0(pid: int) -> str | None:
@@ -838,15 +972,56 @@ def marker_path(root: Path, version: str) -> Path:
     return version_dir(root, version) / COMPLETE_MARKER
 
 
+def _load_unique_json(path: Path):
+    def unique_object(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate JSON field: {key}")
+            out[key] = value
+        return out
+
+    return json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=unique_object,
+    )
+
+
+def validate_marker(data, version: str) -> dict | None:
+    """Validate the canonical completion-marker schema.
+
+    JSON field order is intentionally irrelevant to Python readers. The shell
+    resolver recognizes the canonical order emitted by :func:`mark_complete`;
+    both enforce the same fields, types, and exact version value.
+    """
+    if not isinstance(data, dict):
+        return None
+    allowed = {"version", "completed_at", "pid", "payload_hash"}
+    required = {"version", "completed_at", "pid"}
+    if not required.issubset(data) or not set(data).issubset(allowed):
+        return None
+    if not isinstance(data["version"], str) or data["version"] != version:
+        return None
+    if not isinstance(data["completed_at"], str):
+        return None
+    if (
+        not isinstance(data["pid"], int)
+        or isinstance(data["pid"], bool)
+        or data["pid"] < 0
+    ):
+        return None
+    if "payload_hash" in data and not isinstance(data["payload_hash"], str):
+        return None
+    return data
+
+
 def read_marker(root: Path, version: str) -> dict | None:
     """Parse a slot's completion marker, or None if absent/partial/mismatched."""
     try:
-        data = json.loads(marker_path(root, version).read_text(encoding="utf-8"))
+        data = _load_unique_json(marker_path(root, version))
     except Exception:
         return None
-    if not isinstance(data, dict) or data.get("version") != version:
-        return None
-    return data
+    return validate_marker(data, version)
 
 
 def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> bool:

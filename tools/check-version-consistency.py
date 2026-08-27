@@ -8,8 +8,9 @@ For every plugin ``<p>`` the version must agree across:
      this file)
   3. ``.github/plugin/marketplace.json``    -> the ``plugins[]`` entry matched
      **by name** -> ``version``             (always)
-  4. ``plugins/<p>/src/*/_build_info.py``   -> ``__version__``       (when that
-     file declares a source-version fallback)
+  4. checked-in source fallbacks under ``plugins/<p>/src/``:
+     ``_build_info.py`` ``__version__`` assignments and numeric development
+     literals assigned to ``__version__`` or ``_FALLBACK_VERSION``
 
 Why this guard exists: a version bump that touches only one file (e.g. #65
 bumped pyproject.toml to dev219 but left plugin.json/marketplace.json at dev218)
@@ -25,6 +26,7 @@ Exit code 0 = conformant, 1 = violations (suitable for a pre-push hook).
 from __future__ import annotations
 
 import ast
+from dataclasses import dataclass
 import json
 import re
 import sys
@@ -40,6 +42,41 @@ MARKETPLACE = REPO / ".github" / "plugin" / "marketplace.json"
 _PYPROJECT_VERSION = re.compile(
     r'^\s*version\s*=\s*"([^"]+)"', re.MULTILINE
 )
+_VERSION_LITERAL = re.compile(r"^\d+\.\d+\.\d+(?:-dev\d+)?$")
+_MONITORED_FALLBACKS = frozenset({"__version__", "_FALLBACK_VERSION"})
+
+
+@dataclass(frozen=True)
+class FallbackAssignment:
+    """One checked-in assignment to a monitored source-version variable."""
+
+    variable: str
+    value: str | None
+    line: int
+
+
+# Explicit contracts for packages whose source fallback is intentionally a
+# sentinel/dynamic resolver rather than the plugin version. The exact assignment
+# shape is verified; changing the sentinel or adding another assignment removes
+# the exemption and fails closed.
+_SOURCE_FALLBACK_EXEMPTIONS: dict[
+    tuple[str, str], tuple[tuple[str, str | None], ...]
+] = {
+    ("agent-bridge", "src/agent_bridge/__init__.py"): (
+        ("__version__", None),
+        ("__version__", "0.0.0-unknown"),
+    ),
+    ("agent-dispatch", "src/agent_dispatch/__init__.py"): (
+        ("__version__", None),
+    ),
+}
+_DYNAMIC_PRIMARY_FALLBACKS = {
+    ("agent-containers", "src/agent_containers/__init__.py"),
+    ("agent-index", "src/agent_index/__init__.py"),
+    ("agent-machines", "src/agent_machines/__init__.py"),
+    ("agent-ssh", "src/agent_ssh/__init__.py"),
+    ("agent-vault", "src/agent_vault/__init__.py"),
+}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -58,19 +95,18 @@ def _pyproject_version(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
-def _build_info_version(
+def _source_fallback_assignments(
     path: Path,
-) -> tuple[bool, str | None, str | None]:
+) -> tuple[list[FallbackAssignment], str | None]:
     try:
         text = path.read_text(encoding="utf-8")
     except Exception:
-        return False, None, "cannot read file"
-    if "__version__" not in text:
-        return False, None, None
+        return [], "cannot read file"
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return True, None, None
+        return [], "cannot parse file"
+    assignments: list[FallbackAssignment] = []
     for node in ast.walk(tree):
         targets: list[ast.expr] = []
         value: ast.expr | None = None
@@ -80,17 +116,71 @@ def _build_info_version(
         elif isinstance(node, ast.AnnAssign):
             targets = [node.target]
             value = node.value
-        if (
-            value is not None
-            and any(
-                isinstance(target, ast.Name) and target.id == "__version__"
-                for target in targets
+        for target in targets:
+            if (
+                isinstance(target, ast.Name)
+                and target.id in _MONITORED_FALLBACKS
+            ):
+                literal = (
+                    value.value
+                    if (
+                        isinstance(value, ast.Constant)
+                        and isinstance(value.value, str)
+                    )
+                    else None
+                )
+                assignments.append(
+                    FallbackAssignment(target.id, literal, node.lineno)
+                )
+    return sorted(assignments, key=lambda assignment: assignment.line), None
+
+
+def _source_fallback_versions(
+    path: Path,
+    *,
+    exemption: tuple[tuple[str, str | None], ...] | None = None,
+    allow_dynamic_primary: bool = False,
+) -> tuple[dict[str, str], list[str]]:
+    """Return literal fallback versions and assignment-validation errors."""
+    assignments, read_error = _source_fallback_assignments(path)
+    if read_error:
+        return {}, [read_error]
+    shape = tuple(
+        (assignment.variable, assignment.value) for assignment in assignments
+    )
+    if exemption is not None and shape == exemption:
+        return {}, []
+    if (
+        allow_dynamic_primary
+        and len(assignments) == 2
+        and assignments[0].variable == assignments[1].variable
+        and assignments[0].value is None
+        and assignments[1].value is not None
+    ):
+        assignments = assignments[1:]
+
+    versions: dict[str, str] = {}
+    errors: list[str] = []
+    counts: dict[str, int] = {}
+    for assignment in assignments:
+        counts[assignment.variable] = counts.get(assignment.variable, 0) + 1
+        key = f"{assignment.variable}@{assignment.line}"
+        if assignment.value is None:
+            errors.append(
+                f"{assignment.variable} line {assignment.line} is not a "
+                "constant string"
             )
-            and isinstance(value, ast.Constant)
-            and isinstance(value.value, str)
-        ):
-            return True, value.value, None
-    return True, None, None
+            continue
+        versions[key] = assignment.value
+        if not _VERSION_LITERAL.fullmatch(assignment.value):
+            errors.append(
+                f"{assignment.variable} line {assignment.line} has invalid "
+                f"version literal {assignment.value!r}"
+            )
+    for variable, count in counts.items():
+        if count > 1:
+            errors.append(f"{variable} has {count} monitored assignments")
+    return versions, errors
 
 
 def main() -> int:
@@ -128,21 +218,22 @@ def main() -> int:
                     f"{name}: pyproject.toml present but no [project].version found"
                 )
 
-        for build_info in sorted(plugin_dir.glob("src/*/_build_info.py")):
-            declares_version, build_ver, read_error = _build_info_version(build_info)
-            label = build_info.relative_to(plugin_dir).as_posix()
-            if read_error:
-                violations.append(f"{name}: cannot read {label}")
-                continue
-            if not declares_version:
-                continue
-            if build_ver:
-                sources[label] = build_ver
-            else:
-                violations.append(
-                    f"{name}: {label} declares __version__ but has no constant "
-                    "string assignment"
-                )
+        source_files = sorted(plugin_dir.glob("src/*/__init__.py"))
+        source_files.extend(sorted(plugin_dir.glob("src/*/_build_info.py")))
+        for source_file in source_files:
+            label = source_file.relative_to(plugin_dir).as_posix()
+            exemption = _SOURCE_FALLBACK_EXEMPTIONS.get((name, label))
+            fallback_versions, fallback_errors = _source_fallback_versions(
+                source_file,
+                exemption=exemption,
+                allow_dynamic_primary=(
+                    (name, label) in _DYNAMIC_PRIMARY_FALLBACKS
+                ),
+            )
+            for error in fallback_errors:
+                violations.append(f"{name}: {label}: {error}")
+            for assignment, fallback_ver in fallback_versions.items():
+                sources[f"{label}:{assignment}"] = fallback_ver
 
         if name in mkt_versions:
             if mkt_versions[name]:
@@ -162,7 +253,7 @@ def main() -> int:
         print(
             "\nEvery plugin's version must agree across plugin.json, "
             "pyproject.toml (runtime plugins), marketplace.json entry, and any "
-            "checked-in _build_info.py fallback. "
+            "checked-in numeric development-version fallback. "
             "See CONTRIBUTING.md § 'Where the version lives'.",
             file=sys.stderr,
         )
