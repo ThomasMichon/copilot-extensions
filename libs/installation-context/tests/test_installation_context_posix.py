@@ -496,6 +496,30 @@ def test_strict_json_language_is_shared_by_all_implementations(
         assert result.returncode != 0
 
 
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_unexpected_settings_json_type_fails_with_controlled_error(
+    runner_name: str,
+    command: tuple[str, ...],
+    tmp_path: Path,
+) -> None:
+    del runner_name
+    copilot, payload, durable = _installed_layout(tmp_path)
+    (copilot / "settings.json").write_text("[]\n", encoding="utf-8")
+    result = _run(
+        command,
+        "resolve",
+        "--copilot-home",
+        copilot,
+        "--payload-root",
+        payload,
+        "--durable-home",
+        durable,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "Traceback" not in result.stderr
+
+
 @pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
 def test_nul_source_values_fail_closed_everywhere() -> None:
     assert POWERSHELL_COMMAND is not None

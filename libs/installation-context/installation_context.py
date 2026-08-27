@@ -35,6 +35,8 @@ def _fail(message: str) -> None:
 def _property(value: Mapping[str, Any] | None, name: str, default: Any = None) -> Any:
     if value is None:
         return default
+    if not isinstance(value, Mapping):
+        _fail(f"Expected a JSON object while reading field '{name}'.")
     for candidate in value:
         if candidate != name and candidate.casefold() == name.casefold():
             _fail(f"JSON property '{candidate}' conflicts with exact case '{name}'.")
