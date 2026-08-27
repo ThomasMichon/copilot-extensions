@@ -65,9 +65,9 @@ def test_cloudflare_recipe_direct_recipe_and_coexistence() -> None:
 
     include_lines = [
         line for line in ssh_config.read_text(encoding="utf-8").splitlines()
-        if line.strip() == ssh_profile.ROOT_INCLUDE
+        if line.strip() == ssh_profile._include_line(config_d)
     ]
-    assert include_lines == [ssh_profile.ROOT_INCLUDE]
+    assert include_lines == [ssh_profile._include_line(config_d)]
     assert peer.read_text(encoding="utf-8") == "Host peer\n    HostName peer.example.com\n"
 
 

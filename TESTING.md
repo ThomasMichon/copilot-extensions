@@ -52,6 +52,9 @@ python tools/sync-installation-context.py --check  # inert exemplar copies match
 - **agent-mcp:** config loading, auth injectors, transports, bridge framing, the
   decorator pipeline; the code-mode Node tests skip automatically when `node` is
   absent.
+- **agent-ssh:** transport rendering, managed OpenSSH fragment source identity,
+  tri-state reconciliation, stale/duplicate quarantine, bounded warnings,
+  report-only doctor parity, and reachability-vs-hygiene separation.
 - **agent-worktrees:** a large suite covering worktree lifecycle, the
   status/tracking model, PR flow, and the Textual **Picker**.
 - **ai-attribution:** payload-only hook tests covering authoritative
