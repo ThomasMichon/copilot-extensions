@@ -42,8 +42,8 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 SessionState = Literal["active", "handed-off", "concluded"]
 HandoffState = Literal["pending", "linked", "cancelled"]
 
-# States that mean "no longer the current session" -- a head pointing at one of
-# these is stale and the resolved head advances past it.
+# States that mean "no longer the current session" -- a replayed head pointing
+# at one resolves to no current session until an explicit successor/adoption.
 _CONCLUDED_SESSION_STATES: tuple[SessionState, ...] = ("handed-off", "concluded")
 
 # A worktree's owner class. "session" = an interactive agent session (the
@@ -2359,9 +2359,9 @@ def conclude_session(
     """Assert a session's conclusion (``concluded`` or ``handed-off``).
 
     Conclusion is a deliberate act, never inferred from liveness. When the
-    concluded session was the head, the head pointer is **advanced** to the
-    newest remaining non-concluded session (or cleared to None when none
-    remains), so a worktree never keeps a concluded session as its current one.
+    concluded session was the head, a transition explicitly clears the head.
+    Another active session is never promoted by list or timestamp order; a
+    successor or adopter must assert the next transition.
     """
     if state not in _CONCLUDED_SESSION_STATES:
         raise SessionLifecycleError(

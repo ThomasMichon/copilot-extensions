@@ -16515,9 +16515,8 @@ def build_parser() -> argparse.ArgumentParser:
     # conclude-session -- assert a session's conclusion (handed-off | concluded)
     sp = sub.add_parser(
         "conclude-session",
-        help="Assert a session concluded (handed-off|concluded); advances the "
-             "head off it (JSON) -- the durable write context-handoff's cutover "
-             "shells to",
+        help="Assert a session concluded (handed-off|concluded); clears it as "
+             "head (JSON) without guessing a successor",
     )
     sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
                     required=True, help="Worktree ID (full or 4-char suffix)")
@@ -17996,12 +17995,10 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
 
     The ground-layer WRITE that context-handoff's live cutover shells to so the
     retired session leaves a durable, asserted lifecycle record -- not merely a
-    killed pane. Concluding the outgoing session ``handed-off`` advances the head
-    off it (``resolved_head_session`` derives the newest survivor, or None),
-    which is what closes the spent-baton replay: neither a stale replay nor the
-    agent-bridge create guard treats the worktree as still holding the concluded
-    session. The successor completes the two-way link when it registers
-    (:func:`tracking.register_session`).
+    killed pane. Concluding the outgoing session clears it as head without
+    guessing a replacement from list order. An exact-token successor bind
+    performs the normal atomic link; this command remains the compatibility and
+    explicit-sunset primitive.
 
     Resolves the worktree across all projects (a higher-layer caller's CWD is
     unrelated to the worktree). Unlike the read-only ``head-session``, an unknown
