@@ -136,6 +136,17 @@ reachable when their ownership is explicit.
     before any runtime root becomes operative.
   - [x] Add cross-platform receipt stamping, lock ownership, generation
     compare-and-swap, and inert exemplar vendoring.
+  - [ ] Implement the reviewed
+    [user-local installation-mode governance](installation-mode-governance.md):
+    OS-profile-pinned default legacy policy, exact marketplace/plugin overrides,
+    sticky actual mode, and the normative resolver/status contract.
+  - [ ] Add the tiny shared legacy-entrypoint probe and complete declared
+    path/service/task footprints for each exemplar; no exemplar becomes
+    operative until every legacy installer/bootstrap mutation refuses
+    namespaced-active, orphaned-transfer, and maintenance.
+  - [ ] Prove activation CAS pins namespace, install, and activation generations
+    and that Windows/WSL/POSIX receipts fail closed outside their exact
+    environment.
 - [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
   identity through stamp, snapshot, provision, cutover, rollback, and uninstall.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
@@ -166,8 +177,19 @@ reachable when their ownership is explicit.
 
 ### Phase 6 — Migration, enforcement, and cleanup ([#1110](https://github.com/ThomasMichon/copilot-extensions/issues/1110))
 
-- [ ] Provide an explicit legacy-state attribution/migration command; ambiguous
-  `~/.agent-*` state is preserved and never claimed automatically.
+- [ ] Add user-wide and plugin-scoped parser-free maintenance gates with strict
+  ownership sidecars, explicit management-command authorization, draining lease
+  behavior, stale-owner diagnostics, and fail-safe remote maintenance probing.
+- [ ] Provide explicit legacy-state attribution/migration under the legacy
+  lock/lease and cell install lock; publish the ownership tombstone and
+  generation-pinned activation without an observable mixed-writer interval.
+- [ ] Add explicit rollback/deactivation that publishes a monotonic
+  legacy/deactivated activation before clearing the tombstone under both locks.
+  Reserve activation deletion for locked cleanup after companion evidence is
+  gone.
+- [ ] Make every long-running legacy and namespaced loop recheck maintenance,
+  tombstone ownership, and activation/install generations at iteration
+  boundaries and before mutation.
 - [ ] Migrate or retire legacy services and global generic binstubs only after
   ownership is proven and the new cell passes health checks.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
@@ -358,8 +380,27 @@ See [`design.md`](design.md).
   across PowerShell, stdlib Python, and the no-Python Bash bootstrap.
 - Added byte-identical vendoring into the future `agent-machines` and
   `agent-index` exemplar payloads plus a CI sync gate.
-- Kept the slice non-operative: neither plugin selects the new roots, no legacy
-  state moves, and reconciliation plus both exemplar cutovers remain open.
+
+### 2026-08-27 — Windows handoff: activation-governance specification
+
+- Took the Windows-side handoff after cross-platform resolver parity and receipt
+  mutation locking landed.
+- Specified OS-profile-pinned
+  `~/.copilot-extensions/installation-mode.json` as the default-off user policy,
+  with source-derived marketplace and extensible exact-plugin overrides.
+- Moved the exact policy, `installation-activation.json`, legacy ownership
+  tombstone, resolver/status, and effective-mode contracts into
+  [`docs/install-contract.md`](../../../docs/install-contract.md#installation-mode-governance).
+- Required two-lock migration, generation-pinned activation CAS, explicit
+  legacy footprint metadata, environment isolation, and a shared pre-mutation
+  probe across every legacy installer/bootstrap entrypoint.
+- Specified user-wide and plugin-scoped maintenance markers with strict
+  ownership sidecars so active machines can drain and be updated surgically
+  over SSH.
+- Kept the slice specification-only and non-operative: no policy reader,
+  activation/tombstone writer, maintenance command, footprint probe, installer
+  gate, or exemplar cutover is claimed implemented by these documentation
+  changes.
 
 ### 2026-08-26 — Runtime plugin hook audit
 

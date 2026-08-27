@@ -56,6 +56,8 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 | File | Purpose | Written by |
 |------|---------|-----------|
 | `~/.copilot/settings.json` | Per-user CLI settings — **experimental mode**, personal plugin toggles | you (once per machine) |
+| `~/.copilot-extensions/installation-mode.json` | OS-profile-pinned desired installation mode: legacy by default, with namespaced opt-in and exact marketplace/plugin overrides | configurator / you |
+| `~/.copilot-extensions/maintenance` + `maintenance.json` | Existence gate plus strict ownership sidecar that quiesces new plugin activity during user-wide surgical maintenance | maintenance command / you |
 | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles` | `install` |
 | `~/.agent-worktrees/repos.yaml` · `projects.yaml` | The repos registry + adopted-projects registry (checkout paths, class) | `repos` / `register` |
 | `~/.{project}/config.yaml` | Per-machine overrides + the adapter that makes a *foreign* repo compatible | `register` (machine wiring) |
@@ -76,6 +78,25 @@ state by globally distinguishing marketplace provenance:
     plugins/<plugin-id>/{install.json,state,run,logs,...}
     repos/<stable-repo-id>/<plugin-id>/...
 ```
+
+Namespaced placement is not enabled merely because a plugin understands cells.
+The OS-profile-pinned
+`~/.copilot-extensions/installation-mode.json` flag is default-off and may
+enable cells globally or for an exact source-derived marketplace/plugin. It is
+resolved independently of ordinary `HOME` and durable-home overrides; repository
+`.copilot-extensions/` is never searched for this policy. Policy expresses
+desired mode; `<cell>/plugins/<plugin-id>/installation-activation.json` records
+the actual authoritative root after safe first install or migration. Existing
+unattributed legacy state therefore remains legacy and reports
+`migration-required` until explicitly migrated. Removing the flag from an
+active cell reports `deactivation-required` rather than switching roots.
+
+The maintenance marker is orthogonal: it suppresses new hooks, reconciliation,
+provisioning, service ensure/start, scheduled work, and dispatch while leaving
+read-only status/doctor available. A plugin-scoped marker and sidecar may live
+beside that plugin's cell state. The stable policy, activation, legacy
+tombstone, maintenance, and effective-mode contracts are defined by the
+[Install Contract](install-contract.md#installation-mode-governance).
 
 Committed repository policy remains distribution-neutral. New plugin-owned
 repository configuration converges on
@@ -110,7 +131,7 @@ unqualified state automatically. See
   `~/.agent-worktrees/config.yaml` (lowest). A repo designed for this system needs
   **no** machine-local file; you add one only to *override* on a specific machine
   or to adapt a foreign repo. Full precedence rules:
-  [agent-worktrees config-reference § Three config sources](../plugins/agent-worktrees/docs/config-reference.md#three-config-sources-layered).
+  [agent-worktrees config-reference § Config sources](../plugins/agent-worktrees/docs/config-reference.md#config-sources-layered).
 
 ## See also
 
