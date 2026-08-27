@@ -31,6 +31,8 @@ def test_windows_provision_bootstraps_uv_before_runtime_build():
     assert "if ($env:PROGRAMDATA)" in installer
     assert "$pythonPath = Get-BootstrapPython" in installer
     assert "& $pythonPath -m pip config get global.index-url" in installer
+    assert "$env:AGENT_WORKTREES_UV_BOOTSTRAP_URL" in installer
+    assert "$urlTemplate.Replace('{asset}', $asset)" in installer
 
 
 def test_uv_bootstrap_python_survives_windows_powershell_argument_passing():

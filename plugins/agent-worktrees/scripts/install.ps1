@@ -896,7 +896,11 @@ function Ensure-Uv {
 
     Write-ServiceChanged "uv not found -- vendoring the official Windows release into $toolDir"
     Ensure-InstallDir $toolDir
-    $url = "https://github.com/astral-sh/uv/releases/latest/download/$asset"
+    $urlTemplate = $env:AGENT_WORKTREES_UV_BOOTSTRAP_URL
+    if (-not $urlTemplate) {
+        $urlTemplate = 'https://github.com/astral-sh/uv/releases/latest/download/{asset}'
+    }
+    $url = $urlTemplate.Replace('{asset}', $asset)
     $bootstrap = @'
 import os
 import pathlib
