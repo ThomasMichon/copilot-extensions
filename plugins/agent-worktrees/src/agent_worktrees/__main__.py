@@ -16709,7 +16709,7 @@ def _hook_event_timestamp(payload: dict | None) -> str | None:
         try:
             return datetime.fromtimestamp(
                 seconds, tz=timezone.utc
-            ).astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+            ).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
         except (OSError, OverflowError, ValueError):
             return None
     if isinstance(value, str) and value.strip():
@@ -16718,7 +16718,7 @@ def _hook_event_timestamp(payload: dict | None) -> str | None:
                 value.strip().replace("Z", "+00:00")
             )
             if parsed.tzinfo is not None:
-                parsed = parsed.astimezone().replace(tzinfo=None)
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
             return parsed.strftime("%Y-%m-%dT%H:%M:%S")
         except ValueError:
             return None

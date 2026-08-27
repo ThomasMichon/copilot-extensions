@@ -428,8 +428,7 @@ class TestDeregisterSessionStdin:
         entry = load_record(
             tmp_tracking_dir / "wt-end.yaml"
         ).session_entry("session-end")
-        assert len(entry.ended_at) == 19
-        assert "+" not in entry.ended_at
+        assert entry.ended_at == "2026-08-27T11:00:00"
         assert entry.activations[-1].end_source == "hook:exit"
         assert entry.activations[-1].end_recorded_at
 
