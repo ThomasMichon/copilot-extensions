@@ -8,8 +8,9 @@ For every plugin ``<p>`` the version must agree across:
      this file)
   3. ``.github/plugin/marketplace.json``    -> the ``plugins[]`` entry matched
      **by name** -> ``version``             (always)
-  4. ``plugins/<p>/src/*/_build_info.py``   -> ``__version__``       (when that
-     file declares a source-version fallback)
+  4. checked-in source fallbacks under ``plugins/<p>/src/``:
+     ``_build_info.py`` ``__version__`` assignments and numeric development
+     literals assigned to ``__version__`` or ``_FALLBACK_VERSION``
 
 Why this guard exists: a version bump that touches only one file (e.g. #65
 bumped pyproject.toml to dev219 but left plugin.json/marketplace.json at dev218)
@@ -40,6 +41,7 @@ MARKETPLACE = REPO / ".github" / "plugin" / "marketplace.json"
 _PYPROJECT_VERSION = re.compile(
     r'^\s*version\s*=\s*"([^"]+)"', re.MULTILINE
 )
+_DEV_VERSION = re.compile(r"^\d+\.\d+\.\d+-dev\d+$")
 
 
 def _read_json(path: Path) -> dict | None:
@@ -58,19 +60,18 @@ def _pyproject_version(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
-def _build_info_version(
+def _source_fallback_versions(
     path: Path,
-) -> tuple[bool, str | None, str | None]:
+) -> tuple[dict[str, str], str | None]:
     try:
         text = path.read_text(encoding="utf-8")
     except Exception:
-        return False, None, "cannot read file"
-    if "__version__" not in text:
-        return False, None, None
+        return {}, "cannot read file"
     try:
         tree = ast.parse(text)
     except SyntaxError:
-        return True, None, None
+        return {}, "cannot parse file"
+    versions: dict[str, str] = {}
     for node in ast.walk(tree):
         targets: list[ast.expr] = []
         value: ast.expr | None = None
@@ -82,15 +83,17 @@ def _build_info_version(
             value = node.value
         if (
             value is not None
-            and any(
-                isinstance(target, ast.Name) and target.id == "__version__"
-                for target in targets
-            )
             and isinstance(value, ast.Constant)
             and isinstance(value.value, str)
+            and _DEV_VERSION.fullmatch(value.value)
         ):
-            return True, value.value, None
-    return True, None, None
+            for target in targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id in {"__version__", "_FALLBACK_VERSION"}
+                ):
+                    versions[target.id] = value.value
+    return versions, None
 
 
 def main() -> int:
@@ -128,21 +131,16 @@ def main() -> int:
                     f"{name}: pyproject.toml present but no [project].version found"
                 )
 
-        for build_info in sorted(plugin_dir.glob("src/*/_build_info.py")):
-            declares_version, build_ver, read_error = _build_info_version(build_info)
-            label = build_info.relative_to(plugin_dir).as_posix()
+        source_files = sorted(plugin_dir.glob("src/*/__init__.py"))
+        source_files.extend(sorted(plugin_dir.glob("src/*/_build_info.py")))
+        for source_file in source_files:
+            fallback_versions, read_error = _source_fallback_versions(source_file)
+            label = source_file.relative_to(plugin_dir).as_posix()
             if read_error:
-                violations.append(f"{name}: cannot read {label}")
+                violations.append(f"{name}: {read_error}: {label}")
                 continue
-            if not declares_version:
-                continue
-            if build_ver:
-                sources[label] = build_ver
-            else:
-                violations.append(
-                    f"{name}: {label} declares __version__ but has no constant "
-                    "string assignment"
-                )
+            for variable, fallback_ver in fallback_versions.items():
+                sources[f"{label}:{variable}"] = fallback_ver
 
         if name in mkt_versions:
             if mkt_versions[name]:
@@ -162,7 +160,7 @@ def main() -> int:
         print(
             "\nEvery plugin's version must agree across plugin.json, "
             "pyproject.toml (runtime plugins), marketplace.json entry, and any "
-            "checked-in _build_info.py fallback. "
+            "checked-in numeric development-version fallback. "
             "See CONTRIBUTING.md § 'Where the version lives'.",
             file=sys.stderr,
         )
