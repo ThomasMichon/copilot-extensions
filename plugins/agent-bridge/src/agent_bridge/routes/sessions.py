@@ -277,32 +277,45 @@ def _find_reusable_session(mgr, agent_name, caller_id):
 
 
 def _enforce_worktree_head_guard(worktree_id: str) -> None:
-    """Refuse (409) a create into a worktree with an ``active`` ground-layer head.
+    """Refuse a create into a worktree with an active head or pending handoff.
 
     Derives the head from agent-worktrees (see :mod:`..worktree_head`). When the
-    worktree has a current, un-concluded head session, raises an ``HTTPException``
+    worktree is occupied by a current session or handoff, raises an ``HTTPException``
     409 whose structured detail enumerates the three deliberate resolutions
     (reuse / handoff / sunset) plus the ``reclaim`` break-glass. Fails **open**:
-    an untracked worktree or an unreadable ground layer yields ``active=False``
+    an untracked worktree or an unreadable ground layer yields ``occupied=False``
     and this returns without raising, so create proceeds exactly as before.
     """
     from ..worktree_head import resolve_head
 
     head = resolve_head(worktree_id)
-    if not head.active:
+    if not head.occupied:
         return
+    pending = head.occupied and not head.active
     raise HTTPException(
         status_code=409,
         detail={
-            "reason": "worktree_head_active",
+            "reason": (
+                "worktree_head_pending" if pending
+                else "worktree_head_active"
+            ),
             "worktree_id": worktree_id,
             "head_session": head.head_session,
             "head_state": head.state,
             "message": (
-                f"Worktree {worktree_id} already has a current session "
-                f"({head.head_session}); starting a new one would run in "
-                "parallel with it. Resolve the incumbent first (reuse / handoff "
-                "/ sunset), or pass reclaim=true to take over."
+                (
+                    f"Worktree {worktree_id} has a pending handoff; starting "
+                    "another session could race the intended successor. "
+                    "Consume or explicitly supersede the handoff, or pass "
+                    "reclaim=true to take over."
+                )
+                if pending else
+                (
+                    f"Worktree {worktree_id} already has a current session "
+                    f"({head.head_session}); starting a new one would run in "
+                    "parallel with it. Resolve the incumbent first (reuse / "
+                    "handoff / sunset), or pass reclaim=true to take over."
+                )
             ),
             "choices": [
                 {

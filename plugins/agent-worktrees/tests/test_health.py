@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import yaml
 
 from agent_worktrees import health
-from agent_worktrees.tracking import SessionEntry, WorktreeRecord
+from agent_worktrees.tracking import HeadTransition, SessionEntry, WorktreeRecord
 
 # --------------------------------------------------------------------------- #
 # YAML integrity
@@ -302,3 +302,30 @@ class TestOrphanedHandoffs:
         e.state = "active"
         o.record.head_session = o.session_id
         assert rec.resolved_head_session == "s1"  # resumable again
+
+
+def test_finds_stale_head_cache_from_transition_replay():
+    record = WorktreeRecord(
+        worktree_id="wt-head",
+        branch="worktree/wt-head",
+        worktree_path="/tmp/wt-head",
+        repo="repo",
+        machine="machine",
+        platform="wsl",
+        started_at="t",
+        last_resumed_at="t",
+        resume_count=0,
+        title=None,
+        status="active",
+        completed_at=None,
+        sessions=[SessionEntry("old", "t"), SessionEntry("new", "t")],
+        head_session="old",
+        lifecycle_revision=2,
+        head_revision=1,
+        head_transitions=[
+            HeadTransition(1, "old", "initial", "t"),
+            HeadTransition(2, "new", "adopted", "t"),
+        ],
+    )
+
+    assert health.find_stale_head_caches([record]) == [record]

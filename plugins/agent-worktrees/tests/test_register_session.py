@@ -45,6 +45,7 @@ def _args(**kw) -> argparse.Namespace:
         pid=None,
         pane=None,
         emit_context=False,
+        handoff_token=None,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -394,6 +395,108 @@ def test_deregister_session_worktree_is_optional_for_hook_inference():
         ["deregister-session", "--session-id", "session-1"]
     )
     assert args.worktree_id is None
+
+
+class TestDeregisterSessionStdin:
+    def test_session_end_payload_closes_activation_with_event_timestamp(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-end", "/tmp/src/wt-end")
+        m.tracking.register_session(
+            "wt-end", "session-end", started_at="2026-08-27T10:00:00"
+        )
+        monkeypatch.setattr(
+            m.sys,
+            "stdin",
+            io.StringIO(json.dumps({
+                "sessionId": "session-end",
+                "cwd": "/tmp/src/wt-end",
+                "timestamp": "2026-08-27T11:00:00Z",
+                "source": "exit",
+            })),
+        )
+        args = argparse.Namespace(
+            worktree_id=None,
+            session_id=None,
+            cwd=None,
+            stdin=True,
+            launch_id=None,
+        )
+
+        assert m.cmd_deregister_session(args) == 0
+
+        entry = load_record(
+            tmp_tracking_dir / "wt-end.yaml"
+        ).session_entry("session-end")
+        assert len(entry.ended_at) == 19
+        assert "+" not in entry.ended_at
+        assert entry.activations[-1].end_source == "hook:exit"
+        assert entry.activations[-1].end_recorded_at
+
+    def test_session_end_resolves_exact_registered_session_when_cwd_is_home(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        path = tmp_tracking_dir / "wt-end.yaml"
+        _save_record(tmp_tracking_dir, "wt-end", "/tmp/src/wt-end")
+        m.tracking.register_session("wt-end", "session-end")
+        monkeypatch.setattr(m, "_activate_project_for_path", lambda _cwd: None)
+        monkeypatch.setattr(
+            m.tracking, "find_worktree_id_by_cwd", lambda _cwd: None
+        )
+        monkeypatch.setattr(
+            m, "_find_tracking_file_by_session", lambda _sid: path
+        )
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id", lambda _wid: "test"
+        )
+        monkeypatch.setattr(
+            m.sys,
+            "stdin",
+            io.StringIO(
+                '{"sessionId":"session-end","cwd":"/home/user"}'
+            ),
+        )
+        args = argparse.Namespace(
+            worktree_id=None,
+            session_id=None,
+            cwd=None,
+            stdin=True,
+            launch_id=None,
+        )
+
+        assert m.cmd_deregister_session(args) == 0
+        assert load_record(path).session_entry("session-end").ended_at
+
+    def test_explicit_worktree_id_activates_project_before_resolution(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _save_record(tmp_tracking_dir, "wt-end", "/tmp/src/wt-end")
+        m.tracking.register_session("wt-end", "session-end")
+        m.cfg.set_active_project(None)
+
+        def activate(_wid):
+            m.cfg.set_active_project("test-project")
+            return "test-project"
+
+        monkeypatch.setattr(
+            m, "_activate_project_for_worktree_id", activate
+        )
+        monkeypatch.setattr(
+            m, "_resolve_worktree_id", lambda wid: wid
+        )
+        monkeypatch.setattr(m, "_capture_session_title", lambda *_: True)
+        args = argparse.Namespace(
+            worktree_id="wt-end",
+            session_id="session-end",
+            cwd=None,
+            stdin=False,
+            launch_id=None,
+        )
+
+        assert m.cmd_deregister_session(args) == 0
+        assert load_record(
+            tmp_tracking_dir / "wt-end.yaml"
+        ).session_entry("session-end").ended_at
 
 
 class TestRegisterSessionReseedsStatusUpdater:
