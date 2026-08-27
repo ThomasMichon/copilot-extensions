@@ -622,9 +622,10 @@ def test_first_use_provision_is_serialized(tmp_path: Path) -> None:
     scripts = plugin / "scripts"
     scripts.mkdir(exist_ok=True)
     (scripts / "resolve-runtime.sh").write_text(
-        'AGENT_RT_PY=""\n'
+        'AW_PY=""\n'
         'p="$AGENT_RT_ROOT/versions/test/bin/python"\n'
-        '[ -x "$p" ] && AGENT_RT_PY="$p"\n'
+        '[ -x "$p" ] && AW_PY="$p"\n'
+        'AGENT_RT_PY="$AW_PY"\n'
         "true\n",
         encoding="utf-8",
     )

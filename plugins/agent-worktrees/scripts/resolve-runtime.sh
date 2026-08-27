@@ -1,12 +1,13 @@
 # shellcheck shell=sh
 # Canonical agent-worktrees runtime resolver -- sourced by the POSIX hooks and
-# binstubs. Sets AW_PY to the runtime slot python resolved via the junction-free
-# `current-version` marker (the single source of truth; #1106):
+# binstubs. Sets AW_PY and the payload-invocation contract's AGENT_RT_PY to the
+# runtime slot python resolved via the junction-free `current-version` marker
+# (the single source of truth; #1106):
 #
 #   ~/.agent-worktrees/current-version  ->  versions/<ver>/{bin/python|Scripts/python.exe}
 #
-# Nothing resolves through the retired `.venv` link. AW_PY is empty when no
-# runtime slot is installed (callers degrade gracefully / no-op).
+# Nothing resolves through the retired `.venv` link. Both variables are empty
+# when no runtime slot is installed (callers degrade gracefully / no-op).
 #
 # Resolution order (#742): the marker is written atomically (temp + rename), so
 # it is never observed half-written or transiently absent during a swap. When it
@@ -51,5 +52,6 @@ if [ -z "$AW_PY" ]; then
     [ -x "$_p" ] && AW_PY="$_p"
   done
 fi
+AGENT_RT_PY="$AW_PY"
 unset _awr _awv _awlkg _sub _p 2>/dev/null || true
 unset -f _aw_try_slot 2>/dev/null || true
