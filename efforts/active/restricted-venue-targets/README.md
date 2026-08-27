@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent serial PRs from one managed worktree
 - **Created:** 2026-08-26
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-containers` (`repository-shaped workspace`,
   `coordination-layer face`, `same-fabric-contract`,
   `policy-legible-before-dispatch`) · `visions/agent-fabric`
@@ -91,16 +91,17 @@ mount, credential relay, merge authority, or deployment authority.
 ## Plan
 
 ### Phase 1 — Stable provider target contract
-- [ ] Extend agent-containers provider list/resolve output with a stable,
+- [x] Extend agent-containers provider resolve output with a stable,
       provider-owned target identity and explicit venue metadata: provider,
       venue kind, target id, fleet, workspace, security profile, readiness, and
-      effective capability envelope.
-- [ ] Make the restricted ACP execution operation fail closed against the live
+      effective capability envelope. Namespace listing retains its compatible
+      name/state shape until agent-bridge can consume structured list metadata.
+- [x] Make the restricted ACP execution operation fail closed against the live
       container posture. It must never project credentials, relay variables,
       SSH keys/config, host paths, extra networks, or gateway reach.
-- [ ] Keep the payload additive and transport-neutral so older bridge consumers
+- [x] Keep the payload additive and transport-neutral so older bridge consumers
       continue to use the existing spawn command.
-- [ ] Add focused resolver, CLI, manifest, and Docker-argv tests; document the
+- [x] Add focused resolver, CLI, manifest, and Docker-argv tests; document the
       contract and bump agent-containers.
 
 ### Phase 2 — Provider target in agent-bridge
@@ -226,3 +227,12 @@ key and relay projection; restricted venues never enter that path.
   ahead of dispatch recovery, and anchored the agent-logger implementation slice
   to the agent-fabric `survivable-work` / `recover-not-lose` intent rather than
   extending the chronicler-specific agent-logger vision.
+- Phase 1 implementation adds a versioned provider `venue` block with stable
+  target id plus replaceable instance id, and splits restricted launch onto a
+  command builder that cannot accept host credential or relay projection. The
+  existing live-posture reinspection remains the gate immediately before exec.
+- Review made the contract explicitly fail-closed: `venue.security_profile`
+  remains backward-compatible, configured/observed mismatches resolve to the
+  stricter posture and are unready, readiness is distinct from authoritative
+  `ensure_ready` policy verification, credential capabilities come from the
+  effective fleet policy, and target IDs are scoped to one provider instance.
