@@ -79,7 +79,7 @@ def _hook_scripts() -> list[Path]:
     names = [
         "session-machine", "session-conduct", "register-session",
         "deregister-session", "project-hooks", "provision-check",
-        "anchor-hygiene-check", "bootstrap-check",
+        "anchor-hygiene-check", "marketplace-overrides", "bootstrap-check",
     ]
     out: list[Path] = []
     for n in names:

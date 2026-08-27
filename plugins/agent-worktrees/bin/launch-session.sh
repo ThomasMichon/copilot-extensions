@@ -587,6 +587,18 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
         exit "$_KNOWLEDGE_RC"
     fi
 
+    _MARKETPLACE_ARGS=(-m agent_worktrees reconcile-marketplaces
+        --cwd "$_KNOWLEDGE_CWD" --ensure-ignored --json)
+    if _MARKETPLACE_JSON=$("$PYTHON" "${_MARKETPLACE_ARGS[@]}" 2>&1); then
+        setup_log INFO "Marketplace override preflight completed: $_MARKETPLACE_JSON"
+    else
+        _MARKETPLACE_RC=$?
+        setup_log ERROR "Marketplace override preflight failed (exit $_MARKETPLACE_RC): ${_MARKETPLACE_JSON:-no details}"
+        printf 'ERROR: Marketplace override preflight failed: %s\n' \
+            "${_MARKETPLACE_JSON:-no details}" >&2
+        exit "$_MARKETPLACE_RC"
+    fi
+
     if [[ "$NO_MUX" == "1" ]]; then
         setup_log INFO "Mux disabled; launching directly"
     fi

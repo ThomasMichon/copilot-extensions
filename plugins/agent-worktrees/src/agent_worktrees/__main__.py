@@ -30,6 +30,7 @@ Usage (direct):
     agent-worktrees repos find <name>
     agent-worktrees repos srcroot [--set PATH] [--platform P]
     agent-worktrees knowledge compose-plugins [--json] [--cwd PATH]
+    agent-worktrees reconcile-marketplaces [--json] [--cwd PATH]
     agent-worktrees pre-launch
     agent-worktrees reconcile-plugins [--machine M]
 
@@ -1159,6 +1160,11 @@ def _create_worktree_core(
             record.pair_ref = pair_stamp.get("pair_ref")
             record.pair_kind = pair_stamp.get("pair_kind")
             tracking.save_record(record)
+
+    # Copilot discovers repository settings before sessionStart. Seed the
+    # worktree-local source overlay now so programmatic create callers and
+    # direct launch commands see registered local marketplaces immediately.
+    _reconcile_marketplaces_for_checkout(worktree_path, ensure_ignored=True)
 
     # Build launch command (for caller to use)
     fake_args = argparse.Namespace(
@@ -7430,6 +7436,26 @@ def cmd_create(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reconcile_marketplaces_for_checkout(
+    checkout: str | Path,
+    *,
+    ensure_ignored: bool = False,
+    warn_only: bool = True,
+) -> dict | None:
+    """Pre-seed local marketplace overrides without orphaning lifecycle work."""
+    from . import marketplace_overrides
+
+    try:
+        return marketplace_overrides.reconcile(
+            checkout, ensure_ignored=ensure_ignored
+        )
+    except marketplace_overrides.MarketplaceOverrideError as exc:
+        if warn_only:
+            output.warn(f"Could not reconcile local marketplace overrides: {exc}")
+            return None
+        raise
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # run -- execute an inner subcommand and journal the resource it produces as an
 # outbound claim on THIS (the calling) worktree (agent-fabric resource-claims)
@@ -10936,6 +10962,11 @@ def cmd_register(args: argparse.Namespace) -> int:
     except Exception:
         pass
 
+    # Adoption owns repository-local machine wiring. Seed source overrides after
+    # the repo registry entry exists, so exact-name marketplace checkouts can be
+    # resolved without guessing from the source root.
+    _reconcile_marketplaces_for_checkout(repo_dir, ensure_ignored=True)
+
     # Refresh Windows Terminal profiles if installed via install.ps1
     if plat == "windows":
         _refresh_terminal_profiles()
@@ -13879,6 +13910,83 @@ def cmd_knowledge_dispatch(argv: list[str]) -> int:
     return 0
 
 
+def _checkout_root(path: str | Path | None) -> Path | None:
+    """Return the actual checkout root, preserving linked-worktree identity."""
+    target = Path(path).resolve() if path else Path.cwd()
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    try:
+        return Path(result.stdout.strip()).resolve()
+    except OSError:
+        return None
+
+
+def cmd_reconcile_marketplaces(args: argparse.Namespace) -> int:
+    """Reconcile trusted local marketplace sources for one repo checkout."""
+    cwd = args.cwd
+    if args.stdin:
+        try:
+            payload = json.loads(sys.stdin.read() or "{}")
+        except (OSError, ValueError):
+            payload = {}
+        if isinstance(payload, dict) and isinstance(payload.get("cwd"), str):
+            cwd = payload["cwd"]
+
+    repo = _checkout_root(cwd)
+    if repo is None:
+        summary = {"action": "no-op", "changed": False, "reason": "no-repo"}
+    else:
+        from . import marketplace_overrides
+
+        try:
+            summary = marketplace_overrides.reconcile(
+                repo, ensure_ignored=args.ensure_ignored
+            )
+        except marketplace_overrides.MarketplaceOverrideError as exc:
+            if args.session_start:
+                print("{}")
+                return 0
+            summary = {"action": "error", "changed": False, "error": str(exc)}
+            if args.json:
+                print(json.dumps(summary, indent=2))
+            else:
+                print(
+                    f"Marketplace override reconciliation failed: {exc}",
+                    file=sys.stderr,
+                )
+            return 3
+
+    if args.session_start:
+        if summary.get("changed"):
+            path = summary.get("settings_local", "settings.local.json")
+            message = (
+                "Agent Worktrees updated local plugin marketplace source "
+                f"overrides in {path}. Restart Copilot CLI for the new plugin "
+                "sources to take effect."
+            )
+            print(json.dumps({"additionalContext": message}))
+        else:
+            print("{}")
+    elif args.json:
+        print(json.dumps(summary, indent=2))
+    else:
+        if summary["action"] == "no-op":
+            print("No repository checkout was resolved.")
+        else:
+            action = "Updated" if summary["changed"] else "Verified"
+            print(f"{action} marketplace overrides: {summary['settings_local']}")
+    return 0
+
+
 def _hunt_checkout(name: str) -> str | None:
     """Best-effort: find a local checkout for ``name`` under a known source root.
 
@@ -15773,6 +15881,22 @@ def build_parser() -> argparse.ArgumentParser:
     # pre-launch (two-pass self-update protocol)
     sub.add_parser("pre-launch", help="Check bootstrap staleness (JSON output)")
 
+    # reconcile-marketplaces (registered local checkout source overrides)
+    sp = sub.add_parser(
+        "reconcile-marketplaces",
+        help="Prefer exact-name registered local plugin marketplace checkouts",
+    )
+    sp.add_argument("--cwd", default=None,
+                    help="Path inside the target checkout (defaults to cwd)")
+    sp.add_argument("--stdin", action="store_true",
+                    help="Read a sessionStart payload and use its cwd")
+    sp.add_argument("--session-start", action="store_true",
+                    help="Emit sessionStart JSON and request restart when changed")
+    sp.add_argument("--ensure-ignored", action="store_true",
+                    help="Add the local settings path to Git info/exclude if needed")
+    sp.add_argument("--json", action="store_true",
+                    help="Emit the reconciliation summary as JSON")
+
     # stage-update (background marketplace download; #1430 stage-then-join)
     sp = sub.add_parser(
         "stage-update",
@@ -17647,6 +17771,7 @@ COMMAND_MAP = {
     "machine-context": cmd_machine_context,
     "get": cmd_get,
     "pre-launch": cmd_pre_launch,
+    "reconcile-marketplaces": cmd_reconcile_marketplaces,
     "stage-update": cmd_stage_update,
     "reconcile-plugins": cmd_reconcile_plugins,
     "reconcile-binstubs": cmd_reconcile_binstubs,
@@ -17995,7 +18120,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 # and balks helpfully when neither is available.
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
-    "register", "hook", "knowledge",
+    "register", "hook", "knowledge", "reconcile-marketplaces",
     "picker", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
     "bind-session",
     "bind-nudge",
