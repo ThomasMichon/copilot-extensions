@@ -63,6 +63,11 @@ restart when it can't. Set
 install with `worktree-manager self-install` (dry-run) / `--apply`, and see it in
 `worktree-manager doctor`.
 
+Registered project binstubs enter the interactive front door as
+`worktree-manager --project <name>`; that project-only form launches the Picker.
+Truly argument-free `worktree-manager` retains the provider-free first-run
+banner and onboarding roadmap.
+
 ## Choose the update source (fork / canary branch)
 
 By default the self-updater pulls the Worktree Manager payload from the canonical

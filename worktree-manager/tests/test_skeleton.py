@@ -5,6 +5,7 @@ programmatic, non-agentic, out-of-plugin entry point.
 from __future__ import annotations
 
 from worktree_manager import __version__
+from worktree_manager import __main__ as entrypoint
 from worktree_manager.__main__ import main
 
 
@@ -26,6 +27,24 @@ def test_bare_run_prints_intro_and_roadmap(capsys):
     # The roadmap is shown so a first run is self-explanatory.
     assert "one-line bootstrap" in out
     assert "you are here" in out
+
+
+def test_project_only_invocation_launches_picker(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        entrypoint,
+        "_cmd_picker",
+        lambda args: calls.append(args) or 17,
+    )
+
+    assert main(["--project", "dotfiles"]) == 17
+    assert calls == [["dotfiles"]]
+
+
+def test_project_only_invocation_rejects_missing_or_extra_values(capsys):
+    assert main(["--project"]) == 2
+    assert main(["--project", "dotfiles", "extra"]) == 2
+    assert "exactly one project name" in capsys.readouterr().out
 
 
 def test_is_not_a_plugin_payload():
