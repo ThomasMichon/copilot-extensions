@@ -10,6 +10,7 @@ import pytest
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
+VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
 
 
 def test_hook_manifest_points_to_payload_scripts() -> None:
@@ -45,7 +46,7 @@ def test_powershell_hook_emits_existing_guide() -> None:
     assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
     assert "organization-neutral" in payload["additionalContext"]
     assert payload["additionalContext"].startswith(
-        "[owner: copilot-extensions-harness@0.1.0-dev22]"
+        f"[owner: copilot-extensions-harness@{VERSION}]"
     )
 
 
@@ -64,7 +65,7 @@ def test_powershell_hook_falls_back_to_script_location() -> None:
     payload = json.loads(result.stdout)
     assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
     assert payload["additionalContext"].startswith(
-        "[owner: copilot-extensions-harness@0.1.0-dev22]"
+        f"[owner: copilot-extensions-harness@{VERSION}]"
     )
 
 
