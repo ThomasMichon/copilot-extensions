@@ -20150,11 +20150,11 @@ def main(argv: list[str] | None = None) -> int:
     has_project = bool(cfg.active_project())
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
-    # invocation is the human-facing path: prefer the out-of-plugin Worktree
-    # Manager when it is on PATH (its presence is the whole seam signal -- no
-    # registration file). With no Manager, fall back to the still-bundled Picker
-    # while it ships, and to the trustworthy install trigger once Phase 6c
-    # retires it (`_bundled_picker_available()` flips this automatically).
+    # invocation is the human-facing path. During the production-UX transplant,
+    # prefer the still-bundled production Picker while it ships; the replacement
+    # Manager Picker does not own the front door again until it carries that UX
+    # wholesale. Once the bundled Picker is retired, hand off to the Manager (or
+    # show the trustworthy install trigger when no usable Manager is present).
     # Headless projects are never interactive, so they keep their CLI-only
     # summary. Any args route programmatically to the CLI (below), never through
     # this seam.
@@ -20162,11 +20162,11 @@ def main(argv: list[str] | None = None) -> int:
         if has_project:
             if _is_headless_project():
                 return cmd_headless_bare()
+            if _bundled_picker_available():
+                return cmd_launch([])
             mgr = _usable_worktree_manager()
             if mgr:
                 return _exec_worktree_manager(mgr, cfg.active_project())
-            if _bundled_picker_available():
-                return cmd_launch([])
             return cmd_manager_install_trigger(cfg.active_project())
         mgr = _usable_worktree_manager()
         if mgr:
