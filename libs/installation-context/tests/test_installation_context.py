@@ -459,6 +459,19 @@ def test_source_id_requires_a_descriptor() -> None:
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_source_id_rejects_unused_case_colliding_properties() -> None:
+    result = _run_ps(
+        "source-id",
+        "-SourceJson",
+        '{"source":"opaque","id":"example","unused":1,"UNUSED":2}',
+        "-MarketplaceKey",
+        "example",
+        check=False,
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_machine_json_is_utf8() -> None:
     result = _run_ps(
         "source-id",

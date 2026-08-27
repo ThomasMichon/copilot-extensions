@@ -312,10 +312,17 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
+    casefolded: dict[str, str] = {}
     for key, value in pairs:
         if key in result:
             _fail(f"Duplicate JSON property '{key}'.")
+        folded = key.casefold()
+        if folded in casefolded:
+            _fail(
+                f"JSON properties '{casefolded[folded]}' and '{key}' differ only by case."
+            )
         result[key] = value
+        casefolded[folded] = key
     return result
 
 

@@ -475,6 +475,24 @@ def test_source_identity_matches_portable_vectors(
         assert actual["marketplaceId"] == vector["marketplaceId"]
 
 
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_source_identity_rejects_unused_case_colliding_properties(
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    del runner_name
+    result = _run(
+        command,
+        "source-id",
+        "--source-json",
+        '{"source":"opaque","id":"example","unused":1,"UNUSED":2}',
+        "--marketplace-key",
+        "example",
+        check=False,
+    )
+    assert result.returncode != 0
+
+
 @pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
 def test_all_implementations_match_the_full_source_vector_corpus() -> None:
     assert POWERSHELL_COMMAND is not None
