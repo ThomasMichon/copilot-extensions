@@ -2284,6 +2284,27 @@ def link_handoff(
             f"handoff predecessor {handoff.predecessor} is not tracked on "
             f"worktree {record.worktree_id}"
         )
+    if predecessor.state == "concluded":
+        raise SessionLifecycleError(
+            f"handoff predecessor {predecessor.session_id} was explicitly "
+            "concluded"
+        )
+    if (
+        predecessor.successor is not None
+        and predecessor.successor != successor_id
+    ):
+        raise SessionLifecycleError(
+            f"handoff predecessor {predecessor.session_id} already links to "
+            f"{predecessor.successor}"
+        )
+    if (
+        successor.predecessor is not None
+        and successor.predecessor != predecessor.session_id
+    ):
+        raise SessionLifecycleError(
+            f"handoff successor {successor_id} already follows "
+            f"{successor.predecessor}"
+        )
     predecessor.state = "handed-off"
     predecessor.successor = successor_id
     successor.state = "active"

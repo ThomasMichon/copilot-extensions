@@ -385,6 +385,37 @@ class TestExactHandoffLedger:
         assert rec.session_entry("new") is not None
         assert rec.resolved_head_session == "old"
 
+    def test_late_token_cannot_overwrite_explicit_conclusion(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        conclude_session(rec, "old", state="concluded")
+        with pytest.raises(SessionLifecycleError):
+            tracking.register_session(
+                "wt-1", "new", handoff_token="token"
+            )
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").state == "concluded"
+        assert rec.session_entry("old").successor is None
+
+    def test_token_cannot_overwrite_conflicting_successor_predecessor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t", successor="other"),
+            SessionEntry("new", "t", predecessor="different"),
+        ])
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token")
+        with pytest.raises(SessionLifecycleError):
+            tracking.link_handoff(rec, "token", "new")
+        assert rec.session_entry("old").successor == "other"
+        assert rec.session_entry("new").predecessor == "different"
+
     def test_new_handoff_cancels_prior_pending_for_same_predecessor(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
