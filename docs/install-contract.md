@@ -88,16 +88,32 @@ Consequence — a rule for every plugin in this repo:
 - A plugin that ships **only** skills, hooks, and/or agents needs no installer:
   `copilot plugin update` fully deploys it.
 - A plugin that ships a **runtime** — anything beyond skills/hooks/agents: a
-  venv, `~/.local/bin` binstubs, or a long-running service — **must** ship both:
-  1. `scripts/install.{ps1,sh}` implementing this contract, and
+  venv, command, or long-running service — **must** ship:
+  1. matching `scripts/install.{ps1,sh}` or `scripts/init.{ps1,sh}` entrypoints
+     implementing this contract, and
   2. an **install skill** an agent can trigger to deploy/refresh that runtime
      **from the source folder** after a payload update. The skill's job is to run
-     the plugin's `scripts/install.* update` from the source dir (the marketplace
-     plugin dir, or a local checkout — see
+     the plugin's manifest-selected canonical entrypoint with its documented
+     reconcile action (for example, `install.* update` or `init.* --force`) from
+     the source dir (the marketplace plugin dir, or a local checkout — see
      [Source = where the installer runs from](#source--where-the-installer-runs-from-no-flag)).
      Existing examples: `agent-worktrees:copilot-extensions-setup` (agent-worktrees +
      agent-bridge), `agent-codespaces:codespaces-setup` (agent-codespaces), `agent-containers:containers-fleet`
      (agent-containers).
+
+  A Python `agent-*` runtime that exposes an agent-facing command additionally
+  ships:
+  3. `payload-invocation.json` plus its generated POSIX, PowerShell, and CMD
+     payload-local command shims, and
+  4. attributable `sessionStart` hooks for both `bootstrap-check` and
+     `emit-command-catalog`.
+
+Every agent-facing command belongs to its implementing payload. Skills consume
+the owning plugin's exact catalog `argv`; they do not hardcode another plugin's
+path or discover a same-named command through `PATH`. The command glossary is
+static invocation context, not a snapshot of live worktrees, sessions, leases,
+or service health. See
+[`patterns/runtime-agent-plugin.md`](patterns/runtime-agent-plugin.md).
 
 So the full deploy of a runtime plugin is two steps — a payload refresh **then**
 its runtime installer — but **you do not run them per plugin by hand.** The
@@ -706,9 +722,10 @@ A plugin's own `scripts/*` and `src/<pkg>/installer.py` ship together, so they
 may share freely. Secondary entry points (e.g. `init.ps1`/`init.sh`) should
 delegate to the canonical `install.*` rather than duplicate the deploy logic.
 
-## Runtime self-reconcile (session-start hook)
+## Runtime self-reconcile and command glossary (session-start hooks)
 
-A Python runtime plugin installs a `~/.local/bin/<name>` binstub, but a
+A Python runtime plugin currently installs a legacy `~/.local/bin/<name>`
+management wrapper, but a
 `copilot plugin update` refreshes only the cached payload — it does **not**
 redeploy the binstub/venv. Without a nudge, the runtime silently lags the payload
 until someone re-runs the installer by hand.
@@ -727,6 +744,10 @@ version drifts** from the payload.
   plugin's canonical installer (`init.*`, or `install.* install`) **in the
   background** — the atomic versioned-venv swap keeps concurrent use safe, and
   backgrounding keeps session start non-blocking.
+- A separate `sessionStart` command hook runs
+  `scripts/emit-command-catalog.{ps1,sh}` from `COPILOT_PLUGIN_ROOT` and emits
+  exact payload-local `argv` plus `availability`. It never snapshots dynamic
+  runtime state or falls through to the legacy global wrapper.
 
 This reconciles the **tool**, never machine state or config. First install remains
 the one-time setup step; the hook only keeps an installed runtime current.

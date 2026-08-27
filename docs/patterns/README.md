@@ -61,8 +61,11 @@ Choose the simplest shape that fits; don't impose structure a plugin doesn't nee
    binstub, supervision), never leaked into behavior.
 6. **Fail loud on the real cause.** A service that can't bind or reach its endpoint
    surfaces the literal cause; it does not mask the symptom or silently degrade.
-7. **One canonical CLI per plugin.** A plugin owns exactly one binstub; a sibling
-   that imports its package must not re-point that binstub (avoids version skew).
+7. **One command owner, one attributable invocation surface.** A plugin owns
+   each logical command it implements and carries the canonical payload-local
+   platform shims for it. Siblings refer to the logical command and consume the
+   owning plugin's session glossary; they never re-point its command, embed its
+   path, or rediscover it through `PATH`.
 8. **Sweep safely; doctor explicitly.** A consumer-owned `*.d` registry processes
    each contribution independently, warns without aborting valid peers, and
    derives live state only from an authoritative current snapshot; an unreadable
@@ -141,6 +144,20 @@ core of the principles above; a reviewer checks a change against these.
   launch" — but that path must not be a *dependency*: the sibling-independent,
   confined-env realization (self-provisioning binstub + `stamp` + skill readiness
   self-check) is [`runtime-self-provisioning.md`](runtime-self-provisioning.md).)
+- **Every runtime command is payload-attributable.** Every runtime-bearing
+  marketplace `agent-*` plugin declares all agent-facing commands in
+  `payload-invocation.json`, commits the generated POSIX/PowerShell/CMD shims,
+  and wires both-platform bootstrap and command-glossary hooks through
+  `COPILOT_PLUGIN_ROOT`. Static prose names logical commands, never another
+  plugin's direct path; missing or ambiguous ownership never falls through to
+  `PATH`. Enforced by
+  `libs/payload-invocation/tests/test_agent_plugin_coverage.py`. See
+  [`runtime-agent-plugin.md`](runtime-agent-plugin.md).
+- **Initial command context stays static.** A session command glossary contains
+  exact attributable invocation data and, at most, stable bounded pivots such
+  as machine/repository names. It never snapshots worktrees, sessions, leases,
+  health, or live agents; fast-changing resources are queried through the mapped
+  command at the point of use.
 - **Repo mutation is an adopt-only power.** `install`/`update` act on
   **machine-local** state only — they may migrate local config *schema* and *warn*
   on a stale/deprecated repo convention, but never alter a repo's committed config
@@ -205,6 +222,7 @@ the exemplars, and the vision it serves):
 
 | Pattern | Concern |
 |---------|---------|
+| [runtime-agent-plugin](runtime-agent-plugin.md) | The complete “add an `agent-*` plugin” path: choose the smallest runtime shape, implement the cross-platform install contract, generate payload-local commands, wire attributable bootstrap/glossary hooks, write skills against logical commands, and add service/provider ownership without dynamic initial-context snapshots |
 | [context-injection](context-injection.md) | How repositories, plugins, skills, and operator policy retain clear ownership while plugin-owned ambient guidance is injected as a concise, gated `sessionStart` context kernel with fail-open behavior, static safety fallback, cross-platform parity, and non-executing budget inventory |
 | [local-endpoint-discovery](local-endpoint-discovery.md) | How a service exposes a discoverable, collision-free, local-first endpoint — the anti-static-port pattern, incl. the rendezvous / port-mapping file |
 | [service-transport](service-transport.md) | Which channel a service exposes — the transport ladder (stdio → OS-native socket/pipe → OS-assigned loopback → tunnel) and the named-pipe/UDS reality |
