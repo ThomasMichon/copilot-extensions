@@ -67,7 +67,7 @@ The CLI gates **all** extension loading behind `"experimental": true` in
 `~/.copilot/settings.json`. If extensions are not loading at all, set it there
 directly (or use whatever repo/machine bootstrap normally manages your Copilot
 settings) and start a fresh session. This plugin does **not** require
-agent-worktrees registration.
+worktree registration.
 
 ## Verify
 

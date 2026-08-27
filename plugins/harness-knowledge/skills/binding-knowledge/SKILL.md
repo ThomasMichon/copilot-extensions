@@ -24,6 +24,12 @@ description: >
 
 # Binding a stateless harness to its knowledge repo (harness-first)
 
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+state and repository operations below. Replace
+`<agent-worktrees catalog argv[0]>` with the raw path and quote it at each
+shell call site on POSIX; in PowerShell invoke it as
+`& "<agent-worktrees catalog argv[0]>" <args>`.
+
 A **stateless harness** is a shareable/forkable control plane that holds the
 *intelligence* (instructions, config, skills, sub-agents) but **no personal
 state**. Personal state -- efforts, logs, visions, notes, artifacts, personal
@@ -38,7 +44,7 @@ config, never committed into the harness.
 ## When to run
 
 - Right after cloning/forking a stateless harness on a new machine.
-- When `agent-worktrees state-root` reports the harness **requires an external
+- When `<agent-worktrees catalog argv[0]> state-root` reports the harness **requires an external
   state root but none is bound**.
 - To re-point the harness at a different knowledge repo.
 
@@ -47,7 +53,7 @@ config, never committed into the harness.
 Confirm the launch repo is a stateless harness:
 
 ```
-agent-worktrees state-root --json
+<agent-worktrees catalog argv[0]> state-root --json
 ```
 
 If `requires_external` is `true` and `bound` is `false` (or `state_root` is
@@ -90,7 +96,7 @@ repos are **direct-commit, low-ceremony** -- no PR gate.
 So the state-root resolver can find the knowledge checkout by name:
 
 ```
-agent-worktrees repos add <knowledge-name> "<knowledge-path>" --class singleton
+<agent-worktrees catalog argv[0]> repos add <knowledge-name> "<knowledge-path>" --class singleton
 ```
 
 (The harness itself is normally already registered from its own adoption. If not,
@@ -117,7 +123,7 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
 fragment names them for this machine. The fragment is **machine-local**
 (`~/.<harness>/knowledge-binding.md`, **emitted at session start by the
 harness-knowledge `sessionStart` hook**) -- it is **never** committed into the
-harness, and it does **not** use `agent-worktrees related add` (that would write
+harness, and it does **not** use the related-registry `add` operation (that would write
 a repo name into the harness's committed `related.yaml` and break statelessness).
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
@@ -161,7 +167,7 @@ exact managed values are tracked so stale entries can be retired safely.
 > preflight automatically runs:
 >
 > ```
-> agent-worktrees knowledge compose-plugins
+> agent-worktrees knowledge compose-plugins # marketplace-isolation: allow launch-preflight
 > ```
 >
 > The command resolves both paths by pair role and points local marketplaces at
@@ -175,7 +181,7 @@ exact managed values are tracked so stale entries can be retired safely.
 ## 4. Verify
 
 ```
-agent-worktrees state-root --json
+<agent-worktrees catalog argv[0]> state-root --json
 ```
 
 Expect `requires_external: true`, `bound: true`, and `state_root` pointing at the

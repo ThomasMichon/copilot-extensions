@@ -18,6 +18,12 @@ description: >
 
 # Authoring Harness Plugins
 
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+the related-repository operation below. Replace
+`<agent-worktrees catalog argv[0]>` with the raw path and quote it at the shell
+call site on POSIX; in PowerShell invoke it as
+`& "<agent-worktrees catalog argv[0]>" <args>`.
+
 The **`<repo>-harness`** standard: a repo ships its own *operator harness* — a
 payload-only Copilot CLI plugin that teaches an agent how to work **on** that
 repo. Instead of every downstream control repo hand-writing a per-repo narrative,
@@ -155,7 +161,8 @@ plugins/<repo>-harness/
 A `<repo>-harness` plugin **may ship a `.agent-worktrees/related.yaml` in its own
 payload** to contribute its target repo's related entry — `role`, `locus`
 (e.g. a CodeSpace/container venue), and `delegate` — so that **merely installing
-the plugin** makes `agent-worktrees related resolve <repo>` work, with no
+the plugin** makes `<agent-worktrees catalog argv[0]> related resolve <repo>`
+work, with no
 hand-authored config in the operator's control plane. agent-worktrees discovers
 these by convention: it sweeps installed plugins for a shipped
 `.agent-worktrees/related.yaml` and grafts them in as the **lowest-precedence**

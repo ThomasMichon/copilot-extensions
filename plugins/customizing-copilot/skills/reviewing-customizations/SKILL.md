@@ -63,7 +63,7 @@ It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
 `description`), **name/folder match**, **trigger collisions** across skills,
 **anti-recursion** (an agent that declares `mcp-servers` but lacks an MCP-readiness
 section or an anti-self-delegation line) and **agent-mcp fallback** (an
-agent-mcp-backed agent without an equivalent materialized CLI fallback),
+an agent-mcp-backed agent without an equivalent materialized CLI fallback),
 **inline secrets** in config files, and **raw IPs** in ssh/scp/rsync commands.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
 gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather

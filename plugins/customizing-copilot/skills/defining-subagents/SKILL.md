@@ -22,6 +22,11 @@ description: >
 
 # Defining Sub-Agents
 
+Use the exact `argv[0]` from the agent-mcp session command catalog for MCP
+fallback operations below. Replace `<agent-mcp catalog argv[0]>` with the raw
+path and quote it at the shell call site on POSIX; in PowerShell invoke it as
+`& "<agent-mcp catalog argv[0]>" <args>`.
+
 Custom agents are specialized profiles Copilot can delegate to. Each runs in its
 own subagent process with a separate context window. They are for **delegation**
 -- not host/machine identity (which a control harness handles through its own
@@ -149,7 +154,8 @@ config, or run commands. Instead, prevent self-delegation via
    startup and preserve the exact observed error if the catalog does not load.
 2. **Same-bridge CLI fallback.** After a catalog/load failure, use the existing
    materialized fleet named by the agent. Re-materialize when the expected stub
-   is missing or `manifest.json.generated_by` differs from `agent-mcp --version`;
+   is missing or `manifest.json.generated_by` differs from
+   `<agent-mcp catalog argv[0]> --version`;
    config/schema drift needs a deploy-owned digest. Probe a read-only stub with
    `--no-serve` and verify identity/capability before acting. If both surfaces
    fail, report both errors and stop. This fallback does not bypass an auth
@@ -244,12 +250,13 @@ from the CLI, no JSON-RPC by hand. `<bridge>` is the bridge's **registered name 
 the exact config path** the frontmatter uses — e.g. the `--config <path>` the
 `mcp-servers` block passes, given positionally:
 
-- **`agent-mcp call <bridge> <tool> '<arguments-json>'`** — one-shot: invoke a
+- **`<agent-mcp catalog argv[0]> call <bridge> <tool> '<arguments-json>'`** — one-shot: invoke a
   single upstream tool and print the result (pipeable; also reads the args JSON on
   stdin).
-- **`agent-mcp materialize <bridge>`** — project the whole `tools/list` catalog
+- **`<agent-mcp catalog argv[0]> materialize <bridge>`** — project the whole `tools/list` catalog
   into a discoverable CLI stub fleet under `~/.agent-mcp/materialized/<server>/`
-  (each stub forwards to `agent-mcp call`, so tools are invocable by name and pipe
+  (each stub forwards through the legacy global `agent-mcp call` management <!-- marketplace-isolation: allow materialized-stub-management -->
+  wrapper, so tools are invocable by name and pipe
   like any command; `--windows` emits a `.ps1`/`.cmd` shim farm). Re-running
   rebuilds atomically, so it doubles as a drift refresh.
 
@@ -272,7 +279,8 @@ Three boundaries keep this coherent with the readiness rule above:
   surfacing; record it, then continue through the equivalent fleet rather than
   hiding the discrepancy.
 - **It cannot rescue a broken bridge.** If the *bridge itself* is broken (upstream
-  down, credentials missing, provisioning failed), `agent-mcp call` fails
+  down, credentials missing, provisioning failed), the generated global
+  management call fails
   **identically** — same bridge — so it can't paper over a genuine bridge fault.
   Report the specific error and stop; don't loop.
 - **Same bridge, not a raw bypass.** The forbidden fallback (previous section) is

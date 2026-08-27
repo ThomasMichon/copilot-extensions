@@ -23,6 +23,9 @@ description: >
 
 # Validating in the clean room
 
+Use the exact `argv[0]` for `session-sync` from the agent-logger session
+command catalog when interpreting the standalone logger scenario below.
+
 The clean room is a disposable **fresh machine** (a Docker box with a stock
 login-shell PATH and none of your runtime state) that turns "I *think* the
 install/bootstrap/provision flow does X" into a hard **PASS/FAIL** line. This
@@ -193,7 +196,7 @@ Under `tools/clean-room/scenarios/` today:
 | `agent-containers-solo` | P/F1 | agent-containers provisions solo; its knowledge-overlay `state-root` shell-out falls open and read verbs answer without the base. |
 | `agent-ssh-solo` | P/F1 | agent-ssh (standalone profile emitter/verifier) installs with no sibling and its transport-contract read verbs answer. |
 | `agent-machines-solo` | P/F1 | agent-machines (standalone reconciler) provisions; `restore` (default dry-run) refuses cleanly on validator errors instead of crashing on absent config. |
-| `agent-logger-solo` | P/F1 | agent-logger (standalone) provisions; read verbs answer and `session-sync run --dry-run` reports would-push only. |
+| `agent-logger-solo` | P/F1 | the standalone logger provisions; read verbs answer and `session-sync run --dry-run` reports would-push only. <!-- marketplace-isolation: allow clean-room-runtime --> |
 | `agent-mcp-solo` | P/F1 | agent-mcp (the standalone MCP-wrapper exemplar, no bridge) provisions; `validate` schema-checks a stdio bridge and cleanly rejects a missing one. *(Docker smoke-run green.)* |
 | `agent-dispatch-solo` | P/F1 | agent-dispatch (standalone) provisions; `--version` matches package+manifest (not the fallback) and read verbs answer on an empty queue. |
 | `agent-index-solo` | P/F1 | agent-index (standalone) provisions the **service** without the heavy engine; status/role read verbs and the direct/bridge MCP surfaces answer. |

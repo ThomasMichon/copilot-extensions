@@ -155,7 +155,7 @@ When the binding is **branches**, the effort README's `## Coordination` section
 holds the topology: a **shared feature branch** (delegates ff-push slices; the
 **host** owns PRs) for interdependent work, or **independent worktrees with
 per-slice PRs** when each PR leaves the default branch green on its own. In an
-agent-worktrees repo, the mechanics are turn-key helpers in the
+a repo managed by agent-worktrees, the mechanics are turn-key helpers in the
 `agent-worktrees:git-collaboration` skill -- the effort records only the plan and who owns what.
 
 The effort README is where multi-participant coordination is planned and

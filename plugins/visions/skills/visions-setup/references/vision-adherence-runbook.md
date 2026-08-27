@@ -58,7 +58,7 @@ into every node the repo actually has:
    reconcile + hard rule + proportionality escape hatch in a stable
    `<!-- visions:vision-adherence:start -->` /
    `<!-- visions:vision-adherence:end -->` region in the repo's
-   agent-instructions file (or a dedicated `visions`-named instruction file).
+   an agent-instructions file (or a dedicated `visions`-named instruction file).
    Do not append a second copy on rerun. The owner marker is also the future
    migration seam: once equivalent plugin injection covers the launch paths,
    setup can shrink or remove this fallback without touching adjacent
