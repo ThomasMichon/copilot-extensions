@@ -16,6 +16,22 @@ _PLUGIN = Path(__file__).resolve().parents[1]
 
 
 def _bash() -> str:
+    if os.name == "nt":
+        candidates = [
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+            / "Git"
+            / "bin"
+            / "bash.exe",
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "Programs"
+            / "Git"
+            / "bin"
+            / "bash.exe",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+        pytest.skip("Git Bash is not available for Windows-path fixtures")
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("Bash is not available")
@@ -37,6 +53,7 @@ def _hooks(event: str) -> list[dict[str, object]]:
 
 def _run(command: str, shell: str, home: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
+    env.pop("COPILOT_PLUGIN_ROOT", None)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
     return subprocess.run(
