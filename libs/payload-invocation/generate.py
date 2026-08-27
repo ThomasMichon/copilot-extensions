@@ -148,26 +148,16 @@ def render(
     windows_catalog_shell = (
         "cmd" if data["windowsCatalogShim"] == "cmd" else "direct"
     )
-    if data["windowsCatalogShim"] == "cmd":
-        windows_cmd_host_block = (
-            "where pwsh >nul 2>&1\n"
-            "if %ERRORLEVEL%==0 (\n"
-            '  set "_PSHOST=pwsh"\n'
-            ") else (\n"
-            '  set "_PSHOST=%SystemRoot%\\System32\\WindowsPowerShell\\'
-            'v1.0\\powershell.exe"\n'
-            ")\n"
-            '"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*'
-        )
-    else:
-        windows_cmd_host_block = (
-            "where pwsh >nul 2>&1\n"
-            "if %ERRORLEVEL%==0 (\n"
-            '  pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*\n'
-            ") else (\n"
-            '  powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*\n'
-            ")"
-        )
+    windows_cmd_host_block = (
+        "where pwsh >nul 2>&1\n"
+        "if %ERRORLEVEL%==0 (\n"
+        '  set "_PSHOST=pwsh"\n'
+        ") else (\n"
+        '  set "_PSHOST=%SystemRoot%\\System32\\WindowsPowerShell\\'
+        'v1.0\\powershell.exe"\n'
+        ")\n"
+        '"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*'
+    )
     installer_name = str(data["installer"])
     if data["provisionMode"] == "direct":
         provision_posix = 'bash "$_installer" provision >&2'

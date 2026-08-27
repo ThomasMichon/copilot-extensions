@@ -191,18 +191,15 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
     )
 
     comspec = os.environ.get("COMSPEC", "cmd.exe")
-    pwsh = shutil.which("pwsh.exe")
-    if not pwsh:
-        pytest.skip("PowerShell 7 is unavailable")
     env = {
         **os.environ,
         "COPILOT_PLUGIN_ROOT": str(plugin),
-        "PATH": os.pathsep.join([str(Path(pwsh).parent), str(Path(comspec).parent)]),
+        "PATH": str(Path(comspec).parent),
     }
     result = subprocess.run(
         [
             comspec, "/d", "/s", "/c", str(cmd),
-            "create", "target", "--prompt-file", "-",
+            "create", "target", "--prompt-file", "prompt.txt",
         ],
         input="task body",
         env=env,
@@ -212,7 +209,7 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.replace("\r\n", "\n") == (
-        "-m agent_bridge create target --prompt-file -::task body\n"
+        "-m agent_bridge create target --prompt-file prompt.txt::task body\n"
     )
 
 

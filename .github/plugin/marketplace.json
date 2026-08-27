@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev659"
+    "version": "1.7.5-dev660"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev641",
+      "version": "1.5.3-dev642",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -24,13 +24,13 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev85",
+      "version": "0.4.0-dev86",
       "source": "plugins/agent-codespaces"
     },
     {
       "name": "agent-containers",
       "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted-fleet OpenSSH transport",
-      "version": "0.1.2-dev89",
+      "version": "0.1.2-dev90",
       "source": "plugins/agent-containers"
     },
     {
@@ -42,13 +42,13 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev51",
+      "version": "0.1.0-dev52",
       "source": "plugins/agent-ssh"
     },
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev67",
+      "version": "0.1.1-dev68",
       "source": "plugins/agent-logger"
     },
     {
@@ -102,13 +102,13 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev84",
+      "version": "0.1.0-dev85",
       "source": "plugins/agent-index"
     },
     {
       "name": "agent-machines",
       "description": "Portable restore-machinestate for Copilot CLI - converge the current machine to desired state declared in in-repo requirement packages (Copilot settings first, then repo-local modules). Machine-scoped union restore discovered from the adopted-projects registry, a seven-disposition model (enforce/ensure-present/capture-only/ignore/exclude/prune/prerequisite-check), a conflict validator that detects (never auto-arbitrates) cross-package clashes, and a repo-local module runner (dry-run-aware, gated, cross-platform) so sensitive OS-mutating modules stay in each harness repo while the engine stays generic.",
-      "version": "0.1.0-dev46",
+      "version": "0.1.0-dev47",
       "source": "plugins/agent-machines"
     },
     {
