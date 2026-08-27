@@ -31,6 +31,16 @@ try { $peek = & $VenvPython -m agent_worktrees reconcile-plugins --peek 2>$null 
 if (-not $peek) { exit 0 }
 
 try { $plan = $peek | ConvertFrom-Json } catch { exit 0 }
+$diagnostics = $plan.PSObject.Properties['diagnostics']
+if ($diagnostics) {
+    foreach ($diagnostic in @($diagnostics.Value)) {
+        if (-not $diagnostic) { continue }
+        Write-Host (
+            "[agent-worktrees] Reconcile diagnostic: {0} [{1}] {2}" -f
+            $diagnostic.service, $diagnostic.reason, $diagnostic.message
+        ) -ForegroundColor DarkGray
+    }
+}
 if ($plan.action -ne 'reconcile') { exit 0 }
 
 $services = ($plan.updates | ForEach-Object { $_.service } | Select-Object -Unique) -join ', '

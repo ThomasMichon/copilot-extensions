@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import subprocess
+import types
 from pathlib import Path
 
 import pytest
@@ -78,7 +79,7 @@ def _installer_ran(calls: list[list[str]]) -> bool:
 def test_installer_skipped_when_version_current(wired, monkeypatch):
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
-                        lambda name, home=None: "1.5.3-dev9")
+                        lambda name, home=None, **kwargs: "1.5.3-dev9")
     assert m.cmd_update(_args()) == 0
     assert not _installer_ran(wired), "installer must be skipped when current"
 
@@ -86,7 +87,7 @@ def test_installer_skipped_when_version_current(wired, monkeypatch):
 def test_installer_runs_on_version_drift(wired, monkeypatch):
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev10")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
-                        lambda name, home=None: "1.5.3-dev9")
+                        lambda name, home=None, **kwargs: "1.5.3-dev9")
     assert m.cmd_update(_args()) == 0
     assert _installer_ran(wired), "installer must run when the version drifts"
 
@@ -94,16 +95,127 @@ def test_installer_runs_on_version_drift(wired, monkeypatch):
 def test_force_reruns_installer_when_current(wired, monkeypatch):
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
-                        lambda name, home=None: "1.5.3-dev9")
+                        lambda name, home=None, **kwargs: "1.5.3-dev9")
     assert m.cmd_update(_args(force=True)) == 0
     assert _installer_ran(wired), "--force must re-deploy even when current"
+
+
+def test_selected_context_never_runs_self_legacy_installer(
+    wired,
+    monkeypatch,
+    plugin_dir,
+):
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev10")
+    monkeypatch.setattr(
+        reconcile,
+        "_selected_runtime_root",
+        lambda name, selected_plugin_dir: (Path("/cell/agent-worktrees"), True),
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_deployed_version",
+        lambda name, home=None, **kwargs: "1.5.3-dev9",
+    )
+
+    assert m.cmd_update(_args(force=True)) == 0
+
+    assert not _installer_ran(wired)
+
+
+def test_prelaunch_selected_context_suppresses_self_legacy_installer(
+    tmp_path,
+    monkeypatch,
+    plugin_dir,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    cell_root = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(service_paths=None)
+        ),
+    )
+    monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
+    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        reconcile,
+        "installed_payload_dir",
+        lambda name: plugin_dir,
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_explicit_context_target",
+        lambda: (Path("/context/install.json"), "agent-worktrees"),
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_selected_runtime_root",
+        lambda name, selected_plugin_dir: (cell_root, True),
+    )
+    monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev10")
+    monkeypatch.setattr(
+        reconcile,
+        "runtime_deployed_version",
+        lambda name, home=None, **kwargs: "1.5.3-dev9",
+    )
+
+    plan = m.plan_pre_launch()
+
+    assert plan["action"] == "continue"
+    assert plan["diagnostics"][0]["reason"] == "context-runtime-version-drift"
+    assert "updates" not in plan
+
+
+def test_prelaunch_invalid_other_context_fails_closed(
+    tmp_path,
+    monkeypatch,
+    plugin_dir,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.setattr(m, "_find_repo_dir", lambda: repo)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: types.SimpleNamespace(
+            default_repo=types.SimpleNamespace(service_paths=None)
+        ),
+    )
+    monkeypatch.setattr(m, "_resolve_environment", lambda config: "test")
+    monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        reconcile,
+        "installed_payload_dir",
+        lambda name: plugin_dir,
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_explicit_context_target",
+        lambda: (Path("/context/install.json"), "agent-index"),
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_selected_runtime_root",
+        lambda name, selected_plugin_dir: (_ for _ in ()).throw(
+            ValueError("invalid cross-plugin context")
+        ),
+    )
+
+    plan = m.plan_pre_launch()
+
+    assert plan["action"] == "continue"
+    assert plan["diagnostics"][0]["reason"] == "installation-context-invalid"
+    assert "updates" not in plan
 
 
 def test_installer_runs_when_deployed_version_unknown(wired, monkeypatch):
     # No deploy-manifest -> deployed version is None -> never skip on uncertainty.
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
-                        lambda name, home=None: None)
+                        lambda name, home=None, **kwargs: None)
     assert m.cmd_update(_args()) == 0
     assert _installer_ran(wired), "unknown deployed version must re-deploy"
 
@@ -115,7 +227,7 @@ def test_skip_still_reconciles_terminal_state_on_windows(wired, monkeypatch):
     (Test Chamber hidden / orphan cruft) forever."""
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
-                        lambda name, home=None: "1.5.3-dev9")
+                        lambda name, home=None, **kwargs: "1.5.3-dev9")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "windows")
     refreshed = {"n": 0}
     monkeypatch.setattr(m, "_refresh_terminal_profiles",
@@ -129,7 +241,7 @@ def test_skip_does_not_reconcile_terminal_on_non_windows(wired, monkeypatch):
     """The skip-path terminal reconcile is Windows-only (no-op elsewhere)."""
     monkeypatch.setattr(reconcile, "payload_version", lambda d: "1.5.3-dev9")
     monkeypatch.setattr(reconcile, "runtime_deployed_version",
-                        lambda name, home=None: "1.5.3-dev9")
+                        lambda name, home=None, **kwargs: "1.5.3-dev9")
     monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
     refreshed = {"n": 0}
     monkeypatch.setattr(m, "_refresh_terminal_profiles",

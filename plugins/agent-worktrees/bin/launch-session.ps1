@@ -63,6 +63,20 @@ function Write-SetupStatus {
     }
 }
 
+function Write-PlanDiagnostics {
+    param([object]$Plan, [string]$Prefix)
+    if (-not $Plan) { return }
+    $property = $Plan.PSObject.Properties['diagnostics']
+    if (-not $property) { return }
+    foreach ($diagnostic in @($property.Value)) {
+        if (-not $diagnostic) { continue }
+        Write-SetupLog (
+            "{0}: {1} [{2}] {3}" -f
+            $Prefix, $diagnostic.service, $diagnostic.reason, $diagnostic.message
+        ) 'WARN'
+    }
+}
+
 # Write header and create a "latest" copy for easy access
 try {
     $header = @(
@@ -311,6 +325,11 @@ function Invoke-UpdateApply {
                 try { $status = Get-Content $statusFile -Raw | ConvertFrom-Json } catch {}
             }
         }
+        if ($status -and $status.runtime_apply_blocked) {
+            Write-SetupLog (
+                "Plugin runtime apply blocked: $($status.runtime_apply_blocked)"
+            ) 'WARN'
+        }
 
         # (1) Marketplace installer, iff the download changed the payload.
         #     NO re-exec: a launcher-script change applies on the next launch.
@@ -364,7 +383,10 @@ function Invoke-UpdateApply {
             $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
             if (-not $prePlan) {
                 Write-SetupLog 'pre-launch returned invalid JSON — proceeding' 'WARN'
-            } elseif ($prePlan.action -eq 'self-update') {
+            } else {
+                Write-PlanDiagnostics $prePlan 'Pre-launch'
+            }
+            if ($prePlan -and $prePlan.action -eq 'self-update') {
                 Write-SetupStatus 'Bootstrap services are stale; updating them...'
                 foreach ($update in $prePlan.updates) {
                     Write-SetupStatus "Updating $($update.service)..."
@@ -385,6 +407,7 @@ function Invoke-UpdateApply {
                 $preJson = & $VenvPython -m agent_worktrees pre-launch 2>$null
                 if ($LASTEXITCODE -eq 0 -and $preJson) {
                     $prePlan = ($preJson -join "`n") | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    Write-PlanDiagnostics $prePlan 'Pre-launch'
                     if ($prePlan -and $prePlan.action -eq 'self-update') {
                         Write-SetupLog 'Still stale after update — proceeding anyway' 'WARN'
                     }
@@ -406,8 +429,11 @@ function Invoke-UpdateApply {
             $recJson = & $VenvPython -m agent_worktrees reconcile-plugins 2>$null
             if (-not $recJson) { break }
             try { $recPlan = ($recJson | ConvertFrom-Json) } catch { break }
+            Write-PlanDiagnostics $recPlan 'Plugin reconcile'
             if ($recPlan.action -ne 'reconcile') {
-                if ($rpass -eq 1) { Write-SetupLog 'Plugin reconcile: nothing to do' }
+                if ($rpass -eq 1) {
+                    Write-SetupLog 'Plugin reconcile: no executable actions'
+                }
                 break
             }
             $recUpdates = @($recPlan.updates)

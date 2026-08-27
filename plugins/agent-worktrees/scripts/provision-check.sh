@@ -31,6 +31,17 @@ if [[ ! -x "$PYTHON" ]]; then exit 0; fi
 peek="$(PYTHONPATH="" "$PYTHON" -m agent_worktrees reconcile-plugins --peek 2>/dev/null)" || exit 0
 [[ -n "$peek" ]] || exit 0
 
+diagnostics="$(printf '%s' "$peek" | PYTHONPATH="" "$PYTHON" -c \
+'import sys, json
+for d in json.load(sys.stdin).get("diagnostics", []):
+    print(f"{d.get('service', '?')} [{d.get('reason', 'diagnostic')}] {d.get('message', '')}")' \
+    2>/dev/null)" || diagnostics=""
+while IFS= read -r diagnostic; do
+    [[ -n "$diagnostic" ]] || continue
+    echo "[agent-worktrees] Reconcile diagnostic: $diagnostic" >&2
+    _log WARN "reconcile diagnostic: $diagnostic"
+done <<< "$diagnostics"
+
 # Decide + extract the services needing work in one python pass (no jq dep).
 # Exits non-zero when there is nothing to do, so the shim returns immediately.
 services="$(printf '%s' "$peek" | PYTHONPATH="" "$PYTHON" -c \

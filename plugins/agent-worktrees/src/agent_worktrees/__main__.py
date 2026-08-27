@@ -11355,17 +11355,42 @@ def _cmd_update_in_plugin(args: argparse.Namespace) -> int:
     plat = cfg.detect_platform()
     force = getattr(args, "force", False)
     aw_payload_ver = _reconcile.payload_version(plugin_dir)
-    aw_deployed_ver = _reconcile.runtime_deployed_version("agent-worktrees")
-    version_match = (
-        (not force) and aw_payload_ver and aw_payload_ver == aw_deployed_ver
+    try:
+        aw_runtime_root, aw_context_selected = _reconcile._selected_runtime_root(
+            "agent-worktrees", plugin_dir
+        )
+    except ValueError as error:
+        output.err(f"Installation context invalid: {error}")
+        return 1
+    aw_deployed_ver = _reconcile.runtime_deployed_version(
+        "agent-worktrees", root=aw_runtime_root
     )
+    versions_equal = bool(
+        aw_payload_ver and aw_payload_ver == aw_deployed_ver
+    )
+    version_match = (not force) and versions_equal
     # The bin/ hook shims deploy independently of the runtime version, so a
     # version match is NOT proof they are current -- a payload can add a new
     # shim (resolve-runtime.ps1, #1106) or a partial deploy can bump the runtime
     # slot without redeploying them, silently breaking the sessionStart reseed
     # (empty Mux status bar, dotfiles #1171). Don't quick-skip on shim drift.
-    hooks_drifted = bool(version_match) and _reconcile.hook_shims_drifted(plugin_dir)
-    if version_match and not hooks_drifted:
+    hooks_drifted = (
+        bool(version_match)
+        and not aw_context_selected
+        and _reconcile.hook_shims_drifted(plugin_dir)
+    )
+    if aw_context_selected:
+        if versions_equal:
+            output.ok(
+                f"Selected context runtime already at {aw_deployed_ver} -- "
+                "skipping legacy installer"
+            )
+        else:
+            output.warn(
+                "Selected context runtime is missing or stale; namespaced "
+                "installation remains read-only, so the legacy installer was skipped"
+            )
+    elif version_match and not hooks_drifted:
         output.ok(f"Runtime already at {aw_deployed_ver} -- skipping installer "
                   "(use --force to re-deploy)")
         # The full installer is skipped, but LIVE Windows Terminal state drifts
@@ -11768,11 +11793,18 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     if scope == "none":
         return "payload-only"
 
-    if not force:
-        pver = reconcile.payload_version(pdir)
-        dver = reconcile.runtime_deployed_version(name)
+    try:
+        runtime_root, context_selected = reconcile._selected_runtime_root(name, pdir)
+    except ValueError as error:
+        return f"installation context invalid: {error}"
+    pver = reconcile.payload_version(pdir)
+    dver = reconcile.runtime_deployed_version(name, root=runtime_root)
+    if context_selected:
         if pver and dver and reconcile._versions_equal(dver, pver):
             return "SKIPPED (current)"
+        return "SKIPPED (context runtime is read-only)"
+    if not force and pver and dver and reconcile._versions_equal(dver, pver):
+        return "SKIPPED (current)"
 
     # Resolve the runtime installer with the SAME preference the launch-path
     # reconciler uses (``reconcile.runtime_installer_argv``): prefer
@@ -12032,15 +12064,45 @@ def _update_modules(
         # skip when we can positively confirm equality; an unknown deployed
         # version (no deploy-manifest) falls through and re-deploys. --force
         # always re-deploys.
-        if not force:
-            from . import reconcile as _reconcile
-            mod_payload_ver = _reconcile.payload_version(module_dir)
-            mod_deployed_ver = _reconcile.runtime_deployed_version(name)
-            if mod_payload_ver and mod_payload_ver == mod_deployed_ver:
+        from . import reconcile as _reconcile
+        try:
+            runtime_root, context_selected = _reconcile._selected_runtime_root(
+                name, module_dir
+            )
+        except ValueError as error:
+            output.warn(f"{name}: installation context invalid: {error}")
+            results.append((name, "installation context invalid"))
+            continue
+        mod_payload_ver = _reconcile.payload_version(module_dir)
+        mod_deployed_ver = _reconcile.runtime_deployed_version(
+            name, root=runtime_root
+        )
+        if context_selected:
+            if (
+                mod_payload_ver
+                and mod_deployed_ver
+                and mod_payload_ver == mod_deployed_ver
+            ):
                 output.ok(f"{name} already at {mod_deployed_ver} -- "
                           "skipping installer")
                 results.append((name, "SKIPPED (current)"))
-                continue
+            else:
+                output.warn(
+                    f"{name}: selected context runtime is read-only; "
+                    "skipping legacy installer"
+                )
+                results.append((name, "SKIPPED (context runtime is read-only)"))
+            continue
+        if (
+            not force
+            and mod_payload_ver
+            and mod_deployed_ver
+            and mod_payload_ver == mod_deployed_ver
+        ):
+            output.ok(f"{name} already at {mod_deployed_ver} -- "
+                      "skipping installer")
+            results.append((name, "SKIPPED (current)"))
+            continue
 
         # Locate the platform installer (convention: scripts/install.{ps1,sh})
         if platform == "windows":
@@ -14868,6 +14930,8 @@ def plan_pre_launch() -> dict:
     ``updates`` into the staged pending-apply plan). The launcher executes the
     ``argv`` vectors and re-invokes pre-launch (max 1 retry).
     """
+    from . import reconcile as _reconcile
+
     repo_dir = _find_repo_dir()
     if not repo_dir:
         # Can't determine staleness -- proceed anyway
@@ -14886,10 +14950,77 @@ def plan_pre_launch() -> dict:
 
     # Filter to bootstrap services only
     bootstrap = {s.name: s for s in all_services if s.name in _BOOTSTRAP_SERVICES}
+    diagnostics: list[dict[str, str]] = []
+    aw_context_selected = False
+    aw_plugin_dir = _reconcile.installed_payload_dir("agent-worktrees")
+    try:
+        explicit_context = _reconcile._explicit_context_target()
+    except ValueError as error:
+        explicit_context = None
+        aw_context_selected = True
+        diagnostics.append({
+            "service": "agent-worktrees",
+            "reason": "installation-context-invalid",
+            "message": str(error),
+        })
+    if explicit_context is not None:
+        if aw_plugin_dir is None:
+            aw_context_selected = True
+            diagnostics.append({
+                "service": "agent-worktrees",
+                "reason": "installation-context-payload-missing",
+                "message": (
+                    "selected context cannot be validated because the "
+                    "agent-worktrees payload is not installed"
+                ),
+            })
+        else:
+            aw_runtime_root = None
+            try:
+                aw_runtime_root, aw_context_selected = (
+                    _reconcile._selected_runtime_root(
+                        "agent-worktrees", aw_plugin_dir
+                    )
+                )
+            except ValueError as error:
+                aw_context_selected = True
+                diagnostics.append({
+                    "service": "agent-worktrees",
+                    "reason": "installation-context-invalid",
+                    "message": str(error),
+                })
+            else:
+                if not aw_context_selected:
+                    aw_runtime_root = None
+            if aw_context_selected and aw_runtime_root is not None:
+                payload_version = _reconcile.payload_version(aw_plugin_dir)
+                deployed_version = _reconcile.runtime_deployed_version(
+                    "agent-worktrees", root=aw_runtime_root
+                )
+                if (
+                    payload_version is None
+                    or not _reconcile._versions_equal(
+                        deployed_version, payload_version
+                    )
+                ):
+                    diagnostics.append({
+                        "service": "agent-worktrees",
+                        "reason": (
+                            "context-runtime-missing"
+                            if deployed_version is None
+                            else "context-runtime-version-drift"
+                        ),
+                        "message": (
+                            "selected namespaced runtime is read-only; "
+                            "legacy pre-launch installer suppressed"
+                        ),
+                    })
+    if aw_context_selected:
+        bootstrap.pop("agent-worktrees", None)
 
     # Direct fallback for agent-worktrees: always deployed at a known
     # location, but may be missing from service.yaml for this environment
-    if "agent-worktrees" not in bootstrap:
+    if not aw_context_selected and "agent-worktrees" not in bootstrap:
         wm_dir = cfg.install_dir()
         wm_manifest = wm_dir / "deploy-manifest.json"
         if wm_manifest.exists():
@@ -14927,15 +15058,24 @@ def plan_pre_launch() -> dict:
                     # Check discovered bootstrap services too
                     for s in bootstrap.values():
                         _append_update_if_stale(s, repo_dir, updates)
-                    return {"action": "self-update", "updates": updates}
+                    result: dict = {"action": "self-update", "updates": updates}
+                    if diagnostics:
+                        result["diagnostics"] = diagnostics
+                    return result
 
     updates = []
     for s in bootstrap.values():
         _append_update_if_stale(s, repo_dir, updates)
 
     if updates:
-        return {"action": "self-update", "updates": updates}
-    return {"action": "continue"}
+        result = {"action": "self-update", "updates": updates}
+        if diagnostics:
+            result["diagnostics"] = diagnostics
+        return result
+    result = {"action": "continue"}
+    if diagnostics:
+        result["diagnostics"] = diagnostics
+    return result
 
 
 def cmd_pre_launch(args: argparse.Namespace) -> int:

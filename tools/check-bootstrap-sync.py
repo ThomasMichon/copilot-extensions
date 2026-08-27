@@ -51,11 +51,14 @@ FAMILIES: dict[str, list[str]] = {
         "agent-codespaces",
         "agent-containers",
         "agent-dispatch",
-        "agent-index",
         "agent-logger",
         "agent-mcp",
         "agent-vault",
     ],
+    # Agent Index keeps the shared versioned-venv model but is the
+    # service-bearing installation-cell exemplar. Its bootstrap can inspect an
+    # explicitly selected, validated context without making that root operative.
+    "versioned-venv/context-selected-agent-index": ["agent-index"],
     # agent-bridge reference: the psscriptroot model plus reconcile observability
     # (reconcile.log / reconcile-status.json) and a venv-or-.venv guard (its
     # stable link is 'venv', not '.venv'). Kept distinct until the observability

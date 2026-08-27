@@ -194,11 +194,11 @@ invoke_update_apply() {
     _UPDATE_APPLIED=1
 
     local status_file="$HOME/.agent-worktrees/updater-status.json"
-    local stage_done="" plugin_changed="" skipped="" plugin_dir=""
+    local stage_done="" plugin_changed="" skipped="" plugin_dir="" runtime_apply_blocked=""
 
     _parse_stage_status() {
         [[ -f "$status_file" ]] || return 0
-        IFS=$'\t' read -r stage_done plugin_changed skipped plugin_dir < <(
+        IFS=$'\t' read -r stage_done plugin_changed skipped plugin_dir runtime_apply_blocked < <(
             "$PYTHON" -c "
 import sys, json
 try:
@@ -210,6 +210,7 @@ print('\t'.join([
     str(d.get('plugin_changed', False)),
     str(d.get('skipped', '')),
     str(d.get('plugin_dir', '')),
+    str(d.get('runtime_apply_blocked', '')),
 ]))
 " "$status_file" 2>/dev/null
         )
@@ -231,6 +232,9 @@ print('\t'.join([
             setup_status INFO 'Background download unavailable; downloading the plugin update now...'
             "$PYTHON" -m agent_worktrees stage-update >/dev/null 2>&1 || true
             _parse_stage_status
+        fi
+        if [[ -n "$runtime_apply_blocked" ]]; then
+            setup_log WARN "Plugin runtime apply blocked: $runtime_apply_blocked"
         fi
 
         # (1) Marketplace installer, iff the download changed the payload.
@@ -275,7 +279,19 @@ print('\t'.join([
 
         # (2) Pre-launch self-update (bootstrap-service staleness; two-pass).
         setup_status INFO 'Checking bootstrap services for pending updates...'
+        _log_prelaunch_diagnostics() {
+            local _plan_json="$1"
+            while IFS= read -r _pdiag; do
+                [[ -n "$_pdiag" ]] || continue
+                setup_log WARN "Pre-launch: $_pdiag"
+            done < <(printf '%s' "$_plan_json" | "$PYTHON" -c '
+import sys, json
+for d in json.load(sys.stdin).get("diagnostics", []):
+    print(f"{d.get('"'"'service'"'"', '"'"'?'"'"')} [{d.get('"'"'reason'"'"', '"'"'diagnostic'"'"')}] {d.get('"'"'message'"'"', '"'"''"'"')}")
+' 2>/dev/null)
+        }
         PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue","reason":"error"}'
+        _log_prelaunch_diagnostics "$PRE_JSON"
         PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
         if [[ "$PRE_ACTION" == "self-update" ]]; then
             setup_status INFO 'Bootstrap services are stale; updating them...'
@@ -298,6 +314,7 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
             done
             setup_log INFO 'Re-checking staleness after update'
             PRE_JSON=$("$PYTHON" -m agent_worktrees pre-launch 2>/dev/null) || PRE_JSON='{"action":"continue"}'
+            _log_prelaunch_diagnostics "$PRE_JSON"
             PRE_ACTION=$(echo "$PRE_JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) || PRE_ACTION="continue"
             if [[ "$PRE_ACTION" == "self-update" ]]; then
                 setup_log WARN 'Still stale after update -- proceeding anyway'
@@ -317,8 +334,18 @@ for a in json.load(sys.stdin)['updates'][$i].get('argv', []):
             REC_ACTION=$(printf '%s' "$REC_JSON" \
                 | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('action','continue'))" 2>/dev/null) \
                 || REC_ACTION="continue"
+            while IFS= read -r _rdiag; do
+                [[ -n "$_rdiag" ]] || continue
+                setup_log WARN "Plugin reconcile: $_rdiag"
+            done < <(printf '%s' "$REC_JSON" | "$PYTHON" -c '
+import sys, json
+for d in json.load(sys.stdin).get("diagnostics", []):
+    print(f"{d.get('"'"'service'"'"', '"'"'?'"'"')} [{d.get('"'"'reason'"'"', '"'"'diagnostic'"'"')}] {d.get('"'"'message'"'"', '"'"''"'"')}")
+' 2>/dev/null)
             if [[ "$REC_ACTION" != "reconcile" ]]; then
-                [[ "$_rpass" == "1" ]] && setup_log INFO 'Plugin reconcile: nothing to do'
+                if [[ "$_rpass" == "1" ]]; then
+                    setup_log INFO 'Plugin reconcile: no executable actions'
+                fi
                 break
             fi
             REC_COUNT=$("$PYTHON" -c "import sys,json; print(len(json.load(sys.stdin).get('updates',[])))" <<< "$REC_JSON" 2>/dev/null) || REC_COUNT=0

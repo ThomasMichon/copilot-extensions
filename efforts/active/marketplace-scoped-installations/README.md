@@ -136,6 +136,9 @@ reachable when their ownership is explicit.
     before any runtime root becomes operative.
   - [x] Add cross-platform receipt stamping, lock ownership, generation
     compare-and-swap, and inert exemplar vendoring.
+  - [x] Make Agent Machines, Agent Index, and agent-worktrees reconciliation
+    inspect an explicitly selected, validated deploy manifest without activating
+    or mutating the namespaced runtime root.
   - [ ] Implement the reviewed
     [user-local installation-mode governance](installation-mode-governance.md):
     OS-profile-pinned default legacy policy, exact marketplace/plugin overrides,
@@ -401,6 +404,26 @@ See [`design.md`](design.md).
   activation/tombstone writer, maintenance command, footprint probe, installer
   gate, or exemplar cutover is claimed implemented by these documentation
   changes.
+
+### 2026-08-27 — Cell-aware reconciliation prerequisite
+
+- Added explicit receipt-selected deploy-manifest inspection to the Agent
+  Machines and Agent Index bootstrap checks on POSIX and PowerShell. A context
+  for another plugin leaves legacy reconciliation unchanged; malformed or
+  matching-invalid evidence fails closed without stamping or invoking a legacy
+  installer.
+- Made agent-worktrees reconciliation and operator update paths compare the
+  selected namespaced manifest but report missing/drifted context runtimes as
+  diagnostic-only. Namespaced roots remain read-only until activation governance
+  and context-aware installers land.
+- Surfaced reconciliation diagnostics through detached provision checks and
+  both worktree launchers, while preserving executable legacy updates for
+  unrelated plugins.
+- Tightened PowerShell receipt parsing and identity comparison to reject
+  duplicate, case-conflicting, and case-mismatched identities, then synchronized
+  Agent Machines, Agent Index, and the Agent Worktrees management copy.
+- Kept agent-worktrees project state, activation policy, service identity,
+  migration, and runtime-root mutation unchanged.
 
 ### 2026-08-26 — Runtime plugin hook audit
 
