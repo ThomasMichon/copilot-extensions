@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import shutil
+import socket
 import subprocess
 from pathlib import Path
 
@@ -206,6 +207,227 @@ def _receipt_layout(tmp_path: Path) -> dict[str, Path | str]:
         "namespace": namespace,
         "install": install,
     }
+
+
+def _stamp_arguments(
+    tmp_path: Path,
+    *,
+    expected_namespace_generation: int = 0,
+    expected_install_generation: int = 0,
+) -> tuple[list[object], dict[str, Path | str]]:
+    vector = _vectors()[0]
+    payload = tmp_path / "payload"
+    payload.mkdir(parents=True, exist_ok=True)
+    durable = tmp_path / "durable"
+    values: dict[str, Path | str] = {
+        "payload": payload,
+        "durable": durable,
+        "marketplace_id": str(vector["marketplaceId"]),
+        "plugin_id": "agent-example",
+    }
+    return (
+        [
+            "stamp",
+            "-PayloadRoot",
+            payload,
+            "-DurableHome",
+            durable,
+            "-PluginId",
+            values["plugin_id"],
+            "-MarketplaceKey",
+            vector["marketplaceKey"],
+            "-SourceJson",
+            json.dumps(vector["descriptor"], separators=(",", ":")),
+            "-PayloadVersion",
+            "1.0.0",
+            "-PayloadOrigin",
+            "explicit",
+            "-ExpectedNamespaceGeneration",
+            expected_namespace_generation,
+            "-ExpectedInstallGeneration",
+            expected_install_generation,
+        ],
+        values,
+    )
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_stamp_creates_and_idempotently_validates_receipts(tmp_path: Path) -> None:
+    arguments, _ = _stamp_arguments(tmp_path)
+    first = json.loads(_run_ps(*arguments).stdout)
+    assert first["namespaceChanged"] is True
+    assert first["installChanged"] is True
+    assert first["namespaceGeneration"] == 1
+    assert first["generation"] == 1
+    assert first["operative"] is False
+
+    repeat_arguments, _ = _stamp_arguments(
+        tmp_path,
+        expected_namespace_generation=1,
+        expected_install_generation=1,
+    )
+    second = json.loads(_run_ps(*repeat_arguments).stdout)
+    assert second["namespaceChanged"] is False
+    assert second["installChanged"] is False
+    assert second["namespaceGeneration"] == 1
+    assert second["generation"] == 1
+
+    repeat_arguments.extend(["-InstallState", "inactive"])
+    updated = json.loads(_run_ps(*repeat_arguments).stdout)
+    assert updated["namespaceGeneration"] == 1
+    assert updated["generation"] == 2
+    assert updated["state"] == "inactive"
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_stamp_generation_compare_and_swap_rejects_stale_writer(tmp_path: Path) -> None:
+    arguments, _ = _stamp_arguments(tmp_path)
+    _run_ps(*arguments)
+    stale = _run_ps(*arguments, check=False)
+    assert stale.returncode != 0
+    assert "generation changed" in stale.stderr
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_stamp_fails_closed_on_dead_owner_and_blocks_live_owner(tmp_path: Path) -> None:
+    arguments, values = _stamp_arguments(tmp_path)
+    lock = (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / ".locks"
+        / f"{values['plugin_id']}.install.lock"
+    )
+    lock.mkdir(parents=True)
+    _write_json(
+        lock / "owner.json",
+        {
+            "schema": "copilot-extensions.installation-lock",
+            "version": 1,
+            "kind": "install",
+            "marketplaceId": values["marketplace_id"],
+            "pluginId": values["plugin_id"],
+            "token": "dead-owner",
+            "host": socket.gethostname(),
+            "pid": 2147483647,
+            "acquiredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    stale = _run_ps(*arguments, check=False)
+    assert stale.returncode != 0
+    assert "stale owner" in stale.stderr
+    assert lock.exists()
+    shutil.rmtree(lock)
+    retry_arguments, _ = _stamp_arguments(
+        tmp_path,
+        expected_namespace_generation=1,
+        expected_install_generation=0,
+    )
+    stamped = json.loads(_run_ps(*retry_arguments).stdout)
+    assert stamped["generation"] == 1
+
+    update_arguments, _ = _stamp_arguments(
+        tmp_path,
+        expected_namespace_generation=1,
+        expected_install_generation=1,
+    )
+    lock.mkdir()
+    _write_json(
+        lock / "owner.json",
+        {
+            "schema": "copilot-extensions.installation-lock",
+            "version": 1,
+            "kind": "install",
+            "marketplaceId": values["marketplace_id"],
+            "pluginId": values["plugin_id"],
+            "token": "live-owner",
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "acquiredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    blocked = _run_ps(*update_arguments, check=False)
+    assert blocked.returncode != 0
+    assert "busy" in blocked.stderr
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_stamp_rejects_string_typed_lock_version(tmp_path: Path) -> None:
+    arguments, values = _stamp_arguments(tmp_path)
+    lock = (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / ".locks"
+        / f"{values['plugin_id']}.install.lock"
+    )
+    lock.mkdir(parents=True)
+    _write_json(
+        lock / "owner.json",
+        {
+            "schema": "copilot-extensions.installation-lock",
+            "version": "1",
+            "kind": "install",
+            "marketplaceId": values["marketplace_id"],
+            "pluginId": values["plugin_id"],
+            "token": "malformed-owner",
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "acquiredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    rejected = _run_ps(*arguments, check=False)
+    assert rejected.returncode != 0
+    assert "owner receipt is invalid" in rejected.stderr
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_concurrent_first_stamp_leaves_one_untorn_receipt(tmp_path: Path) -> None:
+    arguments, values = _stamp_arguments(tmp_path)
+    command = [str(POWERSHELL), "-NoProfile"]
+    if os.name == "nt":
+        command.extend(["-ExecutionPolicy", "Bypass"])
+    command.extend(["-File", str(SCRIPT), *(str(argument) for argument in arguments)])
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    processes = [
+        subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+        )
+        for _ in range(2)
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    return_codes = [process.returncode for process in processes]
+    assert sorted(return_codes) == [0, 1], results
+    assert "generation changed" in results[return_codes.index(1)][1]
+    install = (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / "plugins"
+        / str(values["plugin_id"])
+        / "install.json"
+    )
+    validated = json.loads(
+        _run_ps(
+            "validate",
+            "-Context",
+            install,
+            "-DurableHome",
+            values["durable"],
+            "-ExpectedMarketplaceId",
+            values["marketplace_id"],
+            "-ExpectedPluginId",
+            values["plugin_id"],
+        ).stdout
+    )
+    assert validated["generation"] == 1
 
 
 def test_fixture_constants_are_independently_reproducible() -> None:

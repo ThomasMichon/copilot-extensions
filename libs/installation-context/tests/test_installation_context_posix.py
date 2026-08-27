@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ RUNNERS = (
     ("python", (sys.executable, str(PYTHON_SCRIPT))),
     ("posix", (str(POSIX_SCRIPT),)),
 )
+PYTHON_COMMAND = RUNNERS[0][1]
 
 
 def _vectors() -> list[dict[str, object]]:
@@ -152,6 +154,270 @@ def _receipt_layout(tmp_path: Path) -> dict[str, Path | str]:
         "namespace": namespace,
         "install": install,
     }
+
+
+def _stamp_arguments(
+    tmp_path: Path,
+    *,
+    expected_namespace_generation: int = 0,
+    expected_install_generation: int = 0,
+) -> tuple[list[object], dict[str, Path | str]]:
+    vector = _vectors()[0]
+    payload = tmp_path / "payload"
+    payload.mkdir(parents=True, exist_ok=True)
+    durable = tmp_path / "durable"
+    values: dict[str, Path | str] = {
+        "payload": payload,
+        "durable": durable,
+        "marketplace_id": str(vector["marketplaceId"]),
+        "plugin_id": "agent-example",
+    }
+    return (
+        [
+            "stamp",
+            "--payload-root",
+            payload,
+            "--durable-home",
+            durable,
+            "--plugin-id",
+            values["plugin_id"],
+            "--marketplace-key",
+            vector["marketplaceKey"],
+            "--source-json",
+            json.dumps(vector["descriptor"], separators=(",", ":")),
+            "--payload-version",
+            "1.0.0",
+            "--payload-origin",
+            "explicit",
+            "--expected-namespace-generation",
+            expected_namespace_generation,
+            "--expected-install-generation",
+            expected_install_generation,
+        ],
+        values,
+    )
+
+
+def test_python_stamp_creates_and_idempotently_validates_receipts(tmp_path: Path) -> None:
+    arguments, values = _stamp_arguments(tmp_path)
+    first = json.loads(_run(PYTHON_COMMAND, *arguments).stdout)
+    assert first["action"] == "stamp"
+    assert first["namespaceChanged"] is True
+    assert first["installChanged"] is True
+    assert first["namespaceGeneration"] == 1
+    assert first["generation"] == 1
+    assert first["operative"] is False
+
+    namespace = Path(first["namespaceReceipt"])
+    install = Path(first["installReceipt"])
+    assert namespace.read_bytes().endswith(b"\n")
+    assert install.read_bytes().endswith(b"\n")
+    assert not namespace.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert not install.read_bytes().startswith(b"\xef\xbb\xbf")
+    assert json.loads(namespace.read_text(encoding="utf-8"))["marketplaceId"] == values[
+        "marketplace_id"
+    ]
+
+    repeat_arguments, _ = _stamp_arguments(
+        tmp_path,
+        expected_namespace_generation=1,
+        expected_install_generation=1,
+    )
+    second = json.loads(_run(PYTHON_COMMAND, *repeat_arguments).stdout)
+    assert second["namespaceChanged"] is False
+    assert second["installChanged"] is False
+    assert second["namespaceGeneration"] == 1
+    assert second["generation"] == 1
+    assert not list(Path(values["durable"]).rglob("*.tmp-*"))
+
+
+def test_python_stamp_updates_receipt_with_generation_compare_and_swap(
+    tmp_path: Path,
+) -> None:
+    arguments, _ = _stamp_arguments(tmp_path)
+    first = json.loads(_run(PYTHON_COMMAND, *arguments).stdout)
+    update_arguments, _ = _stamp_arguments(
+        tmp_path,
+        expected_namespace_generation=1,
+        expected_install_generation=1,
+    )
+    update_arguments.extend(["--install-state", "inactive"])
+    updated = json.loads(_run(PYTHON_COMMAND, *update_arguments).stdout)
+    assert updated["namespaceGeneration"] == 1
+    assert updated["generation"] == 2
+    assert updated["state"] == "inactive"
+
+    stale = _run(PYTHON_COMMAND, *update_arguments, check=False)
+    assert stale.returncode != 0
+    assert "generation changed" in stale.stderr
+    receipt = json.loads(Path(first["installReceipt"]).read_text(encoding="utf-8"))
+    assert receipt["generation"] == 2
+    assert receipt["state"] == "inactive"
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_stamp_blocks_a_live_install_owner(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    arguments, values = _stamp_arguments(tmp_path / runner_name)
+    lock = (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / ".locks"
+        / f"{values['plugin_id']}.install.lock"
+    )
+    lock.mkdir(parents=True)
+    _write_json(
+        lock / "owner.json",
+        {
+            "schema": "copilot-extensions.installation-lock",
+            "version": 1,
+            "kind": "install",
+            "marketplaceId": values["marketplace_id"],
+            "pluginId": values["plugin_id"],
+            "token": "live-owner",
+            "host": socket.gethostname(),
+            "pid": os.getpid(),
+            "acquiredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    result = _run(command, *arguments, check=False)
+    assert result.returncode != 0
+    assert "busy" in result.stderr
+    assert not (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / "plugins"
+        / str(values["plugin_id"])
+        / "install.json"
+    ).exists()
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_stamp_fails_closed_on_a_dead_install_owner(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    arguments, values = _stamp_arguments(tmp_path / runner_name)
+    lock = (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / ".locks"
+        / f"{values['plugin_id']}.install.lock"
+    )
+    lock.mkdir(parents=True)
+    _write_json(
+        lock / "owner.json",
+        {
+            "schema": "copilot-extensions.installation-lock",
+            "version": 1,
+            "kind": "install",
+            "marketplaceId": values["marketplace_id"],
+            "pluginId": values["plugin_id"],
+            "token": "dead-owner",
+            "host": socket.gethostname(),
+            "pid": 2147483647,
+            "acquiredAt": "2026-01-01T00:00:00Z",
+        },
+    )
+    result = _run(command, *arguments, check=False)
+    assert result.returncode != 0
+    assert "stale owner" in result.stderr
+    assert lock.exists()
+
+
+@pytest.mark.parametrize(("runner_name", "runner_command"), RUNNERS)
+def test_concurrent_first_stamp_leaves_one_untorn_receipt(
+    tmp_path: Path,
+    runner_name: str,
+    runner_command: tuple[str, ...],
+) -> None:
+    arguments, values = _stamp_arguments(tmp_path / runner_name)
+    command = [*runner_command, *(str(argument) for argument in arguments)]
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    processes = [
+        subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+        )
+        for _ in range(2)
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    return_codes = [process.returncode for process in processes]
+    assert sorted(return_codes) == [0, 1], results
+    failure = results[return_codes.index(1)][1]
+    assert "generation changed" in failure
+
+    install = (
+        Path(values["durable"])
+        / "marketplaces"
+        / str(values["marketplace_id"])
+        / "plugins"
+        / str(values["plugin_id"])
+        / "install.json"
+    )
+    validated = _run(
+        runner_command,
+        "validate",
+        "--context",
+        install,
+        "--durable-home",
+        values["durable"],
+        "--expected-marketplace-id",
+        values["marketplace_id"],
+        "--expected-plugin-id",
+        values["plugin_id"],
+    )
+    assert json.loads(validated.stdout)["generation"] == 1
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_stamp_creation_and_idempotence_match_across_runners(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    arguments, _ = _stamp_arguments(tmp_path / runner_name)
+    first = json.loads(_run(command, *arguments).stdout)
+    assert first["namespaceChanged"] is True
+    assert first["installChanged"] is True
+    assert first["namespaceGeneration"] == 1
+    assert first["generation"] == 1
+    repeat_arguments, _ = _stamp_arguments(
+        tmp_path / runner_name,
+        expected_namespace_generation=1,
+        expected_install_generation=1,
+    )
+    second = json.loads(_run(command, *repeat_arguments).stdout)
+    assert second["namespaceChanged"] is False
+    assert second["installChanged"] is False
+    assert second["namespaceGeneration"] == 1
+    assert second["generation"] == 1
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_stamp_generation_conflict_matches_across_runners(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    arguments, _ = _stamp_arguments(tmp_path / runner_name)
+    _run(command, *arguments)
+    stale = _run(command, *arguments, check=False)
+    assert stale.returncode != 0
+    assert "generation changed" in stale.stderr
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)

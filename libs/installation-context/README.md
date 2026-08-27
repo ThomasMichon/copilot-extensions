@@ -13,9 +13,10 @@ installation cells:
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
-layout, detect existing-cell rebind requirements, and strictly validate existing
-receipts. They never create or change cells, receipts, runtimes, locks, state,
-or payload files.
+layout, strictly validate receipts, and expose the same bounded `stamp`
+mutation. `stamp` creates or updates only `namespace.json` and `install.json`;
+it does not select a runtime, create version slots, migrate legacy state, or
+activate the cell.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
@@ -43,6 +44,14 @@ writes an actionable error to stderr and exits nonzero.
   -ExpectedMarketplaceId example--0123456789abcdef `
   -ExpectedPluginId agent-example `
   -ExpectedPayloadRoot $env:COPILOT_PLUGIN_ROOT
+
+.\installation-context.ps1 stamp `
+  -PayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -PluginId agent-example `
+  -PayloadVersion 1.0.0 `
+  -PayloadOrigin installed `
+  -ExpectedNamespaceGeneration 0 `
+  -ExpectedInstallGeneration 0
 ```
 
 ```bash
@@ -60,12 +69,33 @@ writes an actionable error to stderr and exits nonzero.
   --expected-marketplace-id example--0123456789abcdef \
   --expected-plugin-id agent-example \
   --expected-payload-root "$COPILOT_PLUGIN_ROOT"
+
+./installation-context.sh stamp \
+  --payload-root "$COPILOT_PLUGIN_ROOT" \
+  --plugin-id agent-example \
+  --payload-version 1.0.0 \
+  --payload-origin installed \
+  --expected-namespace-generation 0 \
+  --expected-install-generation 0
 ```
 
 The Python CLI uses the same lowercase long options as the Bash entry point.
 Callers that already have a private Python toolchain may import
 `normalize_source`, `source_identity`, `resolve_context`, and
-`validate_context_receipt` directly.
+`validate_context_receipt` directly. Management callers may use
+`stamp_context`; its two expected-generation arguments are mandatory.
+
+Cell genesis and plugin installation mutations use the same directory-lock
+protocol on every platform. Each lock contains a strict `owner.json` naming the
+marketplace, plugin when applicable, host, process, and random ownership token.
+A live same-host owner is waited out briefly. Dead, cross-host, ownerless, or
+malformed ownership fails closed and requires explicit repair; automatic stale
+reclamation is forbidden because a pathname-only takeover cannot fence a newer
+lock incarnation.
+Receipt replacement is same-directory and atomic, and the lock token is
+revalidated immediately before replacement. Existing receipt updates compare
+the caller-observed namespace and install generations while holding their
+respective locks; stale writers must resolve again.
 
 `ProjectRoot` / `--project-root` is explicit; resolution never guesses project
 settings from the current directory. `COPILOT_EXTENSIONS_CONTEXT` is only a
@@ -85,6 +115,8 @@ UTF-8 without BOM, and length prefixes every value, including `version:1:1`.
 The test suite runs the same vectors and behavioral cases through PowerShell,
 Python, and the no-Python POSIX bootstrap.
 
-Later slices still own vendoring into runtime plugins, receipt creation and
-mutation, locking/CAS, migration, runtime-root activation, payload-invocation
-schema changes, and dual-cell exemplars.
+`python tools/sync-installation-context.py` vendors byte-identical inert copies
+into the Phase 3 exemplar payloads. The sync does not make them operative.
+
+Later slices still own snapshot provenance, migration, runtime-root activation,
+payload-invocation schema changes, reconciliation, and dual-cell exemplars.
