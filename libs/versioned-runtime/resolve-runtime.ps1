@@ -21,7 +21,9 @@ if ($_rtRoot) {
     if (-not $ver) { return $false }
     try {
       $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
-      if ([regex]::Matches($raw, '"version"\s*:').Count -ne 1) { return $false }
+      if ($raw -cnotmatch '^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$') {
+        return $false
+      }
       $marker = $raw | ConvertFrom-Json -ErrorAction Stop
       return ($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver)
     } catch {

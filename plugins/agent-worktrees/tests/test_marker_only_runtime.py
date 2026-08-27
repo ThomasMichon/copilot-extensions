@@ -202,6 +202,8 @@ def test_resolver_rejects_incomplete_marker_slot(tmp_path):
         "{not-json",
         '{"version": "wrong", "completed_at": "x", "pid": 1}',
         '{"version": "1.2.3", "version": "1.2.3", "completed_at": "x", "pid": 1}',
+        '{"\\u0076ersion": "wrong", "version": "1.2.3", "completed_at": "x", "pid": 1}',
+        '{"version": "1.2.3", "completed_at": "x", "pid": 01}',
     ],
 )
 def test_resolver_rejects_invalid_marker_json(tmp_path, marker):

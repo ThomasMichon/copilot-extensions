@@ -82,6 +82,8 @@ def test_powershell_resolver_skips_incomplete_current_without_spawning(
         "{not-json",
         '{"version": "wrong", "completed_at": "x", "pid": 1}',
         '{"version": "1.0.0", "version": "1.0.0", "completed_at": "x", "pid": 1}',
+        '{"\\u0076ersion": "wrong", "version": "1.0.0", "completed_at": "x", "pid": 1}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": 01}',
     ],
 )
 def test_powershell_resolver_rejects_invalid_marker_states(
@@ -189,6 +191,8 @@ def test_posix_resolver_requires_completion_marker_without_spawning(
         "{not-json",
         '{"version": "wrong", "completed_at": "x", "pid": 1}',
         '{"version": "1.0.0", "version": "1.0.0", "completed_at": "x", "pid": 1}',
+        '{"\\u0076ersion": "wrong", "version": "1.0.0", "completed_at": "x", "pid": 1}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": 01}',
     ],
 )
 def test_posix_resolver_rejects_invalid_marker_states(

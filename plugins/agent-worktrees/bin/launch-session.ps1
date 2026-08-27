@@ -176,14 +176,13 @@ if (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) {
     . $runtimeResolver
 }
 
-function Resolve-CurrentRuntimePython {
-    try {
-        $version = ([IO.File]::ReadAllText(
-            (Join-Path $RuntimeDir 'current-version')
-        )).Trim()
-        return _Aw-TrySlot $version
-    } catch {}
-    return $null
+function Resolve-RuntimePython {
+    $AwPy = $null
+    if (-not (Test-Path -LiteralPath $runtimeResolver -PathType Leaf)) {
+        return $null
+    }
+    . $runtimeResolver
+    return $AwPy
 }
 
 $VenvPython = $AwPy
@@ -616,11 +615,11 @@ Set-Location $plan.work_dir
 # Compose the paired private knowledge repo's plugin settings into the harness
 # worktree before Copilot starts and performs plugin discovery. status_path is
 # the real worktree during Bare resume (work_dir is HOME).
-$refreshedVenvPython = Resolve-CurrentRuntimePython
+$refreshedVenvPython = Resolve-RuntimePython
 if (-not $refreshedVenvPython) {
     $runtimeMessage = (
-        'Current agent-worktrees runtime is unavailable after update apply; ' +
-        "expected a valid current-version slot under $RuntimeDir"
+        'Agent-worktrees runtime is unavailable after update apply; ' +
+        "expected a complete slot under $RuntimeDir"
     )
     Write-SetupLog $runtimeMessage 'ERROR'
     [Console]::Error.WriteLine("ERROR: $runtimeMessage")

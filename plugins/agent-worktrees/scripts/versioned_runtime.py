@@ -473,7 +473,7 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
                 detached_completion_is_valid = (
                     isinstance(data, dict) and data.get("version") == version
                 )
-            except (OSError, UnicodeError, json.JSONDecodeError):
+            except (OSError, UnicodeError, ValueError):
                 pass
         if detached_completion_is_valid or is_complete(root, version):
             for pair in reversed(detached):
@@ -637,17 +637,24 @@ def _recorded_ownership_is_stale(root: Path, version: str) -> bool:
     except Exception:
         return False
     entries = data if isinstance(data, list) else [data]
-    matching = [
-        entry["pid"]
-        for entry in entries
-        if (
-            isinstance(entry, dict)
-            and isinstance(entry.get("pid"), int)
-            and isinstance(entry.get("version"), str)
-            and _norm_version(entry["version"]) == _norm_version(version)
-        )
-    ]
-    return bool(matching) and all(not _pid_alive(pid) for pid in matching)
+    matching: list[int] = []
+    found_version = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        recorded_version = entry.get("version")
+        if not isinstance(recorded_version, str):
+            continue
+        if _norm_version(recorded_version) != _norm_version(version):
+            continue
+        found_version = True
+        pid = entry.get("pid")
+        if not isinstance(pid, int) or pid <= 0:
+            return False
+        matching.append(pid)
+    return found_version and bool(matching) and all(
+        not _pid_alive(pid) for pid in matching
+    )
 
 
 def _pid_cmdline_argv0(pid: int) -> str | None:

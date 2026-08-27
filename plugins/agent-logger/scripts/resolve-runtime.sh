@@ -26,7 +26,7 @@ if [ -n "$_rt_root" ]; then
     awk -v expected="$1" '
       NR != 1 { bad = 1 }
       NR == 1 {
-        if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": [0-9]+(, "payload_hash": "[^"\\]+")?\}$/) {
+        if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$/) {
           bad = 1
           next
         }

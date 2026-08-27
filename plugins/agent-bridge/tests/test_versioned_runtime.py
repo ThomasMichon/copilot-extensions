@@ -166,6 +166,47 @@ def test_stale_recorded_owner_allows_cleanup_without_process_enumeration(
     assert current == rebuilt
 
 
+def test_unknown_recorded_owner_retains_current_without_process_enumeration(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.RUNNING_VERSION_FILE).write_text(
+        json.dumps([
+            {"version": "1.0.0", "pid": 424242},
+            {"version": "1.0.0"},
+        ]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+    monkeypatch.setattr(vr, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert (current / "marker.txt").is_file()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+
+
+def test_duplicate_marker_cleanup_restores_state_on_conservative_failure(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    marker = vr.marker_path(tmp_path, "1.0.0")
+    duplicate = '{"version": "1.0.0", "version": "1.0.0"}'
+    marker.write_text(duplicate, encoding="utf-8")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+
+    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert current.is_dir()
+    assert marker.read_text(encoding="utf-8") == duplicate
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+
+
 def _write_slot_python(root: Path, version: str) -> Path:
     subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
     python = vr.version_dir(root, version) / subpath

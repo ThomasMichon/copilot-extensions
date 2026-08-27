@@ -730,7 +730,7 @@ function _resolve_cs_py {
         $slot = Join-Path $_root ('versions\' + $ver)
         try {
             $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
-            if ([regex]::Matches($raw, '"version"\s*:').Count -ne 1) { return $null }
+            if ($raw -cnotmatch '^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$') { return $null }
             $marker = $raw | ConvertFrom-Json -ErrorAction Stop
             if (-not (($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver))) { return $null }
         } catch { return $null }

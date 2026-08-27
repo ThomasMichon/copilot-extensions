@@ -68,15 +68,12 @@ if [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]]; then
 fi
 PYTHON="$AW_PY"
 
-resolve_current_runtime_python() {
-    local version=""
-    [[ -f "$RUNTIME_DIR/current-version" ]] || return 1
-    version="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version" 2>/dev/null)" \
-        || return 1
-    case "$AW_PY" in
-        "$RUNTIME_DIR/versions/$version/"*) printf '%s\n' "$AW_PY" ;;
-        *) return 1 ;;
-    esac
+resolve_runtime_python() {
+    AW_PY=""
+    [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]] || return 1
+    source "$RUNTIME_DIR/bin/resolve-runtime.sh"
+    [[ -n "$AW_PY" ]] || return 1
+    printf '%s\n' "$AW_PY"
 }
 
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then
@@ -554,9 +551,9 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
     # Compose the paired private knowledge repo's plugin settings into the
     # harness worktree before Copilot starts and performs plugin discovery.
     # status_path is the real worktree during Bare resume (work_dir is HOME).
-    if ! _REFRESHED_PYTHON="$(resolve_current_runtime_python)"; then
-        setup_log ERROR "Current agent-worktrees runtime is unavailable after update apply; expected a valid current-version slot under $RUNTIME_DIR"
-        printf 'ERROR: Current agent-worktrees runtime is unavailable after update apply; expected a valid current-version slot under %s\n' \
+    if ! _REFRESHED_PYTHON="$(resolve_runtime_python)"; then
+        setup_log ERROR "Agent-worktrees runtime is unavailable after update apply; expected a complete slot under $RUNTIME_DIR"
+        printf 'ERROR: Agent-worktrees runtime is unavailable after update apply; expected a complete slot under %s\n' \
             "$RUNTIME_DIR" >&2
         exit 1
     fi
