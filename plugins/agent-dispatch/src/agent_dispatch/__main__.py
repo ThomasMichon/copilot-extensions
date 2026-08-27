@@ -3102,7 +3102,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     cp.add_argument(
         "--spawn-agent", default="task-worker",
-        help="agent-bridge agent name to spawn (bridge backend only; "
+        help="agent-bridge agent name to spawn (bridge backend only; "  # marketplace-isolation: allow agent-bridge-management
              "default: task-worker)",
     )
     cp.add_argument(

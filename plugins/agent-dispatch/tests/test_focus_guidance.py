@@ -20,10 +20,11 @@ CONFIG = Path(".agent-dispatch/session-guidance.json")
 VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
 KERNEL = (
     f"[owner: agent-dispatch@{VERSION}]\n"
-    "Before starting work likely to overlap another worktree, check "
-    "`agent-dispatch focus --list`. At the start of substantial operator-led or "
+    "Before starting work likely to overlap another worktree, use the "
+    "agent-dispatch session command catalog's exact `argv[0]` with "
+    "`focus --list`. At the start of substantial operator-led or "
     "task-less work, and when its direction changes, advertise it early with "
-    "`agent-dispatch focus \"<one-line subject>\"`; this is shorthand for writing "
+    "that same command plus `focus \"<one-line subject>\"`; this is shorthand for writing "
     "the same agent-worktrees status-core summary, not a separate store. "
     "Agent-worktrees conduct and regular `agent-worktrees status --summary` remain "
     "authoritative for ongoing disposition, and their normal update cadence still "
@@ -206,8 +207,9 @@ def test_enabled_opt_in_emits_exact_bounded_owned_kernel(tmp_path: Path) -> None
         ) == 1
         kernel = json.loads(result.stdout)["additionalContext"]
         assert (
-            "Before starting work likely to overlap another worktree, check "
-            "`agent-dispatch focus --list`."
+            "Before starting work likely to overlap another worktree, use the "
+            "agent-dispatch session command catalog's exact `argv[0]` with "
+            "`focus --list`."
         ) in kernel
         assert "advertise it early" in kernel
         assert "same agent-worktrees status-core summary" in kernel
@@ -462,13 +464,21 @@ def test_payload_cwd_is_authoritative_when_process_cwd_differs(
 
 def test_hook_registration_is_separate_from_bootstrap_contract() -> None:
     entries = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]["sessionStart"]
-    assert len(entries) == 2
+    assert len(entries) == 3
     assert "bootstrap-check" in entries[0]["bash"]
     assert "bootstrap-check" in entries[0]["powershell"]
+    assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
+    assert "COPILOT_PLUGIN_ROOT" in entries[0]["powershell"]
+    assert "else printf '{}'" in entries[0]["bash"]
+    assert "else { [Console]::Out.Write('{}') }" in entries[0]["powershell"]
     assert "focus-guidance" not in entries[0]["bash"]
     assert "focus-guidance" not in entries[0]["powershell"]
     assert "focus-guidance" in entries[1]["bash"]
     assert "focus-guidance" in entries[1]["powershell"]
+    assert "COPILOT_PLUGIN_ROOT" in entries[1]["bash"]
+    assert "COPILOT_PLUGIN_ROOT" in entries[1]["powershell"]
+    assert "emit-command-catalog" in entries[2]["bash"]
+    assert "emit-command-catalog" in entries[2]["powershell"]
     for bootstrap in (
         PLUGIN / "scripts" / "bootstrap-check.sh",
         PLUGIN / "scripts" / "bootstrap-check.ps1",

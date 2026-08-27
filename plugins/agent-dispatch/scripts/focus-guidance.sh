@@ -10,7 +10,7 @@ emit_empty() {
 
 python="$(command -v python3 || command -v python || true)"
 git="$(command -v git || true)"
-agent_worktrees="$(command -v agent-worktrees || true)"
+agent_worktrees="$(command -v agent-worktrees || true)" # marketplace-isolation: allow agent-worktrees-management
 [[ -n "$python" && -n "$git" && -n "$agent_worktrees" ]] || emit_empty
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" ||
@@ -38,7 +38,7 @@ PY
 [[ -n "$plugin_version" ]] || emit_empty
 
 kernel="[owner: agent-dispatch@${plugin_version}]
-Before starting work likely to overlap another worktree, check \`agent-dispatch focus --list\`. At the start of substantial operator-led or task-less work, and when its direction changes, advertise it early with \`agent-dispatch focus \"<one-line subject>\"\`; this is shorthand for writing the same agent-worktrees status-core summary, not a separate store. Agent-worktrees conduct and regular \`agent-worktrees status --summary\` remain authoritative for ongoing disposition, and their normal update cadence still applies."
+Before starting work likely to overlap another worktree, use the agent-dispatch session command catalog's exact \`argv[0]\` with \`focus --list\`. At the start of substantial operator-led or task-less work, and when its direction changes, advertise it early with that same command plus \`focus \"<one-line subject>\"\`; this is shorthand for writing the same agent-worktrees status-core summary, not a separate store. Agent-worktrees conduct and regular \`agent-worktrees status --summary\` remain authoritative for ongoing disposition, and their normal update cadence still applies."
 
 git_env=(
     GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE

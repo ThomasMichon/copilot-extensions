@@ -509,7 +509,7 @@ _ensure_uv_index() {
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
     local machine="${AGENT_DISPATCH_SUPERVISE_MACHINE:-}"
-    if [[ -z "$machine" ]] && command -v agent-worktrees >/dev/null 2>&1; then
+    if [[ -z "$machine" ]] && command -v agent-worktrees >/dev/null 2>&1; then # marketplace-isolation: allow installer-management
         machine="$(agent-worktrees get machine 2>/dev/null | head -n1 || true)"
     fi
     [[ -n "$machine" ]] || machine="$(hostname 2>/dev/null || true)"

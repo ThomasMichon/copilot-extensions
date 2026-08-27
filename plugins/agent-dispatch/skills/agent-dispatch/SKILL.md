@@ -26,14 +26,24 @@ description: >
 
 # agent-dispatch -- Agent Task Queue + Coordinator
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-dispatch provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-dispatch` fails, deploy
-> its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-dispatch/scripts/install.sh | head -1)" stamp`
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install.
+> **Before you start — use the payload-local session command.**
+> The agent-dispatch session command catalog supplies an exact `argv[0]` owned
+> by this plugin payload. Replace `<agent-dispatch catalog argv[0]>` in
+> interactive dispatch operations below with that path; never search `PATH` or
+> substitute a same-named command from another payload. Commands explicitly
+> labeled as management boundaries remain literal global-wrapper invocations.
+> In PowerShell, invoke the catalog path as
+> `& "<agent-dispatch catalog argv[0]>" <args>`. The payload shim provisions
+> its own runtime on first use and works without agent-worktrees. The first call
+> may take ~30–120s (watch for `::agent-provisioning::`); let it finish and
+> surface any exact provisioning failure instead of improvising a toolchain
+> install.
+>
+> If session-start hooks did not publish the catalog, enumerate installed
+> payloads for this plugin and fail unless exactly one exists. Invoke that
+> payload's `bin/agent-dispatch` on POSIX or `bin\agent-dispatch.cmd` on Windows
+> directly; never stamp or choose a global wrapper just to recover an in-session
+> command, and never choose the first match from multiple marketplaces.
 
 `agent-dispatch` is a **portable agent task-queue**. A per-host **coordinator**
 (a single-writer SQLite/WAL daemon) hands out an **atomic leased claim** over a
@@ -87,7 +97,7 @@ next session); (2) **fire-and-forget delegation** to another worktree/machine;
 (3) **reactive tasks** on automated events (critical detections / posted reviews
 / outages — tightly scoped, since workers are expensive); (4) **scheduled tasks**
 (recurring producers). These four are the standing intent recorded in the
-agent-dispatch vision (`visions/plugins/agent-dispatch/` in the source repo).
+plugin vision (`visions/plugins/agent-dispatch/` in the source repo).
 
 ## Prerequisite: a reachable coordinator
 
@@ -98,10 +108,11 @@ discovers the local coordinator through the zdd routing table /
 `http://127.0.0.1:9847`. Add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
 
 ```bash
-agent-dispatch health          # confirm a coordinator is reachable first
+<agent-dispatch catalog argv[0]> health          # confirm a coordinator is reachable first
 ```
 
-- **Lone dev box:** run a loopback coordinator locally: `agent-dispatch serve`
+- **Lone dev box:** run a loopback coordinator locally:
+  `agent-dispatch serve` <!-- marketplace-isolation: allow coordinator-management -->
   (or install it as a service -- see the plugin README). Local client verbs
   lazy-start a detached coordinator when none answers; `health` does not.
 - **Shared network:** set `AGENT_DISPATCH_URL` to the designated coordinator
@@ -121,9 +132,12 @@ client picks per command:
   always-on **hosted coordinator**; standalone, whichever mesh peer is elected to host it),
   and `AGENT_DISPATCH_SHARED_TOKEN` for its bearer (independent of the local
   token — the two authenticate separately).
-- Add `--shared` to any client verb to target it: `agent-dispatch --shared
-  create …`, `agent-dispatch --shared list`, `agent-dispatch --shared claim …`,
-  `agent-dispatch --shared supervise --pool …`. Omit `--shared` for the local
+- Add `--shared` to any client verb to target it:
+  `<agent-dispatch catalog argv[0]> --shared create …`,
+  `<agent-dispatch catalog argv[0]> --shared list`,
+  `<agent-dispatch catalog argv[0]> --shared claim …`, and
+  `agent-dispatch --shared supervise --pool …`. <!-- marketplace-isolation: allow supervisor-management -->
+  Omit `--shared` for the local
   coordinator. An explicit `--url` always overrides both.
 - The shared coordinator **binds loopback behind the secured mesh** and
   is reached by **client-initiated outbound** calls + bearer — never a raw LAN
@@ -144,8 +158,8 @@ current directory** by delegating to `agent-worktrees` (the same way git finds
 its repo). So from inside your worktree you pass **no** identity flags:
 
 ```bash
-agent-dispatch worktree-status     # my inbox: tasks targeted at + owned by me
-agent-dispatch claim               # lease an eligible task; owner is auto-stamped
+<agent-dispatch catalog argv[0]> worktree-status     # my inbox: tasks targeted at + owned by me
+<agent-dispatch catalog argv[0]> claim               # lease an eligible task; owner is auto-stamped
 ```
 
 Override (or supply, when `agent-worktrees` is absent) with `--machine` /
@@ -163,13 +177,13 @@ agent's harness repo*. **Repos stay in their own lanes:** a task made by a
 `webapp` agent is for `webapp` agents, and every subcommand is
 **scoped to the calling repo by default**. You never see or claim another repo's
 tasks. Like identity, the lane is **auto-resolved from your CWD** (via
-`agent-worktrees get repo-remote`, falling back to `git remote get-url origin`),
+`agent-worktrees get repo-remote`, falling back to `git remote get-url origin`), <!-- marketplace-isolation: allow agent-worktrees-management -->
 so you pass nothing:
 
 ```bash
-agent-dispatch create "..."      # lane auto-stamped from the calling repo
-agent-dispatch sweep             # dedup corpus for THIS repo only
-agent-dispatch list --status queued
+<agent-dispatch catalog argv[0]> create "..."      # lane auto-stamped from the calling repo
+<agent-dispatch catalog argv[0]> sweep             # dedup corpus for THIS repo only
+<agent-dispatch catalog argv[0]> list --status queued
 ```
 
 - **Cross-repo *code* work stays in the producing lane.** If a `webapp`
@@ -187,7 +201,8 @@ agent-dispatch list --status queued
 - **Hybrid keys.** The wire/DB stores a device-independent **canonical remote**
   (so one shared coordinator keys every machine the same); the CLI lets you
   *type* and *reads back* the local repo **name** (resolved through the
-  agent-worktrees registry). Output carries both `repo` (remote) and `repo_name`.
+  agent-worktrees registry). <!-- marketplace-isolation: allow agent-worktrees-management -->
+  Output carries both `repo` (remote) and `repo_name`.
 
 ## The seven-state lifecycle
 
@@ -228,7 +243,8 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
   **liveness** garbage-collection pass -- never on elapsed time, so a
   long-running live worker is never disturbed and a momentary bridge blip
   (verdict *unknown*) leaves the task alone. The coordinator runs GC on a timer
-  (`AGENT_DISPATCH_GC_INTERVAL`, default 60s); `agent-dispatch recover` forces a
+  (`AGENT_DISPATCH_GC_INTERVAL`, default 60s);
+  `<agent-dispatch catalog argv[0]> recover` forces a
   pass on demand. (There is **no** lease TTL: recovery is reconciled against live
   workers, not a clock.)
 
@@ -244,12 +260,12 @@ prompt** -- enough for a sweeping agent to judge duplication without extra
 context. The coordinator also backstops with a unique `dedup_key`.
 
 ```bash
-agent-dispatch sweep                         # the dedup corpus: every non-abandoned
+<agent-dispatch catalog argv[0]> sweep       # the dedup corpus: every non-abandoned
                                              #   task (proposed/queued/claimed/started/
                                              #   completed), newest first -- read these,
                                              #   then explore/verify before creating
-agent-dispatch find "narration track"        # quick substring probe over title/prompt
-agent-dispatch list --status queued,started  # filter by status (comma-separate for several),
+<agent-dispatch catalog argv[0]> find "narration track"        # quick substring probe over title/prompt
+<agent-dispatch catalog argv[0]> list --status queued,started  # filter by status (comma-separate for several),
                                              #   --target-machine/--target-repo/--label
 ```
 
@@ -262,7 +278,7 @@ agent-dispatch list --status queued,started  # filter by status (comma-separate 
 ### 2. Create a task
 
 ```bash
-agent-dispatch create "Add narration track" \
+<agent-dispatch catalog argv[0]> create "Add narration track" \
   --prompt "segment 42 needs a narration pass" \
   --require logger \                 # hard selector: only a worker advertising 'logger' can claim
   --exclude machine:flaky-box \      # hard anti-selector: that machine can NOT claim
@@ -287,7 +303,8 @@ machine/worktree/repo**. A task is claimable only when every `--require` token i
 present in the worker's set **and** no `--exclude` token is. Excludes are hard
 anti-affinity (unlike soft `--affinity`, which only orders). A declining worker
 can **append its own "not me"** on the way back to the queue with
-`agent-dispatch yield <id> --exclude-self {worktree,machine}` (or `--exclude <token>`);
+`<agent-dispatch catalog argv[0]> yield <id> --exclude-self {worktree,machine}`
+(or `--exclude <token>`);
 because excludes only grow, the candidate set shrinks monotonically to a taker or
 to unclaimable.
 
@@ -317,7 +334,7 @@ a single mechanical step; a plain one-shot prompt (no goal) is the exception, fo
 genuinely atomic work.
 
 ```bash
-agent-dispatch create "Drive PR #128 to ready" \
+<agent-dispatch catalog argv[0]> create "Drive PR #128 to ready" \
   --prompt "review, address feedback, and land the auth-hardening PR" \
   --goal "PR #128 is approved and merged" \
   --done-criteria "review approved, CI green, merged to master"
@@ -327,7 +344,8 @@ agent-dispatch create "Drive PR #128 to ready" \
   test for *done*. Both are stored on the task row and both are optional — omit
   them for a one-shot task.
 - A worker treats a goal-bearing task as something to **pursue in a loop**: do one
-  unit of work → record a **progress beat** (`agent-dispatch progress <id> …`,
+  unit of work → record a **progress beat**
+  (`<agent-dispatch catalog argv[0]> progress <id> …`,
   which *appends* to the task's durable `progress_log`) → re-check the
   done-criteria → repeat until they are genuinely met. Dispatched **autopilot**
   bodies (`embody` / fleet seeds) run exactly this loop; the seed prompt spells it
@@ -355,22 +373,26 @@ agent-dispatch create "Drive PR #128 to ready" \
 The coordinator only owns the queue; anything that *creates* tasks is a
 **producer**. Two ship in-box, each driven by a declarative JSON spec:
 
-- **`agent-dispatch schedule tick <spec>`** (and `schedule serve <spec>
+- **`agent-dispatch schedule tick <spec>`** <!-- marketplace-isolation: allow scheduler-management -->
+  (and
+  `schedule serve <spec>
   --interval N`) -- a scheduler/timer producer. Each tick creates one task per
   due occurrence of every schedule (`interval_seconds`, or daily `at: ["HH:MM"]`
   times), stamping `not_before` and a deterministic `dedup_key`
   (`sched:<id>:<epoch>`) so re-ticks are idempotent. Drive `tick` from cron / a
   systemd timer / `manage_schedule`, or run the built-in `serve` loop.
-- **`agent-dispatch webhook --config <cfg>`** -- a reactive producer: an HTTP app
+- **`agent-dispatch webhook --config <cfg>`** <!-- marketplace-isolation: allow webhook-management -->
+  -- a reactive producer: an HTTP app
   with `POST /webhook/pr` (a **merged** PR -> follow-up task, `source=pr-webhook`,
   `origin_ref=pr/<n>`, lane from the payload's repo remote) and
   `POST /webhook/telemetry` (a **firing** alert -> remediation task,
   `source=telemetry`). Deterministic `dedup_key`s make redelivery safe.
-- **`agent-dispatch evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
+- **`<agent-dispatch catalog argv[0]> evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
   lifecycle event (stdin or `--event-file`) through a declarative rule set that
   decides what happens next (emit a follow-up task, or nothing). Hook-like; the
   judgment half of emitters-and-evaluators. `--dry-run` prints decisions only.
-  For the **service-driven** loop, `agent-dispatch supervise --evaluator <cfg>`
+  For the **service-driven** loop,
+  `agent-dispatch supervise --evaluator <cfg>` <!-- marketplace-isolation: allow supervisor-management -->
   runs the same rules each cycle over newly-terminal tasks (advancing the loop
   with no bespoke module; idempotent via the emit's `dedup_key`).
 
@@ -385,9 +407,9 @@ kickable: no standing service, emitter, or evaluator is required -- just a
 coordinator + a worker body.
 
 ```bash
-agent-dispatch recipes list                                   # available recipes + params
-agent-dispatch recipes render reviewer --param repo=o/n --param pr=42   # inspect the fields
-agent-dispatch recipes kick reviewer --param repo=o/n --param pr=42 --repo o/n --spawn
+<agent-dispatch catalog argv[0]> recipes list                                   # available recipes + params
+<agent-dispatch catalog argv[0]> recipes render reviewer --param repo=o/n --param pr=42   # inspect the fields
+<agent-dispatch catalog argv[0]> recipes kick reviewer --param repo=o/n --param pr=42 --repo o/n --spawn
 ```
 
 `kick` reuses `create` (lane resolution, dedup, `--spawn`/`--spawn-backend`;
@@ -404,7 +426,7 @@ and let a pool slot claim it -- no `--spawn` needed.
 
 ```bash
 # a persistent pool watches one label, e.g. AGENT_DISPATCH_SUPERVISE_LABELS=general
-agent-dispatch recipes kick goal-driven \
+<agent-dispatch catalog argv[0]> recipes kick goal-driven \
   --param goal="fix the flaky retry in the uploader" --param repos=o/n \
   --label general        # a 'general'-pool slot claims + drives it to a PR
 ```
@@ -413,7 +435,8 @@ Because a label-gated supervisor claims **only** tasks carrying its label, a poo
 scoped to a dedicated label (`general`) is a clean **positive opt-in**: it never
 picks up system tasks that carry their own labels (reviews, scheduled sweeps).
 
-**Driving the loop** -- `agent-dispatch recipes drive <name> --signal <s>` maps a
+**Driving the loop** --
+`<agent-dispatch catalog argv[0]> recipes drive <name> --signal <s>` maps a
 recipe + what-just-happened to the next action: **work** (start / a `suspend_on`
 event), **suspend** (`work-done`/`idle` -> hibernate the wait), or **resolve**
 (`merged`/`abandoned` -> drive-to-resolution). `--execute` runs the suspend leg
@@ -428,14 +451,15 @@ verifies clean; abandoning **unwinds to base** and reconciles the source. Run it
 on your **own** worktree:
 
 ```bash
-agent-dispatch resolve --outcome landed                                  # verify clean
-agent-dispatch resolve --outcome abandoned --base main --source o/n#42   # preview the unwind
-agent-dispatch resolve --outcome abandoned --base main --execute         # perform it (destructive)
+<agent-dispatch catalog argv[0]> resolve --outcome landed                                  # verify clean
+<agent-dispatch catalog argv[0]> resolve --outcome abandoned --base main --source o/n#42   # preview the unwind
+<agent-dispatch catalog argv[0]> resolve --outcome abandoned --base main --execute         # perform it (destructive)
 ```
 
 Planning is pure and prints by default; `--execute` performs the (destructive)
-unwind and a failed reset stops rather than pressing on. `agent-dispatch abandon
---resolve` surfaces the same plan alongside the abandon. See the plugin README
+unwind and a failed reset stops rather than pressing on.
+`<agent-dispatch catalog argv[0]> abandon --resolve` surfaces the same plan
+alongside the abandon. See the plugin README
 (**Drive the worktree to resolution**) and `visions/plugins/agent-dispatch`
 (§*drive-the-worktree-to-resolution*).
 
@@ -446,8 +470,8 @@ session. Hand the wait to `run`: it executes the blocking command and, when it
 resolves, resumes the worktree-affinitied worker via an agent-bridge nudge.
 
 ```bash
-agent-dispatch run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42
-agent-dispatch run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42
+<agent-dispatch catalog argv[0]> run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
+<agent-dispatch catalog argv[0]> run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
 ```
 
 Everything after `--` is the wait command. `--detach` runs it as a fully detached,
@@ -459,17 +483,18 @@ README (**Hibernate the wait**) and `visions/plugins/agent-dispatch`
 ### 3. Claim, work, finish
 
 ```bash
-agent-dispatch claim --capability logger     # atomically leases one eligible task
+<agent-dispatch catalog argv[0]> claim --capability logger     # atomically leases one eligible task
 # note the returned task id + owner, then:
-agent-dispatch start    <id> <owner>
-agent-dispatch heartbeat <id> <owner>        # optional: refresh the last-seen beat
-agent-dispatch complete <id> <owner> --result-ref pr/123
+<agent-dispatch catalog argv[0]> start    <id> <owner>
+<agent-dispatch catalog argv[0]> heartbeat <id> <owner>        # optional: refresh the last-seen beat
+<agent-dispatch catalog argv[0]> complete <id> <owner> --result-ref pr/123
 ```
 
 > **Owner is optional on `claim`/`start`/`complete`/`yield`/`progress`.** Omit it
 > and the coordinator resolves your **worktree identity** (`<machine>/<worktree>`)
 > from the CWD -- so an embodied/taken-over worker can drive its whole lifecycle
-> (`agent-dispatch claim --task <id>` → `start <id>` → `complete <id>`) without
+> (`<agent-dispatch catalog argv[0]> claim --task <id>` → `start <id>` →
+> `complete <id>`) without
 > ever typing an owner. This keeps the task's owner equal to its worktree, which
 > is what lets live-session tracking join a CLI-embodied task to its session (the
 > `embodiment` overlay above).
@@ -478,9 +503,9 @@ Report progress toward the goal so callers/operator watch the fleet at a glance
 (this also refreshes the last-seen beat):
 
 ```bash
-agent-dispatch progress <id> --phase implementing --summary "wired the verb; tests green"
-agent-dispatch progress <id> --phase "PR open" --summary "opened the PR" --pr pr/2601
-agent-dispatch progress <id> --summary "stuck on a flaky test" --blocker "CI timeout"
+<agent-dispatch catalog argv[0]> progress <id> --phase implementing --summary "wired the verb; tests green"
+<agent-dispatch catalog argv[0]> progress <id> --phase "PR open" --summary "opened the PR" --pr pr/2601
+<agent-dispatch catalog argv[0]> progress <id> --summary "stuck on a flaky test" --blocker "CI timeout"
 ```
 
 Set **this worktree's current focus** (for an operator or task-less worktree —
@@ -488,15 +513,15 @@ the cockpit shows what each worktree is working on). Post it when you *start
 substantial work* and *change direction*, never on a timer:
 
 ```bash
-agent-dispatch focus "driving live-session-messaging Phase 8 (multi-machine dispatch)"
-agent-dispatch focus            # show this worktree's current focus
-agent-dispatch focus --list     # every worktree's focus (this machine)
+<agent-dispatch catalog argv[0]> focus "driving live-session-messaging Phase 8 (multi-machine dispatch)"
+<agent-dispatch catalog argv[0]> focus            # show this worktree's current focus
+<agent-dispatch catalog argv[0]> focus --list     # every worktree's focus (this machine)
 ```
 
 > `focus` resolves `machine/worktree` from the CWD (no id to type). It **is**
 > the worktree record's status-core summary: a focus write forwards through the
-> `agent-worktrees status` verb, and `--list` / show *derive* from
-> `agent-worktrees list --json` — there is no separate focus store
+> `agent-worktrees status` verb, and `--list` / show *derive* from <!-- marketplace-isolation: allow agent-worktrees-management -->
+> `agent-worktrees list --json` — there is no separate focus store <!-- marketplace-isolation: allow agent-worktrees-management -->
 > (single-owning-layer / derive-don't-duplicate). It is the operator/task-less
 > analogue of a dispatched worker's `progress` (which is keyed to a task).
 > The concise posting cadence is injected at session start when the repository
@@ -516,7 +541,7 @@ agent-dispatch focus --list     # every worktree's focus (this machine)
 Recoverable snag -> return it for a later cycle (keep the note!):
 
 ```bash
-agent-dispatch yield <id> <owner> --note "blocked on merge conflict; retry next cycle"
+<agent-dispatch catalog argv[0]> yield <id> <owner> --note "blocked on merge conflict; retry next cycle"
 ```
 
 Discard a duplicate / dropped task (needs permission):
@@ -524,9 +549,9 @@ Discard a duplicate / dropped task (needs permission):
 ```bash
 # a duplicate is self-justifying -- --duplicate-of implies permission and
 # records the dedup reference in the audit trail (never a silent drop):
-agent-dispatch abandon <id> --duplicate-of pr/123     # or task-id / issue ref
+<agent-dispatch catalog argv[0]> abandon <id> --duplicate-of pr/123     # or task-id / issue ref
 # any other discard still asserts permission explicitly:
-agent-dispatch abandon <id> --worker-id <owner> --permit --reason "dropped priority"
+<agent-dispatch catalog argv[0]> abandon <id> --worker-id <owner> --permit --reason "dropped priority"
 ```
 
 ### Evaluate before committing (the contract-net window)
@@ -541,11 +566,11 @@ an evaluator is reclaimed only if its worker is confirmed gone (liveness GC), an
 available.
 
 ```bash
-agent-dispatch claim --task <id> --evaluation    # win a short exclusive eval window
-# ...assess: dup-check (agent-dispatch list / sweep), feasibility, is-this-for-me...
-agent-dispatch start   <id>                      # ACCEPT -> commit to doing the work
-agent-dispatch yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
-agent-dispatch abandon <id> --duplicate-of <ref>                                # DUPLICATE
+<agent-dispatch catalog argv[0]> claim --task <id> --evaluation    # win a short exclusive eval window
+# ...assess: dup-check (<agent-dispatch catalog argv[0]> list / sweep), feasibility, is-this-for-me...
+<agent-dispatch catalog argv[0]> start   <id>                      # ACCEPT -> commit to doing the work
+<agent-dispatch catalog argv[0]> yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
+<agent-dispatch catalog argv[0]> abandon <id> --duplicate-of <ref>                                # DUPLICATE
 ```
 
 Three ways out of the window: **accept** (`start`), **decline** (`yield
@@ -558,12 +583,12 @@ to `machine` only when the mismatch is machine-wide.
 ### Inspect
 
 ```bash
-agent-dispatch show    <id>       # full task record
-agent-dispatch events  <id>       # append-only audit trail of every transition
-agent-dispatch payload <id>       # resolved payload (inline or blob); --raw prints content only
-agent-dispatch consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
-agent-dispatch consume <id> --defer-complete  # TAKEOVER pickup: approve->claim->start + print brief, NO complete
-agent-dispatch watch              # stream task.* events (SSE) as JSON lines
+<agent-dispatch catalog argv[0]> show    <id>       # full task record
+<agent-dispatch catalog argv[0]> events  <id>       # append-only audit trail of every transition
+<agent-dispatch catalog argv[0]> payload <id>       # resolved payload (inline or blob); --raw prints content only
+<agent-dispatch catalog argv[0]> consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
+<agent-dispatch catalog argv[0]> consume <id> --defer-complete  # TAKEOVER pickup: approve->claim->start + print brief, NO complete
+<agent-dispatch catalog argv[0]> watch              # stream task.* events (SSE) as JSON lines
 ```
 
 > **`show`/`list` overlay live-session status for a CLI-embodied task.** A
@@ -575,7 +600,9 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 > mid-turn (`active`), done (`idle`), or silently `stalled`. **Cross-machine
 > (Phase 8 8b):** the overlay resolves against the *owner's* machine — a task
 > whose owner is a remote machine (an SSH-pushed dispatch) resolves its live
-> session on that machine over the SSH mesh (`ssh <machine> agent-bridge …`), so
+> session on that machine over the SSH mesh
+> (`ssh <machine> agent-bridge …`), <!-- marketplace-isolation: allow remote-management -->
+> so
 > a remote-dispatched task is trackable from the originator like a local one.
 > Best-effort and read-only: with no `agent-bridge`/`ssh` on PATH (or no live
 > session) the overlay is simply omitted and output is unchanged.
@@ -591,8 +618,9 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 > - **Deferred (`consume <id> --defer-complete`):** approve → claim → **start**
 >   (take ownership, mark in-progress) + print the brief, but do **not**
 >   complete. This is the **takeover** pickup for a *dispatched / embodied
->   successor*: it loads the brief, works the task, and runs `agent-dispatch
->   complete <id>` **explicitly** only when it judges the goal reached -- so
+>   successor*: it loads the brief, works the task, and runs
+>   `<agent-dispatch catalog argv[0]> complete <id>` **explicitly** only when
+>   it judges the goal reached -- so
 >   `completed` means *the work is done*, not *the baton was handed over*.
 >
 > An already-terminal (or unclaimable) task just has its payload re-printed,
@@ -625,11 +653,11 @@ agent-dispatch watch              # stream task.* events (SSE) as JSON lines
 
 ```bash
 # Headless agent-bridge ACP worker (default backend)
-agent-dispatch create "Summarize the PR" --require review --spawn              # managed (waits)
-agent-dispatch create "Summarize the PR" --spawn --spawn-agent task-worker --async  # fire-and-forget
+<agent-dispatch catalog argv[0]> create "Summarize the PR" --require review --spawn              # managed (waits)
+<agent-dispatch catalog argv[0]> create "Summarize the PR" --spawn --spawn-agent task-worker --async  # fire-and-forget
 
 # CLI-backed AUTOPILOT session -- "dispatch an agent to do X"
-agent-dispatch create "Refactor the auth module" \
+<agent-dispatch catalog argv[0]> create "Refactor the auth module" \
   --prompt "extract JWT handling into src/auth/ …" \
   --spawn --spawn-backend embody
 ```
@@ -638,7 +666,8 @@ agent-dispatch create "Refactor the auth module" \
   worker. Ephemeral; torn down with its caller.
 - **`--spawn-backend embody`** -- a **durable, CLI-backed autopilot** session in
   a **fresh parallel worktree on the same machine**, via `agent-worktrees embody
-  --new` (tools auto-approved with `--allow-all-tools`, stamped `--driver
+  --new` <!-- marketplace-isolation: allow agent-worktrees-management -->
+  (tools auto-approved with `--allow-all-tools`, stamped `--driver
   agent-dispatch` so it's viewable in Neuron Forge with a "driven by" banner).
   This is the **"dispatch an agent to do X"** path: the embodied session claims →
   starts → works the task autonomously → and **completes it explicitly** only
@@ -646,7 +675,8 @@ agent-dispatch create "Refactor the auth module" \
   `completed` state means the *work is done*, not that a baton was handed over).
 
 **Same body choice in the supervisor, keyed by label.** A persistent
-`agent-dispatch supervise` loop embodies via the **CLI autopilot** (`embody`) by
+`agent-dispatch supervise` loop <!-- marketplace-isolation: allow supervisor-management -->
+embodies via the **CLI autopilot** (`embody`) by
 default, but `--headless-label L` (repeatable; `--headless-agent` names the
 bridge agent) routes tasks carrying label `L` to the **headless bridge** body
 instead -- for **self-contained sweeps** that need no human attach (and whose
@@ -678,22 +708,26 @@ headless supervisor persistently, put the watched labels in
 `AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS`. See `docs/spawn-supervisor.md` for depth.
 
 > **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
-> `embody` spawn to dispatch **on another machine**: `agent-dispatch create <task>
-> --target-machine emancipation-cube --spawn --spawn-backend embody`. Because
+> `embody` spawn to dispatch **on another machine**:
+> `<agent-dispatch catalog argv[0]> create <task> --target-machine
+> emancipation-cube --spawn --spawn-backend embody`. Because
 > agent-dispatch is per-host (each machine owns a loopback coordinator + local
 > embody), the whole create+embody is run **on Y** over the SSH mesh (Y's
 > name is its SSH alias -- never a raw IP); the task lives on Y's coordinator and
-> the autopilot session runs + completes there. Observe it with `ssh Y
-> agent-dispatch show <id>`, or — since **8b** — directly from the originator:
+> the autopilot session runs + completes there. Observe it with
+> `ssh Y agent-dispatch show <id>`, <!-- marketplace-isolation: allow remote-management -->
+> or — since **8b** — directly from the originator:
 > `show`/`list` resolve a remote-owned task's `embodiment` overlay on the owner's
 > machine over the mesh (turn-state/liveness included). Degrades cleanly: no
 > `ssh` / unreachable host → nothing is queued, with a clear message.
 
 > **Peer-queue browse (Phase 8 8c).** Add `--machine <Y>` to `list` or `inbox`
 > to read **Y's own queue** over the SSH mesh instead of the local coordinator:
-> `agent-dispatch list --machine emancipation-cube --status started` /
-> `agent-dispatch inbox --machine emancipation-cube`. When `Y` is a remote peer, the read
-> command is run **on Y** (`ssh Y agent-dispatch …`), so it reads Y's loopback
+> `<agent-dispatch catalog argv[0]> list --machine emancipation-cube --status started` /
+> `<agent-dispatch catalog argv[0]> inbox --machine emancipation-cube`. When `Y`
+> is a remote peer, the read command is run **on Y**
+> (`ssh Y agent-dispatch …`), <!-- marketplace-isolation: allow remote-management -->
+> so it reads Y's loopback
 > coordinator and — via 8b — enriches against Y's own bridge; the JSON streams
 > straight back. `list` forwards the locally-resolved repo lane (+ any
 > `--status`/`--label`/`--limit`/`--target-*` filters); the `--machine` selector
@@ -708,14 +742,15 @@ queued for any worker to claim. agent-dispatch stays fully usable standalone.
 
 ## MCP tools instead of the CLI
 
-`agent-dispatch mcp` runs a local **stdio MCP server** exposing the same
+`<agent-dispatch catalog argv[0]> mcp` runs a local **stdio MCP server** exposing the same
 operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_sweep`,
 `dispatch_claim`, `dispatch_start`, `dispatch_complete`, `dispatch_payload`,
 `dispatch_worktree_status`, ...). It resolves your `machine`/`worktree` identity
 from the working directory just like the CLI, so `dispatch_claim` /
 `dispatch_worktree_status` are auto-scoped with no arguments. Point a sub-agent's
-`.mcp.json` at `{"command": "agent-dispatch", "args": ["mcp"]}` (needs the `mcp`
-extra). The coordinator also hosts the **same tools over HTTP at `/mcp`** for
+`.mcp.json` at
+`{"command": "agent-dispatch", "args": ["mcp"]}` <!-- marketplace-isolation: allow mcp-server-startup -->
+(needs the `mcp` extra). The coordinator also hosts the **same tools over HTTP at `/mcp`** for
 remote clients that supply identity via `X-Agent-Machine`/`X-Agent-Worktree`
 headers. The CLI and MCP tools are interchangeable — use whichever fits.
 

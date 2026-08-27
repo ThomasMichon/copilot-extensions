@@ -185,6 +185,7 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
     for plugin in (
         "agent-codespaces",
         "agent-containers",
+        "agent-dispatch",
         "agent-logger",
         "agent-machines",
         "agent-mcp",

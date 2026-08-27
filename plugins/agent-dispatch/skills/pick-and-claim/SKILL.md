@@ -3,7 +3,7 @@ name: pick-and-claim
 description: >
   Dedup-safe self-dispatch for open-ended "pick something and work on it"
   prompts. Before starting freely-chosen work, atomically claim your pick on the
-  agent-dispatch queue with a subject dedup_key, so two concurrent open-ended
+  dispatch queue with a subject dedup_key, so two concurrent open-ended
   agents don't land the same item. Use this whenever you (or several parallel
   sessions) are told to choose your own work.
   Trigger phrases include:
@@ -21,6 +21,13 @@ description: >
 
 # Pick-and-Claim — dedup-safe open-ended self-dispatch
 
+Use the exact `argv[0]` from the agent-dispatch session command catalog for
+every dispatch operation below. Replace `<agent-dispatch catalog argv[0]>`
+with that path; never search `PATH` for a same-named command. In PowerShell,
+invoke it as `& "<agent-dispatch catalog argv[0]>" <args>`. If the catalog is
+missing, follow the single-installed-payload fallback in the `agent-dispatch`
+skill and fail on ambiguity.
+
 When you are told to **pick your own work** ("pick something interesting and work
 on it", "grab an issue", "pick up an effort and drive it") — especially when
 **several sessions run the same open-ended prompt at once** — you must avoid two
@@ -37,10 +44,10 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    - A **semantic search** over your work corpus / issue tracker, if one is
      available (it catches differently-worded duplicates that a substring match
      misses).
-   - `agent-dispatch list --status queued,claimed,started` — what is already
+   - `<agent-dispatch catalog argv[0]> list --status queued,claimed,started` — what is already
      grabbed on the queue.
    - Active worktree **charters** (if the coordination layer exposes them, e.g.
-     `agent-worktrees list --json`) — do not pick what another agent is already
+     `agent-worktrees list --json`) — do not pick what another agent is already <!-- marketplace-isolation: allow agent-worktrees-management -->
      driving.
 
 2. **Prefer a structured subject.** A tracked artifact (issue / PR / effort /
@@ -52,7 +59,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    to subject *X*, claim it in one race-free call:
 
    ```bash
-   agent-dispatch create "<what you're tackling>" \
+   <agent-dispatch catalog argv[0]> create "<what you're tackling>" \
      --dedup-key "<subject-id>" --claim
    ```
 
@@ -67,14 +74,16 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    slip into. (Without `--claim`, guard the gap with `--require worktree:<self>`
    then `claim`, but `--claim` is the clean primitive.)
 
-4. **Work it, then close the loop.** `agent-dispatch progress <id> …` at phase
-   boundaries; `agent-dispatch complete <id> --result-ref <ref>` when done. If the
+4. **Work it, then close the loop.**
+   `<agent-dispatch catalog argv[0]> progress <id> …` at phase boundaries;
+   `<agent-dispatch catalog argv[0]> complete <id> --result-ref <ref>` when done. If the
    pick is an *objective* rather than a single step, make it a **durable goal**
    (`create … --goal "<objective>" --done-criteria "<when done>"`) and **loop
    toward it** — work a unit, record a progress beat, re-check the done-criteria,
    repeat — so a replacement resumes from the recorded progress rather than
    restarting (see the **`agent-dispatch`** skill § *Goal-loop tasks*). If you
-   must drop it: `agent-dispatch yield <id> --exclude-self worktree` (append a "not
+   must drop it:
+   `<agent-dispatch catalog argv[0]> yield <id> --exclude-self worktree` (append a "not
    me" so you are not re-offered it), or `abandon --duplicate-of <ref>` if it turns
    out to be a duplicate.
 
@@ -117,5 +126,5 @@ computes identically.
   matching. Its **"Which coordination system?"** matrix disambiguates
   native sub-agent vs. agent-bridge vs. agent-dispatch when you're unsure which
   tool a task wants.
-- `agent-dispatch create --help` — the `--claim`, `--dedup-key`, `--require`, and
+- `<agent-dispatch catalog argv[0]> create --help` — the `--claim`, `--dedup-key`, `--require`, and
   `--exclude` flags.

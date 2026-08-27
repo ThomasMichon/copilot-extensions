@@ -181,10 +181,12 @@ function Invoke-WithCleanGitEnvironment([scriptblock] $Action) {
 try {
     $PluginVersion = Read-PluginVersion
     $Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
-        'Before starting work likely to overlap another worktree, check ' +
-        '`agent-dispatch focus --list`. At the start of substantial operator-led ' +
+        'Before starting work likely to overlap another worktree, use the ' +
+        "agent-dispatch session command catalog's exact " +
+        '`argv[0]` with ' +
+        '`focus --list`. At the start of substantial operator-led ' +
         'or task-less work, and when its direction changes, advertise it early ' +
-        'with `agent-dispatch focus "<one-line subject>"`; this is shorthand for ' +
+        'with that same command plus `focus "<one-line subject>"`; this is shorthand for ' +
         'writing the same agent-worktrees status-core summary, not a separate ' +
         'store. Agent-worktrees conduct and regular ' +
         '`agent-worktrees status --summary` remain authoritative for ongoing ' +
@@ -202,7 +204,7 @@ try {
     }
 
     $Git = Get-Command git -ErrorAction Stop
-    $AgentWorktrees = Get-Command agent-worktrees -ErrorAction Stop
+    $AgentWorktrees = Get-Command agent-worktrees -ErrorAction Stop # marketplace-isolation: allow agent-worktrees-management
     $Result = Invoke-WithCleanGitEnvironment {
         $Root = (& $Git.Source -C $Cwd rev-parse --show-toplevel 2>$null |
             Select-Object -First 1)

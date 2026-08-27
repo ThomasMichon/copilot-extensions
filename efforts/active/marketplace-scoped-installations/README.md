@@ -278,6 +278,11 @@ See [`design.md`](design.md).
   agent-facing shell operations to a payload-local command while preserving
   static `mcp-servers.command` and generated materialized fleets as explicit
   startup and management compatibility boundaries.
+- The agent-vault slice merged in
+  [#1150](https://github.com/ThomasMichon/copilot-extensions/pull/1150), moving
+  agent-facing vault operations to a payload-local command while preserving
+  installer/service actions, Git credential-helper registration, and
+  `vault-askpass` as explicit out-of-session management boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 
