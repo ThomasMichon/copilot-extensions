@@ -299,6 +299,11 @@ See [`design.md`](design.md).
   direct lifecycle, repository, collaboration, repair, setup, and cross-repo
   operations to the payload catalog while keeping project commands and
   deployment verification as explicit entry-point boundaries.
+- The shared-skill cleanup merged in
+  [#1172](https://github.com/ThomasMichon/copilot-extensions/pull/1172), moving
+  current-session calls in payload-only plugins to the runtime catalogs while
+  preserving handoff seeds, launch preflight, deployed-runtime diagnostics,
+  materialized MCP fleets, and clean-room commands as explicit boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 

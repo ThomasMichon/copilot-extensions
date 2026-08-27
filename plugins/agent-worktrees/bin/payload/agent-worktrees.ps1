@@ -50,8 +50,15 @@ function Resolve-PayloadRuntime {
 
 $_py = Resolve-PayloadRuntime
 if ($_py) {
+    $_payloadRootEnvPrevious = [Environment]::GetEnvironmentVariable('AGENT_WORKTREES_PAYLOAD_ROOT', 'Process')
+    $env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRoot
+    try {
     & $_py -m $_module @args
-    exit $LASTEXITCODE
+    $_payloadRc = $LASTEXITCODE
+    } finally {
+        if ($null -eq $_payloadRootEnvPrevious) { Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT -ErrorAction SilentlyContinue } else { $env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRootEnvPrevious }
+    }
+    exit $_payloadRc
 }
 if (Test-Path "env:AGENT_WORKTREES_NO_SELFPROVISION") {
     [Console]::Error.WriteLine("[$_command] runtime not provisioned (AGENT_WORKTREES_NO_SELFPROVISION set).")
@@ -117,8 +124,15 @@ $_provisionRc = $LASTEXITCODE
 }
 if ($_provisionRc -ne 0) { exit $_provisionRc }
 if ($_provisionedPy) {
+    $_payloadRootEnvPrevious = [Environment]::GetEnvironmentVariable('AGENT_WORKTREES_PAYLOAD_ROOT', 'Process')
+    $env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRoot
+    try {
     & $_provisionedPy -m $_module @args
-    exit $LASTEXITCODE
+    $_payloadRc = $LASTEXITCODE
+    } finally {
+        if ($null -eq $_payloadRootEnvPrevious) { Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT -ErrorAction SilentlyContinue } else { $env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRootEnvPrevious }
+    }
+    exit $_payloadRc
 }
 [Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")
 exit 1

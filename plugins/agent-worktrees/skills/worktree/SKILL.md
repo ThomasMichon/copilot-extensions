@@ -452,6 +452,11 @@ directory**: the target worktree and its anchor repo are discovered from CWD
 CWD were that project's anchor repo* — so you can act on another repo's
 worktrees from anywhere without env-var contamination.
 
+Project binstubs pin the payload that created them and carry an ownership
+receipt. A different payload cannot silently overwrite one; deliberate
+ownership transfer uses the current payload command's
+`reconcile-binstubs --transfer <project>` operation.
+
 > **`register` (adopt) is the exception — cwd is the only *implicit* locator.**
 > Because a project binstub / `--project <name>` resolves an *already-adopted*
 > project, those levers don't exist for the repo you're about to adopt.

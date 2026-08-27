@@ -462,12 +462,29 @@ function Register-ProjectEntry {
     if (-not (Test-Path $VenvPython)) { return }
     $awArgs = @('-m', 'agent_worktrees', 'register-project-entry',
                 $ProjectName) + $ExtraArgs
+    if ($RepoDir -and -not ($ExtraArgs -contains '--repo-dir')) {
+        $awArgs += @('--repo-dir', $RepoDir)
+    }
     $prevPythonPath = $env:PYTHONPATH
+    $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
     try {
         $env:PYTHONPATH = $null
+        $env:AGENT_WORKTREES_PAYLOAD_ROOT = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+            $env:COPILOT_PLUGIN_STAGED_FROM
+        } else {
+            $PluginDir
+        }
         & $VenvPython @awArgs
+        if ($LASTEXITCODE -ne 0) {
+            throw "Project registration failed (exit $LASTEXITCODE)"
+        }
     } finally {
         $env:PYTHONPATH = $prevPythonPath
+        if ($null -eq $savedPayloadRoot) {
+            Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT -ErrorAction SilentlyContinue
+        } else {
+            $env:AGENT_WORKTREES_PAYLOAD_ROOT = $savedPayloadRoot
+        }
     }
 }
 
@@ -711,7 +728,11 @@ function Write-V3Manifest {
     <# Unified schema_version 3 manifest -- self-contained per plugin. Records
        the source footprint (local vs marketplace); written atomically. #>
     $manifestPath = Join-Path $InstallDir 'deploy-manifest.json'
-    $pluginPath = $PluginDir.ToString()
+    $pluginPath = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+        $env:COPILOT_PLUGIN_STAGED_FROM
+    } else {
+        $PluginDir.ToString()
+    }
     $kind = Get-SourceKind -PluginPath $pluginPath
     $ver = '0.0.0'
     $pyproj = Join-Path $PluginDir 'pyproject.toml'
@@ -2253,7 +2274,27 @@ function Assert-PathIncludes {
 }
 
 function Remove-Binstub {
-    foreach ($stub in @("$ProjectName.cmd", "$ProjectName.ps1", 'mark-session-complete.cmd', 'mark-session-complete.ps1', 'agent-worktrees.cmd', 'agent-worktrees.ps1')) {
+    if ($HasProject -and (Test-Path $VenvPython)) {
+        $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
+        try {
+            $env:AGENT_WORKTREES_PAYLOAD_ROOT = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+                $env:COPILOT_PLUGIN_STAGED_FROM
+            } else {
+                $PluginDir
+            }
+            & $VenvPython -m agent_worktrees reconcile-binstubs --remove $ProjectName
+            if ($LASTEXITCODE -ne 0) {
+                Write-ServiceWarn 'Project binstub preserved (ownership check failed)'
+            }
+        } finally {
+            if ($null -eq $savedPayloadRoot) {
+                Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT -ErrorAction SilentlyContinue
+            } else {
+                $env:AGENT_WORKTREES_PAYLOAD_ROOT = $savedPayloadRoot
+            }
+        }
+    }
+    foreach ($stub in @('mark-session-complete.cmd', 'mark-session-complete.ps1', 'agent-worktrees.cmd', 'agent-worktrees.ps1')) {
         $path = Join-Path $LocalBin $stub
         if (Test-Path $path) {
             Remove-Item $path -Force
@@ -2289,12 +2330,24 @@ function Reconcile-Binstubs {
        Python implementation (single, cross-platform source of truth) so it runs
        regardless of whether this install has a project context. #>
     if (-not (Test-Path $VenvPython)) { return }
+    $savedPayloadRoot = $env:AGENT_WORKTREES_PAYLOAD_ROOT
     try {
         $env:PYTHONUTF8 = '1'
+        $env:AGENT_WORKTREES_PAYLOAD_ROOT = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+            $env:COPILOT_PLUGIN_STAGED_FROM
+        } else {
+            $PluginDir
+        }
         & $VenvPython -m agent_worktrees reconcile-binstubs 2>&1 |
             ForEach-Object { Write-Host "  $_" }
     } catch {
         Write-ServiceWarn "Binstub reconciliation skipped: $_"
+    } finally {
+        if ($null -eq $savedPayloadRoot) {
+            Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT -ErrorAction SilentlyContinue
+        } else {
+            $env:AGENT_WORKTREES_PAYLOAD_ROOT = $savedPayloadRoot
+        }
     }
 }
 
@@ -2409,8 +2462,8 @@ switch ($Action) {
         # -- Project-specific (only when adopting) --
         if ($HasProject) {
             Deploy-Config -Machine $machine | Out-Null
-            Deploy-Binstub
             Register-ProjectEntry
+            Reconcile-Binstubs
             Deploy-Shortcuts -Machine $machine
             if ($RepoDir) { Deploy-GitHooksPath }
 
@@ -2732,8 +2785,8 @@ switch ($Action) {
 
         # -- Project-specific (only when a project is known) --
         if ($HasProject) {
-            Deploy-Binstub
             Register-ProjectEntry
+            Reconcile-Binstubs
             $updateMachine = Resolve-Machine
             $configPath = Join-Path $ProjectDir 'config.yaml'
             if (Test-Path $configPath) {

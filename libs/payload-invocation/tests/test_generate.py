@@ -91,6 +91,33 @@ def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
         ).stat().st_mode & 0o100
 
 
+def test_payload_root_env_is_opt_in_and_preserves_defaults(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    baseline = generator.expected_files(manifest)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["payloadRootEnv"] = "AGENT_EXAMPLE_PAYLOAD_ROOT"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    generated = generator.expected_files(manifest)
+
+    posix_path = manifest.parent / "bin" / "agent-example"
+    powershell_path = manifest.parent / "bin" / "agent-example.ps1"
+    assert "AGENT_EXAMPLE_PAYLOAD_ROOT" not in baseline[posix_path]
+    assert "AGENT_EXAMPLE_PAYLOAD_ROOT" not in baseline[powershell_path]
+    assert (
+        'export AGENT_EXAMPLE_PAYLOAD_ROOT="$_payload_root"'
+        in generated[posix_path]
+    )
+    assert (
+        "$env:AGENT_EXAMPLE_PAYLOAD_ROOT = $_payloadRoot"
+        in generated[powershell_path]
+    )
+    assert (
+        "$env:AGENT_EXAMPLE_PAYLOAD_ROOT = $_payloadRoot\n    try {"
+        in generated[powershell_path]
+    )
+    assert "} finally {" in generated[powershell_path]
+
+
 def test_generates_multiple_commands_and_one_catalog(tmp_path: Path) -> None:
     manifest = _multi_manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []

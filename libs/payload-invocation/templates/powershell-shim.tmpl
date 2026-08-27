@@ -50,8 +50,8 @@ function Resolve-PayloadRuntime {
 
 $_py = Resolve-PayloadRuntime
 if ($_py) {
-    & $_py -m $_module @args
-    exit $LASTEXITCODE
+@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_py -m $_module @args
+@@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
 }
 if (Test-Path "env:@@NO_SELFPROVISION_ENV@@") {
     [Console]::Error.WriteLine("[$_command] runtime not provisioned (@@NO_SELFPROVISION_ENV@@ set).")
@@ -101,8 +101,8 @@ $_hostExe = if ($_host) { $_host.Source } else { 'powershell.exe' }
 }
 if ($_provisionRc -ne 0) { exit $_provisionRc }
 if ($_provisionedPy) {
-    & $_provisionedPy -m $_module @args
-    exit $LASTEXITCODE
+@@PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE@@    & $_provisionedPy -m $_module @args
+@@PAYLOAD_ROOT_ENV_POWERSHELL_AFTER@@    exit @@PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE@@
 }
 [Console]::Error.WriteLine("[$_command] provisioning completed without a resolvable runtime.")
 exit 1

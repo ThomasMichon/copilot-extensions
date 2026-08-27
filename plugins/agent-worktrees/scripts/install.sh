@@ -507,12 +507,15 @@ register_project() {
     # Positional project name (NOT --project: main() pre-pops a global
     # --project flag before argparse reaches this subcommand).
     local -a args=("$PROJECT_NAME")
+    [[ -n "$REPO_DIR" ]] && args+=(--repo-dir "$REPO_DIR")
     if [[ "$platform" == "wsl" || "$platform" == "linux" ]]; then
         args+=(--wsl-state adopted)
         [[ -n "${WSL_DISTRO_NAME:-}" ]] && args+=(--wsl-distro "$WSL_DISTRO_NAME")
         [[ -n "$REPO_DIR" ]] && args+=(--wsl-path "$REPO_DIR")
     fi
-    PYTHONPATH= "$VENV_PYTHON" -m agent_worktrees register-project-entry "${args[@]}"
+    AGENT_WORKTREES_PAYLOAD_ROOT="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        PYTHONPATH= "$VENV_PYTHON" -m agent_worktrees \
+        register-project-entry "${args[@]}"
 }
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -807,7 +810,9 @@ reconcile_binstubs() {
     if [[ ! -x "$VENV_PYTHON" ]]; then
         return 0
     fi
-    PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees reconcile-binstubs 2>&1 |
+    AGENT_WORKTREES_PAYLOAD_ROOT="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        PYTHONUTF8=1 \
+        "$VENV_PYTHON" -m agent_worktrees reconcile-binstubs 2>&1 |
         while IFS= read -r line; do echo "  $line"; done || \
         warn "Binstub reconciliation skipped"
 }
@@ -940,16 +945,17 @@ EOF
 
 write_deploy_manifest() {
     local manifest_path="$INSTALL_DIR/deploy-manifest.json"
-    local machine platform kind ver commit branch dirty
+    local machine platform kind ver commit branch dirty stable_plugin
     machine="$(resolve_machine)"
     platform="$(detect_platform)"
-    kind="$(_source_kind "$PLUGIN_DIR")"
+    stable_plugin="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"
+    kind="$(_source_kind "$stable_plugin")"
     ver="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$PLUGIN_DIR/pyproject.toml" 2>/dev/null || echo 0.0.0)"
 
     commit="null"; branch="null"; dirty="false"
     if [[ "$kind" == "local" ]]; then
         local repo_root c b
-        repo_root="$(cd "$PLUGIN_DIR/../.." && pwd)"
+        repo_root="$(cd "$stable_plugin/../.." && pwd)"
         c="$(git -C "$repo_root" rev-parse --short HEAD 2>/dev/null || echo unknown)"
         b="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
         commit="\"$c\""; branch="\"$b\""
@@ -965,7 +971,7 @@ write_deploy_manifest() {
   "deployed_by": "${machine}-${platform}",
   "source": {
     "kind": "$kind",
-    "path": "$PLUGIN_DIR",
+    "path": "$stable_plugin",
     "repo": "copilot-extensions",
     "plugin": "agent-worktrees",
     "version": "$ver",
@@ -1584,8 +1590,8 @@ case "$ACTION" in
         # -- Project-specific (only when adopting) --
         if $HAS_PROJECT; then
             deploy_config "$machine" "$platform" || true
-            deploy_binstub
             register_project
+            reconcile_binstubs
             deploy_tabby_profile "$platform" "$machine"
             deploy_git_hooks_path
 
@@ -1623,12 +1629,12 @@ case "$ACTION" in
         fi
 
         # Remove project binstub
-        if $HAS_PROJECT; then
-            local_binstub="$LOCAL_BIN/$PROJECT_NAME"
-            if [[ -f "$local_binstub" ]]; then
-                rm -f "$local_binstub"
-                changed "Removed binstub: $local_binstub"
-            fi
+        if $HAS_PROJECT && [[ -x "$VENV_PYTHON" ]]; then
+            AGENT_WORKTREES_PAYLOAD_ROOT="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+                PYTHONUTF8=1 "$VENV_PYTHON" -m agent_worktrees \
+                reconcile-binstubs --remove "$PROJECT_NAME" 2>&1 |
+                while IFS= read -r line; do echo "  $line"; done || \
+                warn "Project binstub preserved (ownership check failed)"
         fi
 
         # Remove tool binstubs
@@ -1843,8 +1849,8 @@ case "$ACTION" in
 
         # -- Project-specific (only when a project is known) --
         if $HAS_PROJECT; then
-            deploy_binstub
             register_project
+            reconcile_binstubs
             deploy_tabby_profile "$(detect_platform)" "$(resolve_machine)"
             deploy_git_hooks_path
 

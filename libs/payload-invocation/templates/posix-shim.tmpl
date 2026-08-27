@@ -44,7 +44,7 @@ _resolve_runtime() {
     fi
 }
 
-_resolve_runtime
+@@PAYLOAD_ROOT_ENV_POSIX@@_resolve_runtime
 if [ -n "${AGENT_RT_PY:-}" ]; then
     exec "$AGENT_RT_PY" -m "$_module" "$@"
 fi
