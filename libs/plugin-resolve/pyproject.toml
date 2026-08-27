@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # "plugin-resolve") to prevent dependency-confusion; the import module stays
 # ``plugin_resolve``. Mirrors agent-config-migrate / agent-ssh-manager / agent-zdd.
 name = "agent-plugin-resolve"
-version = "0.1.0-dev1"
+version = "0.1.0-dev2"
 description = "Copilot CLI + Claude plugin resolution: locate marketplaces, plugins, and a repo's enabled plugins across both conventions"
 readme = "README.md"
 license = "MIT"

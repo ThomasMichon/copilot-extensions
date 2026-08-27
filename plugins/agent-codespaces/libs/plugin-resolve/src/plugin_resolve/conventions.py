@@ -14,6 +14,7 @@ Sources:
 
 from __future__ import annotations
 
+from enum import Enum
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -54,6 +55,17 @@ PLUGIN_MANIFEST_RELS: tuple[tuple[str, ...], ...] = (
 # Local (on-disk) marketplace source spellings. Copilot's `directory` and the
 # older `local` both mean "a marketplace directory on this machine".
 LOCAL_MARKETPLACE_SOURCE_KINDS: frozenset[str] = frozenset({"directory", "local"})
+REMOTE_MARKETPLACE_SOURCE_KINDS: frozenset[str] = frozenset(
+    {"github", "git", "git-subdir", "npm", "url"}
+)
+
+
+class MarketplaceSourceKind(str, Enum):
+    """Whether a settings marketplace source is local, remote, or malformed."""
+
+    LOCAL = "local"
+    REMOTE = "remote"
+    INVALID = "invalid"
 
 
 def first_existing(base: Path, rels: tuple[tuple[str, ...], ...]) -> Path | None:
