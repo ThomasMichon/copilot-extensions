@@ -1149,6 +1149,13 @@ function Assert-ReceiptState($Value, [string]$Name) {
     }
 }
 
+function Assert-ReceiptGeneration($Value, [string]$Name) {
+    Assert-PositiveInteger $Value $Name
+    if ([int64]$Value -gt [int64]::MaxValue) {
+        Fail "$Name exceeds the portable signed 64-bit maximum."
+    }
+}
+
 function Validate-NamespaceReceipt(
     [string]$ReceiptPath,
     [string]$ResolvedDurableHome
@@ -1178,7 +1185,7 @@ function Validate-NamespaceReceipt(
     if (-not $idMatch.Success) {
         Fail "Invalid source-derived marketplace id '$marketplaceId'."
     }
-    Assert-PositiveInteger (Get-PropertyValue $namespace 'generation') 'namespace.json generation'
+    Assert-ReceiptGeneration (Get-PropertyValue $namespace 'generation') 'namespace.json generation'
     Assert-ReceiptState (Get-StringProperty $namespace 'state') 'namespace.json state'
     $sourceReceipt = Get-PropertyValue $namespace 'source'
     $normalized = Normalize-Source ([pscustomobject]@{
@@ -1284,7 +1291,7 @@ function Validate-ContextReceipt(
     if ($CellExpectation -and -not (Paths-Equal $cellRoot $CellExpectation)) {
         Fail "Expected cell '$CellExpectation', receipt belongs to '$cellRoot'."
     }
-    Assert-PositiveInteger (Get-PropertyValue $install 'generation') 'install.json generation'
+    Assert-ReceiptGeneration (Get-PropertyValue $install 'generation') 'install.json generation'
     Assert-ReceiptState (Get-StringProperty $install 'state') 'install.json state'
 
     $namespacePath = Canonical-Path (Join-Path $cellRoot 'namespace.json')
@@ -1448,6 +1455,9 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
             if ($null -ne $existingNamespace) {
                 $createdAt = Get-ReceiptTimestamp $existingNamespace 'createdAt' $now
             }
+            if ($namespaceGeneration -eq [int64]::MaxValue) {
+                Fail 'namespace.json generation cannot be incremented; explicit repair is required.'
+            }
             $namespaceGeneration++
             $namespace = [ordered]@{
                 schema = 'copilot-extensions.marketplace-namespace'
@@ -1553,6 +1563,9 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
                 origin = $PayloadOrigin
             }
             if ($originReceiptPath) { $payload['originReceipt'] = $originReceiptPath }
+            if ($installGeneration -eq [int64]::MaxValue) {
+                Fail 'install.json generation cannot be incremented; explicit repair is required.'
+            }
             $installGeneration++
             $install = [ordered]@{
                 schema = 'copilot-extensions.plugin-installation'

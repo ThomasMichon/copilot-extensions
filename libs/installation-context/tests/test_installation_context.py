@@ -289,6 +289,49 @@ def test_stamp_generation_compare_and_swap_rejects_stale_writer(tmp_path: Path) 
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_stamp_refuses_generation_overflow_before_replacing_receipt(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    maximum = 9223372036854775807
+    for key in ("namespace", "install"):
+        path = Path(layout[key])
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        receipt["generation"] = maximum
+        _write_json(path, receipt)
+    vector = _vectors()[0]
+    result = _run_ps(
+        "stamp",
+        "-PayloadRoot",
+        layout["payload"],
+        "-DurableHome",
+        layout["durable"],
+        "-PluginId",
+        layout["plugin_id"],
+        "-MarketplaceKey",
+        vector["marketplaceKey"],
+        "-SourceJson",
+        json.dumps(vector["descriptor"], separators=(",", ":")),
+        "-PayloadVersion",
+        "1.0.0",
+        "-PayloadOrigin",
+        "explicit",
+        "-ExpectedNamespaceGeneration",
+        maximum,
+        "-ExpectedInstallGeneration",
+        maximum,
+        "-InstallState",
+        "inactive",
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "cannot be incremented" in result.stderr
+    install = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
+    assert install["generation"] == maximum
+    assert install["state"] == "active"
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_stamp_fails_closed_on_dead_owner_and_blocks_live_owner(tmp_path: Path) -> None:
     arguments, values = _stamp_arguments(tmp_path)
     lock = (

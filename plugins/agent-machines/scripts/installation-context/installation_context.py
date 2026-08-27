@@ -25,6 +25,7 @@ LOCK_VERSION = 1
 LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
 LOCK_INITIALIZATION_RETRIES = 100
 MAX_NAMESPACE_LOCATORS = 16
+MAX_RECEIPT_GENERATION = (1 << 63) - 1
 ROOT_NAMES = ("versions", "snapshots", "state", "run", "logs", "cache", "launchers")
 
 
@@ -741,6 +742,12 @@ def _assert_receipt_state(value: Any, name: str) -> None:
         _fail(f"{name} must be active, inactive, orphaned, or removing.")
 
 
+def _assert_receipt_generation(value: Any, name: str) -> None:
+    _assert_positive_integer(value, name)
+    if value > MAX_RECEIPT_GENERATION:
+        _fail(f"{name} exceeds the portable signed 64-bit maximum.")
+
+
 def validate_namespace_receipt(
     receipt_path: str | os.PathLike[str],
     durable_home: str | os.PathLike[str],
@@ -772,7 +779,7 @@ def validate_namespace_receipt(
     match = re.fullmatch(r"(.+)--([0-9a-f]{16})", marketplace_id)
     if match is None:
         _fail(f"Invalid source-derived marketplace id '{marketplace_id}'.")
-    _assert_positive_integer(
+    _assert_receipt_generation(
         _property(namespace, "generation"),
         "namespace.json generation",
     )
@@ -892,7 +899,7 @@ def validate_context_receipt(
         _fail(f"Expected plugin '{expected_plugin_id}', receipt names '{plugin_id}'.")
     if expected_cell_root and not paths_equal(cell_root, expected_cell_root):
         _fail(f"Expected cell '{expected_cell_root}', receipt belongs to '{cell_root}'.")
-    _assert_positive_integer(_property(install, "generation"), "install.json generation")
+    _assert_receipt_generation(_property(install, "generation"), "install.json generation")
     _assert_receipt_state(_property(install, "state"), "install.json state")
 
     namespace_path = canonical_path(cell_root / "namespace.json")
@@ -1072,9 +1079,7 @@ def _namespace_receipt_value(
             "fingerprint": _string_property(resolved, "sourceFingerprint"),
         },
         "locators": locators,
-        "generation": (
-            _property(existing, "generation") + 1 if existing is not None else 1
-        ),
+        "generation": _property(existing, "generation") if existing is not None else 1,
         "state": state,
         "createdAt": created_at or now,
         "updatedAt": now,
@@ -1129,9 +1134,7 @@ def _install_receipt_value(
         "namespaceReceipt": _string_property(resolved, "namespaceReceipt"),
         "payload": payload,
         "roots": roots,
-        "generation": (
-            _property(existing, "generation") + 1 if existing is not None else 1
-        ),
+        "generation": _property(existing, "generation") if existing is not None else 1,
         "state": state,
         "createdAt": created_at or now,
         "updatedAt": now,
@@ -1217,6 +1220,13 @@ def stamp_context(
             or _without_mutation_fields(existing_namespace)
             != _without_mutation_fields(desired_namespace)
         ):
+            if existing_namespace is not None:
+                if actual_generation >= MAX_RECEIPT_GENERATION:
+                    _fail(
+                        "namespace.json generation cannot be incremented; "
+                        "explicit repair is required."
+                    )
+                desired_namespace["generation"] = actual_generation + 1
             _atomic_write_json(namespace_path, desired_namespace, lock=genesis_lock)
             namespace_changed = True
 
@@ -1261,6 +1271,13 @@ def stamp_context(
             or _without_mutation_fields(existing_install)
             != _without_mutation_fields(desired_install)
         ):
+            if existing_install is not None:
+                if actual_generation >= MAX_RECEIPT_GENERATION:
+                    _fail(
+                        "install.json generation cannot be incremented; "
+                        "explicit repair is required."
+                    )
+                desired_install["generation"] = actual_generation + 1
             _atomic_write_json(install_path, desired_install, lock=install_lock)
             install_changed = True
 

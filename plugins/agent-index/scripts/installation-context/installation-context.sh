@@ -674,6 +674,15 @@ assert_positive_integer() {
     [[ "$1" =~ ^[1-9][0-9]*$ ]] || fail "$2 must be an integer of at least 1."
 }
 
+assert_receipt_generation() {
+    local value="$1" name="$2"
+    assert_positive_integer "$value" "$name"
+    if ((${#value} > 19)) ||
+        ((${#value} == 19)) && [[ "$value" > 9223372036854775807 ]]; then
+        fail "$name exceeds the portable signed 64-bit maximum."
+    fi
+}
+
 assert_receipt_state() {
     case "$1" in
         active|inactive|orphaned|removing) ;;
@@ -855,7 +864,7 @@ validate_namespace_receipt() {
     json_optional_string_into state "$actual" state
     assert_json_type "$actual" generation number "namespace.json generation"
     assert_json_type "$actual" state string "namespace.json state"
-    assert_positive_integer "$generation" "namespace.json generation"
+    assert_receipt_generation "$generation" "namespace.json generation"
     assert_receipt_state "$state" "namespace.json state"
     source_prefix=source
     normalize_source "$actual" "$source_prefix" "" true
@@ -927,7 +936,7 @@ validate_context_receipt() {
     json_optional_string_into state "$actual" state
     assert_json_type "$actual" generation number "install.json generation"
     assert_json_type "$actual" state string "install.json state"
-    assert_positive_integer "$generation" "install.json generation"
+    assert_receipt_generation "$generation" "install.json generation"
     assert_receipt_state "$state" "install.json state"
     namespace_path="$(canonical_path "$cell_root/namespace.json")"
     json_optional_string_into namespace_receipt "$actual" namespaceReceipt
@@ -1183,6 +1192,8 @@ stamp_context() {
         if [[ -n "$existing_namespace" ]]; then
             json_optional_string_into created_at "$namespace" createdAt "$now"
         fi
+        [[ "$namespace_generation" != 9223372036854775807 ]] ||
+            fail "namespace.json generation cannot be incremented; explicit repair is required."
         namespace_generation=$((namespace_generation + 1))
         namespace_json="{
   \"schema\":\"copilot-extensions.marketplace-namespace\",
@@ -1233,6 +1244,8 @@ stamp_context() {
         if [[ -n "$existing_install" ]]; then
             json_optional_string_into created_at "$install" createdAt "$now"
         fi
+        [[ "$install_generation" != 9223372036854775807 ]] ||
+            fail "install.json generation cannot be incremented; explicit repair is required."
         install_generation=$((install_generation + 1))
         if [[ -n "$existing_install" ]]; then
             for name in versions snapshots state run logs cache launchers; do

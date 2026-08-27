@@ -95,7 +95,9 @@ lock incarnation.
 Receipt replacement is same-directory and atomic, and the lock token is
 revalidated immediately before replacement. Existing receipt updates compare
 the caller-observed namespace and install generations while holding their
-respective locks; stale writers must resolve again.
+respective locks; stale writers must resolve again. Generations are positive
+signed 64-bit integers on every implementation, and mutation fails before
+replacement when the next generation cannot be represented portably.
 
 `ProjectRoot` / `--project-root` is explicit; resolution never guesses project
 settings from the current directory. `COPILOT_EXTENSIONS_CONTEXT` is only a

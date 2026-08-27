@@ -452,6 +452,54 @@ def test_stamp_generation_conflict_matches_across_runners(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_stamp_refuses_generation_overflow_before_replacing_receipt(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    runner_root = tmp_path / runner_name
+    runner_root.mkdir()
+    layout = _receipt_layout(runner_root)
+    maximum = 9223372036854775807
+    for key in ("namespace", "install"):
+        path = Path(layout[key])
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        receipt["generation"] = maximum
+        _write_json(path, receipt)
+    vector = _vectors()[0]
+    result = _run(
+        command,
+        "stamp",
+        "--payload-root",
+        layout["payload"],
+        "--durable-home",
+        layout["durable"],
+        "--plugin-id",
+        layout["plugin_id"],
+        "--marketplace-key",
+        vector["marketplaceKey"],
+        "--source-json",
+        json.dumps(vector["descriptor"], separators=(",", ":")),
+        "--payload-version",
+        "1.0.0",
+        "--payload-origin",
+        "explicit",
+        "--expected-namespace-generation",
+        maximum,
+        "--expected-install-generation",
+        maximum,
+        "--install-state",
+        "inactive",
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "cannot be incremented" in result.stderr
+    install = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
+    assert install["generation"] == maximum
+    assert install["state"] == "active"
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
 def test_source_identity_matches_portable_vectors(
     runner_name: str,
     command: tuple[str, ...],
