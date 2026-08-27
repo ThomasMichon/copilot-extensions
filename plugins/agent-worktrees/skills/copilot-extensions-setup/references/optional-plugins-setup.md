@@ -19,7 +19,7 @@ bridge flow.
 - MCP plugin init (section 8)
 
 ---
-## 5. Agent-Codespaces Init
+## 5. Codespaces Plugin Init
 
 Install the agent-codespaces runtime (CLI binstub + `~/.agent-codespaces`
 home). The credential relay itself runs inside the agent-bridge service, but
@@ -47,7 +47,7 @@ bash "$ac_dir/scripts/init.sh"
 
 ---
 
-## 6. Agent-Codespaces Adopt
+## 6. Codespaces Plugin Adopt
 
 **Most repos need no config.** agent-codespaces works out of the box on standard
 CodeSpaces — machine/location defaults, the `/workspaces/<basename>` checkout,
@@ -90,7 +90,7 @@ by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 
 ---
 
-## 7. Agent-Containers Init
+## 7. Container Plugin Init
 
 Install the agent-containers runtime (CLI binstub + `~/.agent-containers`
 home). agent-containers registers the `container:` namespace with the
@@ -134,7 +134,7 @@ into containers, so `gh` must be authenticated for dispatched agents to work.
 
 ---
 
-## 8. Agent-MCP Init (optional, standalone)
+## 8. MCP Plugin Init (optional, standalone)
 
 Install the agent-mcp runtime (CLI binstub + `~/.agent-mcp` home). agent-mcp is
 **not** part of the bridge mesh — it has no `codespace:` / `container:`-style
