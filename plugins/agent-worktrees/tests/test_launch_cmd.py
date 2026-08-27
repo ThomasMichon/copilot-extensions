@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -105,6 +109,8 @@ def test_setup_hook_builds_normalized_launch(monkeypatch):
     assert hook_arg.endswith("session-setup.sh")
     # relative hook path is resolved against the anchor
     assert "tools" in hook_arg and "setup" in hook_arg
+    assert "--config-root" in cmd
+    assert "--runtime-python" in cmd
     assert cmd[-1] == "--allow-all"
 
 
@@ -148,6 +154,8 @@ def test_setup_hook_recovery_passes_recovery_and_hook(monkeypatch):
     cmd = m._build_launch_cmd(cfg_, args, "/w/wt")
     assert "--setup-hook" in cmd
     assert "--recovery" in cmd
+    assert "--config-root" not in cmd
+    assert "--runtime-python" not in cmd
 
 
 def test_setup_hook_and_session_path_config_parsing():
@@ -384,6 +392,12 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert "--session-path" in text
     assert "--env-script" in text
     assert "--copilot-path" in text
+    assert "--config-root" in text
+    assert "AGENT_WORKTREES_CONFIG_ROOT" in text
+    assert '"$_AW_PY" -I' in text
+    assert text.index('export AGENT_WORKTREES_CONFIG_ROOT=') > text.index(
+        '. "$ENV_SCRIPT"'
+    )
     # env_script is sourced with auto-export so its vars reach the exec
     assert "set -a" in text
     # hook is skipped in recovery
@@ -403,6 +417,12 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "$SessionPath" in text
     assert "$EnvScript" in text
     assert "$CopilotPath" in text
+    assert "$ConfigRoot" in text
+    assert "AGENT_WORKTREES_CONFIG_ROOT" in text
+    assert "'-I', '-m', 'agent_worktrees'" in text
+    assert text.index("$env:AGENT_WORKTREES_CONFIG_ROOT =") > text.index(
+        "SetEnvironmentVariable"
+    )
     # env_script's captured environment is imported into the launcher process
     assert "SetEnvironmentVariable" in text
     assert "-not $Recovery" in text  # hook skipped in recovery
@@ -412,6 +432,104 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     # --stdio (ACP) mode redirects Write-Host + hook output to stderr
     assert "StdioMode" in text
     assert "[Console]::Error.WriteLine" in text
+
+
+def test_supported_setup_surface_rejects_stateless_destination_before_hook(
+    tmp_path,
+):
+    """A caller bypassing state-root is still blocked at normalized setup."""
+    harness = tmp_path / "stateless-harness"
+    harness.mkdir()
+    subprocess.run(["git", "init", "--quiet", str(harness)], check=True)
+    config_dir = harness / ".agent-worktrees"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        "default_branch: main\nstateless: true\n",
+        encoding="utf-8",
+    )
+    marker = tmp_path / "hook-ran"
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["USERPROFILE"] = str(tmp_path / "home")
+    env["SETUP_GUARD_MARKER"] = str(marker)
+    before = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=harness,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    if os.name == "nt" and shutil.which("pwsh"):
+        hook = harness / "setup-hook.ps1"
+        hook.write_text(
+            "param([string]$Machine)\n"
+            "Set-Content -LiteralPath $env:SETUP_GUARD_MARKER -Value ran\n",
+            encoding="utf-8",
+        )
+        command = [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            str(scripts / "default-setup.ps1"),
+            "-Machine",
+            "test",
+            "-SetupHook",
+            str(hook),
+            "-ConfigRoot",
+            str(harness),
+            "-RuntimePython",
+            sys.executable,
+        ]
+    elif shutil.which("bash"):
+        hook = harness / "setup-hook.sh"
+        hook.write_text(
+            '#!/usr/bin/env bash\nprintf "ran\\n" > "$SETUP_GUARD_MARKER"\n',
+            encoding="utf-8",
+        )
+        command = [
+            "bash",
+            str(scripts / "default-setup.sh"),
+            "--machine",
+            "test",
+            "--setup-hook",
+            str(hook),
+            "--config-root",
+            str(harness),
+            "--runtime-python",
+            sys.executable,
+        ]
+    else:
+        pytest.skip("neither pwsh nor bash is available")
+
+    after_fixture = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=harness,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    proc = subprocess.run(
+        command,
+        cwd=harness,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    after = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=harness,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+    assert proc.returncode == 3
+    assert "inside stateless checkout" in proc.stderr
+    assert not marker.exists()
+    assert after == after_fixture
+    assert before != after_fixture  # only the test's hook fixture was added
 
 
 # ---------------------------------------------------------------------------

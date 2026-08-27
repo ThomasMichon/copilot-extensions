@@ -29,6 +29,7 @@ Usage (direct):
     agent-worktrees repos list [--type project|repo] [--json]
     agent-worktrees repos find <name>
     agent-worktrees repos srcroot [--set PATH] [--platform P]
+    agent-worktrees config-root [--destination PATH] [--json]
     agent-worktrees knowledge compose-plugins [--json] [--cwd PATH]
     agent-worktrees reconcile-marketplaces [--json] [--cwd PATH]
     agent-worktrees pre-launch
@@ -1386,6 +1387,18 @@ def _build_launch_cmd(
             resolved_hook = hook_path.format(**variables)
             if not os.path.isabs(resolved_hook):
                 resolved_hook = str(Path(anchor) / resolved_hook)
+            config_root_path = ""
+            if not recovery:
+                config_root = state_root_mod.resolve_config_root(
+                    config,
+                    cwd=work_dir,
+                )
+                if not config_root.path:
+                    raise RuntimeError(
+                        config_root.error
+                        or "could not resolve the machine-local configuration root"
+                    )
+                config_root_path = config_root.path
             if is_windows:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
                 cmd = [
@@ -1393,6 +1406,11 @@ def _build_launch_cmd(
                     launcher, "-Machine", config.machine,
                     "-SetupHook", resolved_hook,
                 ]
+                if config_root_path:
+                    cmd += [
+                        "-ConfigRoot", config_root_path,
+                        "-RuntimePython", sys.executable,
+                    ]
                 if session_path_arg:
                     cmd += ["-SessionPath", session_path_arg]
                 if resolved_env_script:
@@ -1407,6 +1425,11 @@ def _build_launch_cmd(
                     "bash", launcher, "--machine", config.machine,
                     "--setup-hook", resolved_hook,
                 ]
+                if config_root_path:
+                    cmd += [
+                        "--config-root", config_root_path,
+                        "--runtime-python", sys.executable,
+                    ]
                 if session_path_arg:
                     cmd += ["--session-path", session_path_arg]
                 if resolved_env_script:
@@ -13803,6 +13826,51 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     return 0 if res.path else 3
 
 
+def cmd_config_root_dispatch(argv: list[str]) -> int:
+    """Resolve the guarded machine-local root for supported setup writers."""
+    p = argparse.ArgumentParser(
+        prog="agent-worktrees config-root",
+        description=(
+            "Resolve the machine-local configuration root for the current "
+            "project and reject an explicit stateless-checkout destination."
+        ),
+    )
+    p.add_argument(
+        "--destination",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Validate an explicit configuration root instead of resolving the "
+            "default machine-local root"
+        ),
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit config_root/source/repo/stateless/bound/error as JSON",
+    )
+    try:
+        args = p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    if args.destination and not cfg.active_project():
+        res = state_root_mod.validate_config_destination(args.destination)
+    else:
+        res = state_root_mod.resolve_config_root(
+            cfg.load_config(),
+            destination=args.destination,
+        )
+    if args.json:
+        print(json.dumps(res.as_dict(), indent=2))
+    else:
+        if res.path:
+            print(res.path)
+        if res.error:
+            print(res.error, file=sys.stderr)
+    return 0 if res.path else 3
+
+
 def cmd_knowledge_dispatch(argv: list[str]) -> int:
     """Manage the launch-time harness/knowledge composition boundary."""
     p = argparse.ArgumentParser(
@@ -15858,6 +15926,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Emit the full resolution as JSON")
     sp.add_argument("--repo", default=None, metavar="NAME",
                     help="Explicit override: resolve this registered repo")
+
+    # config-root -- dispatched pre-argparse (see cmd_config_root_dispatch)
+    sp = sub.add_parser(
+        "config-root",
+        help="Resolve/validate the machine-local root for setup configuration",
+    )
+    sp.add_argument("--destination", default=None, metavar="PATH")
+    sp.add_argument("--json", action="store_true")
 
     # knowledge -- dispatched pre-argparse (see cmd_knowledge_dispatch)
     sub.add_parser(
@@ -18198,7 +18274,12 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     command = args_list[0]
     if command in _NO_PROJECT_COMMANDS or command.startswith("-"):
         return True
-    return command == "list-sessions" and "--all-projects" in args_list[1:]
+    if command == "list-sessions" and "--all-projects" in args_list[1:]:
+        return True
+    return command == "config-root" and any(
+        arg == "--destination" or arg.startswith("--destination=")
+        for arg in args_list[1:]
+    )
 
 
 # Machine-global verbs where ``--project`` can NEVER matter: the pure registries
@@ -19720,10 +19801,15 @@ def main(argv: list[str] | None = None) -> int:
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
     _needs_project = not _is_no_project_invocation(args_list)
+    _optional_project = (
+        bool(args_list)
+        and args_list[0] == "config-root"
+        and _is_no_project_invocation(args_list)
+    )
 
     if _proj:
         _project, _assumed = _resolve_active_project(_proj)
-    elif _needs_project:
+    elif _needs_project or _optional_project:
         _project, _assumed = _resolve_active_project(None)
     else:
         _project, _assumed = None, None
@@ -19852,6 +19938,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "state-root":
         try:
             return cmd_state_root_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # config-root (guarded machine-local setup destination) -- manual dispatch.
+    if args_list[0] == "config-root":
+        try:
+            return cmd_config_root_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

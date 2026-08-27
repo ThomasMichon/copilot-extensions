@@ -199,6 +199,17 @@ session_path:
   linux:   ["{work_dir}/tools/bin"]
 ```
 
+The normalized `setup_hook` surface is also the supported cooperative boundary
+for write-capable setup. Before the hook runs, agent-worktrees resolves and
+validates the per-project machine-local root (`~/.<project>/`) through
+`agent-worktrees config-root`, then exports it as
+`AGENT_WORKTREES_CONFIG_ROOT`. A hook that writes concrete operator or product
+configuration must write beneath that root. An explicit destination can be
+preflighted with `agent-worktrees config-root --destination <path>`; a path
+inside a stateless checkout fails before the hook executes. Custom `launch`
+commands and legacy `tools/setup/setup.*` scripts are outside this cooperative
+boundary and must invoke the same resolver themselves before writing.
+
 Select a local Copilot build for one project without replacing the ambient
 `copilot` command:
 

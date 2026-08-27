@@ -37,6 +37,12 @@ param(
     # Optional project-scoped Copilot executable. When set, use it instead of
     # resolving the ambient `copilot` command from PATH.
     [string]$CopilotPath,
+    # Guarded machine-local root exported to the setup hook. An explicit value
+    # is validated before the hook runs.
+    [string]$ConfigRoot,
+    # Exact current runtime interpreter supplied by the launch plan. Direct
+    # callers fall back to the installed runtime resolver.
+    [string]$RuntimePython,
     [Parameter(ValueFromRemainingArguments)]
     [string[]]$CopilotArgs
 )
@@ -59,6 +65,40 @@ if ($script:StdioMode) {
         )
         $text = ($Object -join ' ')
         if ($NoNewline) { [Console]::Error.Write($text) } else { [Console]::Error.WriteLine($text) }
+    }
+}
+
+# ── Guarded setup configuration root ─────────────────────────────────────
+# setup_hook is the supported cooperative writer boundary. Resolve its
+# machine-local root, or validate an explicit caller-supplied root, before the
+# hook gets a chance to execute.
+if ($SetupHook -and -not $Recovery) {
+    $guardPython = $RuntimePython
+    if (-not $guardPython) {
+        $resolver = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+        if (Test-Path -LiteralPath $resolver) {
+            . $resolver
+            $guardPython = $AwPy
+        }
+    }
+    if (-not $guardPython -or -not (Test-Path -LiteralPath $guardPython)) {
+        [Console]::Error.WriteLine(
+            'ERROR: agent-worktrees runtime is unavailable; cannot validate the setup config root.'
+        )
+        exit 3
+    }
+    $configRootArgs = @('-I', '-m', 'agent_worktrees', 'config-root')
+    if ($ConfigRoot) {
+        $configRootArgs += @('--destination', $ConfigRoot)
+    }
+    $guardedConfigRoot = (& $guardPython @configRootArgs | Out-String).Trim()
+    $configRootExit = $LASTEXITCODE
+    if ($configRootExit -ne 0) {
+        exit $configRootExit
+    }
+    if (-not $guardedConfigRoot) {
+        [Console]::Error.WriteLine('ERROR: agent-worktrees returned an empty setup config root.')
+        exit 3
     }
 }
 
@@ -106,6 +146,7 @@ $env:WORKTREE_MACHINE = $Machine
 # broken hook can never lock the operator out of a recovery session. A
 # non-zero exit warns but does not abort the launch.
 if ($SetupHook -and -not $Recovery) {
+    $env:AGENT_WORKTREES_CONFIG_ROOT = $guardedConfigRoot
     if (Test-Path -LiteralPath $SetupHook) {
         Write-Host "  Setup:    $SetupHook" -ForegroundColor DarkGray
         if ($script:StdioMode) {

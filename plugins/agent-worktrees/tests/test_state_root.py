@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 
 from agent_worktrees import config as cfg
@@ -158,6 +160,160 @@ def test_explicit_override_unregistered(fake_checkouts):
     assert res.path is None
     assert res.source == "explicit"
     assert "not a registered repo" in res.error
+
+
+def test_config_root_defaults_to_machine_local_project_dir(monkeypatch, tmp_path):
+    machine_root = tmp_path / ".harness"
+    monkeypatch.setattr(cfg, "project_dir", lambda _name=None: machine_root)
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(tmp_path / "harness"))
+    )
+
+    assert res.path == str(machine_root.resolve())
+    assert res.source == "machine_local"
+    assert res.repo == "harness"
+    assert res.stateless is True
+    assert res.bound is True
+    assert res.error is None
+
+
+def test_config_root_rejects_explicit_stateless_checkout(tmp_path):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(harness)),
+        destination=str(harness / "generated"),
+        cwd=str(harness),
+    )
+
+    assert res.path is None
+    assert res.source == "explicit"
+    assert res.bound is False
+    assert "inside stateless checkout" in res.error
+    assert "agent-worktrees config-root" in res.error
+
+
+def test_config_root_rejects_other_declared_stateless_checkout(tmp_path):
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    target = tmp_path / "other-harness"
+    (target / ".git").mkdir(parents=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "requires_external_state_root: true\n",
+        encoding="utf-8",
+    )
+
+    res = sr.resolve_config_root(
+        _config("launch", anchor=str(launch)),
+        destination=str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert str(target) in res.error
+
+
+def test_config_root_rejects_sibling_worktree_from_machine_local_stateless_config(
+    tmp_path,
+):
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    anchor.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(anchor)),
+        destination=str(sibling / "generated"),
+        cwd=str(anchor),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert str(sibling) in res.error
+
+
+def test_config_root_allows_explicit_machine_local_destination(tmp_path):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    machine_root = tmp_path / "home" / ".harness"
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(harness)),
+        destination=str(machine_root),
+        cwd=str(harness),
+    )
+
+    assert res.path == str(machine_root.resolve())
+    assert res.source == "explicit"
+    assert res.bound is True
+    assert res.error is None
+
+
+def test_config_root_cli_honors_machine_local_stateless_config(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from agent_worktrees import __main__ as main
+
+    harness = tmp_path / "harness"
+    (harness / ".git").mkdir(parents=True)
+    monkeypatch.setattr(main.cfg, "active_project", lambda: "harness")
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: _config("harness", stateless=True, anchor=str(harness)),
+    )
+
+    rc = main.cmd_config_root_dispatch(["--destination", str(harness)])
+
+    assert rc == 3
+    assert "inside stateless checkout" in capsys.readouterr().err
+
+
+def test_config_root_explicit_destination_can_guard_without_adoption():
+    from agent_worktrees import __main__ as main
+
+    assert main._is_no_project_invocation(
+        ["config-root", "--destination", "/tmp/harness"]
+    )
+    assert main._is_no_project_invocation(
+        ["config-root", "--destination=/tmp/harness"]
+    )
+    assert not main._is_no_project_invocation(["config-root"])
+
+
+def test_config_root_as_dict_shape(monkeypatch, tmp_path):
+    machine_root = tmp_path / ".h"
+    monkeypatch.setattr(cfg, "project_dir", lambda _name=None: machine_root)
+    data = sr.resolve_config_root(_config("h")).as_dict()
+
+    assert set(data) == {
+        "config_root", "source", "repo", "stateless", "bound", "error",
+    }
+    assert data["config_root"] == str(machine_root.resolve())
 
 
 def test_as_dict_shape(fake_checkouts):
