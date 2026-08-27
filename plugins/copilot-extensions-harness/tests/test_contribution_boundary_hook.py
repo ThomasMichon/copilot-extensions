@@ -18,8 +18,8 @@ def test_hook_manifest_points_to_payload_scripts() -> None:
     assert len(entries) == 1
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
-    assert "Get-Location" in entries[0]["powershell"]
-    assert "$(pwd)" in entries[0]["bash"]
+    assert "} else { '{}' }" in entries[0]["powershell"]
+    assert "else printf '{}'" in entries[0]["bash"]
 
 
 def test_bash_hook_has_interpreter_and_json_fallbacks() -> None:
@@ -44,6 +44,9 @@ def test_powershell_hook_emits_existing_guide() -> None:
     payload = json.loads(result.stdout)
     assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
     assert "organization-neutral" in payload["additionalContext"]
+    assert payload["additionalContext"].startswith(
+        "[owner: copilot-extensions-harness@0.1.0-dev22]"
+    )
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
@@ -60,6 +63,9 @@ def test_powershell_hook_falls_back_to_script_location() -> None:
     )
     payload = json.loads(result.stdout)
     assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
+    assert payload["additionalContext"].startswith(
+        "[owner: copilot-extensions-harness@0.1.0-dev22]"
+    )
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,

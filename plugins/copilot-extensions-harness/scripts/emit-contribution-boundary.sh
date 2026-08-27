@@ -2,7 +2,8 @@
 set -u
 plugin_root="${COPILOT_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 guide="$plugin_root/references/contribution-ground-rules.md"
-if [[ ! -f "$guide" ]]; then
+manifest="$plugin_root/plugin.json"
+if [[ ! -f "$guide" ]] || [[ ! -f "$manifest" ]]; then
   printf '{}'
   exit 0
 fi
@@ -11,13 +12,16 @@ if [[ -z "$python_bin" ]]; then
   printf '{}'
   exit 0
 fi
-if ! output="$("$python_bin" - "$guide" 2>/dev/null <<'PY'
+if ! output="$("$python_bin" - "$guide" "$manifest" 2>/dev/null <<'PY'
 import json
 import sys
 
-guide = sys.argv[1]
+guide, manifest = sys.argv[1:3]
+with open(manifest, encoding="utf-8") as stream:
+    version = json.load(stream)["version"]
 context = (
-    "Copilot-extensions accepts only general-purpose, organization-neutral "
+    f"[owner: copilot-extensions-harness@{version}] Copilot-extensions accepts "
+    "only general-purpose, organization-neutral "
     "capabilities; personal needs belong in the adopter's private control repo "
     f"and organization-specific work in its internal marketplace. Read: {guide}"
 )
