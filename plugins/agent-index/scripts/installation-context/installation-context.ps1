@@ -425,8 +425,9 @@ function Acquire-Lock(
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
     $token = [guid]::NewGuid().ToString('N')
-    $hostName = [Environment]::MachineName
-    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+    $hostName = [Environment]::MachineName.Split('.')[0].ToLowerInvariant()
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    while ($stopwatch.Elapsed -lt [TimeSpan]::FromSeconds(5)) {
         try {
             New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
             $script:HeldLockPath = $Path
@@ -442,7 +443,16 @@ function Acquire-Lock(
                 pid = $PID
                 acquiredAt = Get-UtcTimestamp
             }
-            Write-AtomicJson (Join-Path $Path 'owner.json') $owner -SkipLockCheck
+            try {
+                Write-AtomicJson (Join-Path $Path 'owner.json') $owner -SkipLockCheck
+            }
+            catch {
+                Remove-Item -LiteralPath (Join-Path $Path 'owner.json') -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+                $script:HeldLockPath = ''
+                $script:HeldLockToken = ''
+                throw
+            }
             return
         }
         catch [System.IO.IOException] {
@@ -452,9 +462,6 @@ function Acquire-Lock(
         }
         $ownerPath = Join-Path $Path 'owner.json'
         if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) {
-            if ($attempt -eq 99) {
-                Fail "Installation lock '$Path' has no owner receipt; explicit repair is required."
-            }
             Start-Sleep -Milliseconds 10
             continue
         }
@@ -476,6 +483,9 @@ function Acquire-Lock(
             continue
         }
         Fail "Installation lock '$Path' is busy (host=$ownerHost, pid=$ownerPid)."
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $Path 'owner.json') -PathType Leaf)) {
+        Fail "Installation lock '$Path' has no owner receipt; explicit repair is required."
     }
     Fail "Installation lock '$Path' remained busy."
 }

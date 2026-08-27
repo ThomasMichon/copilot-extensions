@@ -16,10 +16,13 @@ HELD_LOCK_TOKEN=""
 
 cleanup() {
     local path
-    if [[ -n "$HELD_LOCK_DIR" && -d "$HELD_LOCK_DIR" ]] &&
-        (lock_owner_matches "$HELD_LOCK_DIR/owner.json" 2>/dev/null); then
-        rm -f -- "$HELD_LOCK_DIR/owner.json" 2>/dev/null || true
-        rmdir -- "$HELD_LOCK_DIR" 2>/dev/null || true
+    if [[ -n "$HELD_LOCK_DIR" && -d "$HELD_LOCK_DIR" ]]; then
+        if [[ ! -e "$HELD_LOCK_DIR/owner.json" ]]; then
+            rmdir -- "$HELD_LOCK_DIR" 2>/dev/null || true
+        elif (lock_owner_matches "$HELD_LOCK_DIR/owner.json" 2>/dev/null); then
+            rm -f -- "$HELD_LOCK_DIR/owner.json" 2>/dev/null || true
+            rmdir -- "$HELD_LOCK_DIR" 2>/dev/null || true
+        fi
     fi
     for path in "${TEMP_FILES[@]}"; do
         rm -f -- "$path" 2>/dev/null || true
@@ -214,12 +217,15 @@ assert_lock_owned() {
 
 acquire_lock() {
     local path="$1" kind="$2" marketplace_id="$3" plugin_id="${4-}"
-    local attempt owner owner_snapshot owner_host owner_pid host token owner_schema owner_version
+    local deadline owner owner_snapshot owner_host owner_pid host token owner_schema owner_version
     local owner_kind owner_marketplace owner_plugin owner_token
     host="$(hostname)"
+    host="${host%%.*}"
+    host="${host,,}"
     token="$(random_token)"
     mkdir -p -- "$(dirname -- "$path")"
-    for ((attempt = 0; attempt < 100; attempt++)); do
+    deadline=$((SECONDS + 5))
+    while ((SECONDS < deadline)); do
         if mkdir -- "$path" 2>/dev/null; then
             HELD_LOCK_DIR="$path"
             HELD_LOCK_TOKEN="$token"
@@ -239,9 +245,6 @@ acquire_lock() {
         fi
         owner="$path/owner.json"
         if [[ ! -f "$owner" ]]; then
-            if ((attempt == 99)); then
-                fail "Installation lock '$path' has no owner receipt; explicit repair is required."
-            fi
             sleep 0.01
             continue
         fi
@@ -279,6 +282,9 @@ acquire_lock() {
         fi
         fail "Installation lock '$path' is busy (host=$owner_host, pid=$owner_pid)."
     done
+    if [[ ! -f "$path/owner.json" ]]; then
+        fail "Installation lock '$path' has no owner receipt; explicit repair is required."
+    fi
     fail "Installation lock '$path' remained busy."
 }
 

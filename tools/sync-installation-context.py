@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import os
 import shutil
+import stat
 import sys
 from pathlib import Path
 
@@ -46,6 +47,10 @@ def verify() -> list[str]:
             problems.append(f"{relative} is missing")
         elif destination.read_bytes() != source.read_bytes():
             problems.append(f"{relative} differs from {source.relative_to(REPO)}")
+        elif os.name != "nt" and stat.S_IMODE(destination.stat().st_mode) != stat.S_IMODE(
+            source.stat().st_mode
+        ):
+            problems.append(f"{relative} mode differs from {source.relative_to(REPO)}")
     return problems
 
 
@@ -54,10 +59,22 @@ def sync() -> list[str]:
     for source, destination in vendor_pairs():
         if not source.is_file():
             raise FileNotFoundError(f"canonical source missing: {source}")
-        if destination.is_file() and destination.read_bytes() == source.read_bytes():
+        content_matches = (
+            destination.is_file() and destination.read_bytes() == source.read_bytes()
+        )
+        mode_matches = (
+            destination.is_file()
+            and (
+                os.name == "nt"
+                or stat.S_IMODE(destination.stat().st_mode)
+                == stat.S_IMODE(source.stat().st_mode)
+            )
+        )
+        if content_matches and mode_matches:
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+        if not content_matches:
+            shutil.copyfile(source, destination)
         os.chmod(destination, source.stat().st_mode & 0o777)
         written.append(destination.relative_to(REPO).as_posix())
     return written

@@ -7,6 +7,7 @@ import os
 import shutil
 import socket
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ POWERSHELL_HOSTS = list(
     )
 )
 POWERSHELL = POWERSHELL_HOSTS[0] if POWERSHELL_HOSTS else None
+LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
 
 
 def _record(kind: str, canonical: str, ref: str) -> str:
@@ -351,7 +353,7 @@ def test_stamp_fails_closed_on_dead_owner_and_blocks_live_owner(tmp_path: Path) 
             "marketplaceId": values["marketplace_id"],
             "pluginId": values["plugin_id"],
             "token": "dead-owner",
-            "host": socket.gethostname(),
+            "host": LOCK_HOST,
             "pid": 2147483647,
             "acquiredAt": "2026-01-01T00:00:00Z",
         },
@@ -384,14 +386,17 @@ def test_stamp_fails_closed_on_dead_owner_and_blocks_live_owner(tmp_path: Path) 
             "marketplaceId": values["marketplace_id"],
             "pluginId": values["plugin_id"],
             "token": "live-owner",
-            "host": socket.gethostname(),
+            "host": LOCK_HOST,
             "pid": os.getpid(),
             "acquiredAt": "2026-01-01T00:00:00Z",
         },
     )
+    started = time.monotonic()
     blocked = _run_ps(*update_arguments, check=False)
+    elapsed = time.monotonic() - started
     assert blocked.returncode != 0
     assert "busy" in blocked.stderr
+    assert elapsed < 12
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
@@ -414,7 +419,7 @@ def test_stamp_rejects_string_typed_lock_version(tmp_path: Path) -> None:
             "marketplaceId": values["marketplace_id"],
             "pluginId": values["plugin_id"],
             "token": "malformed-owner",
-            "host": socket.gethostname(),
+            "host": LOCK_HOST,
             "pid": os.getpid(),
             "acquiredAt": "2026-01-01T00:00:00Z",
         },

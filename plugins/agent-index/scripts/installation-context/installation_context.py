@@ -23,7 +23,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 LOCK_SCHEMA = "copilot-extensions.installation-lock"
 LOCK_VERSION = 1
 LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
-LOCK_INITIALIZATION_RETRIES = 100
+LOCK_POLL_SECONDS = 0.01
 MAX_NAMESPACE_LOCATORS = 16
 MAX_RECEIPT_GENERATION = (1 << 63) - 1
 ROOT_NAMES = ("versions", "snapshots", "state", "run", "logs", "cache", "launchers")
@@ -186,7 +186,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
         self.plugin_id = plugin_id
         self.token = secrets.token_hex(16)
         self.owner_path = path / "owner.json"
-        self.host = socket.gethostname()
+        self.host = socket.gethostname().split(".", 1)[0].casefold()
         self.acquired = False
 
     def _owner(self) -> Mapping[str, Any]:
@@ -216,7 +216,8 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        for _ in range(LOCK_INITIALIZATION_RETRIES):
+        deadline = time.monotonic() + LOCK_INITIALIZATION_GRACE_SECONDS
+        while True:
             try:
                 self.path.mkdir()
             except FileExistsError:
@@ -230,7 +231,9 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                             f"Installation lock '{self.path}' has no owner receipt; "
                             "explicit repair is required."
                         )
-                    time.sleep(0.01)
+                    if time.monotonic() >= deadline:
+                        _fail(f"Installation lock '{self.path}' remained busy.")
+                    time.sleep(LOCK_POLL_SECONDS)
                     continue
                 try:
                     owner = self._owner()
@@ -246,7 +249,9 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                             f"Installation lock '{self.path}' has a stale owner "
                             f"(host={owner_host}, pid={owner_pid}); explicit repair is required."
                         )
-                    time.sleep(0.01)
+                    if time.monotonic() >= deadline:
+                        _fail(f"Installation lock '{self.path}' remained busy.")
+                    time.sleep(LOCK_POLL_SECONDS)
                     continue
                 _fail(
                     f"Installation lock '{self.path}' is busy "
@@ -273,7 +278,6 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                     raise
                 self.acquired = True
                 return
-        _fail(f"Installation lock '{self.path}' remained busy.")
 
     def assert_owned(self) -> None:
         if not self.acquired:

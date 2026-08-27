@@ -8,6 +8,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ RUNNERS = (
     ("posix", (str(POSIX_SCRIPT),)),
 )
 PYTHON_COMMAND = RUNNERS[0][1]
+LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
 
 
 def _load_python_module():
@@ -310,14 +312,17 @@ def test_stamp_blocks_a_live_install_owner(
             "marketplaceId": values["marketplace_id"],
             "pluginId": values["plugin_id"],
             "token": "live-owner",
-            "host": socket.gethostname(),
+            "host": LOCK_HOST,
             "pid": os.getpid(),
             "acquiredAt": "2026-01-01T00:00:00Z",
         },
     )
+    started = time.monotonic()
     result = _run(command, *arguments, check=False)
+    elapsed = time.monotonic() - started
     assert result.returncode != 0
     assert "busy" in result.stderr
+    assert elapsed < 10
     assert not (
         Path(values["durable"])
         / "marketplaces"
@@ -352,7 +357,7 @@ def test_stamp_fails_closed_on_a_dead_install_owner(
             "marketplaceId": values["marketplace_id"],
             "pluginId": values["plugin_id"],
             "token": "dead-owner",
-            "host": socket.gethostname(),
+            "host": LOCK_HOST,
             "pid": 2147483647,
             "acquiredAt": "2026-01-01T00:00:00Z",
         },

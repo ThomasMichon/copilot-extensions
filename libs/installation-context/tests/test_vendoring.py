@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
@@ -39,3 +40,9 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     written = module.sync()
     assert len(written) == len(module.FILES) * 2
     assert module.verify() == []
+    if os.name != "nt":
+        destination = plugins / "plugin-a" / "scripts" / "installation-context" / module.FILES[0]
+        destination.chmod(0o600)
+        assert any("mode differs" in problem for problem in module.verify())
+        assert destination.relative_to(tmp_path).as_posix() in module.sync()
+        assert module.verify() == []
