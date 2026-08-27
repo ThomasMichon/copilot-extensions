@@ -11,7 +11,7 @@ try {
         throw 'plugin payload incomplete'
     }
     $version = (Get-Content -Raw -LiteralPath $manifest | ConvertFrom-Json).version
-    $context = "[owner: copilot-extensions-harness@$version] Copilot-extensions accepts only general-purpose, organization-neutral capabilities; personal needs belong in the adopter's private control repo and organization-specific work in its internal marketplace. Read: $guide"
+    $context = "[owner: copilot-extensions-harness@$version] copilot-extensions accepts only general-purpose, organization-neutral capabilities; personal needs belong in the adopter's private control repo and organization-specific work in its internal marketplace. Read: $guide"
     Write-Output (@{ additionalContext = $context } | ConvertTo-Json -Compress)
 } catch {
     Write-Output '{}'

@@ -11,6 +11,12 @@ import pytest
 
 PLUGIN = Path(__file__).resolve().parents[1]
 VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
+GUIDE = PLUGIN / "references" / "contribution-ground-rules.md"
+
+
+def _without_plugin_root() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items()
+            if key != "COPILOT_PLUGIN_ROOT"}
 
 
 def test_hook_manifest_points_to_payload_scripts() -> None:
@@ -19,8 +25,6 @@ def test_hook_manifest_points_to_payload_scripts() -> None:
     assert len(entries) == 1
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
-    assert "} else { '{}' }" in entries[0]["powershell"]
-    assert "else printf '{}'" in entries[0]["bash"]
 
 
 def test_bash_hook_has_interpreter_and_json_fallbacks() -> None:
@@ -43,7 +47,7 @@ def test_powershell_hook_emits_existing_guide() -> None:
         env=env,
     )
     payload = json.loads(result.stdout)
-    assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
+    assert str(GUIDE) in payload["additionalContext"]
     assert "organization-neutral" in payload["additionalContext"]
     assert payload["additionalContext"].startswith(
         f"[owner: copilot-extensions-harness@{VERSION}]"
@@ -52,21 +56,34 @@ def test_powershell_hook_emits_existing_guide() -> None:
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
 def test_powershell_hook_falls_back_to_script_location() -> None:
-    env = {key: value for key, value in os.environ.items()
-           if key != "COPILOT_PLUGIN_ROOT"}
     result = subprocess.run(
         ["pwsh", "-NoProfile", "-File",
          str(PLUGIN / "scripts" / "emit-contribution-boundary.ps1")],
         check=True,
         capture_output=True,
         text=True,
-        env=env,
+        env=_without_plugin_root(),
     )
     payload = json.loads(result.stdout)
-    assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
+    assert str(GUIDE) in payload["additionalContext"]
     assert payload["additionalContext"].startswith(
         f"[owner: copilot-extensions-harness@{VERSION}]"
     )
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
+def test_powershell_manifest_fails_open_without_root(tmp_path: Path) -> None:
+    hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    command = hooks["hooks"]["sessionStart"][0]["powershell"]
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", command],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=_without_plugin_root(),
+    )
+    assert result.stdout.strip() == "{}"
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,
@@ -81,5 +98,21 @@ def test_bash_hook_emits_existing_guide() -> None:
         env=env,
     )
     payload = json.loads(result.stdout)
-    assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
+    assert str(GUIDE) in payload["additionalContext"]
     assert "organization-neutral" in payload["additionalContext"]
+
+
+@pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,
+                    reason="POSIX bash payload test")
+def test_bash_manifest_fails_open_without_root(tmp_path: Path) -> None:
+    hooks = json.loads((PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    command = hooks["hooks"]["sessionStart"][0]["bash"]
+    result = subprocess.run(
+        ["bash", "-c", command],
+        check=True,
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env=_without_plugin_root(),
+    )
+    assert result.stdout.strip() == "{}"
