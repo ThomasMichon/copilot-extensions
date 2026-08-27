@@ -140,11 +140,13 @@ def _declares_external_state_root(root: Path) -> bool:
     return bool(raw.get("stateless") or raw.get("requires_external_state_root"))
 
 
-def _containing_git_checkout(path: Path) -> Path | None:
-    for candidate in (path, *path.parents):
-        if (candidate / ".git").exists():
-            return candidate
-    return None
+def _containing_git_checkouts(path: Path) -> list[Path]:
+    """Return every enclosing Git checkout, nearest first."""
+    return [
+        candidate
+        for candidate in (path, *path.parents)
+        if (candidate / ".git").exists()
+    ]
 
 
 def _git_common_dir(checkout: Path) -> Path:
@@ -176,11 +178,8 @@ def _git_common_dir(checkout: Path) -> Path:
 
 def _containing_stateless_checkout(path: Path) -> Path | None:
     """Return a stateless checkout containing ``path``, if any."""
-    for candidate in (path, *path.parents):
-        if (
-            (candidate / ".git").exists()
-            and _declares_external_state_root(candidate)
-        ):
+    for candidate in _containing_git_checkouts(path):
+        if _declares_external_state_root(candidate):
             return candidate
     return None
 
@@ -197,7 +196,10 @@ def validate_config_destination(
     supported setup entry point can reject a stateless checkout during initial
     bootstrap.
     """
+    launch_stateless = False
     try:
+        launch_path = _normalized_path(cwd or os.getcwd())
+        launch_stateless = _containing_stateless_checkout(launch_path) is not None
         target = _normalized_path(destination, cwd=cwd)
         if target.exists() and not target.is_dir():
             raise ValueError(f"config root '{target}' is not a directory")
@@ -207,7 +209,7 @@ def validate_config_destination(
             None,
             "explicit",
             repo,
-            False,
+            launch_stateless,
             False,
             error=str(exc),
         )
@@ -215,8 +217,8 @@ def validate_config_destination(
         return ConfigRoot(
             None,
             "explicit",
-            repo or unsafe_root.name,
-            True,
+            repo,
+            launch_stateless,
             False,
             error=(
                 f"config destination '{target}' is inside stateless checkout "
@@ -226,7 +228,7 @@ def validate_config_destination(
                 "operator or product configuration."
             ),
         )
-    return ConfigRoot(str(target), "explicit", repo, False, True)
+    return ConfigRoot(str(target), "explicit", repo, launch_stateless, True)
 
 
 def resolve_config_root(
@@ -268,17 +270,15 @@ def resolve_config_root(
                     unsafe_root = _normalized_path(raw_root)
                     break
             if unsafe_root is None:
-                target_checkout = _containing_git_checkout(target)
-                anchor_checkout = _containing_git_checkout(
+                anchor_checkouts = _containing_git_checkouts(
                     _normalized_path(repo_cfg.anchor)
                 )
-                if (
-                    target_checkout is not None
-                    and anchor_checkout is not None
-                    and _git_common_dir(target_checkout)
-                    == _git_common_dir(anchor_checkout)
-                ):
-                    unsafe_root = target_checkout
+                if anchor_checkouts:
+                    anchor_common_dir = _git_common_dir(anchor_checkouts[0])
+                    for target_checkout in _containing_git_checkouts(target):
+                        if _git_common_dir(target_checkout) == anchor_common_dir:
+                            unsafe_root = target_checkout
+                            break
         if unsafe_root is None:
             unsafe_root = _containing_stateless_checkout(target)
     except (OSError, ValueError) as exc:
@@ -296,7 +296,7 @@ def resolve_config_root(
             None,
             source,
             repo,
-            True,
+            stateless,
             False,
             error=(
                 f"config destination '{target}' is inside stateless checkout "

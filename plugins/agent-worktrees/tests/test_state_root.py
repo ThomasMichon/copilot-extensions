@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 
@@ -215,6 +216,7 @@ def test_config_root_rejects_other_declared_stateless_checkout(tmp_path):
 
     assert res.path is None
     assert res.bound is False
+    assert res.stateless is False
     assert str(target) in res.error
 
 
@@ -253,6 +255,113 @@ def test_config_root_rejects_sibling_worktree_from_machine_local_stateless_confi
     assert res.path is None
     assert res.bound is False
     assert str(sibling) in res.error
+
+
+@pytest.mark.parametrize("nested_kind", ["repository", "gitfile"])
+def test_config_root_rejects_nested_checkout_inside_stateless_sibling(
+    tmp_path,
+    nested_kind,
+):
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    nested = sibling / "nested"
+    anchor.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+    nested.mkdir()
+    if nested_kind == "repository":
+        subprocess.run(["git", "init", "--quiet"], cwd=nested, check=True)
+    else:
+        git_dir = anchor / ".git" / "modules" / "nested"
+        git_dir.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "git",
+                "init",
+                "--quiet",
+                "--separate-git-dir",
+                str(git_dir),
+                str(nested),
+            ],
+            check=True,
+        )
+        assert (nested / ".git").is_file()
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(anchor)),
+        destination=str(nested / "generated"),
+        cwd=str(anchor),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is True
+    assert str(sibling) in res.error
+
+
+def test_validate_config_destination_rejection_has_no_launch_statelessness(tmp_path):
+    launch = tmp_path / "launch"
+    target = tmp_path / "target"
+    (launch / ".git").mkdir(parents=True)
+    (target / ".git").mkdir(parents=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+
+    res = sr.validate_config_destination(
+        str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is False
+    assert res.repo == ""
+
+
+def test_validate_config_destination_preserves_launch_statelessness(tmp_path):
+    launch = tmp_path / "launch"
+    target = tmp_path / "target"
+    (launch / ".git").mkdir(parents=True)
+    (launch / ".agent-worktrees").mkdir()
+    (launch / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+    (target / ".git").mkdir(parents=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+
+    res = sr.validate_config_destination(
+        str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is True
 
 
 def test_git_common_dir_ignores_inherited_repository_context(
@@ -382,6 +491,55 @@ def test_config_root_cli_honors_machine_local_stateless_config(
 
     assert rc == 3
     assert "inside stateless checkout" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("launch_stateless", [False, True])
+def test_config_root_cli_json_preserves_launch_statelessness(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    launch_stateless,
+):
+    from agent_worktrees import __main__ as main
+
+    launch = tmp_path / "launch"
+    target = tmp_path / "target"
+    launch.mkdir()
+    target.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=launch, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=target, check=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+    main.cfg.set_active_project("launch")
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: _config(
+            "launch",
+            stateless=launch_stateless,
+            anchor=str(launch),
+        ),
+    )
+
+    try:
+        rc = main.cmd_config_root_dispatch([
+            "--destination",
+            str(target / "generated"),
+            "--json",
+        ])
+    finally:
+        main.cfg.set_active_project(None)
+
+    data = json.loads(capsys.readouterr().out)
+    assert rc == 3
+    assert data["config_root"] is None
+    assert data["bound"] is False
+    assert data["stateless"] is launch_stateless
+    assert data["repo"] == "launch"
+    assert "inside stateless checkout" in data["error"]
 
 
 @pytest.fixture
