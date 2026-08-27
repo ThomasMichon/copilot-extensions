@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ssh"
-version = "0.1.0-dev50"
+version = "0.1.0-dev51"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -15,12 +15,15 @@ authors = [
 dependencies = [
     "pyyaml>=6.0.3",
     "agent-procutil",
+    "agent-dropin-registry",
 ]
 
 [tool.uv.sources]
 # Shared Windows-headless / detached process-spawn kwargs, vendored per plugin
 # (byte-identical src across copies; see tools/check-vendored-libs-sync.py).
 agent-procutil = { path = "libs/agent-procutil" }
+# Tri-state managed-fragment scans and bounded operational warnings.
+agent-dropin-registry = { path = "libs/dropin-registry" }
 
 [project.scripts]
 agent-ssh = "agent_ssh.__main__:main"
@@ -35,6 +38,7 @@ line-length = 99
 [project.optional-dependencies]
 dev = [
     "pytest>=9.1.1",
+    "jsonschema>=4.26.0",
 ]
 
 [tool.ruff.lint]

@@ -12,6 +12,7 @@ registry plus a transport `module.yaml` it writes one managed SSH fragment:
 
 ```powershell
 agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
+agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
 ```
@@ -59,6 +60,19 @@ Consumers reach a machine by `ssh <name>`. Each transport contributes only its
 own `Host <name>` blocks to a managed `~/.ssh/config.d/50-agent-ssh-<module>.conf`
 fragment, so multiple transports coexist on one client, dispatched per machine
 by the registry `transport:` key. No transport owns the whole config.
+
+New fragments carry schema-v1 source identity for the absolute registry and
+transport-module files that produced them. Keep those source files durable:
+operational commands audit each managed fragment against the current sources,
+withdraw confirmed-stale aliases from `verify`/`explore`, and emit bounded
+warnings without probing the host. Legacy fragments remain usable with a
+`legacy-unattributed` advisory until `emit-profile` rewrites them.
+
+`agent-ssh doctor [--json]` reports every managed-fragment finding and the exact
+file to re-emit or remove. It scans only `50-agent-ssh-*.conf`; unrelated
+OpenSSH drop-ins are never parsed or changed. Cleanup is intentionally
+report-only because agent-ssh does not have a receipt ledger that could prove
+safe deletion.
 
 ## Layout
 
