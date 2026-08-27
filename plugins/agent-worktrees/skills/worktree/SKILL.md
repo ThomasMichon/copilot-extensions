@@ -443,7 +443,8 @@ Follow the repo's normal commit policy.
 
 ## Quick Reference
 
-All commands use the `agent-worktrees` binstub. Never call Python
+Direct runtime commands use the session catalog's exact payload command;
+project binstubs remain attributable project entry points. Never call Python
 modules directly. Context resolves **the way git does — from the current
 directory**: the target worktree and its anchor repo are discovered from CWD
 (not from ambient environment variables or branch names). A project binstub
