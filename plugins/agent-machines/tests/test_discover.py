@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from agent_machines import discover
+from agent_machines.manifest import ManifestError
 
 from ._helpers import base_package, enable_plugin, write_package
 
@@ -34,6 +37,118 @@ def test_discover_respects_gate(tmp_path):
     write_package(repo, "defaults.yaml", base_package(gate=["box-1"]))
     reg = _registry(srcroot, acme={"class": "worktree"})
     assert discover.discover(machine="other-box", registry=reg, projects=_projects("acme")) == []
+
+
+def test_discover_combines_all_and_matching_machine_packages(tmp_path):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(repo, "shared.yaml", base_package(name="acme/shared", gate=["*"]))
+    write_package(
+        repo,
+        "specific.yaml",
+        base_package(name="acme/specific", gate=["*"]),
+        machine="Box-1",
+    )
+    write_package(
+        repo,
+        "other.yaml",
+        base_package(name="acme/other", gate=["*"]),
+        machine="box-2",
+    )
+    reg = _registry(srcroot, acme={"class": "worktree"})
+    found = discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+    assert [pkg.name for pkg in found[0].packages] == ["acme/shared", "acme/specific"]
+
+
+def test_machine_directory_rejects_contradictory_explicit_gate(tmp_path):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(
+        repo,
+        "specific.yaml",
+        base_package(name="acme/specific", gate=["box-2"]),
+        machine="box-1",
+    )
+    reg = _registry(srcroot, acme={"class": "worktree"})
+    with pytest.raises(ManifestError, match="gate excludes its containing machine"):
+        discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+
+
+def test_legacy_layout_is_fallback_when_canonical_root_absent(tmp_path):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(
+        repo,
+        "legacy.yaml",
+        base_package(name="acme/legacy", gate=["*"]),
+        legacy=True,
+    )
+    reg = _registry(srcroot, acme={"class": "worktree"})
+    found = discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+    assert [pkg.name for pkg in found[0].packages] == ["acme/legacy"]
+
+
+def test_canonical_root_suppresses_legacy_layout(tmp_path):
+    srcroot = tmp_path / "Src"
+    repo = srcroot / "acme"
+    write_package(
+        repo,
+        "legacy.yaml",
+        base_package(name="acme/legacy", gate=["*"]),
+        legacy=True,
+    )
+    write_package(repo, "current.yaml", base_package(name="acme/current", gate=["*"]))
+    reg = _registry(srcroot, acme={"class": "worktree"})
+    found = discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))
+    assert [pkg.name for pkg in found[0].packages] == ["acme/current"]
+
+
+def test_flat_package_under_canonical_root_fails_closed(tmp_path):
+    repo = tmp_path / "acme"
+    path = repo / ".agent-machines" / "defaults.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text("schema_version: 1\npackage: acme/defaults\n", encoding="utf-8")
+    with pytest.raises(ManifestError, match="packages belong directly under all/"):
+        discover.packages_in_repo(repo, "acme", "box-1")
+
+
+def test_nested_package_under_all_fails_closed(tmp_path):
+    repo = tmp_path / "acme"
+    path = repo / ".agent-machines" / "all" / "nested" / "defaults.yaml"
+    path.parent.mkdir(parents=True)
+    path.write_text("schema_version: 1\npackage: acme/defaults\n", encoding="utf-8")
+    with pytest.raises(ManifestError, match="must be direct children"):
+        discover.packages_in_repo(repo, "acme", "box-1")
+
+
+def test_legacy_duplicate_package_names_preserve_compatibility(tmp_path):
+    repo = tmp_path / "acme"
+    write_package(
+        repo,
+        "one.yaml",
+        base_package(name="acme/duplicate", gate=["*"]),
+        legacy=True,
+    )
+    write_package(
+        repo,
+        "two.yaml",
+        base_package(name="acme/duplicate", gate=["*"]),
+        legacy=True,
+    )
+    assert len(discover.packages_in_repo(repo, "acme", "box-1")) == 2
+
+
+def test_duplicate_package_names_across_scopes_fail(tmp_path):
+    repo = tmp_path / "acme"
+    write_package(repo, "shared.yaml", base_package(name="acme/duplicate", gate=["*"]))
+    write_package(
+        repo,
+        "specific.yaml",
+        base_package(name="acme/duplicate", gate=["*"]),
+        machine="box-1",
+    )
+    with pytest.raises(ManifestError, match="independent complete packages"):
+        discover.packages_in_repo(repo, "acme", "box-1")
 
 
 def test_discover_only_considers_adopted_projects(tmp_path):

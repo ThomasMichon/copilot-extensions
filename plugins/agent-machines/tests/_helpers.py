@@ -7,8 +7,20 @@ from pathlib import Path
 import yaml
 
 
-def write_package(repo_root: Path, filename: str, data: dict) -> Path:
-    state = repo_root / ".github" / "machine-state"
+def write_package(
+    repo_root: Path,
+    filename: str,
+    data: dict,
+    *,
+    machine: str | None = None,
+    legacy: bool = False,
+) -> Path:
+    if legacy:
+        state = repo_root / ".github" / "machine-state"
+    elif machine:
+        state = repo_root / ".agent-machines" / "machines" / machine
+    else:
+        state = repo_root / ".agent-machines" / "all"
     state.mkdir(parents=True, exist_ok=True)
     path = state / filename
     path.write_text(yaml.safe_dump(data), encoding="utf-8")

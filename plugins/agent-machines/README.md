@@ -81,7 +81,32 @@ Module stdout is shown by default in dry-runs, hidden during apply unless
 
 ## Requirement packages
 
-A requirement package is a YAML file under `.github/machine-state/`:
+Requirement packages use a repo-owned namespace:
+
+```text
+.agent-machines/
+├── all/                       # packages evaluated on every machine
+│   └── copilot-defaults.yaml
+└── machines/
+    └── my-box/                # packages discoverable only on my-box
+        └── laptop-policy.yaml
+```
+
+Every file is an independent, complete package with a unique `package` name.
+The machine directory is an implicit scope; an explicit package `gate` is still
+honored. Partial overrides of a shared package remain in that package's existing
+`per-machine` block rather than being a cross-file merge.
+Multi-machine packages belong in `all/` with an explicit `gate`.
+
+`<machine>` is the raw host name returned by `platform.node()` (on Windows,
+`%COMPUTERNAME%`), matched case-insensitively. It is not a display name from an
+external machine registry.
+
+For migration, `.github/machine-state/` remains a bounded legacy fallback only
+when `.agent-machines/` is absent. Move a repo atomically: once the canonical
+root exists, legacy files in that repo are ignored.
+
+A package under `.agent-machines/all/` has this shape:
 
 ```yaml
 schema_version: 1
