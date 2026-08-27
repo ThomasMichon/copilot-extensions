@@ -320,9 +320,13 @@ function Invoke-NativeCapture {
 
     $previousErrorAction = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
+    $exitCode = 1
+    $output = ''
     try {
         $output = (& $Command 2>&1 | Out-String -Width 4096).Trim()
         $exitCode = $LASTEXITCODE
+    } catch {
+        $output = ($_ | Out-String -Width 4096).Trim()
     } finally {
         $ErrorActionPreference = $previousErrorAction
     }
@@ -373,7 +377,8 @@ function Ensure-Uv {
     $staging = Join-Path $InstallDir ".uv-stage-$PID"
     try {
         if (Test-Path -LiteralPath $staging) {
-            Remove-Item -LiteralPath $staging -Recurse -Force
+            Remove-Item -LiteralPath $staging -Recurse -Force `
+                -ErrorAction SilentlyContinue
         }
         New-Item -ItemType Directory -Path $staging -Force | Out-Null
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -396,7 +401,8 @@ function Ensure-Uv {
         Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
             -Force -ErrorAction SilentlyContinue
-        Write-Fail "Failed to vendor uv: $_"
+        Write-Fail "Failed to vendor uv from $url`: $_"
+        Write-Fail 'Retry the installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/.'
         return $false
     } finally {
         Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
@@ -405,7 +411,10 @@ function Ensure-Uv {
     $result = Invoke-NativeCapture { & $uvPath --version }
     if ($result.ExitCode -ne 0) {
         Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
         Write-Fail "Vendored uv is not executable: $($result.Output)"
+        Write-Fail 'Retry the installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/.'
         return $false
     }
     $env:PATH = "$toolDir;$env:PATH"
