@@ -869,6 +869,70 @@ def test_root_include_preserves_symlinked_config(
     assert "Host existing" in target.read_text(encoding="utf-8")
 
 
+def test_emit_profile_reports_broken_root_config_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, module_path, _, _ = _sources(tmp_path, "direct")
+    broken = tmp_path / "config"
+    try:
+        broken.symlink_to(tmp_path / "missing-config")
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+    monkeypatch.setattr(ssh_profile, "_chmod", lambda *_args: None)
+    monkeypatch.setattr(ssh_profile, "openssh_syntax_error", _no_syntax_error)
+
+    rc = main(
+        [
+            "emit-profile",
+            str(registry),
+            "--module",
+            str(module_path),
+            "--config-d",
+            str(tmp_path / "config.d"),
+            "--ssh-config",
+            str(broken),
+        ]
+    )
+
+    assert rc == 2
+    assert "symlink target does not exist" in capsys.readouterr().err
+
+
+def test_emit_profile_rejects_linked_config_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    registry, module_path, _, _ = _sources(tmp_path, "direct")
+    target = tmp_path / "actual-config.d"
+    target.mkdir()
+    linked = tmp_path / "config.d"
+    try:
+        linked.symlink_to(target, target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+    monkeypatch.setattr(ssh_profile, "_chmod", lambda *_args: None)
+
+    rc = main(
+        [
+            "emit-profile",
+            str(registry),
+            "--module",
+            str(module_path),
+            "--config-d",
+            str(linked),
+            "--ssh-config",
+            str(tmp_path / "config"),
+        ]
+    )
+
+    assert rc == 2
+    assert "regular non-reparse directory" in capsys.readouterr().err
+    assert list(target.iterdir()) == []
+
+
 def test_compatibility_emitter_rejects_transport_mismatch(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

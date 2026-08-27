@@ -61,7 +61,7 @@ def _cmd_emit_profile(args: argparse.Namespace) -> int:
             registry_path=args.config.resolve(strict=True),
             module_path=args.module.resolve(strict=True),
         )
-    except (KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         print(f"[FAIL] cannot render managed SSH fragment: {exc}", file=sys.stderr)
         return 2
     fragment_registry.FragmentRegistry(args.config_d).refresh()

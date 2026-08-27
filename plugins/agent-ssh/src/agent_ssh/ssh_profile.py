@@ -375,7 +375,10 @@ def _root_config_target(path: Path) -> Path:
     except FileNotFoundError:
         return path
     if stat.S_ISLNK(info.st_mode):
-        target = path.resolve(strict=True)
+        try:
+            target = path.resolve(strict=True)
+        except FileNotFoundError as exc:
+            raise OSError(f"SSH config symlink target does not exist: {path}") from exc
         target_info = target.lstat()
         if (
             not stat.S_ISREG(target_info.st_mode)
@@ -389,6 +392,20 @@ def _root_config_target(path: Path) -> Path:
     if not stat.S_ISREG(info.st_mode):
         raise OSError(f"SSH config must be a regular file: {path}")
     return path
+
+
+def _regular_config_directory(path: Path) -> Path:
+    """Return the canonical managed directory, rejecting links/reparse points."""
+    info = path.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or _is_reparse(info)
+    ):
+        raise OSError(
+            f"managed config.d must be a regular non-reparse directory: {path}"
+        )
+    return path.resolve(strict=True)
 
 
 def _include_line(config_d: Path | None = None) -> str:
@@ -451,12 +468,14 @@ def write_fragment(
     validate_profile_inputs(cfg, module, require_transport_match=True)
     config_d = config_d or (_ssh_dir() / "config.d")
     config_d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    canonical_config_d = _regular_config_directory(config_d)
     _chmod(config_d, 0o700)  # mkdir(mode=) is a no-op for ACLs on Windows
     frag = config_d / fragment_name(module["module"])
+    target_frag = canonical_config_d / frag.name
     lock_path = config_d.parent / ".agent-ssh-locks" / f"{frag.name}.lock"
     with exclusive_file_lock(lock_path):
         fd, temporary = tempfile.mkstemp(
-            dir=str(config_d.parent),
+            dir=str(canonical_config_d.parent),
             prefix=".agent-ssh-fragment-",
             suffix=".tmp",
         )
@@ -479,7 +498,7 @@ def write_fragment(
                 raise ValueError(
                     f"OpenSSH rejected the managed fragment: {syntax_error}"
                 )
-            os.replace(tmp, frag)
+            os.replace(tmp, target_frag)
         finally:
             try:
                 tmp.unlink()
@@ -564,25 +583,29 @@ def main(argv: list[str] | None = None) -> int:
     assert isinstance(cfg, dict)
     assert isinstance(module, dict)
 
-    if args.print:
-        sys.stdout.write(
-            render_fragment(
-                cfg,
-                module,
-                registry_path=args.config.resolve(strict=True),
-                module_path=args.module.resolve(strict=True),
+    try:
+        if args.print:
+            sys.stdout.write(
+                render_fragment(
+                    cfg,
+                    module,
+                    registry_path=args.config.resolve(strict=True),
+                    module_path=args.module.resolve(strict=True),
+                )
             )
-        )
-        return 0
+            return 0
 
-    frag = write_fragment(
-        cfg,
-        module,
-        config_d=args.config_d,
-        ssh_config=args.ssh_config,
-        registry_path=args.config.resolve(strict=True),
-        module_path=args.module.resolve(strict=True),
-    )
+        frag = write_fragment(
+            cfg,
+            module,
+            config_d=args.config_d,
+            ssh_config=args.ssh_config,
+            registry_path=args.config.resolve(strict=True),
+            module_path=args.module.resolve(strict=True),
+        )
+    except (OSError, ValueError) as exc:
+        print(f"[FAIL] cannot emit managed SSH fragment: {exc}", file=sys.stderr)
+        return 2
     print(f"[OK] wrote {len(cfg.get('machines', []))} host block(s) to {frag}")
     return 0
 
