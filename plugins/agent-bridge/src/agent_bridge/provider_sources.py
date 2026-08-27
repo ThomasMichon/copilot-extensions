@@ -23,11 +23,19 @@ bounded daemon warnings and ``agent-bridge doctor``.
 Manifest schema (``~/.agent-bridge/providers.d/<name>.json``)::
 
     {
+      "schema_version": 1,
+      "plugin": "agent-codespaces@copilot-extensions",
+      "plugin_root": "/current/installed/plugin/root",
       "namespace": "codespace",          # required: the ``<prefix>:`` it serves
       "command": ["/abs/agent-codespaces"],  # required: absolute argv prefix
       "restricted": false,                # optional: venues lack cross-repo/inject
       "description": "GitHub Codespaces"  # optional: human label
     }
+
+Schema-v1 manifests are active only while the attributed plugin is effectively
+enabled globally or in an adopted project and ``plugin_root`` exactly matches
+its current identity-verified root. Legacy anonymous manifests remain loadable
+with an advisory during their compatibility window.
 
 agent-bridge invokes ``<command...> namespace-list`` /
 ``<command...> namespace-resolve <name>`` (etc.) to source and resolve the
@@ -40,16 +48,19 @@ import json
 import os
 import shutil
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from dropin_registry import (
     EntryDecision,
+    EntryStatus,
     Finding,
+    ScanAuthority,
     ScanSnapshot,
     scan_directory,
 )
+from plugin_activation import ActivationReport, resolve_active_plugins
 
 REGISTRY_NAME = "providers.d"
 
@@ -190,6 +201,27 @@ def _inactive(
     )
 
 
+def _indeterminate(
+    path: Path,
+    *,
+    target: str | None = None,
+    detail: str | None = None,
+    owner: str | None = None,
+) -> EntryDecision[ProviderManifest]:
+    return EntryDecision.indeterminate(
+        Finding(
+            registry=REGISTRY_NAME,
+            entry=str(path),
+            status="indeterminate",
+            reason="entry-indeterminate",
+            target=target,
+            owner=owner,
+            remedy="Retry `agent-bridge doctor` after plugin settings are readable.",
+            detail=detail,
+        )
+    )
+
+
 def _resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
     first = command[0]
     candidate = Path(first).expanduser()
@@ -206,7 +238,80 @@ def _resolve_command(command: tuple[str, ...]) -> tuple[str, ...]:
     return (str(target), *command[1:])
 
 
-def _classify_manifest(path: Path) -> EntryDecision[ProviderManifest]:
+def _classify_attribution(
+    path: Path,
+    manifest: ProviderManifest,
+    activation: ActivationReport,
+) -> EntryDecision[ProviderManifest]:
+    source = manifest.plugin or ""
+    if activation.authority is ScanAuthority.INDETERMINATE:
+        return _indeterminate(
+            path,
+            target=manifest.plugin_root,
+            owner=source,
+            detail="effective plugin activation evidence is indeterminate",
+        )
+
+    decision = activation.decisions.get(source)
+    if decision is None:
+        return _inactive(
+            path,
+            "not-enabled",
+            target=manifest.plugin_root,
+            owner=source,
+            detail="plugin is not enabled globally or in any registered project",
+        )
+    if decision.status is EntryStatus.INDETERMINATE:
+        detail = "; ".join(
+            finding.detail or finding.reason for finding in decision.findings
+        )
+        return _indeterminate(
+            path,
+            target=manifest.plugin_root,
+            owner=source,
+            detail=detail or "plugin root eligibility is indeterminate",
+        )
+    if decision.status is EntryStatus.INACTIVE or decision.value is None:
+        finding = decision.findings[0]
+        return _inactive(
+            path,
+            finding.reason,
+            target=finding.target or manifest.plugin_root,
+            owner=source,
+            detail=finding.detail,
+        )
+
+    expected_root = decision.value.root
+    if Path(manifest.plugin_root or "") != expected_root:
+        return _inactive(
+            path,
+            "identity-mismatch",
+            target=manifest.plugin_root,
+            owner=source,
+            detail=f"provider root differs from active plugin root {expected_root}",
+        )
+    if decision.status is EntryStatus.ACTIVE_WITH_ADVISORY:
+        advisories = tuple(
+            Finding(
+                registry=REGISTRY_NAME,
+                entry=str(path),
+                status="advisory",
+                reason=finding.reason,
+                target=finding.target,
+                owner=source,
+                remedy="Run `agent-bridge doctor` and repair the plugin source.",
+                detail=finding.detail,
+            )
+            for finding in decision.findings
+        )
+        return EntryDecision.advisory(manifest, *advisories)
+    return EntryDecision.active(manifest)
+
+
+def _classify_manifest(
+    path: Path,
+    activation_report: Callable[[], ActivationReport],
+) -> EntryDecision[ProviderManifest]:
     try:
         data = json.loads(path.read_text(encoding="utf-8-sig"))
         manifest = parse_manifest(data, source_path=str(path))
@@ -264,7 +369,7 @@ def _classify_manifest(path: Path) -> EntryDecision[ProviderManifest]:
             plugin=manifest.plugin,
             plugin_root=canonical_root,
         )
-        return EntryDecision.active(manifest)
+        return _classify_attribution(path, manifest, activation_report())
 
     manifest = ProviderManifest(
         namespace=manifest.namespace,
@@ -290,12 +395,21 @@ def scan_provider_registry(
     directory: str | os.PathLike[str] | None = None,
     *,
     previous: Mapping[str, ProviderManifest] | None = None,
+    activation_report: ActivationReport | None = None,
 ) -> ProviderRegistryReport:
     """Scan, reconcile, and de-duplicate provider manifests."""
     root = Path(directory) if directory is not None else providers_dir()
+    resolved_activation = activation_report
+
+    def current_activation() -> ActivationReport:
+        nonlocal resolved_activation
+        if resolved_activation is None:
+            resolved_activation = resolve_active_plugins()
+        return resolved_activation
+
     snapshot = scan_directory(
         root,
-        _classify_manifest,
+        lambda path: _classify_manifest(path, current_activation),
         registry=REGISTRY_NAME,
         suffixes=(".json",),
     )
