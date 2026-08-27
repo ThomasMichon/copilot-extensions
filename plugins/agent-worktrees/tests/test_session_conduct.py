@@ -20,6 +20,23 @@ _PLUGIN = Path(__file__).resolve().parents[1]
 _SCRIPTS = _PLUGIN / "scripts"
 
 
+def _bash() -> str | None:
+    if os.name == "nt":
+        candidates = [
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+            / "Git"
+            / "bin"
+            / "bash.exe",
+            Path(os.environ.get("LOCALAPPDATA", ""))
+            / "Programs"
+            / "Git"
+            / "bin"
+            / "bash.exe",
+        ]
+        return next((str(path) for path in candidates if path.is_file()), None)
+    return shutil.which("bash")
+
+
 def _prepare_hook_home(
     tmp_path: Path,
     *,
@@ -56,14 +73,17 @@ import os
 import sys
 
 args = sys.argv[1:]
+def emit(value):
+    sys.stdout.buffer.write(value.encode("utf-8"))
+
 if args == ["-m", "agent_worktrees", "get", "project"]:
     print("harness")
 elif "state-root" in args and "--conduct" in args:
-    sys.stdout.write({output_text(definition)!r})
+    emit({output_text(definition)!r})
 elif "related" in args and "--conduct" in args:
-    sys.stdout.write({output_text(related)!r})
+    emit({output_text(related)!r})
 elif "history-digest" in args:
-    sys.stdout.write({output_text(history)!r})
+    emit({output_text(history)!r})
 elif args[:2] == ["-m", "agent_worktrees.conduct"]:
     os.execv(sys.executable, [sys.executable, *args])
 else:
@@ -130,11 +150,14 @@ def _stress_hook_fixture(tmp_path):
     return definition, related, history, home, conduct_dir
 
 
-@pytest.mark.skipif(shutil.which("bash") is None, reason="Bash is unavailable")
+@pytest.mark.skipif(
+    os.name == "nt" or _bash() is None,
+    reason="POSIX conduct fixtures require a POSIX host",
+)
 def test_posix_hook_enforces_budget_priority(tmp_path):
     definition, related, _history, home, conduct_dir = _stress_hook_fixture(tmp_path)
 
-    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, "bash")
+    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, _bash())
     data = json.loads(bash_output)
     context = data["additionalContext"]
     assert c.runtime_units(bash_output) <= c.MAX_OUTPUT_CHARS
@@ -183,12 +206,12 @@ def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(tmp_pat
 
 
 @pytest.mark.skipif(
-    shutil.which("bash") is None or _powershell() is None,
-    reason="Bash and PowerShell are both required for parity",
+    os.name == "nt" or _bash() is None or _powershell() is None,
+    reason="Bash/PowerShell parity requires a POSIX host",
 )
 def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path):
     _definition, _related, _history, home, _ = _stress_hook_fixture(tmp_path)
-    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, "bash")
+    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, _bash())
     ps_output = _run(_SCRIPTS / "session-conduct.ps1", home, _powershell())
     assert ps_output == bash_output
 
