@@ -373,7 +373,7 @@ def _root_config_target(path: Path) -> Path:
     try:
         info = path.lstat()
     except FileNotFoundError:
-        return path
+        return path.expanduser().resolve(strict=False)
     if stat.S_ISLNK(info.st_mode):
         try:
             target = path.resolve(strict=True)
@@ -429,9 +429,14 @@ def ensure_root_include(
     ssh_config = ssh_config or (_ssh_dir() / "config")
     include_line = _include_line(config_d)
     ssh_config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    lock_path = ssh_config.parent / ".agent-ssh-locks" / "root-config.lock"
+    target = _root_config_target(ssh_config)
+    lock_path = target.parent / ".agent-ssh-locks" / "root-config.lock"
     with exclusive_file_lock(lock_path):
-        target = _root_config_target(ssh_config)
+        current_target = _root_config_target(ssh_config)
+        if current_target != target:
+            raise OSError(
+                f"SSH config target changed while waiting for the write lock: {ssh_config}"
+            )
         existing = target.read_text(encoding="utf-8") if target.exists() else ""
         if any(line.strip() == include_line for line in existing.splitlines()):
             return False

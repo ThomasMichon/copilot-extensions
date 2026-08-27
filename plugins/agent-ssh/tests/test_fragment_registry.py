@@ -869,6 +869,37 @@ def test_root_include_preserves_symlinked_config(
     assert "Host existing" in target.read_text(encoding="utf-8")
 
 
+def test_root_include_serializes_symlink_and_direct_target_callers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "managed" / "ssh-config"
+    target.parent.mkdir()
+    target.write_text(
+        "Host existing\n    HostName existing.example.com\n",
+        encoding="utf-8",
+    )
+    link = tmp_path / "config"
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
+    monkeypatch.setattr(ssh_profile, "_chmod", lambda *_args: None)
+    barrier = threading.Barrier(2)
+
+    def update(path: Path) -> bool:
+        barrier.wait()
+        return ssh_profile.ensure_root_include(path)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(update, (link, target)))
+
+    content = target.read_text(encoding="utf-8")
+    assert sorted(results) == [False, True]
+    assert content.count(ssh_profile.ROOT_INCLUDE) == 1
+    assert link.is_symlink()
+
+
 def test_emit_profile_reports_broken_root_config_symlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
