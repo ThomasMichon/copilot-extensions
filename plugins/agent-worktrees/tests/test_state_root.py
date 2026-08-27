@@ -450,6 +450,8 @@ def test_git_common_dir_ignores_inherited_repository_context(
 
     monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
     monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "global.gitconfig"))
+    monkeypatch.setenv("GIT_TRACE", "1")
     monkeypatch.setenv("BENIGN_SETUP_CONTEXT", "preserved")
     captured: dict[str, str] = {}
     original_run = subprocess.run
@@ -463,6 +465,9 @@ def test_git_common_dir_ignores_inherited_repository_context(
     assert sr._git_common_dir(checkout) == (checkout / ".git").resolve()
     assert "GIT_DIR" not in captured
     assert "GIT_WORK_TREE" not in captured
+    assert captured["GIT_CONFIG_GLOBAL"] == str(tmp_path / "global.gitconfig")
+    assert captured["GIT_TRACE"] == "1"
+    assert captured["GIT_TERMINAL_PROMPT"] == "0"
     assert captured["BENIGN_SETUP_CONTEXT"] == "preserved"
 
 
