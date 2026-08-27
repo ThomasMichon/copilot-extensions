@@ -113,8 +113,11 @@ reachable when their ownership is explicit.
   canonical templates.
 - [x] Add session-start command-catalog context so skills and agents receive the
   exact payload-owned invocation path; convert operative bare command examples.
-- [ ] Stop installing generic `agent-*` commands into `~/.local/bin`.
-- [ ] Make project binstubs pin their owning payload and reject silent ownership
+- [ ] Stop installing generic `agent-*` commands into `~/.local/bin`; retained
+  service, provider, remote, scheduled, startup, and deployment boundaries still
+  require attributable external-launch contracts before their compatibility
+  wrappers can be retired.
+- [x] Make project binstubs pin their owning payload and reject silent ownership
   transfer.
 
 ### Phase 3 — Installation context and exemplars ([#1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104))
@@ -342,3 +345,20 @@ See [`design.md`](design.md).
   because an initial-context snapshot would stale immediately.
 - Added a roster-wide guard so a future runtime `agent-*` plugin cannot land
   without both-platform bootstrap and glossary wiring.
+
+### 2026-08-26 — Phase 2 ownership and closure audit
+
+- Project-command ownership merged in
+  [#1178](https://github.com/ThomasMichon/copilot-extensions/pull/1178).
+  Project launchers now pin the payload that created them, carry owner/project
+  identity plus exact launcher hashes in receipts, serialize registration and
+  reconciliation, preserve unreceipted or modified commands, and require an
+  explicit transfer operation before replacement.
+- Re-ran the runtime roster, catalog-adopter, and report-only isolation guards.
+  All runtime plugins retain their bootstrap and command-glossary wiring, and
+  catalog adopters have no unmarked bare agent commands.
+- Kept Phase 2 and #1103 open: the isolation inventory still reports 86
+  global-plugin-binstub surfaces across 14 plugins. These are the intentionally
+  retained external management boundaries; removing them before they receive
+  attributable launch contracts would break out-of-session callers rather than
+  isolate them.
