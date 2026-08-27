@@ -108,13 +108,35 @@ repos:
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
 | `repos` | map | `{}` | Per-repo configuration, keyed by repo name. |
 
-### Config drop-ins — `~/.{project}/config.d/*.yaml`
+### Config drop-ins — `~/.{project}/config.d/`
 
 A **service** can register machine-local config without editing the shared
-`config.yaml`. Every `*.yaml` in `~/.{project}/config.d/` (sorted by name, later
-names win among drop-ins) is deep-merged as a **base UNDER** the machine-local
-`config.yaml` — so an explicit `config.yaml` still wins, and multiple services
-coexist. The merged result then layers over the in-repo + global tiers as usual.
+`config.yaml`. Valid entries are sorted by name and deep-merged as a **base
+UNDER** the machine-local `config.yaml` — so an explicit `config.yaml` still
+wins, and multiple services coexist. The merged result then layers over the
+in-repo + global tiers as usual.
+
+Two entry classes are supported:
+
+- `*.yaml` / `*.yml` — direct, permanent **operator-owned** fragments.
+- `*.json` — a managed plugin pointer with exactly:
+
+  ```json
+  {
+    "schema_version": 1,
+    "plugin": "example-plugin@example-marketplace",
+    "plugin_root": "/current/verified/plugin/root",
+    "target": "/current/verified/plugin/root/config/fragment.yaml"
+  }
+  ```
+
+Managed pointers activate only while the plugin is enabled globally or for this
+project, the stored root exactly matches its current identity-verified root, and
+the target is a regular YAML file canonically contained by that root. Each file
+is parsed and structurally validated independently. Confirmed invalidity or
+absence withdraws the fragment; transient registry/entry/target I/O retains only
+that entry's last-known contribution. Operational warnings are bounded;
+`agent-worktrees doctor [--json]` is exhaustive and report-only.
 
 Use it for service-owned settings that shouldn't live in the committed repo
 config. Example — the Aperture Vault registering its askpass path so
@@ -122,14 +144,14 @@ config. Example — the Aperture Vault registering its askpass path so
 shared repo config:
 
 ```yaml
-# ~/.test-chamber/config.d/vault.yaml   (written by the vault installer)
+# ~/.test-chamber/config.d/vault.yaml
 repos:
   test-chamber:
     session_env:
       SUDO_ASKPASS: /home/me/.local/bin/vault-askpass
 ```
 
-This deep-merges with the repo's own `session_env` (e.g.
+This operator fragment deep-merges with the repo's own `session_env` (e.g.
 `COPILOT_FEATURE_FLAGS`), so both keys reach the session. (Read by
 agent-worktrees ≥ 1.5.3-dev113.)
 

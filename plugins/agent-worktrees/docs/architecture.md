@@ -557,24 +557,33 @@ does.
                      "{task_id}", "--permit"] }, ... ] }
 ```
 
-- **Discovery** (`picker_tui/pivots.py`): the picker scans the directory at
-  startup (and on `r`-refresh), weaving each manifest into the built-in order by
-  its `after` hint. `AGENT_WORKTREES_PIVOTS_DIR` overrides the location (tests,
-  escape hatch). A missing dir or a malformed manifest is skipped -- never fatal.
-- **Self-heal** (`ensure_pivots`, #2180): a contributor copies its manifest into
-  `~/.agent-worktrees/pivots/` only on *its own* install, so resetting the
-  agent-worktrees runtime root silently drops every contributed pivot (the
-  `Tasks` pivot vanishes) until each plugin is reinstalled. Before each scan the
-  picker restores them from the **durable** copilot marketplace install tree --
-  `~/.copilot/installed-plugins/<marketplace>/<plugin>/pivots/*.json`
-  (`AGENT_WORKTREES_PLUGINS_DIR` overrides) -- copying any *missing* manifest
-  back. Restore-only (never clobbers a locally-present manifest) and best-effort
-  (any error is swallowed), so registration is idempotently ensured with no
-  contributor involvement.
+- **Discovery and reconciliation** (`picker_tui/pivots.py`): one classifier
+  scans the directory at startup (and on `r`-refresh), validates every external
+  command, and returns both active contributions and exhaustive findings.
+  Entries are independent fault boundaries. A complete/absent scan withdraws a
+  removed, malformed, disabled, or stale contribution; registry or entry I/O
+  uncertainty retains only last-known state and never activates a fresh entry.
+  `AGENT_WORKTREES_PIVOTS_DIR` overrides the location (tests, escape hatch).
+- **Attributed materialization** (`ensure_pivots`, #2180): before runtime
+  discovery, agent-worktrees resolves plugins that are currently enabled
+  globally or in an adopted project, verifies one current root, and reads each
+  root's shipped `pivots/*.json` template. It publishes a schema-v2 runtime
+  manifest containing `plugin`, `plugin_root`, and `template`, with command
+  targets resolved to canonical absolute paths. Cached installed payloads alone
+  are never authority. Publication is append-only and exclusive-create: an
+  existing file is never replaced, and a changed template gets a deterministic
+  fingerprinted sibling. Routine discovery never deletes registry files.
+- **Compatibility and diagnostics.** Known schema-v1 suite manifests remain
+  active only while their contributing plugin is enabled and identity-verified,
+  with a `legacy-unattributed` advisory. Unknown schema-v1 manifests retain
+  compatibility as report-only unknown legacy entries; unversioned manifests
+  are operator-owned. Operational warnings are capped and fingerprint-
+  deduplicated. `agent-worktrees doctor [--json]` reports the same classifier's
+  findings exhaustively with exact report-only remedies.
 - **Shipped list pivots (this repo).** Several plugins ship a manifest in their
-  own `pivots/` dir (installed to `<plugin>/pivots/*.json`, self-healed in by
+  own `pivots/` dir (materialized from its verified active root by
   `ensure_pivots`), each a **zero-engine-change** `list` pivot that appears only
-  when that layer is installed and its CLI is on `PATH`:
+  while that layer is currently enabled and its command target is usable:
   `agent-dispatch` -> **Tasks** (`agent-dispatch inbox --machine {machine}`),
   `agent-bridge` -> **Bridges** (`agent-bridge agents --json`),
   `agent-codespaces` -> **CodeSpaces** (`agent-codespaces list --json`),
@@ -583,8 +592,8 @@ does.
   pulls id/title/subtitle/badges out of each. This is graceful-capability-scaling
   in practice: adopt more of the fabric, get more pivots; adopt less, and the
   picker is never burdened by a pivot for a layer you don't have.
-- **Data + actions** (`picker_tui/tasks.py`): the `list` command is run as a
-  **subprocess** (argv[0] resolved on `PATH`) on a background thread, cached per
+- **Data + actions** (`picker_tui/tasks.py`): the validated `list` command is run
+  as a **subprocess** on a background thread, cached per
   machine, and expected to print a JSON array. `actions` argv templates are run
   the same way. Placeholders (`{machine}`, `{worktree}`, `{id}`/`{task_id}`,
   `{title}`, plus any entry field) are substituted at activation time. Data

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent-plugin-activation"
+version = "0.1.0-dev1"
+description = "Resolve effectively enabled Copilot plugins to identity-verified roots"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "agent-dropin-registry",
+    "agent-plugin-resolve",
+]
+
+[tool.uv.sources]
+agent-dropin-registry = { path = "../dropin-registry" }
+agent-plugin-resolve = { path = "../plugin-resolve" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603", "S607"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
