@@ -34,7 +34,7 @@ def _config(tmp_path) -> cfg.Config:
     )
 
 
-def _unsafe_root(config, *, cwd=None):
+def _unsafe_root(config, *, cwd=None, project=None):
     return state_root.ConfigRoot(
         None,
         "machine_local",
@@ -43,6 +43,41 @@ def _unsafe_root(config, *, cwd=None):
         False,
         error="machine-local config root is unsafe",
     )
+
+
+def test_launch_preflight_uses_active_project_for_config_root(
+    tmp_path,
+    monkeypatch,
+):
+    base = _config(tmp_path)
+    config = cfg.Config(
+        srcroot=base.srcroot,
+        machine=base.machine,
+        platform=base.platform,
+        repo_name="selected-repo",
+        repos={"selected-repo": base.repos["demo"]},
+    )
+    captured = {}
+    monkeypatch.setattr(m.cfg, "active_project", lambda: "control-project")
+
+    def resolve(config_arg, *, cwd=None, project=None):
+        captured.update(config=config_arg, cwd=cwd, project=project)
+        return state_root.ConfigRoot(
+            str(tmp_path / ".control-project"),
+            "machine_local",
+            config_arg.repo_name,
+            False,
+            True,
+        )
+
+    monkeypatch.setattr(m.state_root_mod, "resolve_config_root", resolve)
+    args = argparse.Namespace(recovery=False)
+
+    preflight = m._preflight_launch(config, args, str(tmp_path / "future-worktree"))
+
+    assert preflight.error is None
+    assert captured["project"] == "control-project"
+    assert captured["config"].repo_name == "selected-repo"
 
 
 def _create_args(*, json_output: bool) -> argparse.Namespace:

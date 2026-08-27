@@ -1362,7 +1362,11 @@ def _preflight_launch(
     if recovery or plat_key in launch_map or not repo.setup_hook.get(plat_key):
         return LaunchPreflight()
     return LaunchPreflight(
-        config_root=state_root_mod.resolve_config_root(config, cwd=work_dir)
+        config_root=state_root_mod.resolve_config_root(
+            config,
+            cwd=work_dir,
+            project=cfg.active_project(),
+        )
     )
 
 
@@ -1840,6 +1844,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
                     kind="session",
                     recovery=getattr(args, "recovery", False),
                 )
+        except LaunchPreflightError as e:
+            return _json_error(str(e), exit_code=3)
         except Exception as e:
             return _json_error(f"failed to create worktree: {e}")
         wt_id = created["worktree"]["id"]
@@ -13996,12 +14002,24 @@ def cmd_config_root_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    if args.destination and not cfg.active_project():
-        res = state_root_mod.validate_config_destination(args.destination)
-    else:
-        res = state_root_mod.resolve_config_root(
-            cfg.load_config(),
-            destination=args.destination,
+    try:
+        if args.destination and not cfg.active_project():
+            res = state_root_mod.validate_config_destination(args.destination)
+        else:
+            project = cfg.project_name()
+            res = state_root_mod.resolve_config_root(
+                cfg.load_config(),
+                destination=args.destination,
+                project=project,
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        res = state_root_mod.ConfigRoot(
+            None,
+            "explicit" if args.destination else "machine_local",
+            "",
+            False,
+            False,
+            error=str(exc),
         )
     if args.json:
         print(json.dumps(res.as_dict(), indent=2))

@@ -180,6 +180,46 @@ def test_config_root_defaults_to_machine_local_project_dir(monkeypatch, tmp_path
     assert res.error is None
 
 
+def test_config_root_defaults_to_active_project_not_selected_repo(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+    monkeypatch.setattr(cfg, "active_project", lambda: "control-project")
+
+    def project_dir(name=None):
+        captured["name"] = name
+        return tmp_path / f".{name}"
+
+    monkeypatch.setattr(cfg, "project_dir", project_dir)
+    config = _config("selected-repo")
+
+    res = sr.resolve_config_root(config)
+
+    assert captured["name"] == "control-project"
+    assert res.path == str((tmp_path / ".control-project").resolve())
+    assert res.repo == "selected-repo"
+
+
+def test_config_root_explicit_project_overrides_ambient_project(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+    monkeypatch.setattr(cfg, "active_project", lambda: "ambient-project")
+
+    def project_dir(name=None):
+        captured["name"] = name
+        return tmp_path / f".{name}"
+
+    monkeypatch.setattr(cfg, "project_dir", project_dir)
+
+    res = sr.resolve_config_root(_config("selected-repo"), project="explicit-project")
+
+    assert captured["name"] == "explicit-project"
+    assert res.path == str((tmp_path / ".explicit-project").resolve())
+
+
 def test_config_root_rejects_explicit_stateless_checkout(tmp_path):
     harness = tmp_path / "harness"
     harness.mkdir()
@@ -558,14 +598,17 @@ def test_config_root_cli_honors_machine_local_stateless_config(
 
     harness = tmp_path / "harness"
     (harness / ".git").mkdir(parents=True)
-    monkeypatch.setattr(main.cfg, "active_project", lambda: "harness")
     monkeypatch.setattr(
         main.cfg,
         "load_config",
         lambda: _config("harness", stateless=True, anchor=str(harness)),
     )
 
-    rc = main.cmd_config_root_dispatch(["--destination", str(harness)])
+    main.cfg.set_active_project("harness")
+    try:
+        rc = main.cmd_config_root_dispatch(["--destination", str(harness)])
+    finally:
+        main.cfg.set_active_project(None)
 
     assert rc == 3
     assert "inside stateless checkout" in capsys.readouterr().err
@@ -618,6 +661,72 @@ def test_config_root_cli_json_preserves_launch_statelessness(
     assert data["stateless"] is launch_stateless
     assert data["repo"] == "launch"
     assert "inside stateless checkout" in data["error"]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_config_root_cli_load_failure_is_controlled(
+    monkeypatch,
+    capsys,
+    json_output,
+):
+    from agent_worktrees import __main__ as main
+
+    main.cfg.set_active_project("unknown")
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: (_ for _ in ()).throw(ValueError("unknown project config")),
+    )
+    argv = ["--json"] if json_output else []
+    try:
+        rc = main.cmd_config_root_dispatch(argv)
+    finally:
+        main.cfg.set_active_project(None)
+
+    captured = capsys.readouterr()
+    assert rc == 3
+    assert "Traceback" not in captured.out + captured.err
+    if json_output:
+        data = json.loads(captured.out)
+        assert data["config_root"] is None
+        assert data["bound"] is False
+        assert data["error"] == "unknown project config"
+        assert captured.err == ""
+    else:
+        assert captured.out == ""
+        assert "unknown project config" in captured.err
+
+
+def test_main_unknown_project_config_root_json_is_controlled(
+    monkeypatch,
+    capfd,
+):
+    from agent_worktrees import __main__ as main
+
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: (_ for _ in ()).throw(ValueError("unknown project config")),
+    )
+    main.cfg.set_active_project(None)
+    try:
+        rc = main.main([
+            "--project",
+            "unknown",
+            "config-root",
+            "--json",
+        ])
+    finally:
+        main.cfg.set_active_project(None)
+
+    captured = capfd.readouterr()
+    assert rc == 3
+    assert "Traceback" not in captured.out + captured.err
+    data = json.loads(captured.out)
+    assert data["config_root"] is None
+    assert data["bound"] is False
+    assert data["error"] == "unknown project config"
+    assert captured.err == ""
 
 
 @pytest.fixture

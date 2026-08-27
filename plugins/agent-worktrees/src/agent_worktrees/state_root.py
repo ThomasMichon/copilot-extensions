@@ -255,6 +255,7 @@ def resolve_config_root(
     *,
     destination: str | None = None,
     cwd: str | None = None,
+    project: str | None = None,
 ) -> ConfigRoot:
     """Resolve and guard the configuration root for supported setup writers.
 
@@ -273,10 +274,11 @@ def resolve_config_root(
         or getattr(repo_cfg, "requires_external_state_root", False)
     )
     source = "explicit" if destination else "machine_local"
+    project_name = project or cfg.active_project() or repo
 
     try:
         target = _normalized_path(
-            destination or str(cfg.project_dir(repo)),
+            destination or str(cfg.project_dir(project_name)),
             cwd=cwd,
         )
         if target.exists() and not target.is_dir():

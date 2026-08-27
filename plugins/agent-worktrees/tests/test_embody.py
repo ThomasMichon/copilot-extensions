@@ -292,6 +292,46 @@ class TestCmdEmbody:
         assert captured["recovery"] is True
         assert json.loads(capfd.readouterr().out)["worktree_id"] == "fresh-r"
 
+    def test_new_preflight_failure_preserves_message_and_exit_code(
+        self,
+        monkeypatch,
+        capfd,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(
+            m,
+            "_create_worktree_core",
+            lambda c, **k: (_ for _ in ()).throw(
+                m.LaunchPreflightError("machine-local config root is unsafe")
+            ),
+        )
+
+        rc = m.cmd_embody(_ns(new=True))
+
+        assert rc == 3
+        out = json.loads(capfd.readouterr().out)
+        assert out["error"] == "machine-local config root is unsafe"
+        assert "failed to create worktree" not in out["error"]
+
+    def test_new_unrelated_create_failure_keeps_existing_contract(
+        self,
+        monkeypatch,
+        capfd,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(
+            m,
+            "_create_worktree_core",
+            lambda c, **k: (_ for _ in ()).throw(RuntimeError("git failed")),
+        )
+
+        rc = m.cmd_embody(_ns(new=True))
+
+        assert rc == 1
+        assert json.loads(capfd.readouterr().out)["error"] == (
+            "failed to create worktree: git failed"
+        )
+
     def test_spawn_failure_exits_4(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)
         monkeypatch.setattr(m, "_resolve_worktree_id", lambda r: "wtE")
