@@ -28,9 +28,11 @@ description: >
 
 > **Before you start — use the payload-local session command.**
 > The agent-dispatch session command catalog supplies an exact `argv[0]` owned
-> by this plugin payload. Replace `<agent-dispatch catalog argv[0]>` in every
-> shell operation below with that path; never search `PATH` or substitute a
-> same-named command from another payload. In PowerShell, invoke it as
+> by this plugin payload. Replace `<agent-dispatch catalog argv[0]>` in
+> interactive dispatch operations below with that path; never search `PATH` or
+> substitute a same-named command from another payload. Commands explicitly
+> labeled as management boundaries remain literal global-wrapper invocations.
+> In PowerShell, invoke the catalog path as
 > `& "<agent-dispatch catalog argv[0]>" <args>`. The payload shim provisions
 > its own runtime on first use and works without agent-worktrees. The first call
 > may take ~30–120s (watch for `::agent-provisioning::`); let it finish and
