@@ -25,9 +25,10 @@ AW_PY=""
 _awr="$HOME/.agent-worktrees"
 _awv=""
 
-# -- helper: set AW_PY from a version's slot python, if executable --
+# -- helper: set AW_PY from a complete version's slot python --
 _aw_try_slot() {
   [ -n "$1" ] || return 1
+  [ -f "$_awr/versions/$1/.install-complete.json" ] || return 1
   for _sub in bin/python Scripts/python.exe; do
     if [ -x "$_awr/versions/$1/$_sub" ]; then AW_PY="$_awr/versions/$1/$_sub"; return 0; fi
   done
@@ -46,12 +47,16 @@ if [ -z "$AW_PY" ] && [ -f "$_awr/last-known-good" ]; then
   _aw_try_slot "$_awlkg"
 fi
 
-# Tier 3: true first-run (no marker, no last-known-good) -> newest installed slot.
+# Tier 3: true first-run -> newest complete installed slot.
 if [ -z "$AW_PY" ]; then
-  for _p in "$_awr"/versions/*/bin/python "$_awr"/versions/*/Scripts/python.exe; do
-    [ -x "$_p" ] && AW_PY="$_p"
+  for _m in "$_awr"/versions/*/.install-complete.json; do
+    [ -f "$_m" ] || continue
+    _slot=${_m%/.install-complete.json}
+    for _sub in bin/python Scripts/python.exe; do
+      [ -x "$_slot/$_sub" ] && AW_PY="$_slot/$_sub"
+    done
   done
 fi
 AGENT_RT_PY="$AW_PY"
-unset _awr _awv _awlkg _sub _p 2>/dev/null || true
+unset _awr _awv _awlkg _sub _m _slot 2>/dev/null || true
 unset -f _aw_try_slot 2>/dev/null || true

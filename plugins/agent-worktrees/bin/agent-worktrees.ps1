@@ -16,7 +16,8 @@ function _resolve_aw_py {
         $ver = ''
         try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
         $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+        $complete = if ($ver) { Join-Path $_root ('versions\' + $ver + '\.install-complete.json') } else { '' }
+        if ($p -and (Test-Path -LiteralPath $complete -PathType Leaf) -and (Test-Path -LiteralPath $p)) { return $p }
     }
     Get-ChildItem (Join-Path $_root 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc | ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |

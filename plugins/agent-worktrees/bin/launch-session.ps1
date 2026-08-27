@@ -179,7 +179,11 @@ function Resolve-CurrentRuntimePython {
         $python = Join-Path $RuntimeDir (
             'versions\' + $version + '\Scripts\python.exe'
         )
-        if (Test-Path -LiteralPath $python -PathType Leaf) { return $python }
+        $complete = Join-Path $RuntimeDir (
+            'versions\' + $version + '\.install-complete.json'
+        )
+        if ((Test-Path -LiteralPath $complete -PathType Leaf) -and
+            (Test-Path -LiteralPath $python -PathType Leaf)) { return $python }
     } catch {}
     return $null
 }
@@ -189,13 +193,15 @@ try {
     $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'current-version'))).Trim()
     if ($_ver) {
         $_p = Join-Path $RuntimeDir ('versions\' + $_ver + '\Scripts\python.exe')
-        if (Test-Path -LiteralPath $_p) { $VenvPython = $_p }
+        $_complete = Join-Path $RuntimeDir ('versions\' + $_ver + '\.install-complete.json')
+        if ((Test-Path -LiteralPath $_complete -PathType Leaf) -and
+            (Test-Path -LiteralPath $_p)) { $VenvPython = $_p }
     }
 } catch {}
 if (-not $VenvPython) {
-    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object Name |
-        ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
+        Sort-Object { $_.Directory.Name } |
+        ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
         Where-Object { Test-Path -LiteralPath $_ } |
         Select-Object -Last 1
 }

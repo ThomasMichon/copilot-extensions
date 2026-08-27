@@ -21,11 +21,15 @@
 $AwPy = $null
 $_awr = Join-Path $env:USERPROFILE '.agent-worktrees'
 
-# -- helper: return a version's slot python if it exists, else $null --
+# -- helper: return a complete version's slot python, else $null --
 function _Aw-TrySlot([string]$ver) {
   if (-not $ver) { return $null }
+  $slot = Join-Path $_awr ("versions\$ver")
+  if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) {
+    return $null
+  }
   foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-    $p = Join-Path $_awr ("versions\$ver\$sub")
+    $p = Join-Path $slot $sub
     if (Test-Path -LiteralPath $p) { return $p }
   }
   return $null
@@ -44,11 +48,11 @@ if (-not $AwPy) {
   if ($_awlkg) { $AwPy = _Aw-TrySlot $_awlkg }
 }
 
-# Tier 3: true first-run (no marker, no last-known-good) -> newest installed slot.
+# Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
-  $AwPy = Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue |
-    Sort-Object Name |
-    ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
+  $AwPy = Get-ChildItem (Join-Path $_awr 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
+    Sort-Object { $_.Directory.Name } |
+    ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
     Where-Object { Test-Path -LiteralPath $_ } |
     Select-Object -Last 1
 }

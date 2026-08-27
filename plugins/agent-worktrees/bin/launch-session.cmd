@@ -14,8 +14,8 @@ rem `.venv` link is retired (#1106).
 set "PYTHON="
 set "_VER="
 if exist "%RUNTIME_DIR%\current-version" set /p _VER=<"%RUNTIME_DIR%\current-version"
-if defined _VER if exist "%RUNTIME_DIR%\versions\%_VER%\Scripts\python.exe" set "PYTHON=%RUNTIME_DIR%\versions\%_VER%\Scripts\python.exe"
-if not defined PYTHON if exist "%RUNTIME_DIR%\versions" for /f "delims=" %%d in ('dir /b /ad /o-n "%RUNTIME_DIR%\versions" 2^>nul') do if not defined PYTHON if exist "%RUNTIME_DIR%\versions\%%d\Scripts\python.exe" set "PYTHON=%RUNTIME_DIR%\versions\%%d\Scripts\python.exe"
+if defined _VER if exist "%RUNTIME_DIR%\versions\%_VER%\.install-complete.json" if exist "%RUNTIME_DIR%\versions\%_VER%\Scripts\python.exe" set "PYTHON=%RUNTIME_DIR%\versions\%_VER%\Scripts\python.exe"
+if not defined PYTHON if exist "%RUNTIME_DIR%\versions" for /f "delims=" %%d in ('dir /b /ad /o-n "%RUNTIME_DIR%\versions" 2^>nul') do if not defined PYTHON if exist "%RUNTIME_DIR%\versions\%%d\.install-complete.json" if exist "%RUNTIME_DIR%\versions\%%d\Scripts\python.exe" set "PYTHON=%RUNTIME_DIR%\versions\%%d\Scripts\python.exe"
 if not defined PYTHON (
     echo ERROR: Venv not found. Run the installer first. >&2
     exit /b 1

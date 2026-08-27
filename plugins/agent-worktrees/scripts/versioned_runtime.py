@@ -379,25 +379,64 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     return vdir
 
 
-def _detach_marker_reference(root: Path, name: str, version: str) -> None:
-    """Atomically remove a marker when it still references ``version``."""
+def _detach_file(path: Path) -> tuple[Path, Path] | None:
+    """Atomically move ``path`` aside and return ``(detached, original)``."""
+    detached = path.with_name(
+        f".{path.name}.stale-{os.getpid()}-{time.time_ns()}"
+    )
+    try:
+        os.replace(path, detached)
+    except FileNotFoundError:
+        return None
+    return detached, path
+
+
+def _discard_detached(pair: tuple[Path, Path] | None) -> None:
+    if pair is None:
+        return
+    try:
+        pair[0].unlink()
+    except OSError:
+        pass
+
+
+def _restore_detached(pair: tuple[Path, Path] | None) -> None:
+    """Restore a detached marker without overwriting a concurrent publisher."""
+    if pair is None:
+        return
+    detached, original = pair
+    try:
+        os.link(detached, original)
+    except FileExistsError:
+        pass
+    except OSError:
+        if not original.exists():
+            os.replace(detached, original)
+            return
+    _discard_detached(pair)
+
+
+def _detach_marker_reference(
+    root: Path, name: str, version: str
+) -> tuple[Path, Path] | None:
+    """Atomically detach a marker only while it references ``version``."""
     marker = root / name
     try:
         if marker.read_text(encoding="utf-8").strip() != version:
-            return
-    except OSError:
-        return
-    detached = marker.with_name(
-        f".{marker.name}.stale-{os.getpid()}-{time.time_ns()}"
-    )
+            return None
+    except (OSError, UnicodeError):
+        return None
+    pair = _detach_file(marker)
+    if pair is None:
+        return None
     try:
-        os.replace(marker, detached)
-    except FileNotFoundError:
-        return
-    try:
-        detached.unlink()
-    except OSError:
-        pass
+        still_references = pair[0].read_text(encoding="utf-8").strip() == version
+    except (OSError, UnicodeError):
+        still_references = False
+    if not still_references:
+        _restore_detached(pair)
+        return None
+    return pair
 
 
 def slot(root: Path, version: str, *, clean_incomplete: bool = False,
@@ -415,12 +454,35 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
     """
     vdir = version_dir(root, version)
     if clean_incomplete and vdir.is_dir() and not is_complete(root, version):
+        completion_pair = _detach_file(marker_path(root, version))
+        detached = [completion_pair]
+        detached.extend([
+            _detach_marker_reference(root, CURRENT_VERSION_FILE, version),
+            _detach_marker_reference(root, LAST_KNOWN_GOOD_FILE, version),
+        ])
+        detached_completion_is_valid = False
+        if completion_pair is not None:
+            try:
+                data = json.loads(completion_pair[0].read_text(encoding="utf-8"))
+                detached_completion_is_valid = (
+                    isinstance(data, dict) and data.get("version") == version
+                )
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                pass
+        if detached_completion_is_valid or is_complete(root, version):
+            for pair in reversed(detached):
+                _restore_detached(pair)
+            return vdir
         if version in _versions_with_live_process(root):
+            for pair in reversed(detached):
+                _restore_detached(pair)
             raise RuntimeError(f"incomplete runtime slot is still in use: {vdir}")
-        _detach_marker_reference(root, CURRENT_VERSION_FILE, version)
-        _detach_marker_reference(root, LAST_KNOWN_GOOD_FILE, version)
         if not _remove_slot(vdir, label="slot"):
+            for pair in reversed(detached):
+                _restore_detached(pair)
             raise RuntimeError(f"could not remove incomplete runtime slot: {vdir}")
+        for pair in detached:
+            _discard_detached(pair)
     vdir.mkdir(parents=True, exist_ok=True)
     return vdir
 

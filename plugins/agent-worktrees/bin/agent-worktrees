@@ -13,9 +13,9 @@ _aw_exec_resolved() {
     _awver=""
     [ -f "$_awroot/$_marker" ] && _awver=$(tr -d ' \t\r\n' < "$_awroot/$_marker")
     _awslot="$_awroot/versions/$_awver"
-    if [ -n "$_awver" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
+    if [ -n "$_awver" ] && [ -f "$_awslot/.install-complete.json" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
       exec "$_awslot/bin/agent-worktrees" "$@"
-    elif [ -n "$_awver" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
+    elif [ -n "$_awver" ] && [ -f "$_awslot/.install-complete.json" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
       exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
     fi
   done

@@ -41,6 +41,9 @@ def test_powershell_resolver_exports_payload_invocation_contract(tmp_path):
     slot_python = runtime / "versions" / "1.2.3" / "Scripts" / "python.exe"
     slot_python.parent.mkdir(parents=True)
     slot_python.touch()
+    (slot_python.parents[1] / ".install-complete.json").write_text(
+        json.dumps({"version": "1.2.3"}), encoding="utf-8"
+    )
     (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
     resolver = _SCRIPTS / "resolve-runtime.ps1"
     home_literal = str(tmp_path).replace("'", "''")
@@ -136,9 +139,12 @@ def test_installer_records_last_known_good(installer: str):
 
 
 def _make_slot(root: Path, version: str) -> None:
-    slot = root / ".agent-worktrees" / "versions" / version / "bin"
-    slot.mkdir(parents=True, exist_ok=True)
-    py = slot / "python"
+    slot = root / ".agent-worktrees" / "versions" / version
+    (slot / "bin").mkdir(parents=True, exist_ok=True)
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": version}), encoding="utf-8"
+    )
+    py = slot / "bin" / "python"
     py.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     py.chmod(0o755)
 
@@ -158,6 +164,16 @@ def _resolve(home: Path) -> str:
         f"resolver exited {out.returncode}: {out.stderr.strip()}"
     )
     return out.stdout.strip()
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
+def test_resolver_rejects_incomplete_marker_slot(tmp_path):
+    _make_slot(tmp_path, "1.2.3")
+    runtime = tmp_path / ".agent-worktrees"
+    (runtime / "versions" / "1.2.3" / ".install-complete.json").unlink()
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+
+    assert _resolve(tmp_path) == ""
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")

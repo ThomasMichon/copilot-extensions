@@ -65,13 +65,13 @@ RUNTIME_DIR="$HOME/.agent-worktrees"
 PYTHON=""
 if [[ -f "$RUNTIME_DIR/current-version" ]]; then
     _ver="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version")"
-    if [[ -n "$_ver" && -x "$RUNTIME_DIR/versions/$_ver/bin/python" ]]; then
+    if [[ -n "$_ver" && -f "$RUNTIME_DIR/versions/$_ver/.install-complete.json" && -x "$RUNTIME_DIR/versions/$_ver/bin/python" ]]; then
         PYTHON="$RUNTIME_DIR/versions/$_ver/bin/python"
     fi
 fi
 if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
     for _d in $(ls -1 "$RUNTIME_DIR/versions" 2>/dev/null | sort -r); do
-        if [[ -x "$RUNTIME_DIR/versions/$_d/bin/python" ]]; then
+        if [[ -f "$RUNTIME_DIR/versions/$_d/.install-complete.json" && -x "$RUNTIME_DIR/versions/$_d/bin/python" ]]; then
             PYTHON="$RUNTIME_DIR/versions/$_d/bin/python"; break
         fi
     done
@@ -83,6 +83,7 @@ resolve_current_runtime_python() {
     version="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version" 2>/dev/null)" \
         || return 1
     [[ -n "$version" ]] || return 1
+    [[ -f "$RUNTIME_DIR/versions/$version/.install-complete.json" ]] || return 1
     python="$RUNTIME_DIR/versions/$version/bin/python"
     [[ -f "$python" && -x "$python" ]] || return 1
     printf '%s\n' "$python"
