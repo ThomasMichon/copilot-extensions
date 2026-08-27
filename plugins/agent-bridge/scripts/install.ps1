@@ -345,13 +345,10 @@ function Ensure-Uv {
             return $true
         }
         Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
     }
 
-    $pythonPath = Get-BootstrapPython
-    if (-not $pythonPath) {
-        Write-Fail 'uv is absent and no Python is available to bootstrap it'
-        return $false
-    }
     $arch = if ($env:PROCESSOR_ARCHITEW6432) {
         $env:PROCESSOR_ARCHITEW6432
     } else {
@@ -372,51 +369,38 @@ function Ensure-Uv {
         $urlTemplate = 'https://github.com/astral-sh/uv/releases/latest/download/{asset}'
     }
     $url = $urlTemplate.Replace('{asset}', $asset)
-    $bootstrap = @'
-import os
-import pathlib
-import shutil
-import sys
-import tempfile
-import urllib.request
-import zipfile
-
-url, target = sys.argv[1:3]
-target = pathlib.Path(target)
-request = urllib.request.Request(url, headers={'User-Agent': 'agent-bridge-bootstrap'})
-fd, archive = tempfile.mkstemp(suffix='.zip')
-os.close(fd)
-staging = pathlib.Path(tempfile.mkdtemp(prefix='uv-stage-', dir=target.parent))
-try:
-    with urllib.request.urlopen(request, timeout=120) as response, open(archive, 'wb') as out:
-        shutil.copyfileobj(response, out)
-    found = set()
-    with zipfile.ZipFile(archive) as bundle:
-        for member in bundle.namelist():
-            name = pathlib.PurePosixPath(member).name
-            if name not in {'uv.exe', 'uvx.exe'}:
-                continue
-            with bundle.open(member) as source, open(staging / name, 'wb') as out:
-                shutil.copyfileobj(source, out)
-            found.add(name)
-    if 'uv.exe' not in found:
-        raise RuntimeError('uv.exe was absent from the release archive')
-    target.mkdir(parents=True, exist_ok=True)
-    if (staging / 'uvx.exe').exists():
-        os.replace(staging / 'uvx.exe', target / 'uvx.exe')
-    os.replace(staging / 'uv.exe', target / 'uv.exe')
-finally:
-    try:
-        pathlib.Path(archive).unlink()
-    except FileNotFoundError:
-        pass
-    shutil.rmtree(staging, ignore_errors=True)
-'@
-    Write-Step "uv not found -- vendoring the official Windows release into $toolDir"
-    $result = Invoke-NativeCapture { & $pythonPath -c $bootstrap $url $toolDir }
-    if ($result.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $uvPath)) {
-        Write-Fail "Failed to vendor uv: $($result.Output)"
+    $archive = [IO.Path]::GetTempFileName()
+    $staging = Join-Path $InstallDir ".uv-stage-$PID"
+    try {
+        if (Test-Path -LiteralPath $staging) {
+            Remove-Item -LiteralPath $staging -Recurse -Force
+        }
+        New-Item -ItemType Directory -Path $staging -Force | Out-Null
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $client = New-Object Net.WebClient
+        $client.Headers['User-Agent'] = 'agent-bridge-bootstrap'
+        $client.DownloadFile($url, $archive)
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging)
+        $uvSource = Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'uv.exe' |
+            Select-Object -First 1 -ExpandProperty FullName
+        if (-not $uvSource) { throw 'uv.exe was absent from the release archive' }
+        $uvxSource = Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'uvx.exe' |
+            Select-Object -First 1 -ExpandProperty FullName
+        if ($uvxSource) {
+            Move-Item -LiteralPath $uvxSource `
+                -Destination (Join-Path $toolDir 'uvx.exe') -Force
+        }
+        Move-Item -LiteralPath $uvSource -Destination $uvPath -Force
+    } catch {
+        Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
+        Write-Fail "Failed to vendor uv: $_"
         return $false
+    } finally {
+        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
     }
     $result = Invoke-NativeCapture { & $uvPath --version }
     if ($result.ExitCode -ne 0) {
@@ -826,11 +810,12 @@ function New-SignedVenv {
     } elseif ($env:OS -eq 'Windows_NT') {
         Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
     }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { & uv venv $VenvDir --allow-existing 2>&1 | Out-Null }
-    $ErrorActionPreference = $prevEAP
+    $result = Invoke-NativeCapture {
+        & uv venv $VenvDir --python 3.10 --allow-existing
+    }
+    if ($result.ExitCode -ne 0) {
+        $result = Invoke-NativeCapture { & uv venv $VenvDir --allow-existing }
+    }
     return (Test-Path $VenvPython)
 }
 
@@ -2275,12 +2260,7 @@ function Invoke-Update {
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # Prerequisite: uv
-    try { uv --version 2>&1 | Out-Null } catch {
-        Write-Fail 'uv not found on PATH (required for package management)'
-        Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
-        exit 1
-    }
+    if (-not (Ensure-Uv)) { exit 1 }
 
     # Strict same-content no-op (ce#776/#777) -- checked BEFORE we stop the daemon
     # or touch the venv. Otherwise the classic same-version path below "downgrades

@@ -21,7 +21,11 @@ def test_first_use_installer_captures_python_probes_and_bootstraps_uv():
     assert "Invoke-NativeCapture {" in installer
     assert "if (-not (Ensure-Uv)) { exit 1 }" in installer
     assert "$env:AGENT_BRIDGE_UV_BOOTSTRAP_URL" in installer
-    assert '"' not in installer.split("$bootstrap = @'", 1)[1].split("'@", 1)[0]
+    assert "System.IO.Compression.FileSystem" in installer
+    assert "$client.DownloadFile($url, $archive)" in installer
+    assert "no Python is available to bootstrap" not in installer
+    update = installer.split("function Invoke-Update", 1)[1]
+    assert "if (-not (Ensure-Uv)) { exit 1 }" in update
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility")
