@@ -335,6 +335,17 @@ See [`design.md`](design.md).
 - Left Python/POSIX parity, vendoring, receipt mutation, locking, runtime-root
   activation, and the two exemplars to later Phase 3 slices.
 
+### 2026-08-26 — Non-operative Python/POSIX parity
+
+- Added the stdlib-only Python installation-context API and a Bash/awk bootstrap
+  that does not require Python or `jq`.
+- Ran the canonical source vectors and read-only resolution, path, rebind, and
+  receipt-validation behavior across PowerShell, Python, and POSIX entry points.
+- Kept the primitive non-operative: it computes and validates context without
+  creating cells, receipts, locks, runtime roots, or payload state.
+- Left vendoring, receipt mutation, locking/CAS, runtime-root activation,
+  reconciliation, and both exemplars to later Phase 3 slices.
+
 ### 2026-08-26 — Runtime plugin hook audit
 
 - Audited every runtime-bearing `agent-*` marketplace plugin against the

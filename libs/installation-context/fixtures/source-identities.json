@@ -69,6 +69,344 @@
       "record": "version:1:1\nkind:6:opaque\nsource:36:opaque:urn:example:marketplace:alpha\nref:0:\n",
       "sha256": "df64acc01b0b1745783194abaf31b08b73e4e38bb812c6168b89656efbb9a6ac",
       "marketplaceId": "managed--df64acc01b0b1745"
+    },
+    {
+      "name": "git-space",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com/Org/My Repo"
+      },
+      "marketplaceKey": "Spaces",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/Org/My%20Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:37:git:https://example.com/Org/My%20Repo\nref:0:\n",
+      "sha256": "38d32d24b5255f16c037391d660bbe79ea54d262c73226be5ec1909f50da63bf",
+      "marketplaceId": "spaces--38d32d24b5255f16"
+    },
+    {
+      "name": "git-trailing-separators",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com/Org/Repo//"
+      },
+      "marketplaceKey": "Trailing",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:32:git:https://example.com/Org/Repo\nref:0:\n",
+      "sha256": "e149d26eadf6d4302d06a2144a8ca5e7ad5b0c683414cae747180913418f2ddd",
+      "marketplaceId": "trailing--e149d26eadf6d430"
+    },
+    {
+      "name": "git-explicit-ssh-port",
+      "descriptor": {
+        "source": "git",
+        "url": "ssh://example.com:22/Org/Repo"
+      },
+      "marketplaceKey": "SSH Port",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ssh://example.com:22/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:33:git:ssh://example.com:22/Org/Repo\nref:0:\n",
+      "sha256": "e8e2a842b2dba4762b04f5fcf3acadc43d121bc4a022af67f6edaf36024f4c8a",
+      "marketplaceId": "ssh-port--e8e2a842b2dba476"
+    },
+    {
+      "name": "git-dot-segments",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com/Org/../Repo"
+      },
+      "marketplaceKey": "Dot Segments",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:28:git:https://example.com/Repo\nref:0:\n",
+      "sha256": "5583f2e6da5f5b2384a346c426d998c927927e209495e6b904af3550f30065de",
+      "marketplaceId": "dot-segments--5583f2e6da5f5b23"
+    },
+    {
+      "name": "null-ref",
+      "descriptor": {
+        "source": "github",
+        "repo": "example/example",
+        "ref": null
+      },
+      "marketplaceKey": "Null Ref",
+      "normalized": {
+        "kind": "github",
+        "canonical": "github:example/example",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:6:github\nsource:22:github:example/example\nref:0:\n",
+      "sha256": "d17c4cb4a57021397e9eae99058b2bc0e35cadfaf20b1120a0174c333408e40c",
+      "marketplaceId": "null-ref--d17c4cb4a5702139"
+    },
+    {
+      "name": "git-leading-separators",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com//Org/Repo"
+      },
+      "marketplaceKey": "Leading",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:32:git:https://example.com/Org/Repo\nref:0:\n",
+      "sha256": "e149d26eadf6d4302d06a2144a8ca5e7ad5b0c683414cae747180913418f2ddd",
+      "marketplaceId": "leading--e149d26eadf6d430"
+    },
+    {
+      "name": "git-zero-padded-http-port",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com:0080/Org/Repo"
+      },
+      "marketplaceKey": "Padded HTTP",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com:80/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:35:git:https://example.com:80/Org/Repo\nref:0:\n",
+      "sha256": "4c3f591cf5352a9d04a8f6cb870abbd9bb445f95cd9ef0f244b29d76fd3c78e0",
+      "marketplaceId": "padded-http--4c3f591cf5352a9d"
+    },
+    {
+      "name": "git-zero-padded-ssh-port",
+      "descriptor": {
+        "source": "git",
+        "url": "ssh://example.com:0022/Org/Repo"
+      },
+      "marketplaceKey": "Padded SSH",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ssh://example.com:22/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:33:git:ssh://example.com:22/Org/Repo\nref:0:\n",
+      "sha256": "e8e2a842b2dba4762b04f5fcf3acadc43d121bc4a022af67f6edaf36024f4c8a",
+      "marketplaceId": "padded-ssh--e8e2a842b2dba476"
+    },
+    {
+      "name": "git-empty-port",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com:/Org/Repo"
+      },
+      "marketplaceKey": "Empty Port",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/Org/Repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:32:git:https://example.com/Org/Repo\nref:0:\n",
+      "sha256": "e149d26eadf6d4302d06a2144a8ca5e7ad5b0c683414cae747180913418f2ddd",
+      "marketplaceId": "empty-port--e149d26eadf6d430"
+    },
+    {
+      "name": "git-backslash",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com/a\\tb/repo"
+      },
+      "marketplaceKey": "Backslash URL",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/a/tb/repo",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:33:git:https://example.com/a/tb/repo\nref:0:\n",
+      "sha256": "74df4bbe566098fb13db46f0169189374ea793c9d941f11d19dda970c50f1b59",
+      "marketplaceId": "backslash-url--74df4bbe566098fb"
+    },
+    {
+      "name": "opaque-escapes",
+      "descriptor": {
+        "source": "opaque",
+        "id": "urn:example:a\\nb",
+        "ref": "line\nslash\\"
+      },
+      "marketplaceKey": "Escapes",
+      "normalized": {
+        "kind": "opaque",
+        "canonical": "opaque:urn:example:a\\nb",
+        "ref": "line\nslash\\"
+      },
+      "record": "version:1:1\nkind:6:opaque\nsource:23:opaque:urn:example:a\\nb\nref:11:line\nslash\\\n",
+      "sha256": "b03037f17c15b14570c0f3db54d68170d41ac816c83a27ef6abd113f95308980",
+      "marketplaceId": "escapes--b03037f17c15b145"
+    },
+    {
+      "name": "git-pathless",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com"
+      },
+      "marketplaceKey": "Pathless",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:24:git:https://example.com/\nref:0:\n",
+      "sha256": "a99d1c7811e58012b2cdfd503ceeb02629630a474ee9c0467be8693f360c7da1",
+      "marketplaceId": "pathless--a99d1c7811e58012"
+    },
+    {
+      "name": "git-interior-separators",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com/a//b"
+      },
+      "marketplaceKey": "Interior",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/a//b",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:28:git:https://example.com/a//b\nref:0:\n",
+      "sha256": "ed61b402bddf7cf18591dbf1c7e0d758e1116c582088ec0428c90f0fb152dedf",
+      "marketplaceId": "interior--ed61b402bddf7cf1"
+    },
+    {
+      "name": "git-zero-padded-default-port",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com:00443/x"
+      },
+      "marketplaceKey": "Padded Default",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/x",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:25:git:https://example.com/x\nref:0:\n",
+      "sha256": "8c847ebd32cd0cdbaceeadcf7b346cb4516e3a6926a34d582e4c140a334e32fa",
+      "marketplaceId": "padded-default--8c847ebd32cd0cdb"
+    },
+    {
+      "name": "git-bracket-path",
+      "descriptor": {
+        "source": "git",
+        "url": "https://example.com/[a]"
+      },
+      "marketplaceKey": "Bracket",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://example.com/[a]",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:27:git:https://example.com/[a]\nref:0:\n",
+      "sha256": "732bea16d68959cea5e7b08ec8ebffa276ebba7a9931729fb8131bec620b71e3",
+      "marketplaceId": "bracket--732bea16d68959ce"
+    },
+    {
+      "name": "git-fragment-host-injection",
+      "descriptor": {
+        "source": "git",
+        "url": "https://good.com#@evil.com/a"
+      },
+      "marketplaceKey": "Fragment Host",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:https://good.com/",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:21:git:https://good.com/\nref:0:\n",
+      "sha256": "63d6e8dbb08af29cb5d0e7a4129e476867b1076a9e35588bdc56845ccba12e17",
+      "marketplaceId": "fragment-host--63d6e8dbb08af29c"
+    },
+    {
+      "name": "git-ftp-explicit-port",
+      "descriptor": {
+        "source": "git",
+        "url": "ftp://example.com:21/a/b.git"
+      },
+      "marketplaceKey": "FTP",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ftp://example.com:21/a/b",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:28:git:ftp://example.com:21/a/b\nref:0:\n",
+      "sha256": "a6ec6f7bf3df97a672875f6eecb2e77fae1152ab7f706f619e35ad7ae8e4a1be",
+      "marketplaceId": "ftp--a6ec6f7bf3df97a6"
+    },
+    {
+      "name": "git-websocket-explicit-port",
+      "descriptor": {
+        "source": "git",
+        "url": "ws://example.com:80/a"
+      },
+      "marketplaceKey": "WS",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ws://example.com:80/a",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:25:git:ws://example.com:80/a\nref:0:\n",
+      "sha256": "4bca966f3fc94af61dd05c20cef971c223b4d1131163e85539aa128c6bc2b2a3",
+      "marketplaceId": "ws--4bca966f3fc94af6"
+    },
+    {
+      "name": "git-secure-websocket-explicit-port",
+      "descriptor": {
+        "source": "git",
+        "url": "wss://example.com:443/a"
+      },
+      "marketplaceKey": "WSS",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:wss://example.com:443/a",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:27:git:wss://example.com:443/a\nref:0:\n",
+      "sha256": "d40c8ce97f0c2cffa6a269be89bf095ccd8ef9b548d7939f43f92a4eb400f455",
+      "marketplaceId": "wss--d40c8ce97f0c2cff"
+    },
+    {
+      "name": "git-ldap-explicit-port",
+      "descriptor": {
+        "source": "git",
+        "url": "ldap://example.com:389/a"
+      },
+      "marketplaceKey": "LDAP",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ldap://example.com:389/a",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:28:git:ldap://example.com:389/a\nref:0:\n",
+      "sha256": "4e075643222613ccc681e7c14cd6404d399a86fbe4af0ef1c5424958b2c5d4ec",
+      "marketplaceId": "ldap--4e075643222613cc"
+    },
+    {
+      "name": "git-expanded-ipv6",
+      "descriptor": {
+        "source": "git",
+        "url": "ssh://[0:0:0:0:0:0:0:1]/a/b"
+      },
+      "marketplaceKey": "IPv6",
+      "normalized": {
+        "kind": "git",
+        "canonical": "git:ssh://[0:0:0:0:0:0:0:1]/a/b",
+        "ref": ""
+      },
+      "record": "version:1:1\nkind:3:git\nsource:31:git:ssh://[0:0:0:0:0:0:0:1]/a/b\nref:0:\n",
+      "sha256": "bec1244a73f38ab4f3ef077c9c3bec716b81bffc5b36846c70b77a57c49734dc",
+      "marketplaceId": "ipv6--bec1244a73f38ab4"
     }
   ]
 }
