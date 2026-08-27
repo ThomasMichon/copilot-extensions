@@ -631,7 +631,7 @@ function Deploy-SelfProvisioningBinstub {
     $machine = $env:AGENT_DISPATCH_SUPERVISE_MACHINE
     if (-not $machine) {
         try {
-            $aw = Get-Command agent-worktrees -ErrorAction Stop
+            $aw = Get-Command agent-worktrees -ErrorAction Stop # marketplace-isolation: allow installer-management
             $machine = (& $aw.Source get machine 2>$null | Select-Object -First 1)
         } catch {}
     }

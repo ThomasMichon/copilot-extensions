@@ -123,8 +123,9 @@ def test_remote_machine_falls_back_to_full_cli(monkeypatch):
 
     monkeypatch.setattr(board_cli.subprocess, "run", run)
     assert board_cli.main(["--machine", "m2"]) == 7
-    assert captured["command"][:5] == [
-        "agent-dispatch",
+    assert captured["command"][1:7] == [
+        "-m",
+        "agent_dispatch",
         "inbox",
         "--machine",
         "m2",

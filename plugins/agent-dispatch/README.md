@@ -38,6 +38,22 @@ bash "$(copilot plugin path agent-dispatch)/scripts/install.sh" install    # Lin
 # Windows:  pwsh -File <plugin>\scripts\install.ps1 -Action install
 ```
 
+Agent-facing sessions receive an exact payload-local command through the
+session command catalog. That command resolves and, when necessary, provisions
+the runtime from its own payload without searching `PATH` for another
+marketplace's same-named plugin. The existing `provision` lifecycle remains a
+full first-use installation, including the legacy compatibility wrappers and
+eligible local services; this adoption changes command selection, not that
+installer behavior.
+
+The legacy global wrappers remain explicit compatibility and management
+boundaries for callers that do not inherit session catalogs: coordinator and
+supervisor services, scheduler/webhook launchers, picker pivots, remote SSH
+commands, startup-generated handoff and worker seeds, and committed static MCP launch
+configuration. Catalog adoption does not make those callers payload-aware; they
+retain their current commands until an attributable launcher contract reaches
+each surface.
+
 ### Opt-in worktree focus guidance
 
 Repositories can opt into a concise `sessionStart` context kernel that asks an

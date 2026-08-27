@@ -14,6 +14,7 @@ plugins/agent-worktrees/bin/payload/agent-worktrees text eol=lf
 plugins/agent-index/bin/agent-index text eol=lf
 plugins/agent-mcp/bin/agent-mcp text eol=lf
 plugins/agent-vault/bin/agent-vault text eol=lf
+plugins/agent-dispatch/bin/agent-dispatch text eol=lf
 plugins/agent-codespaces/bin/agent-codespaces text eol=lf
 plugins/agent-containers/bin/agent-containers text eol=lf
 plugins/agent-logger/bin/agent-logger text eol=lf
