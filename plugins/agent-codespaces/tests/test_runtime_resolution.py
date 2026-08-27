@@ -55,7 +55,10 @@ def test_powershell_resolver_skips_incomplete_current_without_spawning(
     )
 
     assert result.returncode == 0, result.stderr
-    assert Path(result.stdout) == lkg / "Scripts" / "python.exe"
+    expected = lkg / (
+        Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
+    )
+    assert Path(result.stdout) == expected
     assert not (current / "spawned").exists()
     assert not (lkg / "spawned").exists()
 
