@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,6 +13,10 @@ import pytest
 from agent_worktrees import reconcile
 
 MKT = reconcile.MARKETPLACE
+REPO = Path(__file__).resolve().parents[3]
+INSTALLATION_CONTEXT = (
+    REPO / "libs" / "installation-context" / "installation_context.py"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +34,7 @@ def env(tmp_path: Path, monkeypatch):
     home.mkdir()
     repo = tmp_path / "repo"
     (repo / ".github" / "copilot").mkdir(parents=True)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
 
     monkeypatch.setattr(reconcile, "_home", lambda: home)
     monkeypatch.setattr(
@@ -74,6 +81,16 @@ def env(tmp_path: Path, monkeypatch):
         (pdir / "plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
         if installer:
             (pdir / "scripts" / installer).write_text("#!/bin/sh\n", encoding="utf-8")
+        if name in {"agent-machines", "agent-index", "agent-worktrees"}:
+            helper = (
+                pdir
+                / "scripts"
+                / "installation-context"
+                / "installation_context.py"
+            )
+            helper.parent.mkdir(parents=True, exist_ok=True)
+            if not helper.is_file():
+                shutil.copyfile(INSTALLATION_CONTEXT, helper)
         return pdir
 
     def deploy_runtime(name: str, version: str):
@@ -95,6 +112,69 @@ def env(tmp_path: Path, monkeypatch):
             encoding="utf-8",
         )
 
+    def select_context(
+        name: str,
+        payload_dir: Path,
+        payload_version: str,
+        deployed_version: str | None,
+    ) -> tuple[Path, Path]:
+        helper = (
+            payload_dir
+            / "scripts"
+            / "installation-context"
+            / "installation_context.py"
+        )
+        helper.parent.mkdir(parents=True, exist_ok=True)
+        if not helper.is_file():
+            shutil.copyfile(INSTALLATION_CONTEXT, helper)
+        durable = home / ".copilot-extensions"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(helper),
+                "stamp",
+                "--source-json",
+                json.dumps({
+                    "source": "github",
+                    "repo": "Example-Org/Example-Marketplace.git",
+                }),
+                "--marketplace-key",
+                "example",
+                "--plugin-id",
+                name,
+                "--payload-root",
+                str(payload_dir),
+                "--payload-version",
+                payload_version,
+                "--payload-origin",
+                "explicit",
+                "--expected-namespace-generation",
+                "0",
+                "--expected-install-generation",
+                "0",
+                "--durable-home",
+                str(durable),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        context = json.loads(result.stdout)
+        plugin_root = Path(context["pluginRoot"])
+        if deployed_version is not None:
+            (plugin_root / "deploy-manifest.json").write_text(
+                json.dumps({
+                    "schema_version": 3,
+                    "source": {"version": deployed_version},
+                }),
+                encoding="utf-8",
+            )
+        monkeypatch.setenv(
+            "COPILOT_EXTENSIONS_CONTEXT",
+            str(context["installReceipt"]),
+        )
+        return Path(context["installReceipt"]), plugin_root
+
     def write_gate(mapping: dict[str, list[str]]):
         services = [{"name": n, "deploy_machines": m} for n, m in mapping.items()]
         doc = {"repos": {"copilot-extensions": {"services": services}}}
@@ -115,6 +195,7 @@ def env(tmp_path: Path, monkeypatch):
     e.install_payload = install_payload
     e.deploy_runtime = deploy_runtime
     e.deploy_running = deploy_running
+    e.select_context = select_context
     e.write_gate = write_gate
     e.write_gate_services = write_gate_services
     return e
@@ -375,6 +456,205 @@ def test_payload_refresh_suppressed_by_default(env):
     )
     assert _services(plan, phase="payload") == set()
     assert cache["plugins"]["agent-mcp"]["last_payload_update"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Explicit installation-context manifest selection
+# ---------------------------------------------------------------------------
+
+def test_context_selected_current_runtime_avoids_legacy_reinstall(
+    env, monkeypatch
+):
+    env.write_settings({f"agent-index@{MKT}": True})
+    payload = env.install_payload("agent-index", "2.0.0", scope="universal")
+    _context, plugin_root = env.select_context(
+        "agent-index", payload, "2.0.0", "2.0.0"
+    )
+    child_environments = []
+    original_run = reconcile.subprocess.run
+
+    def track_environment(*args, **kwargs):
+        child_environments.append(kwargs["env"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(reconcile.subprocess, "run", track_environment)
+
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", cache={}, save=False
+    )
+
+    assert plan["action"] == "continue"
+    assert _services(plan, phase="runtime") == set()
+    assert plan.get("diagnostics") is None
+    assert not (env.home / ".agent-index").exists()
+    assert (plugin_root / "deploy-manifest.json").is_file()
+    assert len(child_environments) == 1
+    assert "PYTHONPATH" not in child_environments[0]
+
+
+def test_context_selected_drift_is_diagnostic_not_legacy_install(env):
+    env.write_settings({f"agent-index@{MKT}": True})
+    payload = env.install_payload("agent-index", "2.0.0", scope="universal")
+    _context, plugin_root = env.select_context(
+        "agent-index", payload, "2.0.0", "1.0.0"
+    )
+    env.deploy_runtime("agent-index", "2.0.0")
+
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", cache={}, save=False
+    )
+
+    assert plan["action"] == "continue"
+    assert _services(plan, phase="runtime") == set()
+    assert plan["diagnostics"] == [{
+        "service": "agent-index",
+        "phase": "runtime",
+        "reason": "context-runtime-version-drift",
+        "from_version": "1.0.0",
+        "to_version": "2.0.0",
+        "runtime_root": str(plugin_root),
+        "message": (
+            "namespaced runtime inspection is read-only until activation "
+            "governance and context-aware installers land"
+        ),
+    }]
+
+
+def test_explicit_context_preserves_legacy_reconcile_for_other_plugins(
+    env, monkeypatch
+):
+    env.write_settings({
+        f"agent-index@{MKT}": True,
+        f"agent-machines@{MKT}": True,
+    })
+    selected = env.install_payload("agent-index", "2.0.0", scope="universal")
+    env.select_context("agent-index", selected, "2.0.0", "2.0.0")
+    env.install_payload("agent-machines", "2.0.0", scope="universal")
+    env.deploy_runtime("agent-machines", "1.0.0")
+    selections = []
+    original_select = reconcile._selected_runtime_root
+
+    def track_selection(name, plugin_dir, **kwargs):
+        selections.append(name)
+        return original_select(name, plugin_dir, **kwargs)
+
+    monkeypatch.setattr(reconcile, "_selected_runtime_root", track_selection)
+
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", cache={}, save=False
+    )
+
+    assert plan["action"] == "reconcile"
+    assert _services(plan, phase="runtime") == {"agent-machines"}
+    assert plan.get("diagnostics") is None
+    assert selections == ["agent-index"]
+
+
+def test_invalid_cross_plugin_context_does_not_enable_legacy_reconcile(
+    env, monkeypatch
+):
+    env.write_settings({f"agent-machines@{MKT}": True})
+    env.install_payload("agent-index", "2.0.0", scope="universal")
+    env.install_payload("agent-machines", "2.0.0", scope="universal")
+    env.deploy_runtime("agent-machines", "1.0.0")
+    forged = (
+        env.home
+        / ".copilot-extensions"
+        / "marketplaces"
+        / "forged--0000000000000000"
+        / "plugins"
+        / "agent-index"
+        / "install.json"
+    )
+    forged.parent.mkdir(parents=True)
+    forged.write_text('{"pluginId":"agent-index"}', encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(forged))
+
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", cache={}, save=False
+    )
+
+    assert plan["action"] == "continue"
+    assert _services(plan, phase="runtime") == set()
+    assert plan["diagnostics"][0]["reason"] == "installation-context-invalid"
+
+
+@pytest.mark.parametrize(
+    "plugin_id",
+    ("/tmp/untrusted", "../untrusted", r"name\child", "CON"),
+)
+def test_untrusted_plugin_id_does_not_select_validator_path(
+    tmp_path, monkeypatch, plugin_id
+):
+    payload = tmp_path / "payload"
+    helper = (
+        payload
+        / "scripts"
+        / "installation-context"
+        / "installation_context.py"
+    )
+    helper.parent.mkdir(parents=True)
+    shutil.copyfile(INSTALLATION_CONTEXT, helper)
+    context = (
+        tmp_path
+        / "durable"
+        / "marketplaces"
+        / "forged--0000000000000000"
+        / "plugins"
+        / "agent-index"
+        / "install.json"
+    )
+    context.parent.mkdir(parents=True)
+    context.write_text(json.dumps({"pluginId": plugin_id}), encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(context))
+
+    def installed_payload(name):
+        assert name == reconcile.SELF_PLUGIN
+        return None
+
+    monkeypatch.setattr(reconcile, "installed_payload_dir", installed_payload)
+
+    with pytest.raises(ValueError):
+        reconcile._selected_runtime_root("agent-index", payload)
+
+
+def test_invalid_context_does_not_fall_through_to_legacy_runtime(env, monkeypatch):
+    env.write_settings({f"agent-index@{MKT}": True})
+    env.install_payload("agent-index", "2.0.0", scope="universal")
+    env.deploy_runtime("agent-index", "1.0.0")
+    invalid = env.home / ".copilot-extensions" / "invalid.json"
+    invalid.parent.mkdir(parents=True)
+    invalid.write_text("{not-json", encoding="utf-8")
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(invalid))
+
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", cache={}, save=False
+    )
+
+    assert plan["action"] == "continue"
+    assert _services(plan, phase="runtime") == set()
+    assert plan["diagnostics"][0]["reason"] == "installation-context-invalid"
+
+
+def test_duplicate_context_plugin_id_fails_closed(env, monkeypatch):
+    env.write_settings({f"agent-index@{MKT}": True})
+    env.install_payload("agent-index", "2.0.0", scope="universal")
+    env.deploy_runtime("agent-index", "1.0.0")
+    invalid = env.home / ".copilot-extensions" / "duplicate.json"
+    invalid.parent.mkdir(parents=True)
+    invalid.write_text(
+        '{"pluginId":"agent-index","pluginId":"other"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(invalid))
+
+    plan = reconcile.build_plan(
+        env.repo, machine="m1", cache={}, save=False
+    )
+
+    assert plan["action"] == "continue"
+    assert _services(plan, phase="runtime") == set()
+    assert plan["diagnostics"][0]["reason"] == "installation-context-invalid"
 
 
 # ---------------------------------------------------------------------------

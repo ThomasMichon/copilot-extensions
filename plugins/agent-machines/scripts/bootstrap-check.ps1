@@ -6,11 +6,10 @@
     `copilot plugin update` that bumps the payload is picked up automatically --
     without ever running machine *restoration* itself.
 
-    Fast path: read the deployed version from ~/.agent-machines/deploy-manifest.json
-    and the source version from the plugin's pyproject.toml. If they match and the
-    binstub exists, exit immediately. Otherwise re-run the plugin's own installer
-    (scripts/init.ps1) in the BACKGROUND so session start never blocks on a venv
-    build; the versioned-venv swap is atomic, so concurrent use stays safe.
+    Fast path: compare the deployed and payload versions. Legacy deployments
+    read ~/.agent-machines/deploy-manifest.json; an explicit validated
+    installation context may redirect that read to its plugin root. Namespaced
+    writes remain blocked until the context-aware installer is operative.
 
     Deployed to ~/.agent-machines/bin/ by scripts/init.ps1. Never installs from
     scratch (that is the one-time `agent-machines-setup` step) -- it only exists
@@ -18,7 +17,49 @@
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 
+$PluginDir = Split-Path -Parent $PSScriptRoot
+$contextSelected = $false
 $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
+if ($env:COPILOT_EXTENSIONS_CONTEXT) {
+    $resolver = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+    if (-not (Test-Path $resolver)) {
+        Write-Host '[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile.' -ForegroundColor DarkGray
+        exit 0
+    }
+    $durableHome = $env:COPILOT_EXTENSIONS_CONTEXT
+    1..5 | ForEach-Object { $durableHome = Split-Path -Parent $durableHome }
+    $hostExe = (Get-Process -Id $PID).Path
+    $validatedJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $resolver validate `
+        -Context $env:COPILOT_EXTENSIONS_CONTEXT -DurableHome $durableHome
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+        exit 0
+    }
+    try { $contextPlugin = ($validatedJson | ConvertFrom-Json).pluginId } catch {
+        Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+        exit 0
+    }
+    if (-not $contextPlugin) {
+        Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+        exit 0
+    }
+    if ($contextPlugin -ceq 'agent-machines') {
+        $contextJson = & $hostExe -NoProfile -ExecutionPolicy Bypass -File $resolver resolve `
+            -Context $env:COPILOT_EXTENSIONS_CONTEXT -PluginId agent-machines `
+            -PayloadRoot $PluginDir -DurableHome $durableHome
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host '[agent-machines] installation context is invalid; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+            exit 0
+        }
+        $resolvedContext = $contextJson | ConvertFrom-Json
+        if (-not $resolvedContext.pluginRoot) {
+            Write-Host '[agent-machines] installation context returned no plugin root; skipping reconcile without legacy fallback.' -ForegroundColor DarkGray
+            exit 0
+        }
+        $InstallDir = $resolvedContext.pluginRoot
+        $contextSelected = $true
+    }
+}
 $Manifest   = Join-Path $InstallDir 'deploy-manifest.json'
 $Binstub    = Join-Path $env:USERPROFILE '.local\bin\agent-machines.cmd'
 
@@ -28,6 +69,10 @@ $Binstub    = Join-Path $env:USERPROFILE '.local\bin\agent-machines.cmd'
 # plugin's scripts/ dir even on a fresh box. Fires only when init.ps1 declares a
 # 'stamp' action; else a safe no-op.
 if (-not (Test-Path $Manifest)) {
+    if ($contextSelected) {
+        Write-Host '[agent-machines] selected context has no deploy manifest; namespaced install remains non-operative.' -ForegroundColor DarkGray
+        exit 0
+    }
     $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
     if ((Test-Path $payloadInit) -and (Select-String -Path $payloadInit -Pattern "'stamp'" -Quiet)) {
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -39,7 +84,7 @@ if (-not (Test-Path $Manifest)) {
 
 try {
     $m = Get-Content $Manifest -Raw | ConvertFrom-Json
-    $pluginDir = $m.source.path
+    $pluginDir = if ($contextSelected) { $PluginDir } else { $m.source.path }
     if (-not $pluginDir) { exit 0 }
     $pluginDir = $pluginDir -replace '/', '\'
     if (-not (Test-Path $pluginDir)) { exit 0 }
@@ -50,6 +95,11 @@ try {
     if (Test-Path $pyproj) {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
+    }
+    if ($contextSelected) {
+        if ($deployed -eq $current) { exit 0 }
+        Write-Host "[agent-machines] selected context runtime $deployed -> $current; context-aware install is not active yet." -ForegroundColor DarkGray
+        exit 0
     }
 
     # Up to date and binstub present -> fast no-op (the common case).

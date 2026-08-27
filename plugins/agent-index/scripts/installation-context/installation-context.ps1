@@ -166,12 +166,14 @@ public static class CeStrictJson {
         private void ParseObject() {
             index++;
             SkipWhitespace();
-            var keys = new HashSet<string>(StringComparer.Ordinal);
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (Consume('}')) return;
             while (true) {
                 if (index >= text.Length || text[index] != '"') Error("expected object key");
                 string key = ParseString();
-                if (!keys.Add(key)) Error("duplicate object key '" + key + "'");
+                if (!keys.Add(key)) {
+                    Error("duplicate or case-conflicting object key '" + key + "'");
+                }
                 SkipWhitespace();
                 Require(':');
                 ParseValue();
@@ -387,8 +389,8 @@ function Assert-LockOwnerShape(
         (Get-StringProperty $Owner 'schema') -ne 'copilot-extensions.installation-lock' -or
         $version -ne 1 -or
         (Get-StringProperty $Owner 'kind') -ne $Kind -or
-        (Get-StringProperty $Owner 'marketplaceId') -ne $MarketplaceIdValue -or
-        (Get-StringProperty $Owner 'pluginId') -ne $PluginIdValue -or
+        (Get-StringProperty $Owner 'marketplaceId') -cne $MarketplaceIdValue -or
+        (Get-StringProperty $Owner 'pluginId') -cne $PluginIdValue -or
         -not (Get-StringProperty $Owner 'token') -or
         -not (Get-StringProperty $Owner 'host')) {
         Fail 'Installation lock owner receipt is invalid.'
@@ -1061,7 +1063,7 @@ function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedP
             $matches = @()
             foreach ($plugin in $plugins) {
                 $name = Get-StringProperty $plugin 'name'
-                if ($RequestedPluginId -and $name -ne $RequestedPluginId) { continue }
+                if ($RequestedPluginId -and $name -cne $RequestedPluginId) { continue }
                 $sourcePath = Get-StringProperty $plugin 'source'
                 if (-not $sourcePath) { continue }
                 if ([IO.Path]::IsPathRooted($sourcePath) -or
@@ -1130,10 +1132,10 @@ function Find-ExistingSource(
         $receipt = $validated.receipt
         $receiptFingerprint = $validated.identity.fingerprint
         $receiptId = $validated.marketplaceId
-        if ($cellDirectory.Name -eq $DesiredId -and $receiptFingerprint -ne $Fingerprint) {
+        if ($cellDirectory.Name -ceq $DesiredId -and $receiptFingerprint -cne $Fingerprint) {
             Fail "Marketplace id '$DesiredId' is already occupied by a different full source fingerprint."
         }
-        if ($receiptFingerprint -ne $Fingerprint) { continue }
+        if ($receiptFingerprint -cne $Fingerprint) { continue }
         $locatorMatch = $null -eq $Locator
         if ($null -ne $Locator) {
             foreach ($known in @(Get-PropertyValue $receipt 'locators' @())) {
@@ -1143,7 +1145,7 @@ function Find-ExistingSource(
         $results += [pscustomobject][ordered]@{
             marketplaceId = $receiptId
             namespaceReceipt = Canonical-Path $file.FullName
-            sameId = ($receiptId -eq $DesiredId)
+            sameId = ($receiptId -ceq $DesiredId)
             locatorMatch = $locatorMatch
         }
     }
@@ -1159,7 +1161,7 @@ function Assert-PositiveInteger($Value, [string]$Name) {
 }
 
 function Assert-ReceiptState($Value, [string]$Name) {
-    if ([string]$Value -notin @('active', 'inactive', 'orphaned', 'removing')) {
+    if ([string]$Value -cnotin @('active', 'inactive', 'orphaned', 'removing')) {
         Fail "$Name must be active, inactive, orphaned, or removing."
     }
 }
@@ -1208,11 +1210,11 @@ function Validate-NamespaceReceipt(
     $namespace = Read-Json $actualReceipt
     $namespaceVersion = Get-PropertyValue $namespace 'version'
     Assert-PositiveInteger $namespaceVersion 'namespace.json version'
-    if ((Get-StringProperty $namespace 'schema') -ne 'copilot-extensions.marketplace-namespace' -or
+    if ((Get-StringProperty $namespace 'schema') -cne 'copilot-extensions.marketplace-namespace' -or
         $namespaceVersion -ne 1) {
         Fail "Namespace receipt '$actualReceipt' has an unsupported schema or version."
     }
-    if ((Get-StringProperty $namespace 'marketplaceId') -ne $marketplaceId) {
+    if ((Get-StringProperty $namespace 'marketplaceId') -cne $marketplaceId) {
         Fail "Namespace receipt '$actualReceipt' does not match its cell directory."
     }
     $idMatch = [regex]::Match($marketplaceId, '^(.+)--([0-9a-f]{16})$')
@@ -1228,10 +1230,10 @@ function Validate-NamespaceReceipt(
         ref = Get-StringProperty $sourceReceipt 'ref'
     }) '' -FromReceipt
     $identity = Source-Identity $normalized $idMatch.Groups[1].Value
-    if ($identity.marketplaceId -ne $marketplaceId) {
+    if ($identity.marketplaceId -cne $marketplaceId) {
         Fail "Namespace receipt '$actualReceipt' id does not match its normalized source."
     }
-    if ((Get-StringProperty $sourceReceipt 'fingerprint') -ne $identity.fingerprint) {
+    if ((Get-StringProperty $sourceReceipt 'fingerprint') -cne $identity.fingerprint) {
         Fail "Namespace receipt '$actualReceipt' fingerprint does not match its normalized source."
     }
     return [pscustomobject]@{
@@ -1296,7 +1298,7 @@ function Validate-ContextReceipt(
     $install = Read-Json $actualReceipt
     $installVersion = Get-PropertyValue $install 'version'
     Assert-PositiveInteger $installVersion 'install.json version'
-    if ((Get-StringProperty $install 'schema') -ne 'copilot-extensions.plugin-installation' -or
+    if ((Get-StringProperty $install 'schema') -cne 'copilot-extensions.plugin-installation' -or
         $installVersion -ne 1) {
         Fail 'install.json has an unsupported schema or version.'
     }
@@ -1316,10 +1318,10 @@ function Validate-ContextReceipt(
     if (-not (Paths-Equal (Get-StringProperty $install 'pluginRoot') $expectedPluginRoot)) {
         Fail 'install.json pluginRoot does not match its canonical cell/plugin location.'
     }
-    if ($MarketplaceExpectation -and $marketplaceId -ne $MarketplaceExpectation) {
+    if ($MarketplaceExpectation -and $marketplaceId -cne $MarketplaceExpectation) {
         Fail "Expected marketplace '$MarketplaceExpectation', receipt names '$marketplaceId'."
     }
-    if ($PluginExpectation -and $receiptPluginId -ne $PluginExpectation) {
+    if ($PluginExpectation -and $receiptPluginId -cne $PluginExpectation) {
         Fail "Expected plugin '$PluginExpectation', receipt names '$receiptPluginId'."
     }
     if ($CellExpectation -and -not (Paths-Equal $cellRoot $CellExpectation)) {
@@ -1333,7 +1335,7 @@ function Validate-ContextReceipt(
         Fail 'install.json namespaceReceipt is not the exact namespace receipt in the same cell.'
     }
     $validatedNamespace = Validate-NamespaceReceipt $namespacePath $ResolvedDurableHome
-    if ($validatedNamespace.marketplaceId -ne $marketplaceId) {
+    if ($validatedNamespace.marketplaceId -cne $marketplaceId) {
         Fail 'namespace.json marketplaceId does not match install.json.'
     }
     $identity = $validatedNamespace.identity
@@ -1344,7 +1346,7 @@ function Validate-ContextReceipt(
     if ([string]::IsNullOrWhiteSpace((Get-StringProperty $payload 'version'))) {
         Fail 'payload.version must be a non-empty string.'
     }
-    if ((Get-StringProperty $payload 'origin') -notin
+    if ((Get-StringProperty $payload 'origin') -cnotin
         @('installed', 'directory', 'staged', 'explicit')) {
         Fail 'payload.origin must be installed, directory, staged, or explicit.'
     }
@@ -1423,7 +1425,7 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
     if ([string]::IsNullOrWhiteSpace($PayloadVersion)) {
         Fail 'stamp requires -PayloadVersion.'
     }
-    if ($PayloadOrigin -notin @('installed', 'directory', 'staged', 'explicit')) {
+    if ($PayloadOrigin -cnotin @('installed', 'directory', 'staged', 'explicit')) {
         Fail 'payload origin must be installed, directory, staged, or explicit.'
     }
     if ($ExpectedNamespaceGeneration -lt 0) {
@@ -1732,7 +1734,7 @@ try {
                 if ($null -eq $evidence) {
                     Fail "Cannot establish marketplace provenance for payload '$resolvedPayload'. Supply an explicit source descriptor for management/development mode."
                 }
-                if ($PluginId -and $PluginId -ne $evidence.pluginId) {
+                if ($PluginId -and $PluginId -cne $evidence.pluginId) {
                     Fail "Expected plugin '$PluginId', payload evidence identifies '$($evidence.pluginId)'."
                 }
             }
