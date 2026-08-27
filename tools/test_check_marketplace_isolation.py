@@ -72,6 +72,16 @@ def test_inventory_categories(tmp_path: Path) -> None:
         _write(
             root,
             "plugins/example/skills/example/SKILL.md",
+            "> ```bash\n"
+            "> agent-worktrees knowledge compose-plugins\n"
+            "> ```\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
+            "plugins/example/skills/example/SKILL.md",
             "Run `agent-example verify\n<name>` before continuing.\n",
         ),
         root,
@@ -202,6 +212,13 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
         "agent-ssh",
         "agent-vault",
         "agent-worktrees",
+        "context-handoff",
+        "copilot-extensions-harness",
+        "customizing-copilot",
+        "efforts",
+        "harness-knowledge",
+        "visions",
+        "wsl-setup",
     ):
         findings = [
             finding

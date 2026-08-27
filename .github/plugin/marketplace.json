@@ -54,25 +54,25 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover so the predecessor is retired only after pickup",
-      "version": "0.1.0-dev42",
+      "version": "0.1.0-dev43",
       "source": "plugins/context-handoff"
     },
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev12",
+      "version": "0.1.0-dev13",
       "source": "plugins/efforts"
     },
     {
       "name": "visions",
       "description": "Visions system - persistent, in-place-revised north-star documents stating what a system/service/tool/product is ultimately meant to be (purpose + concepts + expected features + expected behaviors); intent-level, not a specification; efforts are carved from the vision-vs-reality delta. Ships the envisioning and visions-setup skills",
-      "version": "0.1.0-dev17",
+      "version": "0.1.0-dev18",
       "source": "plugins/visions"
     },
     {
       "name": "customizing-copilot",
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev38",
+      "version": "0.1.0-dev39",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -90,13 +90,13 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable, owner-authored skills to work ON the plugin suite (contribute changes, diagnose the deployed runtimes, and validate them on a fresh box). Any control repo can enable it instead of hand-writing a per-repo narrative. Reference implementation of the <repo>-harness plugin standard; ships the contributing-to-copilot-extensions, diagnosing-copilot-extensions, and validating-in-clean-room skills plus the clean-room-judge evaluator sub-agent.",
-      "version": "0.1.0-dev20",
+      "version": "0.1.0-dev21",
       "source": "plugins/copilot-extensions-harness"
     },
     {
       "name": "wsl-setup",
       "description": "Set up and troubleshoot WSL2 as a first-class development and service-hosting environment - install a distro, choose the networking mode (NAT + localhostForwarding vs mirrored + dnsTunneling), split storage across a small NTFS-hosted rootfs VHD and a native ext4 data disk, keep the distro alive for hosted services, and diagnose corp-network egress and host<->WSL loopback failures. Composes with agent-worktrees' agent-worktrees-wsl-provision; ships the setting-up-wsl, splitting-wsl-storage and troubleshooting-wsl-networking skills",
-      "version": "0.1.0-dev6",
+      "version": "0.1.0-dev7",
       "source": "plugins/wsl-setup"
     },
     {
@@ -114,7 +114,7 @@
     {
       "name": "harness-knowledge",
       "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: after cloning the harness, ask for (or create) the knowledge repo, register both, write the machine-local knowledge_repo pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths - keeping the shareable harness tree generic and name-free. Ships the binding-knowledge setup skill.",
-      "version": "0.1.0-dev11",
+      "version": "0.1.0-dev12",
       "source": "plugins/harness-knowledge"
     },
     {

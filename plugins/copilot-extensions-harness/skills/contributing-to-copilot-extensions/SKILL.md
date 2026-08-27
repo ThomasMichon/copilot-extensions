@@ -109,7 +109,7 @@ installer. Know which kind you are changing.
    - `plugins/<plugin>/plugin.json` → `version`
    - `plugins/<plugin>/pyproject.toml` → `[project].version` (runtime plugins)
    - `.github/plugin/marketplace.json` → that plugin's `plugins[N].version`
-   - agent-worktrees only: also `marketplace.json` `metadata.version` **and**
+   - the agent-worktrees plugin only: also `marketplace.json` `metadata.version` **and**
      `plugins[0].version`. Adding a **new** plugin is a catalog change — bump
      `metadata.version` too.
 
@@ -128,7 +128,8 @@ installer. Know which kind you are changing.
    verb through `agent-worktrees`) and then `copilot-extensions finalize`.
 8. **Deploy with `<repo> update` — one unified command.** Merging only *primes*
    the change; deploy it on each target machine (over SSH for remotes) with the
-   repo's update binstub: **`<repo> update`** (e.g. `agent-worktrees update`, or
+   repo's update binstub: **`<repo> update`** (e.g. `agent-worktrees update`, <!-- marketplace-isolation: allow deployment-management -->
+   or
    any repo binstub such as `dotfiles update`). This single flow does
    everything: it refreshes the marketplace catalog, updates **every** registered
    plugin's payload — runtime AND payload-only (`efforts`, `visions`,
@@ -180,7 +181,8 @@ upstream half — landing the real fix in the plugin.
   bump, PR/self-merge, deploy.
 - **Don't hand-run `copilot plugin update` or a per-plugin `scripts/install.*` /
   `scripts/init.*`** — always deploy with the unified **`<repo> update`**
-  (`agent-worktrees update`). One flow updates every plugin's payload AND
+  (`agent-worktrees update`). <!-- marketplace-isolation: allow deployment-management -->
+  One flow updates every plugin's payload AND
   rebuilds every runtime; the per-plugin installers are internals / local-test /
   recovery only. Running them by hand is easy to get wrong (wrong plugin, missed
   runtime, a version-unbumped no-op that looks like success).

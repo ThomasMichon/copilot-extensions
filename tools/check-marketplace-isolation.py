@@ -549,7 +549,7 @@ def _scan_file(
     relative = path.relative_to(root).as_posix()
 
     for number, line in enumerate(text.splitlines(), 1):
-        if is_md and line.lstrip().startswith("```"):
+        if is_md and re.match(r"^\s*(?:>\s*)?```", line):
             in_fence = not in_fence
             continue
 

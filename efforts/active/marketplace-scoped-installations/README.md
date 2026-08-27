@@ -294,6 +294,11 @@ See [`design.md`](design.md).
   interactive bridge operations and dependent CodeSpace/container dispatch
   guidance to a payload-local command while preserving service, deployment,
   elevated, picker, remote, and provider launchers as explicit boundaries.
+- The agent-worktrees guidance slice merged in
+  [#1169](https://github.com/ThomasMichon/copilot-extensions/pull/1169), moving
+  direct lifecycle, repository, collaboration, repair, setup, and cross-repo
+  operations to the payload catalog while keeping project commands and
+  deployment verification as explicit entry-point boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 

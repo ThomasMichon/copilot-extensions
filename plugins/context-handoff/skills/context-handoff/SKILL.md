@@ -29,6 +29,15 @@ description: >
 
 # Context Handoff
 
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+worktree-state and cutover operations executed in the current session. Replace
+`<agent-worktrees catalog argv[0]>` with the raw path and quote it at the shell
+call site on POSIX; in PowerShell use
+`& "<agent-worktrees catalog argv[0]>" <args>`. Generated successor
+first-action commands remain literal global
+wrappers because they run before the successor receives session catalog
+context.
+
 Generate structured continuation prompts so a new Copilot CLI session can
 seamlessly resume work from the current session.
 
@@ -84,7 +93,7 @@ recovery.
 | agent-dispatch coordinator | live mux session | Behavior |
 |---|---|---|
 | yes | yes | Store a `proposed`, `handoff`-labeled task pinned to this worktree. `continue_handoff` spawns the successor. The successor calls `consume_handoff` for that task, which runs the consume path and retires the recorded predecessor pane after pickup. |
-| yes | no | Store the same task. Reply with the short paste prompt containing the full `agent-dispatch consume <id>` command. |
+| yes | no | Store the same task. Reply with the short paste prompt containing the full `agent-dispatch consume <id>` command. <!-- marketplace-isolation: allow handoff-seed-startup --> |
 | no | yes | Store a one-time JSON handoff file under the worktree state directory reported by agent-worktrees, outside the repo checkout. `continue_handoff` spawns the successor. The successor calls `consume_handoff`, which marks the file consumed and retires the recorded predecessor pane. |
 | no | no | Store the same one-time worktree-state file. Reply with the short paste prompt telling the next session to call `consume_handoff` with the handoff id. |
 
@@ -105,9 +114,10 @@ recovery.
    `save_handoff_prompt`.
 
 > **Two completion models.** A task-backed paste resume uses
-> `agent-dispatch consume <id>` and completes the baton on pickup. A task-backed
+> `agent-dispatch consume <id>` and completes the baton on pickup. <!-- marketplace-isolation: allow handoff-seed-startup -->
+> A task-backed
 > live cutover uses `consume_handoff` with `defer_complete: true`; the successor
-> later runs `agent-dispatch complete <id>` only when it reaches the handoff goal.
+> later runs `agent-dispatch complete <id>` only when it reaches the handoff goal. <!-- marketplace-isolation: allow handoff-seed-startup -->
 
 ### Fallback when the extension's tools are unavailable — the CLI
 
@@ -132,8 +142,9 @@ node "$CH" save --title "<topic>" --prompt-file <handoff.md>
 # Consume a file-backed handoff:            node "$CH" consume --handoff-id <id>
 ```
 
-It reuses the SDK-free `handoff-core.mjs` (same store format + `agent-worktrees
-handoff-cutover` trigger + issue-#853 bash-first seed), so a handoff it stores is
+It reuses the SDK-free `handoff-core.mjs` (same store format +
+`agent-worktrees handoff-cutover` trigger <!-- marketplace-isolation: allow handoff-core-management -->
+and the issue-#853 bash-first seed), so a handoff it stores is
 byte-compatible with `consume_handoff` / `/resume-handoff`. Session id defaults
 to `$COPILOT_AGENT_SESSION_ID`; pass `--session-id` / `--cwd` when running from
 outside the worktree. `--no-task` forces the file store.
@@ -152,7 +163,7 @@ choreography: it opens a successor pane and seeds it. The stored baton includes
 the predecessor pane id and session id. The successor's first action is to call
 `consume_handoff`; that consume step loads the brief, marks file-backed handoffs
 spent, records the predecessor as handed off, and retires the old pane through
-`agent-worktrees handoff-cutover --retire-pane`.
+`agent-worktrees handoff-cutover --retire-pane`. <!-- marketplace-isolation: allow handoff-core-management -->
 
 This successor-consume-driven retire is the safety rule: **the predecessor never
 self-retires on idle.** If the successor hangs before consuming, no retire is
@@ -166,7 +177,8 @@ A handoff is **not** auto-loaded. How you resume depends on which form the
 previous session produced:
 
 1. **agent-dispatch form** (coordinator available). The paste prompt contains
-   the complete `agent-dispatch consume <id>` command. `/resume-handoff` can also
+   the complete `agent-dispatch consume <id>` command. <!-- marketplace-isolation: allow handoff-seed-startup -->
+   `/resume-handoff` can also
    find and consume this worktree's newest proposed handoff task and inject the
    continuation prompt.
 2. **File form** (no coordinator). The paste prompt tells the next session to
@@ -180,19 +192,19 @@ previous session produced:
 When the user says "resume from handoff", "pick up from last session", or
 similar **without pasting an exact handoff id/prompt**, do not begin with a
 global agent-dispatch query or cross-session search. The current worktree's
-agent-worktrees state is the authoritative first stop:
+the agent-worktrees state is the authoritative first stop:
 
 1. Resolve the local state directory with
-   `agent-worktrees get worktree-state-dir`. If the session resumed with a CWD
+   `<agent-worktrees catalog argv[0]> get worktree-state-dir`. If the session resumed with a CWD
    outside its worktree, retry with the current session id:
-   `agent-worktrees get worktree-state-dir --session-id <session-id>`.
+   `<agent-worktrees catalog argv[0]> get worktree-state-dir --session-id <session-id>`.
 2. Sweep `<worktree-state-dir>/handoff/*.json`, newest first. Select only a
    valid `kind: "context-handoff"` record for this worktree whose `consumed`
    value is not `true`. Call `consume_handoff` with its exact `path`; do not
    merely read or replay `promptText`, because the tool owns one-time
    consumption and predecessor retirement.
 3. If no unconsumed file exists, read the worktree-local pointer history with
-   `agent-worktrees status --history --json --limit 20` (pass
+   `<agent-worktrees catalog argv[0]> status --history --json --limit 20` (pass
    `--worktree-id <id>` when CWD cannot resolve it). Walk newest-first for a
    `kind: "handoff"` entry. If it names `handoff task <id>`, call
    `consume_handoff` with that exact `task_id`.
@@ -259,7 +271,8 @@ the one-time worktree-state handoff file). Full template:
 - **The inline REPLY prompt must be short — one or two sentences.** It is
   addressed to the **next agent** and is whichever form `save_handoff_prompt`
   returned: either the agent-dispatch resume seed with the full
-  `agent-dispatch consume <id>` command, or the file-backed seed instructing
+  `agent-dispatch consume <id>` command, <!-- marketplace-isolation: allow handoff-seed-startup -->
+  or the file-backed seed instructing
   the next agent to call `consume_handoff` with the handoff id. It is
   copy-pasted verbatim into `/clear` (or `/new`); keep it scannable and do
   **not** repeat the handoff contents.
@@ -283,6 +296,6 @@ the one-time worktree-state handoff file). Full template:
 - **Storage is mode-dependent.** `save_handoff_prompt` prefers an agent-dispatch
   task (payload = metadata plus the markdown, no file handoff) and falls back to
   a one-time JSON file under the worktree state directory reported by
-  agent-worktrees only when no coordinator is reachable. Pass the markdown as the
+  the agent-worktrees state only when no coordinator is reachable. Pass the markdown as the
   **`prompt_text`** argument (the `prompt` alias is also accepted) plus an
   optional short **`title`**.

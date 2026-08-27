@@ -22,7 +22,7 @@ description: >
 Provision WSL2 so it can run a reachable, persistent service — not just an
 interactive shell. This is the **environment** setup and works standalone: enable
 the payload-only plugin and run this skill; no repo needs to be registered as an
-agent-worktrees harness. To clone a *repo* into WSL and wire Windows Terminal
+an agent-worktrees harness. To clone a *repo* into WSL and wire Windows Terminal
 profiles, use `agent-worktrees:agent-worktrees-wsl-provision` skill (they
 compose). To reach a WSL-hosted sshd as its **own SSH target** from other
 machines, keep the boundary-crossing transport on the Windows host: either

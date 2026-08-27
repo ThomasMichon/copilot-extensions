@@ -47,7 +47,7 @@ Before writing a skill or sub-agent for a repo, decide **how it is packaged**:
 + a `marketplace.json` entry, but it makes each capability independently
 enable-able, reviewable, and portable — and it is the only form that loads when
 the repo is *consumed* rather than *launched* (a bound data/knowledge repo, an
-agent-bridge dispatch target). Use a loose skill/agent only when that portability
+a bridge dispatch target). Use a loose skill/agent only when that portability
 genuinely doesn't matter.
 
 > **The two are otherwise identical to author.** A skill is the same `SKILL.md`
@@ -185,7 +185,7 @@ When a skill (or its docs/references) refers to a skill or sub-agent **shipped b
 a different plugin**, name it in the **namespaced `plugin:name` form** — e.g. the
 `agent-bridge` skill in the agent-bridge plugin is `agent-bridge:agent-bridge`,
 agent-worktrees' worktree skill is `agent-worktrees:worktree`, and the
-agent-logger writer agent is `agent-logger:session-log-writer`. This disambiguates
+the logger writer agent is `agent-logger:session-log-writer`. This disambiguates
 same-named skills across plugins and tells the reader (and the agent) exactly
 which plugin owns it. **Within the same plugin, keep the bare name** — only
 *cross-plugin* references are namespaced. The same rule applies to a sub-agent's
