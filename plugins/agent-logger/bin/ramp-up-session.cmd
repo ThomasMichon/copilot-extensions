@@ -7,11 +7,8 @@ if not exist "%_PS1%" (
   echo [ramp-up-session] payload PowerShell shim not found: %_PS1% 1>&2
   exit /b 127
 )
-"%SystemRoot%\System32\where.exe" pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (
-  set "_PSHOST=pwsh"
-) else (
-  set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
-)
+set "_PSHOST="
+for /f "delims=" %%I in ('"%SystemRoot%\System32\where.exe" pwsh 2^>nul') do if not defined _PSHOST set "_PSHOST=%%I"
+if not defined _PSHOST set "_PSHOST=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
 "%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
 exit /b %ERRORLEVEL%
