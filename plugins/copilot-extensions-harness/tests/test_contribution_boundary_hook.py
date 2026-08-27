@@ -20,6 +20,14 @@ def test_hook_manifest_points_to_payload_scripts() -> None:
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
 
 
+def test_bash_hook_has_interpreter_and_json_fallbacks() -> None:
+    script = (PLUGIN / "scripts" / "emit-contribution-boundary.sh").read_text(
+        encoding="utf-8"
+    )
+    assert "command -v python3 || command -v python" in script
+    assert script.count("printf '{}'") >= 3
+
+
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
 def test_powershell_hook_emits_existing_guide() -> None:
     env = {**os.environ, "COPILOT_PLUGIN_ROOT": str(PLUGIN)}
