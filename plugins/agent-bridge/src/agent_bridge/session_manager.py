@@ -332,7 +332,7 @@ def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
         return True
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
-        return True
+        return False
     creationflags = no_window_flags()
     try:
         result = subprocess.run(

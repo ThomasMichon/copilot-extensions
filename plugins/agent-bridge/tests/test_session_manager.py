@@ -2621,6 +2621,23 @@ class TestClaimCodespaceHelper:
         assert called["ran"] is False
 
 
+class TestReleaseCodespaceClaimHelper:
+    def test_missing_binstub_is_not_confirmed(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: None)
+
+        assert sm._release_codespace_claim("cs", "/wt/a") is False
+
+    def test_disabled_claim_needs_no_release(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+
+        assert sm._release_codespace_claim("cs", "/wt/a") is True
+
+
 class TestCodespaceClaimKey:
     """``_codespace_claim_key`` resolves (name, owner) from a target for the
     end-session release, deterministically from persisted state."""
