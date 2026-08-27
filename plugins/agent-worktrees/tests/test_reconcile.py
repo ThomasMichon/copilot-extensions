@@ -508,7 +508,9 @@ def test_context_selected_drift_is_diagnostic_not_legacy_install(env):
     }]
 
 
-def test_explicit_context_preserves_legacy_reconcile_for_other_plugins(env):
+def test_explicit_context_preserves_legacy_reconcile_for_other_plugins(
+    env, monkeypatch
+):
     env.write_settings({
         f"agent-index@{MKT}": True,
         f"agent-machines@{MKT}": True,
@@ -517,6 +519,14 @@ def test_explicit_context_preserves_legacy_reconcile_for_other_plugins(env):
     env.select_context("agent-index", selected, "2.0.0", "2.0.0")
     env.install_payload("agent-machines", "2.0.0", scope="universal")
     env.deploy_runtime("agent-machines", "1.0.0")
+    selections = []
+    original_select = reconcile._selected_runtime_root
+
+    def track_selection(name, plugin_dir, **kwargs):
+        selections.append(name)
+        return original_select(name, plugin_dir, **kwargs)
+
+    monkeypatch.setattr(reconcile, "_selected_runtime_root", track_selection)
 
     plan = reconcile.build_plan(
         env.repo, machine="m1", cache={}, save=False
@@ -525,6 +535,7 @@ def test_explicit_context_preserves_legacy_reconcile_for_other_plugins(env):
     assert plan["action"] == "reconcile"
     assert _services(plan, phase="runtime") == {"agent-machines"}
     assert plan.get("diagnostics") is None
+    assert selections == ["agent-index"]
 
 
 def test_invalid_cross_plugin_context_does_not_enable_legacy_reconcile(

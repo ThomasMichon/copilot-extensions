@@ -904,23 +904,57 @@ def build_plan(
                 "message": str(error),
             }],
         }
-
-    for name in names:
-        entry: dict[str, Any] = plugins_cache.setdefault(name, {})
-        pdir = installed_payload_dir(name)
-
-        if pdir is None:
-            if explicit_context is not None and explicit_context[1] == name:
-                diagnostics.append({
-                    "service": name,
+    validated_context: tuple[str, Path] | None = None
+    if explicit_context is not None:
+        target_name = explicit_context[1]
+        target_dir = installed_payload_dir(target_name)
+        if target_dir is None:
+            return {
+                "action": "continue",
+                "machine": machine,
+                "diagnostics": [{
+                    "service": target_name,
                     "phase": "runtime",
                     "reason": "installation-context-payload-missing",
                     "message": (
                         "the explicitly selected context cannot be validated "
                         "because its plugin payload is not installed"
                     ),
-                })
-                continue
+                }],
+            }
+        try:
+            selected_root, context_selected = _selected_runtime_root(
+                target_name, target_dir
+            )
+        except ValueError as error:
+            return {
+                "action": "continue",
+                "machine": machine,
+                "diagnostics": [{
+                    "service": target_name,
+                    "phase": "runtime",
+                    "reason": "installation-context-invalid",
+                    "message": str(error),
+                }],
+            }
+        if not context_selected:
+            return {
+                "action": "continue",
+                "machine": machine,
+                "diagnostics": [{
+                    "service": target_name,
+                    "phase": "runtime",
+                    "reason": "installation-context-invalid",
+                    "message": "validated context did not select its named plugin",
+                }],
+            }
+        validated_context = (target_name, selected_root)
+
+    for name in names:
+        entry: dict[str, Any] = plugins_cache.setdefault(name, {})
+        pdir = installed_payload_dir(name)
+
+        if pdir is None:
             # Payload not installed yet. Installing it is a MARKETPLACE PULL
             # (``copilot plugin install``) -- an operator / Worktree-Manager /
             # Picker "update flow" action, NOT something a programmatic
@@ -942,16 +976,12 @@ def build_plan(
 
         pver = payload_version(pdir)
         entry["payload_version"] = pver
-        try:
-            selected_root, context_selected = _selected_runtime_root(name, pdir)
-        except ValueError as error:
-            diagnostics.append({
-                "service": name,
-                "phase": "runtime",
-                "reason": "installation-context-invalid",
-                "message": str(error),
-            })
-            continue
+        if validated_context is not None and validated_context[0] == name:
+            selected_root = validated_context[1]
+            context_selected = True
+        else:
+            selected_root = runtime_dir(name)
+            context_selected = False
 
         # Throttled payload refresh (network / MARKETPLACE PULL). Same rule as
         # payload-missing above: the Picker/operator update flow owns it; the
