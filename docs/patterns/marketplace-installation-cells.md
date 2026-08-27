@@ -162,6 +162,13 @@ is never a fallback.
 
 ## Lifecycle and migration
 
+- Namespaced operation is user-local and default-off. A shared user config
+  expresses desired legacy/namespaced mode globally or for an exact
+  marketplace/plugin; repository config and payloads cannot override it.
+- Desired mode is not actual ownership. A namespaced activation receipt pins the
+  authoritative runtime root after a new install or migration. Removing the
+  flag never silently reactivates legacy state, and enabling it never creates a
+  parallel empty runtime beside an existing legacy footprint.
 - Provision, update, rollback, repair, supervision, reconciliation, and
   uninstall operate on one validated installation identity.
 - Legacy unqualified state has no trustworthy owner. Migration requires the
@@ -173,6 +180,23 @@ is never a fallback.
 - An orphaned cell remains attributable and inert when its marketplace payload
   disappears. Another marketplace cannot activate or adopt it by name.
 - Uninstall removes only artifacts whose receipts match the uninstalling cell.
+- A user-local maintenance marker can quiesce hooks, reconciliation,
+  provisioning, service ensure/start, scheduled work, and dispatch while
+  preserving read-only doctor and explicitly authorized repair surfaces.
+
+Policy and maintenance resolve from the canonical OS user profile, not an
+ordinary `HOME`, durable-home override, or repository directory. Windows, native
+POSIX, and WSL receipts do not cross-validate. Migration holds both the legacy
+plugin lock/lease and cell install lock, and publishes a legacy-side ownership
+tombstone with the activation generation. Long-running writers revalidate
+maintenance, ownership, and receipt generations before mutation.
+
+The stable schemas, resolver status precedence, and effective-mode table are
+defined by the
+[install contract](../install-contract.md#installation-mode-governance).
+The active effort's
+[installation-mode governance](../../efforts/active/marketplace-scoped-installations/installation-mode-governance.md)
+retains rollout rationale and acceptance only.
 
 ## Transition rule
 

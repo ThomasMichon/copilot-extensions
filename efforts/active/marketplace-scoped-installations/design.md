@@ -20,6 +20,10 @@ Back to the [effort](README.md).
 7. **Missing provenance fails closed.** No compatibility path may silently use
    an unqualified runtime root, ambient same-named command, wildcard marketplace
    scan, or fixed endpoint.
+8. **Namespaced activation is user-local and default-off.** The shared user
+   config expresses desired mode; an activation receipt records the actual
+   authoritative root. Existing legacy state never migrates or competes merely
+   because the flag changed.
 
 ## Approved target model
 
@@ -135,6 +139,14 @@ Machine-local project state lives under the adopting cell's `repos/` tree. A
 normalized remote identity plus a collision-resistant suffix is the canonical
 key; repository basename remains display metadata only.
 
+Runtime-root activation is governed by the normative
+[`installation-mode install contract`](../../../docs/install-contract.md#installation-mode-governance);
+the effort's [governance note](installation-mode-governance.md) retains
+rationale and rollout. Missing policy preserves legacy behavior. Namespaced
+policy creates a cell automatically only for a new installation with no
+unattributed legacy footprint; existing state requires explicit migration, a
+legacy ownership tombstone, and a generation-pinned activation receipt.
+
 Host-provided plugin-data directories are useful inputs but not the identity
 contract. Hooks and LSP servers receive `COPILOT_PLUGIN_DATA`; Agent Plugins
 specification MCP servers also receive `PLUGIN_DATA`; legacy MCP servers and
@@ -235,6 +247,9 @@ still control the machine-global daemon.
   compatibility resolver.
 - Existing unqualified state has no trustworthy owner. Migration requires the
   operator to name the destination cell and writes an ownership receipt.
+- Migration holds the legacy plugin lock/lease and destination install lock
+  across quiescence, state transfer, tombstone publication, activation
+  publication, and verification.
 - If new and legacy state both exist, diagnostics report both and never merge
   registries silently.
 - Legacy services and global shims are retired only after ownership is proven,
@@ -243,6 +258,9 @@ still control the machine-global daemon.
   receipt.
 - Committed repo config uses new-first, legacy-fallback reads for a bounded
   compatibility window; install/update never rewrites it.
+- Every legacy installer/bootstrap entrypoint must use the shared activation
+  probe and refuse namespaced-active, orphaned-transfer, and maintenance before
+  any exemplar becomes operative.
 
 ## Cross-platform gate
 
@@ -253,8 +271,8 @@ becomes mandatory. Particular attention is required for:
   running;
 - scheduled-task, named-mutex, named-pipe, and process identity scoping;
 - systemd user-unit, Unix-socket, executable-bit, and atomic-marker behavior;
-- WSL host/guest identity propagation and intentionally shared network
-  boundaries;
+- WSL host/guest identity propagation, with separate receipt and root ownership
+  unless a future explicit sharing contract is introduced;
 - quoting and stdio preservation through payload shims and remote execution.
 
 The acceptance test is two marketplace cells with the same plugin names running

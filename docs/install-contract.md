@@ -51,6 +51,317 @@ complete.
    resolver. Migration names the destination cell and writes ownership before
    legacy activation is quiesced; uninstall removes only receipt-matching
    artifacts.
+9. Installation-cell activation is governed by default-off user-local policy.
+   Policy records desired mode; a validated plugin activation receipt records
+   the actual authoritative root. Enabling policy never creates a parallel
+   runtime beside unattributed legacy state, and disabling policy never silently
+   reactivates legacy writers after a cell is active.
+
+### Installation-mode governance
+
+This section is the normative authority for desired-mode policy, actual-mode
+activation, legacy transfer ownership, and resolver status. The policy remains
+binary: legacy is the default and namespaced installation is opt-in. Shadow
+comparison is doctor-only; `shadow`, `new-only`, and other runtime modes do not
+exist.
+
+#### Canonical policy and maintenance home
+
+Policy and user-wide maintenance state are pinned to the operating-system user
+profile, independently of ordinary `HOME`, Copilot-home, or `--durable-home`
+overrides:
+
+- Windows uses `USERPROFILE`, resolved to its canonical physical path.
+- POSIX uses the account home returned by the passwd database. `HOME` is
+  accepted only when its canonical physical path is the same directory.
+- WSL is a POSIX environment with its own passwd home. Windows and WSL never
+  share policy, receipts, or roots by path inference.
+
+The policy file is
+`<os-user-profile>/.copilot-extensions/installation-mode.json`. A repository
+`.copilot-extensions/` directory is never searched for user policy. An injected
+policy path is allowed only for tests and an explicitly invoked management
+command; it cannot authorize namespaced activation.
+
+#### User policy schema
+
+```json
+{
+  "schema": "copilot-extensions.installation-mode",
+  "version": 1,
+  "installationMode": {
+    "enabled": false,
+    "marketplaces": {
+      "example--0123456789abcdef": {
+        "enabled": true,
+        "plugins": {
+          "agent-example": {
+            "enabled": false
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+`enabled` fields are strict JSON booleans. Effective policy precedence is
+plugin > source-derived `marketplaceId` > global > implicit `false`. Readers
+and diagnostics retain whether the winning value was explicit `false` or
+missing/default `false`. Plugin values are objects rather than bare booleans so
+v1-compatible fields can be added later.
+
+Within supported version 1, readers ignore unknown fields and writers preserve
+them at every object level. They reject duplicate keys, malformed JSON,
+incorrect known-field types, a wrong schema name, and invalid marketplace or
+plugin ids. A higher unsupported version blocks activation, migration,
+deactivation, cleanup, and other policy-changing operations. Doctor, explicit
+repair, and already-activated runtime operation continue from the validated,
+pinned actual root; an unsupported policy must not strand an active cell.
+Writers use atomic same-directory replacement, UTF-8 without BOM, and LF.
+
+#### Installation activation schema
+
+Actual mode is recorded at
+`<cell>/plugins/<plugin-id>/installation-activation.json`:
+
+```json
+{
+  "schema": "copilot-extensions.installation-activation",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "mode": "namespaced",
+  "state": "active",
+  "environment": {
+    "platform": "windows",
+    "homeRealPath": "C:\\Users\\example",
+    "wslDistro": null
+  },
+  "context": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\install.json",
+  "namespaceGeneration": 1,
+  "installGeneration": 1,
+  "generation": 1,
+  "legacy": {
+    "disposition": "absent",
+    "probe": {
+      "declared": true,
+      "result": "absent",
+      "checkedAt": "2026-01-01T00:00:00Z"
+    }
+  },
+  "createdAt": "2026-01-01T00:00:00Z",
+  "updatedAt": "2026-01-01T00:00:00Z"
+}
+```
+
+`mode` is `namespaced` or `legacy`; `state` is `active` or `deactivated`.
+Version 1 accepts only the pairs `namespaced`/`active` and
+`legacy`/`deactivated`.
+`platform` is `windows` or `posix`; `wslDistro` is the exact WSL distribution
+identity or `null`. `legacy.disposition` is `absent`, `quiesced`,
+`retained-inert`, or `restored`; the recorded probe result is `absent`,
+`present`, or `unknown`.
+
+The activation is a monotonic record. Migration publishes
+`mode: namespaced`, `state: active`. Explicit rollback/deactivation writes
+`mode: legacy`, `state: deactivated` at `generation + 1`; it does not delete
+the record. Cleanup is the only operation permitted to delete it, and only
+after all companion ownership, rollback, service, task, lease, and tombstone
+evidence has been cleared under the required locks.
+
+Activation writes use compare-and-swap under the cell installation lock. The
+CAS pins the caller-observed activation `generation`, `namespaceGeneration`,
+and `installGeneration`; any mismatch returns `revalidation-required`. The
+environment tuple is exact. A Windows receipt never validates in WSL, one WSL
+distribution never validates in another, and no roots are shared across
+environments absent a future explicit sharing contract. A foreign-environment
+receipt fails closed.
+
+#### Legacy ownership tombstone schema
+
+Migration writes `<legacy-root>/.installation-ownership.json`:
+
+```json
+{
+  "schema": "copilot-extensions.legacy-installation-ownership",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "activation": {
+    "path": "C:\\Users\\example\\.copilot-extensions\\marketplaces\\example--0123456789abcdef\\plugins\\agent-example\\installation-activation.json",
+    "generation": 1
+  },
+  "environment": {
+    "platform": "windows",
+    "homeRealPath": "C:\\Users\\example",
+    "wslDistro": null
+  },
+  "transferredAt": "2026-01-01T00:00:00Z"
+}
+```
+
+The tombstone binds the legacy footprint to the destination cell and activation
+generation. A tombstone whose activation is missing, unreadable, mismatched, or
+foreign is `orphaned-transfer`: all writers fail closed and legacy operation
+must never resume. Explicit rollback first publishes the next legacy activation
+generation and only then clears the tombstone while holding both locks.
+
+Legacy footprint is qualified by ownership. Present but unattributed state
+blocks automatic activation for every cell. A valid tombstone attributing an
+inert legacy footprint to another marketplace cell does not block a new,
+distinct cell. Installers must not infer absence when no probe is declared.
+Each runtime plugin's deploy/installation metadata declares all three lists:
+
+```json
+{
+  "installation": {
+    "legacyFootprint": {
+      "paths": [
+        "<profile-relative-or-absolute-path>"
+      ],
+      "services": [
+        {
+          "platform": "windows|posix",
+          "manager": "<service-manager>",
+          "name": "<service-identity>"
+        }
+      ],
+      "tasks": [
+        {
+          "platform": "windows|posix",
+          "manager": "<task-manager>",
+          "name": "<task-identity>"
+        }
+      ]
+    }
+  }
+}
+```
+
+Empty lists are explicit. A missing object or missing list produces probe result
+`unknown` and is treated as footprint present. Probe outcome and time are
+recorded in the activation receipt; detailed evidence remains diagnostic data.
+
+#### Resolver result and precedence
+
+Every installer, bootstrap, hook, reconciler, launcher, supervisor, repair,
+uninstall, and cleanup caller consumes this result shape:
+
+```json
+{
+  "schema": "copilot-extensions.installation-resolution",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "environment": {
+    "platform": "windows",
+    "homeRealPath": "C:\\Users\\example",
+    "wslDistro": null
+  },
+  "desiredMode": "legacy",
+  "actualMode": "legacy",
+  "status": "ready",
+  "maintenance": {
+    "state": "inactive",
+    "scope": "none",
+    "marker": null,
+    "sidecar": null
+  },
+  "runtimeRoot": "<authoritative-absolute-root>",
+  "context": null,
+  "activation": null,
+  "activationGeneration": null,
+  "installGeneration": null,
+  "reason": "policy-default-false"
+}
+```
+
+All fields are present. `desiredMode`, `actualMode`, and `runtimeRoot` may be
+`null` only when no safe value can be established. Paths are absolute canonical
+paths. `reason` is a stable machine-readable code and distinguishes, among
+other cases, explicit false from implicit/default false.
+`maintenance.state` is `inactive`, `active`, `stale`, or `unknown`;
+`maintenance.scope` is `none`, `user`, or `plugin`.
+
+When more than one condition applies, status precedence is:
+
+```text
+invalid
+> maintenance-blocked
+> foreign-environment
+> orphaned-transfer
+> revalidation-required
+> migration-required | deactivation-required | provenance-blocked
+> ready
+```
+
+Callers authorize behavior by status and reason rather than reinterpreting
+evidence. Long-lived callers pin activation and install generations and
+revalidate them at each iteration boundary and immediately before mutation.
+
+#### Effective-mode and status table
+
+| Policy/evidence | Activation and legacy state | Effective result |
+|---|---|---|
+| File or `enabled` absent | No namespaced activation | desired/actual `legacy`, `ready`, reason `policy-default-false` |
+| Winning value explicitly `false` | No namespaced activation | desired/actual `legacy`, `ready`, reason identifies the explicit global/marketplace/plugin false |
+| Winning value `true` | No legacy footprint | create the cell under the activation transaction; then namespaced `ready` |
+| Winning value `true` | Unattributed legacy footprint, or undeclared/incomplete probe | legacy root remains actual; `migration-required`; no parallel cell runtime |
+| Winning value `true` | Legacy footprint has a valid tombstone for another cell | the distinct cell may activate namespaced; it does not claim or mutate that legacy footprint |
+| Winning value `true` | Valid active namespaced activation for this cell | desired/actual `namespaced`, `ready` |
+| Winning value becomes false or disappears | Valid active namespaced activation | actual stays `namespaced`; `deactivation-required` until explicit rollback |
+| Any | Tombstone exists but its activation is missing, unreadable, mismatched, or foreign | `orphaned-transfer`; no legacy or namespaced mutation and never resume legacy |
+| Any | Activation/tombstone environment differs from the current exact environment tuple | `foreign-environment`; fail closed |
+| Any | Observed activation, namespace, or install generation changed | `revalidation-required`; restart resolution |
+| Any | Marketplace provenance is unresolved or ambiguous | `provenance-blocked`; do not create or migrate a cell |
+| Malformed or invalid supported-v1 policy | Pinned actual root can be validated | `invalid`; retain that root for diagnosis, but block mutation except the explicitly defined repair path |
+| Higher unsupported policy version | Valid active namespaced activation | `invalid`; keep pinned namespaced runtime and doctor/repair available, but block policy-changing operations |
+| Higher unsupported policy version | No valid activation | `invalid`; create or migrate nothing |
+| Otherwise ready | User or cell maintenance marker exists | `maintenance-blocked`; current runtime root remains diagnostic-only and new activity stands down |
+| Otherwise ready | Marker exists without a live, valid sidecar owner | `maintenance-blocked` with `maintenance-stale`; never auto-clear |
+| Otherwise ready | Remote target maintenance cannot be determined | `maintenance-blocked` with `maintenance-unknown`; treat target as quiesced and do not provision |
+
+#### Migration, locking, and legacy rollout gate
+
+Migration is one two-lock critical section: acquire the legacy plugin's existing
+lock/lease and the destination cell installation lock, then hold both across
+quiescence, state transfer, tombstone and activation publication, and final
+verification. Failure to acquire either lock fails closed. Publication order
+for a transferred legacy footprint must never expose namespaced activation
+without its matching tombstone, nor clear the tombstone before a rollback
+activation is durable.
+
+At every iteration boundary and immediately before mutation, legacy and
+namespaced long-running loops recheck maintenance, the tombstone, activation
+generation, and install generation. Lease renewal is refused while maintenance
+applies so work drains instead of extending itself.
+
+Before either exemplar or any later cell-aware plugin becomes operative, every
+legacy installer and bootstrap entrypoint for that plugin must call the shared,
+dependency-light activation probe before mutation. The probe refuses mutation
+on `namespaced-active`, `orphaned-transfer`, or applicable maintenance. This is
+a rollout gate, not optional compatibility hardening.
+
+#### Maintenance contract
+
+`<os-user-profile>/.copilot-extensions/maintenance` remains a parser-free
+existence gate. Its strict sidecar,
+`<os-user-profile>/.copilot-extensions/maintenance.json`, contains
+`owner`, `host`, `pid`, `reason`, `enteredAt`, and `expectedUntil`. A cell may
+also be quiesced surgically with
+`<cell>/plugins/<plugin-id>/maintenance` and sibling `maintenance.json`.
+User-wide maintenance takes precedence over plugin-scoped maintenance.
+
+Marker existence always gates first. A missing, malformed, ownerless, expired,
+or dead-owner sidecar reports `maintenance-stale` and is never auto-cleared.
+Read-only doctor/status remains available. Repair or maintenance mutation
+requires an explicit authorization flag on the invoked management command;
+environment variables and inherited context cannot authorize it.
+
+Remote dispatchers query target maintenance before provisioning. If target
+state cannot be determined, they treat the target as quiesced and do not
+provision, reconcile, ensure, or start anything.
 
 The canonical dependency-light primitive lives in
 `libs/installation-context/`. Its `stamp` operation is the only Phase 3
@@ -82,6 +393,9 @@ not replace installation identity, and not every plugin surface receives it.
 > later in this document describe the currently deployed legacy layout. They
 > remain valid only for unchanged legacy installers during the phased migration.
 > New or migrated installer surfaces follow the cell contract above.
+> Until activation governance becomes operative, missing user policy means the
+> legacy layout remains authoritative. Context receipts may be stamped
+> non-operatively without selecting the cell runtime.
 
 ## Plugin update ≠ runtime install
 

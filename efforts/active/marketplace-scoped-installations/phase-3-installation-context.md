@@ -159,10 +159,11 @@ whose full digests differ fails closed.
 
 For directory marketplaces, canonical physical paths form the portable source
 identity unless the caller supplies an explicit stable source id. Windows and
-WSL spellings of the same physical directory therefore create distinct cells by
-default; sharing one cell across that boundary requires an explicit stable
-source id and shared-home semantics. This outcome is deliberate, not inferred
-from path similarity.
+WSL spellings of the same physical directory therefore create distinct cells.
+Even with the same explicit source identity, their activation environments,
+policy homes, receipts, and runtime roots remain separate; cross-environment
+root sharing requires a future explicit contract and is never inferred from
+path similarity.
 
 The digest implementation is identical on Windows and POSIX. POSIX tries
 `sha256sum`, `shasum -a 256`, then `openssl dgst -sha256`; PowerShell uses the
@@ -440,9 +441,14 @@ temporary sidecar alone is never trusted.
 - Namespace garbage collection is a separate explicit management operation and
   acts only on attributable, inactive cells.
 - Existing installations do not switch to cell mode merely because an exemplar
-  ships it. Cell activation is explicit until the migration phase attributes
-  legacy state. An exemplar reports legacy state and remains on its legacy root
-  unless the caller requested a new cell or completed migration.
+  ships it. Cell activation follows the normative
+  [installation-mode contract](../../../docs/install-contract.md#installation-mode-governance).
+  An exemplar reports existing unattributed legacy state as
+  `migration-required` and remains on its legacy root until two-lock migration
+  publishes a legacy ownership tombstone and valid activation receipt.
+- Before an exemplar becomes operative, every one of its legacy installer and
+  bootstrap entrypoints calls the shared activation probe and refuses mutation
+  for namespaced-active, orphaned-transfer, or applicable maintenance.
 
 ## Exemplars
 
@@ -484,19 +490,24 @@ identity is the reference implementation that #1108 generalizes.
 
 ## Delivery slices
 
-1. **Contract and fixture corpus** — land this proposal, then move the normative
-   schemas/precedence into the install contract and installation-cell pattern
-   with canonical test vectors; no runtime behavior changes.
+1. **Contract and fixture corpus** — land this proposal and the normative
+   policy, activation, tombstone, resolver, and effective-mode contract in
+   [`docs/install-contract.md`](../../../docs/install-contract.md#installation-mode-governance);
+   no runtime behavior changes.
 2. **Primitive, non-operative** — add the canonical Python/POSIX/PowerShell
    implementations and unit tests; payload shims still use legacy roots.
 3. **Cell-aware reconciliation prerequisite** — teach bootstrap checks and the
    agent-worktrees reconciler to recognize a context-selected deploy manifest
    without migrating agent-worktrees project state.
-4. **agent-machines exemplar** — make installation context explicitly operative
+4. **Activation governance prerequisite** — implement the shared default-off
+   desired/actual resolver and legacy-entrypoint probe from the
+   [install contract](../../../docs/install-contract.md#installation-mode-governance)
+   without changing a runtime root.
+5. **agent-machines exemplar** — make installation context explicitly operative
    for one CLI-only runtime and add dual-cell install/update/rollback tests.
-5. **agent-index exemplar** — namespace its service and durable state and add
+6. **agent-index exemplar** — namespace its service and durable state and add
    concurrent dual-cell clean-room coverage.
-6. **Contract enforcement** — make new payload-invocation manifests require
+7. **Contract enforcement** — make new payload-invocation manifests require
    installation context; retain explicit compatibility annotations only for
    plugins assigned to later rollout issues.
 
@@ -529,7 +540,7 @@ other platform still derives a different marketplace id or root.
 | Remote context propagation | Identity preserved; destination paths resolved locally |
 | Converted exemplar with legacy state | Remains legacy or reports migration; never silently appears empty |
 | Converted exemplar with legacy reconciler | No repeated installs or legacy-root recreation |
-| Windows and WSL see one directory marketplace | Separate cells unless an explicit stable source id is shared |
+| Windows and WSL see one directory marketplace | Separate policy, receipts, cells, and roots; neither validates or operates the other |
 
 ## Open questions resolved by implementation review
 
