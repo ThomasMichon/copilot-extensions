@@ -1419,20 +1419,12 @@ function Deploy-Binstub {
 set "PYTHONUTF8=1"
 rem Context resolves from CWD / --project (git-like); the binstub names its
 rem project via --project, not an ambient env var.
-rem Resolve the .venv reparse target and launch the slot python directly, never
-rem traversing the junction (blocked under RedirectionGuard) -- dotfiles #637.
-set "_ROOT=%USERPROFILE%\.agent-worktrees"
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if not exist "%_ROOT%\versions\%_VER%\.install-complete.json" goto :_aw_fallback
-if not exist "%_PY%" goto :_aw_fallback
-"%_PY%" -m agent_worktrees --project $ProjectName %*
-exit /b %ERRORLEVEL%
-:_aw_fallback
-rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT
-set "WORKTREE_PROJECT=$ProjectName"
-"%USERPROFILE%\.agent-worktrees\bin\launch-session.cmd" %*
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (
+  pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0$ProjectName.ps1" %*
+) else (
+  powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0$ProjectName.ps1" %*
+)
 exit /b %ERRORLEVEL%
 "@
     $dst = Join-Path $LocalBin "$ProjectName.cmd"
@@ -1452,33 +1444,10 @@ $env:PYTHONUTF8 = '1'
 # Resolve the runtime slot python via the junction-free current-version marker
 # (the .venv junction is retired -- #637/#1085/#1106).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
-$_py = ''
-$_ver = ''
-try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-function _key([string]$ver) {
-    if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
-        $phase = if ($Matches[4]) { '0' } else { '1' }
-        $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
-        return '0:{0}.{1}.{2}.{3}.{4}' -f $Matches[1].PadLeft(20, '0'), $Matches[2].PadLeft(20, '0'), $Matches[3].PadLeft(20, '0'), $phase, $dev.PadLeft(20, '0')
-    }
-    return '1:' + [regex]::Replace($ver.ToLowerInvariant(), '\d+', { param($m) $m.Value.PadLeft(20, '0') })
-}
-function _try([string]$ver) {
-    if (-not $ver) { return $null }
-    $slot = Join-Path $_root ('versions\' + $ver)
-    if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) { return $null }
-    foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-        $candidate = Join-Path $slot $sub
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
-    }
-    return $null
-}
-$_py = _try $_ver
-if (-not $_py) {
-    $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { _key $_.Name } | ForEach-Object { _try $_.Name } |
-        Where-Object { $_ } | Select-Object -Last 1
-}
+$AwPy = $null
+$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+if (Test-Path -LiteralPath $_resolver -PathType Leaf) { . $_resolver }
+$_py = $AwPy
 if (Test-Path $_py) {
     & $_py -m agent_worktrees --project '%%PROJECT%%' @args
     exit $LASTEXITCODE

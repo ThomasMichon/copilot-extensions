@@ -136,7 +136,11 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
     )
     python.chmod(0o755)
     (python.parents[1] / ".install-complete.json").write_text(
-        '{"version":"test"}', encoding="utf-8"
+        (
+            '{"version": "test", '
+            '"completed_at": "2026-08-27T00:00:00Z", "pid": 1}'
+        ),
+        encoding="utf-8",
     )
     (runtime / "current-version").write_text("test\n", encoding="utf-8")
 

@@ -21,13 +21,23 @@
 $AwPy = $null
 $_awr = Join-Path $env:USERPROFILE '.agent-worktrees'
 
+function _Aw-MarkerValid([string]$slot, [string]$ver) {
+  if (-not $ver) { return $false }
+  try {
+    $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
+    if ([regex]::Matches($raw, '"version"\s*:').Count -ne 1) { return $false }
+    $marker = $raw | ConvertFrom-Json -ErrorAction Stop
+    return ($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver)
+  } catch {
+    return $false
+  }
+}
+
 # -- helper: return a complete version's slot python, else $null --
 function _Aw-TrySlot([string]$ver) {
   if (-not $ver) { return $null }
   $slot = Join-Path $_awr ("versions\$ver")
-  if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) {
-    return $null
-  }
+  if (-not (_Aw-MarkerValid $slot $ver)) { return $null }
   foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
     $p = Join-Path $slot $sub
     if (Test-Path -LiteralPath $p) { return $p }

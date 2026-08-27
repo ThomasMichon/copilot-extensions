@@ -114,7 +114,11 @@ def test_posix_binstub_tier3_prefers_dev10_over_dev9(tmp_path: Path) -> None:
         )
         python.chmod(0o755)
         (slot / ".install-complete.json").write_text(
-            f'{{"version":"{version}"}}', encoding="utf-8"
+            (
+                f'{{"version": "{version}", '
+                '"completed_at": "2026-08-27T00:00:00Z", "pid": 1}'
+            ),
+            encoding="utf-8",
         )
     env = os.environ.copy()
     env["HOME"] = str(home)
@@ -137,7 +141,11 @@ def test_posix_binstub_tier3_prefers_dev10_over_dev9(tmp_path: Path) -> None:
     python.write_text("#!/bin/sh\nprintf '%s' '0.4.0'\n", encoding="utf-8")
     python.chmod(0o755)
     (slot / ".install-complete.json").write_text(
-        '{"version":"0.4.0"}', encoding="utf-8"
+        (
+            '{"version": "0.4.0", '
+            '"completed_at": "2026-08-27T00:00:00Z", "pid": 1}'
+        ),
+        encoding="utf-8",
     )
     result = subprocess.run(
         [shutil.which("bash"), str(binstub), "version"],
@@ -161,7 +169,4 @@ def test_windows_binstubs_share_safe_resolution_and_locking() -> None:
     assert "PadLeft(20, '0')" in ps1
     assert "System.Threading.Mutex" in ps1
     assert 'agent-codespaces.ps1" %*' in cmd
-    assert "current-version" in cmd
-    assert "last-known-good" in cmd
-    assert ".install-complete.json" in cmd
-    assert "versions\\%_VER%\\Scripts\\python.exe" in cmd
+    assert "powershell" in cmd

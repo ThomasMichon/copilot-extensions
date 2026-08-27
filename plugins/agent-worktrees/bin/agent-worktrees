@@ -8,63 +8,11 @@
 # resort (#234 defect 2).
 export PYTHONUTF8=1
 _awroot="$HOME/.agent-worktrees"
-_aw_version_key() {
-  awk '
-    {
-      original = $0
-      if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
-        count = split(original, part, /[.-]/)
-        phase = (count == 4) ? 0 : 1
-        dev = (count == 4) ? part[4] : "dev0"
-        sub(/^dev/, "", dev)
-        printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
-          part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
-        next
-      }
-      key = ""; rest = $0
-      while (match(rest, /[0-9]+/)) {
-        key = key substr(rest, 1, RSTART - 1)
-        number = substr(rest, RSTART, RLENGTH)
-        key = key sprintf("%020d", number + 0)
-        rest = substr(rest, RSTART + RLENGTH)
-      }
-      print "1:" key rest "\t" original
-    }
-  '
-}
 _aw_exec_resolved() {
-  for _marker in current-version last-known-good; do
-    _awver=""
-    [ -f "$_awroot/$_marker" ] && _awver=$(tr -d ' \t\r\n' < "$_awroot/$_marker")
-    _awslot="$_awroot/versions/$_awver"
-    if [ -n "$_awver" ] && [ -f "$_awslot/.install-complete.json" ] && [ -x "$_awslot/bin/agent-worktrees" ]; then
-      exec "$_awslot/bin/agent-worktrees" "$@"
-    elif [ -n "$_awver" ] && [ -f "$_awslot/.install-complete.json" ] && [ -x "$_awslot/Scripts/python.exe" ]; then
-      exec "$_awslot/Scripts/python.exe" -m agent_worktrees "$@"
-    fi
-  done
-  # Marker absent/stale: newest COMPLETE slot only. A bare interpreter can exist
-  # before package installation/health checks finish and must never be launched.
-  _awcand=""
-  _awmode=""
-  for _awver in $(
-    for _awslot in "$_awroot"/versions/*; do
-      [ -d "$_awslot" ] || continue
-      printf '%s\n' "${_awslot##*/}"
-    done | _aw_version_key | LC_ALL=C sort | cut -f2-
-  ); do
-    _awslot="$_awroot/versions/$_awver"
-    [ -f "$_awslot/.install-complete.json" ] || continue
-    if [ -x "$_awslot/bin/agent-worktrees" ]; then
-      _awcand="$_awslot/bin/agent-worktrees"
-      _awmode=console
-    elif [ -x "$_awslot/Scripts/python.exe" ]; then
-      _awcand="$_awslot/Scripts/python.exe"
-      _awmode=python
-    fi
-  done
-  if [ "$_awmode" = console ]; then exec "$_awcand" "$@"; fi
-  if [ "$_awmode" = python ]; then exec "$_awcand" -m agent_worktrees "$@"; fi
+  AW_PY=""
+  [ -f "$_awroot/bin/resolve-runtime.sh" ] || return 1
+  . "$_awroot/bin/resolve-runtime.sh"
+  [ -n "$AW_PY" ] && exec "$AW_PY" -m agent_worktrees "$@"
 }
 _aw_exec_resolved "$@"
 

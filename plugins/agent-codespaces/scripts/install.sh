@@ -221,12 +221,11 @@ _versioned_activate() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
     if [[ ! -x "$py" ]]; then
         _fail "Fresh runtime slot has no interpreter (versions/$SRC_VERSION)"
         return 1
     fi
-    if ! "$VENV_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
+    if ! "$py" -c 'import agent_codespaces' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
@@ -239,9 +238,9 @@ _versioned_activate() {
     fi
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
     if [[ -n "$prev" ]]; then
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
     else
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
     fi
     return 0
 }
@@ -540,6 +539,21 @@ deploy_binstub() {
 export PYTHONUTF8=1
 _name="agent-codespaces"
 _root="$HOME/.$_name"
+_marker_valid() {
+    [ -n "$1" ] || return 1
+    awk -v expected="$1" '
+      NR != 1 { bad = 1 }
+      NR == 1 {
+        if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": [0-9]+(, "payload_hash": "[^"\\]+")?\}$/) {
+          bad = 1; next
+        }
+        version = $0
+        sub(/^\{"version": "/, "", version)
+        sub(/".*$/, "", version)
+      }
+      END { exit !(NR == 1 && !bad && version == expected) }
+    ' "$_root/versions/$1/.install-complete.json" 2>/dev/null
+}
 _version_key() {
     awk '
       {
@@ -569,7 +583,7 @@ _resolve_python() {
         _ver=""
         [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
         _candidate="$_root/versions/$_ver/bin/python"
-        if [ -n "$_ver" ] && [ -f "$_root/versions/$_ver/.install-complete.json" ] && [ -x "$_candidate" ]; then
+        if [ -n "$_ver" ] && _marker_valid "$_ver" && [ -x "$_candidate" ]; then
             printf '%s\n' "$_candidate"
             return
         fi
@@ -581,7 +595,7 @@ _resolve_python() {
       done | _version_key | LC_ALL=C sort | cut -f2-
     ); do
         _candidate="$_root/versions/$_ver/bin/python"
-        [ -f "$_root/versions/$_ver/.install-complete.json" ] &&
+        _marker_valid "$_ver" &&
             [ -x "$_candidate" ] && _resolved="$_candidate"
     done
     [ -n "${_resolved:-}" ] && printf '%s\n' "$_resolved"

@@ -21,10 +21,27 @@ _rt_root="${AGENT_RT_ROOT:-}"
 if [ -n "$_rt_root" ]; then
   _rt_ver=""
 
+  _rt_marker_valid() {
+    [ -n "$1" ] || return 1
+    awk -v expected="$1" '
+      NR != 1 { bad = 1 }
+      NR == 1 {
+        if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": [0-9]+(, "payload_hash": "[^"\\]+")?\}$/) {
+          bad = 1
+          next
+        }
+        version = $0
+        sub(/^\{"version": "/, "", version)
+        sub(/".*$/, "", version)
+      }
+      END { exit !(NR == 1 && !bad && version == expected) }
+    ' "$_rt_root/versions/$1/.install-complete.json" 2>/dev/null
+  }
+
   # -- helper: set AGENT_RT_PY from a complete version's slot python --
   _rt_try_slot() {
     [ -n "$1" ] || return 1
-    [ -f "$_rt_root/versions/$1/.install-complete.json" ] || return 1
+    _rt_marker_valid "$1" || return 1
     for _rt_sub in bin/python Scripts/python.exe; do
       if [ -x "$_rt_root/versions/$1/$_rt_sub" ]; then
         AGENT_RT_PY="$_rt_root/versions/$1/$_rt_sub"; return 0
@@ -87,5 +104,5 @@ if [ -n "$_rt_root" ]; then
   fi
 
   unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir 2>/dev/null || true
-  unset -f _rt_try_slot _rt_version_key 2>/dev/null || true
+  unset -f _rt_marker_valid _rt_try_slot _rt_version_key 2>/dev/null || true
 fi

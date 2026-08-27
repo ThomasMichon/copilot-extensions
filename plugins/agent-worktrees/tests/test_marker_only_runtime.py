@@ -42,7 +42,12 @@ def test_powershell_resolver_exports_payload_invocation_contract(tmp_path):
     slot_python.parent.mkdir(parents=True)
     slot_python.touch()
     (slot_python.parents[1] / ".install-complete.json").write_text(
-        json.dumps({"version": "1.2.3"}), encoding="utf-8"
+        json.dumps({
+            "version": "1.2.3",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
     )
     (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
     resolver = _SCRIPTS / "resolve-runtime.ps1"
@@ -112,6 +117,10 @@ def test_binstubs_are_marker_only():
         if not p.is_file():
             continue
         text = p.read_text(encoding="utf-8")
+        if name.endswith(".cmd"):
+            assert name.replace(".cmd", ".ps1") in text
+            assert "powershell" in text
+            continue
         assert "current-version" in text, f"{name} must resolve via the marker"
         assert not re.search(r"\.venv[/\\](bin|Scripts)", text), (
             f"{name} still resolves python through a .venv link"
@@ -139,10 +148,20 @@ def test_installer_records_last_known_good(installer: str):
 
 
 def _make_slot(root: Path, version: str) -> None:
-    slot = root / ".agent-worktrees" / "versions" / version
+    runtime = root / ".agent-worktrees"
+    slot = runtime / "versions" / version
+    runtime_bin = runtime / "bin"
+    runtime_bin.mkdir(parents=True, exist_ok=True)
+    for name in ("resolve-runtime.sh", "resolve-runtime.ps1"):
+        shutil.copy2(_SCRIPTS / name, runtime_bin / name)
     (slot / "bin").mkdir(parents=True, exist_ok=True)
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": version}), encoding="utf-8"
+        json.dumps({
+            "version": version,
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
     )
     py = slot / "bin" / "python"
     py.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -171,6 +190,26 @@ def test_resolver_rejects_incomplete_marker_slot(tmp_path):
     _make_slot(tmp_path, "1.2.3")
     runtime = tmp_path / ".agent-worktrees"
     (runtime / "versions" / "1.2.3" / ".install-complete.json").unlink()
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+
+    assert _resolve(tmp_path) == ""
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not-json",
+        '{"version": "wrong", "completed_at": "x", "pid": 1}',
+        '{"version": "1.2.3", "version": "1.2.3", "completed_at": "x", "pid": 1}',
+    ],
+)
+def test_resolver_rejects_invalid_marker_json(tmp_path, marker):
+    _make_slot(tmp_path, "1.2.3")
+    runtime = tmp_path / ".agent-worktrees"
+    (runtime / "versions" / "1.2.3" / ".install-complete.json").write_text(
+        marker, encoding="utf-8"
+    )
     (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
 
     assert _resolve(tmp_path) == ""
@@ -258,7 +297,12 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
         )
         command.chmod(0o755)
         (slot / ".install-complete.json").write_text(
-            json.dumps({"version": version}), encoding="utf-8"
+            json.dumps({
+                "version": version,
+                "completed_at": "2026-08-27T00:00:00Z",
+                "pid": 1,
+            }),
+            encoding="utf-8",
         )
     env = os.environ.copy()
     env["HOME"] = str(tmp_path)
@@ -280,7 +324,12 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
     command.write_text("#!/bin/sh\nprintf '%s' '1.5.3'\n", encoding="utf-8")
     command.chmod(0o755)
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": "1.5.3"}), encoding="utf-8"
+        json.dumps({
+            "version": "1.5.3",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
     )
     result = subprocess.run(
         [str(_BIN / "agent-worktrees"), "status"],

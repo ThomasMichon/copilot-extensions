@@ -17,13 +17,23 @@ $AgentRtPy = $null
 $_rtRoot = $env:AGENT_RT_ROOT
 if ($_rtRoot) {
 
+  function _Rt-MarkerValid([string]$slot, [string]$ver) {
+    if (-not $ver) { return $false }
+    try {
+      $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
+      if ([regex]::Matches($raw, '"version"\s*:').Count -ne 1) { return $false }
+      $marker = $raw | ConvertFrom-Json -ErrorAction Stop
+      return ($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver)
+    } catch {
+      return $false
+    }
+  }
+
   # -- helper: return a complete version's slot python, else $null --
   function _Rt-TrySlot([string]$ver) {
     if (-not $ver) { return $null }
     $slot = Join-Path $_rtRoot ("versions\$ver")
-    if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) {
-      return $null
-    }
+    if (-not (_Rt-MarkerValid $slot $ver)) { return $null }
     foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
       $p = Join-Path $slot $sub
       if (Test-Path -LiteralPath $p) { return $p }

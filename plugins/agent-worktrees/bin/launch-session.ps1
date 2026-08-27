@@ -170,34 +170,10 @@ if ($RecoveryMode) {
 # #637, and prone to drift; a marker file never is). Fallback: the newest
 # installed slot only -- the `.venv` link is retired (#1106).
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
-function Get-RuntimeVersionKey([string]$Version) {
-    if ($Version -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
-        $phase = if ($Matches[4]) { '0' } else { '1' }
-        $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
-        return '0:{0}.{1}.{2}.{3}.{4}' -f
-            $Matches[1].PadLeft(20, '0'),
-            $Matches[2].PadLeft(20, '0'),
-            $Matches[3].PadLeft(20, '0'),
-            $phase,
-            $dev.PadLeft(20, '0')
-    }
-    return '1:' + [regex]::Replace(
-        $Version.ToLowerInvariant(), '\d+',
-        { param($m) $m.Value.PadLeft(20, '0') }
-    )
-}
-
-function Resolve-RuntimeSlotPython([string]$Version) {
-    if (-not $Version) { return $null }
-    $slot = Join-Path $RuntimeDir ('versions\' + $Version)
-    if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) {
-        return $null
-    }
-    foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-        $candidate = Join-Path $slot $sub
-        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
-    }
-    return $null
+$AwPy = $null
+$runtimeResolver = Join-Path $RuntimeDir 'bin\resolve-runtime.ps1'
+if (Test-Path -LiteralPath $runtimeResolver -PathType Leaf) {
+    . $runtimeResolver
 }
 
 function Resolve-CurrentRuntimePython {
@@ -205,24 +181,12 @@ function Resolve-CurrentRuntimePython {
         $version = ([IO.File]::ReadAllText(
             (Join-Path $RuntimeDir 'current-version')
         )).Trim()
-        return Resolve-RuntimeSlotPython $version
+        return _Aw-TrySlot $version
     } catch {}
     return $null
 }
 
-$VenvPython = Resolve-CurrentRuntimePython
-if (-not $VenvPython) {
-    try {
-        $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'last-known-good'))).Trim()
-        $VenvPython = Resolve-RuntimeSlotPython $_ver
-    } catch {}
-}
-if (-not $VenvPython) {
-    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { Get-RuntimeVersionKey $_.Name } |
-        ForEach-Object { Resolve-RuntimeSlotPython $_.Name } |
-        Where-Object { $_ } | Select-Object -Last 1
-}
+$VenvPython = $AwPy
 
 if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
     Write-SetupLog "Venv resolved: $RuntimeDir"

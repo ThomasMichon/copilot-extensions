@@ -25,10 +25,26 @@ AW_PY=""
 _awr="$HOME/.agent-worktrees"
 _awv=""
 
+_aw_marker_valid() {
+  [ -n "$1" ] || return 1
+  awk -v expected="$1" '
+    NR != 1 { bad = 1 }
+    NR == 1 {
+      if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": [0-9]+(, "payload_hash": "[^"\\]+")?\}$/) {
+        bad = 1; next
+      }
+      version = $0
+      sub(/^\{"version": "/, "", version)
+      sub(/".*$/, "", version)
+    }
+    END { exit !(NR == 1 && !bad && version == expected) }
+  ' "$_awr/versions/$1/.install-complete.json" 2>/dev/null
+}
+
 # -- helper: set AW_PY from a complete version's slot python --
 _aw_try_slot() {
   [ -n "$1" ] || return 1
-  [ -f "$_awr/versions/$1/.install-complete.json" ] || return 1
+  _aw_marker_valid "$1" || return 1
   for _sub in bin/python Scripts/python.exe; do
     if [ -x "$_awr/versions/$1/$_sub" ]; then AW_PY="$_awr/versions/$1/$_sub"; return 0; fi
   done
@@ -85,4 +101,4 @@ if [ -z "$AW_PY" ]; then
 fi
 AGENT_RT_PY="$AW_PY"
 unset _awr _awv _awlkg _sub _slot 2>/dev/null || true
-unset -f _aw_try_slot _aw_version_key 2>/dev/null || true
+unset -f _aw_marker_valid _aw_try_slot _aw_version_key 2>/dev/null || true

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shlex
 import shutil
@@ -19,13 +20,24 @@ def _slot(root: Path, version: str, *, complete: bool, interpreter: bool) -> Pat
     slot.mkdir(parents=True)
     if complete:
         (slot / ".install-complete.json").write_text(
-            f'{{"version":"{version}"}}', encoding="utf-8"
+            json.dumps(
+                {
+                    "version": version,
+                    "completed_at": "2026-08-27T00:00:00Z",
+                    "pid": 1,
+                }
+            ),
+            encoding="utf-8",
         )
     if interpreter:
         subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
         python = slot / subpath
         python.parent.mkdir(parents=True)
-        python.write_text("#!/bin/sh\nexit 99\n", encoding="utf-8")
+        sentinel = slot / "spawned"
+        python.write_text(
+            f"#!/bin/sh\nprintf spawned > {shlex.quote(str(sentinel))}\nexit 99\n",
+            encoding="utf-8",
+        )
         if os.name != "nt":
             python.chmod(0o755)
     return slot
@@ -62,6 +74,42 @@ def test_powershell_resolver_skips_incomplete_current_without_spawning(
     assert Path(result.stdout) == expected
     assert not (current / "spawned").exists()
     assert not (lkg / "spawned").exists()
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not-json",
+        '{"version": "wrong", "completed_at": "x", "pid": 1}',
+        '{"version": "1.0.0", "version": "1.0.0", "completed_at": "x", "pid": 1}',
+    ],
+)
+def test_powershell_resolver_rejects_invalid_marker_states(
+    tmp_path: Path, marker: str
+) -> None:
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if pwsh is None:
+        pytest.skip("PowerShell is unavailable")
+    root = tmp_path / "runtime"
+    slot = _slot(root, "1.0.0", complete=False, interpreter=True)
+    (slot / ".install-complete.json").write_text(marker, encoding="utf-8")
+    (root / "current-version").write_text("1.0.0\n", encoding="utf-8")
+    command = (
+        f"$env:AGENT_RT_ROOT = '{root}'; "
+        f". '{SCRIPTS / 'resolve-runtime.ps1'}'; "
+        "[Console]::Write($AgentRtPy)"
+    )
+
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", command],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert not (slot / "spawned").exists()
 
 
 def test_powershell_tier3_is_version_aware_and_cross_platform(
@@ -129,6 +177,43 @@ def test_posix_resolver_requires_completion_marker_without_spawning(
     assert Path(result.stdout) == healthy / "bin" / "python"
     assert not (incomplete / "spawned").exists()
     assert not (healthy / "spawned").exists()
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None,
+    reason="a native POSIX bash is unavailable",
+)
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not-json",
+        '{"version": "wrong", "completed_at": "x", "pid": 1}',
+        '{"version": "1.0.0", "version": "1.0.0", "completed_at": "x", "pid": 1}',
+    ],
+)
+def test_posix_resolver_rejects_invalid_marker_states(
+    tmp_path: Path, marker: str
+) -> None:
+    root = tmp_path / "runtime"
+    slot = _slot(root, "1.0.0", complete=False, interpreter=True)
+    (slot / ".install-complete.json").write_text(marker, encoding="utf-8")
+    (root / "current-version").write_text("1.0.0\n", encoding="utf-8")
+    command = (
+        f"AGENT_RT_ROOT={shlex.quote(str(root))}; export AGENT_RT_ROOT; "
+        f". {shlex.quote(str(SCRIPTS / 'resolve-runtime.sh'))}; "
+        "printf '%s' \"$AGENT_RT_PY\""
+    )
+
+    result = subprocess.run(
+        [shutil.which("bash"), "-c", command],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    assert not (slot / "spawned").exists()
 
 
 @pytest.mark.skipif(

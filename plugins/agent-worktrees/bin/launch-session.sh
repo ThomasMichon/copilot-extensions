@@ -61,62 +61,22 @@ LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 # marker -> versions/<ver>/bin/python; fall back to the newest slot only -- the
 # `.venv` symlink is retired (#1106).
 RUNTIME_DIR="$HOME/.agent-worktrees"
-
-version_key() {
-    awk '
-      {
-        original = $0
-        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
-          count = split(original, part, /[.-]/)
-          phase = (count == 4) ? 0 : 1
-          dev = (count == 4) ? part[4] : "dev0"
-          sub(/^dev/, "", dev)
-          printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
-            part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
-          next
-        }
-        key = ""; rest = $0
-        while (match(rest, /[0-9]+/)) {
-          key = key substr(rest, 1, RSTART - 1)
-          number = substr(rest, RSTART, RLENGTH)
-          key = key sprintf("%020d", number + 0)
-          rest = substr(rest, RSTART + RLENGTH)
-        }
-        print "1:" key rest "\t" original
-      }
-    '
-}
-
-PYTHON=""
-if [[ -f "$RUNTIME_DIR/current-version" ]]; then
-    _ver="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version")"
-    if [[ -n "$_ver" && -f "$RUNTIME_DIR/versions/$_ver/.install-complete.json" && -x "$RUNTIME_DIR/versions/$_ver/bin/python" ]]; then
-        PYTHON="$RUNTIME_DIR/versions/$_ver/bin/python"
-    fi
+AW_PY=""
+if [[ -f "$RUNTIME_DIR/bin/resolve-runtime.sh" ]]; then
+    # shellcheck source=../scripts/resolve-runtime.sh
+    source "$RUNTIME_DIR/bin/resolve-runtime.sh"
 fi
-if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
-    for _d in $(
-      for _slot in "$RUNTIME_DIR"/versions/*; do
-        [[ -d "$_slot" ]] || continue
-        printf '%s\n' "${_slot##*/}"
-      done | version_key | LC_ALL=C sort -r | cut -f2-
-    ); do
-        if [[ -f "$RUNTIME_DIR/versions/$_d/.install-complete.json" && -x "$RUNTIME_DIR/versions/$_d/bin/python" ]]; then
-            PYTHON="$RUNTIME_DIR/versions/$_d/bin/python"; break
-        fi
-    done
-fi
+PYTHON="$AW_PY"
 
 resolve_current_runtime_python() {
-    local version="" python=""
+    local version=""
     [[ -f "$RUNTIME_DIR/current-version" ]] || return 1
     version="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version" 2>/dev/null)" \
         || return 1
-    [[ -n "$version" ]] || return 1
-    [[ -f "$RUNTIME_DIR/versions/$version/.install-complete.json" ]] || return 1
-    python="$RUNTIME_DIR/versions/$version/bin/python"
-    [[ -f "$python" && -x "$python" ]] || return 1
-    printf '%s\n' "$python"
+    case "$AW_PY" in
+        "$RUNTIME_DIR/versions/$version/"*) printf '%s\n' "$AW_PY" ;;
+        *) return 1 ;;
+    esac
 }
 
 if [[ -n "$PYTHON" && -x "$PYTHON" ]]; then

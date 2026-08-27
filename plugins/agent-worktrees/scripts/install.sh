@@ -843,43 +843,9 @@ export PYTHONUTF8=1
 # -- #637/#1085/#1106); NEVER exec this binstub itself, which would recurse
 # into an unbounded process storm.
 _root="\$HOME/.agent-worktrees"
-_ver="\$(cat "\$_root/current-version" 2>/dev/null)"
-_py="\$_root/versions/\$_ver/bin/python"
-if [[ ! -f "\$_root/versions/\$_ver/.install-complete.json" || ! -x "\$_py" ]]; then
-    _py=""
-    _version_key() {
-        awk '{
-          original = \$0
-          if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
-            count = split(original, part, /[.-]/)
-            phase = (count == 4) ? 0 : 1
-            dev = (count == 4) ? part[4] : "dev0"
-            sub(/^dev/, "", dev)
-            printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
-              part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
-            next
-          }
-          key = ""; rest = \$0
-          while (match(rest, /[0-9]+/)) {
-            key = key substr(rest, 1, RSTART - 1)
-            number = substr(rest, RSTART, RLENGTH)
-            key = key sprintf("%020d", number + 0)
-            rest = substr(rest, RSTART + RLENGTH)
-          }
-          print "1:" key rest "\t" original
-        }'
-    }
-    for _ver in \$(
-      for _slot in "\$_root"/versions/*; do
-        [[ -d "\$_slot" ]] || continue
-        printf '%s\n' "\${_slot##*/}"
-      done | _version_key | LC_ALL=C sort | cut -f2-
-    ); do
-        _candidate="\$_root/versions/\$_ver/bin/python"
-        [[ -f "\$_root/versions/\$_ver/.install-complete.json" && -x "\$_candidate" ]] &&
-            _py="\$_candidate"
-    done
-fi
+AW_PY=""
+[[ -f "\$_root/bin/resolve-runtime.sh" ]] && source "\$_root/bin/resolve-runtime.sh"
+_py="\$AW_PY"
 if [[ -n "\$_py" && -x "\$_py" ]]; then
     exec "\$_py" -m agent_worktrees --project "$PROJECT_NAME" "\$@"
 fi

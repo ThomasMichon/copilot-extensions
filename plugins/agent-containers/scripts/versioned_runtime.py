@@ -459,6 +459,7 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
     """
     vdir = version_dir(root, version)
     if clean_incomplete and vdir.is_dir() and not is_complete(root, version):
+        was_current = current_version(root, link_name) == version
         completion_pair = _detach_file(marker_path(root, version))
         detached = [completion_pair]
         detached.extend([
@@ -468,7 +469,7 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
         detached_completion_is_valid = False
         if completion_pair is not None:
             try:
-                data = json.loads(completion_pair[0].read_text(encoding="utf-8"))
+                data = _load_unique_json(completion_pair[0])
                 detached_completion_is_valid = (
                     isinstance(data, dict) and data.get("version") == version
                 )
@@ -478,6 +479,14 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
             for pair in reversed(detached):
                 _restore_detached(pair)
             return vdir
+        if (was_current and not _reliable_process_enumeration()
+                and not _recorded_ownership_is_stale(root, version)):
+            for pair in reversed(detached):
+                _restore_detached(pair)
+            raise RuntimeError(
+                f"cannot safely clean current incomplete runtime slot "
+                f"without reliable process enumeration: {vdir}"
+            )
         if version in _versions_with_live_process(root):
             for pair in reversed(detached):
                 _restore_detached(pair)
@@ -614,6 +623,31 @@ def _iter_all_pids() -> list[int]:
         return [int(e) for e in os.listdir("/proc") if e.isdigit()]
     except OSError:
         return []
+
+
+def _reliable_process_enumeration() -> bool:
+    """Whether this host can enumerate processes for slot-image attribution."""
+    return os.name == "nt" or Path("/proc").is_dir()
+
+
+def _recorded_ownership_is_stale(root: Path, version: str) -> bool:
+    """Whether explicit ownership records exist for ``version`` and are all dead."""
+    try:
+        data = json.loads((root / RUNNING_VERSION_FILE).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    entries = data if isinstance(data, list) else [data]
+    matching = [
+        entry["pid"]
+        for entry in entries
+        if (
+            isinstance(entry, dict)
+            and isinstance(entry.get("pid"), int)
+            and isinstance(entry.get("version"), str)
+            and _norm_version(entry["version"]) == _norm_version(version)
+        )
+    ]
+    return bool(matching) and all(not _pid_alive(pid) for pid in matching)
 
 
 def _pid_cmdline_argv0(pid: int) -> str | None:
@@ -931,10 +965,25 @@ def marker_path(root: Path, version: str) -> Path:
     return version_dir(root, version) / COMPLETE_MARKER
 
 
+def _load_unique_json(path: Path):
+    def unique_object(pairs):
+        out = {}
+        for key, value in pairs:
+            if key in out:
+                raise ValueError(f"duplicate JSON field: {key}")
+            out[key] = value
+        return out
+
+    return json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=unique_object,
+    )
+
+
 def read_marker(root: Path, version: str) -> dict | None:
     """Parse a slot's completion marker, or None if absent/partial/mismatched."""
     try:
-        data = json.loads(marker_path(root, version).read_text(encoding="utf-8"))
+        data = _load_unique_json(marker_path(root, version))
     except Exception:
         return None
     if not isinstance(data, dict) or data.get("version") != version:

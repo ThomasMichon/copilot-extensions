@@ -7,6 +7,7 @@ packaged into the venv), so it is loaded here by file path via importlib.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import sys
@@ -129,6 +130,42 @@ def test_slot_cleanup_preserves_concurrently_replaced_marker(tmp_path, monkeypat
     assert current.read_text(encoding="utf-8").strip() == "2.0.0"
 
 
+def test_current_incomplete_slot_is_retained_without_process_enumeration(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    with pytest.raises(RuntimeError, match="without reliable process enumeration"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert (current / "marker.txt").is_file()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+
+
+def test_stale_recorded_owner_allows_cleanup_without_process_enumeration(
+    tmp_path, monkeypatch
+):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.RUNNING_VERSION_FILE).write_text(
+        json.dumps({"version": "1.0.0", "pid": 424242}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(vr, "_reliable_process_enumeration", lambda: False)
+    monkeypatch.setattr(vr, "_pid_alive", lambda pid: False)
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    rebuilt = vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert rebuilt.is_dir()
+    assert not (rebuilt / "marker.txt").exists()
+    assert not (tmp_path / vr.CURRENT_VERSION_FILE).exists()
+    assert current == rebuilt
+
+
 def _write_slot_python(root: Path, version: str) -> Path:
     subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
     python = vr.version_dir(root, version) / subpath
@@ -155,6 +192,22 @@ def test_resolve_python_rejects_every_incomplete_slot(tmp_path):
     (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
     (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
 
+    assert vr.resolve_python(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "{not-json",
+        '{"version": "wrong"}',
+        '{"version": "1.0.0", "version": "1.0.0"}',
+    ],
+)
+def test_is_complete_rejects_invalid_or_ambiguous_version_marker(tmp_path, marker):
+    _write_slot_python(tmp_path, "1.0.0")
+    vr.marker_path(tmp_path, "1.0.0").write_text(marker, encoding="utf-8")
+
+    assert not vr.is_complete(tmp_path, "1.0.0")
     assert vr.resolve_python(tmp_path) is None
 
 

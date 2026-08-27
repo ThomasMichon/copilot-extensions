@@ -359,10 +359,6 @@ function Get-BootstrapPython {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
-    if ($LinkDir -and (Test-Path -LiteralPath (Join-Path $LinkDir '.install-complete.json') -PathType Leaf)) {
-        $p = Join-Path $LinkDir 'Scripts\python.exe'
-        if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
-    }
     return $null
 }
 
@@ -732,7 +728,12 @@ function _resolve_cs_py {
     function _try_slot([string]$ver) {
         if (-not $ver) { return $null }
         $slot = Join-Path $_root ('versions\' + $ver)
-        if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) { return $null }
+        try {
+            $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
+            if ([regex]::Matches($raw, '"version"\s*:').Count -ne 1) { return $null }
+            $marker = $raw | ConvertFrom-Json -ErrorAction Stop
+            if (-not (($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver))) { return $null }
+        } catch { return $null }
         foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
             $candidate = Join-Path $slot $sub
             if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
@@ -790,12 +791,6 @@ exit 1
 @echo off
 setlocal
 set "PYTHONUTF8=1"
-set "_ROOT=%USERPROFILE%\.agent-codespaces"
-call :_resolve
-if defined _PY (
-  "%_PY%" -m agent_codespaces %*
-  exit /b %ERRORLEVEL%
-)
 where pwsh >nul 2>&1
 if %ERRORLEVEL%==0 (
   pwsh -NoProfile -ExecutionPolicy Bypass -File "%~dp0agent-codespaces.ps1" %*
@@ -803,17 +798,6 @@ if %ERRORLEVEL%==0 (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0agent-codespaces.ps1" %*
 )
 exit /b %ERRORLEVEL%
-:_resolve
-set "_PY="
-set "_VER="
-if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\.install-complete.json" if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if defined _PY goto :eof
-set "_VER="
-if exist "%_ROOT%\last-known-good" set /p _VER=<"%_ROOT%\last-known-good"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\.install-complete.json" if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
-if defined _PY goto :eof
-goto :eof
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)
     Write-ServiceOk "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"

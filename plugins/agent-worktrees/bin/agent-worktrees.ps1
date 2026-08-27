@@ -12,33 +12,10 @@ $env:PYTHONUTF8 = '1'
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 function _resolve_aw_py {
-    function _version_key([string]$ver) {
-        if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
-            $phase = if ($Matches[4]) { '0' } else { '1' }
-            $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
-            return '0:{0}.{1}.{2}.{3}.{4}' -f $Matches[1].PadLeft(20, '0'), $Matches[2].PadLeft(20, '0'), $Matches[3].PadLeft(20, '0'), $phase, $dev.PadLeft(20, '0')
-        }
-        return '1:' + [regex]::Replace($ver.ToLowerInvariant(), '\d+', { param($m) $m.Value.PadLeft(20, '0') })
-    }
-    function _try_slot([string]$ver) {
-        if (-not $ver) { return $null }
-        $slot = Join-Path $_root ('versions\' + $ver)
-        if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) { return $null }
-        foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-            $candidate = Join-Path $slot $sub
-            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
-        }
-        return $null
-    }
-    foreach ($marker in @('current-version', 'last-known-good')) {
-        $ver = ''
-        try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
-        $p = _try_slot $ver
-        if ($p) { return $p }
-    }
-    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
-        Sort-Object { _version_key $_.Name } | ForEach-Object { _try_slot $_.Name } |
-        Where-Object { $_ } | Select-Object -Last 1
+    $resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $resolver -PathType Leaf)) { return $null }
+    . $resolver
+    return $AwPy
 }
 $_py = _resolve_aw_py
 if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }
