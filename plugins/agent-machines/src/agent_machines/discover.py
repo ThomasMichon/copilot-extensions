@@ -27,9 +27,12 @@ from pathlib import Path
 
 import yaml
 
-from .manifest import RequirementPackage, load_package
+from .manifest import ManifestError, RequirementPackage, load_package
 
-MACHINE_STATE_DIR = ".github/machine-state"
+MACHINE_STATE_ROOT = ".agent-machines"
+ALL_PACKAGES_DIR = "all"
+MACHINES_PACKAGES_DIR = "machines"
+LEGACY_MACHINE_STATE_DIR = ".github/machine-state"
 
 
 def home() -> Path:
@@ -121,16 +124,99 @@ def repo_enables_agent_machines(repo_path: Path) -> bool:
     return any(str(k).startswith("agent-machines") and v for k, v in enabled.items())
 
 
+def _yaml_files(directory: Path) -> list[Path]:
+    if not directory.is_dir():
+        return []
+    direct = sorted(directory.glob("*.yaml")) + sorted(directory.glob("*.yml"))
+    nested = sorted(
+        path for path in directory.rglob("*")
+        if path.is_file()
+        and path.suffix.casefold() in {".yaml", ".yml"}
+        and path.parent != directory
+    )
+    if nested:
+        paths = ", ".join(str(path) for path in nested)
+        raise ManifestError(
+            f"{directory}: requirement packages must be direct children; "
+            f"nested YAML files found: {paths}"
+        )
+    return direct
+
+
+def _validate_canonical_root(root: Path) -> None:
+    allowed_dirs = {ALL_PACKAGES_DIR, MACHINES_PACKAGES_DIR}
+    for child in sorted(root.iterdir()):
+        if child.is_dir() and child.name in allowed_dirs:
+            continue
+        if child.is_file() and child.name.casefold() == "readme.md":
+            continue
+        raise ManifestError(
+            f"{child}: unsupported entry under {MACHINE_STATE_ROOT}; "
+            f"packages belong directly under {ALL_PACKAGES_DIR}/ or "
+            f"{MACHINES_PACKAGES_DIR}/<machine>/"
+        )
+
+
+def _machine_package_dir(root: Path, machine: str) -> Path | None:
+    machines_dir = root / MACHINES_PACKAGES_DIR
+    if not machines_dir.is_dir():
+        return None
+    matches = sorted(
+        child for child in machines_dir.iterdir()
+        if child.is_dir() and child.name.casefold() == machine.casefold()
+    )
+    if len(matches) > 1:
+        names = ", ".join(str(path) for path in matches)
+        raise ManifestError(
+            f"{machines_dir}: multiple machine directories match {machine!r}: {names}"
+        )
+    return matches[0] if matches else None
+
+
+def package_files_in_repo(repo_path: Path, machine: str) -> list[Path]:
+    """Resolve canonical package files, with a bounded legacy fallback.
+
+    ``.agent-machines`` is authoritative whenever it exists. Adopters migrate
+    atomically; the old ``.github/machine-state`` directory is consulted only
+    when the canonical root is absent, so a moved package is never loaded twice.
+    """
+    root = repo_path / MACHINE_STATE_ROOT
+    if root.is_dir():
+        _validate_canonical_root(root)
+        files = _yaml_files(root / ALL_PACKAGES_DIR)
+        machine_dir = _machine_package_dir(root, machine)
+        if machine_dir is not None:
+            files.extend(_yaml_files(machine_dir))
+        return files
+    return _yaml_files(repo_path / LEGACY_MACHINE_STATE_DIR)
+
+
 def packages_in_repo(repo_path: Path, repo_name: str, machine: str) -> list[RequirementPackage]:
     """Load and gate-filter the requirement packages carried by ``repo_path``."""
-    state_dir = repo_path / MACHINE_STATE_DIR
-    if not state_dir.is_dir():
-        return []
     out: list[RequirementPackage] = []
-    for pkg_file in sorted(state_dir.glob("*.yaml")) + sorted(state_dir.glob("*.yml")):
+    names: dict[str, Path] = {}
+    canonical = (repo_path / MACHINE_STATE_ROOT).is_dir()
+    machine_root = repo_path / MACHINE_STATE_ROOT / MACHINES_PACKAGES_DIR
+    for pkg_file in package_files_in_repo(repo_path, machine):
         pkg = load_package(pkg_file, source_repo=repo_name)
-        if pkg.applies_to(machine):
-            out.append(pkg)
+        machine_scoped = canonical and pkg_file.parent.parent == machine_root
+        applies = pkg.applies_to(machine)
+        if machine_scoped and not applies:
+            raise ManifestError(
+                f"{pkg_file}: package gate excludes its containing machine "
+                f"directory {pkg_file.parent.name!r}; machine-scoped packages "
+                "must omit gate, use '*', or include that machine"
+            )
+        if not applies:
+            continue
+        if canonical and pkg.name in names:
+            raise ManifestError(
+                f"{pkg_file}: package {pkg.name!r} duplicates {names[pkg.name]}; "
+                "files under all/ and machines/<machine>/ are independent complete "
+                "packages and must have unique package names"
+            )
+        names[pkg.name] = pkg_file
+        out.append(pkg)
     return out
 
 
@@ -144,9 +230,12 @@ def discover(
 
     The candidate set is ``projects.yaml`` (adopted harness projects); each path
     is resolved from ``repos.yaml`` (which owns paths). A project is included when
-    it (a) carries ``.github/machine-state/`` packages that (b) gate to
-    ``machine``. Plugin-enable status is annotated; set ``require_enable`` to also
-    require the project to enable ``agent-machines``.
+    it (a) carries ``.agent-machines/all/`` or
+    ``.agent-machines/machines/<machine>/`` packages that (b) gate to
+    ``machine``. Plugin-enable status is annotated; set ``require_enable`` to
+    also require the project to enable ``agent-machines``. The legacy
+    ``.github/machine-state/`` location is used only when ``.agent-machines/``
+    is absent.
     """
     machine = machine or current_machine()
     proj = projects if projects is not None else read_projects()
@@ -179,7 +268,7 @@ def _main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI 
     if not repos:
         print("no requirement packages discovered "
               "(no adopted projects in ~/.agent-worktrees/projects.yaml, "
-              "or none carry .github/machine-state/)")
+              "or none carry .agent-machines packages)")
         return 0
     for repo in repos:
         flag = "enabled" if repo.enabled else "not-enabled"

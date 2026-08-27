@@ -31,16 +31,26 @@ Discovery is implemented in `src\agent_machines\discover.py`:
 
 1. Candidate repos come from `~/.agent-worktrees/projects.yaml`.
 2. Their paths are resolved from `~/.agent-worktrees/repos.yaml`.
-3. Each repo contributes `*.yaml` / `*.yml` files under
-   `.github/machine-state/` whose package gate applies to the target machine.
+3. Each repo contributes `*.yaml` / `*.yml` files from
+   `.agent-machines/all/` plus `.agent-machines/machines/<machine>/`; package
+   gates then apply as an additional filter.
 
 If the registries are missing or unreadable, discovery returns an empty set; the
 CLI still runs. `repo_enables_agent_machines()` annotates whether the repo has an
 enabled `agent-machines` plugin, but `discover()` does not require enablement
 unless called with `require_enable=True`.
 
-Package gates are case-insensitive. Module gates and `per-machine` overlay keys
-are exact string matches today.
+Machine-directory and package-gate matching are case-insensitive. Files in
+`all/` and the matching machine directory are independent complete packages and
+must carry unique package names; the engine does not cross-file merge them.
+Partial overrides stay in the existing package-local `per-machine` block.
+Module gates and `per-machine` overlay keys are exact string matches today.
+The machine directory key is the raw `platform.node()` host name (Windows
+`%COMPUTERNAME%`), not an alias from an external topology file.
+
+The legacy `.github/machine-state/` directory is read only when the canonical
+`.agent-machines/` root is absent. This makes migration atomic per repo and
+prevents duplicate settings, resources, or module executions.
 
 ## Requirement-package schema
 

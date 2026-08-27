@@ -4,7 +4,7 @@ description: >
   Install, update, and author for the agent-machines runtime -- the portable
   restore-machinestate engine. Use this skill to enable or repair the
   self-provisioning binstub/venv, inspect runtime readiness, or author
-  requirement packages in a repo's .github/machine-state/ directory.
+  requirement packages under a repo's .agent-machines/ namespace.
   Trigger phrases include:
   - 'install agent-machines'
   - 'update agent-machines'
@@ -63,8 +63,21 @@ Verify:
 
 ## Author a requirement package
 
-A **requirement package** is one YAML file under a repo's
-`.github/machine-state/`. Minimal shape:
+A **requirement package** is one complete YAML file under either:
+
+- `.agent-machines/all/` for shared packages; or
+- `.agent-machines/machines/<machine>/` for packages implicitly scoped to one
+  machine.
+
+Package names must be unique across the shared and selected machine folders.
+`<machine>` is the raw `platform.node()` host name (Windows `%COMPUTERNAME%`),
+matched case-insensitively rather than resolved through an external topology.
+Multi-machine packages belong in `all/` with an explicit `gate`.
+Use a package-local `per-machine` block for partial overrides; files do not merge
+across folders. The legacy `.github/machine-state/` path is consulted only when
+`.agent-machines/` is absent, so migrate all of a repo's packages atomically.
+
+Minimal shape:
 
 ```yaml
 schema_version: 1

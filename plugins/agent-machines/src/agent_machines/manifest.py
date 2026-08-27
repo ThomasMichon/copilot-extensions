@@ -1,7 +1,8 @@
 """Requirement-package manifest parsing, validation, and per-machine layering.
 
 A **requirement package** is one YAML file under a repo's
-``.github/machine-state/``. It declares desired machine state as a set of
+``.agent-machines/all/`` or ``.agent-machines/machines/<machine>/``. It declares
+desired machine state as a set of
 ``manage`` entries, each governed by a **disposition** (see ``DISPOSITIONS``).
 The plugin defines this schema; each repo supplies the data.
 
@@ -147,12 +148,15 @@ class RequirementPackage:
         return machine.lower() in {g.lower() for g in self.gate}
 
     def repo_root(self) -> Path | None:
-        """The repo checkout root, derived from ``<repo>/.github/machine-state/<f>``."""
+        """Derive the repo root from a canonical or legacy package path."""
         if self.source_path is None:
             return None
-        # <repo>/.github/machine-state/<file>.yaml -> parents[2] == <repo>
-        parents = self.source_path.resolve().parents
-        return parents[2] if len(parents) >= 3 else None
+        for parent in self.source_path.absolute().parents:
+            if parent.name == ".agent-machines":
+                return parent.parent
+            if parent.name == "machine-state" and parent.parent.name == ".github":
+                return parent.parent.parent
+        return None
 
 
 def _require(mapping: dict[str, Any], key: str, path: Path) -> Any:
