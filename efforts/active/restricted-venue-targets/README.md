@@ -90,7 +90,7 @@ mount, credential relay, merge authority, or deployment authority.
 
 ## Plan
 
-### Phase 1 - Stable provider target contract
+### Phase 1 — Stable provider target contract
 - [ ] Extend agent-containers provider list/resolve output with a stable,
       provider-owned target identity and explicit venue metadata: provider,
       venue kind, target id, fleet, workspace, security profile, readiness, and
@@ -103,7 +103,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add focused resolver, CLI, manifest, and Docker-argv tests; document the
       contract and bump agent-containers.
 
-### Phase 2 - Provider target in agent-bridge
+### Phase 2 — Provider target in agent-bridge
 - [ ] Preserve provider/target/workspace identity in `SpawnTarget`, session
       records, liveness reads, and provider refreshes.
 - [ ] Deduplicate by stable provider target rather than mutable display/container
@@ -113,7 +113,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add provider reconstruction, persistence, replacement, and compatibility
       tests; bump agent-bridge.
 
-### Phase 3 - SSH-compatible restricted provider exec
+### Phase 3 — SSH-compatible restricted provider exec
 - [ ] Define an agent-ssh provider-exec transport that maps OpenSSH stdio to the
       venue provider boundary without preparing authorized keys or starting
       sshd.
@@ -124,7 +124,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add synthetic transport-provider and forbidden-projection tests; bump
       agent-containers and agent-ssh as required.
 
-### Phase 4 - Provider-backed worktree sources and Picker
+### Phase 4 — Provider-backed worktree sources and Picker
 - [ ] Generalize Picker sources from machine-SSH-only to an explicit source kind
       (`machine-ssh` or `provider-exec`) with one canonical source identity.
 - [ ] Route list/session/status and exact-worktree lifecycle verbs to the owning
@@ -137,7 +137,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add source, cache-key, rendering, version-skew, lineage, and ownership
       tests; bump agent-worktrees.
 
-### Phase 5 - Brokered session checkpoint and restore
+### Phase 5 — Brokered session checkpoint and restore
 - [ ] Define an allowlisted checkpoint manifest for the minimum Copilot session
       artifacts and workspace/origin metadata needed to resume.
 - [ ] Export/import through a host-owned provider operation. The restricted
@@ -151,7 +151,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add interrupted-transfer, replacement, safe-extraction, and repo-scope
       tests; bump agent-logger plus the consuming provider/dispatch plugins.
 
-### Phase 6 - Atomic dispatch ownership and recovery
+### Phase 6 — Atomic dispatch ownership and recovery
 - [ ] Add a venue selector/binding to tasks without changing repository-lane
       semantics.
 - [ ] Atomically bind one task owner to one restricted venue lease and workspace
@@ -165,7 +165,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add queue, coordinator, supervisor, liveness, lease-race, checkpoint, and
       replacement tests; bump agent-dispatch and agent-containers.
 
-### Phase 7 - Clean-room acceptance and docs
+### Phase 7 — Clean-room acceptance and docs
 - [ ] Add a disposable restricted-venue scenario that provisions from a fresh
       install, creates one workspace, dispatches one task, connects through the
       named transport, checkpoints the session, replaces the container, and
