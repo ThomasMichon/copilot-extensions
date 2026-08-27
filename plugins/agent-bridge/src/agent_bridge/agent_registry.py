@@ -463,29 +463,143 @@ class CliNamespaceResolver(NamespaceResolver):
             if rc == 0:
                 try:
                     spec = json.loads(out)
-                    # Structured venue metadata (container fleets surface a
-                    # concrete workspace_folder + trust posture via
-                    # namespace-resolve) -- carried so the daemon can set the ACP
-                    # session cwd to the repo checkout and gate host->venue
-                    # projection on the fleet's trust posture.
-                    ws = spec.get("workspace_folder")
-                    prof = spec.get("security_profile")
-                    venue = (
-                        {"workspace_folder": ws, "security_profile": prof}
-                        if (ws or prof) else None
-                    )
-                    return SpawnTarget(
-                        type=spec.get("type", "command"),
-                        spawn_command=spec["spawn_command"],
-                        user=spec.get("user"),
-                        codespace=spec.get("codespace"),
-                        container=spec.get("container"),
-                        venue=venue,
-                    )
                 except Exception:
                     log.warning(
                         "namespace-resolve output unparseable (%s) -- falling "
                         "back", self._binstub, exc_info=True,
+                    )
+                else:
+                    # Preserve the provider-owned venue contract as the
+                    # authoritative metadata. Older providers expose only the
+                    # top-level workspace/profile pair. Duplicate compatibility
+                    # fields must agree; trust conflicts resolve only toward the
+                    # restricted posture.
+                    raw_venue = spec.get("venue")
+                    if raw_venue is not None and not isinstance(raw_venue, dict):
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve returned a "
+                            "non-object venue contract"
+                        )
+                    venue = dict(raw_venue or {})
+                    ws = spec.get("workspace_folder")
+                    prof = spec.get("security_profile")
+                    if ws is not None and (
+                        not isinstance(ws, str) or not ws.strip()
+                    ):
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve returned an "
+                            "invalid workspace_folder"
+                        )
+                    if prof is not None and prof not in {"trusted", "restricted"}:
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve returned an "
+                            "invalid security_profile"
+                        )
+                    for key in (
+                        "provider",
+                        "kind",
+                        "target_id",
+                        "scope",
+                        "fleet",
+                        "workspace_folder",
+                        "security_profile",
+                        "configured_security_profile",
+                        "observed_security_profile",
+                        "effective_security_profile",
+                        "state",
+                        "transport",
+                    ):
+                        value = venue.get(key)
+                        if value is not None and (
+                            not isinstance(value, str) or not value.strip()
+                        ):
+                            raise RuntimeError(
+                                f"{self._binstub} namespace-resolve venue.{key} "
+                                "must be a non-empty string"
+                            )
+                    instance_id = venue.get("instance_id")
+                    if instance_id is not None and (
+                        not isinstance(instance_id, str) or not instance_id.strip()
+                    ):
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve venue.instance_id "
+                            "must be null or a non-empty string"
+                        )
+                    for key in ("ready", "posture_verified"):
+                        if key in venue and not isinstance(venue[key], bool):
+                            raise RuntimeError(
+                                f"{self._binstub} namespace-resolve venue.{key} "
+                                "must be boolean"
+                            )
+                    if "schema_version" in venue and (
+                        not isinstance(venue["schema_version"], int)
+                        or isinstance(venue["schema_version"], bool)
+                        or venue["schema_version"] < 1
+                    ):
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve "
+                            "venue.schema_version must be a positive integer"
+                        )
+                    capabilities = venue.get("capabilities")
+                    if capabilities is not None and (
+                        not isinstance(capabilities, dict)
+                        or not all(
+                            isinstance(capability, str)
+                            and capability
+                            and isinstance(enabled, bool)
+                            for capability, enabled in capabilities.items()
+                        )
+                    ):
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve "
+                            "venue.capabilities must be boolean flags"
+                        )
+                    if ws:
+                        venue_ws = venue.get("workspace_folder")
+                        if venue_ws and venue_ws != ws:
+                            raise RuntimeError(
+                                f"{self._binstub} namespace-resolve returned "
+                                "conflicting workspace_folder values"
+                            )
+                        venue["workspace_folder"] = ws
+                    if prof:
+                        venue_prof = venue.get("security_profile")
+                        if venue_prof and venue_prof != prof:
+                            if "restricted" not in {venue_prof, prof}:
+                                raise RuntimeError(
+                                    f"{self._binstub} namespace-resolve returned "
+                                    "conflicting security_profile values"
+                                )
+                            venue["security_profile"] = "restricted"
+                            venue["ready"] = False
+                        else:
+                            venue["security_profile"] = prof
+                    target_type = spec.get("type", "command")
+                    spawn_command = spec.get("spawn_command")
+                    if target_type != "command":
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve returned "
+                            f"unsupported target type {target_type!r}"
+                        )
+                    if (
+                        not isinstance(spawn_command, list)
+                        or not spawn_command
+                        or not all(
+                            isinstance(part, str) and part and "\x00" not in part
+                            for part in spawn_command
+                        )
+                    ):
+                        raise RuntimeError(
+                            f"{self._binstub} namespace-resolve returned an "
+                            "invalid spawn_command"
+                        )
+                    return SpawnTarget(
+                        type=target_type,
+                        spawn_command=spawn_command,
+                        user=spec.get("user"),
+                        codespace=spec.get("codespace"),
+                        container=spec.get("container"),
+                        venue=venue or None,
                     )
             # any other non-zero -> a CLI failure, not a resolver outcome
         return await self._fallback_or_raise(
