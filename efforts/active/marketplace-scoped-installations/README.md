@@ -125,15 +125,17 @@ reachable when their ownership is explicit.
 
 ### Phase 3 — Installation context and exemplars ([#1104](https://github.com/ThomasMichon/copilot-extensions/issues/1104))
 
-- [ ] Land the reviewed
+- [x] Land the reviewed
   [installation-context and dual-cell proposal](phase-3-installation-context.md)
   before either platform makes the new root operative.
 - [ ] Introduce a self-contained, vendorable installation-context primitive
   separate from versioned interpreter resolution.
   - [x] Land the non-operative Windows/PowerShell resolver, receipt validator,
     portable source-identity fixtures, and CI tests.
-  - [ ] Add the corresponding Python/POSIX primitive and prove fixture parity
+  - [x] Add the corresponding Python/POSIX primitive and prove fixture parity
     before any runtime root becomes operative.
+  - [x] Add cross-platform receipt stamping, lock ownership, generation
+    compare-and-swap, and inert exemplar vendoring.
 - [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
   identity through stamp, snapshot, provision, cutover, rollback, and uninstall.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
@@ -345,6 +347,19 @@ See [`design.md`](design.md).
   creating cells, receipts, locks, runtime roots, or payload state.
 - Left vendoring, receipt mutation, locking/CAS, runtime-root activation,
   reconciliation, and both exemplars to later Phase 3 slices.
+
+### 2026-08-27 — Non-operative receipt mutation and vendoring
+
+- Added one cross-platform `stamp` contract for atomic namespace and plugin
+  receipt creation/update. Existing mutations require caller-observed
+  generations while holding attributable genesis/install directory locks.
+- Added live-owner receipts, bounded same-host wait, fail-closed stale-owner
+  detection, lock-token revalidation before replacement, and concurrent first-use tests
+  across PowerShell, stdlib Python, and the no-Python Bash bootstrap.
+- Added byte-identical vendoring into the future `agent-machines` and
+  `agent-index` exemplar payloads plus a CI sync gate.
+- Kept the slice non-operative: neither plugin selects the new roots, no legacy
+  state moves, and reconciliation plus both exemplar cutovers remain open.
 
 ### 2026-08-26 — Runtime plugin hook audit
 

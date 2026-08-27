@@ -81,6 +81,8 @@ jobs:
           plugins/agent-index/tests/test_command_catalog.py
       - name: Installation context foundation tests
         run: python -m pytest -q libs/installation-context/tests
+      - name: Installation context vendoring
+        run: python tools/sync-installation-context.py --check
       - name: Hook process hygiene
         # PowerShell command hooks already run inside PowerShell. Spawning a
         # second interpreter can surface Default Terminal windows on Windows.
