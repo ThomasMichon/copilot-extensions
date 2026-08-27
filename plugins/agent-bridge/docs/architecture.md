@@ -272,7 +272,13 @@ restart does not inherently close the child's pipes.
   interrupts only that idle parity session's supervised credential-relay
   process, waits for the same owner handle to establish a replacement process,
   rejects duplicate ownership, and reruns the boolean-only credential consumers
-  before the final continuity turn.
+  before the final continuity turn. The `--fault failed-acp-handshake` mode
+  substitutes a deterministic JSON-RPC handshake rejection for one harness-only
+  remote launch, then requires identity-checked Host/child death, removal of the
+  far-side authority record, provider launch cleanup, local forward/relay/index/
+  lock cleanup, and durable session removal before a normal launch may reacquire
+  the same target. Inconclusive remote or ownership cleanup is fail-closed: the
+  failed session and target ownership remain in place to block a duplicate.
 
 ## Zero-Downtime Redeploy
 

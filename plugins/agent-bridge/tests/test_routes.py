@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from agent_bridge.app import create_app
 from agent_bridge.agent_registry import AgentConfig, AgentResolver
 from agent_bridge.models import ServiceConfig, SessionStatus
+from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_manager import Session, SessionManager
 from agent_bridge.transport import SpawnTarget
 
@@ -78,6 +79,43 @@ def client(app):
     with TestClient(app) as c:
         c.headers["Authorization"] = "Bearer test-token"
         yield c
+
+
+def test_failed_handshake_fault_requires_harness_caller(client) -> None:
+    response = client.post(
+        "/api/v1/sessions",
+        json={
+            "agent": "container:example",
+            "force_new": True,
+            "parity_fault": FAILED_ACP_HANDSHAKE_FAULT,
+        },
+    )
+
+    assert response.status_code == 403
+
+
+def test_failed_handshake_fault_refuses_active_session(client, app) -> None:
+    manager = app.state.session_manager
+    incumbent = Session(
+        "incumbent",
+        "active",
+        SpawnTarget(type="local", cwd="."),
+    )
+    incumbent.status = SessionStatus.IDLE
+    manager._sessions[incumbent.session_id] = incumbent
+
+    response = client.post(
+        "/api/v1/sessions",
+        json={
+            "agent": "container:example",
+            "caller_id": "venue-parity:test",
+            "force_new": True,
+            "parity_fault": FAILED_ACP_HANDSHAKE_FAULT,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "incumbent" in response.json()["detail"]
 
 
 class TestHealthEndpoint:

@@ -15,6 +15,8 @@ from urllib.parse import urlparse
 _RESULT_MARKER = "VENUE_PARITY_JSON:"
 _PROBE_MARKER = "VENUE_PARITY_PROBE:"
 _REATTACH_MARKER = "VENUE_PARITY_REATTACH_OK"
+from .protocol import FAILED_ACP_HANDSHAKE_FAULT
+
 FRONTEND_RESTART_HOSTINDEX_LOSS = "frontend-restart-hostindex-loss"
 RELAY_INTERRUPTION = "relay-interruption"
 _TERMINAL = {"failed", "ended", "stopped"}
@@ -273,6 +275,7 @@ def run(
         None,
         FRONTEND_RESTART_HOSTINDEX_LOSS,
         RELAY_INTERRUPTION,
+        FAILED_ACP_HANDSHAKE_FAULT,
     }:
         raise ParityFailure(f"unsupported parity fault: {fault}")
     if fault == FRONTEND_RESTART_HOSTINDEX_LOSS and fault_handler is None:
@@ -284,6 +287,71 @@ def run(
     evidence = ParityEvidence(target=target)
     session_id = ""
     try:
+        if fault == FAILED_ACP_HANDSHAKE_FAULT:
+            active_others = _active_other_session_ids(client, "")
+            if active_others:
+                raise ParityFailure(
+                    "failed handshake fault refuses to run while another "
+                    "managed session is active: "
+                    + ", ".join(active_others[:5]),
+                    evidence=evidence,
+                )
+            evidence.checks["exclusive_handshake_fault"] = True
+            injected = client.start_session(
+                agent=target,
+                caller_id=caller_id,
+                force_new=True,
+                parity_fault=fault,
+                request_timeout=startup_timeout,
+            )
+            fault_result = injected.get("parity_fault_result") or {}
+            evidence.observed["fault"] = fault
+            evidence.observed["failed_start_cleanup"] = {
+                name: fault_result.get(name)
+                for name in (
+                    "host_process_removed",
+                    "child_process_removed",
+                    "remote_authority_removed",
+                    "provider_cleanup",
+                    "session_row_removed",
+                    "session_memory_removed",
+                    "host_index_removed",
+                    "forward_removed",
+                    "relay_removed",
+                    "target_lock_removed",
+                    "codespace_claim_removed",
+                    "ownership_retained",
+                )
+            }
+            for name in (
+                "host_process_removed",
+                "child_process_removed",
+                "remote_authority_removed",
+                "provider_cleanup",
+                "session_row_removed",
+                "session_memory_removed",
+                "host_index_removed",
+                "forward_removed",
+                "relay_removed",
+                "target_lock_removed",
+                "codespace_claim_removed",
+            ):
+                evidence.checks[name] = fault_result.get(name) is True
+            evidence.checks["ownership_released"] = (
+                fault_result.get("ownership_retained") is False
+            )
+            evidence.checks["failed_start_cleanup_confirmed"] = (
+                fault_result.get("cleanup_confirmed") is True
+            )
+            if not all(evidence.checks.values()):
+                failed = [
+                    name for name, ok in evidence.checks.items() if not ok
+                ]
+                raise ParityFailure(
+                    "failed handshake rollback checks failed: "
+                    + ", ".join(failed),
+                    evidence=evidence,
+                )
         try:
             created = client.start_session(
                 agent=target,
@@ -315,6 +383,8 @@ def run(
         evidence.checks["initial_identity"] = bool(
             evidence.initial_acp_session_id and evidence.initial_child_pid
         )
+        if fault == FAILED_ACP_HANDSHAKE_FAULT:
+            evidence.checks["fresh_same_target_acquisition"] = True
         if session.get("target_type") != "command":
             raise ParityFailure(
                 "parity requires a remote command target (container: or codespace:)",
@@ -347,7 +417,7 @@ def run(
         capabilities = [
             str(item) for item in (reported.get("capabilities") or [])
         ]
-        evidence.observed = {
+        evidence.observed.update({
             "cwd": probe.get("cwd"),
             "capabilities": capabilities,
             "github_credential": probe.get("github_credential"),
@@ -355,7 +425,7 @@ def run(
             "ado_credential": probe.get("ado_credential"),
             "ado_ls_remote": probe.get("ado_ls_remote"),
             "azure_token": probe.get("azure_token"),
-        }
+        })
         if expected_workspace is not None:
             evidence.checks["workspace"] = (
                 probe.get("cwd") == expected_workspace

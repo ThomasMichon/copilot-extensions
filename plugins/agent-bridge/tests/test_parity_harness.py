@@ -8,6 +8,7 @@ import pytest
 
 from agent_bridge import __main__ as cli
 from agent_bridge import parity_harness as parity
+from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_host.host_index import HostIndex, HostRecord
 
 
@@ -29,9 +30,36 @@ class FakeClient:
         self.resume_calls = 0
         self.refresh_calls = 0
         self.relay_fault_calls = 0
+        self.handshake_fault_calls = 0
+        self.start_calls = 0
+        self.normal_started = False
         self.other_sessions = []
 
     def start_session(self, **kwargs):
+        self.start_calls += 1
+        if kwargs.get("parity_fault") == FAILED_ACP_HANDSHAKE_FAULT:
+            self.handshake_fault_calls += 1
+            return {
+                "session_id": "failed-session",
+                "name": "failed",
+                "status": "ended",
+                "parity_fault_result": {
+                    "host_process_removed": True,
+                    "child_process_removed": True,
+                    "remote_authority_removed": True,
+                    "provider_cleanup": True,
+                    "session_row_removed": True,
+                    "session_memory_removed": True,
+                    "host_index_removed": True,
+                    "forward_removed": True,
+                    "relay_removed": True,
+                    "target_lock_removed": True,
+                    "codespace_claim_removed": True,
+                    "ownership_retained": False,
+                    "cleanup_confirmed": True,
+                },
+            }
+        self.normal_started = True
         return {"session_id": "session-1", "name": "parity"}
 
     def get_session(self, session_id):
@@ -119,7 +147,12 @@ class FakeClient:
         self.ended = True
 
     def list_sessions(self):
-        return [dict(self.session), *self.other_sessions]
+        sessions = (
+            [dict(self.session)]
+            if self.normal_started or self.session.get("caller_id")
+            else []
+        )
+        return [*sessions, *self.other_sessions]
 
 
 def test_parity_run_emits_redacted_evidence_and_reattaches_same_child():
@@ -383,6 +416,30 @@ def test_relay_interruption_fault_reprobes_credentials_without_duplication():
     assert result.observed["relay_recovery_probe"]["azure_token"] is True
     assert client.relay_fault_calls == 1
     assert len(client.prompts) == 3
+
+
+def test_failed_handshake_fault_rolls_back_then_acquires_same_target():
+    client = FakeClient()
+
+    result = parity.run(
+        client,
+        "container:example-1",
+        startup_timeout=1,
+        turn_timeout=1,
+        fault=FAILED_ACP_HANDSHAKE_FAULT,
+    )
+
+    assert result.ok is True
+    assert result.checks["failed_start_cleanup_confirmed"] is True
+    assert result.checks["remote_authority_removed"] is True
+    assert result.checks["target_lock_removed"] is True
+    assert result.checks["fresh_same_target_acquisition"] is True
+    assert result.observed["failed_start_cleanup"][
+        "remote_authority_removed"
+    ] is True
+    assert client.handshake_fault_calls == 1
+    assert client.start_calls == 2
+    assert client.ended is True
 
 
 def test_quality_prompt_rejects_credentialed_ado_url():

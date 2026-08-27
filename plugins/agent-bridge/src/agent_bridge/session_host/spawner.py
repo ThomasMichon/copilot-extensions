@@ -605,26 +605,39 @@ try:
     ).read().strip()
 except OSError:
     raise SystemExit(44)
-if (
-    current_boot != boot_id
-    or start_ticks(host_pid) != host_start
-    or start_ticks(child_pid) != child_start
-):
+if current_boot != boot_id:
     raise SystemExit(45)
 
+host_current = start_ticks(host_pid)
+child_current = start_ticks(child_pid)
+if host_current and host_current != host_start:
+    raise SystemExit(46)
+if child_current and child_current != child_start:
+    raise SystemExit(47)
+
 for sig in (signal.SIGTERM, signal.SIGKILL):
-    try:
-        os.killpg(host_pid, sig)
-    except ProcessLookupError:
-        pass
-    for pid in (host_pid, child_pid):
+    if start_ticks(host_pid) == host_start:
+        try:
+            os.killpg(host_pid, sig)
+        except ProcessLookupError:
+            pass
+    for pid, expected in ((host_pid, host_start), (child_pid, child_start)):
+        if start_ticks(pid) != expected:
+            continue
         try:
             os.kill(pid, sig)
         except ProcessLookupError:
             pass
     time.sleep(0.25)
-if start_ticks(host_pid) or start_ticks(child_pid):
+if (
+    start_ticks(host_pid) == host_start
+    or start_ticks(child_pid) == child_start
+):
     raise SystemExit(42)
+try:
+    os.unlink(path)
+except FileNotFoundError:
+    pass
 print("__REAPED__")
 """
         command = f"python3 -c {shlex.quote(script)}"
@@ -656,6 +669,17 @@ print("__REAPED__")
                 out,
             )
         return confirmed
+
+    async def abort_spawned(
+        self,
+        spawned: SpawnedHost,
+        session_id: str,
+    ) -> bool:
+        """Reap one launched remote Host and remove its authority record."""
+        return await self._abort_remote_launch(
+            spawned.state_file,
+            session_id,
+        )
 
     async def _authority_path(self, session_id: str) -> str:
         get_home = getattr(self._transport, "home_dir", None)

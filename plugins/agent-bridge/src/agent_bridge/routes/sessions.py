@@ -358,6 +358,37 @@ async def start_session(req: StartSessionRequest, request: Request):
                    "accepting a new session; retry shortly.",
         )
 
+    if req.parity_fault:
+        from ..protocol import FAILED_ACP_HANDSHAKE_FAULT
+
+        if req.parity_fault != FAILED_ACP_HANDSHAKE_FAULT:
+            raise HTTPException(status_code=400, detail="unsupported parity fault")
+        if (
+            not req.force_new
+            or not req.agent
+            or not (req.caller_id or "").startswith("venue-parity:")
+        ):
+            raise HTTPException(
+                status_code=403,
+                detail="parity start faults require an explicit force-new "
+                "venue-parity caller and a named remote target",
+            )
+        active = [
+            session.session_id
+            for session in mgr.list_sessions()
+            if session.status not in {
+                SessionStatus.FAILED,
+                SessionStatus.ENDED,
+                SessionStatus.STOPPED,
+            }
+        ]
+        if active:
+            raise HTTPException(
+                status_code=409,
+                detail="parity start fault refuses another active managed "
+                f"session: {active[0]}",
+            )
+
     # Caller-affinity reuse: if the caller supplies a caller_id (e.g. a
     # Neuron-Forge worktree GUID) and an alive session already exists for
     # that (agent, caller_id) pair, return it instead of spawning a new one.
@@ -426,6 +457,21 @@ async def start_session(req: StartSessionRequest, request: Request):
             cwd=req.target_dir or ".",
         )
 
+    if req.parity_fault:
+        is_remote = (
+            isinstance(target.container, dict)
+            and bool(target.container.get("name"))
+        ) or (
+            isinstance(target.codespace, dict)
+            and bool(target.codespace.get("name"))
+        )
+        if not is_remote:
+            raise HTTPException(
+                status_code=400,
+                detail="failed ACP handshake parity requires a structured "
+                "container or CodeSpace target",
+            )
+
     # Per-session env overrides (e.g. BYOK provider selection) merge onto the
     # resolved agent's declared env, per-session winning. Applied to the spawned
     # Copilot process by the transport (``env.update(target.env)``).
@@ -439,6 +485,7 @@ async def start_session(req: StartSessionRequest, request: Request):
             copilot_args=req.copilot_args,
             caller_owner_ref=req.caller_owner_ref,
             model=req.model, effort=req.effort,
+            parity_fault=req.parity_fault,
         )
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
@@ -453,10 +500,18 @@ async def start_session(req: StartSessionRequest, request: Request):
             },
         )
 
+    parity_fault_result = None
+    if req.parity_fault:
+        parity_fault_result = await mgr.finalize_parity_fault_start(
+            session,
+            req.parity_fault,
+        )
+
     return StartSessionResponse(
         session_id=session.session_id,
         name=session.name,
         status=session.status,
+        parity_fault_result=parity_fault_result,
     )
 
 

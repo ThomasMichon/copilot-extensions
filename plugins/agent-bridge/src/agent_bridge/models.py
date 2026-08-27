@@ -142,6 +142,10 @@ class StartSessionRequest(BaseModel):
     #                                      worktree's owner_ref so its finalize
     #                                      settles the caller's obligation
     force_new: bool = False  # skip caller_id reuse and always create a fresh session
+    # Harness-only remote launch fault. The sessions route accepts the sole
+    # supported value only for an exclusive ``venue-parity:`` caller using
+    # ``force_new``; ordinary callers cannot alter the far-side ACP command.
+    parity_fault: str | None = None
     # Break-glass override for the session-lifecycle head guard (agent-fabric
     # `single-current-session-per-worktree`). When targeting an *existing*
     # worktree (``worktree_id`` set) whose ground-layer head session is still
@@ -249,6 +253,9 @@ class StartSessionResponse(BaseModel):
     # every construction site advertises it without duplication.
     protocol_version: int = HTTP_PROTOCOL_VERSION
     min_protocol_version: int = HTTP_PROTOCOL_MIN_SUPPORTED
+    # Present only for an explicit harness-owned start fault. Contains boolean
+    # cleanup evidence; never process output, credentials, or provider details.
+    parity_fault_result: dict[str, Any] | None = None
 
 
 class SubmitPromptResponse(BaseModel):

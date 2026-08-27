@@ -185,10 +185,13 @@ def _container_remote_child_argv(
     container_target: dict[str, Any],
     prepared: dict[str, Any],
     plugin_dirs: list[str],
+    *,
+    acp_command_override: str | None = None,
 ) -> list[str]:
     """Build the far-side child command from provider env + bridge policy."""
     acp_command = _append_plugin_dirs(
-        str(prepared.get("acp_command") or container_target["acp_command"]),
+        acp_command_override
+        or str(prepared.get("acp_command") or container_target["acp_command"]),
         plugin_dirs,
     )
     remote_env = prepared.get("remote_env")
@@ -196,6 +199,18 @@ def _container_remote_child_argv(
         env_path = shlex.quote(str(remote_env))
         acp_command = f". {env_path}; rm -f {env_path}; {acp_command}"
     return ["bash", "-lc", acp_command]
+
+
+def _failed_acp_handshake_command() -> str:
+    """Return a deterministic non-ACP child that rejects initialize."""
+    script = (
+        "import json,sys;"
+        "request=json.loads(sys.stdin.readline());"
+        "print(json.dumps({'jsonrpc':'2.0','id':request.get('id'),"
+        "'error':{'code':-32603,'message':'injected handshake failure'}}),"
+        "flush=True)"
+    )
+    return f"exec python3 -c {shlex.quote(script)}"
 
 
 # ``agent-codespaces claim`` exits with this code on a live claim conflict
@@ -305,26 +320,29 @@ def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _release_codespace_claim(codespace_name: str, owner: str) -> None:
-    """Release a Session-Host CodeSpace claim on session end (#897). Best-effort.
+def _release_codespace_claim(codespace_name: str, owner: str) -> bool:
+    """Release a Session-Host CodeSpace claim and report success.
 
-    Symmetric with :func:`_claim_codespace`; a failure is swallowed because the
-    worktree-liveness sweep (and finalize-release) is the durable backstop.
+    Ordinary teardown remains best-effort, while destructive parity rollback
+    uses the return value to avoid claiming cleanup before ownership is gone.
     """
     if os.environ.get("AGENT_CODESPACES_DISABLE_CLAIM"):
-        return
+        return True
     if not owner or not codespace_name:
-        return
+        return True
     binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
-        return
+        return False
     creationflags = no_window_flags()
-    with contextlib.suppress(Exception):
-        subprocess.run(
+    try:
+        result = subprocess.run(
             [binstub, "release-claim", codespace_name, "--owner", owner],
             capture_output=True, text=True, timeout=30,
             creationflags=creationflags,
         )
+    except Exception:
+        return False
+    return result.returncode == 0
 
 
 # Session states that "occupy" a workspace -- a workspace with a session
@@ -620,6 +638,7 @@ class Session:
         # recreation. Deliberately in-memory only: MCP definitions may contain
         # launch credentials and must not be serialized into sessions.db.
         self.mcp_servers: list[dict[str, Any]] = []
+        self.parity_fault_result: dict[str, Any] | None = None
         # Structured milestone markers the dispatched agent has reported via
         # `PROGRESS: key=value` lines (e.g. build=ok, commit=<sha>, pr=<id>) --
         # captured from agent_message text and surfaced in status (#46.3).
@@ -1449,6 +1468,7 @@ class SessionManager:
         load_session_id: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        parity_fault_result: dict[str, Any] | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).
@@ -1572,10 +1592,24 @@ class SessionManager:
                         "handshake_timeout_s": self._timeouts.session_start,
                         "session_new_timeout_s": self._timeouts.session_new,
                     })
-                with contextlib.suppress(Exception):
-                    await sock.terminate()
-                with contextlib.suppress(Exception):
-                    await spawned.aclose()
+                cleanup_confirmed = await self._rollback_failed_host_launch(
+                    spawner,
+                    spawned,
+                    sock,
+                    streams,
+                    session_id,
+                    parity_fault_result,
+                )
+                if not cleanup_confirmed:
+                    from .session_host.spawner import (
+                        RemoteSpawnCleanupPendingError,
+                    )
+
+                    raise RemoteSpawnCleanupPendingError(
+                        "remote Session Host ACP initialization failed and "
+                        f"cleanup is inconclusive for {session_id}; retaining "
+                        "target ownership"
+                    ) from exc
                 raise ConnectError(
                     ConnectStage.LAUNCH_ACP,
                     f"Copilot ACP launch (session host) timed out "
@@ -1587,11 +1621,25 @@ class SessionManager:
                     retryable=False,
                     cause=exc,
                 ) from exc
-            except Exception:
-                with contextlib.suppress(Exception):
-                    await sock.terminate()
-                with contextlib.suppress(Exception):
-                    await spawned.aclose()
+            except Exception as exc:
+                cleanup_confirmed = await self._rollback_failed_host_launch(
+                    spawner,
+                    spawned,
+                    sock,
+                    streams,
+                    session_id,
+                    parity_fault_result,
+                )
+                if not cleanup_confirmed:
+                    from .session_host.spawner import (
+                        RemoteSpawnCleanupPendingError,
+                    )
+
+                    raise RemoteSpawnCleanupPendingError(
+                        "remote Session Host ACP initialization failed and "
+                        f"cleanup is inconclusive for {session_id}; retaining "
+                        "target ownership"
+                    ) from exc
                 raise
 
         if self._host_index is not None:
@@ -1622,6 +1670,46 @@ class SessionManager:
                 await bridge_lock.write(
                     session_id, target.worktree_id, spawned.child_pid)
         return client, acp_sid
+
+    async def _rollback_failed_host_launch(
+        self,
+        spawner: Any,
+        spawned: Any,
+        sock: Any,
+        streams: Any,
+        session_id: str,
+        result: dict[str, Any] | None,
+    ) -> bool:
+        """Reap a failed Host launch and remove every local holder."""
+        with contextlib.suppress(Exception):
+            await sock.terminate()
+        with contextlib.suppress(Exception):
+            await streams.aclose()
+        with contextlib.suppress(Exception):
+            await sock.close()
+
+        remote = getattr(spawned, "boundary", "local") != "local"
+        confirmed = not remote
+        if remote:
+            abort = getattr(spawner, "abort_spawned", None)
+            if callable(abort):
+                try:
+                    confirmed = bool(await abort(spawned, session_id))
+                except Exception:
+                    confirmed = False
+        with contextlib.suppress(Exception):
+            await spawned.aclose()
+        self._forwards.pop(session_id, None)
+        self._relays.pop(session_id, None)
+        if result is not None:
+            result.update({
+                "host_process_removed": confirmed,
+                "child_process_removed": confirmed,
+                "remote_authority_removed": confirmed,
+                "forward_removed": session_id not in self._forwards,
+                "relay_removed": session_id not in self._relays,
+            })
+        return confirmed
 
     # -- boundary-aware Session Host liveness ---------------------------------
     def _rec_host_alive(self, rec: Any) -> bool:
@@ -3133,6 +3221,7 @@ class SessionManager:
         caller_owner_ref: str | None = None,
         model: str | None = None,
         effort: str | None = None,
+        parity_fault: str | None = None,
     ) -> Session:
         """Create and start a new agent session.
 
@@ -3158,6 +3247,10 @@ class SessionManager:
         """
         if self._draining:
             raise DaemonDrainingError("session")
+        from .protocol import FAILED_ACP_HANDSHAKE_FAULT
+
+        if parity_fault not in {None, FAILED_ACP_HANDSHAKE_FAULT}:
+            raise ValueError(f"unsupported parity fault: {parity_fault}")
         # Per-session copilot args: append to the resolved target's args for
         # THIS spawn only (a fresh target copy so a shared/cached AgentConfig
         # target is never mutated). Every spawn path appends target.copilot_args,
@@ -3311,6 +3404,11 @@ class SessionManager:
                 and target.container.get("name")
                 else None
             )
+            if parity_fault:
+                session.parity_fault_result = {
+                    "fault": parity_fault,
+                    "provider_cleanup": container_target is None,
+                }
 
             if target.type == "local":
                 # Session-Host mode: the child lives in a survivable host that
@@ -3371,10 +3469,14 @@ class SessionManager:
                         or container_target.get("workspace_folder")
                         or None
                     )
-                    plugin_dirs = await _resolve_remote_ai_plugin_dirs(
-                        container_spawner.transport,
-                        f"container:{container_target['name']}",
-                        remote_cwd,
+                    plugin_dirs = (
+                        []
+                        if parity_fault
+                        else await _resolve_remote_ai_plugin_dirs(
+                            container_spawner.transport,
+                            f"container:{container_target['name']}",
+                            remote_cwd,
+                        )
                     )
                     client, acp_sid = await self._connect_via_session_host(
                         target,
@@ -3388,10 +3490,16 @@ class SessionManager:
                             container_target,
                             prepared,
                             plugin_dirs,
+                            acp_command_override=(
+                                _failed_acp_handshake_command()
+                                if parity_fault
+                                else None
+                            ),
                         ),
                         remote_cwd=remote_cwd,
                         model=model,
                         effort=effort,
+                        parity_fault_result=session.parity_fault_result,
                     )
                 except Exception as exc:
                     if isinstance(exc, RemoteSpawnCleanupPendingError):
@@ -3407,16 +3515,34 @@ class SessionManager:
                                     provisional,
                                     "incomplete container Session Host launch",
                                 )
-                    else:
+                    elif not parity_fault:
                         self._release_container_lock(session_id)
                     raise
                 finally:
                     if prepared is not None:
-                        with contextlib.suppress(Exception):
-                            await cleanup_container_session_host(
+                        try:
+                            cleaned = await cleanup_container_session_host(
                                 container_target,
                                 prepared,
                             )
+                        except Exception:
+                            cleaned = False
+                            log.warning(
+                                "Container launch-env cleanup failed for %s",
+                                container_target["name"],
+                                exc_info=True,
+                            )
+                        if session.parity_fault_result is not None:
+                            session.parity_fault_result[
+                                "provider_cleanup"
+                            ] = cleaned
+                            if (
+                                cleaned
+                                and session.parity_fault_result.get(
+                                    "remote_authority_removed"
+                                ) is True
+                            ):
+                                self._release_container_lock(session_id)
             elif cs_target is not None:
                 # CodeSpace Session-Host mode (#177): bootstrap the Host inside
                 # the CodeSpace, forward its loopback endpoint, and drive ACP over
@@ -3495,14 +3621,19 @@ class SessionManager:
                 # ``/workspaces/<repo>/.ai/<name>`` needs no install/egress. The
                 # flags append to the tail of ``cd <repo> && copilot --acp …``, so
                 # they land on the ``copilot`` invocation.
-                ai_plugin_dirs = await _resolve_remote_ai_plugin_dirs(
-                    cs_spawner.transport,
-                    f"codespace:{cs_target['name']}",
-                    cs_target.get("workspace_folder") or None,
+                ai_plugin_dirs = (
+                    []
+                    if parity_fault
+                    else await _resolve_remote_ai_plugin_dirs(
+                        cs_spawner.transport,
+                        f"codespace:{cs_target['name']}",
+                        cs_target.get("workspace_folder") or None,
+                    )
                 )
-                acp_command = _append_plugin_dirs(
-                    acp_command,
-                    ai_plugin_dirs,
+                acp_command = (
+                    _failed_acp_handshake_command()
+                    if parity_fault
+                    else _append_plugin_dirs(acp_command, ai_plugin_dirs)
                 )
                 if ai_plugin_dirs:
                     log.info(
@@ -3518,19 +3649,31 @@ class SessionManager:
                 # blind with no repo in view. Prefer the structured provider
                 # workspace_folder; else the cd-target parsed from acp_command.
                 remote_cwd = cs_target.get("workspace_folder") or None
-                client, acp_sid = await self._connect_via_session_host(
-                    target,
-                    tracker=tracker,
-                    session_id=session_id,
-                    on_acp_event=on_acp_event,
-                    permission_callback=permission_callback,
-                    mcp_servers=mcp_servers,
-                    spawner=cs_spawner,
-                    remote_child_argv=remote_argv,
-                    remote_cwd=remote_cwd,
-                    model=model,
-                    effort=effort,
-                )
+                from .session_host.spawner import RemoteSpawnCleanupPendingError
+
+                try:
+                    client, acp_sid = await self._connect_via_session_host(
+                        target,
+                        tracker=tracker,
+                        session_id=session_id,
+                        on_acp_event=on_acp_event,
+                        permission_callback=permission_callback,
+                        mcp_servers=mcp_servers,
+                        spawner=cs_spawner,
+                        remote_child_argv=remote_argv,
+                        remote_cwd=remote_cwd,
+                        model=model,
+                        effort=effort,
+                        parity_fault_result=session.parity_fault_result,
+                    )
+                except RemoteSpawnCleanupPendingError:
+                    raise
+                except Exception:
+                    if not parity_fault:
+                        claim_key = _codespace_claim_key(session.target)
+                        if claim_key is not None:
+                            _release_codespace_claim(*claim_key)
+                    raise
             elif self._is_codespace_target(target):
                 # A CodeSpace target MUST run under a Session Host: only then does
                 # copilot's stdio belong to a survivable host on the far side, so
@@ -3716,6 +3859,98 @@ class SessionManager:
 
         session.touch()
         return session
+
+    async def finalize_parity_fault_start(
+        self,
+        session: Session,
+        fault: str,
+    ) -> dict[str, Any]:
+        """Remove a confirmed failed-start transaction and report booleans."""
+        result = dict(session.parity_fault_result or {})
+        result["fault"] = fault
+        if session.status != SessionStatus.FAILED:
+            with contextlib.suppress(Exception):
+                await self.end_session(session.session_id, force=True)
+            raise RuntimeError(
+                "failed ACP handshake parity injection unexpectedly started "
+                "a usable session"
+            )
+        cleanup_confirmed = all(
+            result.get(name) is True
+            for name in (
+                "host_process_removed",
+                "child_process_removed",
+                "remote_authority_removed",
+                "forward_removed",
+                "relay_removed",
+                "provider_cleanup",
+            )
+        )
+        if not cleanup_confirmed:
+            claim_key = _codespace_claim_key(session.target)
+            ownership_retained = (
+                session.session_id in self._container_lock_sessions
+                or claim_key is not None
+            )
+            result.update({
+                "cleanup_confirmed": False,
+                "ownership_retained": ownership_retained,
+                "durable_session_retained": (
+                    self._db.get_session(session.session_id) is not None
+                ),
+            })
+            return result
+
+        session_id = session.session_id
+        claim_key = _codespace_claim_key(session.target)
+        claim_removed = (
+            True
+            if claim_key is None
+            else _release_codespace_claim(*claim_key)
+        )
+        result["codespace_claim_removed"] = claim_removed
+        if not claim_removed:
+            result.update({
+                "cleanup_confirmed": False,
+                "ownership_retained": True,
+                "durable_session_retained": (
+                    self._db.get_session(session_id) is not None
+                ),
+            })
+            return result
+        self._release_container_lock(session_id)
+        await self.end_session(session_id, force=True)
+        host_index_removed = (
+            self._host_index is None
+            or self._host_index.get(session_id) is None
+        )
+        target_lock_removed = session_id not in self._container_lock_sessions
+        result.update({
+            "session_row_removed": self._db.get_session(session_id) is None,
+            "session_memory_removed": session_id not in self._sessions,
+            "host_index_removed": host_index_removed,
+            "forward_removed": session_id not in self._forwards,
+            "relay_removed": session_id not in self._relays,
+            "target_lock_removed": target_lock_removed,
+            "ownership_retained": False,
+        })
+        result["cleanup_confirmed"] = all(
+            result.get(name) is True
+            for name in (
+                "host_process_removed",
+                "child_process_removed",
+                "remote_authority_removed",
+                "provider_cleanup",
+                "session_row_removed",
+                "session_memory_removed",
+                "host_index_removed",
+                "forward_removed",
+                "relay_removed",
+                "target_lock_removed",
+                "codespace_claim_removed",
+            )
+        )
+        return result
 
     async def resume_session(
         self,

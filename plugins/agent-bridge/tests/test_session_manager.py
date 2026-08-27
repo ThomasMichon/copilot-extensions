@@ -12,6 +12,7 @@ import pytest
 from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
+from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_manager import (
     _STALL_AFTER_S,
     Session,
@@ -538,6 +539,132 @@ async def test_trusted_container_selects_remote_session_host(
 
 
 @pytest.mark.asyncio
+async def test_container_cleanup_exception_does_not_fail_successful_start(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    prepared = {
+        "name": "example-1",
+        "workspace_folder": "/workspaces/example",
+        "ssh": {"host_alias": "agent-container-example-1"},
+        "acp_command": "copilot --acp --stdio",
+        "state_command": ["agent-containers", "session-host-state", "example-1"],
+    }
+
+    async def fake_connect(self, target, **kwargs):
+        client = MagicMock()
+        client.is_running = True
+        client.pid = 12345
+        return client, "acp-container-123"
+
+    async def fail_cleanup(target, result):
+        raise RuntimeError("provider unavailable")
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "prepare_container_session_host",
+        AsyncMock(return_value=prepared),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.ensure_container_ready",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "cleanup_container_session_host",
+        fail_cleanup,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.build_container_spawner",
+        lambda *args, **kwargs: SimpleNamespace(transport=object()),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        SessionManager,
+        "_connect_via_session_host",
+        fake_connect,
+    )
+    monkeypatch.setattr(
+        SessionManager, "_acquire_container_lock", lambda *args: None,
+    )
+    monkeypatch.setattr(
+        SessionManager, "_release_container_lock", lambda *args: None,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.relay_state.get_live_relay_port",
+        lambda: 61234,
+    )
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "example-1",
+            "workspace_folder": "/workspaces/example",
+            "provider_command": ["agent-containers"],
+            "acp_command": "copilot --acp --stdio",
+        },
+    )
+
+    session = await SessionManager(tmp_db).start_session(
+        target,
+        agent_name="container:example-1",
+    )
+
+    assert session.status == SessionStatus.IDLE
+    assert session.acp_session_id == "acp-container-123"
+
+
+@pytest.mark.asyncio
+async def test_codespace_handshake_failure_releases_claim(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    released = []
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._claim_codespace",
+        lambda *_args: (True, ""),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._release_codespace_claim",
+        lambda *args: released.append(args) or True,
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: SimpleNamespace(transport=object()),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._resolve_remote_ai_plugin_dirs",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        SessionManager,
+        "_connect_via_session_host",
+        AsyncMock(side_effect=RuntimeError("handshake rejected")),
+    )
+    target = SpawnTarget(
+        type="command",
+        caller_worktree="caller-1",
+        codespace={
+            "name": "example-codespace",
+            "repo": "example/repo",
+            "acp_command": "copilot --acp --stdio",
+            "workspace_folder": "/workspaces/example",
+        },
+    )
+
+    session = await SessionManager(tmp_db).start_session(
+        target,
+        agent_name="codespace:example-codespace",
+        caller_id="caller-1",
+    )
+
+    assert session.status == SessionStatus.FAILED
+    assert released == [("example-codespace", "caller-1")]
+
+
+@pytest.mark.asyncio
 async def test_stopped_container_is_authoritative_remote_host_death(
     tmp_db,
     monkeypatch,
@@ -646,6 +773,248 @@ async def test_container_state_probe_failure_retains_remote_authority(
     assert recovered == 0
     assert manager._host_index.removed == []
     assert session.session_id in manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_failed_handshake_rollback_removes_remote_holders(
+    tmp_db,
+) -> None:
+    calls = []
+
+    class FakeResource:
+        async def terminate(self):
+            calls.append("terminate")
+
+        async def aclose(self):
+            calls.append("streams-close")
+
+        async def close(self):
+            calls.append("socket-close")
+
+    class FakeSpawned:
+        boundary = "container"
+
+        async def aclose(self):
+            calls.append("spawn-close")
+
+    class FakeSpawner:
+        async def abort_spawned(self, spawned, session_id):
+            assert isinstance(spawned, FakeSpawned)
+            assert session_id == "session-1"
+            calls.append("remote-abort")
+            return True
+
+    manager = SessionManager(tmp_db)
+    manager._forwards["session-1"] = object()
+    manager._relays["session-1"] = [object()]
+    result = {}
+
+    confirmed = await manager._rollback_failed_host_launch(
+        FakeSpawner(),
+        FakeSpawned(),
+        FakeResource(),
+        FakeResource(),
+        "session-1",
+        result,
+    )
+
+    assert confirmed is True
+    assert calls == [
+        "terminate",
+        "streams-close",
+        "socket-close",
+        "remote-abort",
+        "spawn-close",
+    ]
+    assert result == {
+        "host_process_removed": True,
+        "child_process_removed": True,
+        "remote_authority_removed": True,
+        "forward_removed": True,
+        "relay_removed": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_finalize_failed_handshake_removes_session_and_target_lock(
+    tmp_db,
+) -> None:
+    class FakeLock:
+        released = False
+
+        def release(self):
+            self.released = True
+
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-1"},
+    )
+    session = Session(
+        "session-1",
+        "failed",
+        target,
+        agent_name="container:example-1",
+        caller_id="venue-parity:test",
+    )
+    session.status = SessionStatus.FAILED
+    session.parity_fault_result = {
+        "host_process_removed": True,
+        "child_process_removed": True,
+        "remote_authority_removed": True,
+        "provider_cleanup": True,
+        "forward_removed": True,
+        "relay_removed": True,
+    }
+    session.event_log = EventLog(db=tmp_db, session_id=session.session_id)
+    manager._sessions[session.session_id] = session
+    lock = FakeLock()
+    manager._container_locks["example-1"] = (lock, session.session_id)
+    manager._container_lock_sessions[session.session_id] = "example-1"
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=session.agent_name,
+        caller_id=session.caller_id,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.FAILED.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+
+    result = await manager.finalize_parity_fault_start(
+        session,
+        FAILED_ACP_HANDSHAKE_FAULT,
+    )
+
+    assert result["cleanup_confirmed"] is True
+    assert result["session_row_removed"] is True
+    assert result["session_memory_removed"] is True
+    assert result["target_lock_removed"] is True
+    assert result["ownership_retained"] is False
+    assert lock.released is True
+
+
+@pytest.mark.asyncio
+async def test_failed_handshake_provider_cleanup_retains_container_lock(
+    tmp_db,
+) -> None:
+    class FakeLock:
+        def release(self):
+            raise AssertionError("inconclusive cleanup must retain the lock")
+
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-1"},
+    )
+    session = Session(
+        "session-1",
+        "failed",
+        target,
+        agent_name="container:example-1",
+        caller_id="venue-parity:test",
+    )
+    session.status = SessionStatus.FAILED
+    session.parity_fault_result = {
+        "host_process_removed": True,
+        "child_process_removed": True,
+        "remote_authority_removed": True,
+        "provider_cleanup": False,
+        "forward_removed": True,
+        "relay_removed": True,
+    }
+    session.event_log = EventLog(db=tmp_db, session_id=session.session_id)
+    manager._sessions[session.session_id] = session
+    manager._container_locks["example-1"] = (
+        FakeLock(),
+        session.session_id,
+    )
+    manager._container_lock_sessions[session.session_id] = "example-1"
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=session.agent_name,
+        caller_id=session.caller_id,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.FAILED.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+
+    result = await manager.finalize_parity_fault_start(
+        session,
+        FAILED_ACP_HANDSHAKE_FAULT,
+    )
+
+    assert result["cleanup_confirmed"] is False
+    assert result["ownership_retained"] is True
+    assert result["durable_session_retained"] is True
+    with pytest.raises(RuntimeError, match="already owned"):
+        manager._acquire_container_lock("session-2", "example-1")
+
+
+@pytest.mark.asyncio
+async def test_failed_handshake_claim_release_failure_retains_session(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "agent_bridge.session_manager._release_codespace_claim",
+        lambda *_args: False,
+    )
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        caller_worktree="venue-parity:test",
+        codespace={
+            "name": "example-codespace",
+            "repo": "example/repo",
+            "acp_command": "copilot --acp --stdio",
+        },
+    )
+    session = Session(
+        "session-1",
+        "failed",
+        target,
+        agent_name="codespace:example-codespace",
+        caller_id="venue-parity:test",
+    )
+    session.status = SessionStatus.FAILED
+    session.parity_fault_result = {
+        "host_process_removed": True,
+        "child_process_removed": True,
+        "remote_authority_removed": True,
+        "provider_cleanup": True,
+        "forward_removed": True,
+        "relay_removed": True,
+    }
+    session.event_log = EventLog(db=tmp_db, session_id=session.session_id)
+    manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=session.agent_name,
+        caller_id=session.caller_id,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.FAILED.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+
+    result = await manager.finalize_parity_fault_start(
+        session,
+        FAILED_ACP_HANDSHAKE_FAULT,
+    )
+
+    assert result["cleanup_confirmed"] is False
+    assert result["codespace_claim_removed"] is False
+    assert result["ownership_retained"] is True
+    assert result["durable_session_retained"] is True
+    assert manager.get_session(session.session_id) is session
 
 
 class _ParityRelayProcess:
@@ -2250,6 +2619,23 @@ class TestClaimCodespaceHelper:
         monkeypatch.setattr(sm.subprocess, "run", _run)
         assert sm._claim_codespace("cs", "/wt/a") == (True, "")
         assert called["ran"] is False
+
+
+class TestReleaseCodespaceClaimHelper:
+    def test_missing_binstub_is_not_confirmed(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.delenv("AGENT_CODESPACES_DISABLE_CLAIM", raising=False)
+        monkeypatch.setattr(sm.shutil, "which", lambda _: None)
+
+        assert sm._release_codespace_claim("cs", "/wt/a") is False
+
+    def test_disabled_claim_needs_no_release(self, monkeypatch) -> None:
+        from agent_bridge import session_manager as sm
+
+        monkeypatch.setenv("AGENT_CODESPACES_DISABLE_CLAIM", "1")
+
+        assert sm._release_codespace_claim("cs", "/wt/a") is True
 
 
 class TestCodespaceClaimKey:

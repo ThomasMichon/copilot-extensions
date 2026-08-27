@@ -145,19 +145,19 @@ async def ensure_container_ready(target: dict[str, Any]) -> None:
 async def cleanup_container_session_host(
     target: dict[str, Any],
     prepared: dict[str, Any],
-) -> None:
+) -> bool:
     """Best-effort removal of one launch-only secret env file."""
     from ..transport import _reresolve_stale_interpreter
 
     remote_env = prepared.get("remote_env")
     if not remote_env:
-        return
+        return True
     command = _reresolve_stale_interpreter(
         list(target.get("provider_command") or [])
     )
     name = str(target.get("name") or "")
     if not command or not name:
-        return
+        return False
     rc, out, err = await _run_provider(
         [
             *command,
@@ -175,6 +175,8 @@ async def cleanup_container_session_host(
             rc,
             (err or out).decode(errors="replace").strip(),
         )
+        return False
+    return True
 
 
 class ContainerTransport:

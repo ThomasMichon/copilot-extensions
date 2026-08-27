@@ -171,7 +171,7 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
 def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
     plugin = tmp_path / "plugin"
     bin_dir = plugin / "bin"
-    bin_dir.mkdir()
+    bin_dir.mkdir(parents=True)
     cmd = bin_dir / "agent-bridge.cmd"
     shutil.copy2(PLUGIN / "bin" / "agent-bridge.cmd", cmd)
     shutil.copy2(PLUGIN / "bin" / "agent-bridge.ps1", bin_dir)
@@ -185,7 +185,7 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (plugin / "fake-python.cmd").write_text(
-        '@echo off\r\n<nul set /p "=%*::"\r\nmore\r\n',
+        '@echo off\r\n<nul set /p "=%*::"\r\nmore\r\nexit /b 0\r\n',
         encoding="utf-8",
     )
 
@@ -195,7 +195,10 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
         "COPILOT_PLUGIN_ROOT": str(plugin),
     }
     result = subprocess.run(
-        [comspec, "/d", "/s", "/c", f'"{cmd}" create target --prompt-file -'],
+        [
+            comspec, "/d", "/s", "/c", str(cmd),
+            "create", "target", "--prompt-file", "-",
+        ],
         input="task body",
         env=env,
         capture_output=True,

@@ -289,6 +289,7 @@ async def test_post_launch_failure_requires_confirmed_remote_cleanup(
             session_id="sess1",
         )
     assert any(command.startswith("python3 -c ") for command in transport.runs)
+    assert any("os.unlink(path)" in command for command in transport.runs)
 
 
 @pytest.mark.asyncio
