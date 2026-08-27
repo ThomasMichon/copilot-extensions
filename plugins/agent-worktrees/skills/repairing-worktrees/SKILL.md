@@ -24,7 +24,15 @@ description: >
 
 # Repairing worktrees & sessions
 
-`agent-worktrees doctor` is the single repeatable primitive for worktree/session
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+every direct runtime operation below. Replace
+`<agent-worktrees catalog argv[0]>` with that raw path, quote it at each shell
+call site, and never search `PATH`. Cross-plugin
+`<agent-dispatch catalog argv[0]>` examples use that plugin's exact catalog
+path under the same rule.
+Project-binstub examples remain project entry points.
+
+`<agent-worktrees catalog argv[0]> doctor` is the single repeatable primitive for worktree/session
 health. It is **per-project** (run it through each project's binstub, e.g.
 `dotfiles worktrees doctor`, `test-chamber worktrees doctor`) and **read-only by default**.
 
@@ -123,11 +131,11 @@ worktree's **real** session sits unregistered on disk — backfill **skips it**
 bogus id, which has no on-disk turns → **0 turns, forever.** Recover by
 registering the real session and promoting it over the placeholder:
    ```
-   agent-worktrees register-session --cwd <worktree-path> --session-id <real-id>
-   agent-worktrees link-succession --worktree <id> \
+   <agent-worktrees catalog argv[0]> register-session --cwd <worktree-path> --session-id <real-id>
+   <agent-worktrees catalog argv[0]> link-succession --worktree <id> \
        --predecessor <placeholder-id> --successor <real-id> \
        --predecessor-state concluded          # retire the placeholder, promote the real head
-   agent-worktrees list-sessions --worktree <id>   # verify: real session is head, turns > 0
+   <agent-worktrees catalog argv[0]> list-sessions --worktree <id>   # verify: real session is head, turns > 0
    ```
    (`register-session` resolves the project from `--cwd`; pass the target
    worktree's path when running from a *different* worktree.)
@@ -138,8 +146,8 @@ have **additional** real on-disk sessions that never got registered (again,
 backfill skips non-empty registries). Register each missing session, then, if the
 chronologically-latest one should be head, promote it:
    ```
-   agent-worktrees register-session --cwd <worktree-path> --session-id <missing-id>   # repeat, oldest→newest
-   agent-worktrees link-succession --worktree <id> \
+   <agent-worktrees catalog argv[0]> register-session --cwd <worktree-path> --session-id <missing-id>   # repeat, oldest→newest
+   <agent-worktrees catalog argv[0]> link-succession --worktree <id> \
        --predecessor <old-head> --successor <newest-id> --predecessor-state handed-off
    ```
    `register-session` appends and may stamp the *first* newly-registered session
@@ -306,7 +314,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
   — worktrees then resolve **asynchronously over a duration**, at scale, instead
   of blocking this session. Use the **agent-dispatch** queue:
   ```
-  agent-dispatch create "Close out <id>" \
+  <agent-dispatch catalog argv[0]> create "Close out <id>" \
     --target-worktree <id> --dedup-key closeout:<id> \
     --goal "Wind down cleanly — everything filed or built out as efforts" \
     --done-criteria "cross-repo PRs landed/closed; Codespaces disconnected; \
@@ -317,7 +325,7 @@ blindly orphans those. Close-out is deeper than the local git/liveness check.
       disconnect Codespaces, finalize cross-repo worktrees, release/settle your \
       claims, then finalize."
   ```
-  **Dedup first** (`agent-dispatch find` / `sweep`) so you file one close-out per
+  **Dedup first** (`<agent-dispatch catalog argv[0]> find` / `sweep`) so you file one close-out per
   worktree; workers then `claim` → `start` → `complete` it on their own cadence.
   `--spawn` (with `--spawn-backend bridge` or `embody`) kicks a worker
   immediately; otherwise the task waits in the queue for async pickup — prefer the
