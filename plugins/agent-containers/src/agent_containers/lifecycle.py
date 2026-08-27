@@ -416,11 +416,21 @@ def stop_container(name: str, timeout: float = 60.0) -> None:
         raise RuntimeError(f"docker stop {name} failed: {res.stderr.strip()}")
 
 
-def remove_container(name: str, force: bool = False) -> None:
+def remove_container(
+    name: str,
+    force: bool = False,
+    *,
+    timeout: float = 120.0,
+) -> None:
     """Remove a container."""
     args = ["rm", name]
     if force:
         args.insert(1, "-f")
-    res = _docker(args)
+    try:
+        res = _docker(args, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"docker rm {name} did not finish within {timeout:.0f}s"
+        ) from exc
     if res.returncode != 0:
         raise RuntimeError(f"docker rm {name} failed: {res.stderr.strip()}")

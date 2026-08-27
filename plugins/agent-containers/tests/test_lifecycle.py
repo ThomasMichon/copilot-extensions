@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+
+import pytest
+
 from agent_containers.config import FLEET_LABEL, ContainersConfig
 from agent_containers.fleet import _next_indices
 from agent_containers.lifecycle import (
@@ -9,6 +13,7 @@ from agent_containers.lifecycle import (
     _is_fleet_member,
     _parse_labels,
     _row_to_info,
+    remove_container,
 )
 
 
@@ -17,6 +22,16 @@ def test_parse_labels():
     assert labels["a"] == "1"
     assert labels["b"] == "two"
     assert labels["devcontainer.local_folder"] == "/x/y"
+
+
+def test_remove_container_surfaces_bounded_timeout(monkeypatch):
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(["docker", "rm"], 120)
+
+    monkeypatch.setattr("agent_containers.lifecycle._docker", timeout)
+
+    with pytest.raises(RuntimeError, match="did not finish within 120s"):
+        remove_container("example-1", force=True)
 
 
 def test_parse_labels_empty():

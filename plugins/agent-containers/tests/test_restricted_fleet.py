@@ -51,7 +51,9 @@ def test_recreate_member_replaces_one_identity_checked_trusted_container(
     monkeypatch.setattr(
         fleet_mod,
         "remove_container",
-        lambda name, force=False: calls.append(("remove", name, force)),
+        lambda name, force=False, timeout=120: calls.append(
+            ("remove", name, force, timeout)
+        ),
     )
     monkeypatch.setattr(
         fleet_mod,
@@ -69,7 +71,7 @@ def test_recreate_member_replaces_one_identity_checked_trusted_container(
     assert result["new_container_id"] == new.container_id
     assert result["identity_changed"] is True
     assert calls == [
-        ("remove", old.container_id, True),
+        ("remove", old.container_id, True, 600.0),
         ("create", "example-1"),
     ]
 

@@ -165,6 +165,7 @@ async def test_container_state_requires_running_matching_identity(
 @pytest.mark.asyncio
 async def test_recreate_reports_confirmed_old_identity_removal(monkeypatch):
     async def fake_provider(command, *, timeout):
+        assert command[-2:] == ["--timeout", "1"]
         return 2, (
             b'{"name":"odsp-web-1","old_container_removed":true,'
             b'"error":"replacement failed"}'

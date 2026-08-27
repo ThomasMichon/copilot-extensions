@@ -177,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     ns_recreate_p.add_argument("name", help="Container name")
     ns_recreate_p.add_argument("--expected-container-id", required=True)
+    ns_recreate_p.add_argument("--timeout", type=float, default=600.0)
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -452,6 +453,7 @@ def _cmd_namespace_recreate(args: argparse.Namespace) -> int:
             load_config(),
             args.name,
             expected_container_id=args.expected_container_id,
+            timeout=args.timeout,
         )
     except RecreateMemberError as exc:
         print(json.dumps({
