@@ -315,6 +315,142 @@ function Get-BootstrapPython {
     return $null
 }
 
+function Invoke-NativeCapture {
+    param([Parameter(Mandatory)][scriptblock]$Command)
+
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $exitCode = 1
+    $output = ''
+    try {
+        $output = (& $Command 2>&1 | Out-String -Width 4096).Trim()
+        $exitCode = $LASTEXITCODE
+    } catch {
+        $output = ($_ | Out-String -Width 4096).Trim()
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    return [pscustomobject]@{ ExitCode = $exitCode; Output = $output }
+}
+
+function Ensure-Uv {
+    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    if ($existing) {
+        $result = Invoke-NativeCapture { & $existing.Source --version }
+        if ($result.ExitCode -eq 0) { return $true }
+    }
+
+    $toolDir = Join-Path $InstallDir 'tool'
+    $uvPath = Join-Path $toolDir 'uv.exe'
+    if (Test-Path -LiteralPath $uvPath) {
+        $result = Invoke-NativeCapture { & $uvPath --version }
+        if ($result.ExitCode -eq 0) {
+            $env:PATH = "$toolDir;$env:PATH"
+            return $true
+        }
+        Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
+    }
+
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) {
+        $env:PROCESSOR_ARCHITEW6432
+    } else {
+        $env:PROCESSOR_ARCHITECTURE
+    }
+    $uvVersion = '0.12.6'
+    if ($arch -eq 'AMD64') {
+        $asset = 'uv-x86_64-pc-windows-msvc.zip'
+        $expectedSha256 = 'df7cb9f243eae1621400d4fcf5b1b3d90f20e264ece91b64deb3b0078abca6ef'
+    } elseif ($arch -eq 'ARM64') {
+        $asset = 'uv-aarch64-pc-windows-msvc.zip'
+        $expectedSha256 = '6dda514fbbe3152d980758e0f6347116060114d7d24932fc0ea5d8063f8b253a'
+    } else {
+        Write-Fail "uv bootstrap does not support Windows architecture: $arch"
+        return $false
+    }
+    if ($env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256) {
+        if ($env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            Write-Fail 'AGENT_BRIDGE_UV_BOOTSTRAP_SHA256 must be a 64-character hexadecimal SHA-256 digest.'
+            return $false
+        }
+        $expectedSha256 = $env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256.ToLowerInvariant()
+    }
+
+    New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
+    $urlTemplate = $env:AGENT_BRIDGE_UV_BOOTSTRAP_URL
+    if (-not $urlTemplate) {
+        $urlTemplate = "https://github.com/astral-sh/uv/releases/download/$uvVersion/{asset}"
+    }
+    $url = $urlTemplate.Replace('{asset}', $asset)
+    $archive = [IO.Path]::GetTempFileName()
+    $staging = Join-Path $InstallDir ".uv-stage-$PID"
+    $previousSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $client = $null
+    try {
+        if (Test-Path -LiteralPath $staging) {
+            Remove-Item -LiteralPath $staging -Recurse -Force `
+                -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Path $staging -Force | Out-Null
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        $client = New-Object Net.WebClient
+        $client.Headers['User-Agent'] = 'agent-bridge-bootstrap'
+        $client.DownloadFile($url, $archive)
+        $archiveStream = [IO.File]::OpenRead($archive)
+        try {
+            $sha256 = [Security.Cryptography.SHA256]::Create()
+            try {
+                $digest = $sha256.ComputeHash($archiveStream)
+                $actualSha256 = ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+            } finally {
+                $sha256.Dispose()
+            }
+        } finally {
+            $archiveStream.Dispose()
+        }
+        if ($actualSha256 -ne $expectedSha256) {
+            throw "uv archive SHA-256 mismatch for $asset (expected $expectedSha256, got $actualSha256)"
+        }
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging)
+        $uvSource = Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'uv.exe' |
+            Select-Object -First 1 -ExpandProperty FullName
+        if (-not $uvSource) { throw 'uv.exe was absent from the release archive' }
+        $uvxSource = Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'uvx.exe' |
+            Select-Object -First 1 -ExpandProperty FullName
+        if ($uvxSource) {
+            Move-Item -LiteralPath $uvxSource `
+                -Destination (Join-Path $toolDir 'uvx.exe') -Force
+        }
+        Move-Item -LiteralPath $uvSource -Destination $uvPath -Force
+    } catch {
+        Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
+        Write-Fail "Failed to vendor uv from $url`: $_"
+        Write-Fail 'Retry the installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/.'
+        return $false
+    } finally {
+        if ($client) { $client.Dispose() }
+        [Net.ServicePointManager]::SecurityProtocol = $previousSecurityProtocol
+        Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $result = Invoke-NativeCapture { & $uvPath --version }
+    if ($result.ExitCode -ne 0) {
+        Remove-Item -LiteralPath $uvPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $toolDir 'uvx.exe') `
+            -Force -ErrorAction SilentlyContinue
+        Write-Fail "Vendored uv is not executable: $($result.Output)"
+        Write-Fail 'Retry the installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/.'
+        return $false
+    }
+    $env:PATH = "$toolDir;$env:PATH"
+    Write-Ok "Vendored uv into $toolDir"
+    return $true
+}
+
 function Get-PayloadHash {
     <# Content fingerprint of the RUNTIME PAYLOAD (#935/#776/ce#811). sha256 over
        the sorted list of "<relpath>:<per-file sha256>" for pyproject.toml plus
@@ -666,8 +802,12 @@ function Get-SignedBasePython {
     $cands = @()
     if (Get-Command py -ErrorAction SilentlyContinue) {
         foreach ($v in '3.13', '3.12', '3.11', '3.10') {
-            $p = (& py "-$v" -c "import sys;print(sys.executable)" 2>$null | Out-String).Trim()
-            if ($LASTEXITCODE -eq 0 -and $p) { $cands += $p }
+            $result = Invoke-NativeCapture {
+                & py "-$v" -c 'import sys;print(sys.executable)'
+            }
+            if ($result.ExitCode -eq 0 -and $result.Output) {
+                $cands += $result.Output
+            }
         }
     }
     foreach ($c in ($cands | Select-Object -Unique)) {
@@ -708,11 +848,12 @@ function New-SignedVenv {
     } elseif ($env:OS -eq 'Windows_NT') {
         Write-Warn 'No signed system Python found -- using uv (unsigned). On Smart App Control machines, install python.org Python 3.10+ and re-run.'
     }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    & uv venv $VenvDir --python 3.10 --allow-existing 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { & uv venv $VenvDir --allow-existing 2>&1 | Out-Null }
-    $ErrorActionPreference = $prevEAP
+    $result = Invoke-NativeCapture {
+        & uv venv $VenvDir --python 3.10 --allow-existing
+    }
+    if ($result.ExitCode -ne 0) {
+        $result = Invoke-NativeCapture { & uv venv $VenvDir --allow-existing }
+    }
     return (Test-Path $VenvPython)
 }
 
@@ -1529,12 +1670,7 @@ function Invoke-Install {
     Write-Host '=== agent-bridge install ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # Prerequisite: uv
-    try { uv --version 2>&1 | Out-Null } catch {
-        Write-Fail 'uv not found on PATH (required for venv + package management)'
-        Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
-        exit 1
-    }
+    if (-not (Ensure-Uv)) { exit 1 }
 
     # Check for migration from old installer
     Invoke-MigrationCheck
@@ -2162,12 +2298,7 @@ function Invoke-Update {
     Write-Host '=== agent-bridge update ===' -ForegroundColor Cyan
     Write-Host ''
 
-    # Prerequisite: uv
-    try { uv --version 2>&1 | Out-Null } catch {
-        Write-Fail 'uv not found on PATH (required for package management)'
-        Write-Fail 'Install: https://docs.astral.sh/uv/getting-started/installation/'
-        exit 1
-    }
+    if (-not (Ensure-Uv)) { exit 1 }
 
     # Strict same-content no-op (ce#776/#777) -- checked BEFORE we stop the daemon
     # or touch the venv. Otherwise the classic same-version path below "downgrades
