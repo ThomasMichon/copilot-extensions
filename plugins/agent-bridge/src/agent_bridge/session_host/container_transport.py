@@ -209,6 +209,8 @@ async def recreate_container_for_parity(
             name,
             "--expected-container-id",
             expected_container_id,
+            "--timeout",
+            str(timeout),
         ],
         timeout=timeout,
     )

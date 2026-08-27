@@ -522,6 +522,7 @@ def recreate_member(
     name: str,
     *,
     expected_container_id: str,
+    timeout: float = 600.0,
 ) -> dict[str, str | bool]:
     """Recreate one trusted fleet member after an identity-checked remove."""
     _check_docker()
@@ -544,7 +545,7 @@ def recreate_member(
         )
 
     old_id = info.container_id
-    remove_container(old_id, force=True)
+    remove_container(old_id, force=True, timeout=timeout)
     workspace_folder = fleet.workspace_folder or config.workspace_folder
     exec_user = fleet.exec_user or config.exec_user
     try:
