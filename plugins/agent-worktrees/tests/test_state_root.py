@@ -384,6 +384,102 @@ def test_config_root_cli_honors_machine_local_stateless_config(
     assert "inside stateless checkout" in capsys.readouterr().err
 
 
+@pytest.fixture
+def contaminated_main_project_resolution(tmp_path, monkeypatch):
+    from agent_worktrees import __main__ as main
+
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    unrelated = tmp_path / "unrelated"
+    knowledge = tmp_path / "knowledge"
+    anchor.mkdir()
+    unrelated.mkdir()
+    knowledge.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+    configs = {
+        "harness": _config(
+            "harness",
+            stateless=True,
+            knowledge_repo="knowledge",
+            anchor=str(anchor),
+        ),
+        "unrelated": _config("unrelated", anchor=str(unrelated)),
+    }
+    monkeypatch.setattr(
+        main.inst,
+        "read_projects_registry",
+        lambda: {
+            "projects": {
+                "harness": {"anchor": str(anchor)},
+                "unrelated": {"anchor": str(unrelated)},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: configs[main.cfg.active_project()],
+    )
+    monkeypatch.setattr(sr, "_checkout_path", lambda name: (
+        str(knowledge) if name == "knowledge" else None
+    ))
+    monkeypatch.chdir(sibling)
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+    main.cfg.set_active_project(None)
+    yield main, sibling, knowledge
+    main.cfg.set_active_project(None)
+
+
+def test_main_config_root_contamination_cannot_bypass_sibling_guard(
+    contaminated_main_project_resolution,
+    capsys,
+):
+    main, sibling, _knowledge = contaminated_main_project_resolution
+
+    rc = main.main([
+        "config-root",
+        "--destination",
+        str(sibling / "generated"),
+    ])
+
+    assert rc == 3
+    assert main.cfg.active_project() == "harness"
+    assert "inside stateless checkout" in capsys.readouterr().err
+
+
+def test_main_state_root_contamination_cannot_redirect_project(
+    contaminated_main_project_resolution,
+    capsys,
+):
+    main, _sibling, knowledge = contaminated_main_project_resolution
+
+    rc = main.main(["state-root"])
+
+    assert rc == 0
+    assert main.cfg.active_project() == "harness"
+    assert Path(capsys.readouterr().out.strip()).resolve() == knowledge.resolve()
+
+
 def test_config_root_explicit_destination_can_guard_without_adoption():
     from agent_worktrees import __main__ as main
 

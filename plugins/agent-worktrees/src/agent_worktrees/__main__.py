@@ -18231,6 +18231,8 @@ def _git_toplevel(path: Path | None) -> Path | None:
         r = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=5,
+            env=git_ops.repository_identity_env(),
+            stdin=subprocess.DEVNULL,
         )
         if r.returncode == 0 and r.stdout.strip():
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
