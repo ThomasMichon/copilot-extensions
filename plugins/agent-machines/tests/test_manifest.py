@@ -60,6 +60,23 @@ def test_missing_package_key_rejected(tmp_path):
         load_package(path)
 
 
+def test_repo_root_resolves_canonical_all_and_machine_paths(tmp_path):
+    all_path = write_package(tmp_path, "all.yaml", base_package())
+    machine_path = write_package(
+        tmp_path,
+        "machine.yaml",
+        base_package(name="acme/machine"),
+        machine="box-1",
+    )
+    assert load_package(all_path).repo_root() == tmp_path
+    assert load_package(machine_path).repo_root() == tmp_path
+
+
+def test_repo_root_resolves_legacy_path(tmp_path):
+    path = write_package(tmp_path, "legacy.yaml", base_package(), legacy=True)
+    assert load_package(path).repo_root() == tmp_path
+
+
 def test_per_machine_layer_overrides_and_unsets(tmp_path):
     data = base_package(
         gate=["box-1", "box-2"],

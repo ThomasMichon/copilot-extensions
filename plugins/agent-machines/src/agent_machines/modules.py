@@ -106,9 +106,12 @@ def run_module(
     name = str(module.get("name"))
     repo_root = pkg.repo_root()
     block = platform_block(module, plat)
-    if block is None or repo_root is None:
+    if block is None:
         return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run,
                             skipped_reason=f"no command for platform '{plat}'")
+    if repo_root is None:
+        return ModuleResult(name, pkg.source_repo, ran=False, dry_run=dry_run,
+                            skipped_reason="could not derive repo root from package path")
 
     command = [str(c) for c in block.get("command", [])]
     if dry_run:
