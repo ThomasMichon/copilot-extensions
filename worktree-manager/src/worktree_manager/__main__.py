@@ -869,6 +869,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         print("commands:")
         print("  (no args)              show the app banner + build-out roadmap")
+        print("  --project NAME         launch NAME's interactive Picker (binstub seam)")
         print("  doctor                 report prerequisites + the agent-worktrees core")
         print("  setup [--apply]        plan (default) or run prereq provisioning + core install")
         print("  self-install [--apply] version the app: current-version marker + ~/.local/bin binstub")
@@ -917,6 +918,11 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_source(args[1:])
     if args and args[0] == "update":
         return _cmd_update(args[1:])
+    if args and args[0] == "--project":
+        if len(args) != 2 or not args[1]:
+            print("error: --project needs exactly one project name")
+            return 2
+        return _cmd_picker([args[1]])
     _print_intro()
     return 0
 
