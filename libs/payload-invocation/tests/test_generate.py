@@ -169,8 +169,12 @@ def test_manifest_can_select_cmd_for_windows_catalog(tmp_path: Path) -> None:
 
     generated = generator.expected_files(manifest)
     catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.ps1"]
+    cmd = generated[manifest.parent / "bin" / "agent-example.cmd"]
     assert r"bin\agent-example.cmd" in catalog
     assert "shell = 'cmd'" in catalog
+    assert r'"%SystemRoot%\System32\where.exe" pwsh' in cmd
+    assert r"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" in cmd
+    assert '"%_PSHOST%" -NoProfile' in cmd
 
 
 def test_manifest_rejects_unknown_windows_catalog_shim(tmp_path: Path) -> None:

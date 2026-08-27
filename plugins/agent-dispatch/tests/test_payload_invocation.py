@@ -143,12 +143,17 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     comspec = os.environ.get("COMSPEC", "cmd.exe")
+    env = {
+        **os.environ,
+        "PATH": str(Path(comspec).parent),
+    }
     result = subprocess.run(
-        [comspec, "/d", "/s", "/c", f"{cmd} payload --file -"],
+        [comspec, "/d", "/s", "/c", str(cmd), "payload", "--file", "prompt.txt"],
         input="task body",
+        env=env,
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "payload|--file|-::task body"
+    assert result.stdout == "payload|--file|prompt.txt::task body"
