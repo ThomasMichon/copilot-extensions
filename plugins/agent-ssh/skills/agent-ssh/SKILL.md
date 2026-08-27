@@ -5,7 +5,11 @@ description: >-
   transport-provider contract for direct or tunnel transports. Use when deriving
   ~/.ssh/config from a registry, validating reachability, adopting a machine into
   an SSH mesh, exploring a reachable SSH target, or authoring a transport
-  module.yaml.
+  module.yaml. Trigger phrases include:
+  - "derive SSH config"
+  - "audit agent-ssh fragments"
+  - "verify SSH reachability"
+  - "author an SSH transport module"
 ---
 
 # agent-ssh (core + transport-provider contract)
@@ -41,6 +45,10 @@ plugins and register against the same contract.
 - **Coexistence layout** -- a single managed `Include ~/.ssh/config.d/*` plus a
   per-transport drop-in `50-agent-ssh-<module>.conf`. Each transport owns only
   its own fragment.
+- **Managed-fragment hygiene** (`<catalog argv[0]> doctor`) -- audits only the
+  agent-ssh namespace against the current registry/module sources, isolates
+  malformed or stale peers, and gives exhaustive human/JSON report-only cleanup
+  guidance without touching unrelated OpenSSH files.
 - **Reachability verification** (`<catalog argv[0]> verify`) -- probes the active SSH
   profile by machine name and exits non-zero on missing names or unreachable
   aliases.
@@ -59,7 +67,20 @@ plugins and register against the same contract.
 ```
 
 Use `--print` to inspect the fragment without writing it. Use `--config-d` and
-`--ssh-config` for tests or non-default SSH config locations.
+`--ssh-config` for tests or non-default SSH config locations. Keep the registry
+and module files at durable absolute paths after emission: new fragments stamp
+those sources and operational commands use them as current authority.
+
+## Audit managed fragments
+
+```bash
+<catalog argv[0]> doctor [--json]
+```
+
+Doctor is exhaustive and report-only. It identifies the exact managed entry,
+source, reason, and re-emission/removal remedy. Routine commands emit only a
+bounded, deduplicated warning set. Legacy fragments remain active with a
+`legacy-unattributed` advisory until `emit-profile` rewrites them.
 
 ## Verify reachability
 
@@ -68,7 +89,9 @@ Use `--print` to inspect the fragment without writing it. Use `--config-d` and
 ```
 
 A failure is fail-safe: the host is not considered reachable until the probe
-succeeds.
+succeeds. A confirmed-stale managed alias is rejected before the network probe;
+ordinary connection failure remains reachability status and does not classify
+the fragment as stale.
 
 ## Explore a machine
 

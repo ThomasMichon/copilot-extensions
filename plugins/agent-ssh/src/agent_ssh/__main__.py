@@ -1,6 +1,7 @@
 """CLI entry point for agent-ssh.
 
 Subcommands:
+  doctor         Audit managed OpenSSH fragments without changing them.
   emit-profile   Render/write a managed SSH profile fragment.
   explore        Introspect a reachable SSH target (repos, runtimes, agents).
   mesh-status    Render the calling repo's SSH machine mesh from machines.yaml.
@@ -18,7 +19,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags
 
-from . import __version__, ssh_profile
+from . import __version__, fragment_registry, ssh_profile
 from . import explore as explore_mod
 from . import mesh as mesh_mod
 
@@ -26,20 +27,44 @@ from . import mesh as mesh_mod
 def _cmd_emit_profile(args: argparse.Namespace) -> int:
     cfg = ssh_profile.load_file(args.config)
     module = ssh_profile.load_file(args.module)
-    if "module" not in module or not isinstance(module.get("module"), str):
-        print("[FAIL] module.yaml missing required 'module' name", file=sys.stderr)
+    if not isinstance(cfg, dict) or not isinstance(module, dict):
+        print("[FAIL] registry and module roots must be mappings", file=sys.stderr)
+        return 2
+    module_name = module.get("module")
+    if not isinstance(module_name, str) or not ssh_profile.is_valid_transport(module_name):
+        print("[FAIL] module.yaml has an invalid 'module' name", file=sys.stderr)
+        return 2
+    if cfg.get("transport") != module_name:
+        print(
+            "[FAIL] registry 'transport' must match module.yaml 'module'",
+            file=sys.stderr,
+        )
         return 2
 
-    if args.print:
-        sys.stdout.write(ssh_profile.render_fragment(cfg, module))
-        return 0
+    try:
+        if args.print:
+            sys.stdout.write(
+                ssh_profile.render_fragment(
+                    cfg,
+                    module,
+                    registry_path=args.config.resolve(strict=True),
+                    module_path=args.module.resolve(strict=True),
+                )
+            )
+            return 0
 
-    frag = ssh_profile.write_fragment(
-        cfg,
-        module,
-        config_d=args.config_d,
-        ssh_config=args.ssh_config,
-    )
+        frag = ssh_profile.write_fragment(
+            cfg,
+            module,
+            config_d=args.config_d,
+            ssh_config=args.ssh_config,
+            registry_path=args.config.resolve(strict=True),
+            module_path=args.module.resolve(strict=True),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        print(f"[FAIL] cannot render managed SSH fragment: {exc}", file=sys.stderr)
+        return 2
+    fragment_registry.FragmentRegistry(args.config_d).refresh()
     print(f"[OK] wrote {len(cfg.get('machines', []))} host block(s) to {frag}")
     return 0
 
@@ -52,8 +77,16 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     if not args.names:
         print("agent-ssh verify: at least one host name is required", file=sys.stderr)
         return 2
+    report = fragment_registry.FragmentRegistry(args.config_d).refresh()
     rc = 0
     for name in args.names:
+        if not report.permits_probe(name):
+            print(
+                f"[FAIL] {name} is not permitted by current managed-profile evidence; "
+                "run `agent-ssh doctor`"
+            )
+            rc = 1
+            continue
         proc = subprocess.run(
             [
                 "ssh",
@@ -80,6 +113,21 @@ def _cmd_verify(args: argparse.Namespace) -> int:
 
 
 def _cmd_explore(args: argparse.Namespace) -> int:
+    report = fragment_registry.FragmentRegistry(args.config_d).refresh()
+    if not report.permits_probe(args.target):
+        result = explore_mod.ExploreResult(
+            target=args.target,
+            reachable=False,
+            error=(
+                "target is not permitted by current managed-profile evidence; "
+                "run `agent-ssh doctor`"
+            ),
+        )
+        if args.json:
+            print(json.dumps(result.to_dict(), indent=2))
+        else:
+            print(explore_mod.format_report(result))
+        return 1
     result = explore_mod.explore(args.target, timeout=args.timeout)
     if args.json:
         print(json.dumps(result.to_dict(), indent=2))
@@ -89,6 +137,7 @@ def _cmd_explore(args: argparse.Namespace) -> int:
 
 
 def _cmd_mesh_status(args: argparse.Namespace) -> int:
+    fragment_registry.FragmentRegistry(args.config_d).refresh()
     path = args.path
     if path is None:
         path = mesh_mod.find_machines_file()
@@ -109,6 +158,20 @@ def _cmd_mesh_status(args: argparse.Namespace) -> int:
     else:
         print(mesh_mod.format_report(mesh))
     return 0
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    report = fragment_registry.scan_fragment_registry(args.config_d)
+    if args.json:
+        print(
+            json.dumps(
+                fragment_registry.doctor_payload(report, args.config_d),
+                indent=2,
+            )
+        )
+    else:
+        print(fragment_registry.format_doctor(report, args.config_d))
+    return 1 if report.findings else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -132,6 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = sub.add_parser("verify", help="Probe SSH reachability by host alias.")
     verify.add_argument("--timeout", type=int, default=8, help="SSH ConnectTimeout seconds.")
+    verify.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
     verify.add_argument("names", nargs="*", help="Host aliases to probe.")
     verify.set_defaults(func=_cmd_verify)
 
@@ -147,6 +211,7 @@ def build_parser() -> argparse.ArgumentParser:
     explore.add_argument(
         "--json", action="store_true", help="Emit the structured result as JSON."
     )
+    explore.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
     explore.set_defaults(func=_cmd_explore)
 
     mesh = sub.add_parser(
@@ -166,7 +231,20 @@ def build_parser() -> argparse.ArgumentParser:
     mesh.add_argument(
         "--summary", action="store_true", help="Print a one-line summary only."
     )
+    mesh.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
     mesh.set_defaults(func=_cmd_mesh_status)
+
+    doctor = sub.add_parser(
+        "doctor",
+        help="Audit managed 50-agent-ssh-* OpenSSH fragments without changing them.",
+    )
+    doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit exhaustive structured managed-fragment findings.",
+    )
+    doctor.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
+    doctor.set_defaults(func=_cmd_doctor)
 
     sub.add_parser("version", help="Show version")
     return parser

@@ -24,17 +24,26 @@ Either way, the recipe shape and the core's obligations are identical.
 
 - **Core owns the mechanism:** `Host <name>` block rendering, deterministic
   option ordering, the `~/.ssh/config.d` managed-`Include` coexistence layout,
-  atomic per-transport fragment writes, and the reachability probe.
+  atomic per-transport fragment writes, managed-fragment hygiene, and the
+  reachability probe.
 - **Transport owns the recipe:** a single `proxy_command` template describing
   how to dial a host (or nothing, for plain SSH), a `proxy_binary_default`, an
   optional `install-client` script, and its own config schema extensions.
 
 The JSON schemas in `contract/` are the published contract for authors and
-callers. The current CLI is intentionally thin: `agent-ssh emit-profile` requires
-only that the module file contain a string `module` name, then consumes the
-fields it knows (`proxy_command`, `proxy_binary_default`, registry `machines`,
-`gate`, `options`, and so on). Schema validation is a caller/test responsibility
-today, not an extra runtime pass inside the emitter.
+callers. `agent-ssh emit-profile` validates the complete shape it consumes
+(`module`, `proxy_command`, registry transport/topology, exact unique aliases,
+gate, machines, and option maps) and rejects source/runtime contract drift
+before publishing. Transport-specific schemas may extend the normalized record,
+but must preserve these base constraints.
+
+`emit-profile` stamps the canonical absolute registry and module paths into the
+fragment. Those files are the current transport/topology authority and must
+remain durable after emission. Operational commands compare the fragment with a
+fresh render from those sources; a confirmed missing, changed, malformed, or
+identity-mismatched source withdraws that managed alias from agent-ssh
+diagnostics. Source or registry I/O uncertainty retains only an unchanged
+last-known fragment in a stateful process and never activates a fresh one.
 
 ## The `proxy_command` template
 
@@ -66,7 +75,15 @@ Examples:
 2. Add **only** the single managed `Include ~/.ssh/config.d/*` line to
    `~/.ssh/config`; never rewrite existing content.
 3. A machine belongs to exactly one transport's fragment (its `transport:` key).
-4. Never read, write, or assume the layout of a peer transport's fragment.
+4. A transport provider never reads, writes, or assumes the layout of a peer
+   transport's fragment. The core audits only the shared
+   `50-agent-ssh-*.conf` namespace and never parses or changes unrelated
+   OpenSSH drop-ins.
+
+Managed fragments may contain only exact `Host <name>` blocks and ordinary
+indented options. Wildcard/multi-host aliases, nested `Host`, `Match`, and
+`Include` directives, control characters, and module names that could escape
+the managed filename namespace are rejected before publication.
 
 ## Verbs the core satisfies vs. the transport owns
 
@@ -74,6 +91,7 @@ Examples:
 |---|---|
 | `emit-profile` | core (`agent-ssh emit-profile`, `core/ssh_profile.py` compatibility wrapper) |
 | `verify` | core (`agent-ssh verify`, `scripts/verify.*`) |
+| `doctor` | core (`agent-ssh doctor`, exhaustive human/JSON, report-only) |
 | `install-client` | transport (if it needs a client binary) |
 | `provision-server` | transport (optional; may be operator-manual) |
 
@@ -86,8 +104,12 @@ or `provision-server` scripts.
 - `emit-profile` exits `2` when the module file lacks a string `module` name.
   File/permission errors and invalid jumpbox records fail loud instead of
   producing a partial profile.
+- Managed-fragment sweeps isolate malformed/stale peers, cap and deduplicate
+  operational warnings, and direct the operator to `agent-ssh doctor`.
 - `verify` exits `2` when no host names are supplied, exits `1` if any probed
-  alias is unreachable, and prints one `[OK]` / `[FAIL]` line per alias.
+  alias is unreachable or has a confirmed-inactive managed profile, and prints
+  one `[OK]` / `[FAIL]` line per alias. Network unreachability is operational
+  status only; it never makes a fragment stale.
 
 ## `install-client` on Windows — App Execution Alias shims break over SSH
 

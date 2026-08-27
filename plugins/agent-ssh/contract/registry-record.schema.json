@@ -4,9 +4,26 @@
   "title": "agent-ssh normalized machine registry record",
   "description": "The normalized shape every consuming registry maps onto. The core renders `Host <name>` blocks from these. A transport's own config schema MAY extend this (e.g. add proxy_command_binary). PUBLIC contract.",
   "type": "object",
+  "definitions": {
+    "exactAlias": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+      "description": "One exact, non-pattern OpenSSH Host alias."
+    },
+    "options": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(?!(?:[Hh][Oo][Ss][Tt]|[Ii][Nn][Cc][Ll][Uu][Dd][Ee]|[Mm][Aa][Tt][Cc][Hh])$)[A-Za-z][A-Za-z0-9]*$"
+      },
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "null"]
+      }
+    }
+  },
   "properties": {
     "transport": {
       "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
       "description": "Dispatch key: which transport module carries these machines (e.g. 'cloudflare', 'dtssh', 'direct'). Selects the module.yaml + the fragment the records land in."
     },
     "topology": {
@@ -22,30 +39,28 @@
       "type": "object",
       "description": "topology=jumpbox only: the single fronting host the others ProxyJump through.",
       "properties": {
-        "name":          { "type": "string" },
+        "name":          { "$ref": "#/definitions/exactAlias" },
         "hostname":      { "type": "string" },
         "user":          { "type": "string" },
         "identity_file": { "type": "string" },
-        "options":       { "type": "object" }
+        "strict_host_key_checking": { "type": "string" },
+        "options":       { "$ref": "#/definitions/options" }
       },
       "required": ["name"]
     },
     "machines": {
       "type": "array",
+      "description": "Machine and gate aliases must be unique case-insensitively; the runtime enforces this cross-item constraint.",
       "items": {
         "type": "object",
         "properties": {
-          "name":          { "type": "string", "description": "Host alias consumers reach by name: `ssh <name>`." },
+          "name":          { "$ref": "#/definitions/exactAlias" },
           "hostname":      { "type": "string", "description": "Transport-resolved reachable hostname (INJECTED by the consuming registry)." },
           "user":          { "type": "string" },
           "port":          { "type": ["integer", "string"] },
           "identity_file": { "type": "string" },
           "via":           { "type": "string", "enum": ["direct", "jumpbox"], "default": "direct" },
-          "options": {
-            "type": "object",
-            "description": "Verbatim SSH option passthrough (StrictHostKeyChecking, IdentitiesOnly, RemoteForward, MACs, ...).",
-            "additionalProperties": { "type": ["string", "number", "boolean"] }
-          }
+          "options":       { "$ref": "#/definitions/options" }
         },
         "required": ["name"]
       }
