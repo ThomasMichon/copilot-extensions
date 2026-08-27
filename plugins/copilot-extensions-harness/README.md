@@ -6,6 +6,12 @@ any control repo and your agent knows how to **contribute** changes to the
 plugins, **diagnose** the deployed runtimes, and **validate** them on a fresh box,
 without you hand-writing a per-repo guide or installing a runtime.
 
+At session start, the plugin injects one concise pointer to its contribution
+boundary. The full guide remains versioned at
+[`references/contribution-ground-rules.md`](references/contribution-ground-rules.md):
+generic, organization-neutral capabilities are welcome; personal or
+organization-specific needs are routed elsewhere.
+
 | Skill | Covers |
 |-------|--------|
 | [contributing-to-copilot-extensions](skills/contributing-to-copilot-extensions/SKILL.md) | Repo layout, the PR-required worktree flow (`create` → `create-pr`/`push-changes` → `pr-merge --now` → `finalize`), the **mandatory version bump**, test + install-contract gates, deploy-after-merge, and source-of-truth rules |
@@ -19,7 +25,8 @@ without you hand-writing a per-repo guide or installing a runtime.
 ## Enable
 
 No runtime, binstub, service, or setup script is involved. Enabling the plugin is
-the whole install; restart the session so the skills/agent are scanned.
+the whole install; restart the session so the skills, agent, and contribution
+boundary hook are scanned.
 
 In a control repo, declare the marketplace (if it is not already declared) and
 enable the plugin in `.github/copilot/settings.json`:

@@ -1,5 +1,24 @@
 # Contributing to Copilot Extensions
 
+## Contribution boundary
+
+This marketplace accepts **general-purpose capabilities** that can be used
+without a particular person's private state or a particular organization's
+internal systems, identity, process, or data.
+
+Not welcome here:
+
+- Personal/operator-specific workflows, machine inventory, private state, or
+  experiments whose audience is one harness. Keep those in the adopter's
+  private control/knowledge repo.
+- Organization-specific workflows, internal systems, or company-bound policy.
+  Those belong in that organization's internal marketplace.
+
+A generic engine may live here while an organization-specific policy/config
+plugin lives in its internal marketplace. If removing personal and
+organizational assumptions would change the capability's purpose, this is not
+its destination.
+
 ## Contribution flow (PR-required)
 
 **Every change lands through a pull request — direct pushes to `main` are

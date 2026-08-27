@@ -29,6 +29,11 @@ The authoritative, versioned rules live in the repo's own **`CONTRIBUTING.md`**,
 are the repo's own root docs, not carried by this plugin). This skill is the
 operator's map: what to touch, in what order, and the gotchas that bite.
 
+Before proposing a capability, read the portable
+[`contribution-ground-rules.md`](../../references/contribution-ground-rules.md).
+`copilot-extensions` accepts organization-neutral, general-purpose work; it
+rejects personal needs and organization-specific policy/process.
+
 **Two guidance layers a change reconciles to** (design work, not just the
 mechanical flow):
 
