@@ -648,6 +648,85 @@ async def test_container_state_probe_failure_retains_remote_authority(
     assert session.session_id in manager._remote_recovery_inconclusive
 
 
+class _ParityRelayProcess:
+    def __init__(self, owner, pid, *, replacement_pid=None):
+        self._owner = owner
+        self.pid = pid
+        self.returncode = None
+        self._replacement_pid = replacement_pid
+
+    def kill(self):
+        self.returncode = -9
+
+    async def wait(self):
+        if self._replacement_pid is not None:
+            self._owner._proc = _ParityRelayProcess(
+                self._owner,
+                self._replacement_pid,
+            )
+        return self.returncode
+
+
+class _ParityRelay:
+    def __init__(self, pid, replacement_pid):
+        self._proc = _ParityRelayProcess(
+            self,
+            pid,
+            replacement_pid=replacement_pid,
+        )
+
+    @property
+    def is_alive(self):
+        return self._proc is not None and self._proc.returncode is None
+
+
+@pytest.mark.asyncio
+async def test_parity_relay_interrupt_preserves_single_owner(tmp_db, tmp_path):
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    manager._sessions["s1"] = SimpleNamespace(
+        session_id="s1",
+        caller_id="venue-parity:test",
+        status=SessionStatus.IDLE,
+    )
+    relay = _ParityRelay(100, 200)
+    manager._relays["s1"] = [relay]
+
+    result = await manager.interrupt_relays_for_parity("s1", timeout=1)
+
+    assert result == {
+        "owner_count_before": 1,
+        "owner_count_after": 1,
+        "interrupted_count": 1,
+        "all_recovered": True,
+        "owner_identity_preserved": True,
+        "processes_replaced": True,
+    }
+    assert manager._relays["s1"] == [relay]
+    assert relay.is_alive is True
+    assert relay._proc.pid == 200
+
+
+@pytest.mark.asyncio
+async def test_parity_relay_interrupt_requires_harness_owned_idle_session(
+    tmp_db,
+    tmp_path,
+):
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    manager._sessions["s1"] = SimpleNamespace(
+        session_id="s1",
+        caller_id="ordinary-caller",
+        status=SessionStatus.IDLE,
+    )
+
+    with pytest.raises(PermissionError, match="venue-parity"):
+        await manager.interrupt_relays_for_parity("s1", timeout=1)
+
+    manager._sessions["s1"].caller_id = "venue-parity:test"
+    manager._sessions["s1"].status = SessionStatus.RUNNING
+    with pytest.raises(RuntimeError, match="idle session"):
+        await manager.interrupt_relays_for_parity("s1", timeout=1)
+
+
 class TestRemoteForwardRelaySupervision:
     """Remote Session-Host reattach owns relay supervisors separately from -L."""
 

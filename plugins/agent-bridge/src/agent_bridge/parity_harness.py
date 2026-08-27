@@ -16,6 +16,7 @@ _RESULT_MARKER = "VENUE_PARITY_JSON:"
 _PROBE_MARKER = "VENUE_PARITY_PROBE:"
 _REATTACH_MARKER = "VENUE_PARITY_REATTACH_OK"
 FRONTEND_RESTART_HOSTINDEX_LOSS = "frontend-restart-hostindex-loss"
+RELAY_INTERRUPTION = "relay-interruption"
 _TERMINAL = {"failed", "ended", "stopped"}
 _INACTIVE_FOR_FAULT = _TERMINAL
 _SECRET_SHAPES = (
@@ -243,6 +244,15 @@ print("{_PROBE_MARKER}" + json.dumps(out, separators=(",", ":")))
     )
 
 
+def _active_other_session_ids(client, session_id: str) -> list[str]:
+    return [
+        str(item.get("session_id") or "")
+        for item in client.list_sessions()
+        if item.get("session_id") != session_id
+        and str(item.get("status") or "") not in _INACTIVE_FOR_FAULT
+    ]
+
+
 def run(
     client,
     target: str,
@@ -259,10 +269,16 @@ def run(
     fault_handler: Callable[[str, float], dict[str, Any]] | None = None,
 ) -> ParityEvidence:
     """Run baseline quality/auth plus same-child stop/resume acceptance."""
-    if fault not in {None, FRONTEND_RESTART_HOSTINDEX_LOSS}:
+    if fault not in {
+        None,
+        FRONTEND_RESTART_HOSTINDEX_LOSS,
+        RELAY_INTERRUPTION,
+    }:
         raise ParityFailure(f"unsupported parity fault: {fault}")
-    if fault and fault_handler is None:
+    if fault == FRONTEND_RESTART_HOSTINDEX_LOSS and fault_handler is None:
         raise ParityFailure(f"parity fault {fault!r} requires a fault handler")
+    if fault == RELAY_INTERRUPTION and not auth:
+        raise ParityFailure("relay interruption fault requires auth probes")
 
     caller_id = f"venue-parity:{uuid.uuid4().hex}"
     evidence = ParityEvidence(target=target)
@@ -366,12 +382,7 @@ def run(
                 )
 
         if fault == FRONTEND_RESTART_HOSTINDEX_LOSS:
-            active_others = [
-                str(item.get("session_id") or "")
-                for item in client.list_sessions()
-                if item.get("session_id") != session_id
-                and str(item.get("status") or "") not in _INACTIVE_FOR_FAULT
-            ]
+            active_others = _active_other_session_ids(client, session_id)
             if active_others:
                 raise ParityFailure(
                     "frontend restart fault refuses to run while another "
@@ -436,6 +447,117 @@ def run(
                 == evidence.initial_child_pid
                 and fault_result.get("recovered_child_pid")
                 == evidence.initial_child_pid
+            )
+            evidence.checks["resumed_child_live"] = bool(
+                evidence.resumed_child_pid
+            )
+        elif fault == RELAY_INTERRUPTION:
+            active_others = _active_other_session_ids(client, session_id)
+            if active_others:
+                raise ParityFailure(
+                    "relay interruption fault refuses to run while another "
+                    "managed session is active: "
+                    + ", ".join(active_others[:5]),
+                    evidence=evidence,
+                )
+            evidence.checks["exclusive_relay_fault"] = True
+            try:
+                fault_result = client.interrupt_relays_for_parity(
+                    session_id,
+                    timeout=min(startup_timeout, 120.0),
+                )
+            except Exception as exc:
+                raise ParityFailure(
+                    f"relay interruption fault failed: {exc}",
+                    evidence=evidence,
+                ) from exc
+            owner_count_before = int(
+                fault_result.get("owner_count_before") or 0
+            )
+            owner_count_after = int(
+                fault_result.get("owner_count_after") or 0
+            )
+            interrupted_count = int(
+                fault_result.get("interrupted_count") or 0
+            )
+            evidence.observed.update({
+                "fault": fault,
+                "relay_owner_count_before": owner_count_before,
+                "relay_owner_count_after": owner_count_after,
+                "relay_process_replaced": fault_result.get(
+                    "processes_replaced"
+                ),
+            })
+            evidence.checks["relay_interrupted"] = (
+                owner_count_before > 0
+                and interrupted_count == owner_count_before
+            )
+            evidence.checks["relay_recovered"] = (
+                fault_result.get("all_recovered") is True
+            )
+            evidence.checks["no_duplicate_relay_owner"] = (
+                owner_count_after == owner_count_before
+                and fault_result.get("owner_identity_preserved") is True
+            )
+            evidence.checks["relay_process_replaced"] = (
+                fault_result.get("processes_replaced") is True
+            )
+
+            client.submit_prompt(
+                session_id,
+                _quality_prompt(
+                    auth=auth,
+                    ado_url=ado_url,
+                    azure_scope=azure_scope,
+                ),
+                request_timeout=turn_timeout,
+            )
+            relay_message, relay_probe, last_id = _wait_for_turn(
+                client,
+                session_id,
+                after_event_id=last_id,
+                timeout=turn_timeout,
+            )
+            _parse_result(relay_message)
+            if relay_probe is None:
+                raise ParityFailure(
+                    "relay recovery turn omitted the redacted probe marker",
+                    evidence=evidence,
+                )
+            evidence.checks["credential_events_redacted"] = True
+            evidence.observed["relay_recovery_probe"] = {
+                "github_credential": relay_probe.get("github_credential"),
+                "github_api": relay_probe.get("github_api"),
+                "ado_credential": relay_probe.get("ado_credential"),
+                "ado_ls_remote": relay_probe.get("ado_ls_remote"),
+                "azure_token": relay_probe.get("azure_token"),
+            }
+            evidence.checks["relay_github_credential"] = (
+                relay_probe.get("github_credential") is True
+            )
+            evidence.checks["relay_github_api"] = (
+                relay_probe.get("github_api") is True
+            )
+            if ado_url:
+                evidence.checks["relay_ado_credential"] = (
+                    relay_probe.get("ado_credential") is True
+                )
+                evidence.checks["relay_ado_ls_remote"] = (
+                    relay_probe.get("ado_ls_remote") is True
+                )
+            if azure_scope:
+                evidence.checks["relay_azure_token"] = (
+                    relay_probe.get("azure_token") is True
+                )
+            resumed = client.get_session(session_id)
+            evidence.resumed_acp_session_id = resumed.get("acp_session_id")
+            evidence.resumed_child_pid = resumed.get("pid")
+            evidence.checks["same_acp_session"] = (
+                evidence.resumed_acp_session_id
+                == evidence.initial_acp_session_id
+            )
+            evidence.checks["same_child"] = (
+                evidence.resumed_child_pid == evidence.initial_child_pid
             )
             evidence.checks["resumed_child_live"] = bool(
                 evidence.resumed_child_pid

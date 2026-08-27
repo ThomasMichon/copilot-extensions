@@ -2102,6 +2102,106 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await relay.stop()
 
+    async def interrupt_relays_for_parity(
+        self,
+        session_id: str,
+        *,
+        timeout: float = 90.0,
+    ) -> dict[str, Any]:
+        """Interrupt one parity session's relay processes and await recovery."""
+        session = self.get_session(session_id)
+        if session is None:
+            raise KeyError(session_id)
+        if not str(session.caller_id or "").startswith("venue-parity:"):
+            raise PermissionError(
+                "relay interruption is restricted to venue-parity sessions"
+            )
+        if session.status is not SessionStatus.IDLE:
+            raise RuntimeError("relay interruption requires an idle session")
+        active_states = {
+            SessionStatus.CREATED,
+            SessionStatus.STARTING,
+            SessionStatus.RUNNING,
+            SessionStatus.IDLE,
+            SessionStatus.STOPPING,
+        }
+        active_others = [
+            item.session_id
+            for item in self._sessions.values()
+            if item.session_id != session.session_id
+            and item.status in active_states
+        ]
+        if active_others:
+            raise RuntimeError(
+                "relay interruption refuses another active managed session: "
+                + ", ".join(active_others[:5])
+            )
+
+        relays = list(self._relays.get(session.session_id) or [])
+        if not relays:
+            raise RuntimeError("session has no supervised credential relay")
+        handles_before = tuple(id(relay) for relay in relays)
+        processes_before = [getattr(relay, "_proc", None) for relay in relays]
+        pids_before = [
+            int(getattr(process, "pid", 0) or 0)
+            for process in processes_before
+        ]
+        if (
+            not all(getattr(relay, "is_alive", False) for relay in relays)
+            or not all(processes_before)
+            or not all(pids_before)
+        ):
+            raise RuntimeError("session relay is not healthy before interruption")
+
+        interrupted = 0
+        for process in processes_before:
+            try:
+                process.kill()
+            except ProcessLookupError as exc:
+                raise RuntimeError(
+                    "session relay exited before interruption"
+                ) from exc
+            interrupted += 1
+        for process in processes_before:
+            with contextlib.suppress(
+                ProcessLookupError,
+                TimeoutError,
+                asyncio.TimeoutError,
+            ):
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+
+        deadline = time.monotonic() + max(1.0, timeout)
+        current: list[Any] = []
+        pids_after: list[int] = []
+        while time.monotonic() < deadline:
+            current = list(self._relays.get(session.session_id) or [])
+            pids_after = [
+                int(getattr(getattr(relay, "_proc", None), "pid", 0) or 0)
+                for relay in current
+            ]
+            if (
+                tuple(id(relay) for relay in current) == handles_before
+                and len(current) == len(relays)
+                and all(getattr(relay, "is_alive", False) for relay in current)
+                and all(pids_after)
+                and all(
+                    before != after
+                    for before, after in zip(pids_before, pids_after, strict=True)
+                )
+            ):
+                return {
+                    "owner_count_before": len(relays),
+                    "owner_count_after": len(current),
+                    "interrupted_count": interrupted,
+                    "all_recovered": True,
+                    "owner_identity_preserved": True,
+                    "processes_replaced": True,
+                }
+            await asyncio.sleep(0.25)
+        raise TimeoutError(
+            f"session relay did not recover within {timeout:.0f}s"
+        )
+
     def _acquire_container_lock(self, session_id: str, name: str) -> None:
         if session_id in self._container_lock_sessions:
             return

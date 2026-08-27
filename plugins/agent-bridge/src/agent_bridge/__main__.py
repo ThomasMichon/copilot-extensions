@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 from . import __version__
-from .parity_harness import FRONTEND_RESTART_HOSTINDEX_LOSS
+from .parity_harness import FRONTEND_RESTART_HOSTINDEX_LOSS, RELAY_INTERRUPTION
 
 if TYPE_CHECKING:
     from .client import BridgeClientError
@@ -1624,6 +1624,13 @@ def _cmd_parity(args: argparse.Namespace) -> None:
 
     if (args.ado_url or args.azure_scope) and not args.auth:
         message = "--ado-url/--azure-scope require --auth"
+        if args.json:
+            _json_out({"ok": False, "target": args.target, "error": message})
+        else:
+            print(f"[FAIL] venue parity: {message}", file=sys.stderr)
+        sys.exit(2)
+    if args.fault == RELAY_INTERRUPTION and not args.auth:
+        message = "--fault relay-interruption requires --auth"
         if args.json:
             _json_out({"ok": False, "target": args.target, "error": message})
         else:
@@ -4234,11 +4241,11 @@ def build_parser() -> argparse.ArgumentParser:
     parity_p.add_argument("--keep-session", action="store_true")
     parity_p.add_argument(
         "--fault",
-        choices=[FRONTEND_RESTART_HOSTINDEX_LOSS],
+        choices=[FRONTEND_RESTART_HOSTINDEX_LOSS, RELAY_INTERRUPTION],
         help=(
-            "Run an explicit destructive fault scenario. The frontend-restart "
-            "scenario refuses other active managed sessions and removes only "
-            "the harness-created session from the local HostIndex."
+            "Run an explicit destructive fault scenario. Faults refuse other "
+            "active managed sessions and affect only the harness-created "
+            "session's HostIndex or supervised credential relay."
         ),
     )
     parity_p.add_argument(
