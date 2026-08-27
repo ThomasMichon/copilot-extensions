@@ -111,6 +111,11 @@ def test_payload_root_env_is_opt_in_and_preserves_defaults(tmp_path: Path) -> No
         "$env:AGENT_EXAMPLE_PAYLOAD_ROOT = $_payloadRoot"
         in generated[powershell_path]
     )
+    assert (
+        "$env:AGENT_EXAMPLE_PAYLOAD_ROOT = $_payloadRoot\n    try {"
+        in generated[powershell_path]
+    )
+    assert "} finally {" in generated[powershell_path]
 
 
 def test_generates_multiple_commands_and_one_catalog(tmp_path: Path) -> None:

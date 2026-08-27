@@ -236,15 +236,18 @@ def render(
             f"[Environment]::GetEnvironmentVariable('{data['payloadRootEnv']}', "
             "'Process')\n"
             f"    $env:{data['payloadRootEnv']} = $_payloadRoot\n"
+            "    try {\n"
             if data["payloadRootEnv"]
             else ""
         ),
         "PAYLOAD_ROOT_ENV_POWERSHELL_AFTER": (
             "    $_payloadRc = $LASTEXITCODE\n"
-            "    if ($null -eq $_payloadRootEnvPrevious) { "
+            "    } finally {\n"
+            "        if ($null -eq $_payloadRootEnvPrevious) { "
             f"Remove-Item Env:{data['payloadRootEnv']} "
             "-ErrorAction SilentlyContinue } else { "
             f"$env:{data['payloadRootEnv']} = $_payloadRootEnvPrevious }}\n"
+            "    }\n"
             if data["payloadRootEnv"]
             else ""
         ),
