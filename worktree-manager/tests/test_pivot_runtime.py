@@ -49,6 +49,14 @@ def test_parse_list_payload_accepts_array_and_summary_object():
     assert payload.summary == {"ready": 1}
 
 
+def test_parse_list_payload_accepts_declared_items_field():
+    payload = parse_list_payload(
+        {"worktrees": [{"id": "1"}]},
+        items_field="worktrees",
+    )
+    assert payload.rows == ({"id": "1"},)
+
+
 def test_load_pivot_runs_command_and_parses_json():
     script = (
         "import json,sys;"
