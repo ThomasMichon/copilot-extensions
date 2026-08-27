@@ -21,6 +21,11 @@ that the guard currently sees every caller.
 On 2026-08-26, `python tools/check-marketplace-isolation.py --json` reported 86
 `global-plugin-binstub` findings across 14 plugins.
 
+After [#1187](https://github.com/ThomasMichon/copilot-extensions/pull/1187),
+the guard-visible count is 80. The six payload-owned self-wrapper findings are
+complete; every durable boundary and the generic wrapper retirement remain
+open.
+
 | Contract family | Findings | Phase | Reason |
 |-----------------|---------:|-------|--------|
 | Payload-owned self-wrappers | 6 | Phase 2 | The checked-in `agent-ssh` `emit-profile` and `verify` wrappers start inside their own payload and can invoke that payload's generated command directly. |
@@ -170,8 +175,10 @@ prerequisite for making it blocking in Phase 6.
 
 ## Serial execution
 
-1. Move the six payload-owned agent-ssh self-wrappers to their own generated
-   payload command and add cross-platform wrapper tests.
+1. Completed in
+   [#1187](https://github.com/ThomasMichon/copilot-extensions/pull/1187):
+   moved the six payload-owned agent-ssh self-wrappers to their own generated
+   payload command and added cross-platform wrapper tests.
 2. Clean stale descriptive and generated metadata references as the owning
    plugin slices land.
 3. Complete Phase 3 installation context and canonical launcher contracts.
