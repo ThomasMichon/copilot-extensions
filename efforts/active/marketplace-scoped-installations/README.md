@@ -378,3 +378,15 @@ See [`design.md`](design.md).
 - Kept generic wrapper removal in Phase 6, after cell-local runtime rollout,
   ownership attribution, health proof, and rollback protection. Documentation
   cleanup and the six immediate findings do not make #1103 complete.
+
+### 2026-08-26 — Payload-owned SSH wrappers
+
+- Merged [#1187](https://github.com/ThomasMichon/copilot-extensions/pull/1187),
+  moving the `emit-profile` and `verify` compatibility wrappers on POSIX and
+  PowerShell from the global `agent-ssh` binstub to their own payload-local
+  generated command.
+- Added focused cross-platform wrapper tests proving a same-named global shadow
+  is not selected.
+- Reduced the guard-visible global-plugin-binstub baseline from 86 to 80.
+  Durable provider, remote, bootstrap, callback, credential, service, and
+  wrapper-retirement contracts remain open, so Phase 2 and #1103 remain active.
