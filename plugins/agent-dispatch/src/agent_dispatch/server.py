@@ -9,8 +9,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from . import telemetry
-from . import __version__
+from . import __version__, telemetry
 from .config import Config, load_config, requires_token_bind, routing_dir, run_dir
 from .coordinator import create_app
 from .queue import TaskQueue
@@ -22,6 +21,10 @@ log = logging.getLogger("agent-dispatch.server")
 # shutdown path emits a matching STOP even after a cutover demotes us. One
 # coordinator per process, so a module-level flag is sufficient.
 _lifecycle_started = False
+# Last routing-table ownership this process established or observed. A
+# transient routing read failure must not strand durable wakes, and must not
+# make a passive/demoted process seize them.
+_wake_route_owned = False
 
 
 class UnsafeBindError(RuntimeError):
@@ -60,8 +63,31 @@ def build_app(cfg: Config | None = None):
     queue = TaskQueue(Path(cfg.db_path).expanduser())
     return create_app(
         queue, token=cfg.token, sweep_interval=cfg.sweep_interval,
-        orphan_grace=cfg.orphan_grace,
+        orphan_grace=cfg.orphan_grace, wake_interval=0.25,
+        wake_is_active=_owns_active_route,
     )
+
+
+def _owns_active_route() -> bool:
+    """Return whether this process owns the coordinator's active route.
+
+    Preserve the last authoritative result across routing-table I/O failures.
+    This lets an active coordinator keep draining during discovery degradation
+    without allowing a passive or demoted process to infer ownership.
+    """
+    global _wake_route_owned
+    try:
+        from zdd import routing
+
+        table = routing.read_table(routing_dir())
+        raw = table.get("active") if isinstance(table, dict) else None
+        if not isinstance(raw, dict) or raw.get("pid") is None:
+            return _wake_route_owned
+        _wake_route_owned = raw.get("pid") == os.getpid()
+        return _wake_route_owned
+    except Exception:
+        log.debug("wake active-route check failed", exc_info=True)
+        return _wake_route_owned
 
 
 def advertise_endpoint(cfg: Config):
@@ -122,7 +148,7 @@ def _publish_routing(cfg: Config, bound_port: int, *, passive: bool = False) -> 
                 _lifecycle_started = True
         except Exception:
             log.debug("start lifecycle record skipped", exc_info=True)
-    except Exception as exc:  # noqa: BLE001 -- routing is additive, never fatal
+    except Exception as exc:
         log.warning("could not publish zdd routing table (%s); discovery degraded", exc)
 
 
@@ -199,6 +225,8 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
     # the already-bound socket to uvicorn avoids a fixed-port reservation entirely.
     sock = _bind_listen_socket(cfg.host, _server_bind_port())
     bound_port = sock.getsockname()[1]
+    global _wake_route_owned
+    _wake_route_owned = not passive
     # Advertise the bound endpoint for discovery (see the endpoint-rendezvous lib
     # and docs/patterns/local-endpoint-discovery.md). Additive: discovery-capable
     # clients resolve this dynamic port from the rendezvous file.

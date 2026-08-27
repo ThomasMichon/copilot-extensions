@@ -8,10 +8,11 @@ leased-queue design.
 
 Design notes
 ------------
-* **Six-state model** (see :class:`Status`):
-  ``proposed -> queued -> claimed -> started -> completed`` plus terminal
-  ``abandoned``. ``proposed`` is never claimable; an internal lease-expiry
-  transition returns a held task to ``queued`` (attempts++).
+* **Eight-state model** (see :class:`Status`):
+  ``proposed -> queued -> claimed -> started -> completed`` plus dormant
+  ``suspended`` and terminal ``abandoned`` / ``dead_letter``. ``proposed`` and
+  ``suspended`` are never claimable; liveness recovery returns only actively
+  held tasks to ``queued``.
 * **Capability-gated claim.** A task carries a hard ``requires`` set (capability
   tokens or an ``agent:<id>`` identity pin); a worker advertises a capability
   set at claim time. A task is claimable only when ``requires`` is a subset of
@@ -28,6 +29,7 @@ Design notes
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 import time
@@ -50,6 +52,9 @@ DEFAULT_LEASE_SECONDS = 15 * 60
 #: ``claimed`` window is meant to be a quick accept/reject assessment, so a
 #: stuck evaluator auto-releases fast (vs the full work lease a ``start`` grants).
 DEFAULT_EVAL_LEASE_SECONDS = 3 * 60
+#: Maximum time one coordinator owns a claimed wake delivery before another
+#: active coordinator may recover it after a crash or cutover.
+DEFAULT_WAKE_DELIVERY_LEASE_SECONDS = 60
 #: Payloads whose UTF-8 size exceeds this are spilled to a content-addressed blob
 #: instead of being stored inline in the row.
 DEFAULT_BLOB_THRESHOLD = 4096
@@ -136,12 +141,14 @@ def _progress_snapshot(
 
 
 class Status:
-    """The six task states (string constants, stored verbatim)."""
+    """The eight task states (string constants, stored verbatim)."""
 
     PROPOSED = "proposed"
     QUEUED = "queued"
     CLAIMED = "claimed"
     STARTED = "started"
+    #: Previously started, owner-preserving, dormant, and non-claimable.
+    SUSPENDED = "suspended"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
     #: Terminal failure: a held task requeued too many times (its owner kept
@@ -151,10 +158,13 @@ class Status:
 
     #: States a worker actively holds; recoverable by liveness GC (owner-gone).
     HELD = frozenset({CLAIMED, STARTED})
+    #: Non-terminal states that retain an owner. Suspended tasks are deliberately
+    #: excluded from HELD because they have no active lease or embodiment.
+    OWNED = frozenset({CLAIMED, STARTED, SUSPENDED})
     #: Terminal states -- no further transitions.
     TERMINAL = frozenset({COMPLETED, ABANDONED, DEAD_LETTER})
     #: Non-terminal states from which an abandon (with permission) is allowed.
-    ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED})
+    ABANDONABLE = frozenset({PROPOSED, QUEUED, CLAIMED, STARTED, SUSPENDED})
 
 
 class TaskError(RuntimeError):
@@ -263,6 +273,12 @@ class Task:
     #: answered). The submitted answers live in the ``task_steer`` table.
     card: dict | None = None
     awaiting_steer: bool = False
+    #: Latest durable wake outbox operation for this task. ``wake_status`` is
+    #: pending/delivering/delivered/failed/stale; ``wake_operation_id`` is the
+    #: deterministic idempotency key used across retries and restarts.
+    wake_seq: int = 0
+    wake_status: str | None = None
+    wake_operation_id: str | None = None
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
@@ -305,7 +321,36 @@ class Task:
             activity_updated_at=row["activity_updated_at"],
             card=json.loads(row["card"]) if row["card"] else None,
             awaiting_steer=bool(row["awaiting_steer"]),
+            wake_seq=row["wake_seq"],
+            wake_status=row["wake_status"],
+            wake_operation_id=row["wake_operation_id"],
         )
+
+
+@dataclass(frozen=True)
+class WakeOperation:
+    """A durable owner-wake outbox row."""
+
+    id: str
+    task_id: str
+    generation: int
+    wake_seq: int
+    owner: str
+    owner_session_id: str | None
+    message: str | None
+    status: str
+    attempts: int
+    not_before: float
+    created_at: float
+    updated_at: float
+    delivered_at: float | None = None
+    last_error: str | None = None
+    delivery_token: str | None = None
+    delivery_expires_at: float | None = None
+
+    @classmethod
+    def _from_row(cls, row: sqlite3.Row) -> WakeOperation:
+        return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
 
 
 @dataclass(frozen=True)
@@ -452,6 +497,9 @@ _COLUMNS: dict[str, str] = {
     # in the append-only ``task_steer`` table.
     "card": "TEXT",
     "awaiting_steer": "INTEGER NOT NULL DEFAULT 0",
+    "wake_seq": "INTEGER NOT NULL DEFAULT 0",
+    "wake_status": "TEXT",
+    "wake_operation_id": "TEXT",
 }
 
 
@@ -473,6 +521,7 @@ class TaskQueue:
         Status.QUEUED,
         Status.CLAIMED,
         Status.STARTED,
+        Status.SUSPENDED,
         Status.COMPLETED,
     )
 
@@ -578,6 +627,46 @@ class TaskQueue:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_task_steer_task "
                 "ON task_steer(task_id)"
+            )
+            # Durable wake outbox. A steer/resume transaction inserts the wake
+            # row before commit; the coordinator loop claims and delivers it
+            # later. The row id is also the downstream idempotency key, so a
+            # restart retry cannot enqueue the same wake twice.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS wake_outbox ("
+                "  id TEXT PRIMARY KEY,"
+                "  task_id TEXT NOT NULL,"
+                "  generation INTEGER NOT NULL,"
+                "  wake_seq INTEGER NOT NULL,"
+                "  owner TEXT NOT NULL,"
+                "  owner_session_id TEXT,"
+                "  message TEXT,"
+                "  status TEXT NOT NULL DEFAULT 'pending',"
+                "  attempts INTEGER NOT NULL DEFAULT 0,"
+                "  not_before REAL NOT NULL DEFAULT 0,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  delivered_at REAL,"
+                "  last_error TEXT,"
+                "  delivery_token TEXT,"
+                "  delivery_expires_at REAL,"
+                "  UNIQUE(task_id, generation, wake_seq)"
+                ")"
+            )
+            wake_columns = {
+                r["name"] for r in conn.execute("PRAGMA table_info(wake_outbox)")
+            }
+            if "delivery_expires_at" not in wake_columns:
+                conn.execute(
+                    "ALTER TABLE wake_outbox ADD COLUMN delivery_expires_at REAL"
+                )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_wake_outbox_due "
+                "ON wake_outbox(status, not_before, created_at)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_wake_outbox_task "
+                "ON wake_outbox(task_id, wake_seq)"
             )
             # Spawn reservations -- the atomic "exactly one embody spawn per
             # (task, attempt)" record that closes the gap between the queue's
@@ -689,6 +778,68 @@ class TaskQueue:
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None:
         row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
         return Task._from_row(row) if row else None
+
+    def _enqueue_wake(
+        self,
+        conn: sqlite3.Connection,
+        task: Task,
+        *,
+        message: str | None,
+        ts: float,
+    ) -> WakeOperation:
+        """Insert one owner wake in the caller's task-state transaction."""
+        if not task.owner:
+            raise TaskError(f"task {task.id!r} has no owner to wake")
+        wake_seq = task.wake_seq + 1
+        operation_id = f"wake:{task.id}:{task.generation}:{wake_seq}"
+        conn.execute(
+            "UPDATE tasks SET wake_seq = ?, wake_status = 'pending',"
+            " wake_operation_id = ? WHERE id = ?",
+            (wake_seq, operation_id, task.id),
+        )
+        conn.execute(
+            "INSERT INTO wake_outbox "
+            "(id, task_id, generation, wake_seq, owner, owner_session_id,"
+            " message, status, attempts, not_before, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, ?)",
+            (
+                operation_id,
+                task.id,
+                task.generation,
+                wake_seq,
+                task.owner,
+                task.owner_session_id,
+                message,
+                ts,
+                ts,
+                ts,
+            ),
+        )
+        self._audit(
+            conn,
+            task.id,
+            ts=ts,
+            from_status=task.status,
+            to_status=task.status,
+            worker=task.owner,
+            note=f"wake pending ({operation_id})",
+        )
+        row = conn.execute(
+            "SELECT * FROM wake_outbox WHERE id = ?", (operation_id,)
+        ).fetchone()
+        return WakeOperation._from_row(row)
+
+    @staticmethod
+    def _has_spawned_reservation(
+        conn: sqlite3.Connection, task_id: str
+    ) -> bool:
+        row = conn.execute(
+            "SELECT 1 FROM spawn_reservations"
+            " WHERE task_id = ? AND state = ?"
+            " ORDER BY attempt DESC LIMIT 1",
+            (task_id, SpawnState.SPAWNED),
+        ).fetchone()
+        return row is not None
 
     # -- payload -------------------------------------------------------------
 
@@ -979,7 +1130,7 @@ class TaskQueue:
           ``target_worktree == worktree``, or a machine-wide assignment
           (``target_machine == machine`` with no worktree pin). Untargeted open
           tasks are *not* listed here (they belong to no one in particular).
-        - ``owned``: non-terminal tasks this agent has claimed/started
+        - ``owned``: non-terminal tasks this agent has claimed/started/suspended
           (``owner == machine/worktree``).
         """
         owner = worker_id_for(machine, worktree)
@@ -994,9 +1145,15 @@ class TaskQueue:
                 (Status.QUEUED, worktree, machine, *repo_param),
             ).fetchall()
             owned_rows = conn.execute(
-                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
+                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?, ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at ASC",
-                (owner, Status.CLAIMED, Status.STARTED, *repo_param),
+                (
+                    owner,
+                    Status.CLAIMED,
+                    Status.STARTED,
+                    Status.SUSPENDED,
+                    *repo_param,
+                ),
             ).fetchall()
         return {
             "assigned": [Task._from_row(r) for r in assigned_rows],
@@ -1053,18 +1210,143 @@ class TaskQueue:
         worker_id: str,
         *,
         result_ref: str | None = None,
+        expected_status: str | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
         now: float | None = None,
     ) -> Task:
-        """Move a ``started`` task to terminal ``completed`` (owner must match)."""
+        """Complete active or suspended work (owner must match).
+
+        A suspended task may resolve while no worker process is running (for
+        example, an awaited external condition became true). Allowing the
+        preserved owner to complete it directly avoids manufacturing a fake
+        resume/active turn solely to reach the terminal state. Callers that
+        act on a previously read suspended snapshot may supply its status,
+        owner-session identity, and generation as an atomic transition fence.
+        """
+        allowed = {Status.STARTED, Status.SUSPENDED}
+        if expected_status is not None:
+            if expected_status not in allowed:
+                raise TaskError(
+                    f"cannot expect {expected_status!r} when completing a task"
+                )
+            allowed = {expected_status}
         return self._transition(
             task_id,
-            allowed={Status.STARTED},
+            allowed=allowed,
             to=Status.COMPLETED,
             worker_id=worker_id,
             now=now,
             note="complete",
             stamp="completed_at",
             extra={"result_ref": result_ref, "owner": None, "lease_expires_at": None},
+            expected_owner_session_id=expected_owner_session_id,
+            expected_generation=expected_generation,
+        )
+
+    def suspend(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        reason: str,
+        now: float | None = None,
+    ) -> Task:
+        """Park a ``started`` task as dormant while preserving its owner.
+
+        Suspension is owner-gated and requires a non-empty reason, recorded in
+        the audit trail. Durable task context and owner/session/generation
+        identity remain intact; active lease, activity, and liveness observation
+        are cleared because no worker is running while suspended.
+        """
+        meaningful = _clip(reason, PROGRESS_SUMMARY_MAX)
+        if meaningful is None:
+            raise TaskError("suspend requires a non-empty reason")
+        return self._transition(
+            task_id,
+            allowed={Status.STARTED},
+            to=Status.SUSPENDED,
+            worker_id=worker_id,
+            now=now,
+            note=f"suspend: {meaningful}",
+            extra={"lease_expires_at": None, "last_liveness": None},
+            reject_pending_steer=True,
+        )
+
+    def resume(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        wake_requested: bool = False,
+        wake_message: str | None = None,
+        adopt_owner_session_id: str | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Wake an owned ``suspended`` task back to ``started``.
+
+        The same owner, owner-session identity, worktree identity, generation,
+        progress, and card are retained by default. A handoff successor may
+        atomically adopt the task into its current session; that advances the
+        generation so wakes and liveness observations from the prior
+        incarnation become stale.
+        """
+        ts = self._now(now)
+        extra: dict[str, object] = {
+            "lease_expires_at": ts + self.lease_seconds,
+            "last_seen_at": ts,
+            "last_liveness": None,
+        }
+        if adopt_owner_session_id is not None:
+            extra["owner_session_id"] = adopt_owner_session_id
+        return self._transition(
+            task_id,
+            allowed={Status.SUSPENDED},
+            to=Status.STARTED,
+            worker_id=worker_id,
+            now=ts,
+            note="resume",
+            extra=extra,
+            bump_generation=adopt_owner_session_id is not None,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_generation=expected_generation,
+            reembody_headless_on_wake=True,
+            wake_requested=wake_requested,
+            wake_message=wake_message,
+        )
+
+    def release_suspended(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        reason: str | None = None,
+        now: float | None = None,
+    ) -> Task:
+        """Release a suspended task to ``queued`` for a replacement worker.
+
+        Ownership and owner-session identity are cleared, and any active spawn
+        reservation for the former embodiment is released in the same
+        transaction so a supervisor may reserve a replacement.
+        """
+        note = _clip(reason, PROGRESS_SUMMARY_MAX) or "release suspended task"
+        return self._transition(
+            task_id,
+            allowed={Status.SUSPENDED},
+            to=Status.QUEUED,
+            worker_id=worker_id,
+            now=now,
+            note=note,
+            extra={
+                "owner": None,
+                "owner_session_id": None,
+                "lease_expires_at": None,
+                "claimed_at": None,
+                "last_liveness": None,
+            },
+            release_spawn=True,
         )
 
     def yield_task(
@@ -1076,10 +1358,13 @@ class TaskQueue:
         exclude: str | None = None,
         now: float | None = None,
     ) -> Task:
-        """Return a held (``claimed``/``started``) task to ``queued`` with updates.
+        """Return an owned task to ``queued`` with updates.
 
         The recoverable-snag path (e.g. a merge conflict): the worker relinquishes
         the lease so the next scheduler cycle re-surfaces the task.
+
+        Suspended tasks use :meth:`release_suspended`, which also releases the
+        former embodiment's spawn reservation for replacement.
 
         ``exclude`` is an optional **"not me" anti-affinity token** appended to the
         task's ``excludes`` on the way back to the queue, so the *same* candidate
@@ -1090,7 +1375,11 @@ class TaskQueue:
         finds a taker or becomes unclaimable (surfaced for the operator).
         """
         extra: dict[str, object] = {
-            "owner": None, "lease_expires_at": None, "claimed_at": None,
+            "owner": None,
+            "owner_session_id": None,
+            "lease_expires_at": None,
+            "claimed_at": None,
+            "last_liveness": None,
         }
         if exclude:
             current = self.get(task_id)
@@ -1179,6 +1468,11 @@ class TaskQueue:
             if task is None:
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
+            if task.status == Status.SUSPENDED and activity is not None:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"cannot set non-null activity on suspended task {task_id!r}"
+                )
             reservation = conn.execute(
                 "SELECT task_id, state FROM spawn_reservations WHERE key = ?",
                 (reservation_key,),
@@ -1361,6 +1655,8 @@ class TaskQueue:
         *,
         fields: dict,
         sender: str | None = None,
+        wake_requested: bool = False,
+        wake_message: str | None = None,
         now: float | None = None,
     ) -> Task:
         """Submit an operator's answer (a **steer**) to a task's card.
@@ -1369,7 +1665,13 @@ class TaskQueue:
         ``awaiting_steer`` (the operator has responded; the task is no longer
         blocked on a human). Deliberately **not** owner-gated -- the operator (or
         a surface acting for them), not the worker, submits a steer. Allowed on
-        any non-terminal task. The worker consumes the answer with
+        any non-terminal task. A suspended interactive task is atomically
+        resumed to ``started`` while preserving its owner. A suspended
+        headless task has no interactive inbox, so it is instead released to
+        ``queued`` and its reservation settled for safe re-embodiment. When
+        direct wake delivery is possible, the same transaction inserts a
+        durable wake outbox row; bridge delivery happens later in the
+        coordinator loop. The worker consumes the answer with
         :meth:`take_steer` when it resumes. A steer is **never** a verdict -- it
         carries operator *guidance*, and the coordinator has no path to set an
         Approve/Reject outcome from it.
@@ -1389,20 +1691,87 @@ class TaskQueue:
                 "INSERT INTO task_steer (task_id, ts, fields, sender) VALUES (?, ?, ?, ?)",
                 (task_id, ts, payload, sender),
             )
-            conn.execute(
-                "UPDATE tasks SET awaiting_steer = 0, updated_at = ? WHERE id = ?",
-                (ts, task_id),
+            resumed = task.status == Status.SUSPENDED
+            reembody = bool(
+                resumed
+                and wake_requested
+                and task.owner_session_id is None
+                and self._has_spawned_reservation(conn, task_id)
             )
+            if reembody:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, awaiting_steer = 0,"
+                    " owner = NULL, owner_session_id = NULL,"
+                    " lease_expires_at = NULL, claimed_at = NULL,"
+                    " last_liveness = NULL, wake_status = NULL,"
+                    " wake_operation_id = NULL, updated_at = ?"
+                    " WHERE id = ? AND status = ?",
+                    (Status.QUEUED, ts, task_id, Status.SUSPENDED),
+                )
+                conn.execute(
+                    "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
+                    " detail = COALESCE(detail, ?)"
+                    " WHERE task_id = ? AND state IN (?, ?)",
+                    (
+                        SpawnState.SETTLED,
+                        ts,
+                        "headless task released for steer re-embodiment",
+                        task_id,
+                        SpawnState.RESERVING,
+                        SpawnState.SPAWNED,
+                    ),
+                )
+            elif resumed:
+                conn.execute(
+                    "UPDATE tasks SET status = ?, awaiting_steer = 0,"
+                    " lease_expires_at = ?, last_seen_at = ?, last_liveness = NULL,"
+                    " updated_at = ? WHERE id = ? AND status = ?",
+                    (
+                        Status.STARTED,
+                        ts + self.lease_seconds,
+                        ts,
+                        ts,
+                        task_id,
+                        Status.SUSPENDED,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "UPDATE tasks SET awaiting_steer = 0, updated_at = ? WHERE id = ?",
+                    (ts, task_id),
+                )
             self._audit(
                 conn,
                 task_id,
                 ts=ts,
                 from_status=task.status,
-                to_status=task.status,
+                to_status=(
+                    Status.QUEUED
+                    if reembody
+                    else Status.STARTED if resumed else task.status
+                ),
                 worker=sender,
-                note=f"steer submitted{f' by {sender}' if sender else ''}",
+                note=(
+                    f"steer submitted{f' by {sender}' if sender else ''}"
+                    f"{'; released for re-embodiment' if reembody else ''}"
+                    f"{'; resumed' if resumed and not reembody else ''}"
+                ),
             )
             result = self._fetch(conn, task_id)
+            if (
+                wake_requested
+                and not reembody
+                and result is not None
+                and result.owner
+                and result.owner_session_id is not None
+            ):
+                self._enqueue_wake(
+                    conn,
+                    result,
+                    message=wake_message,
+                    ts=ts,
+                )
+                result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
         return result  # type: ignore[return-value]
 
@@ -1411,15 +1780,17 @@ class TaskQueue:
         task_id: str,
         worker_id: str,
         *,
+        all_pending: bool = False,
         now: float | None = None,
-    ) -> dict | None:
-        """Consume the oldest un-taken steer for a held task the worker owns.
+    ) -> dict | list[dict] | None:
+        """Consume pending steering for a held task the worker owns.
 
-        Returns the steer payload ``{id, ts, fields, sender}`` and marks it taken,
-        or ``None`` when the inbox has nothing pending. Owner-gated (only the
-        worker driving the task reads its steers) and lease-refreshing. This is
-        the wake-side read: a resumed worker calls it to learn what the operator
-        answered, then continues toward its goal.
+        By default returns and marks taken the oldest steer payload
+        ``{id, ts, fields, sender}``. With ``all_pending=True``, returns every
+        untaken steer oldest-first and marks the whole batch taken atomically.
+        The all-pending form is the wake-side read: wakes are edge-triggered and
+        may coalesce, so a resumed or replacement worker drains every answer
+        before continuing. Owner-gated and lease-refreshing.
         """
         ts = self._now(now)
         with self._connect() as conn:
@@ -1436,22 +1807,23 @@ class TaskQueue:
                 raise TaskError(
                     f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
                 )
-            row = conn.execute(
+            rows = conn.execute(
                 "SELECT id, ts, fields, sender FROM task_steer "
-                "WHERE task_id = ? AND taken = 0 ORDER BY id ASC LIMIT 1",
+                "WHERE task_id = ? AND taken = 0 ORDER BY id ASC"
+                + ("" if all_pending else " LIMIT 1"),
                 (task_id,),
-            ).fetchone()
-            if row is None:
+            ).fetchall()
+            if not rows:
                 conn.execute(
                     "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
                     " updated_at = ? WHERE id = ?",
                     (ts + self.lease_seconds, ts, ts, task_id),
                 )
                 conn.execute("COMMIT")
-                return None
-            conn.execute(
+                return [] if all_pending else None
+            conn.executemany(
                 "UPDATE task_steer SET taken = 1, taken_at = ? WHERE id = ?",
-                (ts, row["id"]),
+                [(ts, row["id"]) for row in rows],
             )
             conn.execute(
                 "UPDATE tasks SET lease_expires_at = ?, last_seen_at = ?,"
@@ -1465,15 +1837,23 @@ class TaskQueue:
                 from_status=task.status,
                 to_status=task.status,
                 worker=worker_id,
-                note="steer taken",
+                note=(
+                    f"{len(rows)} steers taken"
+                    if all_pending
+                    else "steer taken"
+                ),
             )
             conn.execute("COMMIT")
-        return {
-            "id": row["id"],
-            "ts": row["ts"],
-            "fields": json.loads(row["fields"] or "{}"),
-            "sender": row["sender"],
-        }
+        result = [
+            {
+                "id": row["id"],
+                "ts": row["ts"],
+                "fields": json.loads(row["fields"] or "{}"),
+                "sender": row["sender"],
+            }
+            for row in rows
+        ]
+        return result if all_pending else result[0]
 
     def steer_log(self, task_id: str) -> list[dict]:
         """The full steer inbox for a task (oldest first), for inspection."""
@@ -1494,6 +1874,265 @@ class TaskQueue:
             }
             for r in rows
         ]
+
+    def list_wakes(self, task_id: str) -> list[WakeOperation]:
+        """List a task's durable wake operations, oldest first."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM wake_outbox WHERE task_id = ?"
+                " ORDER BY wake_seq ASC",
+                (task_id,),
+            ).fetchall()
+        return [WakeOperation._from_row(row) for row in rows]
+
+    @staticmethod
+    def _wake_is_current(task: Task | None, wake: WakeOperation) -> bool:
+        return bool(
+            task is not None
+            and task.status == Status.STARTED
+            and task.owner == wake.owner
+            and wake.owner_session_id is not None
+            and task.owner_session_id == wake.owner_session_id
+            and task.generation == wake.generation
+            and task.wake_operation_id == wake.id
+        )
+
+    def recover_inflight_wakes(
+        self,
+        *,
+        now: float | None = None,
+        lease_seconds: float = DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
+    ) -> int:
+        """Return only expired ``delivering`` rows to pending.
+
+        The downstream bridge receives the stable outbox id as its idempotency
+        key, so retrying an ambiguous pre-restart delivery cannot enqueue a
+        duplicate prompt. Rows created before delivery leases were introduced
+        use ``updated_at + lease_seconds`` as their conservative expiry.
+        """
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                "SELECT * FROM wake_outbox WHERE status = 'delivering'"
+                " AND COALESCE(delivery_expires_at, updated_at + ?) <= ?",
+                (max(0.01, lease_seconds), ts),
+            ).fetchall()
+            for row in rows:
+                wake = WakeOperation._from_row(row)
+                conn.execute(
+                    "UPDATE wake_outbox SET status = 'pending',"
+                    " delivery_token = NULL, delivery_expires_at = NULL,"
+                    " not_before = ?, updated_at = ?"
+                    " WHERE id = ? AND status = 'delivering'"
+                    " AND COALESCE(delivery_expires_at, updated_at + ?) <= ?",
+                    (ts, ts, wake.id, max(0.01, lease_seconds), ts),
+                )
+                conn.execute(
+                    "UPDATE tasks SET wake_status = 'pending'"
+                    " WHERE id = ? AND wake_operation_id = ?",
+                    (wake.task_id, wake.id),
+                )
+                task = self._fetch(conn, wake.task_id)
+                if task is not None:
+                    self._audit(
+                        conn,
+                        wake.task_id,
+                        ts=ts,
+                        from_status=task.status,
+                        to_status=task.status,
+                        worker=wake.owner,
+                        note=f"wake recovered ({wake.id})",
+                    )
+            conn.execute("COMMIT")
+        return len(rows)
+
+    def claim_due_wake(
+        self,
+        *,
+        now: float | None = None,
+        lease_seconds: float = DEFAULT_WAKE_DELIVERY_LEASE_SECONDS,
+    ) -> WakeOperation | None:
+        """Atomically claim the oldest due current wake operation.
+
+        Operations fenced out by task status/owner/session/generation or by a
+        newer wake are marked ``stale`` instead of delivered.
+        """
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            while True:
+                row = conn.execute(
+                    "SELECT * FROM wake_outbox"
+                    " WHERE status = 'pending' AND not_before <= ?"
+                    " ORDER BY created_at ASC, id ASC LIMIT 1",
+                    (ts,),
+                ).fetchone()
+                if row is None:
+                    conn.execute("COMMIT")
+                    return None
+                wake = WakeOperation._from_row(row)
+                task = self._fetch(conn, wake.task_id)
+                if not self._wake_is_current(task, wake):
+                    conn.execute(
+                        "UPDATE wake_outbox SET status = 'stale', updated_at = ?,"
+                        " last_error = 'task fence advanced' WHERE id = ?"
+                        " AND status = 'pending'",
+                        (ts, wake.id),
+                    )
+                    conn.execute(
+                        "UPDATE tasks SET wake_status = 'stale'"
+                        " WHERE id = ? AND wake_operation_id = ?",
+                        (wake.task_id, wake.id),
+                    )
+                    if task is not None:
+                        self._audit(
+                            conn,
+                            wake.task_id,
+                            ts=ts,
+                            from_status=task.status,
+                            to_status=task.status,
+                            worker=wake.owner,
+                            note=f"wake stale ({wake.id})",
+                        )
+                    continue
+                token = uuid.uuid4().hex
+                cur = conn.execute(
+                    "UPDATE wake_outbox SET status = 'delivering',"
+                    " attempts = attempts + 1, delivery_token = ?,"
+                    " delivery_expires_at = ?, updated_at = ?"
+                    " WHERE id = ? AND status = 'pending'",
+                    (token, ts + max(0.01, lease_seconds), ts, wake.id),
+                )
+                if not cur.rowcount:
+                    continue
+                conn.execute(
+                    "UPDATE tasks SET wake_status = 'delivering'"
+                    " WHERE id = ? AND wake_operation_id = ?",
+                    (wake.task_id, wake.id),
+                )
+                claimed = conn.execute(
+                    "SELECT * FROM wake_outbox WHERE id = ?", (wake.id,)
+                ).fetchone()
+                conn.execute("COMMIT")
+                return WakeOperation._from_row(claimed)
+
+    def finish_wake(
+        self,
+        operation_id: str,
+        delivery_token: str,
+        *,
+        delivered: bool,
+        error: str | None = None,
+        max_attempts: int = 8,
+        retry_base: float = 1.0,
+        now: float | None = None,
+    ) -> WakeOperation:
+        """Record delivery or retry a claimed wake with exponential backoff."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                "SELECT * FROM wake_outbox WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if row is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such wake operation {operation_id!r}")
+            wake = WakeOperation._from_row(row)
+            if wake.status != "delivering" or wake.delivery_token != delivery_token:
+                conn.execute("COMMIT")
+                raise TaskError(f"wake operation {operation_id!r} is not held by this delivery")
+            task = self._fetch(conn, wake.task_id)
+            if not self._wake_is_current(task, wake):
+                status = "stale"
+                note = f"wake stale ({wake.id})"
+                params = (status, ts, "task fence advanced", wake.id)
+                conn.execute(
+                    "UPDATE wake_outbox SET status = ?, updated_at = ?,"
+                    " delivery_token = NULL, delivery_expires_at = NULL,"
+                    " last_error = ? WHERE id = ?",
+                    params,
+                )
+            elif delivered:
+                status = "delivered"
+                note = f"wake delivered ({wake.id})"
+                conn.execute(
+                    "UPDATE wake_outbox SET status = 'delivered', updated_at = ?,"
+                    " delivered_at = ?, delivery_token = NULL,"
+                    " delivery_expires_at = NULL, last_error = NULL"
+                    " WHERE id = ?",
+                    (ts, ts, wake.id),
+                )
+            elif wake.attempts >= max(1, max_attempts):
+                status = "failed"
+                note = f"wake failed ({wake.id})"
+                conn.execute(
+                    "UPDATE wake_outbox SET status = 'failed', updated_at = ?,"
+                    " delivery_token = NULL, delivery_expires_at = NULL,"
+                    " last_error = ? WHERE id = ?",
+                    (ts, error or "delivery failed", wake.id),
+                )
+            else:
+                status = "pending"
+                delay = min(
+                    60.0,
+                    max(0.01, retry_base)
+                    * float(2 ** max(0, wake.attempts - 1)),
+                )
+                note = f"wake retry scheduled ({wake.id})"
+                conn.execute(
+                    "UPDATE wake_outbox SET status = 'pending', updated_at = ?,"
+                    " not_before = ?, delivery_token = NULL,"
+                    " delivery_expires_at = NULL, last_error = ?"
+                    " WHERE id = ?",
+                    (ts, ts + delay, error or "delivery failed", wake.id),
+                )
+            conn.execute(
+                "UPDATE tasks SET wake_status = ?"
+                " WHERE id = ? AND wake_operation_id = ?",
+                (status, wake.task_id, wake.id),
+            )
+            if task is not None:
+                self._audit(
+                    conn,
+                    wake.task_id,
+                    ts=ts,
+                    from_status=task.status,
+                    to_status=task.status,
+                    worker=wake.owner,
+                    note=note,
+                )
+            result = conn.execute(
+                "SELECT * FROM wake_outbox WHERE id = ?", (wake.id,)
+            ).fetchone()
+            conn.execute("COMMIT")
+        return WakeOperation._from_row(result)
+
+    def wake_metrics(self, *, now: float | None = None) -> dict[str, int | float | None]:
+        """Return durable outbox counts and oldest pending age."""
+        ts = self._now(now)
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT status, COUNT(*) AS count FROM wake_outbox GROUP BY status"
+            ).fetchall()
+            oldest = conn.execute(
+                "SELECT MIN(created_at) FROM wake_outbox"
+                " WHERE status IN ('pending', 'delivering')"
+            ).fetchone()[0]
+        counts = {
+            "pending": 0,
+            "delivering": 0,
+            "delivered": 0,
+            "failed": 0,
+            "stale": 0,
+        }
+        counts.update({row["status"]: row["count"] for row in rows})
+        return {
+            **counts,
+            "oldest_pending_age": (
+                round(ts - oldest, 3) if oldest is not None else None
+            ),
+        }
 
     def recover_expired_leases(self, *, now: float | None = None) -> int:
         """Deprecated compatibility shim -- now runs a **liveness** GC pass.
@@ -1735,7 +2374,8 @@ class TaskQueue:
         **no** action (escalate-or-demote is a consumer policy, not the
         engine). Reports, scoped to ``repo`` when given:
 
-        - ``queued`` / ``proposed`` / ``held`` / ``dead_letter`` -- counts by phase.
+        - ``queued`` / ``proposed`` / ``held`` / ``suspended`` /
+          ``dead_letter`` -- counts by phase.
         - ``oldest_queued_age`` -- seconds the oldest ``queued`` task has waited
           (``None`` when empty), the clearest "is it draining?" beat.
         - ``held_live`` / ``held_gone`` / ``held_unknown`` -- held tasks broken out
@@ -1759,6 +2399,7 @@ class TaskQueue:
 
             queued = _count(Status.QUEUED)
             proposed = _count(Status.PROPOSED)
+            suspended = _count(Status.SUSPENDED)
             dead_letter = _count(Status.DEAD_LETTER)
             held_rows = conn.execute(
                 "SELECT last_liveness, last_seen_at FROM tasks"  # noqa: S608 (constant clause; parameterized)
@@ -1786,6 +2427,7 @@ class TaskQueue:
             "queued": queued,
             "proposed": proposed,
             "held": len(held_rows),
+            "suspended": suspended,
             "held_live": held_live,
             "held_gone": held_gone,
             "held_unknown": held_unknown,
@@ -1836,6 +2478,14 @@ class TaskQueue:
         note: str | None = None,
         stamp: str | None = None,
         extra: dict[str, object] | None = None,
+        release_spawn: bool = False,
+        wake_requested: bool = False,
+        wake_message: str | None = None,
+        bump_generation: bool = False,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+        reembody_headless_on_wake: bool = False,
+        reject_pending_steer: bool = False,
     ) -> Task:
         ts = self._now(now)
         allowed_set = set(allowed)
@@ -1853,8 +2503,49 @@ class TaskQueue:
             if require_owner and worker_id is not None and task.owner not in (None, worker_id):
                 conn.execute("COMMIT")
                 raise TaskError(f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}")
+            if reject_pending_steer:
+                pending = conn.execute(
+                    "SELECT 1 FROM task_steer"
+                    " WHERE task_id = ? AND taken = 0 LIMIT 1",
+                    (task_id,),
+                ).fetchone()
+                if pending is not None:
+                    conn.execute("COMMIT")
+                    raise TaskError(
+                        f"cannot suspend task {task_id!r}: pending steer;"
+                        " take it and continue"
+                    )
+            if expected_generation is not None and (
+                task.generation != expected_generation
+                or task.owner_session_id != expected_owner_session_id
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} ownership incarnation changed"
+                )
+            if (
+                reembody_headless_on_wake
+                and wake_requested
+                and task.owner_session_id is None
+                and self._has_spawned_reservation(conn, task_id)
+            ):
+                to = Status.QUEUED
+                note = "resume: released headless owner for re-embodiment"
+                extra = {
+                    "owner": None,
+                    "owner_session_id": None,
+                    "lease_expires_at": None,
+                    "claimed_at": None,
+                    "last_liveness": None,
+                    "wake_status": None,
+                    "wake_operation_id": None,
+                }
+                release_spawn = True
+                wake_requested = False
             sets = ["status = ?", "updated_at = ?"]
             params: list[object] = [to, ts]
+            if bump_generation:
+                sets.append("generation = generation + 1")
             # Preserve execution across claimed -> started; clear it when work
             # leaves the held lifecycle. The supervisor keeps held observations
             # fresh in the background.
@@ -1870,6 +2561,20 @@ class TaskQueue:
             params.append(task_id)
             # Column names are internal constants; values are bound parameters.
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", params)  # noqa: S608
+            if release_spawn:
+                conn.execute(
+                    "UPDATE spawn_reservations SET state = ?, updated_at = ?,"
+                    " detail = COALESCE(detail, ?) WHERE task_id = ?"
+                    " AND state IN (?, ?)",
+                    (
+                        SpawnState.SETTLED,
+                        ts,
+                        "task released from suspension",
+                        task_id,
+                        SpawnState.RESERVING,
+                        SpawnState.SPAWNED,
+                    ),
+                )
             self._audit(
                 conn,
                 task_id,
@@ -1880,6 +2585,14 @@ class TaskQueue:
                 note=note,
             )
             result = self._fetch(conn, task_id)
+            if wake_requested:
+                self._enqueue_wake(
+                    conn,
+                    result,  # type: ignore[arg-type]
+                    message=wake_message,
+                    ts=ts,
+                )
+                result = self._fetch(conn, task_id)
             conn.execute("COMMIT")
         return result  # type: ignore[return-value]
 
@@ -1959,8 +2672,9 @@ class TaskQueue:
         repo's tasks are invisible to it). Backs the agent-driven
         *sweep + explore + verify* flow a producer runs before creating a task:
         it enumerates every ``proposed``/``queued``/``claimed``/``started``/
-        ``completed`` task so the producer can read the descriptions and judge
-        whether the work already exists -- no semantic index required.
+        ``suspended``/``completed`` task so the producer can read the
+        descriptions and judge whether the work already exists -- no semantic
+        index required.
         Correctness rests on each task carrying a self-contained title + prompt.
         (A future VEI adapter is a pluggable *optimization* over this same
         corpus, never a prerequisite.)

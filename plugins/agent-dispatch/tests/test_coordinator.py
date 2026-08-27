@@ -68,6 +68,84 @@ def client(server_url):
     c.close()
 
 
+def test_client_suspend_resume_release_routes(client, monkeypatch):
+    from agent_dispatch import bridge
+
+    monkeypatch.setattr(
+        bridge, "resume_steered_owner", lambda *_args, **_kwargs: False
+    )
+    task = client.create("wait")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+    parked = client.suspend(
+        task["id"], owner, reason="waiting for an external result"
+    )
+    assert parked["status"] == Status.SUSPENDED
+    resumed = client.resume(task["id"], owner)
+    assert resumed["status"] == Status.STARTED
+    assert resumed["resume_woken"] is None
+    assert resumed["resume_wake_status"] == "pending"
+    client.suspend(task["id"], owner, reason="waiting again")
+    released = client.release(
+        task["id"], owner, reason="use a replacement"
+    )
+    assert released["status"] == Status.QUEUED
+    assert released["owner"] is None
+
+
+def test_client_resume_can_atomically_adopt_successor_session(
+    client, monkeypatch
+):
+    from agent_dispatch import bridge, coordinator
+
+    sessions = iter(["session-old", "session-new"])
+    monkeypatch.setattr(
+        coordinator, "_resolve_owner_session_id", lambda _owner: next(sessions)
+    )
+    monkeypatch.setattr(
+        bridge, "resume_steered_owner", lambda *_args, **_kwargs: False
+    )
+    task = client.create("continue after handoff")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    started = client.start(task["id"], owner)
+    parked = client.suspend(task["id"], owner, reason="handoff")
+
+    resumed = client.resume(
+        task["id"],
+        owner,
+        wake=False,
+        adopt_session=True,
+        expected_owner_session_id=parked["owner_session_id"],
+        expected_generation=parked["generation"],
+    )
+
+    assert started["owner_session_id"] == "session-old"
+    assert resumed["owner_session_id"] == "session-new"
+    assert resumed["generation"] == parked["generation"] + 1
+    assert resumed["resume_wake_status"] == "not_requested"
+
+
+def test_client_completes_suspended_task_without_wake(client, monkeypatch):
+    from agent_dispatch import bridge
+
+    def unexpected_wake(*_args, **_kwargs):
+        raise AssertionError("terminal resolution must not wake the owner")
+
+    monkeypatch.setattr(bridge, "resume_steered_owner", unexpected_wake)
+    task = client.create("wait for condition")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+    client.suspend(task["id"], owner, reason="condition pending")
+
+    done = client.complete(
+        task["id"], owner, result_ref="condition:satisfied"
+    )
+
+    assert done["status"] == Status.COMPLETED
+    assert done["result_ref"] == "condition:satisfied"
+    assert done["owner"] is None
+
+
 # -- coordinator routes ------------------------------------------------------
 
 

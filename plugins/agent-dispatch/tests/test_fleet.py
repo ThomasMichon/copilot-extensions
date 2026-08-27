@@ -197,6 +197,10 @@ def test_fleet_seed_drives_origin_over_ssh_with_explicit_owner():
     # every lifecycle verb reaches the origin over ssh, with the explicit owner
     assert "ssh brain agent-dispatch claim --task t42 --worker fleet-t42-abc123" in seed
     assert "ssh brain agent-dispatch start t42 fleet-t42-abc123" in seed
+    assert (
+        "ssh brain agent-dispatch steer take t42 fleet-t42-abc123 --all"
+        in seed
+    )
     assert "ssh brain agent-dispatch complete t42 fleet-t42-abc123 --result-ref" in seed
     assert "ssh brain agent-dispatch progress t42 fleet-t42-abc123" in seed
     # Contract-net evaluation window (dev55) over the SSH mesh: evaluation claim,

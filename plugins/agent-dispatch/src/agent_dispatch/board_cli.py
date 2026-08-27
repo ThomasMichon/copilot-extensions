@@ -16,7 +16,15 @@ from pathlib import Path
 from .procutil import no_window_kwargs as _no_window_kwargs
 from .procutil import windowless_python
 
-GROUPS = ("Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned")
+GROUPS = (
+    "Blocked",
+    "Proposed",
+    "Queued",
+    "Started",
+    "Suspended",
+    "Completed",
+    "Abandoned",
+)
 TERMINAL = frozenset({"Completed", "Abandoned"})
 ACTIVITY_TTL_SECONDS = 90.0
 
@@ -94,6 +102,8 @@ def _group(task: dict) -> str:
         return "Proposed"
     if status == "queued":
         return "Queued"
+    if status == "suspended":
+        return "Suspended"
     return "Started"
 
 
@@ -188,7 +198,10 @@ def main(argv: list[str] | None = None) -> int:
         ).returncode
 
     query = {
-        "status": "proposed,queued,claimed,started,completed,abandoned,dead_letter",
+        "status": (
+            "proposed,queued,claimed,started,suspended,"
+            "completed,abandoned,dead_letter"
+        ),
         "limit": str(args.limit),
     }
     if args.label:

@@ -224,6 +224,21 @@ def test_backlog_health_breaks_out_held_by_liveness(q):
     assert h["oldest_held_live_age"] == pytest.approx(96.0)
 
 
+def test_backlog_health_counts_suspended_outside_held(q):
+    task = q.create("dormant", now=1000.0)
+    _claim_and_start(
+        q, task.id, wt="wtS", session="SS", now=1001.0
+    )
+    q.suspend(
+        task.id, "m/wtS", reason="waiting for an external result", now=1003.0
+    )
+
+    health = q.backlog_health(now=1100.0)
+    assert health["suspended"] == 1
+    assert health["held"] == 0
+    assert health["held_live"] == 0
+
+
 # -- orphaned-pin reaper: unowned tasks whose target worktree is gone ---------
 
 

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 import yaml
-
 from zdd import routing
+
 from agent_bridge.client import BridgeClient
 
 
@@ -94,3 +94,23 @@ def test_list_agents_preserves_topology_diagnostics(cfg_dir: Path, monkeypatch):
     agents, errors = client.list_agents_with_diagnostics()
     assert agents == [{"name": "valid"}]
     assert errors == ["stale: machines.yaml not found"]
+
+
+def test_live_message_payload_includes_expected_session(cfg_dir: Path, monkeypatch):
+    client = BridgeClient.from_config()
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "_request",
+        lambda method, path, payload, **kwargs:
+            calls.append((method, path, payload, kwargs)) or {},
+    )
+    client.send_live_message(
+        "session-1",
+        sender="dispatch",
+        body="wake",
+        idempotency_key="wake-1",
+        expected_session_id="session-1",
+    )
+    assert calls[0][2]["idempotency_key"] == "wake-1"
+    assert calls[0][2]["expected_session_id"] == "session-1"

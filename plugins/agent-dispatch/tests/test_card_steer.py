@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import threading
+import time
+
 import pytest
 
 from agent_dispatch import steering
@@ -279,6 +282,43 @@ def test_take_steer_fifo_order(q):
     assert q.take_steer(t.id, "w1")["fields"] == {"n": "2"}
 
 
+def test_take_steer_all_drains_pending_batch(q):
+    t = _held(q)
+    q.submit_steer(t.id, fields={"n": "1"})
+    q.submit_steer(t.id, fields={"n": "2"})
+
+    steers = q.take_steer(t.id, "w1", all_pending=True)
+
+    assert [steer["fields"] for steer in steers] == [{"n": "1"}, {"n": "2"}]
+    assert q.take_steer(t.id, "w1", all_pending=True) == []
+
+
+def test_suspend_rejects_steer_that_arrived_after_card(q):
+    t = _held(q)
+    q.set_card(
+        t.id,
+        "w1",
+        card=steering.build_card(
+            request_input=[{"name": "decision", "type": "text"}]
+        ),
+    )
+    q.submit_steer(
+        t.id,
+        fields={"decision": "continue"},
+        sender="operator",
+        wake_requested=False,
+    )
+
+    with pytest.raises(TaskError, match="pending steer"):
+        q.suspend(t.id, "w1", reason="waiting for guidance")
+
+    assert q.get(t.id).status == Status.STARTED
+    q.take_steer(t.id, "w1", all_pending=True)
+    assert q.suspend(
+        t.id, "w1", reason="waiting for more guidance"
+    ).status == Status.SUSPENDED
+
+
 def test_submit_steer_rejects_terminal_task(q):
     t = _held(q)
     q.complete(t.id, "w1")
@@ -305,6 +345,43 @@ def test_submit_steer_not_owner_gated(q):
     assert task.awaiting_steer is False
 
 
+def test_submit_steer_reembodies_suspended_headless_owner(q):
+    t = q.create("review PR 42")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key,
+        session_handle="fleet-body:worker-host:bridge-session-1",
+    )
+    q.claim_one("fleet-owner", task_id=t.id)
+    q.start(t.id, "fleet-owner")
+    q.suspend(t.id, "fleet-owner", reason="waiting for guidance")
+
+    task = q.submit_steer(
+        t.id,
+        fields={"decision": "continue"},
+        sender="operator",
+        wake_requested=True,
+    )
+    q.submit_steer(
+        t.id,
+        fields={"detail": "use option B"},
+        sender="operator",
+        wake_requested=True,
+    )
+
+    assert task.status == Status.QUEUED
+    assert task.owner is None
+    assert q.get_reservation(reservation.key).state == "settled"
+    assert q.list_wakes(t.id) == []
+    q.claim_one("replacement", task_id=t.id)
+    q.start(t.id, "replacement")
+    steers = q.take_steer(t.id, "replacement", all_pending=True)
+    assert [steer["fields"] for steer in steers] == [
+        {"decision": "continue"},
+        {"detail": "use option B"},
+    ]
+
+
 # -- coordinator HTTP routes -------------------------------------------------
 
 
@@ -314,14 +391,39 @@ def api(tmp_path):
 
     from agent_dispatch.coordinator import create_app
 
-    return TestClient(create_app(TaskQueue(tmp_path / "tasks.db")))
+    with TestClient(
+        create_app(
+            TaskQueue(tmp_path / "tasks.db"),
+            wake_interval=0.01,
+            wake_max_attempts=1,
+            wake_retry_base=0.01,
+        )
+    ) as client:
+        yield client
 
 
 def _held_over_http(api, worker="w1"):
     tid = api.post("/tasks", json={"title": "review PR 42"}).json()["id"]
     api.post("/claim", json={"worker_id": worker})
-    api.post(f"/tasks/{tid}/start", json={"worker_id": worker})
+    api.post(
+        f"/tasks/{tid}/start",
+        json={"worker_id": worker, "owner_session_id": f"session-{worker}"},
+    )
     return tid
+
+
+def _wait_for_wake_status(api, task_id, expected, timeout=2.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        notes = [event["note"] for event in api.get(
+            f"/tasks/{task_id}/events"
+        ).json()]
+        if any(
+            note and note.startswith(f"wake {expected}") for note in notes
+        ):
+            return
+        time.sleep(0.01)
+    raise AssertionError(f"wake status {expected!r} was not recorded")
 
 
 def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
@@ -331,7 +433,7 @@ def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
     monkeypatch.setattr(
         bridge,
         "resume_steered_owner",
-        lambda owner, task_id, message=None: wake_calls.append(
+        lambda owner, task_id, message=None, **_kwargs: wake_calls.append(
             (owner, task_id, message)
         ) or True,
     )
@@ -357,15 +459,26 @@ def test_card_and_steer_roundtrip_over_http(api, monkeypatch):
     )
     assert r.status_code == 200
     assert r.json()["awaiting_steer"] is False
-    assert r.json()["steer_woken"] is True
-    assert wake_calls == [("w1", tid, None)]
+    assert r.json()["steer_woken"] is None
+    assert r.json()["steer_wake_status"] == "pending"
+    _wait_for_wake_status(api, tid, "delivered")
+    assert len(wake_calls) == 1
+    assert wake_calls[0][:2] == ("w1", tid)
+    assert f"steer take {tid}" in wake_calls[0][2]
+    [wake] = api.get(f"/tasks/{tid}/wakes").json()
+    assert wake["status"] == "delivered"
+    assert wake["attempts"] == 1
+    assert api.get("/health").json()["wakes"]["delivered"] >= 1
 
-    r = api.post(f"/tasks/{tid}/steer/take", json={"worker_id": "w1"})
+    r = api.post(
+        f"/tasks/{tid}/steer/take",
+        json={"worker_id": "w1", "all_pending": True},
+    )
     assert r.status_code == 200
     took = r.json()
     assert took["task_id"] == tid
-    assert took["steer"]["fields"] == {"decision": "post-approved"}
-    assert took["steer"]["sender"] == "tmichon"
+    assert took["steers"][0]["fields"] == {"decision": "post-approved"}
+    assert took["steers"][0]["sender"] == "tmichon"
 
     # inbox drained
     assert api.post(f"/tasks/{tid}/steer/take", json={"worker_id": "w1"}).json()["steer"] is None
@@ -403,7 +516,9 @@ def test_steer_wake_failure_keeps_answer_durable(api, monkeypatch):
     from agent_dispatch import bridge
 
     monkeypatch.setattr(
-        bridge, "resume_steered_owner", lambda owner, task_id, message=None: False
+        bridge,
+        "resume_steered_owner",
+        lambda owner, task_id, message=None, **_kwargs: False,
     )
     tid = _held_over_http(api)
 
@@ -413,10 +528,48 @@ def test_steer_wake_failure_keeps_answer_durable(api, monkeypatch):
     )
 
     assert r.status_code == 200
-    assert r.json()["steer_woken"] is False
+    assert r.json()["steer_woken"] is None
+    assert r.json()["steer_wake_status"] == "pending"
+    _wait_for_wake_status(api, tid, "failed")
     log = api.get(f"/tasks/{tid}/steer-log").json()
     assert log[0]["fields"] == {"decision": "revise"}
     assert log[0]["taken"] is False
+
+
+def test_steer_atomically_resumes_suspended_task_before_wake(api, monkeypatch):
+    from agent_dispatch import bridge
+
+    wake_called = threading.Event()
+
+    def wake(owner, task_id, message=None, **_kwargs):
+        wake_called.set()
+        return False
+
+    monkeypatch.setattr(bridge, "resume_steered_owner", wake)
+    tid = _held_over_http(api)
+    api.post(
+        f"/tasks/{tid}/suspend",
+        json={"worker_id": "w1", "reason": "waiting for guidance"},
+    )
+
+    response = api.post(
+        f"/tasks/{tid}/steer",
+        json={"fields": {"decision": "continue"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == Status.STARTED
+    assert response.json()["owner"] == "w1"
+    assert response.json()["steer_woken"] is None
+    assert response.json()["steer_wake_status"] == "pending"
+    assert wake_called.wait(1)
+    _wait_for_wake_status(api, tid, "failed")
+    assert api.get(f"/tasks/{tid}/steer-log").json()[0]["taken"] is False
+    assert any(
+        event["from_status"] == Status.SUSPENDED
+        and event["to_status"] == Status.STARTED
+        for event in api.get(f"/tasks/{tid}/events").json()
+    )
 
 
 def test_steer_without_owner_persists_without_wake(api, monkeypatch):
@@ -432,5 +585,38 @@ def test_steer_without_owner_persists_without_wake(api, monkeypatch):
 
     assert r.status_code == 200
     assert r.json()["steer_woken"] is None
+    assert r.json()["steer_wake_status"] == "no_owner"
     log = api.get(f"/tasks/{tid}/steer-log").json()
     assert log[0]["fields"] == {"answer": "later"}
+
+
+def test_slow_wake_never_blocks_durable_steer_response(api, monkeypatch):
+    from agent_dispatch import bridge
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_wake(owner, task_id, message=None, **_kwargs):
+        entered.set()
+        assert release.wait(2)
+        return False
+
+    monkeypatch.setattr(bridge, "resume_steered_owner", slow_wake)
+    tid = _held_over_http(api)
+
+    started = time.monotonic()
+    response = api.post(
+        f"/tasks/{tid}/steer",
+        json={"fields": {"decision": "continue"}},
+    )
+    elapsed = time.monotonic() - started
+
+    assert response.status_code == 200
+    assert elapsed < 1.0
+    assert response.json()["steer_wake_status"] == "pending"
+    assert entered.wait(1)
+    log = api.get(f"/tasks/{tid}/steer-log").json()
+    assert log[0]["fields"] == {"decision": "continue"}
+    assert log[0]["taken"] is False
+    release.set()
+    _wait_for_wake_status(api, tid, "failed")

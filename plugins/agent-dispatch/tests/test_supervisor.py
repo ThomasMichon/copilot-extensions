@@ -123,6 +123,44 @@ def test_poll_spawns_eligible_task_once(q, client):
     assert spawn.calls == [t.id]
 
 
+def test_suspended_reservation_does_not_consume_supervisor_capacity(q, client):
+    first = q.create("dormant")
+    spawn = _ok_spawn()
+    sup = Supervisor(
+        client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=1
+    )
+    assert sup.poll_once() == [first.id]
+    q.claim_one("host-a/wt-1", task_id=first.id)
+    q.start(first.id, "host-a/wt-1")
+    q.suspend(first.id, "host-a/wt-1", reason="waiting")
+    second = q.create("runnable")
+
+    assert sup.poll_once() == [second.id]
+    assert spawn.calls == [first.id, second.id]
+    assert q.get(first.id).status == Status.SUSPENDED
+    assert q.get(first.id).attempts == 1
+
+
+def test_supervisor_settles_suspended_task_completed_by_resolver(q, client):
+    task = q.create("wait for condition")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn(
+        reservation.key, session_handle="session-1", worktree="wt-1"
+    )
+    q.claim_one("host-a/wt-1", task_id=task.id)
+    q.start(task.id, "host-a/wt-1")
+    q.suspend(task.id, "host-a/wt-1", reason="condition pending")
+    q.complete(
+        task.id, "host-a/wt-1", result_ref="condition:satisfied"
+    )
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, max_concurrent=1
+    )
+
+    assert sup.reconcile() == 1
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+
+
 def test_requeued_task_is_not_double_spawned(q, client):
     """A spawned-but-requeued task (lease expired, embody maybe still alive)
     must never be spawned a second time."""
@@ -652,6 +690,49 @@ def test_cli_supervise_pool_headless_builds_headless_fleet(monkeypatch, q, clien
 # -- Slice 2: liveness-gated auto-recovery -----------------------------------
 
 
+@pytest.mark.parametrize(
+    ("session_handle", "body_kind"),
+    [
+        ("worktree-session", "worktree"),
+        ("fleet-body:host-a:fleet-session", "fleet"),
+        ("local-body:local-session", "local"),
+    ],
+)
+def test_recover_gone_ignores_suspended_bodies(
+    q, client, session_handle, body_kind
+):
+    task = q.create("wait")
+    reservation, acquired = q.reserve_spawn(task.id, reserved_by="supervisor")
+    assert acquired is True
+    q.record_spawn(
+        reservation.key,
+        session_handle=session_handle,
+        worktree="wt-1" if body_kind == "worktree" else None,
+    )
+    owner = "host-a/wt-1"
+    q.claim_one(owner, task_id=task.id)
+    q.start(task.id, owner, owner_session_id="owner-session")
+    q.suspend(task.id, owner, reason="awaiting review")
+    before = q.get(task.id)
+    probes = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        verdict_fn=lambda *args: probes.append(("worktree", args)) or "gone",
+        fleet_verdict_fn=lambda *args: probes.append(("fleet", args)) or "gone",
+        local_body_verdict_fn=lambda *args: probes.append(("local", args)) or "gone",
+        nudge=False,
+    )
+
+    assert sup.recover_gone() == 0
+    after_reservation = q.latest_reservation(task.id)
+    assert probes == []
+    assert after_reservation.state == SpawnState.SPAWNED
+    assert after_reservation.attempt == 1
+    assert q.get(task.id).attempts == before.attempts
+
+
 def test_recover_gone_releases_stale_reservation_and_respawns(q, client):
     """A *confirmed-gone* embody's stale reservation is released so the task is
     re-embodied (the replacement resumes from progress_log)."""
@@ -1096,6 +1177,42 @@ def test_supervisor_publishes_fleet_body_activity(q, client):
     assert q.get(t.id).activity == "STALLED"
 
 
+def test_hold_live_leases_does_not_observe_suspended_fleet_body(
+    q, client, monkeypatch
+):
+    t = q.create("dormant")
+    spawn = _fleet_spawn("fleet-body:h:brg-dormant")
+    activity_calls: list[tuple[str, str]] = []
+    verdict_calls: list[tuple[str, str]] = []
+    heartbeat_calls: list[tuple[str, str]] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        publish_activity=True,
+        fleet_activity_fn=lambda host, sid: activity_calls.append((host, sid)),
+        fleet_verdict_fn=lambda host, sid: verdict_calls.append((host, sid)),
+        recover=False,
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    q.claim_one("fleet-o", task_id=t.id)
+    q.start(t.id, "fleet-o")
+    q.suspend(t.id, "fleet-o", reason="waiting")
+    monkeypatch.setattr(
+        client,
+        "heartbeat",
+        lambda tid, wid: heartbeat_calls.append((tid, wid)),
+    )
+
+    assert sup.hold_live_leases() == 0
+    assert activity_calls == []
+    assert verdict_calls == []
+    assert heartbeat_calls == []
+    assert q.get(t.id).activity is None
+
+
 # -- local headless-body recovery (confirmed-gone on THIS host, no SSH) --------
 #
 # The local analog of the fleet-body slice above: a headless body embodied on
@@ -1324,6 +1441,48 @@ def test_supervisor_publishes_local_body_activity_while_task_is_queued(
         "liveness": "idle",
     }
     assert sup.hold_live_leases() == 0
+    assert q.get(t.id).activity is None
+
+
+def test_hold_live_leases_does_not_observe_suspended_local_body(
+    q, client, monkeypatch
+):
+    from agent_dispatch import tracking
+
+    t = q.create("dormant")
+    spawn = _local_spawn("local-body:brg-dormant")
+    session_list_calls: list[bool] = []
+    verdict_calls: list[str] = []
+    heartbeat_calls: list[tuple[str, str]] = []
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        publish_activity=True,
+        local_body_verdict_fn=lambda sid: verdict_calls.append(sid),
+        recover=False,
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+    q.claim_one("local-o", task_id=t.id)
+    q.start(t.id, "local-o")
+    q.suspend(t.id, "local-o", reason="waiting")
+    monkeypatch.setattr(
+        tracking,
+        "list_local_body_sessions",
+        lambda: session_list_calls.append(True) or [],
+    )
+    monkeypatch.setattr(
+        client,
+        "heartbeat",
+        lambda tid, wid: heartbeat_calls.append((tid, wid)),
+    )
+
+    assert sup.hold_live_leases() == 0
+    assert session_list_calls == []
+    assert verdict_calls == []
+    assert heartbeat_calls == []
     assert q.get(t.id).activity is None
 
 

@@ -161,8 +161,9 @@ def test_posix_payload_command_ignores_shadow_path_and_preserves_stdin(
         env=env,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    assert result.returncode == 0, result.stderr
     assert result.stdout == "-m agent_bridge create example|prompt"
     assert not shadow_marker.exists()
 
@@ -203,8 +204,9 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
         env=env,
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
+    assert result.returncode == 0, result.stderr
     assert result.stdout.replace("\r\n", "\n") == (
         "-m agent_bridge create target --prompt-file -::task body\n"
     )

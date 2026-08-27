@@ -78,6 +78,10 @@ class DispatchClient:
     def events(self, task_id: str) -> list[dict]:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/events"))
 
+    def wakes(self, task_id: str) -> list[dict]:
+        """Return a task's durable wake outbox operations."""
+        return self._unwrap(self._http.get(f"/tasks/{task_id}/wakes"))
+
     def progress_log(self, task_id: str) -> list[dict]:
         """The accumulated append-only progress log for a task (oldest first)."""
         return self._unwrap(self._http.get(f"/tasks/{task_id}/progress-log"))
@@ -159,11 +163,73 @@ class DispatchClient:
             )
         )
 
-    def complete(self, task_id: str, worker_id: str, *, result_ref: str | None = None) -> dict:
+    def suspend(self, task_id: str, worker_id: str, *, reason: str) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/suspend",
+                json={"worker_id": worker_id, "reason": reason},
+            )
+        )
+
+    def resume(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        wake: bool = True,
+        message: str | None = None,
+        adopt_session: bool = False,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/resume",
+                json={
+                    "worker_id": worker_id,
+                    "wake": wake,
+                    "message": message,
+                    "adopt_session": adopt_session,
+                    "expected_owner_session_id": expected_owner_session_id,
+                    "expected_generation": expected_generation,
+                },
+            )
+        )
+
+    def release(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        reason: str | None = None,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/tasks/{task_id}/release",
+                json={"worker_id": worker_id, "reason": reason},
+            )
+        )
+
+    def complete(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        result_ref: str | None = None,
+        expected_status: str | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+    ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/complete",
-                json={"worker_id": worker_id, "result_ref": result_ref},
+                json={
+                    "worker_id": worker_id,
+                    "result_ref": result_ref,
+                    "expected_status": expected_status,
+                    "expected_owner_session_id": expected_owner_session_id,
+                    "expected_generation": expected_generation,
+                },
             )
         )
 
@@ -256,13 +322,19 @@ class DispatchClient:
             )
         )
 
-    def steer_take(self, task_id: str, worker_id: str) -> dict:
+    def steer_take(
+        self, task_id: str, worker_id: str, *, all_pending: bool = False
+    ) -> dict:
         """Consume the next pending steer (returns ``{task_id, steer}``; steer is
-        the payload dict or ``None`` when the inbox is empty)."""
+        the payload dict or ``None`` when the inbox is empty). With
+        ``all_pending``, drains the inbox and returns ``{task_id, steers}``."""
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/steer/take",
-                json={"worker_id": worker_id},
+                json={
+                    "worker_id": worker_id,
+                    "all_pending": all_pending,
+                },
             )
         )
 
