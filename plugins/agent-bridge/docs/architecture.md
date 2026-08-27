@@ -487,6 +487,23 @@ boundary (`namespace-list`, `namespace-resolve`, `namespace-ensure-ready`,
 with a warning, so a bad sibling never breaks daemon startup. The built-in
 `admin:` resolver is registered in-process.
 
+`namespace-resolve` may return a versioned, provider-owned `venue` object.
+Agent-bridge preserves that object unchanged in the `SpawnTarget` and durable
+session record so stable target/instance identity, trust posture, readiness, and
+capabilities remain owned by the provider rather than reconstructed from a
+spawn command. The legacy top-level `workspace_folder` / `security_profile`
+fields are folded in only when the provider omits those compatibility keys.
+Conflicting workspace identities are rejected; a trust-posture conflict can
+only resolve toward `restricted` and marks the target unready. A provider that
+successfully returns malformed venue metadata fails closed rather than falling
+back to a different in-process target. CLI namespace providers are command
+transports: a successful resolution must declare `type: command` and a non-empty
+string argv, so provider data cannot redirect a restricted target into a local
+or machine-SSH launch path. Defined venue fields are type-checked at the
+boundary (including boolean readiness/posture flags and boolean capability
+flags), while unknown additive metadata is preserved. Command argv rejects
+embedded NUL bytes before persistence.
+
 ### Architecture
 
 ```

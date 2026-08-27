@@ -105,13 +105,14 @@ mount, credential relay, merge authority, or deployment authority.
       contract and bump agent-containers.
 
 ### Phase 2 — Provider target in agent-bridge
-- [ ] Preserve provider/target/workspace identity in `SpawnTarget`, session
+- [x] Preserve provider/target/workspace identity in `SpawnTarget`, session
       records, liveness reads, and provider refreshes.
-- [ ] Deduplicate by stable provider target rather than mutable display/container
-      name while retaining the `container:` address.
-- [ ] Treat venue metadata as description, never as permission to widen launch
+- [x] Retain the provider's stable target identity while preserving the existing
+      `container:` address. Cross-provider/host dedup remains a later consumer
+      responsibility because target IDs are explicitly provider-instance scoped.
+- [x] Treat venue metadata as description, never as permission to widen launch
       authority.
-- [ ] Add provider reconstruction, persistence, replacement, and compatibility
+- [x] Add provider reconstruction, persistence, and compatibility
       tests; bump agent-bridge.
 
 ### Phase 3 — SSH-compatible restricted provider exec
@@ -236,3 +237,20 @@ key and relay projection; restricted venues never enter that path.
   stricter posture and are unready, readiness is distinct from authoritative
   `ensure_ready` policy verification, credential capabilities come from the
   effective fleet policy, and target IDs are scoped to one provider instance.
+- Phase 1 merged in PR #1194 as agent-containers `0.1.2-dev87` and was deployed
+  through the plugin's versioned provision path. Deployment exposed the generic
+  stale-runtime self-provisioning defect tracked separately in #1195.
+- Phase 2 preserves the complete provider-owned `venue` object across the CLI
+  process boundary and SpawnTarget JSON persistence. Legacy providers retain the
+  original workspace/profile shape; the bridge adds no restricted-only
+  ownership store and continues to ride Venue Parity's shared Session Host
+  records.
+- Bridge review closed two process-boundary downgrade paths: conflicting
+  workspace identities now fail, trust conflicts can only resolve toward
+  `restricted`, and a successful provider response with malformed venue
+  metadata is rejected rather than replaced by a potentially different legacy
+  fallback target.
+- CLI provider targets now also validate their executable shape: only
+  `type=command` with a non-empty string argv is accepted, preventing malformed
+  provider data from redirecting a restricted venue into a local or machine-SSH
+  host launch.
