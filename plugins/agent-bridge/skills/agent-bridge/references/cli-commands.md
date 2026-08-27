@@ -11,6 +11,10 @@ for the overview, when to use the bridge vs internal sub-agents, and common
 patterns. All commands connect to the local agent-bridge HTTP API; the service
 must be running (the `start` management operation).
 
+`agent-bridge` is a logical command name throughout this reference. Replace each
+leading token with the exact `argv[0]` from the agent-bridge session command
+catalog; never resolve it through ambient `PATH`.
+
 ## Contents
 - List Available Agents / Machines
 - Send a Prompt to an Agent (sync / async, sessions, timeouts)

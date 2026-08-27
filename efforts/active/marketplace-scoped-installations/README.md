@@ -109,9 +109,9 @@ reachable when their ownership is explicit.
 
 ### Phase 2 — Payload-local invocation ([#1103](https://github.com/ThomasMichon/copilot-extensions/issues/1103))
 
-- [ ] Add checked-in, payload-local POSIX/PowerShell/CMD shims generated from
+- [x] Add checked-in, payload-local POSIX/PowerShell/CMD shims generated from
   canonical templates.
-- [ ] Add session-start command-catalog context so skills and agents receive the
+- [x] Add session-start command-catalog context so skills and agents receive the
   exact payload-owned invocation path; convert operative bare command examples.
 - [ ] Stop installing generic `agent-*` commands into `~/.local/bin`.
 - [ ] Make project binstubs pin their owning payload and reject silent ownership
@@ -313,3 +313,17 @@ See [`design.md`](design.md).
   rebind requirements without creating or activating any runtime state.
 - Left Python/POSIX parity, vendoring, receipt mutation, locking, runtime-root
   activation, and the two exemplars to later Phase 3 slices.
+
+### 2026-08-26 — Runtime plugin hook audit
+
+- Audited every runtime-bearing `agent-*` marketplace plugin against the
+  [bootstrap/glossary matrix](agent-plugin-hook-audit.md).
+- Confirmed ten plugins already had complete generated shims, attributable
+  command-catalog hooks, and bootstrap hooks. agent-bridge was the sole
+  bootstrap-only gap; added its generated payload command and glossary without
+  changing runtime roots or service/provider ownership.
+- Kept the bridge glossary static: command ownership plus, at most, stable
+  machine/repository breadcrumbs. Worktrees and sessions remain live queries
+  because an initial-context snapshot would stale immediately.
+- Added a roster-wide guard so a future runtime `agent-*` plugin cannot land
+  without both-platform bootstrap and glossary wiring.

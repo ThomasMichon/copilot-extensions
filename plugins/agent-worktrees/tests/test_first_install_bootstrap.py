@@ -22,8 +22,10 @@ def test_session_start_prefers_payload_bootstrap_with_installed_fallback() -> No
         or "bootstrap-check" in entry.get("powershell", "")
     )
 
-    assert '$PWD/scripts/bootstrap-check.sh' in bootstrap["bash"]
+    assert '${COPILOT_PLUGIN_ROOT:-$PWD}' in bootstrap["bash"]
+    assert 's="$r/scripts/bootstrap-check.sh"' in bootstrap["bash"]
     assert '$HOME/.agent-worktrees/bin/bootstrap-check.sh' in bootstrap["bash"]
+    assert "$env:COPILOT_PLUGIN_ROOT" in bootstrap["powershell"]
     assert "scripts\\bootstrap-check.ps1" in bootstrap["powershell"]
     assert ".agent-worktrees\\bin\\bootstrap-check.ps1" in bootstrap["powershell"]
 

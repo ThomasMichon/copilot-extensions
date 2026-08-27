@@ -47,6 +47,13 @@ description: >
 > directly; never stamp or choose a global wrapper just to recover an in-session
 > command, and never choose the first match from multiple marketplaces.
 
+The session-start catalog is intentionally a **static breadcrumb**, not a
+topology snapshot. It maps the logical command to its owning payload and may
+eventually name stable machine/repository pivots, but it never enumerates
+worktrees, sessions, or other fast-changing state. Query `agents`, `sessions`,
+or the relevant repository at the point of use so ephemeral resources cannot
+go stale in initial context.
+
 ## Unexpected behavior is a troubleshooting event, not repair authorization
 
 An isolated disconnect caused by a network disruption or a daemon restart during
