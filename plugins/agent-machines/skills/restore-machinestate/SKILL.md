@@ -33,7 +33,16 @@ unavailable, surface that failure rather than improvising an install.
 
 ## Workflow
 
-1. **Discover** what applies here:
+1. **Doctor** the package layout:
+   ```
+   <catalog argv[0]> doctor
+   ```
+   Reports canonical, legacy, mixed, malformed, unavailable, and absent layouts.
+   For a legacy repo, preview migration with
+   `<catalog argv[0]> migrate --repo <name-or-path>` and apply only after
+   reviewing the byte-preserving move plan.
+
+2. **Discover** what applies here:
    ```
    <catalog argv[0]> discover
    ```
@@ -41,19 +50,19 @@ unavailable, surface that failure rather than improvising an install.
    machine. The candidate set is `~/.agent-worktrees/projects.yaml`; paths are
    resolved from `~/.agent-worktrees/repos.yaml` when present.
 
-2. **Plan** (read-only) -- the managed surfaces and a content drift key:
+3. **Plan** (read-only) -- the managed surfaces and a content drift key:
    ```
    <catalog argv[0]> plan
    ```
 
-3. **Validate** -- detect cross-package conflicts before applying:
+4. **Validate** -- detect cross-package conflicts before applying:
    ```
    <catalog argv[0]> validate
    ```
    Scalar `enforce` disagreements and bootstrap-floor violations are errors; the
    validator reports, it does not auto-arbitrate. Fix conflicting packages.
 
-4. **Restore** -- deliberate + reviewable (dry-run is the default):
+5. **Restore** -- deliberate + reviewable (dry-run is the default):
    ```
    <catalog argv[0]> restore                       # DRY-RUN: what would change and why
    <catalog argv[0]> restore --only ssh            # preview one section

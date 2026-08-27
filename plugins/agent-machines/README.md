@@ -65,6 +65,9 @@ agent-machines version
 
 ```bash
 agent-machines discover                 # packages gated to this machine
+agent-machines doctor                   # layout health across adopted repos
+agent-machines migrate --repo myrepo    # preview legacy -> canonical moves
+agent-machines migrate --repo myrepo --apply
 agent-machines plan                     # read-only surfaces/modules + drift key
 agent-machines validate                 # detect cross-package conflicts
 agent-machines restore                  # dry-run preview; refuses on validator errors
@@ -105,6 +108,15 @@ external machine registry.
 For migration, `.github/machine-state/` remains a bounded legacy fallback only
 when `.agent-machines/` is absent. Move a repo atomically: once the canonical
 root exists, legacy files in that repo are ignored.
+
+Use `agent-machines doctor` to find legacy, mixed, or malformed layouts across
+adopted repos. `agent-machines migrate --repo <name-or-path>` previews a
+behavior-preserving migration: YAML files move byte-for-byte into
+`.agent-machines/all/`, preserving gates, and a legacy `README.md` moves to the
+canonical root. Re-run with `--apply` to perform it. Migration refuses mixed
+layouts, destination collisions, nested content, and unknown legacy entries
+rather than guessing. Reorganizing a migrated package into `machines/<machine>/`
+is a separate explicit edit.
 
 A package under `.agent-machines/all/` has this shape:
 
@@ -180,14 +192,21 @@ the engine converges itself, with cross-package collision detection. See
 
 ## Troubleshooting
 
-There is no `doctor` command today. Use the shipped read-only commands:
+Start with the layout-aware doctor, then inspect resolved state:
 
-1. `agent-machines discover --json` — confirm packages were discovered and gated
+1. `agent-machines doctor --json` — detect canonical, legacy, mixed, malformed,
+   unavailable, and absent repo layouts.
+2. `agent-machines discover --json` — confirm packages were discovered and gated
    to this machine.
-2. `agent-machines validate --json` — inspect fail-loud conflicts before restore.
-3. `agent-machines plan --json` — confirm surfaces/modules and drift key.
-4. `agent-machines restore --json` — capture exact surface diffs and module
+3. `agent-machines validate --json` — inspect fail-loud conflicts before restore.
+4. `agent-machines plan --json` — confirm surfaces/modules and drift key.
+5. `agent-machines restore --json` — capture exact surface diffs and module
    stdout/stderr tails.
+
+`doctor` exits `0` when no layout errors are present (legacy and unavailable
+repos remain advisory), and `1` for malformed or mixed layouts. Command or
+manifest errors exit `2`. `migrate` is a no-op with exit `0` for an already
+canonical, absent, or empty legacy layout.
 
 If the runtime is not built yet, the first command prints a provisioning message
 (POSIX also emits `::agent-provisioning::`) and may take 30–120 seconds.
