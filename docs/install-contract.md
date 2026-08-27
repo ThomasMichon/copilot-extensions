@@ -93,8 +93,9 @@ Consequence — a rule for every plugin in this repo:
      implementing this contract, and
   2. an **install skill** an agent can trigger to deploy/refresh that runtime
      **from the source folder** after a payload update. The skill's job is to run
-     the plugin's `scripts/install.* update` from the source dir (the marketplace
-     plugin dir, or a local checkout — see
+     the plugin's manifest-selected canonical entrypoint with its documented
+     reconcile action (for example, `install.* update` or `init.* --force`) from
+     the source dir (the marketplace plugin dir, or a local checkout — see
      [Source = where the installer runs from](#source--where-the-installer-runs-from-no-flag)).
      Existing examples: `agent-worktrees:copilot-extensions-setup` (agent-worktrees +
      agent-bridge), `agent-codespaces:codespaces-setup` (agent-codespaces), `agent-containers:containers-fleet`
