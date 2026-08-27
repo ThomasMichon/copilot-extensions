@@ -24,7 +24,10 @@ function Emit([string]$msg) {
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PluginDir = Split-Path -Parent $ScriptDir
 $name = ''
-$py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
+$py = Get-Command python -ErrorAction SilentlyContinue
+if (-not $py) {
+  $py = Get-Command python3 -ErrorAction SilentlyContinue
+}
 if ($py) { $name = (& $py.Source -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>$null) }
 if (-not $name) { $name = Split-Path -Leaf $PluginDir }
 if (-not $name) { exit 0 }
