@@ -47,6 +47,7 @@ def test_early_installer_utilities_are_powershell_51_safe_ascii():
 
     assert "#Requires -Version 7.0" not in utilities
     assert "??" not in utilities
+    assert "Join-Path $PSScriptRoot '..\\..\\..'" in utilities
     utilities.encode("ascii")
 
 

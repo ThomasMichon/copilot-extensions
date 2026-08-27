@@ -17,7 +17,9 @@ Set-StrictMode -Version Latest
 # Capture the repo root at load time so functions can locate repo-relative
 # resources regardless of which installer dot-sources this file.
 # service-utils.ps1 lives at <plugin>/scripts/service-utils.ps1.
-$script:_ServiceUtilsRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$script:_ServiceUtilsRepoRoot = (
+    Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
+).Path
 
 # -- Status output --------------------------------------------------------
 
