@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from worktree_manager.plugin_contracts import (
     CONTRACT_VERSION,
+    ContractError,
     discover_contracts,
     parse_manifest,
 )
@@ -71,6 +74,21 @@ def test_parses_pivot_actions_cards_forms_and_config_sections():
     assert contribution.pivot.actions[1].form["fields_from"] == "card.request_input"
     assert contribution.worktree_actions[0].key == "send"
     assert contribution.config_sections[0].key == "settings"
+
+
+@pytest.mark.parametrize("argv", [
+    ["agent-example", 1],
+    ["agent-example", ""],
+])
+def test_argv_rejects_non_string_or_empty_elements(argv):
+    with pytest.raises(ContractError):
+        parse_manifest(
+            _pivot(list=argv),
+            name="agent-example",
+            marketplace="example",
+            plugin="agent-example",
+            source_path="/payload/pivots/agent-example.json",
+        )
 
 
 def test_discovers_only_effectively_enabled_payloads(tmp_path: Path, monkeypatch):

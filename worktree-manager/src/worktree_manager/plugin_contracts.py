@@ -162,10 +162,11 @@ def installed_plugins_dir(
 def _as_argv(value: object, *, where: str) -> tuple[str, ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise ContractError(f"{where} must be a non-empty array of strings")
-    argv = tuple(str(x) for x in value)
-    if not argv:
+    if not value:
         raise ContractError(f"{where} must be a non-empty array of strings")
-    return argv
+    if any(not isinstance(item, str) or not item for item in value):
+        raise ContractError(f"{where} must contain only non-empty strings")
+    return tuple(value)
 
 
 def _optional_path(value: object, *, where: str) -> str | None:
@@ -243,7 +244,9 @@ def _parse_actions(raw: object) -> tuple[ActionContract, ...]:
             args = item.get("args", [])
             if not isinstance(args, Sequence) or isinstance(args, (str, bytes)):
                 raise ContractError(f"`actions[{i}].args` must be an array")
-            run = tuple(str(x) for x in args)
+            if any(not isinstance(arg, str) for arg in args):
+                raise ContractError(f"`actions[{i}].args` must contain only strings")
+            run = tuple(args)
             internal = verb.strip()
         elif kind == "form":
             fields_from = item.get("fields_from")
