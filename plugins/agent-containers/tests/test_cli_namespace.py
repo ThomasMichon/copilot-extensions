@@ -6,6 +6,7 @@ import json
 import types
 from unittest.mock import patch
 
+import pytest
 from ssh_manager import SSHConfig
 
 from agent_containers.__main__ import main
@@ -25,13 +26,23 @@ def test_namespace_list_json(capsys):
 
 def test_namespace_resolve_json(capsys):
     async def _spec(self, name):
-        return {"type": "command", "spawn_command": ["docker", "exec", name], "user": "node"}
+        return {
+            "type": "command",
+            "spawn_command": ["docker", "exec", name],
+            "user": "node",
+            "venue": {
+                "schema_version": 1,
+                "provider": "agent-containers",
+                "target_id": f"container:{name}",
+            },
+        }
 
     with patch("agent_containers.resolver.ContainerResolver.resolve_spec", _spec):
         rc = main(["namespace-resolve", "example-web-1"])
     assert rc == 0
     d = json.loads(capsys.readouterr().out)
     assert d["spawn_command"] == ["docker", "exec", "example-web-1"] and d["user"] == "node"
+    assert d["venue"]["target_id"] == "container:example-web-1"
 
 
 def test_namespace_resolve_not_found_exit3(capsys):
@@ -140,3 +151,35 @@ def test_session_host_state_is_non_waking(capsys):
         "container_id": "abc123",
         "started_at": "now",
     }
+
+
+@pytest.mark.parametrize("live_profile", [None, "unexpected", "restricted"])
+def test_session_host_context_requires_exact_trusted_live_profile(
+    monkeypatch, live_profile
+):
+    from agent_containers import __main__ as cli
+    from agent_containers.config import ContainersConfig, FleetConfig
+    import agent_containers.lifecycle as lifecycle
+
+    config = ContainersConfig()
+    config.fleets["repo"] = FleetConfig(security_profile="trusted")
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(
+        lifecycle,
+        "get_container",
+        lambda cfg, name: types.SimpleNamespace(
+            fleet="repo",
+            state="running",
+        ),
+    )
+    labels = {}
+    if live_profile is not None:
+        labels["agent-containers.security-profile"] = live_profile
+    monkeypatch.setattr(
+        lifecycle,
+        "inspect_container",
+        lambda name: {"Config": {"Labels": labels}},
+    )
+
+    with pytest.raises(RuntimeError, match="exact trusted/trusted posture"):
+        cli._trusted_session_host_context("repo-1")

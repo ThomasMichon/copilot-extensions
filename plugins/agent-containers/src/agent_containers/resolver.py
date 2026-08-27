@@ -4,12 +4,12 @@ Implements the agent-bridge ``NamespaceResolver`` interface so that fleet
 containers can be addressed as ``container:<name>`` without pre-registration.
 Resolution returns a ``SpawnTarget`` that launches a Copilot ACP agent through
 the container wrapper. Trusted fleets use OpenSSH; restricted fleets retain the
-direct ``docker exec -i`` boundary.
+direct ``docker exec -i`` boundary and expose a stable provider-target identity
+without projecting host authority.
 
-The host ``gh auth token`` is forwarded into the container as ``GH_TOKEN`` so
-the in-container Copilot CLI is authenticated headlessly. The token is passed
-via the spawned process's *environment* (``SpawnTarget.env``) and referenced by
-name in the docker command (``-e GH_TOKEN``), so it never appears in argv or logs.
+Trusted fleets may forward the host ``gh auth token`` into the container as
+``GH_TOKEN``. Restricted fleets use a separate command builder that cannot
+accept token or relay arguments.
 
 Usage:
     from agent_containers.resolver import ContainerResolver
@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 from agent_procutil import no_window_flags
 
 from ._invoke import module_argv
-from .config import RESTRICTED_PROFILE, load_config
+from .config import RESTRICTED_PROFILE, TRUSTED_PROFILE, load_config
 from .lease import get_lease
 from .lifecycle import (
     get_container,
@@ -44,6 +44,8 @@ if TYPE_CHECKING:
     from agent_bridge.transport import SpawnTarget
 
 log = logging.getLogger("agent-containers")
+VENUE_SCHEMA_VERSION = 1
+VENUE_PROVIDER = "agent-containers"
 
 
 def _creation_flags() -> int:
@@ -93,6 +95,29 @@ def build_spawn_command(
     return cmd
 
 
+def build_restricted_spawn_command(
+    container: str,
+    user: str,
+    acp_command: str,
+) -> list[str]:
+    """Build the restricted ``docker exec`` command with no host projection.
+
+    This API deliberately accepts no token, relay, SSH, mount, or network
+    arguments. The live Docker posture is validated before this command runs.
+    """
+    return [
+        "docker",
+        "exec",
+        "-i",
+        "-u",
+        user,
+        container,
+        "bash",
+        "-lc",
+        acp_command,
+    ]
+
+
 def build_wrapper_command(name: str) -> list[str]:
     """Build the spawn command agent-bridge runs for a ``container:`` agent.
 
@@ -132,14 +157,15 @@ class ContainerResolver:
             spawn_command=spec["spawn_command"],
             user=spec.get("user"),
             container=spec.get("container"),
+            venue=spec.get("venue"),
         )
 
     async def resolve_spec(self, name: str) -> dict:
         """Resolve a container name to a **plain-dict** spawn spec.
 
         The agent_bridge-free core of :meth:`resolve` -- returns
-        ``{"type","spawn_command","user","workspace_folder","security_profile"}``
-        using only agent-containers + stdlib, so the
+        ``{"type","spawn_command","user","workspace_folder","security_profile",
+        "venue"}`` using only agent-containers + stdlib, so the
         ``agent-containers namespace-resolve`` CLI can emit it as JSON and
         agent-bridge reconstructs the ``SpawnTarget`` across a process boundary
         (#892 Inc 3b). ``workspace_folder`` is the container's concrete repo
@@ -192,13 +218,48 @@ class ContainerResolver:
         actual_profile = getattr(
             info, "security_profile", fleet.security_profile,
         )
-        if not fleet.restricted and actual_profile != RESTRICTED_PROFILE:
+        supported_profile = actual_profile in {TRUSTED_PROFILE, RESTRICTED_PROFILE}
+        restricted = fleet.restricted or actual_profile != TRUSTED_PROFILE
+        effective_profile = RESTRICTED_PROFILE if restricted else actual_profile
+        profile_mismatch = (
+            not supported_profile or fleet.security_profile != actual_profile
+        )
+        forward_gh, relay_enabled = config.credentials_for(fleet)
+        if restricted or profile_mismatch:
+            forward_gh, relay_enabled = False, False
+        spec["venue"] = {
+            "schema_version": VENUE_SCHEMA_VERSION,
+            "provider": VENUE_PROVIDER,
+            "kind": self.prefix,
+            "target_id": f"{self.prefix}:{name}",
+            "scope": "provider-instance",
+            "instance_id": getattr(info, "container_id", None),
+            "fleet": info.fleet,
+            "workspace_folder": workspace_folder,
+            # Backward-compatible trust key used by existing SpawnTarget
+            # consumers. It is the fail-closed maximum of configured/observed
+            # posture, not an attestation that the full policy was inspected.
+            "security_profile": effective_profile,
+            "configured_security_profile": fleet.security_profile,
+            "observed_security_profile": actual_profile,
+            "effective_security_profile": effective_profile,
+            "state": getattr(info, "state", "unknown"),
+            "ready": bool(getattr(info, "is_running", False)) and not profile_mismatch,
+            "posture_verified": False,
+            "transport": "docker-exec" if restricted else "ssh",
+            "capabilities": {
+                "container_local_workspace": True,
+                "host_credentials": forward_gh,
+                "credential_relay": relay_enabled,
+                "session_host": not restricted,
+            },
+        }
+        if not restricted:
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
                 name,
                 user,
             )
-            _forward_gh, relay_enabled = config.credentials_for(fleet)
             spec["container"] = {
                 "name": name,
                 "workspace_folder": workspace_folder,
@@ -259,11 +320,18 @@ class ContainerResolver:
             raise RuntimeError(
                 f"Container '{name}' has no matching fleet configuration"
             )
+        actual_profile = getattr(info, "security_profile", "")
+        if actual_profile not in {TRUSTED_PROFILE, RESTRICTED_PROFILE}:
+            raise RuntimeError(
+                f"Container '{name}' has unsupported live security profile "
+                f"{actual_profile!r}"
+            )
+        if fleet.security_profile != actual_profile:
+            raise RuntimeError(
+                f"Container '{name}' security profile does not match its fleet "
+                f"(configured={fleet.security_profile!r}, live={actual_profile!r})"
+            )
         if fleet.restricted or info.security_profile == "restricted":
-            if not fleet.restricted or info.security_profile != "restricted":
-                raise RuntimeError(
-                    f"Container '{name}' security profile does not match its fleet"
-                )
             errors = await asyncio.to_thread(
                 restricted_policy_errors,
                 info,

@@ -77,6 +77,7 @@ def test_row_to_info_parses_fleet_member():
     assert info.state == "running"
     assert info.fleet == "myrepo"
     assert info.local_folder == "/x/myrepo"
+    assert info.security_profile == "unknown"
 
 
 def test_row_to_info_skips_non_member():

@@ -142,7 +142,7 @@ def _row_to_info(
     if len(parts) < _PS_FIELD_COUNT:
         return None
     name, cid, image, state, status, label_str = parts[:_PS_FIELD_COUNT]
-    profile = parts[6] if len(parts) > 6 and parts[6] else TRUSTED_PROFILE
+    profile = parts[6] if len(parts) > 6 and parts[6] else "unknown"
     policy = parts[7] if len(parts) > 7 and parts[7] else None
     image_id = parts[8] if len(parts) > 8 and parts[8] else None
     labels = _parse_labels(label_str)
