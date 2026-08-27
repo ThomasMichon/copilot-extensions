@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import sys
 import threading
 import time
 import types
@@ -4932,15 +4933,17 @@ def _write_tasks_manifest(directory):
     manifest = {
         "label": "Tasks",
         "after": "Worktrees",
-        "list": ["true"],
+        "list": [sys.executable],
         "entry": {
             "id": "id", "title": "title", "worktree": "target_worktree",
             "subtitle": "repo_name", "badges": ["labels"],
         },
         "empty_hint": "No proposed tasks.",
         "actions": [
-            {"key": "open", "label": "Open into a CLI session", "run": ["echo", "{id}"]},
-            {"key": "abandon", "label": "Abandon", "run": ["echo", "{task_id}"],
+            {"key": "open", "label": "Open into a CLI session",
+             "run": [sys.executable, "{id}"]},
+            {"key": "abandon", "label": "Abandon",
+             "run": [sys.executable, "{task_id}"],
              "confirm": True},
         ],
     }
@@ -5059,13 +5062,15 @@ def test_registered_pivot_groups_by_status_group(tmp_path, monkeypatch):
     d = tmp_path / "pivots"
     d.mkdir()
     manifest = {
-        "label": "Tasks", "after": "Worktrees", "list": ["true"],
+        "label": "Tasks", "after": "Worktrees", "list": [sys.executable],
         "entry": {
             "id": "id", "title": "title", "worktree": "target_worktree",
             "subtitle": "repo_name", "group": "group", "badges": ["labels"],
         },
         "empty_hint": "No tasks.",
-        "actions": [{"key": "open", "label": "Open", "run": ["echo", "{id}"]}],
+        "actions": [
+            {"key": "open", "label": "Open", "run": [sys.executable, "{id}"]}
+        ],
     }
     (d / "agent-dispatch.json").write_text(_json.dumps(manifest), encoding="utf-8")
     monkeypatch.setenv(pivots_mod.PIVOTS_DIR_ENV, str(d))
@@ -5171,7 +5176,7 @@ def _write_codespaces_manifest(directory):
     manifest = {
         "label": "CodeSpaces",
         "after": "Worktrees",
-        "list": ["true"],
+        "list": [sys.executable],
         "columns": [
             {"key": "name", "header": "codespace", "width": 24},
             {"key": "disposition", "header": "state", "width": 10, "style": "yellow"},
@@ -5366,7 +5371,7 @@ def test_registered_pivot_account_scope_and_subtitle(tmp_path, monkeypatch):
         "label": "CodeSpaces",
         "after": "Worktrees",
         "scope": "account",
-        "list": ["true"],
+        "list": [sys.executable],
         "entry": {"id": "id", "title": "display", "subtitle": "subtitle"},
         "columns": [
             {"key": "display", "header": "codespace", "width": 22},
@@ -5510,7 +5515,7 @@ def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypat
     manifest = {
         "label": "Pool",
         "after": "Worktrees",
-        "list": ["true"],
+        "list": [sys.executable],
         "entry": {"id": "id", "title": "display"},
         "actions": [
             {"key": "recycle", "label": "Recycle", "progress": True,
@@ -5567,13 +5572,16 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
     manifest = {
         "label": "Pool",
         "after": "Worktrees",
-        "list": ["true"],
+        "list": [sys.executable],
         "entry": {"id": "id", "title": "display"},
         "actions": [
-            {"key": "info", "label": "Details", "run": ["echo", "{id}"]},
-            {"key": "release", "label": "Release", "run": ["echo", "{id}"],
+            {"key": "info", "label": "Details",
+             "run": [sys.executable, "{id}"]},
+            {"key": "release", "label": "Release",
+             "run": [sys.executable, "{id}"],
              "when": {"disposition": "in-use"}},
-            {"key": "recycle", "label": "Recycle", "run": ["echo", "{id}"],
+            {"key": "recycle", "label": "Recycle",
+             "run": [sys.executable, "{id}"],
              "when": {"disposition": ["stale", "clean"]}},
         ],
     }
@@ -5624,7 +5632,7 @@ def _write_steering_manifest(directory):
     manifest = {
         "label": "Tasks",
         "after": "Worktrees",
-        "list": ["true"],
+        "list": [sys.executable],
         "entry": {"id": "id", "title": "title"},
         "actions": [
             {"key": "card", "label": "View card", "kind": "card",
@@ -5632,9 +5640,10 @@ def _write_steering_manifest(directory):
             {"key": "steer", "label": "Steer", "kind": "form",
              "fields_from": "card.request_input",
              "title_from": "card.title", "body_from": "card.body",
-             "run": ["agent-dispatch", "steer", "submit", "{task_id}", "{fields}"],
+             "run": [sys.executable, "steer", "submit", "{task_id}", "{fields}"],
              "when": {"awaiting_steer": True}},
-            {"key": "abandon", "label": "Abandon", "run": ["echo", "{task_id}"]},
+            {"key": "abandon", "label": "Abandon",
+             "run": [sys.executable, "{task_id}"]},
         ],
     }
     (directory / "agent-dispatch.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -5721,7 +5730,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             await pilot.pause()
 
             assert rt.resolved == [
-                "agent-dispatch", "steer", "submit", "t1",
+                sys.executable, "steer", "submit", "t1",
                 "--field", "feedback=ship it",
                 "--field", "decision=revise",
             ]
@@ -5803,7 +5812,7 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
                 if rt.resolved is not None:
                     break
             assert rt.resolved == [
-                "agent-dispatch", "steer", "submit", "t1",
+                sys.executable, "steer", "submit", "t1",
                 "--field", "feedback=ship it",
                 "--field", "decision=revise",
             ]
@@ -6020,9 +6029,10 @@ def test_contributed_worktree_action_in_submenu_and_runs(tmp_path, monkeypatch):
 
     pv = tmp_path / "pivots"
     _write_wt_actions(pv, [
-        {"label": "Send message", "run": ["mybridge", "send", "{worktree}",
+        {"label": "Send message", "run": [sys.executable, "send", "{worktree}",
                                           "--machine", "{machine}"]},
-        {"label": "Only when final", "run": ["x"], "when": {"state": "FINAL"}},
+        {"label": "Only when final", "run": [sys.executable],
+         "when": {"state": "FINAL"}},
     ])
     monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pv))
     monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(tmp_path / "plugins"))
@@ -6089,8 +6099,9 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
 
     pv = tmp_path / "pivots"
     _write_config_sections(pv, [
-        {"label": "SSH", "run": ["agent-ssh", "config", "--machine", "{machine}"]},
-        {"label": "MCP", "run": ["agent-mcp", "menu"]},
+        {"label": "SSH",
+         "run": [sys.executable, "config", "--machine", "{machine}"]},
+        {"label": "MCP", "run": [sys.executable, "menu"]},
     ])
     monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pv))
     monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(tmp_path / "plugins"))
@@ -6595,7 +6606,7 @@ def test_registered_pivot_grouped_columns_and_task_correlation(tmp_path, monkeyp
         "label": "CodeSpaces",
         "after": "Worktrees",
         "scope": "account",
-        "list": ["true"],
+        "list": [sys.executable],
         "entry": {"id": "id", "title": "display", "worktree": "worktree",
                   "group": "group"},
         "columns": [
@@ -6664,7 +6675,7 @@ def test_codespaces_state_column_is_colour_coded(tmp_path, monkeypatch):
     d.mkdir()
     manifest = {
         "label": "CodeSpaces", "after": "Worktrees", "scope": "account",
-        "list": ["true"],
+        "list": [sys.executable],
         "columns": [
             {"key": "display", "header": "codespace", "width": 20},
             {"key": "status", "header": "state", "width": 8, "palette": "state"},

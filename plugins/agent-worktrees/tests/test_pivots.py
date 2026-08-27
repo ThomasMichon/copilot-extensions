@@ -232,9 +232,15 @@ def test_ensure_pivots_does_not_clobber_existing(tmp_path):
 
     restored = pivots.ensure_pivots(base=dest, plugins_root=src_root)
 
-    assert restored == []
-    [p] = pivots.discover_pivots(dest)
-    assert p.label == "Local"  # untouched
+    assert len(restored) == 1
+    assert restored[0].startswith("agent-dispatch.")
+    assert json.loads(
+        (dest / "agent-dispatch.json").read_text(encoding="utf-8")
+    )["label"] == "Local"  # untouched
+    assert {p.label for p in pivots.discover_pivots(dest)} == {
+        "Local",
+        "Source",
+    }
 
 
 def test_ensure_pivots_missing_source_root_is_noop(tmp_path):

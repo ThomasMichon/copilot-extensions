@@ -16213,7 +16213,8 @@ def build_parser() -> argparse.ArgumentParser:
         "doctor",
         help="Diagnose (and with --fix, repair) worktree/session health: "
              "corrupt tracking records, empty session registries, stale "
-             "status, orphaned empty session shells, cwd/path misalignment.",
+             "status, orphaned empty session shells, cwd/path misalignment, "
+             "and drop-in registry hygiene.",
     )
     sp.add_argument("--fix", action="store_true",
                     help="Apply non-destructive repairs (YAML integrity, "
@@ -16950,67 +16951,86 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     do_gc = getattr(args, "gc_sessions", False)
     json_mode = getattr(args, "json", False)
 
-    tracking_dir = cfg.tracking_dir()
-    session_dir = sessions._session_state_dir()
-    store_db = health.default_store_db(session_dir)
+    try:
+        proj_name = cfg.project_name()
+    except Exception:
+        proj_name = ""
 
-    # 1. YAML integrity -- FIRST so a repaired record is visible to the passes
-    #    below (list_records silently skips an unparseable file).
-    yaml_findings = health.repair_yaml_integrity(tracking_dir, apply=apply)
-
-    # 2. Registry + title backfill (delegates to the shared core when applying;
-    #    read-only scan otherwise -- backfill_sessions never writes).
-    if apply:
-        backfill = _run_backfill(tracking_dir)
-    else:
-        recs = tracking.list_records(tracking_dir)
-        need = [r for r in recs if not r.sessions]
-        disc = sessions.backfill_sessions(need) if need else {}
-        backfill = {
-            "scanned": len(need),
-            "sessions": sum(len(v) for v in disc.values()),
-            "worktrees": len(disc),
-            "registry": len(disc),
-            "titles": len([r for r in recs if not (r.title and r.title != "null")]),
-        }
-
-    records = tracking.list_records(tracking_dir)
-
-    # 3. Stale status: active + completed_at -> complete
-    stale = health.find_stale_status(records)
+    yaml_findings = []
+    backfill = {
+        "scanned": 0,
+        "sessions": 0,
+        "worktrees": 0,
+        "registry": 0,
+        "titles": 0,
+    }
+    records = []
+    stale = []
     stale_fixed = 0
-    if apply:
-        for r in stale:
-            r.status = "complete"
-            tracking.save_record(r)
-            stale_fixed += 1
-
-    # 4. Empty session-state shells (never GC the current or a registered one)
-    exclude = health.registered_session_ids(records) | _current_session_ids()
-    shells = health.find_empty_session_shells(
-        session_dir, exclude_ids=frozenset(exclude))
-    gc_result = health.gc_empty_shells(
-        session_dir, store_db, shells, apply=(apply and do_gc))
-
-    # 5. Alignment audit (report-only)
-    misaligned = health.audit_alignment(records, session_dir)
-
-    # 5b. Orphaned handoffs: a handoff-cutover whose successor never registered
-    #     (e.g. it died on the CLI resume-hang) leaves the derived head None and
-    #     the worktree un-resumable. Re-activate the handed-off tail so the head
-    #     derives again -- the mechanical form of the manual repair. Guarded to
-    #     dark + stale worktrees so a healthy in-flight cutover is never touched.
-    orphaned = health.find_orphaned_handoffs(records)
+    gc_result = {"count": 0, "removed_dirs": 0, "removed_rows": 0, "ids": []}
+    misaligned = []
+    orphaned = []
     orphaned_fixed = 0
-    if apply:
-        for o in orphaned:
-            entry = o.record.session_entry(o.session_id)
-            if entry is not None and entry.state == "handed-off":
-                entry.state = "active"
-                o.record.head_session = o.session_id
-                tracking.save_record(o.record)
-                o.reactivated = True
-                orphaned_fixed += 1
+
+    if proj_name:
+        tracking_dir = cfg.tracking_dir()
+        session_dir = sessions._session_state_dir()
+        store_db = health.default_store_db(session_dir)
+
+        # 1. YAML integrity -- FIRST so a repaired record is visible to the
+        # passes below (list_records silently skips an unparseable file).
+        yaml_findings = health.repair_yaml_integrity(tracking_dir, apply=apply)
+
+        # 2. Registry + title backfill.
+        if apply:
+            backfill = _run_backfill(tracking_dir)
+        else:
+            recs = tracking.list_records(tracking_dir)
+            need = [r for r in recs if not r.sessions]
+            disc = sessions.backfill_sessions(need) if need else {}
+            backfill = {
+                "scanned": len(need),
+                "sessions": sum(len(v) for v in disc.values()),
+                "worktrees": len(disc),
+                "registry": len(disc),
+                "titles": len(
+                    [r for r in recs if not (r.title and r.title != "null")]
+                ),
+            }
+
+        records = tracking.list_records(tracking_dir)
+
+        # 3. Stale status: active + completed_at -> complete
+        stale = health.find_stale_status(records)
+        if apply:
+            for r in stale:
+                r.status = "complete"
+                tracking.save_record(r)
+                stale_fixed += 1
+
+        # 4. Empty session-state shells.
+        exclude = health.registered_session_ids(records) | _current_session_ids()
+        shells = health.find_empty_session_shells(
+            session_dir, exclude_ids=frozenset(exclude)
+        )
+        gc_result = health.gc_empty_shells(
+            session_dir, store_db, shells, apply=(apply and do_gc)
+        )
+
+        # 5. Alignment audit (report-only)
+        misaligned = health.audit_alignment(records, session_dir)
+
+        # 5b. Re-activate only stale orphaned handoff tails.
+        orphaned = health.find_orphaned_handoffs(records)
+        if apply:
+            for o in orphaned:
+                entry = o.record.session_entry(o.session_id)
+                if entry is not None and entry.state == "handed-off":
+                    entry.state = "active"
+                    o.record.head_session = o.session_id
+                    tracking.save_record(o.record)
+                    o.reactivated = True
+                    orphaned_fixed += 1
 
     # 6. Bare (un-muxed) Copilot orphans -- machine-wide surfacing (report-only).
     #    Reclaiming stays operator-initiated: a bare session may be a live,
@@ -17031,13 +17051,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except Exception:
         runtime_lag = []
 
-    try:
-        proj_name = cfg.project_name()
-    except Exception:
-        proj_name = ""
+    from . import config_dropins
+    from .picker_tui import pivots as pivot_registry
+
+    pivot_report = pivot_registry.scan_pivot_registry(materialize=False)
+    config_d_report = (
+        config_dropins.scan_config_dropin_registry(
+            cfg.default_config_path().parent / "config.d",
+            project_name=proj_name,
+        )
+        if proj_name
+        else config_dropins.empty_config_dropin_report()
+    )
 
     report = {
         "project": proj_name,
+        "project_health_available": bool(proj_name),
         "mode": "fix" if apply else "report",
         "yaml_integrity": {
             "bad": len(yaml_findings),
@@ -17065,6 +17094,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         },
         "bare_orphans": {"count": len(bare_orphans), "items": bare_orphans},
         "runtime_lag": runtime_lag,
+        "pivots": pivot_report.to_dict(),
+        "config_d": config_d_report.to_dict(),
     }
 
     if json_mode:
@@ -17078,6 +17109,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> None:
     chk = "\u2713"
     print(f"Worktree/session doctor ({'fix' if applied else 'report-only'})")
+    if not report.get("project_health_available", True):
+        print("  \u2022 Project health skipped: no active project context")
 
     yi = report["yaml_integrity"]
     if yi["bad"]:
@@ -17165,6 +17198,31 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
               "converge this running session sooner)")
     else:
         print("  \u2713 Runtime services match installed payload")
+
+    _render_dropin_registry_report("Picker pivots", report.get("pivots") or {})
+    _render_dropin_registry_report("Project config.d", report.get("config_d") or {})
+
+
+def _render_dropin_registry_report(label: str, report: dict) -> None:
+    """Render one exhaustive report-only drop-in registry section."""
+    authority = report.get("authority", "indeterminate")
+    active = report.get("active_entries") or []
+    findings = report.get("findings") or []
+    if not findings:
+        print(f"  \u2713 {label}: {len(active)} active, authority={authority}")
+        return
+    print(
+        f"  ! {label}: {len(active)} active, {len(findings)} finding(s), "
+        f"authority={authority} (report-only)"
+    )
+    for finding in findings:
+        target = f" target={finding['target']}" if finding.get("target") else ""
+        print(
+            f"      - {finding.get('entry', '?')}: "
+            f"{finding.get('reason', 'unknown')}{target}"
+        )
+        if finding.get("remedy"):
+            print(f"        -> {finding['remedy']}")
 
 
 def cmd_list_sessions(args: argparse.Namespace) -> int:
@@ -18121,7 +18179,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
     "register", "hook", "knowledge", "reconcile-marketplaces",
-    "picker", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
+    "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
     "bind-session",
     "bind-nudge",
     "history-digest",
