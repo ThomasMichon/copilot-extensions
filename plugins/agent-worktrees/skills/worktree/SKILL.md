@@ -44,18 +44,29 @@ description: >
 
 # Worktree Skill
 
-> **Before you start — readiness (self-provisioning tools, no launcher required).**
-> The agent-worktrees **tools** (worktree/branch/change/session management — esp. PR
-> ops: `push-changes` / `create-pr` / `finalize` / `pr-merge`) provision their own
-> runtime on first use and work standalone in any host (CLI, Copilot app, cloud
-> agent), even where the session-launcher never ran. If `command -v agent-worktrees`
-> fails, deploy its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-worktrees/scripts/install.sh | head -1)" stamp`
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install. (Interactive
-> session *launching* is a separate, launcher-only concern and is not needed for the
-> tools above.)
+> **Before you start — use the payload-local session command.**
+> The agent-worktrees session command catalog supplies an exact `argv[0]`
+> owned by this plugin payload. Replace
+> `<agent-worktrees catalog argv[0]>` in direct runtime operations below with
+> that raw path. Quote the path at each shell call site; if assigning it to a
+> variable, store the raw path without embedded quote characters and invoke
+> the variable quoted. Never paste an absolute path unquoted, search `PATH`, or
+> substitute a same-named command from another payload.
+> Project binstubs and commands explicitly labeled as
+> management boundaries remain distinct attributable entry points. In
+> PowerShell, invoke the catalog path as
+> `& "<agent-worktrees catalog argv[0]>" <args>`.
+> Cross-plugin `<agent-codespaces catalog argv[0]>` examples use that plugin's
+> exact catalog path under the same call-site quoting rule.
+>
+> The payload command provisions its runtime on first use and works without
+> the interactive launcher. If session-start hooks did not publish the
+> catalog, enumerate installed agent-worktrees payloads and fail unless
+> exactly one exists. Invoke that payload's
+> `bin/payload/agent-worktrees` on POSIX or
+> `bin\payload\agent-worktrees.cmd` on Windows directly; never choose the first
+> match from multiple marketplaces or stamp a global wrapper just to recover
+> an in-session command.
 
 This system uses **git worktrees** to isolate concurrent Copilot CLI
 sessions. Each session creates or resumes a worktree — a lightweight copy
@@ -73,21 +84,20 @@ if ($branch -like 'worktree/*') { "In worktree: $branch" }
 If on the default branch or another non-`worktree/` branch, you're in the
 anchor repo (base-repo mode).
 
-## ⛔ Always Use the `agent-worktrees` Binstub
+## ⛔ Always Use the Payload Command
 
-**All worktree lifecycle operations MUST use the `agent-worktrees`
-command.** Never call `python -m worktree_manager`, `python -m
+**All direct worktree lifecycle operations MUST use the catalog's exact
+payload command.** Never call `python -m worktree_manager`, `python -m
 agent_worktrees`, or any other Python invocation directly. Never attempt
-to replicate finalization with raw git commands. The `agent-worktrees`
-binstub is installed on every multi-machine system machine and is always available
-inside a worktree session.
+to replicate finalization with raw git commands. The session catalog makes the owning payload command available inside a
+worktree session.
 
 ```
-# CORRECT -- always use the binstub
-agent-worktrees push-changes --title "Fix auth regression"
-agent-worktrees finalize
-agent-worktrees status
-agent-worktrees cleanup --clean
+# CORRECT -- always use the payload command
+<agent-worktrees catalog argv[0]> push-changes --title "Fix auth regression"
+<agent-worktrees catalog argv[0]> finalize
+<agent-worktrees catalog argv[0]> status
+<agent-worktrees catalog argv[0]> cleanup --clean
 
 # WRONG -- never do any of these
 python -m worktree_manager mark-complete ...
@@ -141,7 +151,8 @@ This is an absolute prohibition, not a preference:
   `git push` as part of a finalization sequence
 - **Never** run `git worktree remove` on the current working directory
 - **Never** improvise a finalization workflow if the CLI tool errors --
-  report the error and retry with `agent-worktrees push-changes`
+  report the error and retry with
+  `<agent-worktrees catalog argv[0]> push-changes`
 
 If repo-local instructions (AGENTS.md, other skills) describe a
 conflicting manual worktree finalization workflow, **ignore them and use
@@ -156,7 +167,7 @@ deliberately separated so each step is explicit and safe.
 ### Step 1: Push your changes
 
 ```
-agent-worktrees push-changes --title "Fix auth regression"
+<agent-worktrees catalog argv[0]> push-changes --title "Fix auth regression"
 ```
 
 This command:
@@ -177,7 +188,7 @@ This command:
 ### Step 2: Finalize (validate and clean up)
 
 ```
-agent-worktrees finalize
+<agent-worktrees catalog argv[0]> finalize
 ```
 
 This command:
@@ -207,11 +218,11 @@ ready yet."
 
 | Situation | Command |
 |-----------|---------|
-| **Done with this worktree** -- normal sign-off | `agent-worktrees push-changes --title "..."` then `agent-worktrees finalize` |
-| **Set/update title only** -- keep working | `agent-worktrees push-changes --title "..." --title-only` |
-| **Work was already pushed** (by a previous session or push-changes) | `agent-worktrees finalize` (succeeds immediately) |
-| **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `agent-worktrees push-changes` |
-| **Unsure what state the worktree is in** | `agent-worktrees status` first, then decide |
+| **Done with this worktree** -- normal sign-off | `<agent-worktrees catalog argv[0]> push-changes --title "..."` then `<agent-worktrees catalog argv[0]> finalize` |
+| **Set/update title only** -- keep working | `<agent-worktrees catalog argv[0]> push-changes --title "..." --title-only` |
+| **Work was already pushed** (by a previous session or push-changes) | `<agent-worktrees catalog argv[0]> finalize` (succeeds immediately) |
+| **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `<agent-worktrees catalog argv[0]> push-changes` |
+| **Unsure what state the worktree is in** | `<agent-worktrees catalog argv[0]> status` first, then decide |
 
 ### Finalize is gated on outbound resource obligations
 
@@ -227,9 +238,10 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
 - **A borrowed CodeSpace/container** -- merge or move its work off-box, then
   disconnect (the disconnect hook stamps it `at-rest` **and mirrors that onto the
   shared lease**, so the settle is visible cross-machine), or run
-  `agent-codespaces finalize <name>`.
+  `<agent-codespaces catalog argv[0]> finalize <name>`.
 - **A bridge session** -- drive its worktree to final.
-- **A crashed/gone holder that never settled** -- `agent-worktrees claims sweep`
+- **A crashed/gone holder that never settled** --
+  `<agent-worktrees catalog argv[0]> claims sweep`
   (dry-run) then `--apply` explicitly reclaims provably-gone-and-safe
   obligations. Finalize never auto-reclaims creator ownership. A stale *codespace*
   obligation -- including one owned on a different machine -- is reclaimed by
@@ -238,17 +250,17 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
 - **Genuinely cannot close the children yourself** -- ownership still stays with
   the creating agent. Do **not** choose a handoff unilaterally: ask the operator.
   Only after the operator explicitly names another recipient/flow may you run
-  `agent-worktrees finalize --abandon --handoff-to <recipient-or-flow>`.
+  `<agent-worktrees catalog argv[0]> finalize --abandon --handoff-to <recipient-or-flow>`.
   `--abandon` without `--handoff-to` is refused. The command re-homes the
   obligations to a durable orphanage with that recipient recorded; it never
   drops them. **Creating-agent cleanup is the default; affirmative handoff is the
   only exception.** The creating agent remains responsible until the named flow
   accepts the transfer. Immediately:
   1. save the finalizing worktree id printed in the orphan entries;
-  2. run `agent-worktrees claims cleanup <source-worktree-id>` as a dry-run;
+  2. run `<agent-worktrees catalog argv[0]> claims cleanup <source-worktree-id>` as a dry-run;
   3. investigate each selected resource (child git/PR state, CodeSpace work,
      active sessions), then finalize/settle it through its owning lifecycle;
-  4. use `agent-worktrees claims cleanup <source-worktree-id> --apply` only for
+  4. use `<agent-worktrees catalog argv[0]> claims cleanup <source-worktree-id> --apply` only for
      the selected resources you intend to reclaim, and rerun the selective
      dry-run until it reports no matches.
 
@@ -258,25 +270,27 @@ The error lists each unsettled obligation. Resolve it -- don't bypass:
   orphan entries remain; if the named recipient cannot accept them, return to
   the operator rather than inventing a different flow.
 
-Inspect the ledger any time with `agent-worktrees claims show`. Creator
+Inspect the ledger any time with
+`<agent-worktrees catalog argv[0]> claims show`. Creator
 ownership is invariant: `AGENT_WORKTREES_OBLIGATION_GATE=warn|off` does not
 permit releasing unsettled resources without the affirmative handoff above.
 
 #### Resources you create **out-of-band** aren't auto-journaled — claim them by hand
 
 Auto-journaling only covers resources created through the blessed paths: a
-worktree via `agent-worktrees create`/bridge dispatch, and a CodeSpace via
-`agent-codespaces ssh`. Anything you bring into being **another way** is invisible
+worktree via `<agent-worktrees catalog argv[0]> create`/bridge dispatch, and a
+CodeSpace via `<agent-codespaces catalog argv[0]> ssh`. Anything you bring into being **another way** is invisible
 to the finalize gate unless you journal it yourself — so `finalize` would let this
 worktree vanish while that work is still open. Journal it as a claim on **this**
 worktree, and settle it when it's done:
 
 ```
 # You opened a cross-repo / ADO PR out-of-band (e.g. an example-web PR created with
-# the AZ CLI / ADO REST / gh, NOT `agent-worktrees create-pr`):
-agent-worktrees claims add pr <pr-url-or-id> --owner-ref "$(agent-worktrees get owner-ref)"
+# the AZ CLI / ADO REST / gh, NOT the payload-local create-pr operation):
+aw='<agent-worktrees catalog argv[0]>'
+"$aw" claims add pr <pr-url-or-id> --owner-ref "$("$aw" get owner-ref)"
 # ...later, when that PR merges or closes:
-agent-worktrees claims settle <pr-url-or-id>     # or: claims release <pr-url-or-id> --remove
+"$aw" claims settle <pr-url-or-id>     # or: claims release <pr-url-or-id> --remove
 ```
 
 The gate is **kind-agnostic** — a `pr` (or `codespace`/`container`/`workdir`)
@@ -292,8 +306,8 @@ example-operator/dotfiles#1351.)*
 They mean: push changes and clean up. Run both steps:
 
 ```
-agent-worktrees push-changes --title "concise description of the work"
-agent-worktrees finalize
+<agent-worktrees catalog argv[0]> push-changes --title "concise description of the work"
+<agent-worktrees catalog argv[0]> finalize
 ```
 
 If no title is obvious, omit `--title` -- do not pause to ask unless the
@@ -304,7 +318,8 @@ user requested one.
 After running `push-changes`, **read the output carefully**:
 - If it says push failed or status reverted to orphaned, report that to
   the user. Do not manually recover.
-- If it succeeds, proceed to `agent-worktrees finalize`.
+- If it succeeds, proceed to
+  `<agent-worktrees catalog argv[0]> finalize`.
 
 After running `finalize`, **read the output as success unless it errors.**
 If it reports that content is on the default branch, finalize succeeded -- even when it
@@ -322,10 +337,10 @@ finalization (config `pr.enabled: true`). **Check the target repo's flow
 before signing off -- it is not the same everywhere:**
 
 ```
-agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge | pr-self-merge
-agent-worktrees get pr-enabled      # "true" or "false"
-agent-worktrees get pr-required     # "true" -> direct-to-default-branch is blocked
-agent-worktrees get pr-provider     # gitea | github | azure-devops
+<agent-worktrees catalog argv[0]> get pr-profile      # direct | pr-human-merge | pr-agent-merge | pr-self-merge
+<agent-worktrees catalog argv[0]> get pr-enabled      # "true" or "false"
+<agent-worktrees catalog argv[0]> get pr-required     # "true" -> direct-to-default-branch is blocked
+<agent-worktrees catalog argv[0]> get pr-provider     # gitea | github | azure-devops
 ```
 
 The **profile** tells you how the repo lands work and which `pr-*` verbs apply:
@@ -428,7 +443,8 @@ Follow the repo's normal commit policy.
 
 ## Quick Reference
 
-All commands use the `agent-worktrees` binstub. Never call Python
+Direct runtime commands use the session catalog's exact payload command;
+project binstubs remain attributable project entry points. Never call Python
 modules directly. Context resolves **the way git does — from the current
 directory**: the target worktree and its anchor repo are discovered from CWD
 (not from ambient environment variables or branch names). A project binstub
@@ -439,7 +455,7 @@ worktrees from anywhere without env-var contamination.
 > **`register` (adopt) is the exception — cwd is the only *implicit* locator.**
 > Because a project binstub / `--project <name>` resolves an *already-adopted*
 > project, those levers don't exist for the repo you're about to adopt.
-> `agent-worktrees register <name>` therefore takes the repo **path from cwd** (the
+> `<agent-worktrees catalog argv[0]> register <name>` therefore takes the repo **path from cwd** (the
 > git root of the current directory → its anchor) unless you name one explicitly;
 > `<name>` is only the project **label**. So run `register` **from inside the
 > target repo's checkout**, or pass `--repo-dir <path>` (or use `repos add <name>
@@ -448,25 +464,26 @@ worktrees from anywhere without env-var contamination.
 
 | Action | Command |
 |--------|---------|
-| **Push changes to the default branch** (normal sign-off step 1) | `agent-worktrees push-changes --title "desc"` |
-| **Finalize** (validate + clean up, step 2) | `agent-worktrees finalize` |
-| **PR mode: create + push a feature branch** | `agent-worktrees create-pr --title "desc"` |
-| **PR mode: record PR metadata** (after sub-agent opens it) | `agent-worktrees set-pr --url URL --number N` |
-| **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `agent-worktrees pr-status` |
-| **Check the target repo's PR flow** (direct / human-merge / agent-merge / self-merge) | `agent-worktrees get pr-profile` |
-| **Check if PRs are required** (direct-to-default-branch blocked) | `agent-worktrees get pr-required` |
-| Set/update title only | `agent-worktrees push-changes --title "desc" --title-only` |
-| Show worktree git status | `agent-worktrees status` |
-| List worktrees for cleanup | `agent-worktrees cleanup` |
-| Clean completed worktrees | `agent-worktrees cleanup --clean` |
-| Also clean unused worktrees | `agent-worktrees cleanup --clean --include-unused` |
-| Help | `agent-worktrees --help` |
+| **Push changes to the default branch** (normal sign-off step 1) | `<agent-worktrees catalog argv[0]> push-changes --title "desc"` |
+| **Finalize** (validate + clean up, step 2) | `<agent-worktrees catalog argv[0]> finalize` |
+| **PR mode: create + push a feature branch** | `<agent-worktrees catalog argv[0]> create-pr --title "desc"` |
+| **PR mode: record PR metadata** (after sub-agent opens it) | `<agent-worktrees catalog argv[0]> set-pr --url URL --number N` |
+| **PR mode: show tracked PR state** (reconciles vs. provider; flags pull-forward when merged) | `<agent-worktrees catalog argv[0]> pr-status` |
+| **Check the target repo's PR flow** (direct / human-merge / agent-merge / self-merge) | `<agent-worktrees catalog argv[0]> get pr-profile` |
+| **Check if PRs are required** (direct-to-default-branch blocked) | `<agent-worktrees catalog argv[0]> get pr-required` |
+| Set/update title only | `<agent-worktrees catalog argv[0]> push-changes --title "desc" --title-only` |
+| Show worktree git status | `<agent-worktrees catalog argv[0]> status` |
+| List worktrees for cleanup | `<agent-worktrees catalog argv[0]> cleanup` |
+| Clean completed worktrees | `<agent-worktrees catalog argv[0]> cleanup --clean` |
+| Also clean unused worktrees | `<agent-worktrees catalog argv[0]> cleanup --clean --include-unused` |
+| Help | `<agent-worktrees catalog argv[0]> --help` |
 
 ## Cleanup Procedure
 
 When the user asks to clean up worktrees:
 
-1. **Run default cleanup** — `agent-worktrees cleanup --clean` removes
+1. **Run default cleanup** —
+   `<agent-worktrees catalog argv[0]> cleanup --clean` removes
    only `completed` worktrees (those whose changes are already merged via
    squash-merge) and `gone` worktrees (path no longer exists).
    - For `gone` worktrees, the branch is only deleted if its content is
@@ -481,7 +498,7 @@ When the user asks to clean up worktrees:
    it preserved. These have no commits but may contain planning,
    conversation history, or uncommitted work.
 3. **Ask the user** whether to also purge unused worktrees. If yes, run
-   `agent-worktrees cleanup --clean --include-unused`.
+   `<agent-worktrees catalog argv[0]> cleanup --clean --include-unused`.
 
 Never auto-purge unused worktrees without asking — a worktree may appear
 "unused" if the session involved only questions, planning, or conversation
@@ -506,17 +523,17 @@ with no commits yet.
 Titles appear in the picker for easier identification. Resolution order:
 
 1. **Explicit title** — from the `title` field in worktree YAML. Once set
-   (via `agent-worktrees push-changes --title`), this wins.
+   (via `<agent-worktrees catalog argv[0]> push-changes --title`), this wins.
 2. **Session summary** — auto-derived from the most recent Copilot CLI
    session summary for the worktree path.
 3. **None** — just the worktree ID and age.
 
 ```powershell
 # Set title without pushing (worktree stays active)
-agent-worktrees push-changes --title "Fix auth regression" --title-only
+& "<agent-worktrees catalog argv[0]>" push-changes --title "Fix auth regression" --title-only
 
 # Push changes and set title
-agent-worktrees push-changes --title "Fix auth regression"
+& "<agent-worktrees catalog argv[0]>" push-changes --title "Fix auth regression"
 ```
 
 ## Cross-Worktree Safety
@@ -562,7 +579,7 @@ locks can be reclaimed with the `reclaim` flow above.
 
 ## Resource Leases (atomic, cross-machine, same-harness)
 
-`agent-worktrees lease` is the harness's **one atomic primitive** for exclusive,
+The payload-local `lease` operation is the harness's **one atomic primitive** for exclusive,
 cross-machine access to any scarce shared resource — a CodeSpace, a cross-repo
 worktree, a container, a bridge session — so two agents on two machines never
 collide. It is **ref shenanigans only** in the harness's own repo: hidden
@@ -573,17 +590,17 @@ whose **OID is the fencing token**; release appends a **tombstone** (ABA-safe);
 every read strictly validates linear history.
 
 ```bash
-agent-worktrees lease acquire <kind> <key> --holder <ref> [--ttl N]  # atomic CAS
-agent-worktrees lease renew   <kind> <key> --token <oid> [--ttl N]   # keep the grip
-agent-worktrees lease release <kind> <key> --token <oid>             # tombstone
-agent-worktrees lease inspect <kind> <key>                           # current record
-agent-worktrees lease list [--kind <kind>]                           # fabric-wide view
+<agent-worktrees catalog argv[0]> lease acquire <kind> <key> --holder <ref> [--ttl N]  # atomic CAS
+<agent-worktrees catalog argv[0]> lease renew   <kind> <key> --token <oid> [--ttl N]   # keep the grip
+<agent-worktrees catalog argv[0]> lease release <kind> <key> --token <oid>             # tombstone
+<agent-worktrees catalog argv[0]> lease inspect <kind> <key>                           # current record
+<agent-worktrees catalog argv[0]> lease list [--kind <kind>]                           # fabric-wide view
 ```
 
 - **Holder** = the qualified **ClaimRef** (`machine/project/worktree_id[#session]`),
-  from `agent-worktrees get owner-ref` — directly resolvable for stale-takeover.
+  from `<agent-worktrees catalog argv[0]> get owner-ref` — directly resolvable for stale-takeover.
 - **Store origin** = the resolved lease store repo, from
-  `agent-worktrees get lease-origin` (the `AGENT_WORKTREES_LEASE_ORIGIN` override,
+  `<agent-worktrees catalog argv[0]> get lease-origin` (the `AGENT_WORKTREES_LEASE_ORIGIN` override,
   else the bound control-plane/knowledge repo's origin, else the project's default
   remote). Every agent of one harness resolves the **same** origin — so
   coordination is **same-harness-scoped by construction**. Pin
@@ -598,7 +615,7 @@ agent-worktrees lease list [--kind <kind>]                           # fabric-wi
 ## Lifecycle
 
 ```
-agent-worktrees / launcher
+payload command / launcher
     │
     ▼
 Arrow-key picker (always shown)

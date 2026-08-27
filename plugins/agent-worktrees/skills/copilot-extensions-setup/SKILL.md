@@ -23,6 +23,15 @@ description: >
 
 # Copilot Extensions Setup
 
+Use the exact `argv[0]` from each plugin's session command catalog for
+interactive checks and configuration below. Replace the
+`<agent-worktrees catalog argv[0]>`, `<agent-bridge catalog argv[0]>`,
+`<agent-codespaces catalog argv[0]>`, `<agent-containers catalog argv[0]>`,
+and `<agent-mcp catalog argv[0]>` placeholders with their published paths.
+Substitute each raw path, then quote it at its shell call site.
+Installer, service, and unified-update commands explicitly labeled as
+management boundaries remain literal global-wrapper invocations.
+
 Install and adopt flows for the **core runtime** copilot-extensions plugins
 (the bridge **mesh** plus standalone agent-mcp). The full suite is larger — see
 the [README](../../../../README.md) for the canonical plugin list; the other
@@ -40,7 +49,7 @@ via their own skills:
 These ship from the same `copilot-extensions` repo. Install order for the
 **mesh**: agent-worktrees first (prerequisite), then agent-codespaces and
 agent-containers, then agent-bridge (the bridge installer imports
-agent-codespaces and agent-containers for their `codespace:` / `container:`
+the Codespaces and container plugins for their `codespace:` / `container:`
 resolvers, so install them before the bridge). agent-mcp is **standalone and
 optional** — install it any time; it has no ordering constraint.
 
@@ -95,7 +104,7 @@ the launcher keep everything fresh automatically.
    (sections 1-8 below install the uv/pip payloads).
 
 4. From then on, **boot via the binstub or terminal profile**. Each interactive
-   launch runs `agent-worktrees reconcile-plugins`, which keeps the repo's
+   launch runs the payload-local `reconcile-plugins` operation, which keeps the repo's
    enabled payloads installed and their runtimes matched to the payload version
    -- so the plugin set stays fresh automatically (see
    [`docs/install-contract.md`](../../../../docs/install-contract.md)).
@@ -200,7 +209,7 @@ bash "$aw_dir/scripts/init.sh"
 ### Verify
 
 ```bash
-agent-worktrees --version
+agent-worktrees --version # marketplace-isolation: allow install-verification
 ```
 
 If not found, ensure `~/.local/bin` is on PATH. The init script adds
@@ -218,7 +227,8 @@ export PATH="$HOME/.local/bin:$PATH"                   # Linux
 The global `agent-worktrees` binstub resolves the runtime through the
 `current-version` marker (falling back to the newest installed slot). If no slot
 exists but the payload is discoverable, it runs the lean `install.{ps1,sh}
-provision` path on first use. For normal updates, run `agent-worktrees update`:
+provision` path on first use. For normal updates, run
+`agent-worktrees update`: <!-- marketplace-isolation: allow deployment-management -->
 it refreshes payloads, reconciles runtimes, and fast-forwards managed anchors.
 
 ---
@@ -285,7 +295,7 @@ rosters, and `terminal_profiles` selection in config. They are written to
 
 ```bash
 {repo-name}              # launches worktree picker
-agent-worktrees status   # shows adopted repo
+<agent-worktrees catalog argv[0]> status   # shows adopted repo
 ```
 
 ---
@@ -357,8 +367,8 @@ plugin-owned versions.
 ### Verify
 
 ```bash
-agent-bridge version
-agent-bridge status
+<agent-bridge catalog argv[0]> version
+<agent-bridge catalog argv[0]> status
 ```
 
 ### Other Actions
@@ -388,11 +398,11 @@ profile** in `~/.agent-bridge/config.yaml` pointing to the same
 
 ```bash
 # Auto-discovers machines.yaml (the roster is derived from it)
-agent-bridge config adopt --repo /path/to/repo --profile multi-machine system
+<agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile multi-machine system
 
 # Verify
-agent-bridge config show
-agent-bridge config validate
+<agent-bridge catalog argv[0]> config show
+<agent-bridge catalog argv[0]> config validate
 ```
 
 ### Auto-Discovery Paths
@@ -415,12 +425,12 @@ guide the user interactively through:
 1. Identifying their machines (hostname, platform, SSH alias)
 2. Defining agents (name, host, type)
 3. Writing both files to the repo
-4. Running `agent-bridge config adopt`
+4. Running the payload-local `config adopt` operation
 
 ### Explicit Paths
 
 ```bash
-agent-bridge config adopt \
+<agent-bridge catalog argv[0]> config adopt \
   --repo /path/to/repo --profile multi-machine system \
   --machines-yaml /custom/machines.yaml \
   --agents-config /custom/agents.json
@@ -429,8 +439,8 @@ agent-bridge config adopt \
 ### Multiple Repos
 
 ```bash
-agent-bridge config adopt --repo ~/src/my-project --profile my-project
-agent-bridge config adopt --repo ~/src/dotfiles --profile dotfiles
+<agent-bridge catalog argv[0]> config adopt --repo ~/src/my-project --profile my-project
+<agent-bridge catalog argv[0]> config adopt --repo ~/src/dotfiles --profile dotfiles
 ```
 
 ### After Adopt
@@ -439,20 +449,20 @@ Restart agent-bridge to load new topology:
 
 ```bash
 # Any platform
-agent-bridge service restart
+agent-bridge service restart # marketplace-isolation: allow service-management
 
 # Linux equivalent
 systemctl --user restart agent-bridge.service
 
 # Then verify
-agent-bridge machines
-agent-bridge agents
+<agent-bridge catalog argv[0]> machines
+<agent-bridge catalog argv[0]> agents
 ```
 
 ### Remove a Profile
 
 ```bash
-agent-bridge config remove my-profile
+<agent-bridge catalog argv[0]> config remove my-profile
 ```
 
 ---
@@ -488,23 +498,24 @@ copilot plugin install agent-bridge@copilot-extensions
 #    -> pulls in agent-codespaces + agent-containers for the
 #       codespace: / container: resolvers
 # 4. Wire topology
-agent-bridge config adopt --repo /path/to/repo --profile my-control-harness
+<agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile my-control-harness
 
 # 5. Install agent-codespaces runtime      (optional-plugins-setup.md §5)
 # 6. Adopt the repo for codespaces         (optional-plugins-setup.md §6)
-cd /path/to/repo && agent-codespaces config adopt
+cs='<agent-codespaces catalog argv[0]>'
+cd /path/to/repo && "$cs" config adopt
 
 # 7. Install agent-containers runtime      (optional-plugins-setup.md §7)
 # 8. (optional) Install agent-mcp runtime  (optional-plugins-setup.md §8)
 
 # 9. Start the service
-agent-bridge start  # or: install.ps1 start
+agent-bridge start  # marketplace-isolation: allow service-management
 
 # 10. Verify everything
-agent-worktrees --version && agent-worktrees status
-agent-bridge version && agent-bridge machines && agent-bridge agents
-agent-codespaces version && agent-codespaces status
-agent-containers version && agent-containers fleet
+<agent-worktrees catalog argv[0]> --version && <agent-worktrees catalog argv[0]> status
+<agent-bridge catalog argv[0]> version && <agent-bridge catalog argv[0]> machines && <agent-bridge catalog argv[0]> agents
+<agent-codespaces catalog argv[0]> version && <agent-codespaces catalog argv[0]> status
+<agent-containers catalog argv[0]> version && <agent-containers catalog argv[0]> fleet
 # agent-mcp status   # if installed
 ```
 

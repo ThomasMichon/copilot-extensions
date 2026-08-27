@@ -376,6 +376,7 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
         "agent-mcp",
         "agent-ssh",
         "agent-vault",
+        "agent-worktrees",
     ],
 )
 def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
@@ -390,8 +391,9 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
 
     generated = generator.expected_files(manifest)
     assert generator.process_manifest(manifest, check=True) == []
+    output_dir = plugin_root / str(data["outputDir"])
     for command_id in command_ids:
-        assert plugin_root / "bin" / command_id in generated
+        assert output_dir / command_id in generated
 
     hooks = json.loads((plugin_root / "hooks.json").read_text(encoding="utf-8"))
     session_hooks = hooks["hooks"]["sessionStart"]

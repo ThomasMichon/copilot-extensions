@@ -25,10 +25,14 @@ description: >
 
 # Agent Worktrees Repos Registry
 
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+every shell operation below. Replace `<agent-worktrees catalog argv[0]>` with
+that raw path, quote it at each shell call site, and never search `PATH`.
+
 Manage the repos registry at `~/.agent-worktrees/repos.yaml` — the
 **canonical** catalog of known repositories across platforms. This
 registry supersedes the legacy `~/.git-repos` file; import an existing
-one with `agent-worktrees repos migrate`.
+one with `<agent-worktrees catalog argv[0]> repos migrate`.
 
 ## Repo Classes — How a Checkout Is Edited
 
@@ -95,15 +99,16 @@ lifecycle so concurrent flows stay isolated:
 #   so `register <name>` run from a DIFFERENT repo adopts THAT repo's path under
 #   <name> (a common footgun). To adopt a repo you are not standing in, pass an
 #   explicit path instead of relying on cwd:
-cd <target-repo-checkout> && agent-worktrees register <name>   # cwd = the subject
+aw='<agent-worktrees catalog argv[0]>'
+cd <target-repo-checkout> && "$aw" register <name>   # cwd = the subject
 #   …or, from anywhere, name the path explicitly:
-agent-worktrees register <name> --repo-dir <path>
-agent-worktrees repos add <name> <path> --class worktree       # path-first alt
+<agent-worktrees catalog argv[0]> register <name> --repo-dir <path>
+<agent-worktrees catalog argv[0]> repos add <name> <path> --class worktree       # path-first alt
 
 # Per task: create an isolated worktree, edit there, push, finalize
 #   Agents/automation: create the worktree WITHOUT launching a session. This
 #   prints the worktree path; cd into it and edit in your CURRENT session.
-agent-worktrees create                   # prints id + path (add --json for a plan)
+<agent-worktrees catalog argv[0]> create # prints id + path (add --json for a plan)
 #   Interactive (human at a terminal) only: launch a fresh muxed session in a
 #   new worktree. Refused without a TTY -- never use it from a tool call.
 <repo> --new
@@ -121,7 +126,8 @@ flows from clobbering each other mid-edit.
 
 ## CLI Commands
 
-All commands are accessed via `agent-worktrees repos <subcommand>`:
+All commands are accessed via
+`<agent-worktrees catalog argv[0]> repos <subcommand>`:
 
 ```
 repos list [--class reference|singleton|worktree] [--json]
@@ -175,34 +181,34 @@ as **worktree**; everything else defaults to **singleton** (override with
 verifying.
 
 ```bash
-agent-worktrees repos migrate
-agent-worktrees repos list          # verify, then reclassify as needed
+<agent-worktrees catalog argv[0]> repos migrate
+<agent-worktrees catalog argv[0]> repos list          # verify, then reclassify as needed
 ```
 
 Reclassify any entry by re-adding it with the right class:
 
 ```bash
-agent-worktrees repos add copilot-extensions D:\Src\copilot-extensions --class worktree
+<agent-worktrees catalog argv[0]> repos add copilot-extensions 'D:\Src\copilot-extensions' --class worktree
 ```
 
 ### Set up source roots
 
 ```bash
-agent-worktrees repos srcroot --set D:\Src --platform windows
-agent-worktrees repos srcroot --set ~/src --platform wsl
+<agent-worktrees catalog argv[0]> repos srcroot --set 'D:\Src' --platform windows
+<agent-worktrees catalog argv[0]> repos srcroot --set ~/src --platform wsl
 ```
 
 ### Register an existing repo
 
 ```bash
-agent-worktrees repos add my-lib D:\Src\my-lib --class reference \
+<agent-worktrees catalog argv[0]> repos add my-lib 'D:\Src\my-lib' --class reference \
   --remote https://github.com/org/my-lib.git
 ```
 
 ### Find where a repo is checked out
 
 ```bash
-agent-worktrees repos find my-project
+<agent-worktrees catalog argv[0]> repos find my-project
 # → D:\Src\my-project
 ```
 
@@ -211,8 +217,8 @@ If the repo has no local path but has a remote, suggest cloning it.
 ### Check status / sync across repos (git hygiene)
 
 ```bash
-agent-worktrees repos status                 # branch, dirty, ahead/behind
-agent-worktrees repos sync --tag multi-machine system    # fetch + ff-merge (skips dirty)
+<agent-worktrees catalog argv[0]> repos status                 # branch, dirty, ahead/behind
+<agent-worktrees catalog argv[0]> repos sync --tag multi-machine system    # fetch + ff-merge (skips dirty)
 ```
 
 `sync` only fast-forwards the default branch and **skips** any repo whose
@@ -264,7 +270,7 @@ login flow) are catalogued separately in `~/.agent-worktrees/accounts.yaml`
 
 Operating across repos under different GitHub identities (e.g. an EMU work
 account vs. a personal account) otherwise forces manual `gh auth switch`.
-agent-worktrees resolves the **account from repo context** and applies it
+the runtime resolves the **account from repo context** and applies it
 inline, so agents never hand-switch:
 
 - **Resolution** (`resolve_account` / `account_for_github_owner`): explicit
@@ -308,7 +314,7 @@ it lists the authenticated `gh` logins and persists your pick as an
 *how*. Manage with `accounts list|show|set|remove`:
 
 ```
-agent-worktrees accounts set ThomasMichon --scopes codespace,repo,workflow \
+<agent-worktrees catalog argv[0]> accounts set <gh-login> --scopes codespace,repo,workflow \
     --login-flow 'gh auth login -h github.com'
 ```
 

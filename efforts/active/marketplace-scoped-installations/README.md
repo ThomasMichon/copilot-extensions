@@ -289,6 +289,11 @@ See [`design.md`](design.md).
   command while preserving service/supervisor, scheduler/webhook, picker,
   remote, startup-seed, provider, and static MCP launchers as explicit
   compatibility boundaries.
+- The agent-bridge slice merged in
+  [#1162](https://github.com/ThomasMichon/copilot-extensions/pull/1162), moving
+  interactive bridge operations and dependent CodeSpace/container dispatch
+  guidance to a payload-local command while preserving service, deployment,
+  elevated, picker, remote, and provider launchers as explicit boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 
