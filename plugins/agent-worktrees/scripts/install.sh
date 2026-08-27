@@ -843,11 +843,9 @@ export PYTHONUTF8=1
 # -- #637/#1085/#1106); NEVER exec this binstub itself, which would recurse
 # into an unbounded process storm.
 _root="\$HOME/.agent-worktrees"
-_ver="\$(cat "\$_root/current-version" 2>/dev/null)"
-_py="\$_root/versions/\$_ver/bin/python"
-if [[ ! -x "\$_py" ]]; then
-    _py="\$(ls -1d "\$_root"/versions/*/bin/python 2>/dev/null | sort | tail -n1)"
-fi
+AW_PY=""
+[[ -f "\$_root/bin/resolve-runtime.sh" ]] && source "\$_root/bin/resolve-runtime.sh"
+_py="\$AW_PY"
 if [[ -n "\$_py" && -x "\$_py" ]]; then
     exec "\$_py" -m agent_worktrees --project "$PROJECT_NAME" "\$@"
 fi

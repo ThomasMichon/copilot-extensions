@@ -30,6 +30,22 @@ cannot be a shared runtime import — it must physically exist in each plugin. S
 this canonical copy is **vendored (synced) byte-identically** into every Python
 runtime plugin's `scripts/` dir.
 
+Slot resolution is completion-marker strict: `current-version`,
+`last-known-good`, and newest-slot fallback candidates must carry a valid
+`.install-complete.json` and an interpreter. The marker schema is exact: string
+`version` matching the slot, string `completed_at`, and nonnegative integer
+`pid` (booleans excluded), with only an optional string `payload_hash`; extra or
+duplicate keys are invalid. Python readers accept valid fields in any order,
+while shell resolvers recognize the canonical field order emitted by
+`mark_complete`. Cleanup may rebuild an incomplete current slot only when no
+live process owns it; it atomically detaches stale marker references before
+removal. On hosts without reliable process enumeration (for example macOS
+without `/proc`), current-slot cleanup fails conservatively unless an explicit
+`running-version.json` ownership record proves its owner is gone. Tier-3
+fallback uses the same numeric-token ordering in Python, POSIX shell, and
+PowerShell, so development versions such as `dev10` sort after `dev9` without
+`packaging` or GNU `sort -V`.
+
 ## Editing — one source of truth
 
 **Do not hand-edit `plugins/*/scripts/versioned_runtime.py`.** Edit

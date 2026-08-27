@@ -46,24 +46,36 @@ def test_windows_binstub_resolves_complete_slots_and_serializes_provision() -> N
     ps1 = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text(encoding="utf-8")
     cmd = (PLUGIN / "bin" / "agent-worktrees.cmd").read_text(encoding="utf-8")
 
-    assert "@('current-version', 'last-known-good')" in ps1
-    assert ".install-complete.json" in ps1
-    assert "Sort-Object LastWriteTimeUtc" in ps1
+    assert "resolve-runtime.ps1" in ps1
     assert "System.Threading.Mutex" in ps1
     assert 'agent-worktrees.ps1" %*' in cmd
-    assert "current-version" in cmd
-    assert "last-known-good" in cmd
-    assert ".install-complete.json" in cmd
-    assert "versions\\%_VER%\\Scripts\\python.exe" in cmd
+    assert "powershell" in cmd
 
 
 def test_posix_binstub_resolves_only_active_or_complete_slots() -> None:
     sh = (PLUGIN / "bin" / "agent-worktrees").read_text(encoding="utf-8")
 
-    assert "for _marker in current-version last-known-good" in sh
-    assert ".install-complete.json" in sh
-    assert "ls -1t" in sh
+    assert "resolve-runtime.sh" in sh
     assert '_aw_exec_resolved "$@"' in sh
+
+
+def test_generated_project_binstubs_use_shared_three_tier_resolvers() -> None:
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+    assert 'source "\\$_root/bin/resolve-runtime.sh"' in sh
+    assert "resolve-runtime.ps1" in ps1
+    assert "last-known-good" not in sh.split("deploy_binstub() {", 1)[1].split(
+        "deploy_global_config()", 1
+    )[0]
+
+
+def test_launch_session_cmd_preserves_windows_powershell_fallback() -> None:
+    cmd = (PLUGIN / "bin" / "launch-session.cmd").read_text(encoding="utf-8")
+
+    assert "where pwsh" in cmd
+    assert 'set "_PSHOST=powershell"' in cmd
+    assert '"%_PSHOST%"' in cmd
 
 
 def test_windows_stamp_reuses_immutable_version_snapshot() -> None:

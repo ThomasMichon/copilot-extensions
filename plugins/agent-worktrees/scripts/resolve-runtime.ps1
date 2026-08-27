@@ -21,14 +21,47 @@
 $AwPy = $null
 $_awr = Join-Path $env:USERPROFILE '.agent-worktrees'
 
-# -- helper: return a version's slot python if it exists, else $null --
+function _Aw-MarkerValid([string]$slot, [string]$ver) {
+  if (-not $ver) { return $false }
+  try {
+    $raw = [IO.File]::ReadAllText((Join-Path $slot '.install-complete.json'))
+    if ($raw -cnotmatch '^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$') {
+      return $false
+    }
+    $marker = $raw | ConvertFrom-Json -ErrorAction Stop
+    return ($marker -is [pscustomobject]) -and ([string]$marker.version -ceq $ver)
+  } catch {
+    return $false
+  }
+}
+
+# -- helper: return a complete version's slot python, else $null --
 function _Aw-TrySlot([string]$ver) {
   if (-not $ver) { return $null }
+  $slot = Join-Path $_awr ("versions\$ver")
+  if (-not (_Aw-MarkerValid $slot $ver)) { return $null }
   foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-    $p = Join-Path $_awr ("versions\$ver\$sub")
+    $p = Join-Path $slot $sub
     if (Test-Path -LiteralPath $p) { return $p }
   }
   return $null
+}
+
+function _Aw-VersionKey([string]$ver) {
+  if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
+    $phase = if ($Matches[4]) { '0' } else { '1' }
+    $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
+    return '0:{0}.{1}.{2}.{3}.{4}' -f
+      $Matches[1].PadLeft(20, '0'),
+      $Matches[2].PadLeft(20, '0'),
+      $Matches[3].PadLeft(20, '0'),
+      $phase,
+      $dev.PadLeft(20, '0')
+  }
+  return '1:' + [regex]::Replace(
+    $ver.ToLowerInvariant(), '\d+',
+    { param($m) $m.Value.PadLeft(20, '0') }
+  )
 }
 
 # Tier 1: the `current-version` marker (source of truth; atomically written).
@@ -44,13 +77,12 @@ if (-not $AwPy) {
   if ($_awlkg) { $AwPy = _Aw-TrySlot $_awlkg }
 }
 
-# Tier 3: true first-run (no marker, no last-known-good) -> newest installed slot.
+# Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
   $AwPy = Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue |
-    Sort-Object Name |
-    ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } |
-    Where-Object { Test-Path -LiteralPath $_ } |
-    Select-Object -Last 1
+    Sort-Object { _Aw-VersionKey $_.Name } |
+    ForEach-Object { _Aw-TrySlot $_.Name } |
+    Where-Object { $_ } | Select-Object -Last 1
 }
 
 $AgentRtPy = $AwPy

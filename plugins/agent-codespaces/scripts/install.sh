@@ -221,13 +221,15 @@ _versioned_activate() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    [[ -x "$py" ]] || return 0
-    if ! "$VENV_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
+    if [[ ! -x "$py" ]]; then
+        _fail "Fresh runtime slot has no interpreter (versions/$SRC_VERSION)"
+        return 1
+    fi
+    if ! "$py" -c 'import agent_codespaces' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -236,9 +238,9 @@ _versioned_activate() {
     fi
     _ok "Runtime version $SRC_VERSION active (marker-only; versions/$SRC_VERSION)"
     if [[ -n "$prev" ]]; then
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids --keep "$prev" 2>&1 | sed 's/^/  gc: /' || true
     else
-        "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
+        "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" gc --protect-pids 2>&1 | sed 's/^/  gc: /' || true
     fi
     return 0
 }
@@ -277,15 +279,31 @@ _header()  { echo ""; echo "=== $* ==="; }
 
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    # venv exists (e.g. the pre-build toss). Only returns a PATH interpreter or
+    # a completed active runtime; an incomplete target slot is never trusted to
+    # inspect or delete itself. Prints nothing + returns 1 if none found (#935).
     local __c
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
     done
+    if [[ -f "$LINK_DIR/.install-complete.json" && -x "$LINK_DIR/bin/python" ]]; then
+        echo "$LINK_DIR/bin/python"
+        return 0
+    fi
     return 1
+}
+
+_run_versioned_runtime() {
+    local py
+    if py="$(_bootstrap_python)" && [[ -n "$py" ]]; then
+        "$py" "$SCRIPT_DIR/versioned_runtime.py" "$@"
+        return
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        uv run --no-project --python 3.11 "$SCRIPT_DIR/versioned_runtime.py" "$@"
+        return
+    fi
+    return 127
 }
 
 _payload_hash() {
@@ -306,15 +324,16 @@ _payload_hash() {
 _versioned_slot_clean() {
     # #935: ensure the target slot exists, tossing it first if a prior build left
     # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
+    # over a corpse. The canonical helper protects a slot owned by a live process
+    # and otherwise detaches stale marker references before rebuilding. No-op in
     # legacy mode.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    [[ -d "$VENV_DIR" ]] || return 0
+    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" \
+        slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'; then
+        _fail "Failed to clean incomplete runtime slot (versions/$SRC_VERSION)"
+        return 1
+    fi
 }
 
 _versioned_mark_complete() {
@@ -325,15 +344,20 @@ _versioned_mark_complete() {
     # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
     # this helper is portable byte-identically across plugins).
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    local py="$VENV_PYTHON"
+    if [[ ! -x "$py" ]] && ! py="$(_bootstrap_python)"; then
+        _fail "Cannot mark runtime complete: no bootstrap Python is available"
+        return 1
+    fi
     local ph
     ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
+    local args=("$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    if ! "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
+        _fail "Failed to mark runtime slot complete (versions/$SRC_VERSION)"
+        return 1
+    fi
+    return 0
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -477,7 +501,7 @@ deploy_venv() {
     _assert_uv
     _ensure_uv_index
     mkdir -p "$VENV_DIR"
-    _versioned_slot_clean
+    _versioned_slot_clean || return 1
     if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
         uv venv "$VENV_DIR" --allow-existing 2>/dev/null || true
     fi
@@ -515,20 +539,66 @@ deploy_binstub() {
 export PYTHONUTF8=1
 _name="agent-codespaces"
 _root="$HOME/.$_name"
+_marker_valid() {
+    [ -n "$1" ] || return 1
+    awk -v expected="$1" '
+      NR != 1 { bad = 1 }
+      NR == 1 {
+        if ($0 !~ /^\{"version": "[^"\\]+", "completed_at": "[^"\\]+", "pid": (0|[1-9][0-9]*)(, "payload_hash": "[^"\\]+")?\}$/) {
+          bad = 1; next
+        }
+        version = $0
+        sub(/^\{"version": "/, "", version)
+        sub(/".*$/, "", version)
+      }
+      END { exit !(NR == 1 && !bad && version == expected) }
+    ' "$_root/versions/$1/.install-complete.json" 2>/dev/null
+}
+_version_key() {
+    awk '
+      {
+        original = $0
+        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
+          count = split(original, part, /[.-]/)
+          phase = (count == 4) ? 0 : 1
+          dev = (count == 4) ? part[4] : "dev0"
+          sub(/^dev/, "", dev)
+          printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
+            part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
+          next
+        }
+        key = ""; rest = $0
+        while (match(rest, /[0-9]+/)) {
+          key = key substr(rest, 1, RSTART - 1)
+          number = substr(rest, RSTART, RLENGTH)
+          key = key sprintf("%020d", number + 0)
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        print "1:" key rest "\t" original
+      }
+    '
+}
 _resolve_python() {
     for _marker in current-version last-known-good; do
         _ver=""
         [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
         _candidate="$_root/versions/$_ver/bin/python"
-        if [ -n "$_ver" ] && [ -x "$_candidate" ]; then
+        if [ -n "$_ver" ] && _marker_valid "$_ver" && [ -x "$_candidate" ]; then
             printf '%s\n' "$_candidate"
             return
         fi
     done
-    _complete="$(ls -1t "$_root"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
-    _candidate=""
-    [ -n "$_complete" ] && _candidate="$(dirname "$_complete")/bin/python"
-    [ -x "$_candidate" ] && printf '%s\n' "$_candidate"
+    for _ver in $(
+      for _slot in "$_root"/versions/*; do
+        [ -d "$_slot" ] || continue
+        printf '%s\n' "${_slot##*/}"
+      done | _version_key | LC_ALL=C sort | cut -f2-
+    ); do
+        _candidate="$_root/versions/$_ver/bin/python"
+        _marker_valid "$_ver" &&
+            [ -x "$_candidate" ] && _resolved="$_candidate"
+    done
+    [ -n "${_resolved:-}" ] && printf '%s\n' "$_resolved"
 }
 _python="$(_resolve_python)"
 # Fast path: runtime already provisioned.
@@ -715,6 +785,7 @@ do_install() {
         _ok "Verification: module imports successfully"
     else
         _fail "Verification: module import failed"
+        return 1
     fi
 
     # Connection Owner daemon (config-gated; default off -> ensured absent).
@@ -863,10 +934,10 @@ do_update() {
     fi
 
     # Re-deploy venv
-    deploy_venv
+    deploy_venv || return 1
 
     # Re-deploy package
-    deploy_package
+    deploy_package || return 1
 
     # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
     _versioned_activate || return 1
@@ -922,6 +993,7 @@ do_provision() {
         _ok "Verification: module imports successfully"
     else
         _fail "Verification: module import failed"
+        return 1
     fi
     # Connection Owner daemon (config-gated; default off -> ensured absent).
     _sync_owner_service
