@@ -1606,9 +1606,9 @@ class SessionManager:
                     )
 
                     raise RemoteSpawnCleanupPendingError(
-                        "remote Session Host ACP handshake failed and cleanup "
-                        f"is inconclusive for {session_id}; retaining target "
-                        "ownership"
+                        "remote Session Host ACP initialization failed and "
+                        f"cleanup is inconclusive for {session_id}; retaining "
+                        "target ownership"
                     ) from exc
                 raise ConnectError(
                     ConnectStage.LAUNCH_ACP,
@@ -1636,9 +1636,9 @@ class SessionManager:
                     )
 
                     raise RemoteSpawnCleanupPendingError(
-                        "remote Session Host ACP handshake failed and cleanup "
-                        f"is inconclusive for {session_id}; retaining target "
-                        "ownership"
+                        "remote Session Host ACP initialization failed and "
+                        f"cleanup is inconclusive for {session_id}; retaining "
+                        "target ownership"
                     ) from exc
                 raise
 
