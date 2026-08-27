@@ -7,10 +7,5 @@ if not exist "%_PS1%" (
   echo [@@COMMAND@@] payload PowerShell shim not found: %_PS1% 1>&2
   exit /b 127
 )
-where pwsh >nul 2>&1
-if %ERRORLEVEL%==0 (
-  pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
-) else (
-  powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*
-)
+@@WINDOWS_CMD_HOST_BLOCK@@
 exit /b %ERRORLEVEL%

@@ -143,9 +143,17 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     comspec = os.environ.get("COMSPEC", "cmd.exe")
+    pwsh = shutil.which("pwsh.exe")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is unavailable")
+    env = {
+        **os.environ,
+        "PATH": os.pathsep.join([str(Path(pwsh).parent), str(Path(comspec).parent)]),
+    }
     result = subprocess.run(
         [comspec, "/d", "/s", "/c", f"{cmd} payload --file -"],
         input="task body",
+        env=env,
         capture_output=True,
         text=True,
         check=False,

@@ -191,9 +191,13 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
     )
 
     comspec = os.environ.get("COMSPEC", "cmd.exe")
+    pwsh = shutil.which("pwsh.exe")
+    if not pwsh:
+        pytest.skip("PowerShell 7 is unavailable")
     env = {
         **os.environ,
         "COPILOT_PLUGIN_ROOT": str(plugin),
+        "PATH": os.pathsep.join([str(Path(pwsh).parent), str(Path(comspec).parent)]),
     }
     result = subprocess.run(
         [
@@ -210,3 +214,45 @@ def test_windows_catalog_cmd_preserves_native_stdin(tmp_path: Path) -> None:
     assert result.stdout.replace("\r\n", "\n") == (
         "-m agent_bridge create target --prompt-file -::task body\n"
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows CMD test")
+def test_windows_catalog_cmd_survives_oversized_path(tmp_path: Path) -> None:
+    plugin = tmp_path / "plugin"
+    bin_dir = plugin / "bin"
+    bin_dir.mkdir(parents=True)
+    cmd = bin_dir / "agent-bridge.cmd"
+    shutil.copy2(PLUGIN / "bin" / "agent-bridge.cmd", cmd)
+    shutil.copy2(PLUGIN / "bin" / "agent-bridge.ps1", bin_dir)
+    shutil.copy2(PLUGIN / "plugin.json", plugin)
+
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AgentRtPy = Join-Path (Split-Path -Parent $PSScriptRoot) "
+        "'fake-python.ps1'\n",
+        encoding="utf-8",
+    )
+    (plugin / "fake-python.ps1").write_text(
+        "[Console]::Out.Write(($args -join ' ') + '::')\n",
+        encoding="utf-8",
+    )
+
+    comspec = os.environ.get("COMSPEC", "cmd.exe")
+    oversized_path = f"{tmp_path / 'missing'}{os.pathsep}{'X' * 9000}"
+    assert len(oversized_path) > 8191
+    env = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": str(plugin),
+        "PATH": oversized_path,
+    }
+    result = subprocess.run(
+        [comspec, "/d", "/s", "/c", str(cmd), "agents", "--all-projects"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "-m agent_bridge agents --all-projects::"
