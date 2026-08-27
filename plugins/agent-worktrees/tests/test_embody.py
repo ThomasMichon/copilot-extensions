@@ -117,7 +117,12 @@ def _stub_config(monkeypatch):
     class _Cfg:
         pass
     monkeypatch.setattr(m.cfg, "load_config", lambda: _Cfg())
-    monkeypatch.setattr(m, "_build_launch_cmd", lambda c, a, w: ["copilot"])
+    monkeypatch.setattr(
+        m,
+        "_preflight_launch",
+        lambda c, a, w: m.LaunchPreflight(),
+    )
+    monkeypatch.setattr(m, "_build_launch_cmd", lambda c, a, w, **k: ["copilot"])
     monkeypatch.setattr(m, "_build_env", lambda p, s=None, work_dir=None: {})
     monkeypatch.setattr(m, "_repo_session_env", lambda c, w="": {})
 
@@ -269,6 +274,63 @@ class TestCmdEmbody:
         out = json.loads(capfd.readouterr().out)
         assert out["worktree_id"] == "fresh-1"
         assert out["session"] == "wt-fresh-1" and out["created"] is True
+
+    def test_new_recovery_forwards_recovery_to_create(self, monkeypatch, capfd):
+        _stub_config(monkeypatch)
+        captured = {}
+
+        def _create(c, **kwargs):
+            captured.update(kwargs)
+            return {"worktree": {"id": "fresh-r", "path": "/w/fresh-r"}}
+
+        monkeypatch.setattr(m, "_create_worktree_core", _create)
+        monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
+
+        rc = m.cmd_embody(_ns(new=True, recovery=True))
+
+        assert rc == 0
+        assert captured["recovery"] is True
+        assert json.loads(capfd.readouterr().out)["worktree_id"] == "fresh-r"
+
+    def test_new_preflight_failure_preserves_message_and_exit_code(
+        self,
+        monkeypatch,
+        capfd,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(
+            m,
+            "_create_worktree_core",
+            lambda c, **k: (_ for _ in ()).throw(
+                m.LaunchPreflightError("machine-local config root is unsafe")
+            ),
+        )
+
+        rc = m.cmd_embody(_ns(new=True))
+
+        assert rc == 3
+        out = json.loads(capfd.readouterr().out)
+        assert out["error"] == "machine-local config root is unsafe"
+        assert "failed to create worktree" not in out["error"]
+
+    def test_new_unrelated_create_failure_keeps_existing_contract(
+        self,
+        monkeypatch,
+        capfd,
+    ):
+        _stub_config(monkeypatch)
+        monkeypatch.setattr(
+            m,
+            "_create_worktree_core",
+            lambda c, **k: (_ for _ in ()).throw(RuntimeError("git failed")),
+        )
+
+        rc = m.cmd_embody(_ns(new=True))
+
+        assert rc == 1
+        assert json.loads(capfd.readouterr().out)["error"] == (
+            "failed to create worktree: git failed"
+        )
 
     def test_spawn_failure_exits_4(self, monkeypatch, capfd, tmp_path):
         _stub_config(monkeypatch)

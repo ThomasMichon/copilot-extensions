@@ -20,6 +20,50 @@ from pathlib import Path
 
 log = logging.getLogger("agent-worktrees")
 
+_REPOSITORY_CONTEXT_ENV = frozenset({
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_GRAFT_FILE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_INTERNAL_SUPER_PREFIX",
+    "GIT_NAMESPACE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_QUARANTINE_PATH",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_SHALLOW_FILE",
+    "GIT_WORK_TREE",
+})
+
+
+def repository_identity_env() -> dict[str, str]:
+    """Return ambient process state without inherited Git context.
+
+    Repository identity probes supply their checkout explicitly with ``git -C``.
+    Inherited repository/config-selection variables can override or alter that
+    selection, so they are removed. Unrelated process and Git settings remain.
+    """
+    env = os.environ.copy()
+    for name in list(env):
+        upper = name.upper()
+        if (
+            upper in _REPOSITORY_CONTEXT_ENV
+            or upper.startswith("GIT_CONFIG_KEY_")
+            or upper.startswith("GIT_CONFIG_VALUE_")
+        ):
+            env.pop(name, None)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 # --- Path helpers -----------------------------------------------------------
 
 def _normalize_wt_path(p: str) -> str:
@@ -53,6 +97,7 @@ def resolve_to_anchor(repo_path: Path) -> Path:
             r = subprocess.run(
                 ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"],
                 capture_output=True, text=True, timeout=5,
+                env=repository_identity_env(),
             )
             if r.returncode == 0:
                 common = Path(r.stdout.strip())

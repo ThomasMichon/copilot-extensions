@@ -22,6 +22,8 @@ SETUP_HOOK=""
 SESSION_PATH=""
 ENV_SCRIPT=""
 COPILOT_PATH_OVERRIDE=""
+CONFIG_ROOT=""
+RUNTIME_PYTHON=""
 COPILOT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -32,6 +34,8 @@ while [[ $# -gt 0 ]]; do
         --session-path) SESSION_PATH="$2"; shift 2 ;;
         --env-script)   ENV_SCRIPT="$2"; shift 2 ;;
         --copilot-path) COPILOT_PATH_OVERRIDE="$2"; shift 2 ;;
+        --config-root)  CONFIG_ROOT="$2"; shift 2 ;;
+        --runtime-python) RUNTIME_PYTHON="$2"; shift 2 ;;
         *)              COPILOT_ARGS+=("$1"); shift ;;
     esac
 done
@@ -43,6 +47,41 @@ for _a in "${COPILOT_ARGS[@]:-}"; do
     [[ "$_a" == "--stdio" ]] && STDIO=true
 done
 say() { if $STDIO; then echo "$@" >&2; else echo "$@"; fi; }
+
+# -- Runtime --------------------------------------------------------------
+_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
+[ -f "$_awresolve" ] && . "$_awresolve"
+_AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
+
+# -- Guarded setup configuration root ------------------------------------
+# setup_hook is the supported cooperative writer boundary. Resolve its
+# machine-local root, or validate an explicit caller-supplied root, before the
+# hook gets a chance to execute.
+if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
+    if [[ -n "$_AW_PY" && "$_AW_PY" != */* ]]; then
+        _resolved_aw_py="$(command -v -- "$_AW_PY" 2>/dev/null || true)"
+        [[ -n "$_resolved_aw_py" ]] && _AW_PY="$_resolved_aw_py"
+    fi
+    if [[ -z "$_AW_PY" || ! -x "$_AW_PY" ]]; then
+        echo "ERROR: agent-worktrees runtime is unavailable; cannot validate the setup config root." >&2
+        exit 3
+    fi
+    _config_root_args=(-m agent_worktrees config-root)
+    if [[ -n "$CONFIG_ROOT" ]]; then
+        _config_root_args+=(--destination "$CONFIG_ROOT")
+    fi
+    set +e
+    _guarded_config_root="$(PYTHONPATH="" "$_AW_PY" -I "${_config_root_args[@]}")"
+    _config_root_rc=$?
+    set -e
+    if [[ $_config_root_rc -ne 0 ]]; then
+        exit "$_config_root_rc"
+    fi
+    if [[ -z "$_guarded_config_root" ]]; then
+        echo "ERROR: agent-worktrees returned an empty setup config root." >&2
+        exit 3
+    fi
+fi
 
 # -- Session PATH prepend (generic; repo-provided dirs) -------------------
 if [[ -n "$SESSION_PATH" ]]; then
@@ -69,9 +108,6 @@ fi
 # -- Environment ----------------------------------------------------------
 # Resolve the project from CWD (git-like); fall back to the directory name if
 # the CLI is unavailable (e.g. recovery mode).
-_awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
-[ -f "$_awresolve" ] && . "$_awresolve"
-_AW_PY="${AW_PY:-}"
 PROJECT=""
 if [[ -x "$_AW_PY" ]]; then
     PROJECT="$(PYTHONPATH="" "$_AW_PY" -m agent_worktrees get project 2>/dev/null || true)"
@@ -84,6 +120,7 @@ export WORKTREE_MACHINE="$MACHINE"
 # broken hook can never lock the operator out of a recovery session. A
 # non-zero exit warns but does not abort the launch.
 if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
+    export AGENT_WORKTREES_CONFIG_ROOT="$_guarded_config_root"
     if [[ -f "$SETUP_HOOK" ]]; then
         say "  Setup:    $SETUP_HOOK"
         if $STDIO; then

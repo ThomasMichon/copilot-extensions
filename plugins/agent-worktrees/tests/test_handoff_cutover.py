@@ -622,8 +622,10 @@ class TestCmdHandoffCutover:
 
         monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
         monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(
             m, "_build_launch_cmd",
-            lambda cfg_, args, wd: ["bash", "setup.sh", "--allow-all-tools"],
+            lambda cfg_, args, wd, **k: ["bash", "setup.sh", "--allow-all-tools"],
         )
         monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
@@ -665,7 +667,10 @@ class TestCmdHandoffCutover:
             worktree_path = str(tmp_path / "w")
 
         monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
-        monkeypatch.setattr(m, "_build_launch_cmd", lambda cfg_, args, wd: ["copilot"])
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda cfg_, args, wd, **k: ["copilot"])
         monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
 
@@ -689,8 +694,10 @@ class TestCmdHandoffCutover:
             worktree_path = str(tmp_path / "w")
 
         monkeypatch.setattr(m.tracking, "load_record", lambda p: _Rec())
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
         monkeypatch.setattr(m, "_build_launch_cmd",
-                            lambda c, a, wd: ["copilot"])
+                            lambda c, a, wd, **k: ["copilot"])
         monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
         monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
 

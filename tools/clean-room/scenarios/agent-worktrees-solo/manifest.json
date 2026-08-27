@@ -23,6 +23,7 @@
     { "n": 2, "title": "runtime provisions on first session (venv + binstub)" },
     { "n": 3, "title": "binstub on PATH + reports a REAL version" },
     { "n": 4, "title": "read verbs enumerate (repos/projects/list)" },
-    { "n": 5, "title": "worktree round-trips (register -> create -> finalize)" }
+    { "n": 5, "title": "worktree round-trips (register -> create -> finalize)" },
+    { "n": 6, "title": "stateless setup destination is blocked before hook execution" }
   ]
 }

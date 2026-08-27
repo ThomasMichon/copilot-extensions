@@ -164,4 +164,42 @@ else
 fi
 
 # =========================================================================
+phase 6 "stateless setup destination is blocked before hook execution"
+_guard_repo="$HOME/stateless-setup-repo"
+mkdir -p "$_guard_repo/.agent-worktrees"
+(
+    cd "$_guard_repo" &&
+    git init -q &&
+    git config user.email t@e &&
+    git config user.name t &&
+    printf 'stateless: true\n' > .agent-worktrees/config.yaml &&
+    git add -A &&
+    git commit -qm init
+)
+_escaped="$_guard_repo/escaped-config"
+_hook="$HOME/unsafe-setup-hook.sh"
+cat > "$_hook" <<EOF
+#!/usr/bin/env bash
+touch '$_escaped'
+EOF
+chmod +x "$_hook"
+_before="$(git -C "$_guard_repo" status --porcelain)"
+capture "stateless-setup-guard" -- bash \
+    "$INSTALLED_ROOT/$PLUGIN/scripts/default-setup.sh" \
+    --machine test \
+    --setup-hook "$_hook" \
+    --config-root "$_guard_repo" \
+    --runtime-python "$_slot/bin/python"
+_guard_rc=$?
+_after="$(git -C "$_guard_repo" status --porcelain)"
+if [ "$_guard_rc" -ne 0 ] &&
+   [ ! -e "$_escaped" ] &&
+   [ "$_before" = "$_after" ] &&
+   grep -q "inside stateless checkout" "$CR_LOGDIR/stateless-setup-guard.log"; then
+    pass "normalized setup rejects a stateless config root before the hook runs"
+else
+    fail "normalized setup did not preserve the stateless checkout (see cr-logs/stateless-setup-guard.log)"
+fi
+
+# =========================================================================
 cr_finalize
