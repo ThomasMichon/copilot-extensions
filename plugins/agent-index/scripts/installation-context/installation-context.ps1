@@ -1161,9 +1161,6 @@ function Assert-ReceiptState($Value, [string]$Name) {
 
 function Assert-ReceiptGeneration($Value, [string]$Name) {
     Assert-PositiveInteger $Value $Name
-    if ([int64]$Value -gt [int64]::MaxValue) {
-        Fail "$Name exceeds the portable signed 64-bit maximum."
-    }
 }
 
 function Validate-NamespaceReceipt(
