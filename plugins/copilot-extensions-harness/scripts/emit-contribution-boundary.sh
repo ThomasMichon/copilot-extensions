@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -u
-guide="${COPILOT_PLUGIN_ROOT:-}/references/contribution-ground-rules.md"
+plugin_root="${COPILOT_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+guide="$plugin_root/references/contribution-ground-rules.md"
 if [[ ! -f "$guide" ]]; then
   printf '{}'
   exit 0

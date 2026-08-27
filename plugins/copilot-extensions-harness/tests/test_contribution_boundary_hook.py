@@ -18,6 +18,8 @@ def test_hook_manifest_points_to_payload_scripts() -> None:
     assert len(entries) == 1
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entries[0]["bash"]
+    assert "Get-Location" in entries[0]["powershell"]
+    assert "$(pwd)" in entries[0]["bash"]
 
 
 def test_bash_hook_has_interpreter_and_json_fallbacks() -> None:
@@ -42,6 +44,22 @@ def test_powershell_hook_emits_existing_guide() -> None:
     payload = json.loads(result.stdout)
     assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
     assert "organization-neutral" in payload["additionalContext"]
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
+def test_powershell_hook_falls_back_to_script_location() -> None:
+    env = {key: value for key, value in os.environ.items()
+           if key != "COPILOT_PLUGIN_ROOT"}
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-File",
+         str(PLUGIN / "scripts" / "emit-contribution-boundary.ps1")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    payload = json.loads(result.stdout)
+    assert Path(payload["additionalContext"].split("Read: ", 1)[1]).is_file()
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,

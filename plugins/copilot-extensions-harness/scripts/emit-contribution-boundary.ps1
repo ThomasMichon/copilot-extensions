@@ -1,5 +1,10 @@
 $ErrorActionPreference = 'SilentlyContinue'
-$guide = Join-Path $env:COPILOT_PLUGIN_ROOT 'references\contribution-ground-rules.md'
+$pluginRoot = if ($env:COPILOT_PLUGIN_ROOT) {
+    $env:COPILOT_PLUGIN_ROOT
+} else {
+    Split-Path -Parent $PSScriptRoot
+}
+$guide = Join-Path (Join-Path $pluginRoot 'references') 'contribution-ground-rules.md'
 if (-not (Test-Path -LiteralPath $guide)) {
     Write-Output '{}'
     exit 0
