@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import threading
 from contextlib import redirect_stdout
+from dataclasses import replace
 
 import pytest
 
@@ -18,6 +20,8 @@ from worktree_manager import demo, demo_engine
 from worktree_manager import engine_client as ec
 from worktree_manager import picker_app
 from worktree_manager.engine_client import EngineError, Worktree
+from worktree_manager.pivot_runtime import PivotLoadError, PivotPayload
+from worktree_manager.plugin_contracts import parse_manifest
 
 
 @pytest.fixture(autouse=True)
@@ -92,6 +96,30 @@ def test_app_populates_table_from_source():
     assert asyncio.run(_run()) == 1
 
 
+def test_app_opens_before_worktree_source_finishes():
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_source():
+        started.set()
+        assert release.wait(2)
+        return list(_FIX)
+
+    async def _run() -> tuple[str, int]:
+        app = picker_app.WorktreeManagerApp(slow_source, project="r")
+        async with app.run_test(size=(100, 24)):
+            assert await asyncio.to_thread(started.wait, 1)
+            loading = app._last_status
+            release.set()
+            await app.workers.wait_for_complete()
+            from textual.widgets import DataTable
+            return loading, app.query_one(DataTable).row_count
+
+    loading, row_count = asyncio.run(_run())
+    assert "loading worktrees" in loading
+    assert row_count == len(_FIX)
+
+
 def test_app_engine_error_shows_status_not_crash():
     def boom():
         raise EngineError("nope", install_hint=True)
@@ -102,6 +130,199 @@ def test_app_engine_error_shows_status_not_crash():
             return app._last_status
 
     assert "engine unavailable" in asyncio.run(_run())
+
+
+def _contribution(
+    label: str,
+    *,
+    after: str = "Worktrees",
+    columns: list[dict] | None = None,
+):
+    return parse_manifest(
+        {
+            "schema_version": 1,
+            "label": label,
+            "after": after,
+            "list": ["agent-example", "list", "--machine", "{machine}"],
+            "entry": {
+                "id": "id",
+                "title": "title",
+                "subtitle": "detail",
+                "badges": ["state"],
+            },
+            "columns": columns or [],
+            "summary": "{ready} ready",
+            "empty_hint": f"No {label.lower()}.",
+        },
+        name=label.lower(),
+        marketplace="example",
+        plugin=f"agent-{label.lower()}",
+        source_path=f"/payload/{label.lower()}.json",
+    )
+
+
+def test_contributed_pivot_order_is_stable_and_resolves_forward_anchors():
+    one = _contribution("One")
+    two = _contribution("Two")
+    child = _contribution("Child", after="Parent")
+    parent = _contribution("Parent", after="Two")
+    orphan = _contribution("Orphan", after="Missing")
+
+    descriptors = picker_app.WorktreeManagerApp._build_pivots(
+        [one, two, child, parent, orphan]
+    )
+
+    assert [descriptor.label for descriptor in descriptors] == [
+        "Worktrees",
+        "One",
+        "Two",
+        "Parent",
+        "Child",
+        "Orphan",
+    ]
+
+
+def test_contributed_pivot_loads_off_event_loop_and_renders_columns():
+    started = threading.Event()
+    release = threading.Event()
+    contribution = _contribution(
+        "Tasks",
+        columns=[
+            {"key": "title", "header": "task"},
+            {"key": "state", "header": "state"},
+        ],
+    )
+
+    def loader(pivot, context):
+        assert threading.current_thread() is not threading.main_thread()
+        assert context["machine"] == "m"
+        started.set()
+        assert release.wait(2)
+        return PivotPayload(
+            rows=({"id": "1", "title": "ship it", "state": "ready"},),
+            summary={"ready": 1},
+        )
+
+    async def _run() -> tuple[str, str, int]:
+        app = picker_app.WorktreeManagerApp(
+            lambda: list(_FIX),
+            project="r",
+            contributions=[contribution],
+            context_source=lambda: {"machine": "m"},
+            pivot_loader=loader,
+        )
+        async with app.run_test(size=(100, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            from textual.widgets import DataTable, Tabs
+            app.query_one(Tabs).active = "pivot-1"
+            await pilot.pause()
+            assert await asyncio.to_thread(started.wait, 1)
+            loading = app._last_status
+            release.set()
+            await app.workers.wait_for_complete()
+            return loading, app._last_status, app.query_one(DataTable).row_count
+
+    loading, ready, row_count = asyncio.run(_run())
+    assert "loading tasks" in loading
+    assert ready == "1 tasks · 1 ready · r: refresh · q: quit"
+    assert row_count == 1
+
+
+def test_contributed_pivot_failure_isolated_from_peer_and_worktrees():
+    bad = _contribution("Bad")
+    good = _contribution("Good")
+
+    def loader(pivot, context):
+        if pivot.label == "Bad":
+            raise PivotLoadError("provider failed")
+        return PivotPayload(rows=({"id": "1", "title": "healthy"},), summary={})
+
+    async def _run() -> tuple[str, str, int]:
+        app = picker_app.WorktreeManagerApp(
+            lambda: list(_FIX),
+            project="r",
+            contributions=[bad, good],
+            pivot_loader=loader,
+        )
+        async with app.run_test(size=(100, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            from textual.widgets import DataTable, Tabs
+            tabs = app.query_one(Tabs)
+            tabs.active = "pivot-1"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            bad_status = app._last_status
+            tabs.active = "pivot-2"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            good_status = app._last_status
+            tabs.active = "pivot-0"
+            await pilot.pause()
+            worktree_rows = app.query_one(DataTable).row_count
+            return bad_status, good_status, worktree_rows
+
+    bad_status, good_status, worktree_rows = asyncio.run(_run())
+    assert bad_status == "Bad unavailable: provider failed"
+    assert good_status.startswith("1 good")
+    assert worktree_rows == len(_FIX)
+
+
+def test_contributed_pivot_keeps_cached_rows_when_refresh_fails():
+    contribution = _contribution("Tasks")
+    calls = 0
+
+    def loader(pivot, context):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return PivotPayload(rows=({"id": "1", "title": "cached"},), summary={})
+        raise PivotLoadError("refresh failed")
+
+    async def _run() -> tuple[str, int]:
+        app = picker_app.WorktreeManagerApp(
+            lambda: list(_FIX),
+            project="r",
+            contributions=[contribution],
+            pivot_loader=loader,
+        )
+        async with app.run_test(size=(100, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            from textual.widgets import DataTable, Tabs
+            app.query_one(Tabs).active = "pivot-1"
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            await pilot.press("r")
+            await app.workers.wait_for_complete()
+            return app._last_status, app.query_one(DataTable).row_count
+
+    status, row_count = asyncio.run(_run())
+    assert status == "Tasks unavailable: refresh failed · showing 1 cached"
+    assert row_count == 1
+
+
+def test_unavailable_contributed_pivot_stays_visible_and_isolated():
+    contribution = replace(_contribution("Tasks"), command_available=False)
+
+    async def _run() -> tuple[str, int]:
+        app = picker_app.WorktreeManagerApp(
+            lambda: list(_FIX),
+            project="r",
+            contributions=[contribution],
+        )
+        async with app.run_test(size=(100, 24)) as pilot:
+            await app.workers.wait_for_complete()
+            from textual.widgets import DataTable, Tabs
+            tabs = app.query_one(Tabs)
+            tabs.active = "pivot-1"
+            await pilot.pause()
+            unavailable = app._last_status
+            tabs.active = "pivot-0"
+            await pilot.pause()
+            return unavailable, app.query_one(DataTable).row_count
+
+    status, worktree_rows = asyncio.run(_run())
+    assert status == "Tasks unavailable: agent-example is not available on PATH"
+    assert worktree_rows == len(_FIX)
 
 
 # ── launch/resume action (slice 3) ────────────────────────────────────────────
@@ -120,6 +341,7 @@ def _drive(keys: list[str]):
     async def _run():
         app = picker_app.WorktreeManagerApp(lambda: list(_FIX), project="r")
         async with app.run_test(size=(100, 24)) as pilot:
+            await app.workers.wait_for_complete()
             for k in keys:
                 await pilot.press(k)
         return app.pending_launch

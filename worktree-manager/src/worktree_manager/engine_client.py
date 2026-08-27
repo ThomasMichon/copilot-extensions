@@ -185,6 +185,11 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
 
 
+def get_value(project: str, key: str, *, timeout: int = _DEFAULT_TIMEOUT) -> str:
+    """Read a pinned scalar value from ``agent-worktrees get <key>``."""
+    return _run(project, ["get", key], timeout=timeout).strip()
+
+
 @dataclass(frozen=True)
 class Worktree:
     """A worktree row derived from ``list --json --classify`` (contract v1).
