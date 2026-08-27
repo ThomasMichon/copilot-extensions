@@ -11,11 +11,13 @@ plugins. It is the one piece that must work *before* the plugins do.
 > itself, provisions the harness core, reads harness state, shells out to the
 > worktree engine, and hosts the first independent Textual Picker. It now also
 > owns the versioned contract for plugin-contributed pivots, actions, cards/forms,
-> and configuration sections. Production Picker parity, repo adoption/config
+> and configuration sections. The Picker now renders contributed pivot snapshots
+> asynchronously from that contract; action/streaming parity, repo adoption/config
 > editing, mux/profile relocation, and presets remain under umbrella issue
 > [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) and the
-> contract extraction is tracked by
-> [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165).
+> contract/render extraction is tracked by
+> [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
+> [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
 ## Set up the harness
 
@@ -119,6 +121,12 @@ versioned manifest contract and reports disabled, malformed, duplicate, legacy,
 or missing-command contributions without importing plugin code or requiring a
 plugin installer to write into Manager-owned state. See
 [`docs/plugin-contribution-contract.md`](docs/plugin-contribution-contract.md).
+Available pivot contributions appear beside Worktrees in the Picker. Their list
+commands run in background workers, so the UI opens before cross-process reads
+finish; each pivot keeps its own cached rows and loading/error/empty state, and
+renders either its declared columns or the contract's id/title/badge fallback.
+Streaming, actions, cards/forms, and configuration sections remain subsequent
+parity slices; the bundled Picker stays in place until those are complete.
 
 **Projects** are the repos promoted to first-class harness projects (worthy of
 binstubs + profiles, in `projects.yaml`); **Repos** are everything else in the
