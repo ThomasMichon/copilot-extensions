@@ -294,7 +294,7 @@ def test_qualified_false_disables_stale_marketplace_copy(tmp_path):
     assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
 
 
-def test_repo_local_manifest_uses_source_name_for_override(tmp_path):
+def test_repo_local_identity_mismatch_does_not_override_installed_payload(tmp_path):
     _install_plugin(
         tmp_path / "home",
         "local-marketplace",
@@ -313,7 +313,7 @@ def test_repo_local_manifest_uses_source_name_for_override(tmp_path):
         enabled_names={"example-web-harness"},
         repo_roots=[repo],
     )
-    assert [s.source for s in specs] == ["example-web-agent@local-marketplace"]
+    assert [s.source for s in specs] == ["stale-agent@local-marketplace"]
 
 
 # --------------------------------------------------------------------------

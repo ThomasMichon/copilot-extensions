@@ -17,7 +17,12 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .conventions import SETTINGS_RELS
+from .conventions import (
+    LOCAL_MARKETPLACE_SOURCE_KINDS,
+    REMOTE_MARKETPLACE_SOURCE_KINDS,
+    SETTINGS_RELS,
+    MarketplaceSourceKind,
+)
 
 
 @dataclass(frozen=True)
@@ -62,8 +67,8 @@ def read_repo_settings(repo_dir: str | Path) -> RepoPluginSettings:
         en = data.get("enabledPlugins")
         if isinstance(en, dict):
             for k, v in en.items():
-                if isinstance(k, str):
-                    enabled[k] = bool(v)
+                if isinstance(k, str) and isinstance(v, bool):
+                    enabled[k] = v
         mk = data.get("extraKnownMarketplaces")
         if isinstance(mk, dict):
             for k, v in mk.items():
@@ -88,12 +93,10 @@ def local_marketplace_path(
     of the caller's cwd. A remote (github/git/npm) marketplace yields ``None`` (it
     is not fetched here). Fail-safe -> ``None``.
     """
-    from .conventions import LOCAL_MARKETPLACE_SOURCE_KINDS
-
-    entry = settings.marketplaces.get(marketplace)
-    src = entry.get("source") if isinstance(entry, dict) else None
-    if not (isinstance(src, dict) and src.get("source") in LOCAL_MARKETPLACE_SOURCE_KINDS):
+    if marketplace_source_kind(marketplace, settings) is not MarketplaceSourceKind.LOCAL:
         return None
+    entry = settings.marketplaces[marketplace]
+    src = entry["source"]
     path = src.get("path")
     if not (isinstance(path, str) and path.strip()):
         return None
@@ -101,3 +104,21 @@ def local_marketplace_path(
     if not p.is_absolute() and repo_dir is not None:
         p = Path(repo_dir) / p
     return p
+
+
+def marketplace_source_kind(
+    marketplace: str,
+    settings: RepoPluginSettings,
+) -> MarketplaceSourceKind:
+    """Classify one declared marketplace without conflating remote and invalid."""
+    entry = settings.marketplaces.get(marketplace)
+    source = entry.get("source") if isinstance(entry, dict) else None
+    kind = source.get("source") if isinstance(source, dict) else None
+    if not isinstance(kind, str) or not kind.strip():
+        return MarketplaceSourceKind.INVALID
+    normalized = kind.strip()
+    if normalized in LOCAL_MARKETPLACE_SOURCE_KINDS:
+        return MarketplaceSourceKind.LOCAL
+    if normalized in REMOTE_MARKETPLACE_SOURCE_KINDS:
+        return MarketplaceSourceKind.REMOTE
+    return MarketplaceSourceKind.INVALID
