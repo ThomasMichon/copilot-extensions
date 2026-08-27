@@ -14,6 +14,7 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 
 from __future__ import annotations
 
+import json
 import sys
 
 from . import __version__
@@ -388,6 +389,73 @@ def _cmd_worktrees(rest: list[str]) -> int:
     print()
     print(f"  {total} worktree(s) across {len(projects)} project(s).")
     print("  `worktree-manager worktrees <project>` to list one.")
+    print()
+    return 0
+
+
+def _cmd_contracts(rest: list[str]) -> int:
+    """Inspect plugin-contributed Manager surfaces from installed payloads."""
+    from .plugin_contracts import discover_contracts
+
+    project = None
+    json_output = False
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg == "--json":
+            json_output = True
+            i += 1
+            continue
+        if arg == "--project":
+            if i + 1 >= len(rest):
+                print("error: --project needs a project name")
+                return 2
+            project = rest[i + 1]
+            i += 2
+            continue
+        print(f"error: unknown option {arg!r} for `contracts`.")
+        return 2
+
+    if project:
+        known = {p.name for p in build_projects()}
+        if project not in known:
+            print(f"error: unknown project {project!r}. Known: {', '.join(sorted(known))}")
+            return 2
+
+    report = discover_contracts(project=project)
+    if json_output:
+        print(json.dumps(report.to_dict(), indent=2))
+        return 0
+
+    scope = f"project {project}" if project else "user-global enablement"
+    print()
+    print(f"  {_BANNER} — plugin contribution contracts")
+    print(f"  contract v{report.contract_version} · {scope}")
+    print()
+    if report.contributions:
+        for contribution in report.contributions:
+            pivot = contribution.pivot
+            label = pivot.label if pivot else "(actions/config only)"
+            command = " ".join(pivot.list_cmd) if pivot else "—"
+            available = "ready" if contribution.command_available else "command missing"
+            print(f"    {contribution.qualified_plugin}")
+            print(f"      {label} · {available}")
+            print(f"      list: {command}")
+            print(f"      source: {contribution.source_path}")
+    else:
+        print("    (no enabled plugin contributions)")
+    if report.findings:
+        print()
+        print("  findings:")
+        for finding in report.findings:
+            owner = (
+                f"{finding.plugin}@{finding.marketplace}"
+                if finding.plugin else "(registry)"
+            )
+            print(f"    {finding.severity}: {finding.code} · {owner}")
+            print(f"      {finding.detail}")
+    print()
+    print("  Add `--json` for the machine-readable report.")
     print()
     return 0
 
@@ -799,6 +867,8 @@ def main(argv: list[str] | None = None) -> int:
         print("  projects [<name>]      registered projects (harness repos: binstubs + profiles)")
         print("  repos [<name>]         every known repo + its config-state indicators")
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
+        print("  contracts [--project NAME] [--json]")
+        print("                         validate plugin-contributed pivots/actions/cards/config")
         print("  picker [<project>]     launch the interactive Picker (Textual)")
         print("  picker --demo          preview the Picker with mock Aperture Labs data")
         print("  picker [...] --screenshot F  render a headless SVG screenshot to F")
@@ -816,6 +886,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_repos(args[1:])
     if args and args[0] == "worktrees":
         return _cmd_worktrees(args[1:])
+    if args and args[0] == "contracts":
+        return _cmd_contracts(args[1:])
     if args and args[0] == "picker":
         return _cmd_picker(args[1:])
     if args and args[0] == "doctor":

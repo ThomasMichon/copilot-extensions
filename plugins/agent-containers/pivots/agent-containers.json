@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "label": "Containers",
   "after": "Worktrees",
   "list": ["agent-containers", "fleet", "--json"],

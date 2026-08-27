@@ -7,16 +7,15 @@ pipe — it is its own payload, fetched and run directly, because the thing that
 must guarantee the plugins' prerequisites cannot itself be one of those inert
 plugins. It is the one piece that must work *before* the plugins do.
 
-> **Status: Phase 1 — plugin-knowledge model.** On top of the Phase 0
-> out-of-plugin skeleton, the Worktree Manager now carries a **dependency-free
-> **Status: Phase 2 — prerequisites & core install.** On top of the Phase 1
-> plugin-knowledge model, the Worktree Manager now **detects** the baseline
-> prerequisites, **plans/provisions** the missing ones (restart-aware), and
-> **drives the harness's own** agent-worktrees core install (idempotent; heals a
-> partial install). The remaining work — repo adoption/discovery, the visual
-> worktree-manager, and presets — is being built out under umbrella issue
+> **Status: active control-plane extraction.** The Manager bootstraps and updates
+> itself, provisions the harness core, reads harness state, shells out to the
+> worktree engine, and hosts the first independent Textual Picker. It now also
+> owns the versioned contract for plugin-contributed pivots, actions, cards/forms,
+> and configuration sections. Production Picker parity, repo adoption/config
+> editing, mux/profile relocation, and presets remain under umbrella issue
 > [#352](https://github.com/ThomasMichon/copilot-extensions/issues/352) and the
-> vision [`visions/installer/`](../visions/installer/README.md).
+> contract extraction is tracked by
+> [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165).
 
 ## Set up the harness
 
@@ -102,6 +101,7 @@ uv run python -m worktree_manager repos <name>    # worktree mode · agent mode 
 uv run python -m worktree_manager worktrees       # live worktree counts per project (via the engine)
 uv run python -m worktree_manager worktrees <name> # one project's worktrees: state, sync tags, titles
 uv run python -m worktree_manager plugins --status  # known plugins vs. what is enabled user-global
+uv run python -m worktree_manager contracts --project <name> # contributed pivots/actions/cards/config
 ```
 
 The **worktrees** views are the first slice of the extracted Picker: they read
@@ -112,6 +112,13 @@ the only coupling is the engine's stable `--json` verbs (the pinned
 [engine ↔ Picker contract](../plugins/agent-worktrees/docs/engine-picker-contract.md)),
 and the client ([`engine_client.py`](src/worktree_manager/engine_client.py))
 tolerates an older engine by degrading a request rather than failing.
+
+Plugin-contributed interactive surfaces are discovered independently from each
+enabled plugin's installed payload. `worktree-manager contracts` validates the
+versioned manifest contract and reports disabled, malformed, duplicate, legacy,
+or missing-command contributions without importing plugin code or requiring a
+plugin installer to write into Manager-owned state. See
+[`docs/plugin-contribution-contract.md`](docs/plugin-contribution-contract.md).
 
 **Projects** are the repos promoted to first-class harness projects (worthy of
 binstubs + profiles, in `projects.yaml`); **Repos** are everything else in the

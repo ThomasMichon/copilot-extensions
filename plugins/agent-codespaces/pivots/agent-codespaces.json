@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "label": "CodeSpaces",
   "after": "Worktrees",
   "scope": "account",

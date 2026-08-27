@@ -1,4 +1,5 @@
 {
+  "schema_version": 1,
   "label": "Bridges",
   "after": "Worktrees",
   "list": ["agent-bridge", "agents", "--json"],
