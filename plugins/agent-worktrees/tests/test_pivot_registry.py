@@ -7,6 +7,7 @@ import logging
 import os
 from pathlib import Path
 
+import pytest
 from dropin_registry import (
     EntryDecision,
     EntryStatus,
@@ -368,6 +369,31 @@ def test_dot_relative_commands_resolve_in_their_authority_root(
         activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
     )
     assert Path(operator.pivots[0].list_cmd[0]) == operator_command.resolve()
+
+
+def test_symlinked_executable_resolves_to_regular_target(tmp_path):
+    root = tmp_path / "commands"
+    real = _command(root, "real")
+    suffix = ".cmd" if os.name == "nt" else ""
+    linked = root / "bin" / f"linked{suffix}"
+    try:
+        linked.symlink_to(real)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+    registry = tmp_path / "pivots"
+    registry.mkdir()
+    (registry / "operator.json").write_text(
+        json.dumps({"label": "Operator", "list": [str(linked)]}),
+        encoding="utf-8",
+    )
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+
+    assert Path(report.pivots[0].list_cmd[0]) == real.resolve()
 
 
 def test_malformed_operator_peer_does_not_block_valid_operator(tmp_path):

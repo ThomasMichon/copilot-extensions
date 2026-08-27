@@ -918,17 +918,19 @@ def _resolve_command(command: Sequence[str], *, root: Path | None = None) -> lis
     if not resolved:
         raise FileNotFoundError(first)
     target = Path(resolved)
-    info = target.lstat()
+    canonical = target.resolve(strict=True)
+    info = canonical.lstat()
     if (
         not stat.S_ISREG(info.st_mode)
         or stat.S_ISLNK(info.st_mode)
         or _is_reparse(info)
     ):
         raise TargetUnusableError("command must be a regular non-reparse file")
-    if os.name != "nt" and not os.access(target, os.X_OK):
+    if os.name != "nt" and not os.access(canonical, os.X_OK):
         raise TargetUnusableError("command is not executable")
-    canonical = target.resolve(strict=True)
-    if root is not None and has_path and not candidate.is_absolute():
+    if root is not None and (
+        payload is not None or (has_path and not candidate.is_absolute())
+    ):
         try:
             canonical.relative_to(root)
         except ValueError as exc:
