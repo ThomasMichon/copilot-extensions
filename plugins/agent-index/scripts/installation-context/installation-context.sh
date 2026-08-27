@@ -17,7 +17,7 @@ HELD_LOCK_TOKEN=""
 cleanup() {
     local path
     if [[ -n "$HELD_LOCK_DIR" && -d "$HELD_LOCK_DIR" ]] &&
-        lock_owner_matches "$HELD_LOCK_DIR/owner.json"; then
+        (lock_owner_matches "$HELD_LOCK_DIR/owner.json" 2>/dev/null); then
         rm -f -- "$HELD_LOCK_DIR/owner.json" 2>/dev/null || true
         rmdir -- "$HELD_LOCK_DIR" 2>/dev/null || true
     fi
