@@ -17,11 +17,15 @@ $AgentRtPy = $null
 $_rtRoot = $env:AGENT_RT_ROOT
 if ($_rtRoot) {
 
-  # -- helper: return a version's slot python if it exists, else $null --
+  # -- helper: return a complete version's slot python, else $null --
   function _Rt-TrySlot([string]$ver) {
     if (-not $ver) { return $null }
+    $slot = Join-Path $_rtRoot ("versions\$ver")
+    if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) {
+      return $null
+    }
     foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-      $p = Join-Path $_rtRoot ("versions\$ver\$sub")
+      $p = Join-Path $slot $sub
       if (Test-Path -LiteralPath $p) { return $p }
     }
     return $null
@@ -39,27 +43,15 @@ if ($_rtRoot) {
     if ($_rtLkg) { $AgentRtPy = _Rt-TrySlot $_rtLkg }
   }
 
-  # Tier 3: true first-run (no marker, no last-known-good) -> newest COMPLETE
+  # Tier 3: true first-run (no marker, no last-known-good) -> newest complete
   # slot, matching versioned_runtime.resolve_python. Sorted version-aware (each
-  # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic),
-  # preferring slots that carry a completion marker; falls back to the newest slot
-  # with a python if none is marked complete.
+  # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic).
   if (-not $AgentRtPy) {
     $_rtSlots = Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue |
       Sort-Object { [regex]::Replace($_.Name, '\d+', { param($m) $m.Value.PadLeft(10, '0') }) }
-    $_rtAny = $null
     foreach ($_rtSlot in $_rtSlots) {
-      $p = $null
-      foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
-        $cand = Join-Path $_rtSlot.FullName $sub
-        if (Test-Path -LiteralPath $cand) { $p = $cand; break }
-      }
-      if (-not $p) { continue }
-      $_rtAny = $p
-      if (Test-Path -LiteralPath (Join-Path $_rtSlot.FullName '.install-complete.json')) {
-        $AgentRtPy = $p
-      }
+      $p = _Rt-TrySlot $_rtSlot.Name
+      if ($p) { $AgentRtPy = $p }
     }
-    if (-not $AgentRtPy) { $AgentRtPy = $_rtAny }
   }
 }

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,6 +38,59 @@ def test_posix_activation_requires_completion_marker() -> None:
     assert '"$py" "${args[@]}"' in marker
     assert "|| true" not in marker
     assert "_versioned_slot_clean || return 1" in deploy
+
+
+def test_posix_cleanup_is_vacuous_without_slot_and_bootstraps_with_uv() -> None:
+    text = INSTALL_SH.read_text(encoding="utf-8")
+    bootstrap = text.split("_bootstrap_python() {", 1)[1].split("\n}", 1)[0]
+    runner = text.split("_run_versioned_runtime() {", 1)[1].split("\n}", 1)[0]
+    clean = text.split("_versioned_slot_clean() {", 1)[1].split("\n}", 1)[0]
+
+    assert '[[ -d "$VENV_DIR" ]] || return 0' in clean
+    assert "command -v uv" in runner
+    assert "uv run --no-project --python 3.11" in runner
+    assert runner.index("_bootstrap_python") < runner.index("command -v uv")
+    assert "$VENV_PYTHON" not in bootstrap
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or shutil.which("bash") is None,
+    reason="a native POSIX bash is unavailable",
+)
+def test_posix_binstub_rejects_incomplete_marker_slot_without_running_it(
+    tmp_path: Path,
+) -> None:
+    text = INSTALL_SH.read_text(encoding="utf-8")
+    stub = text.split("cat > \"$stub_path\" << 'STUB'", 1)[1].split("\nSTUB", 1)[0]
+    binstub = tmp_path / "agent-codespaces"
+    binstub.write_text(stub.lstrip(), encoding="utf-8")
+    binstub.chmod(0o755)
+    home = tmp_path / "home"
+    slot = home / ".agent-codespaces" / "versions" / "1.0.0"
+    python = slot / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    sentinel = tmp_path / "spawned"
+    python.write_text(
+        f"#!/bin/sh\nprintf spawned > '{sentinel}'\nexit 0\n", encoding="utf-8"
+    )
+    python.chmod(0o755)
+    (home / ".agent-codespaces" / "current-version").write_text(
+        "1.0.0\n", encoding="utf-8"
+    )
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["AGENT_CODESPACES_NO_SELFPROVISION"] = "1"
+
+    result = subprocess.run(
+        [shutil.which("bash"), str(binstub), "version"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert not sentinel.exists()
 
 
 def test_windows_binstubs_share_safe_resolution_and_locking() -> None:

@@ -280,17 +280,31 @@ _header()  { echo ""; echo "=== $* ==="; }
 
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers python3/python on PATH,
-    # then the active/target slot interpreter. The target is last because a
-    # malformed partial slot must not shadow a healthy bootstrap interpreter.
-    # Prints nothing + returns 1 if none found (#935).
+    # venv exists (e.g. the pre-build toss). Only returns a PATH interpreter or
+    # a completed active runtime; an incomplete target slot is never trusted to
+    # inspect or delete itself. Prints nothing + returns 1 if none found (#935).
     local __c
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
     done
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
-    if [[ -x "$VENV_PYTHON" ]]; then echo "$VENV_PYTHON"; return 0; fi
+    if [[ -f "$LINK_DIR/.install-complete.json" && -x "$LINK_DIR/bin/python" ]]; then
+        echo "$LINK_DIR/bin/python"
+        return 0
+    fi
     return 1
+}
+
+_run_versioned_runtime() {
+    local py
+    if py="$(_bootstrap_python)" && [[ -n "$py" ]]; then
+        "$py" "$SCRIPT_DIR/versioned_runtime.py" "$@"
+        return
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        uv run --no-project --python 3.11 "$SCRIPT_DIR/versioned_runtime.py" "$@"
+        return
+    fi
+    return 127
 }
 
 _payload_hash() {
@@ -311,17 +325,13 @@ _payload_hash() {
 _versioned_slot_clean() {
     # #935: ensure the target slot exists, tossing it first if a prior build left
     # it INCOMPLETE (no completion marker) so we never `uv venv --allow-existing`
-    # over a corpse. The current/active slot is never tossed (the link-name is
-    # derived from LINK_DIR so the current-slot guard works per plugin). No-op in
+    # over a corpse. The canonical helper protects a slot owned by a live process
+    # and otherwise detaches stale marker references before rebuilding. No-op in
     # legacy mode.
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
-        _fail "Cannot inspect runtime slots: no bootstrap Python is available"
-        return 1
-    fi
-    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'; then
+    [[ -d "$VENV_DIR" ]] || return 0
+    if ! _run_versioned_runtime --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" \
+        slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'; then
         _fail "Failed to clean incomplete runtime slot (versions/$SRC_VERSION)"
         return 1
     fi
@@ -335,15 +345,14 @@ _versioned_mark_complete() {
     # versioned_runtime.py via any bootstrap python (the marker is slot-scoped, so
     # this helper is portable byte-identically across plugins).
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
-    local vr="$SCRIPT_DIR/versioned_runtime.py"
-    local py
-    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
+    local py="$VENV_PYTHON"
+    if [[ ! -x "$py" ]] && ! py="$(_bootstrap_python)"; then
         _fail "Cannot mark runtime complete: no bootstrap Python is available"
         return 1
     fi
     local ph
     ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
+    local args=("$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
     if ! "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
         _fail "Failed to mark runtime slot complete (versions/$SRC_VERSION)"
@@ -536,7 +545,7 @@ _resolve_python() {
         _ver=""
         [ -f "$_root/$_marker" ] && _ver="$(tr -d ' \t\r\n' < "$_root/$_marker")"
         _candidate="$_root/versions/$_ver/bin/python"
-        if [ -n "$_ver" ] && [ -x "$_candidate" ]; then
+        if [ -n "$_ver" ] && [ -f "$_root/versions/$_ver/.install-complete.json" ] && [ -x "$_candidate" ]; then
             printf '%s\n' "$_candidate"
             return
         fi

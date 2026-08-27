@@ -30,6 +30,12 @@ cannot be a shared runtime import — it must physically exist in each plugin. S
 this canonical copy is **vendored (synced) byte-identically** into every Python
 runtime plugin's `scripts/` dir.
 
+Slot resolution is completion-marker strict: `current-version`,
+`last-known-good`, and newest-slot fallback candidates must carry a valid
+`.install-complete.json` and an interpreter. Cleanup may rebuild an incomplete
+current slot only when no live process owns it; it atomically detaches stale
+marker references before removal.
+
 ## Editing — one source of truth
 
 **Do not hand-edit `plugins/*/scripts/versioned_runtime.py`.** Edit

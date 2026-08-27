@@ -348,10 +348,9 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
-       Prefers the freshly-built slot venv python ($VenvDir, present at
-       mark-complete before the link is swapped), then the active link's
-       python, then a real base python via the `py` launcher -- avoiding the
-       Windows Store 'python' alias stub. Returns $null if none. #>
+       Prefers a real base Python via the `py` launcher or PATH -- avoiding the
+       Windows Store alias stub -- before considering an active or target slot.
+       Returns $null if none. #>
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
@@ -413,77 +412,25 @@ function Test-PythonVenv {
     }
 }
 
-function Test-VersionedSlotComplete {
-    if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) { return $false }
-    $markerPath = Join-Path $VenvDir '.install-complete.json'
-    if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { return $false }
-    try {
-        $marker = Get-Content -LiteralPath $markerPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
-        if ([string]$marker.version -ne $SrcVersion) { return $false }
-    } catch {
-        return $false
-    }
-    if (-not (Test-PythonVenv -Dir $VenvDir -Python $VenvPython)) { return $false }
-    $prevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & $VenvPython -c 'import agent_codespaces' 2>$null
-        return $LASTEXITCODE -eq 0
-    } catch {
-        return $false
-    } finally {
-        $ErrorActionPreference = $prevEAP
-    }
-}
-
-function Test-VersionedSlotInUse {
-    if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) { return $false }
-    $slotPrefix = [IO.Path]::GetFullPath($VenvDir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
-    try {
-        foreach ($process in Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction Stop) {
-            if (-not $process.ExecutablePath) { continue }
-            $image = [IO.Path]::GetFullPath([string]$process.ExecutablePath)
-            if ($image.StartsWith($slotPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-                return $true
-            }
-        }
-        return $false
-    } catch {
-        throw "Cannot verify whether incomplete runtime slot is in use: $($_.Exception.Message)"
-    }
-}
-
-function Remove-VersionMarkerReference {
-    param([Parameter(Mandatory)][string]$Version)
-    foreach ($name in @('current-version', 'last-known-good')) {
-        $path = Join-Path $InstallDir $name
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
-        $value = ''
-        try { $value = ([IO.File]::ReadAllText($path)).Trim() } catch { }
-        if ($value -ne $Version) { continue }
-        $detached = "$path.invalid-$PID-$([guid]::NewGuid().ToString('N'))"
-        Move-Item -LiteralPath $path -Destination $detached -ErrorAction Stop
-        Remove-Item -LiteralPath $detached -Force -ErrorAction Stop
-    }
-}
-
 function Invoke-VersionedSlotClean {
-    <# Validate the target slot before any --allow-existing build. A slot is
-       reusable only when its completion metadata, venv identity, interpreter,
-       and installed package are all healthy. Otherwise detach marker references
-       and atomically quarantine it before deletion. An in-use slot is never
-       mutated; the caller fails and may retry after the process exits. #>
-    if (-not $VersionedRuntime -or -not (Test-Path -LiteralPath $VenvDir)) { return }
-    if (Test-VersionedSlotComplete) { return }
-    if (Test-VersionedSlotInUse) {
-        throw "Incomplete runtime slot is still in use: $VenvDir"
+    <# Delegate incomplete-slot cleanup and live-process protection to the
+       canonical versioned-runtime primitive. #>
+    if (-not $VersionedRuntime -or -not (Test-Path -LiteralPath $VenvDir)) {
+        return $true
     }
-    Remove-VersionMarkerReference -Version $SrcVersion
-    $versionsDir = Split-Path -Parent $VenvDir
-    $quarantine = Join-Path $versionsDir (".$SrcVersion.incomplete-$PID-$([guid]::NewGuid().ToString('N'))")
-    Move-Item -LiteralPath $VenvDir -Destination $quarantine -ErrorAction Stop
-    Remove-Item -LiteralPath $quarantine -Recurse -Force -ErrorAction Stop
-    Write-ServiceChanged "Discarded incomplete runtime slot: versions/$SrcVersion"
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    if (-not $py) {
+        Write-ServiceErr 'Cannot inspect runtime slots: no bootstrap Python is available'
+        return $false
+    }
+    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
+        ForEach-Object { Write-Host "  ...    $_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-ServiceErr "Failed to clean incomplete runtime slot (versions/$SrcVersion)"
+        return $false
+    }
+    return $true
 }
 
 function Invoke-VersionedMarkComplete {
@@ -683,7 +630,7 @@ function Deploy-Venv {
             }
         }
     }
-    Invoke-VersionedSlotClean
+    if (-not (Invoke-VersionedSlotClean)) { return $false }
     if ($signedBase -and (Test-Path $VenvPython)) {
         try { if ((Get-AuthenticodeSignature $VenvPython).Status -ne 'Valid') { Remove-Item -Recurse -Force $VenvDir -ErrorAction Stop } } catch {}
     }
@@ -756,7 +703,8 @@ function _resolve_cs_py {
         $ver = ''
         try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
         $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
+        $complete = if ($ver) { Join-Path $_root ('versions\' + $ver + '\.install-complete.json') } else { '' }
+        if ($p -and (Test-Path -LiteralPath $complete -PathType Leaf) -and (Test-Path -LiteralPath $p)) { return $p }
     }
     Get-ChildItem (Join-Path $_root 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
         Sort-Object LastWriteTimeUtc | ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
@@ -820,11 +768,11 @@ exit /b %ERRORLEVEL%
 set "_PY="
 set "_VER="
 if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\.install-complete.json" if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 if defined _PY goto :eof
 set "_VER="
 if exist "%_ROOT%\last-known-good" set /p _VER=<"%_ROOT%\last-known-good"
-if defined _VER if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if defined _VER if exist "%_ROOT%\versions\%_VER%\.install-complete.json" if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 if defined _PY goto :eof
 for /f "delims=" %%f in ('dir /b /s /a-d /o-d "%_ROOT%\versions\*\.install-complete.json" 2^>nul') do if not defined _PY if exist "%%~dpfScripts\python.exe" set "_PY=%%~dpfScripts\python.exe"
 goto :eof

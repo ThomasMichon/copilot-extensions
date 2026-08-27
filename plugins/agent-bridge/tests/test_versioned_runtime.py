@@ -55,6 +55,77 @@ def test_slot_creates_version_dir(tmp_path):
     assert d.is_dir()
 
 
+def test_slot_clean_is_vacuous_when_target_does_not_exist(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        vr,
+        "_versions_with_live_process",
+        lambda root: (_ for _ in ()).throw(AssertionError("must not scan processes")),
+    )
+
+    assert vr.slot(tmp_path, "1.0.0", clean_incomplete=True).is_dir()
+
+
+def test_slot_cleans_incomplete_current_and_detaches_markers(tmp_path, monkeypatch):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(vr, "_versions_with_live_process", lambda root: set())
+
+    rebuilt = vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert rebuilt.is_dir()
+    assert not (rebuilt / "marker.txt").exists()
+    assert not (tmp_path / vr.CURRENT_VERSION_FILE).exists()
+    assert not (tmp_path / vr.LAST_KNOWN_GOOD_FILE).exists()
+    assert not list(tmp_path.glob(".*.stale-*"))
+    assert current == rebuilt
+
+
+def test_slot_preserves_live_incomplete_current_and_fails(tmp_path, monkeypatch):
+    current = _install(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+    monkeypatch.setattr(
+        vr, "_versions_with_live_process", lambda root: {"1.0.0"}
+    )
+
+    with pytest.raises(RuntimeError, match="still in use"):
+        vr.slot(tmp_path, "1.0.0", clean_incomplete=True)
+
+    assert (current / "marker.txt").is_file()
+    assert (tmp_path / vr.CURRENT_VERSION_FILE).read_text().strip() == "1.0.0"
+    assert (tmp_path / vr.LAST_KNOWN_GOOD_FILE).read_text().strip() == "1.0.0"
+
+
+def _write_slot_python(root: Path, version: str) -> Path:
+    subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
+    python = vr.version_dir(root, version) / subpath
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
+    if os.name != "nt":
+        python.chmod(0o755)
+    return python
+
+
+def test_resolve_python_falls_through_incomplete_marker_slots(tmp_path):
+    current_python = _write_slot_python(tmp_path, "2.0.0")
+    lkg_python = _write_slot_python(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("2.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+    vr.mark_complete(tmp_path, "1.0.0")
+
+    assert vr.resolve_python(tmp_path) == lkg_python
+    assert vr.resolve_python(tmp_path) != current_python
+
+
+def test_resolve_python_rejects_every_incomplete_slot(tmp_path):
+    _write_slot_python(tmp_path, "1.0.0")
+    (tmp_path / vr.CURRENT_VERSION_FILE).write_text("1.0.0\n", encoding="utf-8")
+    (tmp_path / vr.LAST_KNOWN_GOOD_FILE).write_text("1.0.0\n", encoding="utf-8")
+
+    assert vr.resolve_python(tmp_path) is None
+
+
 def test_activate_points_current_at_version(tmp_path):
     _install(tmp_path, "1.0.0")
     vr.activate(tmp_path, "1.0.0")

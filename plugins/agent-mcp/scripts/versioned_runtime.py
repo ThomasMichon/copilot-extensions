@@ -251,33 +251,34 @@ def resolve_python(root: Path) -> Path | None:
     1. the ``current-version`` marker (the source of truth, written atomically);
     2. ``last-known-good`` -- the last version ``activate()`` published -- when
        the marker is missing/unreadable or names an unresolvable slot;
-    3. the newest **complete** installed slot (true first-run / torn marker),
-       then any newest slot as a final belt.
+    3. the newest complete installed slot (true first-run / torn marker).
 
     Never resolves through a ``venv``/``.venv`` link (a reparse point on Windows
     that RedirectionGuard blocks) and **never** falls back to a PATH python -- an
     unresolved runtime returns ``None`` so the caller degrades deliberately
     (e.g. self-provisions) rather than silently binding the system interpreter.
+    Every tier requires a valid completion marker, so a partially built slot is
+    never selected merely because it contains an interpreter-shaped file.
     """
     # Tier 1: the current-version marker.
-    p = slot_python(root, current_version(root) or "")
-    if p is not None:
-        return p
+    current = current_version(root) or ""
+    if is_complete(root, current):
+        p = slot_python(root, current)
+        if p is not None:
+            return p
     # Tier 2: the last activated version (its slot, having been active, survives).
-    p = slot_python(root, read_last_known_good(root) or "")
-    if p is not None:
-        return p
-    # Tier 3: newest complete slot, then any newest slot.
+    lkg = read_last_known_good(root) or ""
+    if is_complete(root, lkg):
+        p = slot_python(root, lkg)
+        if p is not None:
+            return p
+    # Tier 3: newest complete slot.
     versions = list_versions(root)  # sorted, newest last
     for ver in reversed(versions):
         if is_complete(root, ver):
             p = slot_python(root, ver)
             if p is not None:
                 return p
-    for ver in reversed(versions):
-        p = slot_python(root, ver)
-        if p is not None:
-            return p
     return None
 
 
@@ -378,6 +379,27 @@ def activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     return vdir
 
 
+def _detach_marker_reference(root: Path, name: str, version: str) -> None:
+    """Atomically remove a marker when it still references ``version``."""
+    marker = root / name
+    try:
+        if marker.read_text(encoding="utf-8").strip() != version:
+            return
+    except OSError:
+        return
+    detached = marker.with_name(
+        f".{marker.name}.stale-{os.getpid()}-{time.time_ns()}"
+    )
+    try:
+        os.replace(marker, detached)
+    except FileNotFoundError:
+        return
+    try:
+        detached.unlink()
+    except OSError:
+        pass
+
+
 def slot(root: Path, version: str, *, clean_incomplete: bool = False,
          link_name: str = CURRENT_LINK) -> Path:
     """Ensure ``versions/<version>`` exists (empty is fine) and return it.
@@ -386,15 +408,19 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
     NOT marked complete -- a failed/partial/watchdog-killed prior build -- remove
     it first so the caller builds a FRESH venv rather than reusing a corpse via
     ``uv venv --allow-existing`` (which can inherit half-installed packages). A
-    complete slot is left intact (idempotent, fast re-run). The **current
-    (active)** slot is NEVER tossed even when unmarked -- a legacy slot predates
-    the marker convention yet still backs the live daemon.
+    complete slot is left intact (idempotent, fast re-run). An incomplete slot
+    is protected only while a live process owns it. Otherwise any
+    ``current-version`` / ``last-known-good`` references are atomically detached
+    before the slot is removed, including when the malformed slot is current.
     """
     vdir = version_dir(root, version)
-    if (clean_incomplete and vdir.is_dir()
-            and current_version(root, link_name) != version
-            and not is_complete(root, version)):
-        shutil.rmtree(vdir, ignore_errors=True)
+    if clean_incomplete and vdir.is_dir() and not is_complete(root, version):
+        if version in _versions_with_live_process(root):
+            raise RuntimeError(f"incomplete runtime slot is still in use: {vdir}")
+        _detach_marker_reference(root, CURRENT_VERSION_FILE, version)
+        _detach_marker_reference(root, LAST_KNOWN_GOOD_FILE, version)
+        if not _remove_slot(vdir, label="slot"):
+            raise RuntimeError(f"could not remove incomplete runtime slot: {vdir}")
     vdir.mkdir(parents=True, exist_ok=True)
     return vdir
 
