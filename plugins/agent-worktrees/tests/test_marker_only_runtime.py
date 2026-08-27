@@ -8,7 +8,10 @@ runtime-resolution flow still reads a `.venv` link.
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -30,6 +33,33 @@ def test_resolver_helpers_are_marker_only():
         assert "versions" in text
         # The resolver never resolves a python interpreter THROUGH a `.venv` path.
         assert not re.search(r"\.venv[/\\]", text), f"{name} must not read a .venv link"
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")
+def test_powershell_resolver_exports_payload_invocation_contract(tmp_path):
+    runtime = tmp_path / ".agent-worktrees"
+    slot_python = runtime / "versions" / "1.2.3" / "Scripts" / "python.exe"
+    slot_python.parent.mkdir(parents=True)
+    slot_python.touch()
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    resolver = _SCRIPTS / "resolve-runtime.ps1"
+    home_literal = str(tmp_path).replace("'", "''")
+    resolver_literal = str(resolver).replace("'", "''")
+    script = (
+        f"$env:USERPROFILE = '{home_literal}'; "
+        f". '{resolver_literal}'; "
+        "[pscustomobject]@{ AwPy = $AwPy; AgentRtPy = $AgentRtPy } "
+        "| ConvertTo-Json -Compress"
+    )
+    result = subprocess.run(
+        ["pwsh", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    resolved = json.loads(result.stdout)
+    assert Path(resolved["AwPy"]) == slot_python
+    assert resolved["AgentRtPy"] == resolved["AwPy"]
 
 
 @pytest.mark.parametrize("installer", ["install.ps1", "install.sh"])
