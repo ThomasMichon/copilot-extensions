@@ -29,6 +29,13 @@ from pathlib import Path
 
 import yaml
 
+SETTINGS_RELS: tuple[tuple[str, ...], ...] = (
+    (".claude", "settings.json"),
+    (".claude", "settings.local.json"),
+    (".github", "copilot", "settings.json"),
+    (".github", "copilot", "settings.local.json"),
+)
+
 
 def home() -> Path:
     return Path(os.environ.get("USERPROFILE") or os.path.expanduser("~"))
@@ -159,11 +166,29 @@ def pr_model(repo_path: str | None) -> str:
     return "?"
 
 
-def repo_enabled_plugins(repo_path: str | None) -> list[str]:
+def repo_plugin_enablement(repo_path: str | None) -> dict[str, bool]:
+    """Merged repo plugin settings with native/local last-file-wins precedence."""
     if not repo_path:
-        return []
-    settings = _read_json(Path(repo_path) / ".github" / "copilot" / "settings.json")
-    return list((settings.get("enabledPlugins") or {}).keys())
+        return {}
+    enabled: dict[str, bool] = {}
+    root = Path(repo_path)
+    for rel in SETTINGS_RELS:
+        settings = _read_json(root.joinpath(*rel))
+        values = settings.get("enabledPlugins")
+        if not isinstance(values, dict):
+            continue
+        for name, value in values.items():
+            if isinstance(name, str) and isinstance(value, bool):
+                enabled[name] = value
+    return enabled
+
+
+def repo_enabled_plugins(repo_path: str | None) -> list[str]:
+    return [
+        name
+        for name, enabled in repo_plugin_enablement(repo_path).items()
+        if enabled
+    ]
 
 
 def build_repos(home_dir: Path | None = None) -> list[RepoInfo]:

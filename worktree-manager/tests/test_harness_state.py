@@ -15,6 +15,7 @@ from worktree_manager.harness_state import (
     build_repos,
     build_state,
     pr_model,
+    repo_plugin_enablement,
     user_enabled_plugins,
 )
 from worktree_manager.__main__ import main
@@ -39,7 +40,11 @@ def _make_home(tmp: Path) -> Path:
     checkout = tmp / "src" / "dotfiles"
     (checkout / ".github" / "copilot").mkdir(parents=True)
     (checkout / ".github" / "copilot" / "settings.json").write_text(json.dumps({
-        "enabledPlugins": {"mail@dotfiles-plugins": True, "teams@dotfiles-plugins": True},
+        "enabledPlugins": {
+            "mail@dotfiles-plugins": True,
+            "teams@dotfiles-plugins": True,
+            "disabled@dotfiles-plugins": False,
+        },
     }))
     (checkout / ".agent-worktrees").mkdir()
     (checkout / ".agent-worktrees" / "config.yaml").write_text("pr:\n  enabled: true\n")
@@ -115,6 +120,28 @@ def test_build_projects_joins_config_and_enablement(tmp_path: Path):
     assert p.profiles == 2
     assert p.repo is not None and p.repo.klass == "worktree"
     assert set(e.split("@")[0] for e in p.enabled_plugins) == {"mail", "teams"}
+
+
+def test_repo_plugin_enablement_uses_last_file_wins(tmp_path: Path):
+    repo = tmp_path / "repo"
+    claude = repo / ".claude"
+    native = repo / ".github" / "copilot"
+    claude.mkdir(parents=True)
+    native.mkdir(parents=True)
+    (claude / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"one@m": True, "two@m": True},
+    }))
+    (native / "settings.json").write_text(json.dumps({
+        "enabledPlugins": {"two@m": False},
+    }))
+    (native / "settings.local.json").write_text(json.dumps({
+        "enabledPlugins": {"three@m": True},
+    }))
+    assert repo_plugin_enablement(str(repo)) == {
+        "one@m": True,
+        "two@m": False,
+        "three@m": True,
+    }
 
 
 def test_build_state_shape(tmp_path: Path):
