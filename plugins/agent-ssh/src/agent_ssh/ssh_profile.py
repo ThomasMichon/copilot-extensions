@@ -196,6 +196,7 @@ def validate_profile_inputs(
         for key, value in options.items():
             _require_option(key, value)
 
+
 def fragment_name(module: str) -> str:
     """Per-transport drop-in filename. The 50- prefix orders transports; the
     module name namespaces them so no two transports collide."""
