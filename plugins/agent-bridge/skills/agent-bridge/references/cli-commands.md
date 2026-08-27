@@ -1,9 +1,15 @@
 # Agent-Bridge CLI Command Reference
 
+Use the exact `argv[0]` from the agent-bridge session command catalog for
+interactive bridge operations in this reference. Replace
+`<agent-bridge catalog argv[0]>` with that path and never search `PATH`.
+Commands labeled as service, deployment, provider, or elevated management
+boundaries remain literal global-wrapper invocations.
+
 Full command catalog for the `agent-bridge` CLI. See [SKILL.md](../SKILL.md)
 for the overview, when to use the bridge vs internal sub-agents, and common
 patterns. All commands connect to the local agent-bridge HTTP API; the service
-must be running (`agent-bridge start`).
+must be running (the `start` management operation).
 
 ## Contents
 - List Available Agents / Machines
@@ -16,15 +22,15 @@ must be running (`agent-bridge start`).
 ## CLI Commands
 
 All commands connect to the local agent-bridge HTTP API. The service must
-be running (`agent-bridge start`) for client commands to work.
+be running (the `start` management operation) for client commands to work.
 
 ### List Available Agents
 
 ```bash
-agent-bridge agents
-agent-bridge agents --json
-agent-bridge --project <repo> agents
-agent-bridge agents --all-projects
+<agent-bridge catalog argv[0]> agents
+<agent-bridge catalog argv[0]> agents --json
+<agent-bridge catalog argv[0]> --project <repo> agents
+<agent-bridge catalog argv[0]> agents --all-projects
 ```
 
 Shows all registered agents from the topology config (name, type, host,
@@ -33,10 +39,10 @@ spawnable status).
 ### List Machines
 
 ```bash
-agent-bridge machines
-agent-bridge machines --json
-agent-bridge --project <repo> machines
-agent-bridge machines --all-projects
+<agent-bridge catalog argv[0]> machines
+<agent-bridge catalog argv[0]> machines --json
+<agent-bridge catalog argv[0]> --project <repo> machines
+<agent-bridge catalog argv[0]> machines --all-projects
 ```
 
 `agents` and `machines` infer their project from CWD. Top-level `--project`
@@ -56,25 +62,25 @@ details.
 ```bash
 # Reuse this caller's session for the agent (resumes it if stopped),
 # or start one if none exists, then send a prompt (streams response)
-agent-bridge send <agent-name> "your prompt here"
+<agent-bridge catalog argv[0]> send <agent-name> "your prompt here"
 
 # Send to a specific existing session
-agent-bridge send <session-id> "follow-up prompt"
+<agent-bridge catalog argv[0]> send <session-id> "follow-up prompt"
 
 # Fire-and-forget (don't wait for response)
-agent-bridge send <agent-name> "do this" --no-wait
+<agent-bridge catalog argv[0]> send <agent-name> "do this" --no-wait
 
 # Multi-line / quote-heavy prompt: read it from a file (or '-' for stdin) so it
 # never transits the shell's argv (avoids PowerShell mangling a prompt at the
 # first embedded double-quote). Mutually exclusive with the positional prompt.
-agent-bridge send <agent-name> --prompt-file ./dispatch.md
-Get-Content ./dispatch.md | agent-bridge send <agent-name> --prompt-file -
+<agent-bridge catalog argv[0]> send <agent-name> --prompt-file ./dispatch.md
+Get-Content ./dispatch.md | & "<agent-bridge catalog argv[0]>" send <agent-name> --prompt-file -
 
 # Deliver INTO a live interactive session (human-attached), attributed and
 # answerable -- routes to the message queue, not an ACP turn. The receiver
-# replies with `agent-bridge send <reply-to> "..."`.
-agent-bridge send <live-session-id> "message body"
-agent-bridge send <live-session-id> "msg" --from "reviewer@anomalous-potato" --reply-to <my-session-id>
+# replies with `<agent-bridge catalog argv[0]> send <reply-to> "..."`.
+<agent-bridge catalog argv[0]> send <live-session-id> "message body"
+<agent-bridge catalog argv[0]> send <live-session-id> "msg" --from "reviewer@anomalous-potato" --reply-to <my-session-id>
 ```
 
 `send` auto-detects whether the target is an agent name, a bridge-owned session
@@ -85,27 +91,28 @@ ID, or a **live interactive session** (delivered as an attributed
 When given an **agent name**, it never starts a *fresh* session on top of an
 existing one: it reuses this caller's session for that agent — keyed by
 `(agent, caller)`, where the caller is the current worktree
-(`agent-worktrees get worktree-dir`, or `--caller`) — and
+(`agent-worktrees get worktree-dir`, or `--caller`) — <!-- marketplace-isolation: allow agent-worktrees-management -->
+and
 **resumes it if stopped**. Only when this caller has no session for the agent
 is a new one started. Output streams in real-time: response text, thought
 blocks, and tool call summaries.
 
 > **There is no `send --new`.** It was removed because it silently reused a
 > pre-existing (often stopped, stale) session instead of creating a fresh one.
-> To force a brand-new session, use `agent-bridge create` (below).
+> To force a brand-new session, use the payload-local `create` operation below.
 
 ### Create a Fresh Session
 
 ```bash
 # Force a brand-new session for an agent (no reuse)
-agent-bridge create <agent-name>
+<agent-bridge catalog argv[0]> create <agent-name>
 
 # ...and send a first prompt in one step
-agent-bridge create <agent-name> "your first prompt"
+<agent-bridge catalog argv[0]> create <agent-name> "your first prompt"
 
 # ...or read the first prompt from a file (or '-' for stdin) -- robust for
 # multi-line / quote-heavy dispatch prompts (no argv mangling)
-agent-bridge create <agent-name> --prompt-file ./dispatch.md --no-wait
+<agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md --no-wait
 ```
 
 `create` always spawns a fresh session, bypassing caller reuse. For agents
@@ -114,8 +121,8 @@ checkout — `create` **refuses** if a session already exists rather than
 silently latching onto it, and tells you to end the existing one first:
 
 ```bash
-agent-bridge end <existing-session-id>   # free the CodeSpace
-agent-bridge create <agent-name> "..."   # then start clean
+<agent-bridge catalog argv[0]> end <existing-session-id>   # free the CodeSpace
+<agent-bridge catalog argv[0]> create <agent-name> "..."   # then start clean
 ```
 
 ### Choosing send vs create — check for an outstanding session first
@@ -124,8 +131,8 @@ Before dispatching work to an agent, **check whether it already has a
 session and whether that session's state is relevant to the work**:
 
 ```bash
-agent-bridge sessions          # is there a session for this agent/caller?
-agent-bridge session-usage <session-id>   # how full is its context?
+<agent-bridge catalog argv[0]> sessions          # is there a session for this agent/caller?
+<agent-bridge catalog argv[0]> session-usage <session-id>   # how full is its context?
 ```
 
 - **Relevant & healthy** (same effort, context well under ~70%) → `send`
@@ -134,8 +141,9 @@ agent-bridge session-usage <session-id>   # how full is its context?
   the **first** reattached turn (a stale host cancel draining, not a broken
   resume) — just `send` again and it continues.
 - **Stale / unrelated / context-heavy** (different effort, near the context
-  limit, or known-bad state) → `agent-bridge end <session-id>` then
-  `agent-bridge create` for a clean start.
+  limit, or known-bad state) →
+  `<agent-bridge catalog argv[0]> end <session-id>` then the payload-local
+  `create` operation for a clean start.
 
 `send` is the safe default; it reuses/resumes and drains a stale cancel after
 one turn. Reach for `create` only when you have decided the existing session must
@@ -146,22 +154,22 @@ be discarded (or the cancel signature *persists* across sends). See the
 
 ```bash
 # List all sessions (includes CONTEXT column showing usage %)
-agent-bridge sessions
-agent-bridge sessions --status idle
+<agent-bridge catalog argv[0]> sessions
+<agent-bridge catalog argv[0]> sessions --status idle
 
 # Check context window usage for a session
-agent-bridge session-usage <session-id>
+<agent-bridge catalog argv[0]> session-usage <session-id>
 
 # Compact one-screen status: state, in-flight tool + elapsed, and how far
 # behind your delivery cursor is (head/acked) -- without dumping the feed.
-agent-bridge status <session-id>
-agent-bridge status <session-id> --steps 5   # also show the last 5 collapsed steps
+<agent-bridge catalog argv[0]> status <session-id>
+<agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
 
 # Wait for a running session's current turn
-agent-bridge wait <session-id>
+<agent-bridge catalog argv[0]> wait <session-id>
 
 # Stop a session (preserves state for resume)
-agent-bridge stop <session-id>
+<agent-bridge catalog argv[0]> stop <session-id>
 
 # Resume a stopped session -- or load/take-over a worktree by handle.
 # The target may be an owned ACP session id OR a worktree handle. If it is a
@@ -169,15 +177,15 @@ agent-bridge stop <session-id>
 # worktree is loaded as a fresh owned session -- a dormant worktree is just a
 # note. If a *live* interactive CLI still holds the worktree, resume refuses
 # (break-glass); stop that CLI first, then re-run with --force to take it over.
-agent-bridge resume <session-id|worktree-handle>
-agent-bridge resume <worktree-handle> --force   # affirmative take-over
+<agent-bridge catalog argv[0]> resume <session-id|worktree-handle>
+<agent-bridge catalog argv[0]> resume <worktree-handle> --force   # affirmative take-over
 
 # End a session (full cleanup)
-agent-bridge end <session-id>
+<agent-bridge catalog argv[0]> end <session-id>
 
 # Garbage-collect aged terminal/disconnected sessions + compact the DB.
 # Runs automatically (startup + periodic sweep); this forces it on demand.
-agent-bridge gc
+<agent-bridge catalog argv[0]> gc
 ```
 
 ### Service Control
@@ -189,14 +197,15 @@ instance that auto-starts at logon -- and they fall back to a detached spawn if
 no service manager is registered.
 
 ```bash
-agent-bridge service start      # start the daemon (no-op if already running)
-agent-bridge service stop       # stop the daemon (kills the worker + releases the port)
-agent-bridge service restart    # stop, wait for the port to release, start
-agent-bridge service status     # running state + bound port + PID
+agent-bridge service start      # start the daemon (no-op if already running) -- marketplace-isolation: allow service-management
+agent-bridge service stop       # stop the daemon (kills the worker + releases the port) -- marketplace-isolation: allow service-management
+agent-bridge service restart    # stop, wait for the port to release, start -- marketplace-isolation: allow service-management
+agent-bridge service status     # running state + bound port + PID -- marketplace-isolation: allow service-management
 ```
 
-> **Note:** plain `agent-bridge stop <session-id>` stops a *session*, not the
-> service. For the daemon, always use `agent-bridge service stop`.
+> **Note:** the payload-local `stop <session-id>` operation stops a *session*,
+> not the service. For the daemon, use the literal management command
+> `agent-bridge service stop`. <!-- marketplace-isolation: allow service-management -->
 
 > **Windows headless (run whether logged on or not):** by default the Windows
 > daemon runs from an *at-logon* scheduled task, so it only runs while a user is
@@ -209,7 +218,9 @@ agent-bridge service status     # running state + bound port + PID
 > non-interactive opt-in recovers to the default interactive `AtLogOn` task.
 > See the `agent-worktrees:copilot-extensions-setup` skill.
 
-`agent-bridge start` (no `service`) runs the server in the **foreground** -- it
+The literal management command `agent-bridge start` (no `service`) runs the <!-- marketplace-isolation: allow service-management -->
+server in the **foreground**.
+It
 is the entry point the service manager invokes, and is useful for debugging.
 By default the daemon binds an **OS-assigned ephemeral** loopback port and
 advertises it via the routing table (`active.json`); add `--port` / `--bind`
@@ -217,14 +228,14 @@ only to pin a fixed port (e.g. for debugging).
 
 ```bash
 # Foreground (debugging) -- blocks the terminal
-agent-bridge start
-agent-bridge start --port 9280 --bind 127.0.0.1   # pin a fixed port (default is dynamic)
+agent-bridge start # marketplace-isolation: allow service-management
+agent-bridge start --port 9280 --bind 127.0.0.1 # pin a fixed port (default is dynamic) -- marketplace-isolation: allow service-management
 
 # Health check (also shows the bound URL)
-agent-bridge status
+<agent-bridge catalog argv[0]> status
 
 # Version
-agent-bridge version
+<agent-bridge catalog argv[0]> version
 ```
 
 ### Remote Venue Parity Acceptance
@@ -239,13 +250,13 @@ credential endpoint is hardcoded.
 
 ```bash
 # Baseline cwd + repo-local capability + same-child reattach
-agent-bridge parity container:example-1 \
+<agent-bridge catalog argv[0]> parity container:example-1 \
   --expect-workspace /workspaces/example-web \
   --expect-capability example-local-skill
 
 # Add credential-consumer checks. Values are captured privately; JSON contains
 # booleans only, never tokens or helper output.
-agent-bridge parity container:example-1 \
+<agent-bridge catalog argv[0]> parity container:example-1 \
   --expect-workspace /workspaces/example-web \
   --auth \
   --ado-url https://example.visualstudio.com/Project/_git/repo \
@@ -253,7 +264,7 @@ agent-bridge parity container:example-1 \
   --json
 
 # Narrow no-regression smoke against an explicitly chosen idle CodeSpace.
-agent-bridge parity codespace:example-codespace \
+<agent-bridge catalog argv[0]> parity codespace:example-codespace \
   --expect-workspace /workspaces/example-web \
   --expect-capability example-local-skill
 ```
@@ -279,18 +290,18 @@ it, and the old daemon retire -- with no client ever dialing a dead port.
 # Teardown (stop/end) stays permitted while draining (#1755). Set/clear is
 # logged; /health exposes a drain{} block; a watchdog auto-releases a stuck
 # drain after ~15min so an aborted cutover self-heals (#1757).
-agent-bridge drain --timeout 300
-agent-bridge undrain                 # release the gate (rollback)
+agent-bridge drain --timeout 300 # marketplace-isolation: allow deployment-management
+agent-bridge undrain # release the gate (rollback) -- marketplace-isolation: allow deployment-management
 
 # Active/passive cutover is an INTERNAL installer seam -- NOT an operator
-# command. Do NOT run `agent-bridge deploy` to ship a build. The canonical
+# command. Do NOT run the bridge deploy seam to ship a build. The canonical
 # deploy path is the normal plugin update flow: refresh the payload
 # (`copilot plugin update agent-bridge`) and let the plugin's installer reconcile
 # cut the daemon over (`scripts/install.sh update`, via the host's plugin-update
 # integration or the sessionStart hook). Keep `plugin.json` / `pyproject.toml`
 # versions in lockstep (the marketplace keys off `plugin.json`). `deploy` remains
 # exposed only for installer internals and recovery:
-agent-bridge deploy --recover        # heal a prior aborted cutover, then exit
+agent-bridge deploy --recover # heal a prior aborted cutover, then exit -- marketplace-isolation: allow deployment-management
 ```
 
 The installer `update` path performs graceful cutover automatically when a live
@@ -303,7 +314,8 @@ install.ps1 update    # Windows, from the plugin payload
 install.sh update     # Linux/WSL, from the plugin payload
 ```
 
-> A passive instance (`agent-bridge start --passive`) does not self-publish the
+> A passive instance (`agent-bridge start --passive`) <!-- marketplace-isolation: allow deployment-management -->
+> does not self-publish the
 > routing table or bind the credential relay (ephemeral) -- the deploy orchestrator
 > flips the table after a health check and calls `/api/v1/relay/adopt` once the
 > old daemon releases the relay port. The port-keyed singleton lock lets the
@@ -313,7 +325,7 @@ install.sh update     # Linux/WSL, from the plugin payload
 
 ```bash
 # Run as an ACP agent on stdio (for chat UIs / upstream ACP clients)
-agent-bridge agent --agent my-agent
+agent-bridge agent --agent my-agent # marketplace-isolation: allow provider-startup
 ```
 
 Presents agent-bridge as an ACP-compatible agent. Upstream ACP clients
@@ -327,13 +339,13 @@ Some local agents must run **elevated** (admin) -- e.g. an enlistment-based
 flagged once, at adoption time:
 
 ```bash
-agent-worktrees register <Project> --base-repo --elevated   # writes elevated: true
+agent-worktrees register <Project> --base-repo --elevated # marketplace-isolation: allow agent-worktrees-management
 ```
 
 After that, **just send to it by its bare name** -- no special prefix:
 
 ```bash
-agent-bridge send <Project> "do the elevated work"
+<agent-bridge catalog argv[0]> send <Project> "do the elevated work"
 ```
 
 The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so
@@ -344,8 +356,8 @@ for a flagged agent it transparently:
    `<config>/elevated/active.json` routing table; dotfiles #694), run elevated
    via a persistent `/RL HIGHEST` scheduled task, isolated under
    `<config>/elevated/`; and
-2. **relays** the session to it over ACP-over-WebSocket (`agent-bridge
-   acp-connect ws://127.0.0.1:<port>/acp/<Project>`, where `<port>` is the
+2. **relays** the session to it over ACP-over-WebSocket (the internal
+   `acp-connect ws://127.0.0.1:<port>/acp/<Project>` operation, where `<port>` is the
    discovered elevated port). Because the whole sub-daemon
    is elevated, the agent it spawns is elevated too.
 
@@ -360,10 +372,10 @@ with `schtasks /run` -- **no UAC**. The sub-daemon also **auto-shuts-down** afte
 restarts it headlessly on the next request. Manage it directly when needed:
 
 ```bash
-agent-bridge elevated start          # ensure up (headless once the task exists)
-agent-bridge elevated status         # port / up / task-registered / agents
-agent-bridge elevated stop           # stop now, headless (keeps task for restart)
-agent-bridge elevated stop --deregister  # full teardown: delete the task (one UAC)
+agent-bridge elevated start # marketplace-isolation: allow elevated-management
+agent-bridge elevated status # marketplace-isolation: allow elevated-management
+agent-bridge elevated stop # marketplace-isolation: allow elevated-management
+agent-bridge elevated stop --deregister # marketplace-isolation: allow elevated-management
 ```
 
 > **Security (v1):** the sub-daemon is loopback-only and bearer-token gated, but
@@ -375,17 +387,17 @@ agent-bridge elevated stop --deregister  # full teardown: delete the task (one U
 
 ```bash
 # Show current config
-agent-bridge config show
-agent-bridge config show --json
+<agent-bridge catalog argv[0]> config show
+<agent-bridge catalog argv[0]> config show --json
 
 # Add/update a topology profile for a repo
-agent-bridge config adopt --repo /path/to/repo --profile multi-machine system
+<agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile multi-machine system
 
 # Remove a topology profile
-agent-bridge config remove my-profile
+<agent-bridge catalog argv[0]> config remove my-profile
 
 # Validate config (checks file paths, topology completeness)
-agent-bridge config validate
+<agent-bridge catalog argv[0]> config validate
 ```
 
 For first-time setup, see the `agent-worktrees:copilot-extensions-setup` skill. For

@@ -1,5 +1,9 @@
 # Agent messages — recognizing and answering peer traffic
 
+Use the exact `argv[0]` from the agent-bridge session command catalog for the
+interactive `send` operations below. Replace
+`<agent-bridge catalog argv[0]>` with that path and never search `PATH`.
+
 The fabric can deliver a message **into a live interactive session** (yours, or a
 peer's) via agent-bridge. When that happens, the message arrives as a normal user
 turn, but wrapped in a structured envelope so you can tell it apart from what the
@@ -42,7 +46,7 @@ turn** and prints its assistant output — the reply is just the receiver's
 protocol to learn:
 
 ```bash
-agent-bridge send <worktree-handle> "what's the status of the rebase?"
+<agent-bridge catalog argv[0]> send <worktree-handle> "what's the status of the rebase?"
 # [>] Delivered to live session <id> (message 12, from you)
 # [<] Reply from <id>:
 # rebase is done; tests pass. pushing now.
@@ -68,10 +72,10 @@ mid-work status aside). Send back to the `reply-to` address with the **same verb
 you use for any agent** — no special tool:
 
 ```bash
-agent-bridge send <reply-to> "your reply text"
+<agent-bridge catalog argv[0]> send <reply-to> "your reply text"
 ```
 
-`agent-bridge send` recognizes that `<reply-to>` is a live interactive session
+The payload-local `send` operation recognizes that `<reply-to>` is a live interactive session
 (by session id or worktree handle) and delivers your message into it (rather than
 treating it as a spawned agent). Your own identity and **worktree handle** are
 attached automatically as the new envelope's `from` and `reply-to`, so the other
@@ -92,8 +96,7 @@ Optional flags:
 - Attribution is **legibility**, not authentication: it tells you who a message
   claims to be from. That is sufficient because only the operator's own tooling
   can reach the local bridge (localhost bind + operator-secured SSH + bearer).
-- A session an agent **embodied** (`agent-worktrees embody --driver <agent>`)
+- A session an agent **embodied** (`agent-worktrees embody --driver <agent>`) <!-- marketplace-isolation: allow agent-worktrees-management -->
   registers a `driven_by` marker with the bridge — the "driven by `<agent>`"
   banner — so a human dropping into it (e.g. via Neuron Forge takeover) sees who
   is steering. An operator-launched session has no driver.
-

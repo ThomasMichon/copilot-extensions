@@ -1014,7 +1014,7 @@ def _daemon_launch_argv() -> list[str]:
     )
     if os.path.isfile(py):
         return [windowless_python(py), "-m", "agent_bridge", "start"]
-    exe = shutil.which("agent-bridge")
+    exe = shutil.which("agent-bridge")  # marketplace-isolation: allow self-bootstrap
     if exe:
         return [exe, "start"]
     return ["agent-bridge", "start"]
@@ -2758,7 +2758,7 @@ def _worktrees_get(key: str) -> str | None:
     *not* inject into bridge-dispatched sessions, so it was unreliable). Returns
     the trimmed value, or None if unavailable / empty / not inside a worktree.
     """
-    exe = shutil.which("agent-worktrees")
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow agent-worktrees-management
     if not exe:
         return None
     try:

@@ -64,7 +64,7 @@ def exec_bash_on_target(session: dict, command: str, *, timeout: float) -> str:
     """
     kind = target_kind(session)
     if kind == "codespace":
-        binstub = shutil.which("agent-codespaces")
+        binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
         if not binstub:
             raise TargetExecError("agent-codespaces not on PATH (codespace transport)")
         name = codespace_name(session)

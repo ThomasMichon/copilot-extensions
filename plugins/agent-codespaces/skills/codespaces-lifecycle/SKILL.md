@@ -27,11 +27,11 @@ first-time setup and config changes, see the `codespaces-setup` skill.
 
 Use the exact `argv` from the agent-codespaces session command catalog for
 CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
-worktree claims. For bridge dispatch, follow the `agent-bridge` skill: that
-plugin has not adopted a session catalog yet, so its explicit management
-command remains the compatibility boundary. Never substitute a same-named
-plugin command through ambient PATH. The payload-local command self-provisions
-on first use. Full detail:
+worktree claims. For bridge dispatch, use the exact `argv[0]` from the
+session command catalog for agent-bridge and replace
+`<agent-bridge catalog argv[0]>` below with that path. Never substitute a
+same-named plugin command through ambient PATH. The payload-local commands
+self-provision on first use. Full detail:
 `codespaces-setup` § *Readiness*.
 
 ## Connecting to CodeSpaces
@@ -47,33 +47,33 @@ bare name that collides with another agent makes the bridge **balk** and list
 the candidates.
 
 ```bash
-agent-bridge send codespace:my-feature-branch "<prompt>"   # marketplace-isolation: allow agent-bridge-management
-agent-bridge send my-feature-branch "<prompt>"             # marketplace-isolation: allow agent-bridge-management
-agent-bridge send codespace:my-feature-branch-7qv4rv "..." # marketplace-isolation: allow agent-bridge-management
+<agent-bridge catalog argv[0]> send codespace:my-feature-branch "<prompt>"
+<agent-bridge catalog argv[0]> send my-feature-branch "<prompt>"
+<agent-bridge catalog argv[0]> send codespace:my-feature-branch-7qv4rv "..."
 ```
 
 ### Agent-Bridge CLI
 
 | Command | Purpose |
 |---------|---------|
-| `agent-bridge agents` <!-- marketplace-isolation: allow agent-bridge-management --> | List all available agents (local + codespace) |
-| `agent-bridge send codespace:<name> "<prompt>"` <!-- marketplace-isolation: allow agent-bridge-management --> | Start a new session (blocks until turn completes) |
-| `agent-bridge send <session-id> "<prompt>"` <!-- marketplace-isolation: allow agent-bridge-management --> | Send follow-up prompt on existing session |
-| `agent-bridge send --no-wait <target> "<prompt>"` <!-- marketplace-isolation: allow agent-bridge-management --> | Deliberate fire-and-forget — returns a session ID without attaching to its feed |
-| `agent-bridge wait <session-id>` <!-- marketplace-isolation: allow agent-bridge-management --> | Block until current turn completes |
-| `agent-bridge sessions` <!-- marketplace-isolation: allow agent-bridge-management --> | List all sessions with status |
-| `agent-bridge sessions --status idle` <!-- marketplace-isolation: allow agent-bridge-management --> | List sessions ready for follow-up |
-| `agent-bridge stop <session-id>` <!-- marketplace-isolation: allow agent-bridge-management --> | Pause session (preserves state for resume) |
-| `agent-bridge resume <session-id>` <!-- marketplace-isolation: allow agent-bridge-management --> | Resume a stopped session |
-| `agent-bridge end <session-id>` <!-- marketplace-isolation: allow agent-bridge-management --> | End and clean up session |
+| `<agent-bridge catalog argv[0]> agents` | List all available agents (local + codespace) |
+| `<agent-bridge catalog argv[0]> send codespace:<name> "<prompt>"` | Start a new session (blocks until turn completes) |
+| `<agent-bridge catalog argv[0]> send <session-id> "<prompt>"` | Send follow-up prompt on existing session |
+| `<agent-bridge catalog argv[0]> send --no-wait <target> "<prompt>"` | Deliberate fire-and-forget — returns a session ID without attaching to its feed |
+| `<agent-bridge catalog argv[0]> wait <session-id>` | Block until current turn completes |
+| `<agent-bridge catalog argv[0]> sessions` | List all sessions with status |
+| `<agent-bridge catalog argv[0]> sessions --status idle` | List sessions ready for follow-up |
+| `<agent-bridge catalog argv[0]> stop <session-id>` | Pause session (preserves state for resume) |
+| `<agent-bridge catalog argv[0]> resume <session-id>` | Resume a stopped session |
+| `<agent-bridge catalog argv[0]> end <session-id>` | End and clean up session |
 
 ### Sync pattern (default — recommended for interactive use)
 
-The explicit `agent-bridge send` management action blocks until the turn completes. <!-- marketplace-isolation: allow agent-bridge-management -->
+The payload-local `send` operation blocks until the turn completes.
 Use when you need the result before continuing.
 
 ```
-powershell(command: 'agent-bridge send "codespace:<name>" "<prompt>"', initial_wait: 120) # marketplace-isolation: allow agent-bridge-management
+powershell(command: '& "<agent-bridge catalog argv[0]>" send "codespace:<name>" "<prompt>"', initial_wait: 120)
 ```
 
 ### Long-running interactive work
@@ -84,7 +84,7 @@ thoughts and tools into a low-noise live feed and emits liveness markers during
 quiet tool calls.
 
 ```
-powershell(command: 'agent-bridge send "codespace:<name>" "<prompt>"', initial_wait: 300) # marketplace-isolation: allow agent-bridge-management
+powershell(command: '& "<agent-bridge catalog argv[0]>" send "codespace:<name>" "<prompt>"', initial_wait: 300)
 ```
 
 If the outer tool runner backgrounds the still-running command after its
@@ -99,10 +99,10 @@ completion notification, and the remote feed accumulates unread until a caller
 attaches to it.
 
 ```
-powershell(command: 'agent-bridge send --no-wait "codespace:<name>" "<prompt>"') # marketplace-isolation: allow agent-bridge-management
+powershell(command: '& "<agent-bridge catalog argv[0]>" send --no-wait "codespace:<name>" "<prompt>"')
 # Capture the returned session ID.
-powershell(command: 'agent-bridge read <session-id>', initial_wait: 300) # marketplace-isolation: allow agent-bridge-management
-# `agent-bridge wait <session-id>` is also valid when only the current turn matters. <!-- marketplace-isolation: allow agent-bridge-management -->
+powershell(command: '& "<agent-bridge catalog argv[0]>" read <session-id>', initial_wait: 300)
+# `<agent-bridge catalog argv[0]> wait <session-id>` is also valid when only the current turn matters.
 ```
 
 Do not end the host turn with only "implementation is running" when the result
@@ -116,13 +116,13 @@ Sessions are persistent. After the first `send` creates a session, send
 follow-ups using the session ID:
 
 ```bash
-agent-bridge send "codespace:<name>" "Research the auth module" # marketplace-isolation: allow agent-bridge-management
+<agent-bridge catalog argv[0]> send "codespace:<name>" "Research the auth module"
 # → Session abc123-def (keen-river) created
 
-agent-bridge send abc123-def "Now implement the changes" # marketplace-isolation: allow agent-bridge-management
+<agent-bridge catalog argv[0]> send abc123-def "Now implement the changes"
 # → [response]
 
-agent-bridge end abc123-def # marketplace-isolation: allow agent-bridge-management
+<agent-bridge catalog argv[0]> end abc123-def
 ```
 
 ### Startup and Shutdown Behavior
@@ -171,7 +171,8 @@ the bridge connection instead.
 > session). Genuine drops are now rare but still possible (a CodeSpace idle
 > timeout, a network partition). Long jobs should still be **idempotent** and
 > **push early and often**, and you can **resume on drop**
-> (`agent-bridge end <sid>` → `agent-bridge create …`). <!-- marketplace-isolation: allow agent-bridge-management -->
+> (`<agent-bridge catalog argv[0]> end <sid>` →
+> `<agent-bridge catalog argv[0]> create …`).
 > See the agent-bridge
 > skill's *Dispatching Long Autonomous Work* flow.
 
@@ -275,10 +276,11 @@ retirement, and reserve `delete` for deliberate break-glass cleanup.
 
 > **Closing out a CodeSpace settles the borrowing worktree's obligation.** A
 > borrowed CodeSpace is an `active` `codespace` claim on the borrowing worktree's
-> ledger (`resource-obligation-settlement`) that blocks *its* `agent-worktrees
-> finalize`. A clean **disconnect** stamps the claim `at-rest` and mirrors that
-> onto the CodeSpace's shared lease (cross-machine visible); `agent-codespaces
-> delete` / `finalize --delete` release the box entirely. So drive a borrowed
+> ledger (`resource-obligation-settlement`) that blocks *its* worktree
+> finalization. A clean **disconnect** stamps the claim `at-rest` and mirrors
+> that onto the CodeSpace's shared lease (cross-machine visible); the
+> payload-local `delete` / `finalize --delete` operations release the box
+> entirely. So drive a borrowed
 > CodeSpace to a clean state and disconnect (or delete it) **before** finalizing
 > the worktree that borrowed it — otherwise its finalize blocks on the unsettled
 > obligation. If a settle was missed (a crash, or a bridge-driven box), the
@@ -383,7 +385,8 @@ absolute path to the agent-codespaces binstub). agent-bridge discovers that
 manifest there and registers the `codespace:` **namespace resolver**, driving
 the provider over a process boundary. That resolver lists and resolves your
 CodeSpaces **live** (via `gh codespace list`) on demand — so
-`agent-bridge agents` shows them and `agent-bridge send codespace:<name>` works immediately, <!-- marketplace-isolation: allow agent-bridge-management -->
+the payload-local `agents` output shows them and
+`<agent-bridge catalog argv[0]> send codespace:<name>` works immediately,
 with no expiry, including newly-created CodeSpaces.
 
 Because discovery is declarative (a dropped manifest carrying an absolute
@@ -411,7 +414,7 @@ by agent-codespaces.
 - **Bridge connection fails** -- the bridge auto-starts Shutdown
   CodeSpaces and retries SSH (up to ~180 s). If it still fails, try
   `<agent-codespaces catalog argv[0]> ssh <name> --remote-cmd "echo ok" --no-relay`.
-  Check `agent-bridge status` and <!-- marketplace-isolation: allow agent-bridge-management -->
+  Check `<agent-bridge catalog argv[0]> status` and
   `~/.agent-bridge/agent-bridge-err.log`.
 - **No `codespace:` targets** -- provider registration still uses the explicit
   management binstub, not the session catalog. If that binstub is missing,
@@ -422,7 +425,7 @@ by agent-codespaces.
   Common cause: wrong `ssh_user` in `.agent-codespaces/config.yaml`.
 - **Credential relay not working** -- check that `--no-relay` was not
   accidentally passed, then confirm agent-bridge's relay is up
-  (`agent-bridge service restart` repairs the owner daemon). <!-- marketplace-isolation: allow agent-bridge-management -->
+  (`agent-bridge service restart` repairs the owner daemon). <!-- marketplace-isolation: allow service-management -->
   The client warns when the
   host relay is not listening before connect.
 - **Quota exceeded** -- creating or connecting to a CodeSpace (a Shutdown one
