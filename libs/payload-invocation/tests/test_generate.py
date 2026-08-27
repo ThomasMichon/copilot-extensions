@@ -373,6 +373,7 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
         "agent-machines",
         "agent-mcp",
         "agent-ssh",
+        "agent-vault",
     ],
 )
 def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:

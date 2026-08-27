@@ -189,6 +189,7 @@ def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> No
         "agent-machines",
         "agent-mcp",
         "agent-ssh",
+        "agent-vault",
     ):
         findings = [
             finding
