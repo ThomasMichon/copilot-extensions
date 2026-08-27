@@ -251,17 +251,17 @@ The machine filter selects which singleton may run the unit; the emitter's
 disable|enable declared:<owner>:<name>` provides immediate pause/resume parity
 without racing a declaration sync.
 
-### Plugin-owned registrar drop-ins (designed; not yet built)
+### Plugin-owned registrar drop-ins
 
-Current registrar discovery has two inputs:
+Registrar discovery has three inputs:
 
 - operator-managed pointers in `~/.agent-dispatch/registrar/pointers.json`; and
-- declarations under a pointed repo's `.agent-dispatch/registrar/`.
+- declarations under a pointed repo's `.agent-dispatch/registrar/`; and
+- attributed plugin candidates in `~/.agent-dispatch/registrar.d/*.json`.
 
-It does **not** yet have a plugin contribution directory. The next discovery
-increment adds `~/.agent-dispatch/registrar.d/*.json`, following the existing
-agent-bridge `providers.d` and agent-codespaces `config.d` conventions. A
-contributing plugin ships declarations in its own footprint and its
+The plugin contribution directory follows the agent-bridge `providers.d` and
+agent-codespaces `config.d` conventions. A contributing plugin ships
+declarations in its own footprint and its
 `sessionStart` hook atomically writes an idempotent candidate manifest:
 
 ```json
@@ -326,17 +326,41 @@ stale entries inert.
 Plugin candidates are isolated from trusted discovery. The existing fail-loud
 duplicate-name rule remains within the trusted `pointers.json` tier. Trusted
 declarations win over plugin candidates with the same profile name. If two
-plugin sources claim one name, that **name alone** is quarantined from both
-sources; their other non-conflicting declarations still reconcile. A malformed
-or conflicting plugin candidate therefore cannot abort aggregation, preserve a
-last-known desired set, or prevent an unrelated authorization removal from
-winding a unit down. Diagnostics report every skipped candidate/name.
+manifests claim the same plugin source, both manifests are quarantined until the
+stale sibling is removed. If two distinct plugin sources claim one profile name,
+that **name alone** is quarantined from both sources; their other non-conflicting
+declarations still reconcile. A malformed or conflicting plugin candidate
+therefore cannot abort aggregation, preserve a last-known desired set, or
+prevent an unrelated authorization removal from winding a unit down.
+Diagnostics report every skipped candidate/name.
 
 The trusted `pointers.json` surface remains for explicit operator/service
 adoption. Plugin hooks never edit that aggregate JSON file; each owns only its
 drop-in, so independent plugin starts cannot race or erase one another.
 Enablement and root changes are desired-set changes: live reconcile starts,
 updates, or winds down the affected units without restarting the singleton.
+
+The runtime keeps independent last-known sets for the two tiers. A transient or
+invalid trusted `pointers.json` read retains only the prior trusted declarations;
+plugin candidates continue to reconcile, so a confirmed plugin disablement or
+deletion still winds down its units. Within `registrar.d`, an unreadable registry
+retains the prior candidate set and an unreadable declaration document retains
+only that document's prior value. Confirmed malformed, missing, disabled, or
+identity-mismatched entries withdraw immediately and never activate from cached
+payload presence.
+
+Operational warnings are fingerprint-deduplicated and capped at ten details per
+refresh, followed by a suppressed-count summary. Run:
+
+```
+agent-dispatch registrar doctor
+agent-dispatch registrar doctor --json
+```
+
+Doctor is exhaustive and renders trusted `pointers.json` health separately from
+untrusted `registrar.d` findings while consuming the same classifier as the
+runtime. Cleanup is intentionally report-only: agent-dispatch does not own a
+receipt ledger that could prove a candidate file is safe to delete.
 
 ### Operator overrides (built) — the kill-switch
 
