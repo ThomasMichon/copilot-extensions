@@ -469,9 +469,9 @@ def slot(root: Path, version: str, *, clean_incomplete: bool = False,
         detached_completion_is_valid = False
         if completion_pair is not None:
             try:
-                data = _load_unique_json(completion_pair[0])
                 detached_completion_is_valid = (
-                    isinstance(data, dict) and data.get("version") == version
+                    validate_marker(_load_unique_json(completion_pair[0]), version)
+                    is not None
                 )
             except (OSError, UnicodeError, ValueError):
                 pass
@@ -987,15 +987,41 @@ def _load_unique_json(path: Path):
     )
 
 
+def validate_marker(data, version: str) -> dict | None:
+    """Validate the canonical completion-marker schema.
+
+    JSON field order is intentionally irrelevant to Python readers. The shell
+    resolver recognizes the canonical order emitted by :func:`mark_complete`;
+    both enforce the same fields, types, and exact version value.
+    """
+    if not isinstance(data, dict):
+        return None
+    allowed = {"version", "completed_at", "pid", "payload_hash"}
+    required = {"version", "completed_at", "pid"}
+    if not required.issubset(data) or not set(data).issubset(allowed):
+        return None
+    if not isinstance(data["version"], str) or data["version"] != version:
+        return None
+    if not isinstance(data["completed_at"], str):
+        return None
+    if (
+        not isinstance(data["pid"], int)
+        or isinstance(data["pid"], bool)
+        or data["pid"] < 0
+    ):
+        return None
+    if "payload_hash" in data and not isinstance(data["payload_hash"], str):
+        return None
+    return data
+
+
 def read_marker(root: Path, version: str) -> dict | None:
     """Parse a slot's completion marker, or None if absent/partial/mismatched."""
     try:
         data = _load_unique_json(marker_path(root, version))
     except Exception:
         return None
-    if not isinstance(data, dict) or data.get("version") != version:
-        return None
-    return data
+    return validate_marker(data, version)
 
 
 def is_complete(root: Path, version: str, *, expect_hash: str | None = None) -> bool:

@@ -242,6 +242,13 @@ def test_resolve_python_rejects_every_incomplete_slot(tmp_path):
         "{not-json",
         '{"version": "wrong"}',
         '{"version": "1.0.0", "version": "1.0.0"}',
+        '{"version": "1.0.0"}',
+        '{"version": "1.0.0", "completed_at": "x"}',
+        '{"version": "1.0.0", "completed_at": 1, "pid": 1}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": "1"}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": true}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": 1, "extra": 1}',
+        '{"version": "1.0.0", "completed_at": "x", "pid": 1, "payload_hash": 1}',
     ],
 )
 def test_is_complete_rejects_invalid_or_ambiguous_version_marker(tmp_path, marker):
@@ -250,6 +257,49 @@ def test_is_complete_rejects_invalid_or_ambiguous_version_marker(tmp_path, marke
 
     assert not vr.is_complete(tmp_path, "1.0.0")
     assert vr.resolve_python(tmp_path) is None
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        {
+            "version": "1.0.0",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        },
+        {
+            "pid": 1,
+            "version": "1.0.0",
+            "completed_at": "2026-08-27T00:00:00Z",
+            "payload_hash": "abc",
+        },
+    ],
+)
+def test_is_complete_accepts_canonical_schema_regardless_of_field_order(
+    tmp_path, marker
+):
+    python = _write_slot_python(tmp_path, "1.0.0")
+    vr.marker_path(tmp_path, "1.0.0").write_text(
+        json.dumps(marker), encoding="utf-8"
+    )
+
+    assert vr.is_complete(tmp_path, "1.0.0")
+    assert vr.resolve_python(tmp_path) == python
+
+
+def test_mark_complete_writes_canonical_marker(tmp_path):
+    _write_slot_python(tmp_path, "1.0.0")
+
+    path = vr.mark_complete(
+        tmp_path, "1.0.0", payload_hash="abc", pid=123
+    )
+
+    assert vr.read_marker(tmp_path, "1.0.0") == {
+        "version": "1.0.0",
+        "completed_at": json.loads(path.read_text())["completed_at"],
+        "pid": 123,
+        "payload_hash": "abc",
+    }
 
 
 def test_activate_points_current_at_version(tmp_path):

@@ -221,7 +221,12 @@ def _make_slot(root: Path, ver: str) -> Path:
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="utf-8")
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": ver}), encoding="utf-8"
+        json.dumps({
+            "version": ver,
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
+        encoding="utf-8",
     )
     return py
 

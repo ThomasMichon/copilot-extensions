@@ -227,7 +227,11 @@ def _seed_healthy_slot(home: Path) -> Path:
         encoding="utf-8",
     )
     (slot / ".install-complete.json").write_text(
-        json.dumps({"version": VERSION}),
+        json.dumps({
+            "version": VERSION,
+            "completed_at": "2026-08-27T00:00:00Z",
+            "pid": 1,
+        }),
         encoding="utf-8",
     )
     return slot
