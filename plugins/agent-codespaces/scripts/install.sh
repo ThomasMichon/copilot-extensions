@@ -222,12 +222,15 @@ _versioned_activate() {
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
-    [[ -x "$py" ]] || return 0
+    if [[ ! -x "$py" ]]; then
+        _fail "Fresh runtime slot has no interpreter (versions/$SRC_VERSION)"
+        return 1
+    fi
     if ! "$VENV_PYTHON" -c 'import agent_codespaces' 2>/dev/null; then
         _fail "Fresh runtime slot failed its health gate (versions/$SRC_VERSION) -- not activating"
         return 1
     fi
-    _versioned_mark_complete
+    _versioned_mark_complete || return 1
     local prev
     prev="$("$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo "")"
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
@@ -277,14 +280,16 @@ _header()  { echo ""; echo "=== $* ==="; }
 
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
-    # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
-    # python, then python3/python on PATH. Prints nothing + returns 1 if none
-    # found (#935).
-    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    # venv exists (e.g. the pre-build toss). Prefers python3/python on PATH,
+    # then the active/target slot interpreter. The target is last because a
+    # malformed partial slot must not shadow a healthy bootstrap interpreter.
+    # Prints nothing + returns 1 if none found (#935).
     local __c
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
     done
+    if [[ -x "$LINK_DIR/bin/python" ]]; then echo "$LINK_DIR/bin/python"; return 0; fi
+    if [[ -x "$VENV_PYTHON" ]]; then echo "$VENV_PYTHON"; return 0; fi
     return 1
 }
 
@@ -312,9 +317,14 @@ _versioned_slot_clean() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
-    "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /' || true
+    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
+        _fail "Cannot inspect runtime slots: no bootstrap Python is available"
+        return 1
+    fi
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" slot "$SRC_VERSION" --clean-incomplete 2>&1 | sed 's/^/  ...    /'; then
+        _fail "Failed to clean incomplete runtime slot (versions/$SRC_VERSION)"
+        return 1
+    fi
 }
 
 _versioned_mark_complete() {
@@ -327,13 +337,19 @@ _versioned_mark_complete() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    if ! py="$(_bootstrap_python)" || [[ -z "$py" ]]; then
+        _fail "Cannot mark runtime complete: no bootstrap Python is available"
+        return 1
+    fi
     local ph
     ph="$(_payload_hash)"
     local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
     if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    if ! "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'; then
+        _fail "Failed to mark runtime slot complete (versions/$SRC_VERSION)"
+        return 1
+    fi
+    return 0
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -477,7 +493,7 @@ deploy_venv() {
     _assert_uv
     _ensure_uv_index
     mkdir -p "$VENV_DIR"
-    _versioned_slot_clean
+    _versioned_slot_clean || return 1
     if ! uv venv "$VENV_DIR" --python 3.11 --allow-existing 2>/dev/null; then
         uv venv "$VENV_DIR" --allow-existing 2>/dev/null || true
     fi
@@ -715,6 +731,7 @@ do_install() {
         _ok "Verification: module imports successfully"
     else
         _fail "Verification: module import failed"
+        return 1
     fi
 
     # Connection Owner daemon (config-gated; default off -> ensured absent).
@@ -863,10 +880,10 @@ do_update() {
     fi
 
     # Re-deploy venv
-    deploy_venv
+    deploy_venv || return 1
 
     # Re-deploy package
-    deploy_package
+    deploy_package || return 1
 
     # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
     _versioned_activate || return 1
@@ -922,6 +939,7 @@ do_provision() {
         _ok "Verification: module imports successfully"
     else
         _fail "Verification: module import failed"
+        return 1
     fi
     # Connection Owner daemon (config-gated; default off -> ensured absent).
     _sync_owner_service

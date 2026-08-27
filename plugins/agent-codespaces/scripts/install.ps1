@@ -262,7 +262,10 @@ function Invoke-VersionedActivate {
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
-    if (-not (Test-Path $py)) { return $true }
+    if (-not (Test-Path $py)) {
+        Write-ServiceErr "Fresh runtime slot has no interpreter (versions/$SrcVersion)"
+        return $false
+    }
     $prevEAP = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
     & $VenvPython -c 'import agent_codespaces' 2>$null
     $slotOk = ($LASTEXITCODE -eq 0)
@@ -271,7 +274,7 @@ function Invoke-VersionedActivate {
         Write-ServiceErr "Fresh runtime slot failed its health gate (versions/$SrcVersion) -- not activating"
         return $false
     }
-    Invoke-VersionedMarkComplete
+    if (-not (Invoke-VersionedMarkComplete)) { return $false }
     $prev = (& $py $vr --root $InstallDir --link-name '.venv' current 2>$null); $prev = ("$prev").Trim()
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-ServiceChanged $_ }
@@ -349,9 +352,6 @@ function Get-BootstrapPython {
        mark-complete before the link is swapped), then the active link's
        python, then a real base python via the `py` launcher -- avoiding the
        Windows Store 'python' alias stub. Returns $null if none. #>
-    foreach ($d in @($VenvDir, $LinkDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
-    }
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
         if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
@@ -359,6 +359,9 @@ function Get-BootstrapPython {
     foreach ($cand in 'python3', 'python') {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
+    }
+    foreach ($d in @($LinkDir, $VenvDir)) {
+        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
     }
     return $null
 }
@@ -382,17 +385,105 @@ function Get-PayloadHash {
     } catch { return '' }
 }
 
+function Test-PythonVenv {
+    param(
+        [Parameter(Mandatory)][string]$Dir,
+        [Parameter(Mandatory)][string]$Python
+    )
+    if (-not (Test-Path -LiteralPath (Join-Path $Dir 'pyvenv.cfg') -PathType Leaf)) {
+        return $false
+    }
+    if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
+        return $false
+    }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $probe = @(& $Python -c 'import os, sys; print(os.path.normcase(os.path.abspath(sys.prefix))); print("1" if sys.prefix != sys.base_prefix else "0")' 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $probe.Count -lt 2 -or "$($probe[1])".Trim() -ne '1') {
+            return $false
+        }
+        $actual = [IO.Path]::GetFullPath("$($probe[0])".Trim()).TrimEnd('\', '/')
+        $expected = [IO.Path]::GetFullPath($Dir).TrimEnd('\', '/')
+        return [StringComparer]::OrdinalIgnoreCase.Equals($actual, $expected)
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
+function Test-VersionedSlotComplete {
+    if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) { return $false }
+    $markerPath = Join-Path $VenvDir '.install-complete.json'
+    if (-not (Test-Path -LiteralPath $markerPath -PathType Leaf)) { return $false }
+    try {
+        $marker = Get-Content -LiteralPath $markerPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$marker.version -ne $SrcVersion) { return $false }
+    } catch {
+        return $false
+    }
+    if (-not (Test-PythonVenv -Dir $VenvDir -Python $VenvPython)) { return $false }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $VenvPython -c 'import agent_codespaces' 2>$null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    } finally {
+        $ErrorActionPreference = $prevEAP
+    }
+}
+
+function Test-VersionedSlotInUse {
+    if (-not (Test-Path -LiteralPath $VenvDir -PathType Container)) { return $false }
+    $slotPrefix = [IO.Path]::GetFullPath($VenvDir).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar
+    try {
+        foreach ($process in Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction Stop) {
+            if (-not $process.ExecutablePath) { continue }
+            $image = [IO.Path]::GetFullPath([string]$process.ExecutablePath)
+            if ($image.StartsWith($slotPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+        return $false
+    } catch {
+        throw "Cannot verify whether incomplete runtime slot is in use: $($_.Exception.Message)"
+    }
+}
+
+function Remove-VersionMarkerReference {
+    param([Parameter(Mandatory)][string]$Version)
+    foreach ($name in @('current-version', 'last-known-good')) {
+        $path = Join-Path $InstallDir $name
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        $value = ''
+        try { $value = ([IO.File]::ReadAllText($path)).Trim() } catch { }
+        if ($value -ne $Version) { continue }
+        $detached = "$path.invalid-$PID-$([guid]::NewGuid().ToString('N'))"
+        Move-Item -LiteralPath $path -Destination $detached -ErrorAction Stop
+        Remove-Item -LiteralPath $detached -Force -ErrorAction Stop
+    }
+}
+
 function Invoke-VersionedSlotClean {
-    <# Toss an INCOMPLETE prior slot before building so we never `uv venv
-       --allow-existing` over a corpse (#935); the current/active slot is never
-       tossed (link-name derived from $LinkDir so the guard works per plugin).
-       No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) { return }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
+    <# Validate the target slot before any --allow-existing build. A slot is
+       reusable only when its completion metadata, venv identity, interpreter,
+       and installed package are all healthy. Otherwise detach marker references
+       and atomically quarantine it before deletion. An in-use slot is never
+       mutated; the caller fails and may retry after the process exits. #>
+    if (-not $VersionedRuntime -or -not (Test-Path -LiteralPath $VenvDir)) { return }
+    if (Test-VersionedSlotComplete) { return }
+    if (Test-VersionedSlotInUse) {
+        throw "Incomplete runtime slot is still in use: $VenvDir"
+    }
+    Remove-VersionMarkerReference -Version $SrcVersion
+    $versionsDir = Split-Path -Parent $VenvDir
+    $quarantine = Join-Path $versionsDir (".$SrcVersion.incomplete-$PID-$([guid]::NewGuid().ToString('N'))")
+    Move-Item -LiteralPath $VenvDir -Destination $quarantine -ErrorAction Stop
+    Remove-Item -LiteralPath $quarantine -Recurse -Force -ErrorAction Stop
+    Write-ServiceChanged "Discarded incomplete runtime slot: versions/$SrcVersion"
 }
 
 function Invoke-VersionedMarkComplete {
@@ -400,14 +491,22 @@ function Invoke-VersionedMarkComplete {
        so "marker present" == "healthy, complete build". A crashed / watchdog-
        killed install never reaches here, leaving its slot markerless and thus
        tossable + retryable (#935). No-op in legacy mode. #>
-    if (-not $VersionedRuntime) { return }
+    if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
+    if (-not $py) {
+        Write-ServiceErr 'Cannot mark runtime complete: no bootstrap Python is available'
+        return $false
+    }
     $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
     $ph = Get-PayloadHash
     if ($ph) { $mcArgs += @('--payload-hash', $ph) }
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+    if ($LASTEXITCODE -ne 0) {
+        Write-ServiceErr "Failed to mark runtime slot complete (versions/$SrcVersion)"
+        return $false
+    }
+    return $true
 }
 # === end install-contract:v4 marker/toss helpers ===
 
@@ -590,17 +689,38 @@ function Deploy-Venv {
     }
     if ($signedBase -and -not (Test-Path $VenvPython)) {
         & $signedBase -m venv --copies $VenvDir 2>&1 | Out-Null
+        $signedRc = $LASTEXITCODE
+        if ($signedRc -ne 0) {
+            if (Test-PythonVenv -Dir $VenvDir -Python $VenvPython) {
+                Write-ServiceWarn "Signed Python venv creation exited $signedRc after producing a usable venv"
+            } else {
+                Write-ServiceWarn "Signed Python venv creation failed (exit $signedRc) -- falling back to uv"
+                try {
+                    Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
+                } catch {
+                    $ErrorActionPreference = $prevEAP
+                    Write-ServiceErr "Could not discard failed signed-Python venv: $($_.Exception.Message)"
+                    return $false
+                }
+            }
+        }
     }
     if (-not (Test-Path $VenvPython)) {
         & uv venv $VenvDir --python 3.11 --allow-existing 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             & uv venv $VenvDir --allow-existing 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                $rc = $LASTEXITCODE
+                $ErrorActionPreference = $prevEAP
+                Write-ServiceErr "Venv creation failed (exit $rc)"
+                return $false
+            }
         }
     }
     $ErrorActionPreference = $prevEAP
 
-    if (-not (Test-Path $VenvPython)) {
-        Write-ServiceErr "Venv creation failed"
+    if (-not (Test-PythonVenv -Dir $VenvDir -Python $VenvPython)) {
+        Write-ServiceErr "Venv validation failed at $VenvDir"
         return $false
     }
     Write-ServiceOk "Venv ready at $VenvDir"
@@ -655,15 +775,21 @@ $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 $mutex = [System.Threading.Mutex]::new($false, 'Local\Copilot.AgentCodespaces.Provision')
 $held = $false
+$_provisionRc = 0
 try {
     try { $held = $mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { $held = $true }
     $_py = _resolve_cs_py
     if (-not $_py) {
         & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+        $_provisionRc = $LASTEXITCODE
     }
 } finally {
     if ($held) { try { $mutex.ReleaseMutex() } catch {} }
     $mutex.Dispose()
+}
+if ($_provisionRc -ne 0) {
+    [Console]::Error.WriteLine("[agent-codespaces] provisioning failed (exit $_provisionRc).")
+    exit $_provisionRc
 }
 $_py = _resolve_cs_py
 if ($_py) { & $_py -m agent_codespaces @args; exit $LASTEXITCODE }
@@ -857,13 +983,13 @@ function Invoke-Install {
     }
 
     # Deploy venv
-    if (-not (Deploy-Venv)) { return }
+    if (-not (Deploy-Venv)) { throw 'Venv deployment failed' }
 
     # Deploy package
-    if (-not (Deploy-Package)) { return }
+    if (-not (Deploy-Package)) { throw 'Package deployment failed' }
 
     # Versioned layout (#581): health-gate the slot + swap the `.venv` link.
-    if (-not (Invoke-VersionedActivate)) { return }
+    if (-not (Invoke-VersionedActivate)) { throw 'Runtime activation failed' }
 
     # Deploy binstub
     Deploy-SelfProvisioningBinstub
@@ -895,6 +1021,7 @@ function Invoke-Install {
         Write-ServiceOk 'Verification: module imports successfully'
     } else {
         Write-ServiceErr 'Verification: module import failed'
+        throw 'Runtime verification failed'
     }
 
     # Connection Owner daemon (config-gated; default off -> ensured absent).
@@ -937,6 +1064,16 @@ function Invoke-Uninstall {
 
     # Stop managed SSH ControlMaster connections before removing files.
     Stop-ManagedSshConnections
+
+    # A marketplace invocation self-stages below the runtime tree. Leave that
+    # working directory before removing the tree so uninstall never deletes its
+    # own active ancestor.
+    $cwd = [IO.Directory]::GetCurrentDirectory()
+    $installPrefix = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+    if ($cwd.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        Set-Location -LiteralPath $env:USERPROFILE
+        [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+    }
 
     # Remove binstub
     $removedStub = $false
@@ -1086,13 +1223,13 @@ function Invoke-Update {
     }
 
     # Re-deploy venv (update deps)
-    Deploy-Venv | Out-Null
+    if (-not (Deploy-Venv)) { throw 'Venv deployment failed' }
 
     # Re-deploy package
-    Deploy-Package | Out-Null
+    if (-not (Deploy-Package)) { throw 'Package deployment failed' }
 
     # Versioned layout (#581): health-gate the slot + swap the `.venv` link.
-    if (-not (Invoke-VersionedActivate)) { return }
+    if (-not (Invoke-VersionedActivate)) { throw 'Runtime activation failed' }
 
     # Re-deploy binstub
     Deploy-SelfProvisioningBinstub
@@ -1150,11 +1287,45 @@ function Invoke-Stamp {
 
 # -- Dispatch --------------------------------------------------------------
 
-switch ($Action) {
-    'install'   { Invoke-Install }
-    'uninstall' { Invoke-Uninstall }
-    'status'    { Invoke-Status }
-    'update'    { Invoke-Update }
-    'stamp'     { Invoke-Stamp }
-    'provision' { Invoke-Install }
+$lifecycleMutex = $null
+$lifecycleHeld = $false
+try {
+    if ($Action -ne 'status') {
+        # Marketplace self-staging runs below $InstallDir. Move every contender
+        # off that tree before it waits, not only uninstall itself: otherwise a
+        # queued install/update can hold a CWD handle that makes the lock owner’s
+        # concurrent uninstall fail while removing the runtime.
+        $cwd = [IO.Directory]::GetCurrentDirectory()
+        $installPrefix = [IO.Path]::GetFullPath($InstallDir).TrimEnd('\', '/')
+        if ($cwd.StartsWith($installPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+            Set-Location -LiteralPath $env:USERPROFILE
+            [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+        }
+        $lifecycleMutex = [System.Threading.Mutex]::new($false, 'Local\Copilot.AgentCodespaces.InstallLifecycle')
+        try {
+            $lifecycleHeld = $lifecycleMutex.WaitOne([TimeSpan]::FromMinutes(10))
+        } catch [System.Threading.AbandonedMutexException] {
+            $lifecycleHeld = $true
+        }
+        if (-not $lifecycleHeld) {
+            throw 'Timed out waiting for another agent-codespaces lifecycle operation'
+        }
+    }
+    switch ($Action) {
+        'install'   { Invoke-Install }
+        'uninstall' { Invoke-Uninstall }
+        'status'    { Invoke-Status }
+        'update'    { Invoke-Update }
+        'stamp'     { Invoke-Stamp }
+        'provision' { Invoke-Install }
+    }
+} catch {
+    Write-ServiceErr $_.Exception.Message
+    exit 1
+} finally {
+    if ($lifecycleHeld) {
+        try { $lifecycleMutex.ReleaseMutex() } catch { }
+    }
+    if ($lifecycleMutex) { $lifecycleMutex.Dispose() }
 }
+exit 0

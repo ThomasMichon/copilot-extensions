@@ -24,6 +24,19 @@ def test_binstub_resolves_marker_only_runtime_after_provision() -> None:
     assert 'exec "$_python" -m agent_codespaces "$@"' in stub
 
 
+def test_posix_activation_requires_completion_marker() -> None:
+    text = INSTALL_SH.read_text(encoding="utf-8")
+    activate = text.split("_versioned_activate() {", 1)[1].split("\n}", 1)[0]
+    marker = text.split("_versioned_mark_complete() {", 1)[1].split("\n}", 1)[0]
+    deploy = text.split("deploy_venv() {", 1)[1].split("\n}", 1)[0]
+
+    assert "_versioned_mark_complete || return 1" in activate
+    assert "Failed to mark runtime slot complete" in marker
+    assert '"$py" "${args[@]}"' in marker
+    assert "|| true" not in marker
+    assert "_versioned_slot_clean || return 1" in deploy
+
+
 def test_windows_binstubs_share_safe_resolution_and_locking() -> None:
     text = INSTALL_PS1.read_text(encoding="utf-8")
     ps1 = text.split("$ps1Content = @'", 1)[1].split("\n'@", 1)[0]
