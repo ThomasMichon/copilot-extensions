@@ -947,14 +947,14 @@ def test_bare_non_headless_project_launches(monkeypatch):
 # ── the binstub seam (Phase 6 / DQ7 / DQ8) ────────────────────────────
 
 
-def test_bare_prefers_worktree_manager_when_on_path(monkeypatch):
-    """Bare, non-headless invocation execs the Manager when it is on PATH,
-    threading the active project, and does NOT load the bundled Picker."""
+def test_bare_prefers_bundled_picker_during_production_ux_transplant(monkeypatch):
+    """Bare project invocation keeps the production Picker until transplanted."""
     monkeypatch.delenv("WORKTREE_PROJECT", raising=False)
     monkeypatch.setattr(m, "_resolve_active_project", lambda proj: ("demo", None))
     monkeypatch.setattr(m, "_is_headless_project", lambda: False)
     monkeypatch.setattr(m.cfg, "active_project", lambda: "demo")
     monkeypatch.setattr(m, "_usable_worktree_manager", lambda: "/usr/bin/worktree-manager")
+    monkeypatch.setattr(m, "_bundled_picker_available", lambda: True)
 
     launched = {"v": False}
     monkeypatch.setattr(m, "cmd_launch", lambda argv: launched.__setitem__("v", True) or 0)
@@ -969,8 +969,8 @@ def test_bare_prefers_worktree_manager_when_on_path(monkeypatch):
     monkeypatch.setattr(m, "_exec_worktree_manager", fake_exec)
     rc = m.main([])
     assert rc == 0
-    assert seam == {"mgr": "/usr/bin/worktree-manager", "project": "demo"}
-    assert launched["v"] is False
+    assert seam == {"mgr": None, "project": "unset"}
+    assert launched["v"] is True
 
 
 def test_bare_falls_back_to_picker_without_manager(monkeypatch):
