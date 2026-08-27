@@ -88,11 +88,25 @@ golden path. Two convention-discovered seams, both honored here:
 
 - **Config-provider drop-in (`config.d`).** A harness plugin ships a supplementary
   `.agent-codespaces/config.yaml` under its own `references/` and, from a
-  `sessionStart` hook, drops a one-line **pointer** to it into
-  `~/.agent-codespaces/config.d/<name>.conf`. `discover_dropin_configs()` reads each
-  pointer and `load_merged_config` merges the referenced config at the **lowest
-  precedence** — a provider default any adopted-repo/cwd config still overrides,
-  with no copy to drift and no writeback into any repo.
+  `sessionStart` hook, writes a schema-v1 JSON pointer into
+  `~/.agent-codespaces/config.d/<name>@<marketplace>.json`. The pointer records
+  its exact plugin source, canonical plugin root, and in-place target. The
+  registry activates it only when that source is effectively enabled in the
+  real user's global or registered-project settings and its target remains a
+  regular file contained by the identity-verified root. `AGENT_HOME` relocates
+  runtime state only; it never redirects this authorization lookup.
+- **Hygiene and compatibility.** Operator-owned `*.yaml` fragments remain
+  report-only, while the documented legacy `<name>-harness.conf` pointer remains
+  active with a `legacy-unattributed` advisory during migration. Invalid,
+  disabled, missing, duplicate, or transient entries are isolated from peers;
+  a complete scan reconciles removal, while indeterminate reads retain only their
+  own last-known contribution. Runtime warnings are bounded and deduplicated;
+  `agent-codespaces doctor` (or `doctor --json`) reports the exhaustive findings
+  and precise remediation without deleting any entry.
+- **Precedence.** `load_merged_config` consumes the classifier's selected
+  in-memory configs at the **lowest precedence** — a provider default any
+  adopted-repo/cwd config still overrides, with no copy to drift and no writeback
+  into any repo.
 - **Repo provenance (`workspace_repo`).** The provider config's
   `repos.<vessel>.workspace_repo: <product>` is what makes
   `effective_acp_command_for(<vessel>)` launch the agent in `/workspaces/<product>`
@@ -142,7 +156,8 @@ agent-codespaces config migrate       # Relocate legacy codespaces.yaml -> .agen
 agent-codespaces config show          # Show resolved config
 agent-codespaces config validate      # Validate resolved config
 agent-codespaces cleanup              # Remove stale local state (SSH configs, sockets)
-agent-codespaces doctor               # Check gh auth + codespace scope
+agent-codespaces doctor               # Check gh auth + config.d hygiene
+agent-codespaces doctor --json        # Exhaustive structured auth/config.d report
 agent-codespaces status               # Runtime/config/gh/ssh overview
 agent-codespaces version              # Show version
 ```
