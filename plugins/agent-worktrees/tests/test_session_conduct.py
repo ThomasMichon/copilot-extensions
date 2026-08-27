@@ -129,6 +129,12 @@ def _run(script: Path, home: Path, shell: str) -> str:
     return result.stdout.strip()
 
 
+def _require_shell(shell: str | None, name: str) -> str:
+    if shell is None:
+        pytest.skip(f"{name} is unavailable")
+    return shell
+
+
 def _stress_hook_fixture(tmp_path):
     long_path = "/state/" + ("deep-unicode-深/" * 40)
     definition = (
@@ -158,7 +164,11 @@ def _stress_hook_fixture(tmp_path):
 def test_posix_hook_enforces_budget_priority(tmp_path):
     definition, related, _history, home, conduct_dir = _stress_hook_fixture(tmp_path)
 
-    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, _bash())
+    bash_output = _run(
+        _SCRIPTS / "session-conduct.sh",
+        home,
+        _require_shell(_bash(), "Bash"),
+    )
     data = json.loads(bash_output)
     context = data["additionalContext"]
     assert c.runtime_units(bash_output) <= c.MAX_OUTPUT_CHARS
@@ -196,7 +206,11 @@ def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(tmp_pat
         windows_line_endings=True,
     )
 
-    output = _run(_SCRIPTS / "session-conduct.ps1", home, _powershell())
+    output = _run(
+        _SCRIPTS / "session-conduct.ps1",
+        home,
+        _require_shell(_powershell(), "PowerShell"),
+    )
     context = json.loads(output)["additionalContext"]
     assert c.runtime_units(output) <= c.MAX_OUTPUT_CHARS
     assert "\r" not in context
@@ -212,8 +226,16 @@ def test_powershell_hook_enforces_budget_and_normalizes_windows_newlines(tmp_pat
 )
 def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path):
     _definition, _related, _history, home, _ = _stress_hook_fixture(tmp_path)
-    bash_output = _run(_SCRIPTS / "session-conduct.sh", home, _bash())
-    ps_output = _run(_SCRIPTS / "session-conduct.ps1", home, _powershell())
+    bash_output = _run(
+        _SCRIPTS / "session-conduct.sh",
+        home,
+        _require_shell(_bash(), "Bash"),
+    )
+    ps_output = _run(
+        _SCRIPTS / "session-conduct.ps1",
+        home,
+        _require_shell(_powershell(), "PowerShell"),
+    )
     assert ps_output == bash_output
 
 
