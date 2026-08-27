@@ -845,8 +845,30 @@ export PYTHONUTF8=1
 _root="\$HOME/.agent-worktrees"
 _ver="\$(cat "\$_root/current-version" 2>/dev/null)"
 _py="\$_root/versions/\$_ver/bin/python"
-if [[ ! -x "\$_py" ]]; then
-    _py="\$(ls -1d "\$_root"/versions/*/bin/python 2>/dev/null | sort | tail -n1)"
+if [[ ! -f "\$_root/versions/\$_ver/.install-complete.json" || ! -x "\$_py" ]]; then
+    _py=""
+    _version_key() {
+        awk '{
+          original = \$0; key = ""; rest = \$0
+          while (match(rest, /[0-9]+/)) {
+            key = key substr(rest, 1, RSTART - 1)
+            number = substr(rest, RSTART, RLENGTH)
+            key = key sprintf("%020d", number + 0)
+            rest = substr(rest, RSTART + RLENGTH)
+          }
+          print key rest "\t" original
+        }'
+    }
+    for _ver in \$(
+      for _slot in "\$_root"/versions/*; do
+        [[ -d "\$_slot" ]] || continue
+        printf '%s\n' "\${_slot##*/}"
+      done | _version_key | LC_ALL=C sort | cut -f2-
+    ); do
+        _candidate="\$_root/versions/\$_ver/bin/python"
+        [[ -f "\$_root/versions/\$_ver/.install-complete.json" && -x "\$_candidate" ]] &&
+            _py="\$_candidate"
+    done
 fi
 if [[ -n "\$_py" && -x "\$_py" ]]; then
     exec "\$_py" -m agent_worktrees --project "$PROJECT_NAME" "\$@"

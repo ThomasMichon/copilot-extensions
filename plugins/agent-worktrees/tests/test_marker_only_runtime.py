@@ -236,9 +236,41 @@ def test_resolver_stale_marker_falls_to_last_known_good(tmp_path):
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
 def test_resolver_tier3_newest_on_true_first_run(tmp_path):
     # No marker and no last-known-good -> newest installed slot.
-    _make_slot(tmp_path, "0.1.0")
-    _make_slot(tmp_path, "0.2.0")
-    assert _resolve(tmp_path).endswith("versions/0.2.0/bin/python")
+    _make_slot(tmp_path, "0.1.0-dev9")
+    _make_slot(tmp_path, "0.1.0-dev10")
+    assert _resolve(tmp_path).endswith("versions/0.1.0-dev10/bin/python")
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh binstub")
+def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
+    import os
+    import subprocess
+
+    runtime = tmp_path / ".agent-worktrees"
+    for version in ("1.5.3-dev9", "1.5.3-dev10"):
+        slot = runtime / "versions" / version
+        command = slot / "bin" / "agent-worktrees"
+        command.parent.mkdir(parents=True)
+        command.write_text(
+            f"#!/bin/sh\nprintf '%s' '{version}'\n", encoding="utf-8"
+        )
+        command.chmod(0o755)
+        (slot / ".install-complete.json").write_text(
+            json.dumps({"version": version}), encoding="utf-8"
+        )
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+
+    result = subprocess.run(
+        [str(_BIN / "agent-worktrees"), "status"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "1.5.3-dev10"
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")

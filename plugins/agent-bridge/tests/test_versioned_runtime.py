@@ -258,8 +258,26 @@ def test_list_versions_sorted(tmp_path):
     _install(tmp_path, "0.4.0-dev10")
     _install(tmp_path, "0.4.0-dev2")
     got = vr.list_versions(tmp_path)
-    # PEP 440-aware ordering: dev2 < dev9 < dev10
+    # Supported-version numeric ordering: dev2 < dev9 < dev10.
     assert got == ["0.4.0-dev2", "0.4.0-dev9", "0.4.0-dev10"]
+
+
+def test_version_key_is_stdlib_and_orders_supported_dev_versions(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def without_packaging(name, *args, **kwargs):
+        if name == "packaging" or name.startswith("packaging."):
+            raise ModuleNotFoundError(name)
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_packaging)
+
+    assert sorted(
+        ["0.4.0-dev10", "0.4.0-dev2", "0.4.0-dev9"],
+        key=vr._version_key,
+    ) == ["0.4.0-dev2", "0.4.0-dev9", "0.4.0-dev10"]
 
 
 # ---------------------------------------------------------------------------

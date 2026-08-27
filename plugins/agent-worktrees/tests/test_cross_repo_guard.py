@@ -216,9 +216,13 @@ def test_strip_nt_prefix():
 
 def _make_slot(root: Path, ver: str) -> Path:
     """Create versions/<ver> with a runtime python and return that python path."""
-    py = guard._slot_python(root / "versions" / ver)
+    slot = root / "versions" / ver
+    py = guard._slot_python(slot)
     py.parent.mkdir(parents=True, exist_ok=True)
     py.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": ver}), encoding="utf-8"
+    )
     return py
 
 
@@ -232,8 +236,8 @@ def test_runtime_argv_prefers_current_version(tmp_path):
 
 def test_runtime_argv_falls_back_to_newest_slot_without_marker(tmp_path):
     root = tmp_path / ".agent-worktrees"
-    _make_slot(root, "1.5.3-dev100")
-    py = _make_slot(root, "1.5.3-dev200")
+    _make_slot(root, "1.5.3-dev9")
+    py = _make_slot(root, "1.5.3-dev10")
     # No current-version marker -> newest slot wins.
     assert guard._runtime_argv(root) == [str(py), "-m", "agent_worktrees"]
 

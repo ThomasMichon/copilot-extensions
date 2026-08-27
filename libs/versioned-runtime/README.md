@@ -34,7 +34,9 @@ Slot resolution is completion-marker strict: `current-version`,
 `last-known-good`, and newest-slot fallback candidates must carry a valid
 `.install-complete.json` and an interpreter. Cleanup may rebuild an incomplete
 current slot only when no live process owns it; it atomically detaches stale
-marker references before removal.
+marker references before removal. Tier-3 fallback uses the same numeric-token
+ordering in Python, POSIX shell, and PowerShell, so development versions such
+as `dev10` sort after `dev9` without `packaging` or GNU `sort -V`.
 
 ## Editing — one source of truth
 

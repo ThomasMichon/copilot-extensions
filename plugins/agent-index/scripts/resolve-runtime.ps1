@@ -31,6 +31,13 @@ if ($_rtRoot) {
     return $null
   }
 
+  function _Rt-VersionKey([string]$ver) {
+    return [regex]::Replace(
+      $ver.ToLowerInvariant(), '\d+',
+      { param($m) $m.Value.PadLeft(20, '0') }
+    )
+  }
+
   # Tier 1: the `current-version` marker (source of truth; atomically written).
   $_rtVer = ''
   try { $_rtVer = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'current-version'))).Trim() } catch {}
@@ -48,7 +55,7 @@ if ($_rtRoot) {
   # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic).
   if (-not $AgentRtPy) {
     $_rtSlots = Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue |
-      Sort-Object { [regex]::Replace($_.Name, '\d+', { param($m) $m.Value.PadLeft(10, '0') }) }
+      Sort-Object { _Rt-VersionKey $_.Name }
     foreach ($_rtSlot in $_rtSlots) {
       $p = _Rt-TrySlot $_rtSlot.Name
       if ($p) { $AgentRtPy = $p }

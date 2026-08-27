@@ -349,7 +349,7 @@ function Remove-ConsoleTrampolines {
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
        Prefers a real base Python via the `py` launcher or PATH -- avoiding the
-       Windows Store alias stub -- before considering an active or target slot.
+       Windows Store alias stub -- before considering a completed active slot.
        Returns $null if none. #>
     if (Get-Command py -ErrorAction SilentlyContinue) {
         $exe = (& py -3 -c 'import sys; print(sys.executable)' 2>$null | Out-String).Trim()
@@ -359,10 +359,34 @@ function Get-BootstrapPython {
         $c = Get-Command $cand -ErrorAction SilentlyContinue
         if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
     }
-    foreach ($d in @($LinkDir, $VenvDir)) {
-        if ($d) { $p = Join-Path $d 'Scripts\python.exe'; if (Test-Path $p) { return $p } }
+    if ($LinkDir -and (Test-Path -LiteralPath (Join-Path $LinkDir '.install-complete.json') -PathType Leaf)) {
+        $p = Join-Path $LinkDir 'Scripts\python.exe'
+        if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
     }
     return $null
+}
+
+function Invoke-VersionedRuntime {
+    param([Parameter(Mandatory)][string[]]$Arguments)
+    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+    $py = Get-BootstrapPython
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($py) {
+            $output = (& $py $vr @Arguments 2>&1 | Out-String -Width 4096).Trim()
+            return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+        }
+        $uv = Get-Command uv -ErrorAction SilentlyContinue
+        if ($uv) {
+            $output = (& $uv.Source run --no-project --python 3.11 $vr @Arguments 2>&1 |
+                Out-String -Width 4096).Trim()
+            return [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
+        }
+        return [pscustomobject]@{ ExitCode = 127; Output = 'no bootstrap Python or uv is available' }
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
 }
 
 function Get-PayloadHash {
@@ -418,15 +442,12 @@ function Invoke-VersionedSlotClean {
     if (-not $VersionedRuntime -or -not (Test-Path -LiteralPath $VenvDir)) {
         return $true
     }
-    $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
-    if (-not $py) {
-        Write-ServiceErr 'Cannot inspect runtime slots: no bootstrap Python is available'
-        return $false
-    }
-    & $py $vr --root $InstallDir --link-name (Split-Path -Leaf $LinkDir) slot $SrcVersion --clean-incomplete 2>&1 |
-        ForEach-Object { Write-Host "  ...    $_" }
-    if ($LASTEXITCODE -ne 0) {
+    $result = Invoke-VersionedRuntime -Arguments @(
+        '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir),
+        'slot', $SrcVersion, '--clean-incomplete'
+    )
+    if ($result.Output) { $result.Output -split "`r?`n" | ForEach-Object { Write-Host "  ...    $_" } }
+    if ($result.ExitCode -ne 0) {
         Write-ServiceErr "Failed to clean incomplete runtime slot (versions/$SrcVersion)"
         return $false
     }
@@ -440,7 +461,11 @@ function Invoke-VersionedMarkComplete {
        tossable + retryable (#935). No-op in legacy mode. #>
     if (-not $VersionedRuntime) { return $true }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = Get-BootstrapPython
+    $py = if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
+        $VenvPython
+    } else {
+        Get-BootstrapPython
+    }
     if (-not $py) {
         Write-ServiceErr 'Cannot mark runtime complete: no bootstrap Python is available'
         return $false
@@ -613,9 +638,6 @@ function Deploy-Venv {
     <# Create the Python venv via uv. Deps come from pyproject at package
        install time -- no ad-hoc pyyaml here. #>
     Assert-Uv
-    if (-not (Test-Path $VenvDir)) {
-        New-Item -ItemType Directory -Path $VenvDir -Force | Out-Null
-    }
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     # Prefer a SAC-trusted signed base Python via `--copies` so the venv
@@ -699,16 +721,28 @@ function Deploy-SelfProvisioningBinstub {
 $env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-codespaces'
 function _resolve_cs_py {
+    function _version_key([string]$ver) {
+        [regex]::Replace($ver.ToLowerInvariant(), '\d+', { param($m) $m.Value.PadLeft(20, '0') })
+    }
+    function _try_slot([string]$ver) {
+        if (-not $ver) { return $null }
+        $slot = Join-Path $_root ('versions\' + $ver)
+        if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) { return $null }
+        foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+            $candidate = Join-Path $slot $sub
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+        return $null
+    }
     foreach ($marker in @('current-version', 'last-known-good')) {
         $ver = ''
         try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
-        $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-        $complete = if ($ver) { Join-Path $_root ('versions\' + $ver + '\.install-complete.json') } else { '' }
-        if ($p -and (Test-Path -LiteralPath $complete -PathType Leaf) -and (Test-Path -LiteralPath $p)) { return $p }
+        $p = _try_slot $ver
+        if ($p) { return $p }
     }
-    Get-ChildItem (Join-Path $_root 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc | ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { _version_key $_.Name } | ForEach-Object { _try_slot $_.Name } |
+        Where-Object { $_ } | Select-Object -Last 1
 }
 $_py = _resolve_cs_py
 if ($_py) { & $_py -m agent_codespaces @args; exit $LASTEXITCODE }
@@ -774,7 +808,6 @@ set "_VER="
 if exist "%_ROOT%\last-known-good" set /p _VER=<"%_ROOT%\last-known-good"
 if defined _VER if exist "%_ROOT%\versions\%_VER%\.install-complete.json" if exist "%_ROOT%\versions\%_VER%\Scripts\python.exe" set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
 if defined _PY goto :eof
-for /f "delims=" %%f in ('dir /b /s /a-d /o-d "%_ROOT%\versions\*\.install-complete.json" 2^>nul') do if not defined _PY if exist "%%~dpfScripts\python.exe" set "_PY=%%~dpfScripts\python.exe"
 goto :eof
 '@
     [System.IO.File]::WriteAllText($stubPath, $stubContent, $utf8NoBom)

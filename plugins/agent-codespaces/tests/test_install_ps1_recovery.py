@@ -42,6 +42,13 @@ args = sys.argv[1:]
 mode = os.environ["TEST_UV_MODE"]
 if mode == "fail-all":
     raise SystemExit(23)
+if args and args[0] == "run":
+    script_index = next(i for i, arg in enumerate(args) if arg.endswith(".py"))
+    result = subprocess.run(
+        [os.environ["TEST_BASE_PYTHON"], *args[script_index:]],
+        check=False,
+    )
+    raise SystemExit(result.returncode)
 if args and args[0] == "venv":
     target = Path(args[1])
     result = subprocess.run(
@@ -88,7 +95,14 @@ raise SystemExit(2)
     return fake_bin
 
 
-def _environment(home: Path, fake_bin: Path, driver: Path, mode: str) -> dict[str, str]:
+def _environment(
+    home: Path,
+    fake_bin: Path,
+    driver: Path,
+    mode: str,
+    *,
+    uv_only: bool = False,
+) -> dict[str, str]:
     env = os.environ.copy()
     env.pop("COPILOT_PLUGIN_INSTALL_STAGED", None)
     env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
@@ -97,7 +111,7 @@ def _environment(home: Path, fake_bin: Path, driver: Path, mode: str) -> dict[st
         {
             "USERPROFILE": str(home),
             "OS": "Windows_Test",
-            "PATH": str(fake_bin) + os.pathsep + env["PATH"],
+            "PATH": str(fake_bin) if uv_only else str(fake_bin) + os.pathsep + env["PATH"],
             "TEST_BASE_PYTHON": sys.executable,
             "TEST_FAKE_UV": str(driver),
             "TEST_UV_MODE": mode,
@@ -115,6 +129,7 @@ def _run(
     fake_bin: Path,
     mode: str,
     force: bool = False,
+    uv_only: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     args = [PWSH, "-NoProfile", "-File", str(install), action]
     if force:
@@ -122,7 +137,13 @@ def _run(
     return subprocess.run(
         args,
         cwd=home,
-        env=_environment(home, fake_bin, fake_bin.parent / "fake_uv.py", mode),
+        env=_environment(
+            home,
+            fake_bin,
+            fake_bin.parent / "fake_uv.py",
+            mode,
+            uv_only=uv_only,
+        ),
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -133,6 +154,49 @@ def _run(
 
 def _slot(home: Path) -> Path:
     return home / ".agent-codespaces" / "versions" / VERSION
+
+
+def test_uv_only_clean_host_installs_without_precreating_slot(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_bin = _write_fake_uv(tmp_path)
+
+    result = _run(
+        INSTALL,
+        "install",
+        home=home,
+        fake_bin=fake_bin,
+        mode="success",
+        uv_only=True,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert (_slot(home) / ".install-complete.json").is_file()
+
+
+def test_uv_only_host_rebuilds_malformed_current_slot(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_bin = _write_fake_uv(tmp_path)
+    slot = _slot(home)
+    (slot / "Scripts").mkdir(parents=True)
+    (slot / "Scripts" / "python.exe").write_text("malformed", encoding="ascii")
+    (slot / "partial.txt").write_text("discard", encoding="ascii")
+    root = slot.parents[1]
+    (root / "current-version").write_text(VERSION, encoding="ascii")
+
+    result = _run(
+        INSTALL,
+        "install",
+        home=home,
+        fake_bin=fake_bin,
+        mode="success",
+        uv_only=True,
+    )
+
+    assert result.returncode == 0, result.stdout
+    assert not (slot / "partial.txt").exists()
+    assert (slot / ".install-complete.json").is_file()
 
 
 def _seed_healthy_slot(home: Path) -> Path:

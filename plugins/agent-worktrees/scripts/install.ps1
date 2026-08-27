@@ -1425,6 +1425,7 @@ set "_ROOT=%USERPROFILE%\.agent-worktrees"
 set "_VER="
 if exist "%_ROOT%\current-version" set /p _VER=<"%_ROOT%\current-version"
 set "_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe"
+if not exist "%_ROOT%\versions\%_VER%\.install-complete.json" goto :_aw_fallback
 if not exist "%_PY%" goto :_aw_fallback
 "%_PY%" -m agent_worktrees --project $ProjectName %*
 exit /b %ERRORLEVEL%
@@ -1454,8 +1455,23 @@ $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 $_py = ''
 $_ver = ''
 try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}
-$_py = if ($_ver) { Join-Path $_root ('versions\' + $_ver + '\Scripts\python.exe') } else { '' }
-if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }
+function _key([string]$ver) { [regex]::Replace($ver.ToLowerInvariant(), '\d+', { param($m) $m.Value.PadLeft(20, '0') }) }
+function _try([string]$ver) {
+    if (-not $ver) { return $null }
+    $slot = Join-Path $_root ('versions\' + $ver)
+    if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) { return $null }
+    foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+        $candidate = Join-Path $slot $sub
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return $null
+}
+$_py = _try $_ver
+if (-not $_py) {
+    $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { _key $_.Name } | ForEach-Object { _try $_.Name } |
+        Where-Object { $_ } | Select-Object -Last 1
+}
 if (Test-Path $_py) {
     & $_py -m agent_worktrees --project '%%PROJECT%%' @args
     exit $LASTEXITCODE

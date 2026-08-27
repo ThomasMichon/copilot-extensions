@@ -62,6 +62,21 @@ LAUNCH_PROJECT="${WORKTREE_PROJECT:-}"
 # `.venv` symlink is retired (#1106).
 RUNTIME_DIR="$HOME/.agent-worktrees"
 
+version_key() {
+    awk '
+      {
+        original = $0; key = ""; rest = $0
+        while (match(rest, /[0-9]+/)) {
+          key = key substr(rest, 1, RSTART - 1)
+          number = substr(rest, RSTART, RLENGTH)
+          key = key sprintf("%020d", number + 0)
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        print key rest "\t" original
+      }
+    '
+}
+
 PYTHON=""
 if [[ -f "$RUNTIME_DIR/current-version" ]]; then
     _ver="$(tr -d '[:space:]' < "$RUNTIME_DIR/current-version")"
@@ -70,7 +85,12 @@ if [[ -f "$RUNTIME_DIR/current-version" ]]; then
     fi
 fi
 if [[ -z "$PYTHON" && -d "$RUNTIME_DIR/versions" ]]; then
-    for _d in $(ls -1 "$RUNTIME_DIR/versions" 2>/dev/null | sort -r); do
+    for _d in $(
+      for _slot in "$RUNTIME_DIR"/versions/*; do
+        [[ -d "$_slot" ]] || continue
+        printf '%s\n' "${_slot##*/}"
+      done | version_key | LC_ALL=C sort -r | cut -f2-
+    ); do
         if [[ -f "$RUNTIME_DIR/versions/$_d/.install-complete.json" && -x "$RUNTIME_DIR/versions/$_d/bin/python" ]]; then
             PYTHON="$RUNTIME_DIR/versions/$_d/bin/python"; break
         fi

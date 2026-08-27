@@ -35,6 +35,21 @@ _aw_try_slot() {
   return 1
 }
 
+_aw_version_key() {
+  awk '
+    {
+      original = $0; key = ""; rest = $0
+      while (match(rest, /[0-9]+/)) {
+        key = key substr(rest, 1, RSTART - 1)
+        number = substr(rest, RSTART, RLENGTH)
+        key = key sprintf("%020d", number + 0)
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      print key rest "\t" original
+    }
+  '
+}
+
 # Tier 1: the `current-version` marker (source of truth; atomically written).
 [ -f "$_awr/current-version" ] && _awv=$(tr -d ' \t\r\n' < "$_awr/current-version" 2>/dev/null)
 [ -n "$_awv" ] && _aw_try_slot "$_awv"
@@ -49,14 +64,15 @@ fi
 
 # Tier 3: true first-run -> newest complete installed slot.
 if [ -z "$AW_PY" ]; then
-  for _m in "$_awr"/versions/*/.install-complete.json; do
-    [ -f "$_m" ] || continue
-    _slot=${_m%/.install-complete.json}
-    for _sub in bin/python Scripts/python.exe; do
-      [ -x "$_slot/$_sub" ] && AW_PY="$_slot/$_sub"
-    done
+  for _awv in $(
+    for _slot in "$_awr"/versions/*; do
+      [ -d "$_slot" ] || continue
+      printf '%s\n' "${_slot##*/}"
+    done | _aw_version_key | LC_ALL=C sort | cut -f2-
+  ); do
+    _aw_try_slot "$_awv" || true
   done
 fi
 AGENT_RT_PY="$AW_PY"
-unset _awr _awv _awlkg _sub _m _slot 2>/dev/null || true
-unset -f _aw_try_slot 2>/dev/null || true
+unset _awr _awv _awlkg _sub _slot 2>/dev/null || true
+unset -f _aw_try_slot _aw_version_key 2>/dev/null || true

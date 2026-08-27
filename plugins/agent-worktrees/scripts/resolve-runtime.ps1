@@ -35,6 +35,13 @@ function _Aw-TrySlot([string]$ver) {
   return $null
 }
 
+function _Aw-VersionKey([string]$ver) {
+  return [regex]::Replace(
+    $ver.ToLowerInvariant(), '\d+',
+    { param($m) $m.Value.PadLeft(20, '0') }
+  )
+}
+
 # Tier 1: the `current-version` marker (source of truth; atomically written).
 $_awv = ''
 try { $_awv = ([IO.File]::ReadAllText((Join-Path $_awr 'current-version'))).Trim() } catch {}
@@ -50,11 +57,10 @@ if (-not $AwPy) {
 
 # Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
-  $AwPy = Get-ChildItem (Join-Path $_awr 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
-    Sort-Object { $_.Directory.Name } |
-    ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
-    Where-Object { Test-Path -LiteralPath $_ } |
-    Select-Object -Last 1
+  $AwPy = Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue |
+    Sort-Object { _Aw-VersionKey $_.Name } |
+    ForEach-Object { _Aw-TrySlot $_.Name } |
+    Where-Object { $_ } | Select-Object -Last 1
 }
 
 $AgentRtPy = $AwPy

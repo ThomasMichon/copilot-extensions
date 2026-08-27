@@ -48,7 +48,8 @@ def test_windows_binstub_resolves_complete_slots_and_serializes_provision() -> N
 
     assert "@('current-version', 'last-known-good')" in ps1
     assert ".install-complete.json" in ps1
-    assert "Sort-Object LastWriteTimeUtc" in ps1
+    assert "_version_key" in ps1
+    assert "PadLeft(20, '0')" in ps1
     assert "System.Threading.Mutex" in ps1
     assert 'agent-worktrees.ps1" %*' in cmd
     assert "current-version" in cmd
@@ -62,7 +63,8 @@ def test_posix_binstub_resolves_only_active_or_complete_slots() -> None:
 
     assert "for _marker in current-version last-known-good" in sh
     assert ".install-complete.json" in sh
-    assert "ls -1t" in sh
+    assert "_aw_version_key" in sh
+    assert "sort -V" not in sh
     assert '_aw_exec_resolved "$@"' in sh
 
 

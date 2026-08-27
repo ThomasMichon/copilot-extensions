@@ -12,16 +12,28 @@ $env:PYTHONUTF8 = '1'
 # AGENT_WORKTREES_NO_SELFPROVISION=1 (then falls through to a PATH python).
 $_root = Join-Path $env:USERPROFILE '.agent-worktrees'
 function _resolve_aw_py {
+    function _version_key([string]$ver) {
+        [regex]::Replace($ver.ToLowerInvariant(), '\d+', { param($m) $m.Value.PadLeft(20, '0') })
+    }
+    function _try_slot([string]$ver) {
+        if (-not $ver) { return $null }
+        $slot = Join-Path $_root ('versions\' + $ver)
+        if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) { return $null }
+        foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+            $candidate = Join-Path $slot $sub
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+        return $null
+    }
     foreach ($marker in @('current-version', 'last-known-good')) {
         $ver = ''
         try { $ver = ([IO.File]::ReadAllText((Join-Path $_root $marker))).Trim() } catch {}
-        $p = if ($ver) { Join-Path $_root ('versions\' + $ver + '\Scripts\python.exe') } else { '' }
-        $complete = if ($ver) { Join-Path $_root ('versions\' + $ver + '\.install-complete.json') } else { '' }
-        if ($p -and (Test-Path -LiteralPath $complete -PathType Leaf) -and (Test-Path -LiteralPath $p)) { return $p }
+        $p = _try_slot $ver
+        if ($p) { return $p }
     }
-    Get-ChildItem (Join-Path $_root 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
-        Sort-Object LastWriteTimeUtc | ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1
+    Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { _version_key $_.Name } | ForEach-Object { _try_slot $_.Name } |
+        Where-Object { $_ } | Select-Object -Last 1
 }
 $_py = _resolve_aw_py
 if ($_py) { & $_py -m agent_worktrees @args; exit $LASTEXITCODE }

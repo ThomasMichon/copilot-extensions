@@ -52,6 +52,7 @@ import argparse
 import errno
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -105,16 +106,20 @@ def list_versions(root: Path) -> list[str]:
 
 
 def _version_key(v: str):
-    """Best-effort ordering key (PEP 440 when available, else raw string)."""
-    try:
-        from packaging.version import InvalidVersion, Version
-
-        try:
-            return (0, Version(v))
-        except InvalidVersion:
-            return (1, v)
-    except Exception:
-        return (1, v)
+    """Stdlib-only ordering key for supported ``X.Y.Z[-devN]`` versions."""
+    supported = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", v)
+    if supported:
+        major, minor, patch, dev = supported.groups()
+        return (
+            0,
+            int(major),
+            int(minor),
+            int(patch),
+            1 if dev is None else 0,
+            int(dev or 0),
+        )
+    tokens = re.split(r"(\d+)", v.casefold())
+    return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
 
 
 # --------------------------------------------------------------------------

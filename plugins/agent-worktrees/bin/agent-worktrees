@@ -8,6 +8,20 @@
 # resort (#234 defect 2).
 export PYTHONUTF8=1
 _awroot="$HOME/.agent-worktrees"
+_aw_version_key() {
+  awk '
+    {
+      original = $0; key = ""; rest = $0
+      while (match(rest, /[0-9]+/)) {
+        key = key substr(rest, 1, RSTART - 1)
+        number = substr(rest, RSTART, RLENGTH)
+        key = key sprintf("%020d", number + 0)
+        rest = substr(rest, RSTART + RLENGTH)
+      }
+      print key rest "\t" original
+    }
+  '
+}
 _aw_exec_resolved() {
   for _marker in current-version last-known-good; do
     _awver=""
@@ -23,9 +37,14 @@ _aw_exec_resolved() {
   # before package installation/health checks finish and must never be launched.
   _awcand=""
   _awmode=""
-  _complete="$(ls -1t "$_awroot"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
-  if [ -n "$_complete" ]; then
-    _awslot=$(dirname "$_complete")
+  for _awver in $(
+    for _awslot in "$_awroot"/versions/*; do
+      [ -d "$_awslot" ] || continue
+      printf '%s\n' "${_awslot##*/}"
+    done | _aw_version_key | LC_ALL=C sort | cut -f2-
+  ); do
+    _awslot="$_awroot/versions/$_awver"
+    [ -f "$_awslot/.install-complete.json" ] || continue
     if [ -x "$_awslot/bin/agent-worktrees" ]; then
       _awcand="$_awslot/bin/agent-worktrees"
       _awmode=console
@@ -33,7 +52,7 @@ _aw_exec_resolved() {
       _awcand="$_awslot/Scripts/python.exe"
       _awmode=python
     fi
-  fi
+  done
   if [ "$_awmode" = console ]; then exec "$_awcand" "$@"; fi
   if [ "$_awmode" = python ]; then exec "$_awcand" -m agent_worktrees "$@"; fi
 }

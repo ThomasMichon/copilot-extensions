@@ -33,6 +33,24 @@ if [ -n "$_rt_root" ]; then
     return 1
   }
 
+  # Portable numeric-token key: plain POSIX awk + sort, never GNU `sort -V`.
+  _rt_version_key() {
+    awk '
+      {
+        original = $0
+        key = ""
+        rest = $0
+        while (match(rest, /[0-9]+/)) {
+          key = key substr(rest, 1, RSTART - 1)
+          number = substr(rest, RSTART, RLENGTH)
+          key = key sprintf("%020d", number + 0)
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        print key rest "\t" original
+      }
+    '
+  }
+
   # Tier 1: the `current-version` marker (source of truth; atomically written).
   [ -f "$_rt_root/current-version" ] && \
     _rt_ver=$(tr -d ' \t\r\n' < "$_rt_root/current-version" 2>/dev/null)
@@ -45,15 +63,20 @@ if [ -n "$_rt_root" ]; then
   fi
 
   # Tier 3: true first-run (no marker, no last-known-good) -> newest complete
-  # slot, matching versioned_runtime.resolve_python. Version-sorted (so
-  # 0.1.0-dev185 > 0.1.0-dev50, not lexicographic).
+  # slot, matching versioned_runtime.resolve_python. The key transform makes
+  # plain POSIX sort version-aware (dev185 > dev50) without GNU `sort -V`.
   if [ -z "$AGENT_RT_PY" ]; then
-    # shellcheck disable=SC2012,SC2045  # version names never contain whitespace
-    for _rt_v in $(ls -1 "$_rt_root/versions" 2>/dev/null | sort -V); do
+    # shellcheck disable=SC2046  # version names never contain whitespace
+    for _rt_v in $(
+      for _rt_dir in "$_rt_root"/versions/*; do
+        [ -d "$_rt_dir" ] || continue
+        printf '%s\n' "${_rt_dir##*/}"
+      done | _rt_version_key | LC_ALL=C sort | cut -f2-
+    ); do
       _rt_try_slot "$_rt_v" || true
     done
   fi
 
-  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v 2>/dev/null || true
-  unset -f _rt_try_slot 2>/dev/null || true
+  unset _rt_root _rt_ver _rt_lkg _rt_sub _rt_v _rt_dir 2>/dev/null || true
+  unset -f _rt_try_slot _rt_version_key 2>/dev/null || true
 fi

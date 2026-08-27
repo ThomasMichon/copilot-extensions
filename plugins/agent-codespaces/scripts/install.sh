@@ -540,6 +540,20 @@ deploy_binstub() {
 export PYTHONUTF8=1
 _name="agent-codespaces"
 _root="$HOME/.$_name"
+_version_key() {
+    awk '
+      {
+        original = $0; key = ""; rest = $0
+        while (match(rest, /[0-9]+/)) {
+          key = key substr(rest, 1, RSTART - 1)
+          number = substr(rest, RSTART, RLENGTH)
+          key = key sprintf("%020d", number + 0)
+          rest = substr(rest, RSTART + RLENGTH)
+        }
+        print key rest "\t" original
+      }
+    '
+}
 _resolve_python() {
     for _marker in current-version last-known-good; do
         _ver=""
@@ -550,10 +564,17 @@ _resolve_python() {
             return
         fi
     done
-    _complete="$(ls -1t "$_root"/versions/*/.install-complete.json 2>/dev/null | head -n1)"
-    _candidate=""
-    [ -n "$_complete" ] && _candidate="$(dirname "$_complete")/bin/python"
-    [ -x "$_candidate" ] && printf '%s\n' "$_candidate"
+    for _ver in $(
+      for _slot in "$_root"/versions/*; do
+        [ -d "$_slot" ] || continue
+        printf '%s\n' "${_slot##*/}"
+      done | _version_key | LC_ALL=C sort | cut -f2-
+    ); do
+        _candidate="$_root/versions/$_ver/bin/python"
+        [ -f "$_root/versions/$_ver/.install-complete.json" ] &&
+            [ -x "$_candidate" ] && _resolved="$_candidate"
+    done
+    [ -n "${_resolved:-}" ] && printf '%s\n' "$_resolved"
 }
 _python="$(_resolve_python)"
 # Fast path: runtime already provisioned.

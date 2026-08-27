@@ -170,40 +170,48 @@ if ($RecoveryMode) {
 # #637, and prone to drift; a marker file never is). Fallback: the newest
 # installed slot only -- the `.venv` link is retired (#1106).
 $RuntimeDir = Join-Path $env:USERPROFILE '.agent-worktrees'
+function Get-RuntimeVersionKey([string]$Version) {
+    return [regex]::Replace(
+        $Version.ToLowerInvariant(), '\d+',
+        { param($m) $m.Value.PadLeft(20, '0') }
+    )
+}
+
+function Resolve-RuntimeSlotPython([string]$Version) {
+    if (-not $Version) { return $null }
+    $slot = Join-Path $RuntimeDir ('versions\' + $Version)
+    if (-not (Test-Path -LiteralPath (Join-Path $slot '.install-complete.json') -PathType Leaf)) {
+        return $null
+    }
+    foreach ($sub in @('Scripts\python.exe', 'bin\python')) {
+        $candidate = Join-Path $slot $sub
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+    }
+    return $null
+}
+
 function Resolve-CurrentRuntimePython {
     try {
         $version = ([IO.File]::ReadAllText(
             (Join-Path $RuntimeDir 'current-version')
         )).Trim()
-        if (-not $version) { return $null }
-        $python = Join-Path $RuntimeDir (
-            'versions\' + $version + '\Scripts\python.exe'
-        )
-        $complete = Join-Path $RuntimeDir (
-            'versions\' + $version + '\.install-complete.json'
-        )
-        if ((Test-Path -LiteralPath $complete -PathType Leaf) -and
-            (Test-Path -LiteralPath $python -PathType Leaf)) { return $python }
+        return Resolve-RuntimeSlotPython $version
     } catch {}
     return $null
 }
 
-$VenvPython = $null
-try {
-    $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'current-version'))).Trim()
-    if ($_ver) {
-        $_p = Join-Path $RuntimeDir ('versions\' + $_ver + '\Scripts\python.exe')
-        $_complete = Join-Path $RuntimeDir ('versions\' + $_ver + '\.install-complete.json')
-        if ((Test-Path -LiteralPath $_complete -PathType Leaf) -and
-            (Test-Path -LiteralPath $_p)) { $VenvPython = $_p }
-    }
-} catch {}
+$VenvPython = Resolve-CurrentRuntimePython
 if (-not $VenvPython) {
-    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions\*\.install-complete.json') -File -ErrorAction SilentlyContinue |
-        Sort-Object { $_.Directory.Name } |
-        ForEach-Object { Join-Path $_.DirectoryName 'Scripts\python.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } |
-        Select-Object -Last 1
+    try {
+        $_ver = ([IO.File]::ReadAllText((Join-Path $RuntimeDir 'last-known-good'))).Trim()
+        $VenvPython = Resolve-RuntimeSlotPython $_ver
+    } catch {}
+}
+if (-not $VenvPython) {
+    $VenvPython = Get-ChildItem (Join-Path $RuntimeDir 'versions') -Directory -ErrorAction SilentlyContinue |
+        Sort-Object { Get-RuntimeVersionKey $_.Name } |
+        ForEach-Object { Resolve-RuntimeSlotPython $_.Name } |
+        Where-Object { $_ } | Select-Object -Last 1
 }
 
 if ($VenvPython -and (Test-Path -LiteralPath $VenvPython)) {
