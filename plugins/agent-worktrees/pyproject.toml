@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-worktrees"
-version = "1.5.3-dev631"
+version = "1.5.3-dev632"
 description = "Worktree isolation system for concurrent Copilot CLI sessions"
 readme = "README.md"
 license = "MIT"
@@ -18,6 +18,8 @@ dependencies = [
     "agent-config-migrate",
     "agent-plugin-resolve",
     "agent-procutil",
+    "agent-dropin-registry",
+    "agent-plugin-activation",
 ]
 
 [tool.uv.sources]
@@ -32,6 +34,12 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 # Shared Windows-headless / detached process-spawn kwargs (module
 # ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# Resilient scan authority, entry decisions, and bounded warning tracking for
+# filesystem registries (module ``dropin_registry``).
+agent-dropin-registry = { path = "libs/dropin-registry" }
+# Effective global-or-adopted-project plugin eligibility and identity-verified
+# roots for attributed registry entries (module ``plugin_activation``).
+agent-plugin-activation = { path = "libs/plugin-activation" }
 
 [project.scripts]
 agent-worktrees = "agent_worktrees.__main__:main"

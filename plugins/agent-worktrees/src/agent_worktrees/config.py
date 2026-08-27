@@ -800,7 +800,16 @@ def load_config(path: Path | None = None) -> Config:
     # config.yaml. Drop-ins deep-merge with everything else, so a per-repo
     # ``session_env`` addition survives alongside the repo's own keys.
     machine_raw = _load_yaml_safe(path)
-    dropins = _load_config_d(path.parent / "config.d")
+    preliminary_repo_name = (
+        machine_raw.get("repo_name")
+        or global_raw.get("repo_name")
+        or _project_name_safe()
+    )
+    dropins = _load_config_d(
+        path.parent / "config.d",
+        project_name=str(preliminary_repo_name or ""),
+        warn=True,
+    )
     if dropins:
         machine_raw = _deep_merge(dropins, machine_raw)
 
@@ -972,24 +981,39 @@ def _load_yaml_safe(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _load_config_d(config_d: Path) -> dict[str, Any]:
-    """Deep-merge every ``*.yaml`` in a ``config.d`` directory (sorted by name).
+def _load_config_d(
+    config_d: Path,
+    *,
+    project_name: str = "",
+    warn: bool = False,
+) -> dict[str, Any]:
+    """Deep-merge validated active entries from a ``config.d`` registry.
 
     A drop-in lets a service register machine-local config without editing the
     shared ``config.yaml`` (e.g. the vault registering
     ``session_env.SUDO_ASKPASS``). Files merge in lexical order (later names win
-    among drop-ins); the caller layers the result UNDER ``config.yaml``. Never
-    raises -- a missing dir or a bad file degrades to what parsed cleanly.
+    among drop-ins); the caller layers the result UNDER ``config.yaml``.
+
+    Direct YAML is operator-owned. Managed plugins use attributed JSON pointers
+    to YAML contained by their current identity-verified root. Every entry is an
+    independent fault boundary and uncertainty retains only its last-known
+    contribution.
     """
-    try:
-        if not config_d.is_dir():
-            return {}
-        merged: dict[str, Any] = {}
-        for f in sorted(config_d.glob("*.yaml")):
-            merged = _deep_merge(merged, _load_yaml_safe(f))
-        return merged
-    except Exception:
-        return {}
+    from .config_dropins import (
+        scan_config_dropin_registry,
+        warn_config_dropin_findings,
+    )
+
+    report = scan_config_dropin_registry(
+        config_d,
+        project_name=project_name,
+    )
+    if warn:
+        warn_config_dropin_findings(report)
+    merged: dict[str, Any] = {}
+    for contribution in report.active_configs:
+        merged = _deep_merge(merged, contribution.raw_config)
+    return merged
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
