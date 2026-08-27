@@ -633,6 +633,17 @@ def _worktree_to_dict(
         "title": rec.title,
         "resume_count": rec.resume_count,
     }
+    # Session ownership is durable record state, not live-scan enrichment.
+    # Cache-only Picker rows must therefore carry the registered session count
+    # and current head before any events/mux/process scan runs.  The head is the
+    # asserted succession pointer; a newer transcript timestamp or a surviving
+    # predecessor mux must never replace it.
+    registered_sessions = getattr(rec, "sessions", None)
+    if registered_sessions is not None:
+        d["session_count"] = len(registered_sessions)
+    head_session = getattr(rec, "resolved_head_session", None)
+    if head_session:
+        d["last_session_id"] = head_session
     if rec.completed_at:
         d["completed_at"] = rec.completed_at
     if rec.kind in tracking.MANAGED_KINDS:
@@ -714,12 +725,17 @@ def _worktree_to_dict(
     if session_ctx is not None:
         norm = _normalize_path(rec.worktree_path)
         d["turn_count"] = session_ctx.turn_count.get(norm, 0)
-        d["session_count"] = session_ctx.session_count.get(norm, 0)
+        # Legacy records with no registry retain the scan-derived count.  Once
+        # a registry exists, its journal is authoritative even when a session
+        # directory is temporarily unavailable.
+        if registered_sessions is None:
+            d["session_count"] = session_ctx.session_count.get(norm, 0)
         # two-step-restore: the session id(s) currently held by a live
         # ``inuse.<pid>.lock`` (a bound Copilot process -- mux OR bare), and the
-        # most-recent session id for this worktree. The Picker shows the id (so
-        # the operator can ``/resume`` it manually) and gates the Reclaim action
-        # on a live lock. Both stay off the dict when absent to keep it lean.
+        # current durable head for this worktree. The Picker shows the head id
+        # (so the operator can ``/resume`` it manually) and gates the Reclaim
+        # action on a live lock. Both stay off the dict when absent to keep it
+        # lean.
         _live_ids = session_ctx.active_sessions.get(norm) or []
         if _live_ids:
             d["live_session_ids"] = list(_live_ids)
@@ -733,15 +749,6 @@ def _worktree_to_dict(
         if _stale_pids:
             d["session_lock_stale"] = True
             d["stale_lock_pids"] = list(_stale_pids)
-        # GH #198: read the resume-target id from the single scan pass
-        # (scan_sessions_fast folds it into SessionContext.last_session_id)
-        # instead of a per-worktree full re-scan of session-state. The old
-        # find_latest_session_id_fast() fell back to an O(all-sessions)
-        # yaml.safe_load walk *per worktree*, so with N worktrees it was
-        # O(worktrees x sessions) and could pin a core on a large tree.
-        _last_sid = session_ctx.last_session_id.get(norm)
-        if _last_sid:
-            d["last_session_id"] = _last_sid
         # worktree-status-core: the live activity pulse (derived from the
         # agent's assistant.intent stream by the live-pulse extension). Emitted
         # only when present so un-annotated worktrees stay lean; the picker

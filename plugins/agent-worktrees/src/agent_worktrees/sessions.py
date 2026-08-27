@@ -103,8 +103,10 @@ class SessionContext:
     list command no longer re-scans **all** of ``session-state`` once per
     worktree -- that per-worktree full scan was O(worktrees x sessions)
     ``yaml.safe_load`` calls and could pin a CPU core on a large tree (GH #198).
-    Mirrors ``find_latest_session_id`` semantics: detached sessions skipped (by
-    callers), conversation data required, newest ``updated_at`` wins."""
+    This is transcript metadata only, never the current-session authority:
+    callers derive resumability from ``WorktreeRecord.resolved_head_session``.
+    Detached sessions are skipped, conversation data is required, and newest
+    ``updated_at`` wins."""
 
     _last_sid_ts: dict[str, str] = field(default_factory=dict)
     """Internal: tracks latest updated_at per path for last_session_id selection.
