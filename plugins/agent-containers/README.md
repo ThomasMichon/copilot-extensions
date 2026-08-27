@@ -50,6 +50,26 @@ addressing (`container:<name>`) is unavailable.
   inside the wrapper, it is **never** placed in the SpawnTarget that
   agent-bridge persists to its SQLite DB, nor in any log. Restricted fleets keep
   the direct `docker exec` boundary and receive no SSH key projection.
+  `namespace-resolve` also returns a versioned `venue` block with a stable
+  provider target id (`container:<name>`), the current Docker instance id,
+  fleet/workspace identity, configured and effective trust posture, transport,
+  readiness, and capability envelope. The target id is scoped to the local
+  provider instance and survives deterministic container replacement; the
+  instance id changes so a consumer can detect replacement (enforcement is a
+  later consumer contract). `posture_verified: false` is deliberate:
+  `namespace-resolve` describes the observed label/state, while
+  `namespace-ensure-ready` and `exec` perform the authoritative live policy
+  inspection immediately before launch. A configured/observed trust mismatch is
+  reported unready and resolves to the stricter posture; unknown live profiles
+  are likewise non-projecting and launch is refused. Only exact
+  trusted-configured/trusted-observed posture may enter the SSH, token, or relay
+  path, including Session Host preparation; missing labels are not interpreted
+  as trusted. Unlabeled legacy containers remain visible in inventory as
+  `security_profile: unknown` but cannot launch until their posture is
+  reconciled. The legacy
+  `security_profile` key remains in the block, so the new shape is a strict
+  superset for in-process consumers; older CLI bridge consumers ignore the
+  additive fields.
   The same trusted SSH process carries
   `-R 127.0.0.1:<container-relay>:127.0.0.1:<live-host-relay>`, so credential
   helpers connect only to container loopback and the host relay remains bound
@@ -159,6 +179,18 @@ re-inspects the live Docker posture before every start/exec and refuses drift in
 capabilities, security options, mounts, devices, namespace sharing, published
 ports, network isolation, resource limits, writable surfaces, or immutable image
 identity.
+
+The restricted launch command is a separate API that accepts only container,
+user, and ACP command. It has no parameters for a host token, credential relay,
+SSH projection, mount, network, or gateway, so the restricted path cannot gain
+those capabilities through an accidental caller flag.
+
+Venue capability booleans report configured launch authority, not inferred
+runtime access: `host_credentials` and `credential_relay` come from the effective
+fleet credential policy; `session_host` is trusted-only; and
+`container_local_workspace` means the target has a concrete container workspace,
+not that it is safe to mount host files. Unknown future capability keys must be
+treated as unavailable by consumers.
 
 `environment` is an explicit **non-secret** key/value allowlist baked into the
 container. Restricted configuration rejects credential-shaped names (`*_TOKEN`,

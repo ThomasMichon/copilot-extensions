@@ -31,11 +31,15 @@ from . import __version__
 from .config import (
     RESTRICTED_PROFILE,
     SECURITY_PROFILE_LABEL,
+    TRUSTED_PROFILE,
     ContainersConfig,
     FleetConfig,
     load_config,
 )
-from .resolver import build_spawn_command, host_gh_token
+from .resolver import (
+    build_restricted_spawn_command,
+    host_gh_token,
+)
 from .ssh_transport import (
     build_remote_command,
     build_ssh_command,
@@ -152,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
     ns_resolve_p = sub.add_parser(
         "namespace-resolve",
         help="Print JSON {type,spawn_command,user,workspace_folder,"
-        "security_profile} resolving a container name "
+        "security_profile,venue} resolving a container name "
         "(not-found -> exit 3).",
     )
     ns_resolve_p.add_argument("name", help="Container name")
@@ -257,12 +261,16 @@ def _trusted_session_host_context(name: str):
         )
     actual_profile = (
         ((inspect_container(name).get("Config") or {}).get("Labels") or {})
-        .get(SECURITY_PROFILE_LABEL, "trusted")
+        .get(SECURITY_PROFILE_LABEL)
     )
-    if fleet.restricted or actual_profile == RESTRICTED_PROFILE:
+    if (
+        fleet.security_profile != TRUSTED_PROFILE
+        or actual_profile != TRUSTED_PROFILE
+    ):
         raise RuntimeError(
-            f"Container '{name}' is restricted; Session Host projection is "
-            "trusted-fleet only"
+            f"Container '{name}' is not exact trusted/trusted posture "
+            f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
+            "Session Host projection is trusted-fleet only"
         )
     user = fleet.exec_user or config.exec_user
     workspace = fleet.workspace_folder or config.workspace_folder
@@ -461,7 +469,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                     inspected = inspect_container(c.name)
                     actual_profile = (
                         (inspected.get("Config") or {}).get("Labels") or {}
-                    ).get(SECURITY_PROFILE_LABEL, "trusted")
+                    ).get(SECURITY_PROFILE_LABEL)
                     actual_network = (inspected.get("HostConfig") or {}).get(
                         "NetworkMode"
                     )
@@ -699,11 +707,22 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     inspected = inspect_container(args.name)
     actual_profile = (
         (inspected.get("Config") or {}).get("Labels") or {}
-    ).get(SECURITY_PROFILE_LABEL, "trusted")
+    ).get(SECURITY_PROFILE_LABEL)
     fleet = config.fleets.get(info.fleet or "") if info and info.fleet else None
     if fleet is None:
         raise RuntimeError(
             f"Container '{args.name}' has no matching fleet configuration; "
+            "refusing dispatch"
+        )
+    if actual_profile not in {TRUSTED_PROFILE, RESTRICTED_PROFILE}:
+        raise RuntimeError(
+            f"Container '{args.name}' has unsupported live security profile "
+            f"{actual_profile!r}; refusing dispatch"
+        )
+    if fleet.security_profile != actual_profile:
+        raise RuntimeError(
+            f"Container '{args.name}' security profile does not match its fleet "
+            f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
             "refusing dispatch"
         )
     if fleet and fleet.restricted:
@@ -720,12 +739,6 @@ def _cmd_exec(args: argparse.Namespace) -> int:
                 f"Container '{args.name}' does not satisfy the restricted "
                 f"security policy: {'; '.join(posture_errors)}"
             )
-    elif actual_profile == RESTRICTED_PROFILE:
-        raise RuntimeError(
-            f"Container '{args.name}' is labeled restricted but its configured "
-            "fleet is not; refusing dispatch"
-        )
-
     user = (fleet.exec_user if fleet else None) or config.exec_user
     acp_command = config.acp_command_for(fleet)
 
@@ -760,9 +773,22 @@ def _launch_container_agent(
     acp_command: str,
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
-    forward, relay_enabled = config.credentials_for(fleet)
     if actual_profile == RESTRICTED_PROFILE:
-        forward, relay_enabled = False, False
+        spawn_cmd = build_restricted_spawn_command(
+            args.name,
+            user,
+            acp_command,
+        )
+        log.info("exec transport=docker target=%s", args.name)
+        env = os.environ.copy()
+        if not args.stdio:
+            proc = subprocess.run(
+                spawn_cmd, env=env, creationflags=_creation_flags()
+            )
+            return proc.returncode
+        return _exec_stdio(spawn_cmd, env)
+
+    forward, relay_enabled = config.credentials_for(fleet)
     env = os.environ.copy()
     if forward:
         token = host_gh_token()
@@ -814,18 +840,6 @@ def _launch_container_agent(
         reverse_forwards = [
             f"127.0.0.1:{config.relay_port}:127.0.0.1:{host_relay_port}"
         ]
-
-    if actual_profile == RESTRICTED_PROFILE:
-        spawn_cmd = build_spawn_command(
-            args.name, user, acp_command, forward, relay_env
-        )
-        log.info("exec transport=docker target=%s", args.name)
-        if not args.stdio:
-            proc = subprocess.run(
-                spawn_cmd, env=env, creationflags=_creation_flags()
-            )
-            return proc.returncode
-        return _exec_stdio(spawn_cmd, env)
 
     launch_env = container_environment(args.name, user)
     if forward and "GH_TOKEN" in env:

@@ -122,6 +122,109 @@ def test_restricted_exec_skips_ssh_lock(monkeypatch):
     assert cli._cmd_exec(_args()) == 0
 
 
+@pytest.mark.parametrize("live_profile", [None, "unexpected"])
+def test_exec_rejects_unknown_live_profile_before_launch(monkeypatch, live_profile):
+    import agent_containers.lifecycle as lifecycle
+
+    config, fleet = _config()
+    config.fleets["repo"] = fleet
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(
+        lifecycle,
+        "get_container",
+        lambda cfg, name: SimpleNamespace(fleet="repo"),
+    )
+    labels = {}
+    if live_profile is not None:
+        labels["agent-containers.security-profile"] = live_profile
+    monkeypatch.setattr(
+        lifecycle,
+        "inspect_container",
+        lambda name: {"Config": {"Labels": labels}},
+    )
+    monkeypatch.setattr(
+        cli,
+        "_launch_container_agent",
+        lambda *args: pytest.fail("unknown profile must not launch"),
+    )
+
+    with pytest.raises(RuntimeError, match="unsupported live security profile"):
+        cli._cmd_exec(_args())
+
+
+def test_exec_rejects_configured_observed_profile_mismatch(monkeypatch):
+    import agent_containers.lifecycle as lifecycle
+
+    config, fleet = _config()
+    config.fleets["repo"] = fleet
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(
+        lifecycle,
+        "get_container",
+        lambda cfg, name: SimpleNamespace(fleet="repo"),
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "inspect_container",
+        lambda name: {
+            "Config": {
+                "Labels": {"agent-containers.security-profile": "restricted"},
+            },
+        },
+    )
+    monkeypatch.setattr(
+        cli,
+        "_launch_container_agent",
+        lambda *args: pytest.fail("profile mismatch must not launch"),
+    )
+
+    with pytest.raises(RuntimeError, match="does not match its fleet"):
+        cli._cmd_exec(_args())
+
+
+def test_restricted_launch_never_enters_credential_or_relay_paths(monkeypatch):
+    config, fleet = _config()
+    fleet.security_profile = "restricted"
+    fleet.acp_command = "minimal-agent --stdio"
+    seen = {}
+
+    monkeypatch.setattr(
+        config,
+        "credentials_for",
+        lambda fleet: pytest.fail("restricted launch must not resolve credentials"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "host_gh_token",
+        lambda: pytest.fail("restricted launch must not fetch a host token"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_require_live_relay_port",
+        lambda: pytest.fail("restricted launch must not resolve a relay"),
+    )
+    def build_restricted(*args):
+        seen["spawn"] = list(args)
+        return ["docker"]
+
+    def run(command, **kwargs):
+        seen["run"] = (command, kwargs["env"])
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli, "build_restricted_spawn_command", build_restricted)
+    monkeypatch.setattr(cli.subprocess, "run", run)
+
+    assert cli._launch_container_agent(
+        _args(),
+        config,
+        fleet,
+        "restricted",
+        "agent",
+        "minimal-agent --stdio",
+    ) == 0
+    assert seen["spawn"] == ["repo-1", "agent", "minimal-agent --stdio"]
+
+
 def test_trusted_launch_uses_loopback_reverse_forward(monkeypatch):
     config, fleet = _config()
     seen = {}

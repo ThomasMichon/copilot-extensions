@@ -16,12 +16,13 @@ from ssh_manager import SSHConfig
 
 from agent_containers.resolver import (
     ContainerResolver,
+    build_restricted_spawn_command,
     build_spawn_command,
     build_wrapper_command,
 )
 
 
-def test_restricted_spawn_command_references_token_by_name_only():
+def test_trusted_spawn_command_references_token_by_name_only():
     cmd = build_spawn_command(
         "sandbox-1",
         "agent",
@@ -31,6 +32,28 @@ def test_restricted_spawn_command_references_token_by_name_only():
     assert cmd[:3] == ["docker", "exec", "-i"]
     assert "GH_TOKEN" in cmd
     assert not any("GH_TOKEN=" in part for part in cmd)
+
+
+def test_restricted_spawn_command_cannot_project_host_authority():
+    cmd = build_restricted_spawn_command(
+        "sandbox-1",
+        "agent",
+        "minimal-agent --stdio",
+    )
+    assert cmd == [
+        "docker",
+        "exec",
+        "-i",
+        "-u",
+        "agent",
+        "sandbox-1",
+        "bash",
+        "-lc",
+        "minimal-agent --stdio",
+    ]
+    assert "GH_TOKEN" not in cmd
+    assert not any(part.startswith("LC_GIT_CREDENTIAL_RELAY") for part in cmd)
+    assert "-e" not in cmd
 
 
 def test_build_wrapper_command():
@@ -73,7 +96,11 @@ def test_resolve_returns_wrapper_without_token(monkeypatch):
 
     monkeypatch.setattr(
         r, "get_container",
-        lambda config, name: types.SimpleNamespace(fleet="myrepo"),
+        lambda config, name: types.SimpleNamespace(
+            fleet="myrepo",
+            container_id="instance-123",
+            security_profile="trusted",
+        ),
     )
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig()
@@ -115,7 +142,13 @@ def test_resolve_spec_exposes_workspace_folder_and_profile(monkeypatch):
     _stub_agent_bridge(monkeypatch)
     monkeypatch.setattr(
         r, "get_container",
-        lambda config, name: types.SimpleNamespace(fleet="myrepo"),
+        lambda config, name: types.SimpleNamespace(
+            fleet="myrepo",
+            container_id="instance-123",
+            security_profile="restricted",
+            state="running",
+            is_running=True,
+        ),
     )
     config = ContainersConfig()
     config.fleets["myrepo"] = FleetConfig(
@@ -128,6 +161,30 @@ def test_resolve_spec_exposes_workspace_folder_and_profile(monkeypatch):
 
     assert spec["workspace_folder"] == "/workspaces/myrepo"
     assert spec["security_profile"] == "restricted"
+    assert spec["venue"] == {
+        "schema_version": 1,
+        "provider": "agent-containers",
+        "kind": "container",
+        "target_id": "container:myrepo-1",
+        "scope": "provider-instance",
+        "instance_id": "instance-123",
+        "fleet": "myrepo",
+        "workspace_folder": "/workspaces/myrepo",
+        "security_profile": "restricted",
+        "configured_security_profile": "restricted",
+        "observed_security_profile": "restricted",
+        "effective_security_profile": "restricted",
+        "state": "running",
+        "ready": True,
+        "posture_verified": False,
+        "transport": "docker-exec",
+        "capabilities": {
+            "container_local_workspace": True,
+            "host_credentials": False,
+            "credential_relay": False,
+            "session_host": False,
+        },
+    }
     # unchanged contract fields still present
     assert spec["type"] == "command"
     assert spec["spawn_command"][-3:] == ["exec", "--stdio", "myrepo-1"]
@@ -171,6 +228,9 @@ def test_resolve_spec_exposes_trusted_session_host_transport(monkeypatch):
     assert transport["acp_command"] == "copilot --acp --stdio"
     assert transport["ssh"]["host_alias"] == "agent-container-myrepo-1"
     assert transport["provider_command"][1:3] == ["-m", "agent_containers"]
+    assert spec["venue"]["target_id"] == "container:myrepo-1"
+    assert spec["venue"]["transport"] == "ssh"
+    assert spec["venue"]["capabilities"]["session_host"] is True
 
 
 def test_actual_restricted_label_never_projects_session_host_ssh(monkeypatch):
@@ -201,6 +261,105 @@ def test_actual_restricted_label_never_projects_session_host_ssh(monkeypatch):
     spec = asyncio.run(ContainerResolver().resolve_spec("myrepo-1"))
 
     assert "container" not in spec
+    assert spec["venue"]["security_profile"] == "restricted"
+    assert spec["venue"]["effective_security_profile"] == "restricted"
+    assert spec["venue"]["transport"] == "docker-exec"
+    assert spec["venue"]["ready"] is False
+    assert spec["venue"]["capabilities"]["host_credentials"] is False
+    assert spec["venue"]["capabilities"]["credential_relay"] is False
+
+
+def test_resolve_spec_stopped_restricted_target_is_not_ready(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    _stub_agent_bridge(monkeypatch)
+    monkeypatch.setattr(
+        r,
+        "get_container",
+        lambda config, name: types.SimpleNamespace(
+            fleet="sandbox",
+            container_id="instance-456",
+            security_profile="restricted",
+            state="exited",
+            is_running=False,
+        ),
+    )
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("sandbox-1"))
+
+    assert spec["venue"]["state"] == "exited"
+    assert spec["venue"]["ready"] is False
+    assert spec["venue"]["posture_verified"] is False
+
+
+def test_resolve_spec_configured_restricted_mismatch_fails_closed(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    _stub_agent_bridge(monkeypatch)
+    monkeypatch.setattr(
+        r,
+        "get_container",
+        lambda config, name: types.SimpleNamespace(
+            fleet="sandbox",
+            container_id="instance-789",
+            security_profile="trusted",
+            state="running",
+            is_running=True,
+        ),
+    )
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(security_profile="restricted")
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("sandbox-1"))
+
+    venue = spec["venue"]
+    assert venue["configured_security_profile"] == "restricted"
+    assert venue["observed_security_profile"] == "trusted"
+    assert venue["security_profile"] == "restricted"
+    assert venue["effective_security_profile"] == "restricted"
+    assert venue["transport"] == "docker-exec"
+    assert venue["ready"] is False
+    assert venue["capabilities"]["host_credentials"] is False
+    assert venue["capabilities"]["credential_relay"] is False
+
+
+def test_resolve_spec_unknown_observed_profile_fails_closed(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    _stub_agent_bridge(monkeypatch)
+    monkeypatch.setattr(
+        r,
+        "get_container",
+        lambda config, name: types.SimpleNamespace(
+            fleet="trusted",
+            container_id="instance-unknown",
+            security_profile="unexpected",
+            state="running",
+            is_running=True,
+        ),
+    )
+    config = ContainersConfig(forward_gh_token=True, relay_enabled=True)
+    config.fleets["trusted"] = FleetConfig(security_profile="trusted")
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+
+    venue = asyncio.run(ContainerResolver().resolve_spec("trusted-1"))["venue"]
+
+    assert venue["observed_security_profile"] == "unexpected"
+    assert venue["security_profile"] == "restricted"
+    assert venue["ready"] is False
+    assert venue["transport"] == "docker-exec"
+    assert venue["capabilities"]["host_credentials"] is False
+    assert venue["capabilities"]["credential_relay"] is False
 
 
 def test_resolve_missing_container_raises(monkeypatch):
@@ -250,3 +409,43 @@ def test_ensure_ready_restricted_validates_before_start(monkeypatch):
 
     with pytest.raises(RuntimeError, match="does not satisfy"):
         asyncio.run(ContainerResolver().ensure_ready("sandbox-1"))
+
+
+def test_ensure_ready_rejects_unknown_profile(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    config = ContainersConfig()
+    config.fleets["trusted"] = FleetConfig(security_profile="trusted")
+    info = types.SimpleNamespace(
+        name="trusted-1",
+        fleet="trusted",
+        security_profile="unexpected",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_container", lambda cfg, name: info)
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="unsupported live security profile"):
+        asyncio.run(ContainerResolver().ensure_ready("trusted-1"))
+
+
+def test_ensure_ready_rejects_profile_mismatch(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    config = ContainersConfig()
+    config.fleets["trusted"] = FleetConfig(security_profile="trusted")
+    info = types.SimpleNamespace(
+        name="trusted-1",
+        fleet="trusted",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_container", lambda cfg, name: info)
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="does not match its fleet"):
+        asyncio.run(ContainerResolver().ensure_ready("trusted-1"))
