@@ -116,7 +116,10 @@ reachable when their ownership is explicit.
 - [ ] Stop installing generic `agent-*` commands into `~/.local/bin`; retained
   service, provider, remote, scheduled, startup, and deployment boundaries still
   require attributable external-launch contracts before their compatibility
-  wrappers can be retired.
+  wrappers can be retired. The
+  [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) accounts
+  for all 86 guard-visible findings, records known guard-invisible callers, and
+  maps their Phase 2, Phase 3, Phase 4, and Phase 6 dependencies.
 - [x] Make project binstubs pin their owning payload and reject silent ownership
   transfer.
 
@@ -362,3 +365,16 @@ See [`design.md`](design.md).
   retained external management boundaries; removing them before they receive
   attributable launch contracts would break out-of-session callers rather than
   isolate them.
+
+### 2026-08-26 — Phase 2 launcher dependency map
+
+- Classified all 86 remaining global-plugin-binstub findings in the
+  [launcher contract inventory](phase-2-launcher-contracts.md).
+- Identified six payload-owned agent-ssh wrapper findings that can move directly
+  to their own generated payload command in Phase 2.
+- Bound durable provider manifests, remote transport, persisted callbacks, and
+  cross-plugin bootstrap to the Phase 3 installation-context and canonical
+  launcher contract.
+- Kept generic wrapper removal in Phase 6, after cell-local runtime rollout,
+  ownership attribution, health proof, and rollback protection. Documentation
+  cleanup and the six immediate findings do not make #1103 complete.
