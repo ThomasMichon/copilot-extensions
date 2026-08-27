@@ -22,9 +22,11 @@ Every new manifest declares:
 {
   "schema_version": 1,
   "label": "Tasks",
+  "entity": "task",
   "after": "Worktrees",
   "home": false,
   "list": ["agent-example", "list", "--json"],
+  "items_field": "entries",
   "entry": {
     "id": "id",
     "title": "title",
@@ -39,11 +41,20 @@ Every new manifest declares:
 Version-1 compatibility also covers the existing declarative fields:
 
 - `columns`, `summary`, `scope`, `stream`, and `subscribe`;
+- optional `ready_status`, formatted from the loaded summary plus generic
+  `project`, `count`, and `label` values before declared shortcut hints;
+- `items_field` when an object-shaped list envelope names its row array
+  something other than `entries`;
+- optional `entity`, a stable semantic concept such as `worktree`, `task`, or
+  `venue` that lets generic Manager interactions recognize cross-cutting row
+  semantics without selecting a provider-specific renderer;
 - `home: true` to designate the ordinary initial pivot through the same generic
   contract as every peer (at most one enabled contribution should declare it);
 - pivot `actions`, including command, `internal`, `form`, and `card` kinds;
 - pivot `view_actions`, with the same action kinds, for operations that do not
   target a selected row;
+- optional action `shortcut`, used by the generic interaction shell to expose
+  the action's keyboard affordance without hard-coding a provider's keys;
 - top-level `worktree_actions`;
 - top-level `config_sections`.
 

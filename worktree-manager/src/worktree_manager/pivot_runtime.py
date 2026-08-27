@@ -49,13 +49,18 @@ def format_argv(
     return argv
 
 
-def parse_list_payload(data: object) -> PivotPayload:
+def parse_list_payload(
+    data: object,
+    *,
+    items_field: str = "entries",
+) -> PivotPayload:
     """Normalize the contract's bare-array and entries/summary shapes."""
     if isinstance(data, Mapping):
-        raw_rows = data.get("entries", [])
+        raw_rows = data.get(items_field, [])
         raw_summary = data.get("summary", {})
         if not isinstance(raw_rows, list):
-            raise PivotLoadError("list command returned a non-array `entries` field")
+            raise PivotLoadError(
+                f"list command returned a non-array `{items_field}` field")
         if not isinstance(raw_summary, Mapping):
             raise PivotLoadError("list command returned a non-object `summary` field")
     elif isinstance(data, list):
@@ -119,4 +124,4 @@ def load_pivot(
         data = json.loads(stdout_text or "[]")
     except ValueError as exc:
         raise PivotLoadError("list command did not print JSON") from exc
-    return parse_list_payload(data)
+    return parse_list_payload(data, items_field=pivot.items_field)

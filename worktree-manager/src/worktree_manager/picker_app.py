@@ -21,26 +21,97 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from textual.app import App, ComposeResult
+from textual.events import Key
 from textual.widgets import DataTable, Footer, Header, Static, Tab, Tabs
 
 from . import demo
 from . import engine_client as ec
 from .engine_client import EngineError, Worktree
 from .pivot_runtime import PivotLoadError, PivotPayload, load_pivot
-from .plugin_contracts import PivotContract, PluginContribution
+from .plugin_contracts import PivotContract, PluginContribution, parse_manifest
 
 Source = Callable[[], "list[Worktree]"]
 ContextSource = Callable[[], "Mapping[str, object]"]
 PivotLoader = Callable[[PivotContract, Mapping[str, object]], PivotPayload]
 
-_COLUMNS = ("id", "machine", "repo", "state", "±sync", "title")
 _WORKTREES = "worktrees"
+
+
+def _worktrees_contract() -> PivotContract:
+    """The current internal Worktrees contribution during payload migration."""
+    contribution = parse_manifest(
+        {
+            "schema_version": 1,
+            "label": "Worktrees",
+            "entity": "worktree",
+            "home": True,
+            "after": "Worktrees",
+            "list": [
+                "agent-worktrees",
+                "--project",
+                "{project}",
+                "list",
+                "--json",
+                "--classify",
+            ],
+            "items_field": "worktrees",
+            "entry": {
+                "id": "id",
+                "title": "title",
+            },
+            "columns": [
+                {"key": "id4", "header": "id"},
+                {"key": "machine", "header": "machine"},
+                {"key": "repo", "header": "repo"},
+                {"key": "state_display", "header": "state"},
+                {"key": "sync_tag", "header": "±sync"},
+                {"key": "title", "header": "title"},
+            ],
+            "ready_status": "{project} · {count} worktree(s)",
+            "actions": [
+                {
+                    "key": "resume",
+                    "label": "Launch/Resume",
+                    "kind": "internal",
+                    "verb": "resume",
+                    "shortcut": "l",
+                },
+                {
+                    "key": "bare-resume",
+                    "label": "Bare resume",
+                    "kind": "internal",
+                    "verb": "bare-resume",
+                    "shortcut": "b",
+                },
+            ],
+            "view_actions": [
+                {
+                    "key": "new",
+                    "label": "New worktree",
+                    "kind": "internal",
+                    "verb": "new",
+                    "shortcut": "n",
+                },
+            ],
+            "empty_hint": "No worktrees for this project.",
+        },
+        name=_WORKTREES,
+        marketplace="worktree-manager",
+        plugin="agent-worktrees",
+        source_path="internal:worktrees",
+    )
+    assert contribution.pivot is not None
+    return contribution.pivot
+
+
+_WORKTREES_CONTRACT = _worktrees_contract()
 
 
 @dataclass(frozen=True)
 class _PivotDescriptor:
     key: str
     label: str
+    pivot: PivotContract
     contribution: PluginContribution | None = None
 
 
@@ -79,6 +150,32 @@ def _state_cell(w: Worktree) -> str:
     return state
 
 
+def _worktree_record(worktree: Worktree) -> dict[str, object]:
+    """Adapt the typed cross-cutting model to the declarative pivot row."""
+    record = dict(worktree.raw)
+    record.update({
+        "id": worktree.id,
+        "id4": worktree.id4,
+        "machine": worktree.machine or "?",
+        "repo": worktree.repo or "?",
+        "state_display": _state_cell(worktree),
+        "sync_tag": worktree.sync_tag,
+        "title": worktree.title or "",
+    })
+    return record
+
+
+def _worktree_from_pivot_row(
+    pivot: PivotContract,
+    row: Mapping[str, object],
+) -> Worktree:
+    """Normalize declared semantic fields into the typed Worktree model."""
+    normalized = dict(row)
+    normalized["id"] = row.get(pivot.id_field)
+    normalized["title"] = row.get(pivot.title_field)
+    return ec.worktree_from_dict(normalized)
+
+
 def rows_to_text(worktrees: list[Worktree], *, project: str) -> str:
     """A plain-text table of the same rows the Picker shows (preview + tests)."""
     header = f"Worktree Manager — {project}  ({len(worktrees)} worktrees)"
@@ -104,9 +201,6 @@ class WorktreeManagerApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh"),
-        ("l", "launch", "Launch/Resume"),
-        ("b", "bare_resume", "Bare resume"),
-        ("n", "new_worktree", "New worktree"),
     ]
 
     def __init__(
@@ -149,7 +243,7 @@ class WorktreeManagerApp(App):
         self._active_key = self._initial_pivot.key
         self._states = {pivot.key: _ViewState() for pivot in self._pivots}
         self._last_status = ""
-        self._worktrees: list[Worktree] = []
+        self._worktrees_by_pivot: dict[str, list[Worktree]] = {}
         #: Set when the operator picks a launch; read by the runner after quit.
         self.pending_launch: LaunchRequest | None = None
         self.sub_title = subtitle or project
@@ -181,7 +275,11 @@ class WorktreeManagerApp(App):
     def _build_pivots(
         contributions: Sequence[PluginContribution],
     ) -> list[_PivotDescriptor]:
-        worktrees = _PivotDescriptor(key=_WORKTREES, label="Worktrees")
+        worktrees = _PivotDescriptor(
+            key=_WORKTREES,
+            label=_WORKTREES_CONTRACT.label,
+            pivot=_WORKTREES_CONTRACT,
+        )
         contributed: list[_PivotDescriptor] = []
         for index, contribution in enumerate(contributions):
             pivot = contribution.pivot
@@ -190,6 +288,7 @@ class WorktreeManagerApp(App):
             contributed.append(_PivotDescriptor(
                 key=f"contribution-{index}",
                 label=pivot.label,
+                pivot=pivot,
                 contribution=contribution,
             ))
 
@@ -272,6 +371,24 @@ class WorktreeManagerApp(App):
         if event.tab.id and event.tab.id in self._pivot_by_tab:
             self._activate(self._pivot_by_tab[event.tab.id])
 
+    def on_key(self, event: Key) -> None:
+        descriptor = self._active_pivot()
+        actions = (*descriptor.pivot.actions, *descriptor.pivot.view_actions)
+        action = next(
+            (
+                action for action in actions
+                if action.available
+                and action.shortcut == event.key
+                and descriptor.pivot.entity == "worktree"
+                and action.internal in ("resume", "bare-resume", "new")
+            ),
+            None,
+        )
+        if action and action.internal:
+            event.prevent_default()
+            event.stop()
+            self._request_launch(action.internal)
+
     def action_refresh(self) -> None:
         self._start_load(self._active_pivot(), force=True)
 
@@ -287,10 +404,7 @@ class WorktreeManagerApp(App):
     def _configure_table(self, descriptor: _PivotDescriptor) -> None:
         table = self.query_one(DataTable)
         table.clear(columns=True)
-        if descriptor.key == _WORKTREES:
-            table.add_columns(*_COLUMNS)
-            return
-        pivot = descriptor.contribution.pivot  # type: ignore[union-attr]
+        pivot = descriptor.pivot
         if pivot.columns:
             for column in pivot.columns:
                 table.add_column(column.header, width=column.width)
@@ -305,8 +419,7 @@ class WorktreeManagerApp(App):
         if contribution is not None and not contribution.command_available:
             state.status = "error"
             state.error = (
-                f"{contribution.pivot.list_cmd[0]} is not available on PATH"
-                if contribution.pivot else "list command is unavailable"
+                f"{descriptor.pivot.list_cmd[0]} is not available on PATH"
             )
             self._render(descriptor)
             return
@@ -323,19 +436,37 @@ class WorktreeManagerApp(App):
 
     async def _load(self, descriptor: _PivotDescriptor, generation: int) -> None:
         try:
+            semantic_worktrees: list[Worktree] | None = None
             if descriptor.key == _WORKTREES:
-                rows: list[object] = list(await asyncio.to_thread(self._source))
-                summary: dict[str, object] = {}
+                worktrees = list(await asyncio.to_thread(self._source))
+                rows: list[object] = [
+                    _worktree_record(worktree) for worktree in worktrees
+                ]
+                summary: dict[str, object] = {
+                    "project": self._project,
+                    "count": len(worktrees),
+                }
+                semantic_worktrees = worktrees
             else:
                 contribution = descriptor.contribution
-                assert contribution is not None and contribution.pivot is not None
+                assert contribution is not None
                 context = dict(await asyncio.to_thread(self._context_source))
                 context.setdefault("project", self._project)
                 payload = await asyncio.to_thread(
-                    self._pivot_loader, contribution.pivot, context
+                    self._pivot_loader, descriptor.pivot, context
                 )
                 rows = list(payload.rows)
                 summary = dict(payload.summary)
+                if descriptor.pivot.entity == "worktree":
+                    try:
+                        semantic_worktrees = [
+                            _worktree_from_pivot_row(descriptor.pivot, row)
+                            for row in rows
+                            if isinstance(row, Mapping)
+                        ]
+                    except (TypeError, ValueError) as error:
+                        raise PivotLoadError(
+                            f"invalid worktree row: {error}") from error
         except (EngineError, PivotLoadError) as error:
             state = self._states[descriptor.key]
             if state.generation != generation:
@@ -355,8 +486,8 @@ class WorktreeManagerApp(App):
         state.summary = summary
         state.error = ""
         state.install_hint = False
-        if descriptor.key == _WORKTREES:
-            self._worktrees = [row for row in rows if isinstance(row, Worktree)]
+        if semantic_worktrees is not None:
+            self._worktrees_by_pivot[descriptor.key] = semantic_worktrees
         if self._active_key == descriptor.key:
             self._render(descriptor)
 
@@ -366,29 +497,16 @@ class WorktreeManagerApp(App):
         state = self._states[descriptor.key]
         table = self.query_one(DataTable)
         table.clear()
-        if descriptor.key == _WORKTREES:
-            for row in state.rows:
-                if not isinstance(row, Worktree):
-                    continue
-                table.add_row(
-                    row.id4,
-                    row.machine or "?",
-                    row.repo or "?",
-                    _state_cell(row),
-                    row.sync_tag or "",
-                    row.title or "",
-                )
-        else:
-            self._render_contribution_rows(table, descriptor, state)
+        self._render_pivot_rows(table, descriptor, state)
         self._set_status(self._status_text(descriptor, state))
 
-    def _render_contribution_rows(
+    def _render_pivot_rows(
         self,
         table: DataTable,
         descriptor: _PivotDescriptor,
         state: _ViewState,
     ) -> None:
-        pivot = descriptor.contribution.pivot  # type: ignore[union-attr]
+        pivot = descriptor.pivot
         for raw in state.rows:
             if not isinstance(raw, Mapping):
                 continue
@@ -418,25 +536,7 @@ class WorktreeManagerApp(App):
         state: _ViewState,
     ) -> str:
         cached = len(state.rows)
-        if descriptor.key == _WORKTREES:
-            if state.status == "loading":
-                return (
-                    f"{self._project} · refreshing {cached} cached worktree(s)…"
-                    if cached else f"{self._project} · loading worktrees…"
-                )
-            if state.status == "error":
-                hint = (
-                    "  Run `worktree-manager setup --apply` to install it."
-                    if state.install_hint
-                    else ""
-                )
-                return f"engine unavailable: {state.error}{hint}"
-            return (
-                f"{self._project} · {cached} worktree(s) · "
-                "l: launch/resume · b: bare · n: new · r: refresh · q: quit"
-            )
-
-        pivot = descriptor.contribution.pivot  # type: ignore[union-attr]
+        pivot = descriptor.pivot
         if state.status == "loading":
             return (
                 f"{pivot.label} · refreshing {cached} cached entr{'y' if cached == 1 else 'ies'}…"
@@ -444,12 +544,34 @@ class WorktreeManagerApp(App):
             )
         if state.status == "error":
             suffix = f" · showing {cached} cached" if cached else ""
-            return f"{pivot.label} unavailable: {state.error}{suffix}"
+            hint = (
+                "  Run `worktree-manager setup --apply` to install it."
+                if state.install_hint else ""
+            )
+            return f"{pivot.label} unavailable: {state.error}{suffix}{hint}"
         if not state.rows:
             return pivot.empty_hint
-        summary = _format_summary(pivot, state.summary)
-        suffix = f" · {summary}" if summary else ""
-        return f"{cached} {pivot.label.lower()}{suffix} · r: refresh · q: quit"
+        values = {
+            **state.summary,
+            "project": self._project,
+            "count": cached,
+            "label": pivot.label,
+        }
+        if pivot.ready_status:
+            ready = _format_template(pivot.ready_status, values)
+        else:
+            summary = _format_summary(pivot, state.summary)
+            suffix = f" · {summary}" if summary else ""
+            ready = f"{cached} {pivot.label.lower()}{suffix}"
+        action_hints = [
+            f"{action.shortcut}: {action.label}"
+            for action in (*pivot.actions, *pivot.view_actions)
+            if action.available
+            and action.shortcut
+            and pivot.entity == "worktree"
+            and action.internal in ("resume", "bare-resume", "new")
+        ]
+        return " · ".join([ready, *action_hints, "r: refresh", "q: quit"])
 
     # ── launch/resume action ─────────────────────────────────────────────────
 
@@ -459,13 +581,23 @@ class WorktreeManagerApp(App):
         except Exception:
             return None
         idx = table.cursor_row
-        if idx is None or idx < 0 or idx >= len(self._worktrees):
+        worktrees = self._worktrees_by_pivot.get(self._active_key, [])
+        if idx is None or idx < 0 or idx >= len(worktrees):
             return None
-        return self._worktrees[idx]
+        return worktrees[idx]
 
     def _request_launch(self, mode: str) -> None:
         """Record the operator's launch choice and quit so the runner can act."""
-        if self._active_key != _WORKTREES:
+        descriptor = self._active_pivot()
+        actions = (
+            descriptor.pivot.view_actions
+            if mode == "new"
+            else descriptor.pivot.actions
+        )
+        if (
+            descriptor.pivot.entity != "worktree"
+            or not any(action.internal == mode for action in actions)
+        ):
             self._set_status("pivot actions are not available in this parity slice.")
             return
         if mode == "new":
@@ -489,17 +621,15 @@ class WorktreeManagerApp(App):
             pass
 
     def on_data_table_row_selected(self, event) -> None:  # Enter on a row
-        self._request_launch("resume")
-
-    def action_launch(self) -> None:
-        self._request_launch("resume")
-
-    def action_bare_resume(self) -> None:
-        self._request_launch("bare-resume")
-
-    def action_new_worktree(self) -> None:
-        self._request_launch("new")
-
+        descriptor = self._active_pivot()
+        if (
+            descriptor.pivot.entity == "worktree"
+            and any(
+                action.internal == "resume"
+                for action in descriptor.pivot.actions
+            )
+        ):
+            self._request_launch("resume")
 
 # ── sources ─────────────────────────────────────────────────────────────────
 
@@ -595,16 +725,19 @@ def _cell_text(value: object) -> str:
 def _format_summary(pivot: PivotContract, summary: Mapping[str, object]) -> str:
     if not pivot.summary_template or not summary:
         return ""
+    return _format_template(pivot.summary_template, summary)
 
+
+def _format_template(template: str, values: Mapping[str, object]) -> str:
     class _Default(dict):
         def __missing__(self, key: str) -> str:
             return ""
 
-    values = _Default({
+    safe = _Default({
         key: "" if value is None else str(value)
-        for key, value in summary.items()
+        for key, value in values.items()
     })
     try:
-        return pivot.summary_template.format_map(values)
+        return template.format_map(safe)
     except (KeyError, IndexError, ValueError):
-        return pivot.summary_template
+        return template
