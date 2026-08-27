@@ -17912,7 +17912,7 @@ def _find_tracking_file_by_session(session_id: str) -> Path | None:
     for tracking_dir in _all_tracking_dirs():
         if not tracking_dir.exists():
             continue
-        for path in tracking_dir.glob("*.yaml"):
+        for path in sorted(tracking_dir.glob("*.yaml"), key=lambda item: item.name):
             try:
                 if session_id not in path.read_text(encoding="utf-8"):
                     continue

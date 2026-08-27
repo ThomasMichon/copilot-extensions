@@ -498,6 +498,25 @@ class TestDeregisterSessionStdin:
             tmp_tracking_dir / "wt-end.yaml"
         ).session_entry("session-end").ended_at
 
+    def test_exact_session_fallback_scans_record_names_deterministically(
+        self, tmp_path: Path, monkeypatch
+    ):
+        tracking_dir = tmp_path / "worktrees"
+        tracking_dir.mkdir()
+        _save_record(tracking_dir, "z-record", "/tmp/z")
+        _save_record(tracking_dir, "a-record", "/tmp/a")
+        m.cfg.set_active_project("test-project")
+        for worktree_id in ("z-record", "a-record"):
+            monkeypatch.setattr(
+                m.cfg, "tracking_dir", lambda: tracking_dir
+            )
+            m.tracking.register_session(worktree_id, "same-session")
+        monkeypatch.setattr(m, "_all_tracking_dirs", lambda: [tracking_dir])
+
+        found = m._find_tracking_file_by_session("same-session")
+
+        assert found == tracking_dir / "a-record.yaml"
+
 
 class TestRegisterSessionReseedsStatusUpdater:
     """sessionStart must re-seed the status-bar updater so an attached
