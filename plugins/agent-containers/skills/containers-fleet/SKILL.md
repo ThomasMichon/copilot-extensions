@@ -14,8 +14,10 @@ description: >-
 > The runtime works standalone. In an agent session, invoke the exact `argv`
 > from the agent-containers session command catalog; the payload-local command
 > provisions on first use. Do not search `PATH` or substitute a same-named
-> command from another payload. Outside an agent session, stamp a management
-> binstub from an explicitly chosen payload:
+> command from another payload. For bridge dispatch, use the exact `argv[0]`
+> from the agent-bridge session command catalog and replace
+> `<agent-bridge catalog argv[0]>` below with that path. Outside an agent
+> session, stamp a management binstub from an explicitly chosen payload:
 >
 > - Windows:
 >   `pwsh -NoProfile -ExecutionPolicy Bypass -File "<explicit-payload-path>\scripts\init.ps1" stamp`
@@ -152,7 +154,7 @@ cleanup drift.
 ## Dispatch work
 
 ```bash
-agent-bridge send container:myrepo-1 "run the unit tests in packages/foo" # marketplace-isolation: allow agent-bridge-management
+<agent-bridge catalog argv[0]> send container:myrepo-1 "run the unit tests in packages/foo"
 ```
 
 The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`

@@ -180,7 +180,7 @@ def _command_patterns(root: Path) -> CommandPatterns:
             re.IGNORECASE,
         ),
         multiline_inline=re.compile(
-            rf"""(?<!`)`(?!`)\s*{token}[ \t]+[^`\n]+\n[^`]*(?<!`)`(?!`)""",
+            rf"""(?<!`)`(?!`)\s*{token}(?:[ \t]+[^`\n]*\n|\s*\n)[^`]*(?<!`)`(?!`)""",
             re.IGNORECASE,
         ),
     )

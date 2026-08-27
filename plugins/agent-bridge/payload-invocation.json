@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-bridge",
+  "module": "agent_bridge",
+  "runtimeRoot": ".agent-bridge",
+  "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
+  "purpose": "Communicate with persistent agent sessions",
+  "installer": "install",
+  "windowsCatalogShim": "cmd",
+  "provisionMode": "direct"
+}

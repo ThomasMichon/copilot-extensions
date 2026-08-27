@@ -152,7 +152,7 @@ function resolveToken() {
 // --- One-time session metadata (safe to run sync at load: not a hot path) ---
 function resolveMetadata() {
   const cwd = process.cwd();
-  const get = (key) => runCli("agent-worktrees", ["get", key], cwd);
+  const get = (key) => runCli("agent-worktrees", ["get", key], cwd); // marketplace-isolation: allow agent-worktrees-management
   let branch = null;
   try {
     branch = execFileSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
@@ -262,7 +262,8 @@ async function flushEvents() {
 // wrapper mirrors the runtime's own system markers (<system_reminder> /
 // <system_notification>) so a cooperating agent parses it as authoritative
 // structure: it can tell peer traffic from operator input, see who sent it, and
-// reply over the same bridge with `agent-bridge send <reply-to> "..."`.
+// reply with the agent-bridge session catalog's exact argv[0] plus
+// `send <reply-to> "..."`.
 // Attribute values are escaped; the body is left literal (trusted single-
 // operator mesh) for readability.
 function escAttr(v) {
@@ -279,8 +280,9 @@ function escAttr(v) {
 const KIND_GUIDANCE = {
   notify: "This is a NOTIFY (informational). No reply or new work is expected; " +
     "acknowledge only if useful.",
-  "status-check": "This is a STATUS-CHECK. Answer tersely via `agent-bridge " +
-    "send <reply-to> \"...\"`; do NOT treat it as new work or start a task.",
+  "status-check": "This is a STATUS-CHECK. Answer tersely using the exact " +
+    "argv[0] from the agent-bridge session command catalog with " +
+    "`send <reply-to> \"...\"`; do NOT treat it as new work or start a task.",
 };
 
 function renderDeliveredPrompt(msg) {

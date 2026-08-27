@@ -4,22 +4,32 @@ description: >
   Diagnose agent-bridge CodeSpace dispatch failures without destroying evidence
   or changing shared state by default. Covers expected disconnect-and-resume,
   ACP resume hangs, 409 starting/not-idle errors, protocol disconnects,
-  mid-turn aborts, credential-relay auth flaps, `agent-bridge peek`, persisted
-  traces, split-brain checks, and operator-authorized remediation. Use for
+  mid-turn aborts, credential-relay auth flaps, persisted traces, split-brain
+  checks, agent-bridge peek, and operator-authorized remediation. Use for
   "agent-bridge session stuck/wedged", "resume hang", "dispatch stuck in
   starting", "send returns 409", "agent-bridge protocol error", "session
   aborted mid-turn", "connection closed", "restart agent-bridge", "codespace
-  can't push", "relay unreachable", "unable to get password", or "diagnose an
-  agent-bridge dispatch".
+  can't push", "relay unreachable", "unable to get password", or
+  "diagnose an agent-bridge dispatch".
 ---
 
 # Troubleshooting agent-bridge CodeSpace dispatch
+
+Use the exact `argv[0]` from the agent-bridge session command catalog for every
+interactive bridge operation below. Replace
+`<agent-bridge catalog argv[0]>` with that path; never search `PATH` for a
+same-named command. In PowerShell, invoke it as
+`& "<agent-bridge catalog argv[0]>" <args>`. Commands explicitly labeled as
+service or provider management boundaries remain literal global-wrapper
+invocations. If the catalog is missing, follow the single-installed-payload
+fallback in the `agent-bridge` skill and fail on ambiguity.
 
 Diagnose a wedged `agent-bridge` CodeSpace dispatch without discarding the
 session, disturbing unrelated work, or erasing the evidence. Two distinct
 failure modes -- jump to the matching section:
 
-- **ACP resume-hang** -- `agent-bridge send codespace:<name>` (or any `resume`)
+- **ACP resume-hang** --
+  `<agent-bridge catalog argv[0]> send codespace:<name>` (or any `resume`)
   against a **stopped multi-turn** session stalls in `[starting]` and never
   becomes usable. -> *Is this the resume-hang?* below.
 - **Credential-relay flap** -- the dispatched agent authors + commits work fine,
@@ -47,8 +57,8 @@ during a plugin update is normal transport recovery, not a wedged-session
 signature. Preserve the session and continue in place:
 
 ```bash
-agent-bridge peek <session>                  # when its current state is unclear
-agent-bridge send <session> "<next prompt>"  # resumes the same persisted session
+<agent-bridge catalog argv[0]> peek <session>                  # when its current state is unclear
+<agent-bridge catalog argv[0]> send <session> "<next prompt>"  # resumes the same persisted session
 ```
 
 Do not `end` + `create`, start a replacement session, or restart the daemon.
@@ -69,12 +79,12 @@ step is separately authorized:
   routing/health, and exact process listings);
 - preserve the existing bridge session and remote child;
 - do **not** `stop`, `end`, recreate, or start a replacement session;
-- do **not** restart/update/reinstall agent-bridge, kill processes, stop/start a
+- do **not** restart/update/reinstall the bridge daemon, kill processes, stop/start a
   CodeSpace or provider, or edit `active.json`, `relay-port`, session databases,
   or other runtime state;
 - report the evidence and file a bug in the owning tracker.
 
-In particular, **never restart the shared agent-bridge daemon just to clear a
+In particular, **never restart the shared bridge daemon just to clear a
 session/protocol error**. Daemon-touching commands already self-heal a genuinely
 down service, while a restart can disrupt unrelated sessions and hide the
 original failure. The remediation sections below are reference procedures to
@@ -89,7 +99,7 @@ All of these together mean it's the race, **not** a broken CodeSpace or bad plug
   multi-minute resume/create delay is a failure signal to trace, not normal or
   "known" expected latency.
 - The `send` fails immediately with **`HTTP 409: Session ... is starting, not idle`**.
-- The **CodeSpace is healthy** -- a direct `agent-codespaces ssh <name>` works
+- The **CodeSpace is healthy** -- a direct `agent-codespaces ssh <name>` works <!-- marketplace-isolation: allow provider-management -->
   throughout (the diagnostic SSH path skips plugin injection, which is *why* SSH
   succeeds while the `copilot --acp` launch hangs).
 - A **fresh `create`** on the same target reaches `[idle]` fine; only *resume*
@@ -104,8 +114,8 @@ Only when the operator explicitly authorizes dropping prior-turn context, a
 wedged/stopped ACP session can be ended and recreated:
 
 ```bash
-agent-bridge end <session>            # tears down the wedged session (bridge-side)
-agent-bridge create <target> ...      # fresh session-host -> reliably reaches [idle]
+<agent-bridge catalog argv[0]> end <session>            # tears down the wedged session (bridge-side)
+<agent-bridge catalog argv[0]> create <target> ...      # fresh session-host -> reliably reaches [idle]
 ```
 
 This trades prior-turn context for a new start; it is not a harmless diagnostic.
@@ -113,16 +123,16 @@ This trades prior-turn context for a new start; it is not a harmless diagnostic.
 target's own `~/.copilot/session-state/<acp_session_id>/events.jsonl` persists
 independently on the CodeSpace (that's what `peek` reads -- see below).
 
-## Decide BEFORE resuming -- `agent-bridge peek`
+## Decide BEFORE resuming -- payload-local `peek`
 
-`agent-bridge peek <session|agent>` gives a **Copilot-free** reuse verdict +
+`<agent-bridge catalog argv[0]> peek <session|agent>` gives a **Copilot-free** reuse verdict +
 context snapshot **without launching `copilot --acp`** (the thing that stalls).
 It reads the target session's `events.jsonl` directly over SSH and distills
 lifecycle/health, the recent message tail, a tool-call summary, and usage.
 
 ```bash
-agent-bridge peek <session>            # human-readable snapshot + verdict
-agent-bridge peek <session> --json     # machine-ingestible
+<agent-bridge catalog argv[0]> peek <session>            # human-readable snapshot + verdict
+<agent-bridge catalog argv[0]> peek <session> --json     # machine-ingestible
 ```
 
 A **`risky -- resumed without clean shutdown`** verdict is the resume-stall
@@ -190,7 +200,7 @@ all local, auth-free), then **fails only when it needs the remote (ADO/GitHub)**
   from short-TTL cache`**.
 - It fails **at push/PR time after a long turn** -- the auth-free work is done,
   so it looks like "everything's built but I can't ship it".
-- **`agent-bridge service restart` fixes a *standalone* `agent-codespaces ssh`
+- **`agent-bridge service restart` fixes a *standalone* `agent-codespaces ssh` <!-- marketplace-isolation: allow service-provider-management -->
   connection but NOT the in-flight bridge session** -- the classic "contradiction".
   The standalone path is one stable SSH; the in-flight session's reverse-forward
   is the thing that's flapping. (So it is *not* merely the Windows
@@ -215,8 +225,8 @@ when the operator confirms the work is durably committed and authorizes context
 loss should you end and recreate:
 
 ```bash
-agent-bridge end <session>            # frees the CodeSpace claim + stops the flapping monitor
-agent-bridge send codespace:<name> "<low-context task>"   # fresh session binds a stable reverse-forward
+<agent-bridge catalog argv[0]> end <session>            # frees the CodeSpace claim + stops the flapping monitor
+<agent-bridge catalog argv[0]> send codespace:<name> "<low-context task>"   # fresh session binds a stable reverse-forward
 ```
 
 A **fresh** session resolves the host relay port from the current serving daemon
@@ -311,7 +321,7 @@ after reviewing the evidence and accepting context loss.
 - Prefer **end + recreate** over daemon restarts -- a fresh session gets a clean
   port; restarting the daemon under a live wedged session does not fix its `-R`.
 - If auth is only briefly needed and the session is otherwise fine, a single
-  targeted remote op over a fresh **standalone** `agent-codespaces ssh <name>`
+  targeted remote op over a fresh **standalone** `agent-codespaces ssh <name>` <!-- marketplace-isolation: allow provider-management -->
   connection re-warms/verifies auth on that one connection (it does **not** fix
   the in-flight bridge session's git -- that still needs end + recreate).
 
@@ -357,7 +367,7 @@ pwsh -File <plugin>/scripts/repair-scheduled-task.ps1
 It reuses the existing task's action verbatim (the version-stable
 `start-agent-bridge.ps1` supervisor pointer), so only the logon mode changes.
 The repaired task starts the daemon at your next logon; meanwhile the daemon
-self-heals on demand (any `agent-bridge` command boots it), so there's no rush.
+self-heals on demand (any payload-local bridge command boots it), so there's no rush.
 Prefer the default interactive AtLogOn task; only opt into headless S4U
 (`install.ps1 provision -NonInteractive`, elevated) for an always-on box reached
 over SSH/RDP with no persistent interactive session -- and know S4U can silently
@@ -367,6 +377,6 @@ it alone.)
 
 ## Related skills
 
-- `agent-bridge` -- the CLI/service reference (same plugin).
+- the `agent-bridge` skill -- the CLI/service reference (same plugin).
 - `agent-codespaces:codespaces-lifecycle` -- CodeSpace ssh/list/stop/delete +
   rescue when the CodeSpace itself is broken (not the resume-race/relay-flap).

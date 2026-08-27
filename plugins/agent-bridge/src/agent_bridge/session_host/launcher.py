@@ -202,11 +202,12 @@ async def _spawn_child(
     argv: list[str], cwd: str | None, env: dict[str, str] | None,
 ) -> asyncio.subprocess.Process:
     child_env = os.environ.copy()
-    # The connect-auth nonce is for the host process only -- never leak it into
-    # the copilot child's environment.
-    child_env.pop(_NONCE_ENV, None)
     if env:
         child_env.update(env)
+    # Host-only payload and attach context must be re-established by the
+    # Copilot child's own plugin hooks, never inherited from this launcher.
+    child_env.pop(_NONCE_ENV, None)
+    child_env.pop("COPILOT_PLUGIN_ROOT", None)
     # POSIX/Linux: arm PR_SET_PDEATHSIG so copilot dies with the host even on a
     # hard host kill -- the Linux counterpart to the Windows kill-on-close job,
     # so a remote (mesh/CodeSpace) far side never orphans copilot. None (default)

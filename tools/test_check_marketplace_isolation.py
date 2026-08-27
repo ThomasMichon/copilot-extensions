@@ -170,6 +170,15 @@ def test_inventory_categories(tmp_path: Path) -> None:
     assert _categories(
         _write(
             root,
+            "plugins/example/skills/example/SKILL.md",
+            "`agent-bridge\n"
+            "live-sessions progress --handle example`\n",
+        ),
+        root,
+    ) == ["bare-agent-command"]
+    assert _categories(
+        _write(
+            root,
             "plugins/example/src/example/runtime.js",
             "function launch(cmd) { return spawn(cmd, []); }\n"
             "launch(\n"
@@ -183,6 +192,7 @@ def test_inventory_categories(tmp_path: Path) -> None:
 def test_payload_catalog_adopter_capabilities_avoid_bare_global_commands() -> None:
     patterns = cmi._command_patterns(REPO)
     for plugin in (
+        "agent-bridge",
         "agent-codespaces",
         "agent-containers",
         "agent-dispatch",

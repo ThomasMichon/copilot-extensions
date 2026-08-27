@@ -929,7 +929,7 @@ def _agent_worktrees_bin() -> str | None:
     omits ``~/.local/bin`` misses on ``shutil.which`` and falls through here.
     """
     import shutil
-    exe = shutil.which("agent-worktrees")
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow agent-worktrees-management
     if exe:
         return exe
     base = Path.home() / ".local" / "bin"

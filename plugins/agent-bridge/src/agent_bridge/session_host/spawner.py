@@ -74,7 +74,7 @@ def _resolve_provision_command() -> str | None:
     import shutil
     import subprocess
 
-    binstub = shutil.which("agent-codespaces")
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
         log.debug(
             "agent-codespaces binstub absent -- skipping relay-helper redeploy "

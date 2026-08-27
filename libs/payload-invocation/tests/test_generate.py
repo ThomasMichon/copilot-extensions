@@ -367,8 +367,10 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "plugin",
     [
+        "agent-bridge",
         "agent-codespaces",
         "agent-containers",
+        "agent-dispatch",
         "agent-logger",
         "agent-machines",
         "agent-mcp",

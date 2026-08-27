@@ -68,7 +68,7 @@ def _resolve_relay_launch_env(
     absent or the CLI fails, returns ``("", None)`` and the launch proceeds
     auth-light (fine for ACP + non-ADO turns).
     """
-    binstub = shutil.which("agent-codespaces")
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
         log.info(
             "agent-codespaces binstub absent -- launching Session Host "
@@ -280,7 +280,7 @@ def _claim_codespace(codespace_name: str, owner: str) -> tuple[bool, str]:
         return True, ""
     if not owner or not codespace_name:
         return True, ""
-    binstub = shutil.which("agent-codespaces")
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
         return True, ""
     creationflags = no_window_flags()
@@ -315,7 +315,7 @@ def _release_codespace_claim(codespace_name: str, owner: str) -> None:
         return
     if not owner or not codespace_name:
         return
-    binstub = shutil.which("agent-codespaces")
+    binstub = shutil.which("agent-codespaces")  # marketplace-isolation: allow provider-management
     if not binstub:
         return
     creationflags = no_window_flags()

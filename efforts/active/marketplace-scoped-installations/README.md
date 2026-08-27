@@ -283,6 +283,12 @@ See [`design.md`](design.md).
   agent-facing vault operations to a payload-local command while preserving
   installer/service actions, Git credential-helper registration, and
   `vault-askpass` as explicit out-of-session management boundaries.
+- The agent-dispatch slice merged in
+  [#1153](https://github.com/ThomasMichon/copilot-extensions/pull/1153), moving
+  interactive queue operations and generated focus guidance to a payload-local
+  command while preserving service/supervisor, scheduler/webhook, picker,
+  remote, startup-seed, provider, and static MCP launchers as explicit
+  compatibility boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 

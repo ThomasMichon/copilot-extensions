@@ -50,6 +50,8 @@ def test_provider_management_boundary_stays_explicit():
 
     assert "registered **management entry point**" in text
     assert "Session command catalogs do not replace this provider/supervisor boundary" in normalized
+    assert "<agent-bridge catalog argv[0]> send codespace:" in text
+    assert "marketplace-isolation: allow agent-bridge-management" not in text
 
 
 def test_cleaning_codespaces_skill_contract():

@@ -176,7 +176,7 @@ def _state_root_machines_yaml(repo: Path) -> str | None:
     import shutil
     import subprocess
 
-    exe = shutil.which("agent-worktrees")
+    exe = shutil.which("agent-worktrees")  # marketplace-isolation: allow agent-worktrees-management
     if not exe:
         return None
     try:
