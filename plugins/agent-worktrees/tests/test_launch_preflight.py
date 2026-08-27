@@ -80,13 +80,17 @@ def test_launch_preflight_uses_active_project_for_config_root(
     assert captured["config"].repo_name == "selected-repo"
 
 
-def _create_args(*, json_output: bool) -> argparse.Namespace:
+def _create_args(
+    *,
+    json_output: bool,
+    system: bool = False,
+) -> argparse.Namespace:
     return argparse.Namespace(
-        system=False,
+        system=system,
         no_owner=True,
         owner_ref=None,
         owner=None,
-        name=None,
+        name="service" if system else None,
         interface=None,
         origin=None,
         json=json_output,
@@ -103,6 +107,40 @@ def _forbid_create_mutations(monkeypatch) -> None:
     monkeypatch.setattr(m.permissions, "clone_permissions", forbidden)
     monkeypatch.setattr(m.permissions, "add_trusted_folder", forbidden)
     monkeypatch.setattr(m, "_reconcile_marketplaces_for_checkout", forbidden)
+
+
+def _stub_successful_create(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(
+        m.git_ops,
+        "git",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(m.git_ops, "resolve_start_point", lambda *_a, **_k: "HEAD")
+    monkeypatch.setattr(m.git_ops, "create_worktree", lambda *_a, **_k: None)
+    monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path / "tracking")
+    monkeypatch.setattr(
+        m.tracking,
+        "create_new_record",
+        lambda **kwargs: SimpleNamespace(**kwargs),
+    )
+    monkeypatch.setattr(m.permissions, "clone_permissions", lambda *_a: False)
+    monkeypatch.setattr(m.permissions, "add_trusted_folder", lambda *_a: False)
+    monkeypatch.setattr(m.activity, "log_event", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        m,
+        "_reconcile_marketplaces_for_checkout",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        m,
+        "_worktree_to_dict",
+        lambda record: {
+            "id": record.worktree_id,
+            "path": record.worktree_path,
+            "branch": record.branch,
+            "kind": record.kind,
+        },
+    )
 
 
 @pytest.mark.parametrize("json_output", [False, True])
@@ -127,6 +165,44 @@ def test_create_preflight_failure_has_zero_mutations_and_no_traceback(
         assert json.loads(captured.out)["error"] == "machine-local config root is unsafe"
     else:
         assert "machine-local config root is unsafe" in captured.err
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_system_create_skips_unsafe_launch_preflight_and_emits_path_only(
+    tmp_path,
+    monkeypatch,
+    capfd,
+    json_output,
+):
+    config = _config(tmp_path)
+    monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+    monkeypatch.setattr(
+        m,
+        "_preflight_launch",
+        lambda *_a, **_k: pytest.fail("system create ran launch preflight"),
+    )
+    monkeypatch.setattr(
+        m,
+        "_build_launch_cmd",
+        lambda *_a, **_k: pytest.fail("system create built a launch plan"),
+    )
+    _stub_successful_create(monkeypatch, tmp_path)
+
+    rc = m.cmd_create(_create_args(json_output=json_output, system=True))
+
+    captured = capfd.readouterr()
+    assert rc == 0
+    assert "Traceback" not in captured.out + captured.err
+    if json_output:
+        data = json.loads(captured.out)
+        assert set(data) == {"version", "worktree"}
+        assert data["worktree"]["kind"] == "system"
+        assert data["worktree"]["path"].startswith(str(tmp_path / "worktrees"))
+        assert "launch" not in data
+    else:
+        assert "Created system worktree" in captured.out
+        assert "Path:" in captured.out
+        assert "launch" not in captured.out.lower()
 
 
 def test_resolve_json_new_preflight_failure_has_zero_mutations(

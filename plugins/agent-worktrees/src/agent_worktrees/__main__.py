@@ -1040,17 +1040,20 @@ def _create_worktree_core(
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
-    fake_args = argparse.Namespace(
-        copilot_args=[], recovery=recovery, no_mux=no_mux,
-        no_resume=False, profile=None,
-    )
-    launch_preflight = launch_preflight or _preflight_launch(
-        config,
-        fake_args,
-        worktree_path,
-    )
-    if launch_preflight.error:
-        raise LaunchPreflightError(launch_preflight.error)
+    launches_copilot = kind != "system"
+    fake_args = None
+    if launches_copilot:
+        fake_args = argparse.Namespace(
+            copilot_args=[], recovery=recovery, no_mux=no_mux,
+            no_resume=False, profile=None,
+        )
+        launch_preflight = launch_preflight or _preflight_launch(
+            config,
+            fake_args,
+            worktree_path,
+        )
+        if launch_preflight.error:
+            raise LaunchPreflightError(launch_preflight.error)
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
@@ -1181,7 +1184,13 @@ def _create_worktree_core(
     # direct launch commands see registered local marketplaces immediately.
     _reconcile_marketplaces_for_checkout(worktree_path, ensure_ignored=True)
 
-    # Build launch command (for caller to use)
+    result = {"worktree": _worktree_to_dict(record)}
+    if not launches_copilot:
+        return result
+
+    # Build launch command (for caller to use).
+    assert fake_args is not None
+    assert launch_preflight is not None
     launch_cmd = _build_launch_cmd(
         config,
         fake_args,
@@ -1191,9 +1200,7 @@ def _create_worktree_core(
     )
     env = _build_env(profile, _repo_session_env(config, worktree_path), work_dir=worktree_path)
 
-    return {
-        "worktree": _worktree_to_dict(record),
-        "launch": {
+    result["launch"] = {
             "action": "exec",
             "work_dir": worktree_path,
             "cmd": launch_cmd,
@@ -1201,8 +1208,8 @@ def _create_worktree_core(
             "worktree_id": worktree_id,
             "post_exit": True,
             "no_mux": no_mux,
-        },
     }
+    return result
 
 
 def _self_owner_ref(work_dir: str | None) -> str | None:
@@ -1342,7 +1349,7 @@ class LaunchPreflight:
 
     @property
     def config_root_path(self) -> str:
-        return self.config_root.path if self.config_root else ""
+        return (self.config_root.path or "") if self.config_root else ""
 
 
 class LaunchPreflightError(RuntimeError):
