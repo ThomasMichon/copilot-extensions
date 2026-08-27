@@ -46,7 +46,7 @@ plugins and register against the same contract.
   per-transport drop-in `50-agent-ssh-<module>.conf`. Each transport owns only
   its own fragment.
 - **Managed-fragment hygiene** (`<catalog argv[0]> doctor`) -- audits only the
-  agent-ssh namespace against the current registry/module sources, isolates
+  managed fragment namespace against the current registry/module sources, isolates
   malformed or stale peers, and gives exhaustive human/JSON report-only cleanup
   guidance without touching unrelated OpenSSH files.
 - **Reachability verification** (`<catalog argv[0]> verify`) -- probes the active SSH
