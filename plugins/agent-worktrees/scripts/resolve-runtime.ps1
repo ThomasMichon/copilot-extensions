@@ -1,12 +1,13 @@
 # Canonical agent-worktrees runtime resolver -- dot-sourced by the Windows hooks
-# and binstubs. Sets $AwPy to the runtime slot python resolved via the
+# and binstubs. Sets $AwPy and the payload-invocation contract's $AgentRtPy to
+# the runtime slot python resolved via the
 # junction-free `current-version` marker (the single source of truth; #1106):
 #
 #   %USERPROFILE%\.agent-worktrees\current-version -> versions\<ver>\Scripts\python.exe
 #
 # Nothing resolves through the retired `.venv` junction (a reparse point blocked
-# by RedirectionGuard, WinError 448/3, and prone to drift). $AwPy is $null when
-# no runtime slot is installed (callers degrade gracefully / no-op).
+# by RedirectionGuard, WinError 448/3, and prone to drift). Both variables are
+# $null when no runtime slot is installed (callers degrade gracefully / no-op).
 #
 # Resolution order (#742): the marker is written atomically (temp + rename), so
 # it is never observed half-written or transiently absent during a swap. When it
@@ -51,3 +52,5 @@ if (-not $AwPy) {
     Where-Object { Test-Path -LiteralPath $_ } |
     Select-Object -Last 1
 }
+
+$AgentRtPy = $AwPy
