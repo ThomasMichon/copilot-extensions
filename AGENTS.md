@@ -23,6 +23,7 @@ repo via the Copilot CLI marketplace.
 | Know **which plugins exist** (+ versions) | `.github/plugin/marketplace.json` (source of truth), rendered in `README.md` and `docs/architecture.md` |
 | Understand **how the suite works today** (as-is) | `docs/architecture.md` |
 | See **how we build plugins here** (reusable design) | `docs/patterns/README.md` |
+| Add an **`agent-*` runtime plugin** with commands/services | `docs/patterns/runtime-agent-plugin.md` |
 | See **what a subject should ultimately be** (intent) | `visions/README.md` |
 | Plan or resume a **stretch of work** | `efforts/README.md` + the **`efforts:planning-efforts`** skill |
 | **Make a change and land it correctly** | the **`copilot-extensions-harness:contributing-to-copilot-extensions`** skill (+ *Contribution Rules* below) |
@@ -44,6 +45,8 @@ copilot-extensions/
     pyproject.toml             # runtime plugins only: Python package + version
     src/<pkg>/                 # runtime plugins only: Python source
     scripts/                   # runtime plugins only: installers (init.ps1/sh, install.ps1/sh)
+    payload-invocation.json    # runtime command declarations
+    bin/                       # generated shims (or payload-invocation outputDir)
     skills/                    # plugin-provided skills
     tests/                     # runtime plugins with a suite
     hooks.json | extensions/   # optional: session-start hook / session extension
@@ -69,7 +72,11 @@ payload split, and the per-plugin lifecycle tables** live in
 `docs/architecture.md` (and the `README.md` plugin table) — derived from
 `.github/plugin/marketplace.json`, which is the single source of truth.
 **Don't re-enumerate the plugin roster here** — that duplicate is exactly what
-drifts. All binstubs live in `~/.local/bin/`.
+drifts. Runtime plugins carry generated payload-local agent commands and emit
+their exact `argv` through attributable session command glossaries.
+`~/.local/bin/agent-*` remains a legacy management compatibility surface during
+the installation-cell migration; machine-global command ownership converges on
+attributable project binstubs.
 
 > agent-bridge sources the `codespace:` / `container:` namespaces from a
 > **filesystem provider registry** — each provider drops a manifest into

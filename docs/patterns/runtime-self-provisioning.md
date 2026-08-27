@@ -7,7 +7,7 @@ pattern is a **realization** of that invariant that holds **without depending on
 particular sibling being the session launcher**, and **in confined environments**
 (the GitHub Copilot app, a cloud agent) where neither a launch-wrapper nor
 session-start hooks are guaranteed.
-**Exemplar:** agent-codespaces (self-provisioning binstub + `stamp`/`provision`
+**Exemplar:** agent-codespaces (payload-local self-provisioning shim + `stamp`/`provision`
 actions + vendored-uv + pip-index bridge + bootstrap-check auto-stamp + skill
 readiness self-check).
 
@@ -34,8 +34,8 @@ Provisioning is delivered by **three independent layers**, ordered by how much o
 the environment they need. Each works on its own; together they make provisioning
 succeed across the widest set of environments. **None depends on a sibling.**
 
-1. **Self-provisioning binstub — the safety net (needs only a shell + the binstub on disk).**
-   The plugin's one canonical binstub is a *smart shim*: when its versioned venv is
+1. **Payload-local self-provisioning shim — the safety net (needs only a shell + the payload).**
+   The plugin's generated payload command is a *smart shim*: when its versioned venv is
    present it is a thin exec (fast path); when it is **absent** it **provisions on
    first use**, then dispatches. It must:
    - **announce, never block silently** — a human line on stderr **and** a
@@ -46,23 +46,25 @@ succeed across the widest set of environments. **None depends on a sibling.**
    - **fail fast with the real cause** (a non-zero exit + actionable message; a
      durable status marker) — never a silent half-state.
 
-2. **Session-start auto-stamp — the optimization (needs the env to fire hooks).**
+2. **Session-start bootstrap — the optimization (needs the env to fire hooks).**
    The plugin's `bootstrap-check` sessionStart hook, when the runtime is
-   unprovisioned, runs the installer's cheap **`stamp`** action — *splat the binstub
-   + payload marker only, deferring the venv build to first use*. Stamp is
-   grace-window-safe (no venv build on the hook), so the binstub is on PATH *this*
-   session and self-provisions when first called. Where hooks don't fire, this layer
-   is simply absent — the binstub is stamped by layer 3 instead.
+   unprovisioned, runs the installer's cheap **`stamp`** action — record the
+   payload/snapshot and any compatibility management wrapper while deferring the
+   venv build to first use. The separate command-catalog hook maps the logical
+   command to the payload-local shim already present in the installed payload.
+   Stamp is grace-window-safe because it builds no venv.
 
-3. **Skill-driven readiness self-check — the broadest reach (needs only that the
+3. **Skill-driven payload fallback — the broadest reach (needs only that the
    env loads the plugin's skills + lets the agent run a shell).**
-   Every operational skill opens with a **fail-closed readiness check**: is the CLI
-   ready? If not, it tells the agent to run the plugin's **own** installer
-   (`install.sh stamp`, from the plugin payload) to deploy the binstub — which then
-   self-provisions on first use. This is the layer that reaches the **Copilot app /
-   cloud agent**: it needs no hook, no launch-wrapper, no agent-worktrees — only the
-   skill (already loaded) and a shell (which the agent has). Absence of an explicit
-   *ready* is treated as *not ready* (never inferred from the absence of an error).
+   Every operational skill uses the exact command-catalog `argv`. If hooks did
+   not publish the catalog, the skill uses the host's plugin-management surface
+   to select an explicit `plugin@marketplace` payload and invokes that payload's
+   generated shim directly. It never scans every installed marketplace or
+   chooses the first match. An `availability: unavailable` entry—or absence of
+   an explicit `ready` entry—is not ready and fails closed rather than
+   improvising an install. The shim self-provisions on first use. This reaches
+   the **Copilot app / cloud agent** with no sibling launcher or agent-worktrees
+   dependency.
 
 **Toolchain self-acquisition (cross-cutting).** Provisioning must not dead-end on a
 missing toolchain. The installer **vendors a standalone `uv`** when uv is absent
@@ -80,8 +82,8 @@ agent-worktrees and every plugin still provisions itself through layers 1–3.
 The invariant is about the *user's* experience — "your only action is enabling" —
 and it explicitly forbids a particular-sibling-as-launcher dependency. Layering the
 bootstrap by environmental need is what makes that true everywhere: the skill layer
-covers the confined envs, the hook layer optimizes the CLI, and the binstub layer is
-the always-correct floor. It is the à-la-carte principle
+covers the confined envs, the hook layer optimizes the CLI, and the payload-shim
+layer is the always-correct floor. It is the à-la-carte principle
 ([`a-la-carte-independence.md`](a-la-carte-independence.md)) applied to *provisioning
 itself*: a lone plugin, in any host, brings up its own runtime.
 
