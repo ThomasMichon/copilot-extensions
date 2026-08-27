@@ -486,6 +486,8 @@ def _cmd_picker(rest: list[str]) -> int:
         source = picker_app.demo_source()
         subtitle = f"{project} · demo (Aperture Labs)"
         on_launch = _demo_launch_preview
+        contributions = ()
+        context_source = None
     else:
         if not engine_available():
             print()
@@ -506,15 +508,30 @@ def _cmd_picker(rest: list[str]) -> int:
         source = picker_app.engine_source(project)
         subtitle = project
         on_launch = _run_launch
+        from .plugin_contracts import discover_contracts
+        contributions = discover_contracts(project=project).contributions
+        context_source = picker_app.engine_context_source(project)
 
     if screenshot:
-        svg = picker_app.capture_svg(source, project=project, subtitle=subtitle)
+        svg = picker_app.capture_svg(
+            source,
+            project=project,
+            subtitle=subtitle,
+            contributions=contributions,
+            context_source=context_source,
+        )
         with open(screenshot, "w", encoding="utf-8", newline="\n") as fh:
             fh.write(svg)
         print(f"  wrote screenshot: {screenshot}")
         return 0
-    return picker_app.run_picker(source, project=project, subtitle=subtitle,
-                                 on_launch=on_launch)
+    return picker_app.run_picker(
+        source,
+        project=project,
+        subtitle=subtitle,
+        on_launch=on_launch,
+        contributions=contributions,
+        context_source=context_source,
+    )
 
 
 def _resolve_for(req) -> "tuple[object | None, int]":
