@@ -113,7 +113,8 @@ else:
 def _run(script: Path, home: Path, shell: str) -> str:
     env = os.environ.copy()
     env.update({"HOME": str(home), "USERPROFILE": str(home)})
-    command = ["bash", str(script)] if shell == "bash" else [
+    is_bash = Path(shell).name.lower() in {"bash", "bash.exe"}
+    command = [shell, str(script)] if is_bash else [
         shell, "-NoProfile", "-File", str(script)
     ]
     result = subprocess.run(
