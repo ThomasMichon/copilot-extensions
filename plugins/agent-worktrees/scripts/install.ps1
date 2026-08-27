@@ -618,6 +618,22 @@ function Invoke-NativeCapture {
 # Vendored under the Copilot CLI installed-plugins dir => marketplace;
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
+function Get-ApplicationPath {
+    <# Resolve exactly one application path. Get-Command is array-valued when
+       PATH exposes several matches; never let .Source array expansion become a
+       newline-joined native command. #>
+    param([Parameter(Mandatory)][string[]]$Name)
+    foreach ($candidate in $Name) {
+        $commands = @(Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue)
+        foreach ($command in $commands) {
+            $source = [string]$command.Source
+            if (-not $source -or $source -match 'WindowsApps') { continue }
+            if (Test-Path -LiteralPath $source) { return $source }
+        }
+    }
+    return $null
+}
+
 function Get-BootstrapPython {
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
        Prefers the freshly-built slot venv python ($VenvDir, present at
@@ -633,11 +649,7 @@ function Get-BootstrapPython {
             return $result.Output
         }
     }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -ErrorAction SilentlyContinue
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
-    }
-    return $null
+    return Get-ApplicationPath -Name @('python3', 'python')
 }
 
 function Get-PayloadHash {
@@ -806,12 +818,8 @@ function Ensure-UvIndex {
         if ($result.ExitCode -eq 0) { $idx = $result.Output }
     }
     if (-not $idx) {
-        $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
-        $pythonPath = if ($python -and $python.Source -notmatch 'WindowsApps') {
-            $python.Source
-        } else {
-            Get-BootstrapPython
-        }
+        $pythonPath = Get-ApplicationPath -Name @('python')
+        if (-not $pythonPath) { $pythonPath = Get-BootstrapPython }
         if ($pythonPath) {
             $result = Invoke-NativeCapture { & $pythonPath -m pip config get global.index-url }
             if ($result.ExitCode -eq 0) { $idx = $result.Output }
@@ -843,9 +851,9 @@ function Ensure-UvIndex {
 }
 
 function Ensure-Uv {
-    $existing = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
+    $existing = Get-ApplicationPath -Name @('uv')
     if ($existing) {
-        $result = Invoke-NativeCapture { & $existing.Source --version }
+        $result = Invoke-NativeCapture { & $existing --version }
         if ($result.ExitCode -eq 0) { return $true }
     }
 
@@ -862,18 +870,7 @@ function Ensure-Uv {
             -Force -ErrorAction SilentlyContinue
     }
 
-    $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
-    $pythonPath = if ($python -and $python.Source -notmatch 'WindowsApps') {
-        $python.Source
-    } else {
-        ''
-    }
-    if (-not $pythonPath) {
-        $python = Get-Command python3 -CommandType Application -ErrorAction SilentlyContinue
-        if ($python -and $python.Source -notmatch 'WindowsApps') {
-            $pythonPath = $python.Source
-        }
-    }
+    $pythonPath = Get-ApplicationPath -Name @('python', 'python3')
     if (-not $pythonPath) { $pythonPath = Get-BootstrapPython }
     if (-not $pythonPath) {
         Write-ServiceErr 'uv is absent and no Python is available to bootstrap it'

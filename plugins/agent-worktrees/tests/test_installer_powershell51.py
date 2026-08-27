@@ -44,6 +44,63 @@ def test_uv_bootstrap_python_survives_windows_powershell_argument_passing():
     assert "$ErrorActionPreference = 'Continue'" in installer
 
 
+def test_application_path_selects_one_usable_match(tmp_path: Path):
+    pwsh = (
+        (shutil.which("powershell.exe") if os.name == "nt" else None)
+        or shutil.which("pwsh")
+        or shutil.which("powershell")
+    )
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+
+    first = tmp_path / "first-python"
+    second = tmp_path / "second-python"
+    store_alias = tmp_path / "WindowsApps" / "python.exe"
+    for path in (first, second, store_alias):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+
+    script = r"""
+$tokens = $null
+$errors = $null
+$source = Get-Content -LiteralPath $env:INSTALLER -Raw
+$ast = [System.Management.Automation.Language.Parser]::ParseInput(
+    $source, [ref]$tokens, [ref]$errors
+)
+$functionAst = $ast.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-ApplicationPath'
+}, $true)
+Invoke-Expression $functionAst.Extent.Text
+function Get-Command {
+    @(
+        [pscustomobject]@{ Source = $env:STORE_ALIAS },
+        [pscustomobject]@{ Source = $env:FIRST_PYTHON },
+        [pscustomobject]@{ Source = $env:SECOND_PYTHON }
+    )
+}
+Get-ApplicationPath -Name @('python')
+"""
+    proc = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "INSTALLER": str(INSTALLER),
+            "STORE_ALIAS": str(store_alias),
+            "FIRST_PYTHON": str(first),
+            "SECOND_PYTHON": str(second),
+        },
+        timeout=30,
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == str(first)
+
+
 def test_early_installer_utilities_are_powershell_51_safe_ascii():
     utilities = SERVICE_UTILS.read_text(encoding="utf-8")
 
