@@ -10396,22 +10396,29 @@ def cmd_install(args: argparse.Namespace) -> int:
             else "worktree"
         )
         _remote = ""
-        _remote_result = subprocess.run(
-            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if _remote_result.returncode == 0:
-            _remote = _remote_result.stdout.strip()
-        _repos.add_repo(
-            project,
-            str(repo_dir),
-            repo_class=_reg_class,
-            remote=_remote,
-            agent=_entry.agent if _entry else True,
-            plat=plat,
-        )
+        try:
+            _remote_result = subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if _remote_result.returncode == 0:
+                _remote = _remote_result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+        try:
+            _repos.add_repo(
+                project,
+                str(repo_dir),
+                repo_class=_reg_class,
+                remote=_remote,
+                agent=_entry.agent if _entry else True,
+                plat=plat,
+            )
+        except Exception as exc:
+            output.err(f"Could not record repository identity for {project}: {exc}")
+            return 1
 
         # Update projects registry. Honor the repos.yaml agent-exposure
         # classification (default ON) so reference-only repos stay hidden.
