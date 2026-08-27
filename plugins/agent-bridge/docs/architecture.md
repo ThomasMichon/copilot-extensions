@@ -268,6 +268,11 @@ restart does not inherently close the child's pipes.
   requires recovery from the far-side authority record to preserve the same
   Session Host PID, ACP child PID, and ACP session id through a second turn. The
   mode is explicit and refuses to run while another managed session is active.
+  The companion `--fault relay-interruption` mode requires the auth probe,
+  interrupts only that idle parity session's supervised credential-relay
+  process, waits for the same owner handle to establish a replacement process,
+  rejects duplicate ownership, and reruns the boolean-only credential consumers
+  before the final continuity turn.
 
 ## Zero-Downtime Redeploy
 
