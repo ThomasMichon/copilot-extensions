@@ -10,6 +10,7 @@ import pytest
 from agent_dispatch.queue import (
     DEFAULT_LEASE_SECONDS,
     LEGACY_REPO,
+    SpawnState,
     Status,
     TaskError,
     machine_matches,
@@ -50,6 +51,236 @@ def test_full_happy_path(q):
     assert done.status == Status.COMPLETED
     assert done.result_ref == "pr/42"
     assert done.owner is None
+
+
+def test_resume_atomically_persists_wake_outbox(q):
+    t = q.create("wake me")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1", owner_session_id="session-1")
+    q.suspend(t.id, "w1", reason="waiting")
+
+    task = q.resume(
+        t.id,
+        "w1",
+        wake_requested=True,
+        wake_message="continue",
+        now=1000.0,
+    )
+
+    [wake] = q.list_wakes(t.id)
+    assert task.status == Status.STARTED
+    assert task.wake_status == "pending"
+    assert task.wake_operation_id == wake.id
+    assert wake.id == f"wake:{t.id}:{task.generation}:1"
+    assert wake.owner == "w1"
+    assert wake.owner_session_id == "session-1"
+    assert wake.message == "continue"
+    assert wake.status == "pending"
+
+
+def test_suspend_resume_preserves_durable_owner_context(q):
+    t = q.create(
+        "wait for input",
+        goal="Ship the change",
+        done_criteria="Checks pass",
+        target_machine="host-a",
+        target_worktree="wt-1",
+    )
+    claimed = q.claim_one(
+        "host-a/wt-1",
+        machine="host-a",
+        worktree="wt-1",
+        task_id=t.id,
+        now=1000.0,
+    )
+    started = q.start(
+        t.id, "host-a/wt-1", owner_session_id="session-1", now=1010.0
+    )
+    q.record_progress(
+        t.id,
+        "host-a/wt-1",
+        phase="waiting",
+        summary="submitted the request",
+        now=1020.0,
+    )
+    q.set_card(
+        t.id,
+        "host-a/wt-1",
+        card={"status": "waiting", "request_input": [{"name": "answer"}]},
+        now=1030.0,
+    )
+
+    suspended = q.suspend(
+        t.id,
+        "host-a/wt-1",
+        reason="Waiting for an external decision",
+        now=1040.0,
+    )
+
+    assert suspended.status == Status.SUSPENDED
+    assert suspended.owner == claimed.owner
+    assert suspended.owner_session_id == started.owner_session_id
+    assert suspended.generation == claimed.generation
+    assert suspended.target_machine == "host-a"
+    assert suspended.target_worktree == "wt-1"
+    assert suspended.goal == "Ship the change"
+    assert suspended.latest_progress is not None
+    assert suspended.card["status"] == "waiting"
+    assert suspended.lease_expires_at is None
+    assert suspended.activity is None
+    assert q.claim_one("replacement", task_id=t.id) is None
+    assert q.events(t.id)[-1]["note"] == (
+        "suspend: Waiting for an external decision"
+    )
+
+    resumed = q.resume(t.id, "host-a/wt-1", now=1050.0)
+    assert resumed.status == Status.STARTED
+    assert resumed.owner == "host-a/wt-1"
+    assert resumed.owner_session_id == "session-1"
+    assert resumed.generation == claimed.generation
+    assert resumed.lease_expires_at == pytest.approx(
+        1050.0 + DEFAULT_LEASE_SECONDS
+    )
+
+
+def test_suspend_resume_are_owner_gated_and_state_checked(q):
+    t = q.create("wait")
+    q.claim_one("w1", task_id=t.id)
+    with pytest.raises(TaskError, match="started"):
+        q.suspend(t.id, "w1", reason="not started")
+    q.start(t.id, "w1")
+    with pytest.raises(TaskError, match="non-empty reason"):
+        q.suspend(t.id, "w1", reason="  ")
+    with pytest.raises(TaskError, match="owned by"):
+        q.suspend(t.id, "w2", reason="wrong owner")
+    q.suspend(t.id, "w1", reason="waiting")
+    with pytest.raises(TaskError, match="owned by"):
+        q.resume(t.id, "w2")
+    with pytest.raises(TaskError, match="owned by"):
+        q.complete(t.id, "w2")
+
+
+def test_suspended_successor_adopts_session_and_advances_generation(q):
+    t = q.create("continue after handoff")
+    claimed = q.claim_one("host-a/wt-1", task_id=t.id)
+    q.start(t.id, "host-a/wt-1", owner_session_id="session-old")
+    snapshot = q.suspend(t.id, "host-a/wt-1", reason="handoff")
+
+    resumed = q.resume(
+        t.id,
+        "host-a/wt-1",
+        adopt_owner_session_id="session-new",
+        expected_owner_session_id=snapshot.owner_session_id,
+        expected_generation=snapshot.generation,
+    )
+
+    assert resumed.status == Status.STARTED
+    assert resumed.owner == claimed.owner
+    assert resumed.owner_session_id == "session-new"
+    assert resumed.generation == snapshot.generation + 1
+
+
+def test_resume_with_wake_reembodies_headless_owner(q):
+    t = q.create("continue headless work")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key, session_handle="local-body:bridge-session-1"
+    )
+    q.claim_one("headless-owner", task_id=t.id)
+    q.start(t.id, "headless-owner")
+    q.suspend(t.id, "headless-owner", reason="waiting")
+
+    resumed = q.resume(t.id, "headless-owner", wake_requested=True)
+
+    assert resumed.status == Status.QUEUED
+    assert resumed.owner is None
+    assert resumed.owner_session_id is None
+    assert q.get_reservation(reservation.key).state == SpawnState.SETTLED
+    assert q.list_wakes(t.id) == []
+
+
+def test_suspended_successor_adoption_rejects_stale_snapshot(q):
+    t = q.create("continue once")
+    q.claim_one("host-a/wt-1", task_id=t.id)
+    q.start(t.id, "host-a/wt-1", owner_session_id="session-old")
+    snapshot = q.suspend(t.id, "host-a/wt-1", reason="handoff")
+    q.resume(
+        t.id,
+        "host-a/wt-1",
+        adopt_owner_session_id="session-new",
+        expected_owner_session_id=snapshot.owner_session_id,
+        expected_generation=snapshot.generation,
+    )
+
+    with pytest.raises(TaskError, match="started"):
+        q.resume(
+            t.id,
+            "host-a/wt-1",
+            adopt_owner_session_id="session-other",
+            expected_owner_session_id=snapshot.owner_session_id,
+            expected_generation=snapshot.generation,
+        )
+
+
+def test_suspended_task_can_complete_without_resume(q):
+    t = q.create("wait for merge")
+    claimed = q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1", owner_session_id="session-1")
+    q.suspend(t.id, "w1", reason="waiting for merge")
+
+    done = q.complete(t.id, "w1", result_ref="change/42")
+
+    assert done.status == Status.COMPLETED
+    assert done.result_ref == "change/42"
+    assert done.owner is None
+    assert done.generation == claimed.generation
+    assert [event["to_status"] for event in q.events(t.id)][-2:] == [
+        Status.SUSPENDED,
+        Status.COMPLETED,
+    ]
+
+
+def test_fenced_suspended_completion_loses_concurrent_resume(q):
+    t = q.create("consume baton once")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1", owner_session_id="session-1")
+    snapshot = q.suspend(t.id, "w1", reason="waiting")
+    q.resume(t.id, "w1")
+
+    with pytest.raises(TaskError, match="started"):
+        q.complete(
+            t.id,
+            "w1",
+            expected_status=Status.SUSPENDED,
+            expected_owner_session_id=snapshot.owner_session_id,
+            expected_generation=snapshot.generation,
+        )
+
+    assert q.get(t.id).status == Status.STARTED
+
+
+def test_release_suspended_clears_owner_and_spawn_reservation(q):
+    t = q.create("replace me")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(
+        reservation.key, session_handle="session-1", worktree="wt-1"
+    )
+    q.claim_one("host-a/wt-1", task_id=t.id)
+    q.start(t.id, "host-a/wt-1", owner_session_id="session-1")
+    q.suspend(t.id, "host-a/wt-1", reason="parked")
+
+    released = q.release_suspended(
+        t.id, "host-a/wt-1", reason="replace the dormant worker"
+    )
+
+    assert released.status == Status.QUEUED
+    assert released.owner is None
+    assert released.owner_session_id is None
+    assert released.claimed_at is None
+    assert q.get_reservation(reservation.key).state == "settled"
+    replacement = q.claim_one("host-b/wt-2", task_id=t.id)
+    assert replacement is not None
+    assert replacement.owner == "host-b/wt-2"
 
 
 # -- proposed is not claimable ----------------------------------------------
@@ -115,6 +346,25 @@ def test_gone_owner_requeues(q):
     assert q.claim_one("w2", now=2001.0).owner == "w2"
 
 
+def test_suspended_task_is_excluded_from_liveness_gc(q):
+    t = q.create("dormant")
+    q.claim_one("m/wt", machine="m", worktree="wt", task_id=t.id)
+    q.start(t.id, "m/wt", owner_session_id="session-1")
+    q.suspend(t.id, "m/wt", reason="waiting")
+    calls = []
+
+    counts = q.reconcile_liveness(
+        lambda wt, mc, sid: calls.append((wt, mc, sid)) or "gone"
+    )
+
+    assert calls == []
+    assert counts["checked"] == 0
+    assert counts["requeued"] == 0
+    assert counts["dead_lettered"] == 0
+    assert q.get(t.id).status == Status.SUSPENDED
+    assert q.get(t.id).attempts == 1
+
+
 def test_cooperative_redundancy_after_worker_death(q):
     """A capable second worker reclaims a dead worker's task once it is gone."""
     q.create("review", requires=["review"])
@@ -166,6 +416,26 @@ def test_set_activity_rejects_unknown_value(q):
     q.record_spawn(reservation.key, session_handle="local-body:s1")
     with pytest.raises(TaskError, match="invalid task activity"):
         q.set_activity(t.id, "IDLE", reservation_key=reservation.key)
+
+
+def test_set_activity_cannot_restore_activity_on_suspended_task(q):
+    t = q.create("dormant")
+    reservation, _ = q.reserve_spawn(t.id)
+    q.record_spawn(reservation.key, session_handle="local-body:s1")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.set_activity(t.id, "ACTIVE", reservation_key=reservation.key)
+    q.suspend(t.id, "w1", reason="waiting")
+
+    with pytest.raises(TaskError, match="non-null activity on suspended task"):
+        q.set_activity(t.id, "STALLED", reservation_key=reservation.key)
+
+    dormant = q.get(t.id)
+    assert dormant.status == Status.SUSPENDED
+    assert dormant.activity is None
+    assert q.set_activity(
+        t.id, None, reservation_key=reservation.key
+    ).activity is None
 
 
 def test_state_transition_clears_activity(q):
@@ -550,6 +820,20 @@ def test_mine_returns_assigned_and_owned(q):
     assert all(t.title != "open-to-all" for t in inbox["assigned"])
 
 
+def test_mine_owned_includes_suspended(q):
+    t = q.create("dormant")
+    q.claim_one(
+        "host-a/wt-1",
+        machine="host-a",
+        worktree="wt-1",
+        task_id=t.id,
+    )
+    q.start(t.id, "host-a/wt-1")
+    q.suspend(t.id, "host-a/wt-1", reason="waiting")
+
+    assert [task.id for task in q.mine("host-a", "wt-1")["owned"]] == [t.id]
+
+
 def test_mine_matches_machine_wide_assignment_case_insensitively(q):
     # A machine-wide assignment stored display-cased is still "mine" when my
     # identity names the same machine in canonical (lowercase) form.
@@ -562,7 +846,7 @@ def test_mine_matches_machine_wide_assignment_case_insensitively(q):
 
 
 def _seed_all_states(q):
-    """Create one task in each of the six states; return {state: task}."""
+    """Create one task in each original non-dead-letter state."""
     proposed = q.propose("proposed one", prompt="p")
     queued = q.create("queued one", prompt="q")
 
@@ -623,6 +907,14 @@ def test_sweep_spans_all_states_except_abandoned(q):
         )
     }
     assert seed[Status.ABANDONED].id not in swept
+
+
+def test_sweep_includes_suspended(q):
+    t = q.create("dormant")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.suspend(t.id, "w1", reason="waiting")
+    assert t.id in {task.id for task in q.sweep()}
 
 
 def test_sweep_is_newest_first(q):

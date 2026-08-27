@@ -330,6 +330,22 @@ queued, label-gated tasks into autonomous bodies. The primary supervisor reads
 `agent-dispatch-supervisor-<name>` units/tasks using the same env schema, while
 the primary `agent-dispatch-supervisor` remains unchanged.
 
+Its eight-state lifecycle includes explicit owner-preserving **suspended** work:
+`started → suspended` parks a dormant, non-claimable task without losing its
+owner/session or durable context; `resume` wakes that same owner, while `release`
+clears ownership and requeues it for replacement embodiment. Suspended tasks are
+outside liveness GC and supervisor capacity/retry accounting.
+
+Steer and explicit-resume wakeups use a SQLite transactional outbox. The task
+transition, steer payload, and deterministic wake operation commit together;
+the coordinator loop drains that outbox with restart recovery and exponential
+backoff. A generation/owner-session/status fence retires stale work, while the
+stable operation id is propagated as the bridge delivery idempotency key. Wake
+claims are restricted to the active routed coordinator and carry a delivery
+lease, so cutover promotion recovers interrupted work without allowing a
+passive candidate to steal an in-flight delivery. The bridge atomically
+rechecks the captured owner-session identity when it enqueues the wake.
+
 By default a supervisor body is a CLI/mux `agent-worktrees embody` session on
 the supervisor host. `--headless-label L` routes selected local labels to a
 headless agent-bridge ACP body instead. In fleet mode,

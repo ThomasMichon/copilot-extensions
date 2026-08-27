@@ -503,6 +503,67 @@ class TestLiveMessageAtomicEnqueue:
         assert reason is None and mid > 0
         assert len(tmp_db.list_pending_live_messages("cli-1")) == 1
 
+    def test_atomic_enqueue_idempotency_key_returns_original_message(
+        self, tmp_db
+    ) -> None:
+        now = 10_000.0
+        self._register(tmp_db, "cli-1", "wt-a", now)
+        first, reason = tmp_db.enqueue_live_message_if_fresh(
+            "cli-1",
+            sender="worker",
+            body="wake",
+            now=now,
+            idempotency_key="wake:task-1:2:1",
+        )
+        second, retry_reason = tmp_db.enqueue_live_message_if_fresh(
+            "cli-1",
+            sender="worker",
+            body="wake",
+            now=now + 1,
+            idempotency_key="wake:task-1:2:1",
+        )
+        assert reason is None and retry_reason is None
+        assert second == first
+        assert len(tmp_db.list_pending_live_messages("cli-1")) == 1
+
+    @pytest.mark.parametrize(
+        ("session_id", "sender", "body", "reply_to", "kind"),
+        [
+            ("cli-2", "worker", "wake", None, "prompt"),
+            ("cli-1", "other", "wake", None, "prompt"),
+            ("cli-1", "worker", "different", None, "prompt"),
+            ("cli-1", "worker", "wake", "reply-target", "prompt"),
+            ("cli-1", "worker", "wake", None, "notify"),
+        ],
+    )
+    def test_atomic_enqueue_rejects_idempotency_key_reuse_for_different_request(
+        self, tmp_db, session_id, sender, body, reply_to, kind
+    ) -> None:
+        now = 10_000.0
+        self._register(tmp_db, "cli-1", "wt-a", now)
+        self._register(tmp_db, "cli-2", "wt-b", now)
+        first, reason = tmp_db.enqueue_live_message_if_fresh(
+            "cli-1",
+            sender="worker",
+            body="wake",
+            now=now,
+            idempotency_key="wake:task-1:2:1",
+        )
+        second, retry_reason = tmp_db.enqueue_live_message_if_fresh(
+            session_id,
+            sender=sender,
+            body=body,
+            reply_to=reply_to,
+            kind=kind,
+            now=now + 1,
+            idempotency_key="wake:task-1:2:1",
+        )
+        assert reason is None and first > 0
+        assert second is None
+        assert retry_reason == "idempotency_conflict"
+        assert len(tmp_db.list_pending_live_messages("cli-1")) == 1
+        assert tmp_db.list_pending_live_messages("cli-2") == []
+
     def test_atomic_enqueue_rejects_not_found(self, tmp_db) -> None:
         mid, reason = tmp_db.enqueue_live_message_if_fresh(
             "ghost", sender="op", body="x", now=10_000.0,

@@ -84,7 +84,9 @@ Get-Content ./dispatch.md | & "<agent-bridge catalog argv[0]>" send <agent-name>
 # answerable -- routes to the message queue, not an ACP turn. The receiver
 # replies with `<agent-bridge catalog argv[0]> send <reply-to> "..."`.
 <agent-bridge catalog argv[0]> send <live-session-id> "message body"
-<agent-bridge catalog argv[0]> send <live-session-id> "msg" --from "reviewer@anomalous-potato" --reply-to <my-session-id>
+<agent-bridge catalog argv[0]> send <live-session-id> "msg" --from "reviewer@example-host" --reply-to <my-session-id>
+# Durable producers pass a stable key so retries return the original message id.
+<agent-bridge catalog argv[0]> send <live-session-id> "wake" --no-wait --idempotency-key wake:example:1
 ```
 
 `send` auto-detects whether the target is an agent name, a bridge-owned session

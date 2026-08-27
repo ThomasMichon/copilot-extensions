@@ -44,7 +44,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    - A **semantic search** over your work corpus / issue tracker, if one is
      available (it catches differently-worded duplicates that a substring match
      misses).
-   - `<agent-dispatch catalog argv[0]> list --status queued,claimed,started` — what is already
+   - `<agent-dispatch catalog argv[0]> list --status queued,claimed,started,suspended` — what is already
      grabbed on the queue.
    - Active worktree **charters** (if the coordination layer exposes them, e.g.
      `agent-worktrees list --json`) — do not pick what another agent is already <!-- marketplace-isolation: allow agent-worktrees-management -->
@@ -121,7 +121,7 @@ computes identically.
 
 ## See also
 
-- The **`agent-dispatch`** skill — the full CLI, the seven-state lifecycle, worker
+- The **`agent-dispatch`** skill — the full CLI, the eight-state lifecycle, worker
   identity, capability/affinity routing, and selector (`--require`/`--exclude`)
   matching. Its **"Which coordination system?"** matrix disambiguates
   native sub-agent vs. agent-bridge vs. agent-dispatch when you're unsure which

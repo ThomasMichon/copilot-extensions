@@ -629,6 +629,8 @@ class BridgeClient:
         self, session_id: str, *, sender: str, body: str,
         reply_to: str | None = None, kind: str = "prompt",
         wait: bool = False, wait_timeout: float | None = None,
+        idempotency_key: str | None = None,
+        expected_session_id: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/live-sessions/{id}/messages -- deliver into a live session.
 
@@ -644,6 +646,10 @@ class BridgeClient:
             payload["reply_to"] = reply_to
         if kind and kind != "prompt":
             payload["kind"] = kind
+        if idempotency_key:
+            payload["idempotency_key"] = idempotency_key
+        if expected_session_id:
+            payload["expected_session_id"] = expected_session_id
         request_timeout = None
         if wait:
             payload["wait"] = True

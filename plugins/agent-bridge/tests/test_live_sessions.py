@@ -120,9 +120,10 @@ class TestResolveLiveSession:
         row = tmp_db.resolve_live_session("wt-abc", now=now)
         assert row is not None and row["session_id"] == "sess-1"
 
-    def test_worktree_handle_picks_freshest_session(self, tmp_db: Database) -> None:
-        # Two sessions in the same worktree (a handoff: old + new). The freshest
-        # heartbeat wins, so a reply routes to the live successor, not the corpse.
+    def test_worktree_handle_picks_latest_incarnation(self, tmp_db: Database) -> None:
+        # Two sessions in the same worktree (a handoff: old + new). A late
+        # heartbeat from the predecessor must not take routing back from the
+        # newer incarnation.
         tmp_db.register_live_session(
             "old", machine=None, cwd=None, worktree_id="wt", repo=None,
             branch=None, pid=None, role=None, now=1000.0,
@@ -131,8 +132,37 @@ class TestResolveLiveSession:
             "new", machine=None, cwd=None, worktree_id="wt", repo=None,
             branch=None, pid=None, role=None, now=2000.0,
         )
-        row = tmp_db.resolve_live_session("wt", now=2001.0)
+        tmp_db.register_live_session(
+            "old", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=2001.0,
+        )
+        row = tmp_db.resolve_live_session("wt", now=2002.0)
         assert row is not None and row["session_id"] == "new"
+
+    def test_worktree_handle_excludes_non_live_incarnation(
+        self, tmp_db: Database
+    ) -> None:
+        tmp_db.register_live_session(
+            "old", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=1000.0,
+        )
+        tmp_db.register_live_session(
+            "new", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=2000.0,
+        )
+        tmp_db.execute_write(
+            "UPDATE live_sessions SET status='taken-over', updated_at=? "
+            "WHERE session_id=?",
+            (2001.0, "new"),
+        )
+        tmp_db.register_live_session(
+            "old", machine=None, cwd=None, worktree_id="wt", repo=None,
+            branch=None, pid=None, role=None, now=2001.5,
+        )
+
+        row = tmp_db.resolve_live_session("wt", now=2002.0)
+
+        assert row is not None and row["session_id"] == "old"
 
     def test_stale_worktree_rows_are_excluded(self, tmp_db: Database) -> None:
         # A predecessor that stopped heartbeating (>stale window) is not picked.

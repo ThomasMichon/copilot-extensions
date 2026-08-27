@@ -1,7 +1,7 @@
 """agent-dispatch -- a portable agent task-queue + coordinator.
 
 This package currently ships the queue **engine** (:mod:`agent_dispatch.queue`):
-a single-writer, WAL-mode SQLite task queue with a seven-state model,
+a single-writer, WAL-mode SQLite task queue with an eight-state model,
 capability-gated atomic claim, and lease recovery. The per-host coordinator
 daemon and CLI land in a subsequent slice.
 """

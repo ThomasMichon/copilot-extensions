@@ -13,6 +13,7 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import asdict
 from threading import Condition
@@ -25,7 +26,13 @@ from pydantic import BaseModel, Field
 from . import __version__, telemetry
 from .config import DEFAULT_ORPHAN_GRACE
 from .events import EventBus, sse_format
-from .queue import SpawnReservation, Task, TaskError, TaskQueue, worker_id_for
+from .queue import (
+    SpawnReservation,
+    Task,
+    TaskError,
+    TaskQueue,
+    worker_id_for,
+)
 from .satellites import (
     ROLE_SATELLITE,
     FleetDirectory,
@@ -192,25 +199,13 @@ async def _gc_loop(
     queue: TaskQueue,
     interval: float,
     bus: EventBus,
-    *,
-    orphan_grace: float = DEFAULT_ORPHAN_GRACE,
 ) -> None:
     """Periodically garbage-collect tasks by **liveness**.
 
-    Two passes each interval, both degrade-safe (a probe that can't answer acts on
-    nothing):
-
-    1. **Held-task recovery** (:meth:`reconcile_liveness`) -- a ``claimed``/
-       ``started`` task is requeued only when its owner worktree is *confirmed
-       gone* (not on elapsed time), so long-running live work is never disturbed
-       and a bridge blip leaves a task alone.
-    2. **Orphaned-pin reap** (:func:`_reap_orphans`) -- an **unowned**
-       proposed/queued task pinned to a no-longer-live target worktree (the
-       context-handoff leak) is abandoned once past its grace window; the held
-       recovery never touches unowned tasks, so without this they linger forever.
-
-    Runs the synchronous, subprocess-shelling passes off the event loop via worker
-    threads. Cancelled cleanly on shutdown.
+    A ``claimed``/``started`` task is requeued only when its owner worktree is
+    *confirmed gone* (not on elapsed time), so long-running live work is never
+    disturbed and a bridge blip leaves a task alone. Orphaned-pin reaping runs
+    in its own loop so a slow worktree probe cannot delay this correctness pass.
     """
     while True:
         await asyncio.sleep(interval)
@@ -227,8 +222,22 @@ async def _gc_loop(
                 counts.get("checked", 0),
             )
             bus.publish({"type": "task.reconciled", "requeued": requeued, **counts})
+
+
+async def _orphan_reap_loop(
+    queue: TaskQueue,
+    interval: float,
+    bus: EventBus,
+    *,
+    orphan_grace: float,
+) -> None:
+    """Reap orphaned target pins without blocking held-task liveness GC."""
+    while True:
+        await asyncio.sleep(interval)
         try:
-            reaped = await asyncio.to_thread(_reap_orphans, queue, orphan_grace)
+            reaped = await asyncio.to_thread(
+                _reap_orphans, queue, orphan_grace
+            )
         except Exception:  # pragma: no cover -- never let the loop die on a blip
             log.exception("orphan reap pass failed")
             reaped = 0
@@ -293,9 +302,31 @@ class YieldBody(BaseModel):
     exclude: str | None = None
 
 
+class SuspendBody(BaseModel):
+    worker_id: str
+    reason: str
+
+
+class ResumeBody(BaseModel):
+    worker_id: str
+    wake: bool = True
+    message: str | None = None
+    adopt_session: bool = False
+    expected_owner_session_id: str | None = None
+    expected_generation: int | None = None
+
+
+class ReleaseBody(BaseModel):
+    worker_id: str
+    reason: str | None = None
+
+
 class CompleteBody(BaseModel):
     worker_id: str
     result_ref: str | None = None
+    expected_status: str | None = None
+    expected_owner_session_id: str | None = None
+    expected_generation: int | None = None
 
 
 class ProgressBody(BaseModel):
@@ -329,6 +360,7 @@ class SteerTakeBody(BaseModel):
     """A worker consuming the next pending steer for a task it owns."""
 
     worker_id: str
+    all_pending: bool = False
 
 
 class AbandonBody(BaseModel):
@@ -436,6 +468,11 @@ def create_app(
     sweep_interval: float = 0.0,
     orphan_grace: float = DEFAULT_ORPHAN_GRACE,
     enable_mcp: bool = True,
+    wake_interval: float = 0.0,
+    wake_deliver: Callable[[str, str, str, str | None, str], bool] | None = None,
+    wake_is_active: Callable[[], bool] | None = None,
+    wake_max_attempts: int = 8,
+    wake_retry_base: float = 1.0,
 ) -> FastAPI:
     """Build the coordinator app over an existing :class:`TaskQueue`.
 
@@ -473,8 +510,38 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
+        from .wake import drain_wake_outbox
+
+        wake_options = {
+            "interval": wake_interval,
+            "max_attempts": wake_max_attempts,
+            "retry_base": wake_retry_base,
+        }
+        if wake_deliver is not None:
+            wake_options["deliver"] = wake_deliver
+        if wake_is_active is not None:
+            wake_options["is_active"] = wake_is_active
+        wake_task = (
+            asyncio.create_task(
+                drain_wake_outbox(queue, bus, **wake_options)
+            )
+            if wake_interval > 0
+            else None
+        )
         sweeper = (
-            asyncio.create_task(_gc_loop(queue, sweep_interval, bus, orphan_grace=orphan_grace))
+            asyncio.create_task(_gc_loop(queue, sweep_interval, bus))
+            if sweep_interval and sweep_interval > 0
+            else None
+        )
+        orphan_reaper = (
+            asyncio.create_task(
+                _orphan_reap_loop(
+                    queue,
+                    sweep_interval,
+                    bus,
+                    orphan_grace=orphan_grace,
+                )
+            )
             if sweep_interval and sweep_interval > 0
             else None
         )
@@ -487,7 +554,8 @@ def create_app(
         # with the periodic liveness GC as a backstop.
         #
         # DEFAULT-ON (opt-out): armed unless ``AGENT_DISPATCH_SELF_RETIRE`` is
-        # explicitly falsy; when disabled, the loop is never created. The loop **self-gates on active-ness**:
+        # explicitly falsy; when disabled, the loop is never created. The loop
+        # **self-gates on active-ness**:
         # its startup phase waits until the routing table's ``active`` entry is our
         # own pid before it captures our generation and begins watching. This is what
         # makes it correct for a **cutover-promoted** coordinator -- one spawned
@@ -571,6 +639,12 @@ def create_app(
             try:
                 yield
             finally:
+                if wake_task is not None:
+                    wake_task.cancel()
+                    try:
+                        await wake_task
+                    except asyncio.CancelledError:
+                        pass
                 if self_retire_task is not None:
                     self_retire_task.cancel()
                     try:
@@ -581,6 +655,12 @@ def create_app(
                     sweeper.cancel()
                     try:
                         await sweeper
+                    except asyncio.CancelledError:
+                        pass
+                if orphan_reaper is not None:
+                    orphan_reaper.cancel()
+                    try:
+                        await orphan_reaper
                     except asyncio.CancelledError:
                         pass
 
@@ -628,6 +708,7 @@ def create_app(
             "draining": gate.draining,
             "subscribers": bus.subscriber_count,
             "backlog": queue.backlog_health(repo=repo),
+            "wakes": queue.wake_metrics(),
         }
 
     @app.get("/events")
@@ -774,6 +855,11 @@ def create_app(
         _require(queue.get(task_id))
         return queue.events(task_id)
 
+    @app.get("/tasks/{task_id}/wakes")
+    def get_wakes(task_id: str) -> list[dict]:
+        _require(queue.get(task_id))
+        return [asdict(wake) for wake in queue.list_wakes(task_id)]
+
     @app.get("/tasks/{task_id}/progress-log")
     def get_progress_log(task_id: str) -> list[dict]:
         """The accumulated append-only progress log (oldest first)."""
@@ -890,10 +976,70 @@ def create_app(
             "task.yielded",
         )
 
+    @app.post("/tasks/{task_id}/suspend")
+    def suspend(task_id: str, body: SuspendBody) -> dict:
+        return _guard(
+            lambda: queue.suspend(task_id, body.worker_id, reason=body.reason),
+            "task.suspended",
+        )
+
+    @app.post("/tasks/{task_id}/resume")
+    def resume(task_id: str, body: ResumeBody) -> dict:
+        message = body.message or (
+            f"Task {task_id} has been resumed. Continue toward its goal "
+            "from the durable progress already recorded."
+        )
+        adopt_owner_session_id = None
+        if body.adopt_session:
+            adopt_owner_session_id = _resolve_owner_session_id(body.worker_id)
+            if adopt_owner_session_id is None:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"cannot adopt task {task_id}: no current live session "
+                        f"for owner {body.worker_id!r}"
+                    ),
+                )
+        task = _guard(
+            lambda: queue.resume(
+                task_id,
+                body.worker_id,
+                wake_requested=body.wake,
+                wake_message=message,
+                adopt_owner_session_id=adopt_owner_session_id,
+                expected_owner_session_id=body.expected_owner_session_id,
+                expected_generation=body.expected_generation,
+            ),
+            "task.resumed",
+        )
+        return {
+            **task,
+            "resume_woken": None,
+            "resume_wake_status": (
+                task.get("wake_status") if body.wake else "not_requested"
+            ),
+        }
+
+    @app.post("/tasks/{task_id}/release")
+    def release(task_id: str, body: ReleaseBody) -> dict:
+        return _guard(
+            lambda: queue.release_suspended(
+                task_id, body.worker_id, reason=body.reason
+            ),
+            "task.released",
+        )
+
     @app.post("/tasks/{task_id}/complete")
     def complete(task_id: str, body: CompleteBody) -> dict:
         return _guard(
-            lambda: queue.complete(task_id, body.worker_id, result_ref=body.result_ref),
+            lambda: queue.complete(
+                task_id,
+                body.worker_id,
+                result_ref=body.result_ref,
+                expected_status=body.expected_status,
+                expected_owner_session_id=body.expected_owner_session_id,
+                expected_generation=body.expected_generation,
+            ),
             "task.completed",
         )
 
@@ -947,31 +1093,47 @@ def create_app(
 
     @app.post("/tasks/{task_id}/steer")
     def steer(task_id: str, body: SteerBody) -> dict:
-        """Persist an operator answer, then best-effort resume its task owner."""
+        """Atomically persist an answer, state transition, and wake outbox row."""
+        message = body.message or (
+            f"The operator answered your card on task {task_id}. Resume, run "
+            f"`agent-dispatch steer take {task_id} --all` to read every pending "
+            "answer, and "
+            "continue toward your goal."
+        )
         task = _guard(
             lambda: queue.submit_steer(
-                task_id, fields=body.fields, sender=body.sender
+                task_id,
+                fields=body.fields,
+                sender=body.sender,
+                wake_requested=body.wake,
+                wake_message=message,
             ),
             "task.steer",
         )
-        woken: bool | None = None
         owner = task.get("owner")
-        if body.wake and owner:
-            from . import bridge
-
-            woken = bridge.resume_steered_owner(owner, task_id, body.message)
-        return {**task, "steer_woken": woken}
+        return {
+            **task,
+            "steer_woken": None,
+            "steer_wake_status": (
+                task.get("wake_status")
+                if body.wake and owner
+                else "no_owner" if body.wake else "not_requested"
+            ),
+        }
 
     @app.post("/tasks/{task_id}/steer/take")
     def steer_take(task_id: str, body: SteerTakeBody) -> dict:
         """Consume the next pending steer for a task the worker owns (or null)."""
         try:
-            steer = queue.take_steer(task_id, body.worker_id)
+            steer = queue.take_steer(
+                task_id, body.worker_id, all_pending=body.all_pending
+            )
         except TaskError as exc:
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
             raise HTTPException(status_code=status, detail=msg) from exc
-        return {"task_id": task_id, "steer": steer}
+        key = "steers" if body.all_pending else "steer"
+        return {"task_id": task_id, key: steer}
 
     @app.get("/tasks/{task_id}/steer-log")
     def get_steer_log(task_id: str) -> list[dict]:

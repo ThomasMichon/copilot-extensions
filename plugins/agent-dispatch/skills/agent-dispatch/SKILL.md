@@ -6,7 +6,7 @@ description: >
   browse/dedup, atomically claim, and drive tasks through their lifecycle so
   multiple worktree/session agents cooperate without racing through
   origin/master or needing an account per agent. Covers the CLI verbs, the
-  seven-state model, worker identity (machine/worktree), capability + affinity
+  eight-state model, worker identity (machine/worktree), capability + affinity
   routing, include/exclude selector matching, targeting, dedup-before-create,
   atomic create-and-claim, spawning workers via agent-bridge,
   and loopback-vs-remote coordinator config.
@@ -53,7 +53,7 @@ queue of *tasks*, so multiple agents coordinate without racing through
 A **task** is a graduated handoff: a title + `prompt` + optional Markdown
 `payload`. It carries routing (`requires` / `affinity`), targeting
 (`target_machine` / `target_worktree` / `target_repo`, `labels`), and moves
-through a seven-state lifecycle.
+through an eight-state lifecycle.
 
 ## When to reach for it
 
@@ -204,7 +204,7 @@ so you pass nothing:
   agent-worktrees registry). <!-- marketplace-isolation: allow agent-worktrees-management -->
   Output carries both `repo` (remote) and `repo_name`.
 
-## The seven-state lifecycle
+## The eight-state lifecycle
 
 ```
 proposed -> queued -> claimed -> started -> completed        (terminal)
@@ -212,7 +212,10 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
                 +- decline/yield ----+
                 ^         |          |
                 +- owner-gone (liveness GC requeue, attempts++)
-                          |          |
+started -> suspended -> started                              (resume; same owner)
+               |
+               +-----------> queued                          (release; replacement)
+               +-----------> completed                       (condition resolved)
    (any non-terminal) --> abandoned (terminal, permission-gated)
    (owner-gone past the attempts cap) --> dead_letter (terminal)
 ```
@@ -223,6 +226,7 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 | **queued** | ready to be picked up | Yes |
 | **claimed** | held; worker may evaluate before committing | held |
 | **started** | under active implementation | held |
+| **suspended** | previously started, dormant, same owner/session preserved | No |
 | **completed** | driven to done | terminal |
 | **abandoned** | discarded (duplicate / dropped priority) | terminal |
 | **dead_letter** | requeued too many times (owner kept going gone) -- an actionable failure | terminal |
@@ -235,6 +239,31 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
   committed" marker; elapsed time alone does **not** recover it (see below).
 - **started -> queued** yields **with a note** on a recoverable snag (merge
   conflict, needs a later cycle); **started -> completed** on success.
+- **started -> suspended** (`suspend --reason <why>`) is owner-gated and parks a
+  dormant task without losing its owner/session identity, worktree, generation,
+  progress, or card. It clears active lease/activity and is neither claimable nor
+  subject to liveness GC/supervisor retry accounting. For an interactive owner,
+  `resume` restores **suspended -> started** under that same owner and
+  transactionally enqueues a durable asynchronous wake. A supervised owner
+  without a captured interactive inbox is released to **queued** for safe
+  re-embodiment;
+  `release` clears ownership and returns it to **queued** for a replacement.
+- **suspended -> completed** is owner-gated and direct: if an external condition
+  satisfies the dormant goal, its resolver calls `complete` under the preserved
+  owner without waking a process or manufacturing an active turn.
+- Steering a suspended task durably records the steer and atomically either
+  restores an interactive task to **started** with a wake outbox row, or
+  releases a task without a captured inbox to **queued** for re-embodiment. A newly embodied
+  worker consumes pending steering immediately after start. The HTTP path never
+  calls the bridge. The coordinator loop drains and retries interactive wakes
+  across restarts with exponential backoff and a stable downstream idempotency
+  key. Generation/owner-session/status/latest-wake fences retire stale
+  operations after the task advances. Inspect `wakes <id>`, task events, or
+  health metrics for pending/delivering/delivered/failed/stale state. The steer
+  and runnable task state survive every delivery failure. Wakes are
+  edge-triggered, so every resumed/replacement worker runs
+  `steer take <id> --all` to atomically drain all pending answers; `suspend`
+  refuses to park while an untaken steer exists.
 - **abandon requires permission** (`--permit`, or `--duplicate-of <ref>` which
   self-permits and records the dedup reference) -- it's not a unilateral agent
   action; it's the discard path for duplicates / dropped priorities.
@@ -261,7 +290,7 @@ context. The coordinator also backstops with a unique `dedup_key`.
 
 ```bash
 <agent-dispatch catalog argv[0]> sweep       # the dedup corpus: every non-abandoned
-                                             #   task (proposed/queued/claimed/started/
+                                             #   task (proposed/queued/claimed/started/suspended/
                                              #   completed), newest first -- read these,
                                              #   then explore/verify before creating
 <agent-dispatch catalog argv[0]> find "narration track"        # quick substring probe over title/prompt
@@ -788,7 +817,8 @@ routes the command at the shared/elected coordinator instead of the local one.
 - **Dedup before create.** `sweep` (then explore/verify) is the primary check;
   `find` is a quick probe; rely on `--dedup-key` as the backstop, not the first
   line of defense. Write self-contained titles/prompts so the sweep can work.
-- **Keep the yield note.** `started -> queued` is only useful to the next agent
+- **Explain suspension and yield.** `suspend` requires a meaningful `--reason`;
+  `started -> queued` is only useful to the next agent
   if you say *why* you yielded.
 - **Don't fake identity.** Let `claim` / `worktree-status` resolve it from CWD;
   only pass `--machine` / `--worktree` to override or where agent-worktrees is
