@@ -358,23 +358,35 @@ function Ensure-Uv {
     } else {
         $env:PROCESSOR_ARCHITECTURE
     }
+    $uvVersion = '0.12.6'
     if ($arch -eq 'AMD64') {
         $asset = 'uv-x86_64-pc-windows-msvc.zip'
+        $expectedSha256 = 'df7cb9f243eae1621400d4fcf5b1b3d90f20e264ece91b64deb3b0078abca6ef'
     } elseif ($arch -eq 'ARM64') {
         $asset = 'uv-aarch64-pc-windows-msvc.zip'
+        $expectedSha256 = '6dda514fbbe3152d980758e0f6347116060114d7d24932fc0ea5d8063f8b253a'
     } else {
         Write-Fail "uv bootstrap does not support Windows architecture: $arch"
         return $false
+    }
+    if ($env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256) {
+        if ($env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
+            Write-Fail 'AGENT_BRIDGE_UV_BOOTSTRAP_SHA256 must be a 64-character hexadecimal SHA-256 digest.'
+            return $false
+        }
+        $expectedSha256 = $env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256.ToLowerInvariant()
     }
 
     New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
     $urlTemplate = $env:AGENT_BRIDGE_UV_BOOTSTRAP_URL
     if (-not $urlTemplate) {
-        $urlTemplate = 'https://github.com/astral-sh/uv/releases/latest/download/{asset}'
+        $urlTemplate = "https://github.com/astral-sh/uv/releases/download/$uvVersion/{asset}"
     }
     $url = $urlTemplate.Replace('{asset}', $asset)
     $archive = [IO.Path]::GetTempFileName()
     $staging = Join-Path $InstallDir ".uv-stage-$PID"
+    $previousSecurityProtocol = [Net.ServicePointManager]::SecurityProtocol
+    $client = $null
     try {
         if (Test-Path -LiteralPath $staging) {
             Remove-Item -LiteralPath $staging -Recurse -Force `
@@ -385,6 +397,21 @@ function Ensure-Uv {
         $client = New-Object Net.WebClient
         $client.Headers['User-Agent'] = 'agent-bridge-bootstrap'
         $client.DownloadFile($url, $archive)
+        $archiveStream = [IO.File]::OpenRead($archive)
+        try {
+            $sha256 = [Security.Cryptography.SHA256]::Create()
+            try {
+                $digest = $sha256.ComputeHash($archiveStream)
+                $actualSha256 = ([BitConverter]::ToString($digest)).Replace('-', '').ToLowerInvariant()
+            } finally {
+                $sha256.Dispose()
+            }
+        } finally {
+            $archiveStream.Dispose()
+        }
+        if ($actualSha256 -ne $expectedSha256) {
+            throw "uv archive SHA-256 mismatch for $asset (expected $expectedSha256, got $actualSha256)"
+        }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         [IO.Compression.ZipFile]::ExtractToDirectory($archive, $staging)
         $uvSource = Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'uv.exe' |
@@ -405,6 +432,8 @@ function Ensure-Uv {
         Write-Fail 'Retry the installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/.'
         return $false
     } finally {
+        if ($client) { $client.Dispose() }
+        [Net.ServicePointManager]::SecurityProtocol = $previousSecurityProtocol
         Remove-Item -LiteralPath $archive -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
     }
