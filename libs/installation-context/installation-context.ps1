@@ -21,6 +21,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $utf8NoBom = New-Object Text.UTF8Encoding($false)
+$strictUtf8 = New-Object Text.UTF8Encoding($false, $true)
 $OutputEncoding = $utf8NoBom
 try { [Console]::OutputEncoding = $utf8NoBom } catch {}
 
@@ -79,15 +80,260 @@ public static class CeFinalPath {
 '@
 }
 
+if ($env:OS -ne 'Windows_NT' -and -not ('CePosixPath' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class CePosixPath {
+    [DllImport("libc", SetLastError = true)]
+    private static extern IntPtr realpath(string path, IntPtr resolved);
+
+    [DllImport("libc")]
+    private static extern void free(IntPtr pointer);
+
+    public static string Resolve(string path) {
+        IntPtr pointer = realpath(path, IntPtr.Zero);
+        if (pointer == IntPtr.Zero) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try {
+            return Marshal.PtrToStringAnsi(pointer);
+        }
+        finally {
+            free(pointer);
+        }
+    }
+}
+'@
+}
+
+if (-not ('CeStrictJson' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+
+public static class CeStrictJson {
+    private sealed class Parser {
+        private readonly string text;
+        private int index;
+
+        internal Parser(string value) {
+            text = value ?? throw new ArgumentNullException(nameof(value));
+        }
+
+        internal void Parse() {
+            SkipWhitespace();
+            ParseValue();
+            SkipWhitespace();
+            if (index != text.Length) Error("trailing data");
+        }
+
+        private void ParseValue() {
+            SkipWhitespace();
+            if (index >= text.Length) Error("missing value");
+            switch (text[index]) {
+                case '{': ParseObject(); return;
+                case '[': ParseArray(); return;
+                case '"': ParseString(); return;
+                case 't': ParseLiteral("true"); return;
+                case 'f': ParseLiteral("false"); return;
+                case 'n': ParseLiteral("null"); return;
+                default:
+                    if (text[index] == '-' || char.IsDigit(text[index])) {
+                        ParseNumber();
+                        return;
+                    }
+                    Error("unexpected value");
+                    return;
+            }
+        }
+
+        private void ParseObject() {
+            index++;
+            SkipWhitespace();
+            var keys = new HashSet<string>(StringComparer.Ordinal);
+            if (Consume('}')) return;
+            while (true) {
+                if (index >= text.Length || text[index] != '"') Error("expected object key");
+                string key = ParseString();
+                if (!keys.Add(key)) Error("duplicate object key '" + key + "'");
+                SkipWhitespace();
+                Require(':');
+                ParseValue();
+                SkipWhitespace();
+                if (Consume('}')) return;
+                Require(',');
+                SkipWhitespace();
+            }
+        }
+
+        private void ParseArray() {
+            index++;
+            SkipWhitespace();
+            if (Consume(']')) return;
+            while (true) {
+                ParseValue();
+                SkipWhitespace();
+                if (Consume(']')) return;
+                Require(',');
+                SkipWhitespace();
+            }
+        }
+
+        private string ParseString() {
+            Require('"');
+            var result = new System.Text.StringBuilder();
+            while (index < text.Length) {
+                char value = text[index++];
+                if (value == '"') return result.ToString();
+                if (value < 0x20) Error("unescaped control character");
+                if (value != '\\') {
+                    result.Append(value);
+                    continue;
+                }
+                if (index >= text.Length) Error("unterminated escape");
+                char escape = text[index++];
+                switch (escape) {
+                    case '"': result.Append('"'); break;
+                    case '\\': result.Append('\\'); break;
+                    case '/': result.Append('/'); break;
+                    case 'b': result.Append('\b'); break;
+                    case 'f': result.Append('\f'); break;
+                    case 'n': result.Append('\n'); break;
+                    case 'r': result.Append('\r'); break;
+                    case 't': result.Append('\t'); break;
+                    case 'u':
+                        int code = ParseHex4();
+                        if (code >= 0xD800 && code <= 0xDBFF) {
+                            if (index + 1 >= text.Length || text[index] != '\\' ||
+                                text[index + 1] != 'u') Error("unpaired high surrogate");
+                            index += 2;
+                            int low = ParseHex4();
+                            if (low < 0xDC00 || low > 0xDFFF) Error("invalid low surrogate");
+                            result.Append((char)code);
+                            result.Append((char)low);
+                        } else if (code >= 0xDC00 && code <= 0xDFFF) {
+                            Error("unpaired low surrogate");
+                        } else {
+                            result.Append((char)code);
+                        }
+                        break;
+                    default: Error("invalid string escape"); break;
+                }
+            }
+            Error("unterminated string");
+            return "";
+        }
+
+        private int ParseHex4() {
+            if (index + 4 > text.Length) Error("invalid unicode escape");
+            int result = 0;
+            for (int offset = 0; offset < 4; offset++) {
+                char value = text[index++];
+                int digit;
+                if (value >= '0' && value <= '9') digit = value - '0';
+                else if (value >= 'a' && value <= 'f') digit = value - 'a' + 10;
+                else if (value >= 'A' && value <= 'F') digit = value - 'A' + 10;
+                else { Error("invalid unicode escape"); return 0; }
+                result = (result * 16) + digit;
+            }
+            return result;
+        }
+
+        private void ParseNumber() {
+            if (Consume('-') && index >= text.Length) Error("invalid number");
+            if (Consume('0')) {
+                if (index < text.Length && char.IsDigit(text[index])) Error("leading zero");
+            } else {
+                if (index >= text.Length || text[index] < '1' || text[index] > '9') {
+                    Error("invalid number");
+                }
+                while (index < text.Length && char.IsDigit(text[index])) index++;
+            }
+            if (Consume('.')) {
+                if (index >= text.Length || !char.IsDigit(text[index])) Error("invalid fraction");
+                while (index < text.Length && char.IsDigit(text[index])) index++;
+            }
+            if (index < text.Length && (text[index] == 'e' || text[index] == 'E')) {
+                index++;
+                if (index < text.Length && (text[index] == '+' || text[index] == '-')) index++;
+                if (index >= text.Length || !char.IsDigit(text[index])) Error("invalid exponent");
+                while (index < text.Length && char.IsDigit(text[index])) index++;
+            }
+        }
+
+        private void ParseLiteral(string value) {
+            if (index + value.Length > text.Length ||
+                string.CompareOrdinal(text, index, value, 0, value.Length) != 0) {
+                Error("invalid literal");
+            }
+            index += value.Length;
+        }
+
+        private bool Consume(char value) {
+            if (index < text.Length && text[index] == value) {
+                index++;
+                return true;
+            }
+            return false;
+        }
+
+        private void Require(char value) {
+            if (!Consume(value)) Error("expected '" + value + "'");
+        }
+
+        private void SkipWhitespace() {
+            while (index < text.Length) {
+                char value = text[index];
+                if (value != ' ' && value != '\t' && value != '\r' && value != '\n') return;
+                index++;
+            }
+        }
+
+        private void Error(string message) {
+            throw new FormatException(message + " at character " + index);
+        }
+    }
+
+    public static void Validate(string value) {
+        new Parser(value).Parse();
+    }
+}
+'@
+}
+
 function Fail([string]$Message) {
     throw [System.InvalidOperationException]::new($Message)
 }
 
 function Get-PropertyValue($Object, [string]$Name, $Default = $null) {
     if ($null -eq $Object) { return $Default }
-    $property = $Object.PSObject.Properties[$Name]
-    if ($null -eq $property) { return $Default }
-    return $property.Value
+    $exact = $null
+    foreach ($property in $Object.PSObject.Properties) {
+        if ([string]::Equals($property.Name, $Name, [StringComparison]::Ordinal)) {
+            $exact = $property
+            continue
+        }
+        if ([string]::Equals($property.Name, $Name, [StringComparison]::OrdinalIgnoreCase)) {
+            Fail "JSON property '$($property.Name)' conflicts with exact case '$Name'."
+        }
+    }
+    if ($null -ne $exact) { return $exact.Value }
+    return $Default
+}
+
+function Get-StringProperty($Object, [string]$Name, [string]$Default = '') {
+    $value = Get-PropertyValue $Object $Name $Default
+    if ($null -eq $value) { return $Default }
+    if ($value -isnot [string]) {
+        Fail "JSON field '$Name' must be a string."
+    }
+    if ($value.Contains([char]0)) {
+        Fail "JSON field '$Name' may not contain NUL."
+    }
+    return $value
 }
 
 function Canonical-Path([string]$Path, [switch]$MustExist) {
@@ -113,9 +359,8 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
             catch { Fail "Cannot resolve final Windows path '$existing': $($_.Exception.Message)" }
         }
         else {
-            $resolved = Resolve-Path -LiteralPath $existing -ErrorAction SilentlyContinue
-            if ($null -eq $resolved) { Fail "Cannot resolve path: $existing" }
-            $fullPath = [IO.Path]::GetFullPath($resolved.ProviderPath)
+            try { $fullPath = [CePosixPath]::Resolve($existing) }
+            catch { Fail "Cannot resolve final POSIX path '$existing': $($_.Exception.Message)" }
         }
         foreach ($segment in $tail) { $fullPath = Join-Path $fullPath $segment }
         $fullPath = [IO.Path]::GetFullPath($fullPath)
@@ -148,7 +393,14 @@ function Paths-Equal([string]$Left, [string]$Right) {
 function Read-Json([string]$Path) {
     $canonical = Canonical-Path $Path -MustExist
     try {
-        return ([IO.File]::ReadAllText($canonical) | ConvertFrom-Json)
+        $bytes = [IO.File]::ReadAllBytes($canonical)
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+            $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            Fail "UTF-8 BOM is not allowed in '$canonical'."
+        }
+        $text = $strictUtf8.GetString($bytes)
+        [CeStrictJson]::Validate($text)
+        return ($text | ConvertFrom-Json)
     }
     catch {
         Fail "Invalid JSON in '$canonical': $($_.Exception.Message)"
@@ -161,31 +413,118 @@ function Read-SourceDescriptor {
     }
     if ($SourceFile) { return Read-Json $SourceFile }
     if ($SourceJson) {
-        try { return ($SourceJson | ConvertFrom-Json) }
+        if ($SourceJson[0] -eq [char]0xFEFF) {
+            Fail 'UTF-8 BOM is not allowed in -SourceJson.'
+        }
+        try {
+            [CeStrictJson]::Validate($SourceJson)
+            return ($SourceJson | ConvertFrom-Json)
+        }
         catch { Fail "Invalid -SourceJson: $($_.Exception.Message)" }
     }
     return $null
 }
 
+function Normalize-GitPath([string]$Path) {
+    $candidate = $Path.Replace('\', '/')
+    if (-not $candidate.StartsWith('/')) { $candidate = "/$candidate" }
+    $segments = New-Object Collections.Generic.List[string]
+    foreach ($segment in $candidate.Split([char]'/', [StringSplitOptions]::None)) {
+        if (-not $segment) {
+            if ($segments.Count -gt 0) { $segments.Add('') }
+            continue
+        }
+        if ($segment -eq '.') { continue }
+        if ($segment -eq '..') {
+            if ($segments.Count -gt 0) { $segments.RemoveAt($segments.Count - 1) }
+            continue
+        }
+        $segments.Add($segment)
+    }
+    while ($segments.Count -gt 0 -and -not $segments[$segments.Count - 1]) {
+        $segments.RemoveAt($segments.Count - 1)
+    }
+    return '/' + ($segments -join '/')
+}
+
 function Normalize-GitUrl([string]$Url) {
+    foreach ($character in $Url.ToCharArray()) {
+        $code = [int]$character
+        if ($code -lt 32 -or $code -eq 127) {
+            Fail 'A git source URL may not contain control characters.'
+        }
+    }
     if ([string]::IsNullOrWhiteSpace($Url)) { Fail 'A git source requires url.' }
     $candidate = $Url.Trim()
+    if ([regex]::IsMatch($candidate, '%(?![0-9A-Fa-f]{2})')) {
+        Fail 'Git URL has a malformed percent-escape.'
+    }
     if ($candidate -match '^[^/@:]+@([^/:]+):(.+)$') {
         $candidate = "ssh://$($Matches[1])/$($Matches[2])"
+    }
+    $authorityMatch = [regex]::Match(
+        $candidate,
+        '^([A-Za-z][A-Za-z0-9+.-]*)://([^/?#]+)'
+    )
+    if (-not $authorityMatch.Success) {
+        Fail "Git URL must be absolute and include a host: $Url"
+    }
+    $scheme = $authorityMatch.Groups[1].Value.ToLowerInvariant()
+    $authority = $authorityMatch.Groups[2].Value
+    $at = $authority.LastIndexOf('@')
+    if ($at -ge 0) { $authority = $authority.Substring($at + 1) }
+    $hostCore = ''
+    $rawPort = ''
+    $portPresent = $false
+    $bracketMatch = [regex]::Match($authority, '^(\[[^]]+\])(?::([0-9]*))?$')
+    $hostMatch = [regex]::Match($authority, '^([^:]+)(?::([0-9]*))?$')
+    if ($bracketMatch.Success) {
+        $hostCore = $bracketMatch.Groups[1].Value.Trim('[', ']').ToLowerInvariant()
+        $portPresent = $bracketMatch.Groups[2].Success
+        $rawPort = $bracketMatch.Groups[2].Value
+    }
+    elseif ($hostMatch.Success) {
+        $hostCore = $hostMatch.Groups[1].Value.ToLowerInvariant()
+        $portPresent = $hostMatch.Groups[2].Success
+        $rawPort = $hostMatch.Groups[2].Value
+    }
+    else {
+        Fail "Invalid git URL '$Url'."
+    }
+    if ($hostCore.Contains(':')) {
+        $parsedAddress = $null
+        if ($hostCore -notmatch '^[0-9a-f:]+$' -or
+            -not [Net.IPAddress]::TryParse($hostCore, [ref]$parsedAddress) -or
+            $parsedAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetworkV6) {
+            Fail "Git URL has an invalid host: $Url"
+        }
+    }
+    elseif ($hostCore -notmatch '^[a-z0-9._-]+$') {
+        Fail "Git URL has an invalid host: $Url"
+    }
+    $hostName = $hostCore
+    if ($hostCore.Contains(':')) { $hostName = "[$hostCore]" }
+    $port = ''
+    if ($portPresent -and $rawPort) {
+        [int]$portNumber = 0
+        if (-not [int]::TryParse($rawPort, [ref]$portNumber) -or
+            $portNumber -gt 65535) {
+            Fail "Invalid git URL '$Url'."
+        }
+        if (-not (($scheme -eq 'http' -and $portNumber -eq 80) -or
+                  ($scheme -eq 'https' -and $portNumber -eq 443))) {
+            $port = ":$portNumber"
+        }
     }
     try { $uri = [Uri]$candidate }
     catch { Fail "Invalid git URL '$Url'." }
     if (-not $uri.IsAbsoluteUri -or [string]::IsNullOrWhiteSpace($uri.Host)) {
         Fail "Git URL must be absolute and include a host: $Url"
     }
-    $scheme = $uri.Scheme.ToLowerInvariant()
-    $hostName = $uri.Host.ToLowerInvariant()
-    $port = ''
-    if (-not $uri.IsDefaultPort) { $port = ":$($uri.Port)" }
-    $path = $uri.GetComponents(
+    $path = Normalize-GitPath ($uri.GetComponents(
         [UriComponents]::Path,
         [UriFormat]::UriEscaped
-    ).TrimEnd('/')
+    ))
     $path = [regex]::Replace($path, '%([0-9A-Fa-f]{2})', {
         param($match)
         $value = [Convert]::ToInt32($match.Groups[1].Value, 16)
@@ -201,7 +540,6 @@ function Normalize-GitUrl([string]$Url) {
     if ($path.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
         $path = $path.Substring(0, $path.Length - 4)
     }
-    if (-not $path.StartsWith('/')) { $path = "/$path" }
     return "$scheme`://$hostName$port$path"
 }
 
@@ -211,13 +549,16 @@ function Normalize-Source(
     [switch]$FromReceipt
 ) {
     if ($null -eq $Descriptor) { Fail 'A source descriptor is required.' }
-    $kind = [string](Get-PropertyValue $Descriptor 'kind' '')
-    if (-not $kind) { $kind = [string](Get-PropertyValue $Descriptor 'source' '') }
+    $kind = Get-StringProperty $Descriptor 'kind'
+    if (-not $kind) { $kind = Get-StringProperty $Descriptor 'source' }
     $kind = $kind.Trim().ToLowerInvariant()
     if ($kind -eq 'local') { $kind = 'directory' }
     if ($kind -eq 'url') { $kind = 'git' }
-    $ref = [string](Get-PropertyValue $Descriptor 'ref' '')
-    $canonicalInput = [string](Get-PropertyValue $Descriptor 'canonical' '')
+    $ref = Get-StringProperty $Descriptor 'ref'
+    $canonicalInput = Get-StringProperty $Descriptor 'canonical'
+    if ($FromReceipt -and -not $canonicalInput) {
+        Fail 'A receipt source requires canonical identity.'
+    }
     $canonical = ''
 
     switch ($kind) {
@@ -229,8 +570,8 @@ function Normalize-Source(
                 $repo = $canonicalInput.Substring(7)
             }
             else {
-                $repo = [string](Get-PropertyValue $Descriptor 'repo' '')
-                if (-not $repo) { $repo = [string](Get-PropertyValue $Descriptor 'url' '') }
+                $repo = Get-StringProperty $Descriptor 'repo'
+                if (-not $repo) { $repo = Get-StringProperty $Descriptor 'url' }
             }
             $repo = $repo.Trim()
             $repo = $repo -replace '^(?i:https?://github\.com/)', ''
@@ -255,7 +596,7 @@ function Normalize-Source(
                 $gitUrl = $canonicalInput.Substring(4)
             }
             else {
-                $gitUrl = [string](Get-PropertyValue $Descriptor 'url' '')
+                $gitUrl = Get-StringProperty $Descriptor 'url'
             }
             $canonical = "git:$(Normalize-GitUrl $gitUrl)"
         }
@@ -264,8 +605,8 @@ function Normalize-Source(
                 $canonical = $canonicalInput
             }
             else {
-                $opaqueId = [string](Get-PropertyValue $Descriptor 'id' '')
-                if (-not $opaqueId) { $opaqueId = [string](Get-PropertyValue $Descriptor 'value' '') }
+                $opaqueId = Get-StringProperty $Descriptor 'id'
+                if (-not $opaqueId) { $opaqueId = Get-StringProperty $Descriptor 'value' }
                 if ([string]::IsNullOrWhiteSpace($opaqueId)) {
                     Fail 'An opaque source requires a non-empty id.'
                 }
@@ -276,7 +617,7 @@ function Normalize-Source(
             }
         }
         'directory' {
-            $stableId = ([string](Get-PropertyValue $Descriptor 'stableId' '')).Trim()
+            $stableId = (Get-StringProperty $Descriptor 'stableId').Trim()
             if ($canonicalInput) {
                 if ($canonicalInput.StartsWith('directory-id:', [StringComparison]::Ordinal)) {
                     $receiptStableId = $canonicalInput.Substring(13).Trim()
@@ -302,7 +643,7 @@ function Normalize-Source(
                 $canonical = "directory-id:$stableId"
             }
             else {
-                $directoryPath = [string](Get-PropertyValue $Descriptor 'path' '')
+                $directoryPath = Get-StringProperty $Descriptor 'path'
                 if ([string]::IsNullOrWhiteSpace($directoryPath)) {
                     Fail 'A directory source requires a non-empty path or stableId.'
                 }
@@ -343,6 +684,30 @@ function Source-Record($Source) {
     return $builder.ToString()
 }
 
+function Readable-Slug([string]$Value) {
+    $builder = New-Object Text.StringBuilder
+    $previousDash = $false
+    foreach ($character in $Value.ToCharArray()) {
+        $code = [int]$character
+        if ($code -ge 65 -and $code -le 90) {
+            $character = [char]($code + 32)
+            $code += 32
+        }
+        if (($code -ge 97 -and $code -le 122) -or
+            ($code -ge 48 -and $code -le 57)) {
+            [void]$builder.Append($character)
+            $previousDash = $false
+        }
+        elseif ($builder.Length -gt 0 -and -not $previousDash) {
+            [void]$builder.Append('-')
+            $previousDash = $true
+        }
+    }
+    $slug = $builder.ToString().Trim('-')
+    if (-not $slug) { return 'marketplace' }
+    return $slug
+}
+
 function Source-Identity($Source, [string]$ReadableName) {
     $record = Source-Record $Source
     $bytes = [Text.Encoding]::UTF8.GetBytes($record)
@@ -351,9 +716,7 @@ function Source-Identity($Source, [string]$ReadableName) {
         $digest = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant()
     }
     finally { $sha.Dispose() }
-    $slug = $ReadableName.ToLowerInvariant() -replace '[^a-z0-9]+', '-'
-    $slug = $slug.Trim('-')
-    if (-not $slug) { $slug = 'marketplace' }
+    $slug = Readable-Slug $ReadableName
     return [pscustomobject][ordered]@{
         kind = $Source.kind
         canonical = $Source.canonical
@@ -471,7 +834,7 @@ function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedP
             if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
             $manifest = Read-Json $manifestPath
             $metadata = Get-PropertyValue $manifest 'metadata'
-            $pluginRoot = [string](Get-PropertyValue $metadata 'pluginRoot' '')
+            $pluginRoot = Get-StringProperty $metadata 'pluginRoot'
             $sourceBase = $cursor
             if ($pluginRoot) {
                 if ([IO.Path]::IsPathRooted($pluginRoot)) {
@@ -488,9 +851,9 @@ function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedP
             $plugins = @(Get-PropertyValue $manifest 'plugins' @())
             $matches = @()
             foreach ($plugin in $plugins) {
-                $name = [string](Get-PropertyValue $plugin 'name' '')
+                $name = Get-StringProperty $plugin 'name'
                 if ($RequestedPluginId -and $name -ne $RequestedPluginId) { continue }
-                $sourcePath = [string](Get-PropertyValue $plugin 'source' '')
+                $sourcePath = Get-StringProperty $plugin 'source'
                 if (-not $sourcePath) { continue }
                 if ([IO.Path]::IsPathRooted($sourcePath) -or
                     @($sourcePath -split '[\\/]') -contains '..') {
@@ -510,12 +873,12 @@ function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedP
             if ($matches.Count -ne 1) {
                 Fail "Marketplace manifest '$manifestPath' does not contain exactly one plugin entry resolving to '$ResolvedPayload'."
             }
-            $pluginIdFromManifest = [string](Get-PropertyValue $matches[0] 'name' '')
+            $pluginIdFromManifest = Get-StringProperty $matches[0] 'name'
             $source = Normalize-Source ([pscustomobject]@{ source = 'directory'; path = $cursor }) $cursor
             return [pscustomobject]@{
                 source = $source
                 pluginId = $pluginIdFromManifest
-                readableName = [string](Get-PropertyValue $manifest 'name' 'marketplace')
+                readableName = Get-StringProperty $manifest 'name' 'marketplace'
                 locator = [pscustomobject][ordered]@{
                     kind = 'directory'
                     marketplaceRoot = Canonical-Path $cursor -MustExist
@@ -530,14 +893,14 @@ function Resolve-DirectoryEvidence([string]$ResolvedPayload, [string]$RequestedP
 }
 
 function Locator-Matches($Locator, $ReceiptLocator) {
-    if ([string](Get-PropertyValue $Locator 'kind' '') -ne
-        [string](Get-PropertyValue $ReceiptLocator 'kind' '')) { return $false }
+    if ((Get-StringProperty $Locator 'kind') -ne
+        (Get-StringProperty $ReceiptLocator 'kind')) { return $false }
     if ($Locator.kind -eq 'installed') {
-        return (([string](Get-PropertyValue $ReceiptLocator 'marketplaceKey' '')) -eq $Locator.marketplaceKey -and
-                (Paths-Equal ([string](Get-PropertyValue $ReceiptLocator 'copilotHome' '')) $Locator.copilotHome))
+        return ((Get-StringProperty $ReceiptLocator 'marketplaceKey') -eq $Locator.marketplaceKey -and
+                (Paths-Equal (Get-StringProperty $ReceiptLocator 'copilotHome') $Locator.copilotHome))
     }
     if ($Locator.kind -eq 'directory') {
-        return (Paths-Equal ([string](Get-PropertyValue $ReceiptLocator 'marketplaceRoot' '')) $Locator.marketplaceRoot)
+        return (Paths-Equal (Get-StringProperty $ReceiptLocator 'marketplaceRoot') $Locator.marketplaceRoot)
     }
     return $false
 }
@@ -608,11 +971,13 @@ function Validate-NamespaceReceipt(
         Fail "namespace.json is not at its exact canonical receipt location '$canonicalReceipt'."
     }
     $namespace = Read-Json $actualReceipt
-    if ((Get-PropertyValue $namespace 'schema') -ne 'copilot-extensions.marketplace-namespace' -or
-        (Get-PropertyValue $namespace 'version') -ne 1) {
+    $namespaceVersion = Get-PropertyValue $namespace 'version'
+    Assert-PositiveInteger $namespaceVersion 'namespace.json version'
+    if ((Get-StringProperty $namespace 'schema') -ne 'copilot-extensions.marketplace-namespace' -or
+        $namespaceVersion -ne 1) {
         Fail "Namespace receipt '$actualReceipt' has an unsupported schema or version."
     }
-    if ((Get-PropertyValue $namespace 'marketplaceId') -ne $marketplaceId) {
+    if ((Get-StringProperty $namespace 'marketplaceId') -ne $marketplaceId) {
         Fail "Namespace receipt '$actualReceipt' does not match its cell directory."
     }
     $idMatch = [regex]::Match($marketplaceId, '^(.+)--([0-9a-f]{16})$')
@@ -620,18 +985,18 @@ function Validate-NamespaceReceipt(
         Fail "Invalid source-derived marketplace id '$marketplaceId'."
     }
     Assert-PositiveInteger (Get-PropertyValue $namespace 'generation') 'namespace.json generation'
-    Assert-ReceiptState (Get-PropertyValue $namespace 'state') 'namespace.json state'
+    Assert-ReceiptState (Get-StringProperty $namespace 'state') 'namespace.json state'
     $sourceReceipt = Get-PropertyValue $namespace 'source'
     $normalized = Normalize-Source ([pscustomobject]@{
-        kind = Get-PropertyValue $sourceReceipt 'kind'
-        canonical = Get-PropertyValue $sourceReceipt 'canonical'
-        ref = Get-PropertyValue $sourceReceipt 'ref' ''
+        kind = Get-StringProperty $sourceReceipt 'kind'
+        canonical = Get-StringProperty $sourceReceipt 'canonical'
+        ref = Get-StringProperty $sourceReceipt 'ref'
     }) '' -FromReceipt
     $identity = Source-Identity $normalized $idMatch.Groups[1].Value
     if ($identity.marketplaceId -ne $marketplaceId) {
         Fail "Namespace receipt '$actualReceipt' id does not match its normalized source."
     }
-    if ((Get-PropertyValue $sourceReceipt 'fingerprint') -ne $identity.fingerprint) {
+    if ((Get-StringProperty $sourceReceipt 'fingerprint') -ne $identity.fingerprint) {
         Fail "Namespace receipt '$actualReceipt' fingerprint does not match its normalized source."
     }
     return [pscustomobject]@{
@@ -646,6 +1011,11 @@ function Validate-NamespaceReceipt(
 function Assert-PluginId([string]$Value) {
     if ($Value -notmatch '^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$' -or
         $Value -in @('.', '..')) {
+        Fail "Invalid filesystem-safe plugin id '$Value'."
+    }
+    $baseName = $Value.Split([char]'.')[0].ToUpperInvariant()
+    if ($baseName -in @('CON', 'PRN', 'AUX', 'NUL') -or
+        $baseName -match '^(COM|LPT)[1-9]$') {
         Fail "Invalid filesystem-safe plugin id '$Value'."
     }
 }
@@ -689,12 +1059,14 @@ function Validate-ContextReceipt(
     }
     $actualReceipt = Canonical-Path $ReceiptPath -MustExist
     $install = Read-Json $actualReceipt
-    if ((Get-PropertyValue $install 'schema') -ne 'copilot-extensions.plugin-installation' -or
-        (Get-PropertyValue $install 'version') -ne 1) {
+    $installVersion = Get-PropertyValue $install 'version'
+    Assert-PositiveInteger $installVersion 'install.json version'
+    if ((Get-StringProperty $install 'schema') -ne 'copilot-extensions.plugin-installation' -or
+        $installVersion -ne 1) {
         Fail 'install.json has an unsupported schema or version.'
     }
-    $marketplaceId = [string](Get-PropertyValue $install 'marketplaceId' '')
-    $receiptPluginId = [string](Get-PropertyValue $install 'pluginId' '')
+    $marketplaceId = Get-StringProperty $install 'marketplaceId'
+    $receiptPluginId = Get-StringProperty $install 'pluginId'
     if (-not $marketplaceId -or -not $receiptPluginId) { Fail 'install.json identity is incomplete.' }
     if ($marketplaceId -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{16}$') {
         Fail "Invalid source-derived marketplace id '$marketplaceId'."
@@ -706,7 +1078,7 @@ function Validate-ContextReceipt(
     if (-not (Paths-Equal $actualReceipt $canonicalReceipt)) {
         Fail "install.json is not at its exact canonical receipt location '$canonicalReceipt'."
     }
-    if (-not (Paths-Equal ([string](Get-PropertyValue $install 'pluginRoot' '')) $expectedPluginRoot)) {
+    if (-not (Paths-Equal (Get-StringProperty $install 'pluginRoot') $expectedPluginRoot)) {
         Fail 'install.json pluginRoot does not match its canonical cell/plugin location.'
     }
     if ($MarketplaceExpectation -and $marketplaceId -ne $MarketplaceExpectation) {
@@ -719,10 +1091,10 @@ function Validate-ContextReceipt(
         Fail "Expected cell '$CellExpectation', receipt belongs to '$cellRoot'."
     }
     Assert-PositiveInteger (Get-PropertyValue $install 'generation') 'install.json generation'
-    Assert-ReceiptState (Get-PropertyValue $install 'state') 'install.json state'
+    Assert-ReceiptState (Get-StringProperty $install 'state') 'install.json state'
 
     $namespacePath = Canonical-Path (Join-Path $cellRoot 'namespace.json')
-    if (-not (Paths-Equal ([string](Get-PropertyValue $install 'namespaceReceipt' '')) $namespacePath)) {
+    if (-not (Paths-Equal (Get-StringProperty $install 'namespaceReceipt') $namespacePath)) {
         Fail 'install.json namespaceReceipt is not the exact namespace receipt in the same cell.'
     }
     $validatedNamespace = Validate-NamespaceReceipt $namespacePath $ResolvedDurableHome
@@ -732,12 +1104,12 @@ function Validate-ContextReceipt(
     $identity = $validatedNamespace.identity
 
     $payload = Get-PropertyValue $install 'payload'
-    $payloadPath = [string](Get-PropertyValue $payload 'root' '')
+    $payloadPath = Get-StringProperty $payload 'root'
     if (-not [IO.Path]::IsPathRooted($payloadPath)) { Fail 'payload.root must be absolute.' }
-    if ([string]::IsNullOrWhiteSpace([string](Get-PropertyValue $payload 'version' ''))) {
+    if ([string]::IsNullOrWhiteSpace((Get-StringProperty $payload 'version'))) {
         Fail 'payload.version must be a non-empty string.'
     }
-    if ([string](Get-PropertyValue $payload 'origin' '') -notin
+    if ((Get-StringProperty $payload 'origin') -notin
         @('installed', 'directory', 'staged', 'explicit')) {
         Fail 'payload.origin must be installed, directory, staged, or explicit.'
     }
@@ -745,15 +1117,20 @@ function Validate-ContextReceipt(
     if ($PayloadExpectation -and -not (Paths-Equal $payloadPath $PayloadExpectation)) {
         Fail "Expected payload '$PayloadExpectation', receipt names '$payloadPath'."
     }
-    if ($env:COPILOT_PLUGIN_ROOT -and -not (Paths-Equal $payloadPath $env:COPILOT_PLUGIN_ROOT)) {
-        Fail 'COPILOT_PLUGIN_ROOT conflicts with the validated payload root.'
+    if ($env:COPILOT_PLUGIN_ROOT) {
+        if (-not [IO.Path]::IsPathRooted($env:COPILOT_PLUGIN_ROOT)) {
+            Fail 'COPILOT_PLUGIN_ROOT must be absolute.'
+        }
+        if (-not (Paths-Equal $payloadPath $env:COPILOT_PLUGIN_ROOT)) {
+            Fail 'COPILOT_PLUGIN_ROOT conflicts with the validated payload root.'
+        }
     }
 
     $rootsReceipt = Get-PropertyValue $install 'roots'
     $rootNames = @('versions', 'snapshots', 'state', 'run', 'logs', 'cache', 'launchers')
     $roots = [ordered]@{}
     foreach ($name in $rootNames) {
-        $roots[$name + 'Root'] = Resolve-RelativeRoot $expectedPluginRoot ([string](Get-PropertyValue $rootsReceipt $name '')) $name
+        $roots[$name + 'Root'] = Resolve-RelativeRoot $expectedPluginRoot (Get-StringProperty $rootsReceipt $name) $name
     }
     return [pscustomobject][ordered]@{
         action = 'validate'
@@ -843,8 +1220,13 @@ try {
             if (-not (Test-Path -LiteralPath $resolvedPayload -PathType Container)) {
                 Fail "The payload root must be an existing directory: $resolvedPayload"
             }
-            if ($env:COPILOT_PLUGIN_ROOT -and -not (Paths-Equal $resolvedPayload $env:COPILOT_PLUGIN_ROOT)) {
-                Fail 'COPILOT_PLUGIN_ROOT conflicts with -PayloadRoot.'
+            if ($env:COPILOT_PLUGIN_ROOT) {
+                if (-not [IO.Path]::IsPathRooted($env:COPILOT_PLUGIN_ROOT)) {
+                    Fail 'COPILOT_PLUGIN_ROOT must be absolute.'
+                }
+                if (-not (Paths-Equal $resolvedPayload $env:COPILOT_PLUGIN_ROOT)) {
+                    Fail 'COPILOT_PLUGIN_ROOT conflicts with -PayloadRoot.'
+                }
             }
             $descriptor = Read-SourceDescriptor
             $evidence = $null

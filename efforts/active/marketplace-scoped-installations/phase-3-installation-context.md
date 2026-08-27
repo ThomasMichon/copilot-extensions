@@ -5,9 +5,9 @@
 
 ## Status
 
-**Proposed contract.** This document fixes the Phase 3 boundary before the
-installation root becomes operative. Phase 2 payload-local shims may continue
-using legacy runtime roots while this proposal is reviewed.
+**Non-operative foundation.** The reviewed contract and cross-platform resolver
+foundation are in place before the installation root becomes operative. Phase 2
+payload-local shims continue using legacy runtime roots.
 
 ## Goals
 
@@ -137,7 +137,14 @@ ref:0:
 Each value is preceded by its UTF-8 byte length. Writers use LF and UTF-8
 without BOM. Source-kind normalization strips credentials, normalizes scheme and
 host case, removes a trailing `.git` where the provider treats it as
-equivalent, and preserves provider-significant path/ref case.
+equivalent, and preserves provider-significant path/ref case. Git URL paths use
+URI-escaped bytes, decode only percent-encoded ASCII unreserved characters,
+uppercase retained escapes, treat backslashes as path separators, collapse
+leading separators and dot segments, preserve interior empty path segments, and
+remove repeated trailing separators. Source URLs reject control characters and
+hosts outside the canonical DNS/IPv4/IPv6 spelling accepted by the primitive.
+Explicit non-HTTP(S) ports remain identity-significant; an explicit default
+HTTP/HTTPS port is omitted after numeric normalization.
 
 The id is:
 
@@ -271,6 +278,11 @@ Both receipts are written atomically with UTF-8-no-BOM and LF. Cell genesis uses
 an atomic claim beneath `marketplaces/.locks/` before the cell directory exists.
 All implementations use the same lock-directory protocol and liveness receipt;
 the `.locks` roots are removed only by explicit namespace garbage collection.
+
+Readers accept one strict JSON language on every platform: UTF-8 without BOM,
+case-sensitive and non-duplicated object names, no unescaped control characters,
+and string-typed identity, path, payload-version, locator, and manifest fields. Portable
+plugin ids also reject Windows device basenames on every platform.
 
 Every mutation validates the receipt while holding the corresponding lock and
 holds that lock through the complete mutation. Receipt updates use a monotonic
