@@ -58,6 +58,10 @@ _AW_PY="${RUNTIME_PYTHON:-${AW_PY:-}}"
 # machine-local root, or validate an explicit caller-supplied root, before the
 # hook gets a chance to execute.
 if [[ -n "$SETUP_HOOK" && "$RECOVERY" != true ]]; then
+    if [[ -n "$_AW_PY" && "$_AW_PY" != */* ]]; then
+        _resolved_aw_py="$(command -v -- "$_AW_PY" 2>/dev/null || true)"
+        [[ -n "$_resolved_aw_py" ]] && _AW_PY="$_resolved_aw_py"
+    fi
     if [[ -z "$_AW_PY" || ! -x "$_AW_PY" ]]; then
         echo "ERROR: agent-worktrees runtime is unavailable; cannot validate the setup config root." >&2
         exit 3

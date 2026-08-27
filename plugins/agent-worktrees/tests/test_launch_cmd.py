@@ -395,6 +395,7 @@ def test_default_setup_sh_supports_hook_and_session_path():
     assert "--config-root" in text
     assert "AGENT_WORKTREES_CONFIG_ROOT" in text
     assert '"$_AW_PY" -I' in text
+    assert 'command -v -- "$_AW_PY"' in text
     assert text.index('export AGENT_WORKTREES_CONFIG_ROOT=') > text.index(
         '. "$ENV_SCRIPT"'
     )
@@ -420,6 +421,8 @@ def test_default_setup_ps1_supports_hook_and_session_path():
     assert "$ConfigRoot" in text
     assert "AGENT_WORKTREES_CONFIG_ROOT" in text
     assert "'-I', '-m', 'agent_worktrees'" in text
+    assert "Test-Path -LiteralPath $guardPython -PathType Leaf" in text
+    assert "WildcardPattern]::Escape($guardPython)" in text
     assert text.index("$env:AGENT_WORKTREES_CONFIG_ROOT =") > text.index(
         "SetEnvironmentVariable"
     )
@@ -452,6 +455,8 @@ def test_supported_setup_surface_rejects_stateless_destination_before_hook(
     env["HOME"] = str(tmp_path / "home")
     env["USERPROFILE"] = str(tmp_path / "home")
     env["SETUP_GUARD_MARKER"] = str(marker)
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+    runtime_python = Path(sys.executable).name
     before = subprocess.run(
         ["git", "status", "--porcelain"],
         cwd=harness,
@@ -480,7 +485,7 @@ def test_supported_setup_surface_rejects_stateless_destination_before_hook(
             "-ConfigRoot",
             str(harness),
             "-RuntimePython",
-            sys.executable,
+            runtime_python,
         ]
     elif shutil.which("bash"):
         hook = harness / "setup-hook.sh"
@@ -498,7 +503,7 @@ def test_supported_setup_surface_rejects_stateless_destination_before_hook(
             "--config-root",
             str(harness),
             "--runtime-python",
-            sys.executable,
+            runtime_python,
         ]
     else:
         pytest.skip("neither pwsh nor bash is available")

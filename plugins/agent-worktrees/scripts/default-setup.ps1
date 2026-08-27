@@ -81,7 +81,24 @@ if ($SetupHook -and -not $Recovery) {
             $guardPython = $AwPy
         }
     }
-    if (-not $guardPython -or -not (Test-Path -LiteralPath $guardPython)) {
+    $guardPythonExecutable = $null
+    if ($guardPython) {
+        $isPath = [IO.Path]::IsPathRooted($guardPython) -or
+            $guardPython.Contains('\') -or $guardPython.Contains('/')
+        if ($isPath) {
+            if (Test-Path -LiteralPath $guardPython -PathType Leaf) {
+                $guardPythonExecutable = (Get-Item -LiteralPath $guardPython).FullName
+            }
+        } else {
+            $commandName = [Management.Automation.WildcardPattern]::Escape($guardPython)
+            $guardPythonCommand = Get-Command $commandName -CommandType Application `
+                -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($guardPythonCommand) {
+                $guardPythonExecutable = $guardPythonCommand.Source
+            }
+        }
+    }
+    if (-not $guardPythonExecutable) {
         [Console]::Error.WriteLine(
             'ERROR: agent-worktrees runtime is unavailable; cannot validate the setup config root.'
         )
@@ -91,7 +108,7 @@ if ($SetupHook -and -not $Recovery) {
     if ($ConfigRoot) {
         $configRootArgs += @('--destination', $ConfigRoot)
     }
-    $guardedConfigRoot = (& $guardPython @configRootArgs | Out-String).Trim()
+    $guardedConfigRoot = (& $guardPythonExecutable @configRootArgs | Out-String).Trim()
     $configRootExit = $LASTEXITCODE
     if ($configRootExit -ne 0) {
         exit $configRootExit

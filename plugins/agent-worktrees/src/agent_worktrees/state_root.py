@@ -176,6 +176,17 @@ def _git_common_dir(checkout: Path) -> Path:
     return path.resolve(strict=False)
 
 
+def _enclosing_checkout_with_common_dir(
+    path: Path,
+    common_dir: Path,
+) -> Path | None:
+    """Return the nearest enclosing checkout with ``common_dir`` identity."""
+    for checkout in _containing_git_checkouts(path):
+        if _git_common_dir(checkout) == common_dir:
+            return checkout
+    return None
+
+
 def _containing_stateless_checkout(path: Path) -> Path | None:
     """Return a stateless checkout containing ``path``, if any."""
     for candidate in _containing_git_checkouts(path):
@@ -199,11 +210,19 @@ def validate_config_destination(
     launch_stateless = False
     try:
         launch_path = _normalized_path(cwd or os.getcwd())
-        launch_stateless = _containing_stateless_checkout(launch_path) is not None
+        launch_checkout = _containing_stateless_checkout(launch_path)
+        launch_stateless = launch_checkout is not None
         target = _normalized_path(destination, cwd=cwd)
         if target.exists() and not target.is_dir():
             raise ValueError(f"config root '{target}' is not a directory")
-        unsafe_root = _containing_stateless_checkout(target)
+        unsafe_root = None
+        if launch_checkout is not None:
+            unsafe_root = _enclosing_checkout_with_common_dir(
+                target,
+                _git_common_dir(launch_checkout),
+            )
+        if unsafe_root is None:
+            unsafe_root = _containing_stateless_checkout(target)
     except (OSError, ValueError) as exc:
         return ConfigRoot(
             None,
@@ -275,10 +294,10 @@ def resolve_config_root(
                 )
                 if anchor_checkouts:
                     anchor_common_dir = _git_common_dir(anchor_checkouts[0])
-                    for target_checkout in _containing_git_checkouts(target):
-                        if _git_common_dir(target_checkout) == anchor_common_dir:
-                            unsafe_root = target_checkout
-                            break
+                    unsafe_root = _enclosing_checkout_with_common_dir(
+                        target,
+                        anchor_common_dir,
+                    )
         if unsafe_root is None:
             unsafe_root = _containing_stateless_checkout(target)
     except (OSError, ValueError) as exc:

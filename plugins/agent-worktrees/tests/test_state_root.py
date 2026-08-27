@@ -364,6 +364,79 @@ def test_validate_config_destination_preserves_launch_statelessness(tmp_path):
     assert res.stateless is True
 
 
+@pytest.mark.parametrize("nested_kind", [None, "repository", "gitfile"])
+def test_unadopted_stateless_launch_rejects_stale_sibling_checkout(
+    tmp_path,
+    nested_kind,
+):
+    launch = tmp_path / "harness"
+    sibling = tmp_path / "stale-worktree"
+    launch.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=launch, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=launch,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=launch,
+        check=True,
+    )
+    (launch / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=launch, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "initial"], cwd=launch, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "stale", str(sibling)],
+        cwd=launch,
+        check=True,
+    )
+    (launch / ".agent-worktrees").mkdir()
+    (launch / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", ".agent-worktrees/config.yaml"], cwd=launch, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "declare stateless"],
+        cwd=launch,
+        check=True,
+    )
+    assert not (sibling / ".agent-worktrees" / "config.yaml").exists()
+
+    target = sibling
+    if nested_kind is not None:
+        target = sibling / "nested"
+        target.mkdir()
+        if nested_kind == "repository":
+            subprocess.run(["git", "init", "--quiet"], cwd=target, check=True)
+        else:
+            git_dir = launch / ".git" / "modules" / "nested"
+            git_dir.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "git",
+                    "init",
+                    "--quiet",
+                    "--separate-git-dir",
+                    str(git_dir),
+                    str(target),
+                ],
+                check=True,
+            )
+            assert (target / ".git").is_file()
+
+    res = sr.validate_config_destination(
+        str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is True
+    assert str(sibling) in res.error
+
+
 def test_git_common_dir_ignores_inherited_repository_context(
     tmp_path,
     monkeypatch,
