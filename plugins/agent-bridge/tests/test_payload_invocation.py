@@ -236,7 +236,13 @@ def test_windows_catalog_cmd_survives_oversized_path(tmp_path: Path) -> None:
     )
 
     comspec = os.environ.get("COMSPEC", "cmd.exe")
-    oversized_path = f"{tmp_path / 'missing'}{os.pathsep}{'X' * 9000}"
+    host_bin = tmp_path / "host-bin"
+    host_bin.mkdir()
+    (host_bin / "pwsh.cmd").write_text(
+        '@"%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" %*\n',
+        encoding="utf-8",
+    )
+    oversized_path = f"{host_bin}{os.pathsep}{'X' * 9000}"
     assert len(oversized_path) > 8191
     env = {
         **os.environ,

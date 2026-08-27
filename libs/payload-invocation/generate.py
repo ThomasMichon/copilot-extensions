@@ -149,13 +149,11 @@ def render(
         "cmd" if data["windowsCatalogShim"] == "cmd" else "direct"
     )
     windows_cmd_host_block = (
-        '"%SystemRoot%\\System32\\where.exe" pwsh >nul 2>&1\n'
-        "if %ERRORLEVEL%==0 (\n"
-        '  set "_PSHOST=pwsh"\n'
-        ") else (\n"
-        '  set "_PSHOST=%SystemRoot%\\System32\\WindowsPowerShell\\'
-        'v1.0\\powershell.exe"\n'
-        ")\n"
+        'set "_PSHOST="\n'
+        'for /f "delims=" %%I in (\'"%SystemRoot%\\System32\\where.exe" '
+        "pwsh 2^>nul') do if not defined _PSHOST set \"_PSHOST=%%I\"\n"
+        'if not defined _PSHOST set "_PSHOST=%SystemRoot%\\System32\\'
+        'WindowsPowerShell\\v1.0\\powershell.exe"\n'
         '"%_PSHOST%" -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*'
     )
     installer_name = str(data["installer"])
