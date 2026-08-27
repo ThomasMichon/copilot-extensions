@@ -1,4 +1,3 @@
-#Requires -Version 7.0
 <#
 .SYNOPSIS
     Shared utilities for Windows service installers.
@@ -20,7 +19,7 @@ Set-StrictMode -Version Latest
 # service-utils.ps1 lives at <repo>/services/service-utils.ps1.
 $script:_ServiceUtilsRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-# ── Status output ────────────────────────────────────────────────────────
+# -- Status output --------------------------------------------------------
 
 function Write-ServiceStatus {
     param(
@@ -32,20 +31,20 @@ function Write-ServiceStatus {
     Write-Host $Message
 }
 
-function Write-ServiceOk      { param([string]$Msg) Write-ServiceStatus '✓' 'Green'  $Msg }
-function Write-ServiceChanged { param([string]$Msg) Write-ServiceStatus '→' 'Yellow' $Msg }
-function Write-ServiceSkipped { param([string]$Msg) Write-ServiceStatus '○' 'Cyan'   $Msg }
+function Write-ServiceOk      { param([string]$Msg) Write-ServiceStatus '[OK]' 'Green'  $Msg }
+function Write-ServiceChanged { param([string]$Msg) Write-ServiceStatus '[CHANGED]' 'Yellow' $Msg }
+function Write-ServiceSkipped { param([string]$Msg) Write-ServiceStatus '[SKIP]' 'Cyan'   $Msg }
 function Write-ServiceWarn    { param([string]$Msg) Write-ServiceStatus '!' 'Yellow' $Msg }
-function Write-ServiceErr     { param([string]$Msg) Write-ServiceStatus '✗' 'Red'    $Msg }
+function Write-ServiceErr     { param([string]$Msg) Write-ServiceStatus '[ERROR]' 'Red'    $Msg }
 
 function Write-ServiceHeader {
     param([string]$Name)
     Write-Host ""
-    Write-Host "═══ $Name " -ForegroundColor Cyan -NoNewline
-    Write-Host ("═" * [Math]::Max(0, 56 - $Name.Length)) -ForegroundColor DarkCyan
+    Write-Host "=== $Name " -ForegroundColor Cyan -NoNewline
+    Write-Host ("=" * [Math]::Max(0, 56 - $Name.Length)) -ForegroundColor DarkCyan
 }
 
-# ── Scheduled task helpers ───────────────────────────────────────────────
+# -- Scheduled task helpers -----------------------------------------------
 
 function Get-ServiceTask {
     <#
@@ -112,7 +111,7 @@ function Unregister-ServiceTask {
     Write-ServiceChanged "Removed scheduled task '$TaskName'"
 }
 
-# ── Elevation helpers ─────────────────────────────────────────────────────
+# -- Elevation helpers ----------------------------------------------------
 
 function Test-Elevated {
     <#
@@ -230,7 +229,7 @@ exit `$LASTEXITCODE
     exit $exitCode
 }
 
-# ── Directory helpers ────────────────────────────────────────────────────
+# -- Directory helpers ----------------------------------------------------
 
 function Ensure-InstallDir {
     param([string]$Path)
@@ -264,7 +263,7 @@ function Remove-InstallDir {
     Write-ServiceChanged "Removed $Path"
 }
 
-# ── Config utility bridge ────────────────────────────────────────────────
+# -- Config utility bridge ------------------------------------------------
 
 function Invoke-ServiceConfig {
     <#
@@ -337,7 +336,7 @@ function Invoke-ServiceConfig {
     }
 }
 
-# ── Status reporting ─────────────────────────────────────────────────────
+# -- Status reporting -----------------------------------------------------
 
 function Get-ServiceStatusReport {
     <#
@@ -402,7 +401,7 @@ function Show-ServiceStatus {
     return $status
 }
 
-# ── Environment detection ────────────────────────────────────────────────
+# -- Environment detection ------------------------------------------------
 
 function Get-CurrentEnvironment {
     <#
@@ -412,7 +411,9 @@ function Get-CurrentEnvironment {
         Returns a string like "myhost-windows", "myhost-wsl", or
         "myhost" based on hostname and platform detection.
     #>
-    $hostname = ($env:COMPUTERNAME ?? (hostname)).ToLower()
+    $hostname = $env:COMPUTERNAME
+    if (-not $hostname) { $hostname = hostname }
+    $hostname = $hostname.ToLower()
 
     # Use lowercase hostname as-is. Override $machine below if
     # hostname normalization is needed for specific environments.
@@ -432,7 +433,7 @@ function Get-CurrentEnvironment {
     return $machine
 }
 
-# ── Deployment target validation ─────────────────────────────────────────
+# -- Deployment target validation ----------------------------------------
 
 function Assert-DeploymentTarget {
     <#
@@ -504,7 +505,7 @@ function Assert-DeploymentTarget {
     return $true
 }
 
-# ── Deploy manifest ──────────────────────────────────────────────────────
+# -- Deploy manifest ------------------------------------------------------
 
 function Write-DeployManifest {
     <#
@@ -665,8 +666,8 @@ function Show-DeployStatus {
 
     # Basic provenance
     $commitShort = if ($manifest.commit) { $manifest.commit.Substring(0, [Math]::Min(10, $manifest.commit.Length)) } else { 'unknown' }
-    $branch = $manifest.branch ?? 'unknown'
-    $deployedAt = $manifest.deployed_at ?? 'unknown'
+    $branch = if ($manifest.branch) { $manifest.branch } else { 'unknown' }
+    $deployedAt = if ($manifest.deployed_at) { $manifest.deployed_at } else { 'unknown' }
 
     if ($manifest.dirty) {
         $dirtyCount = @($manifest.dirty_files).Count
