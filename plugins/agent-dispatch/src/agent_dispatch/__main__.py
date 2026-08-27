@@ -2247,12 +2247,12 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     active registration in its own subprocess, reconciling on every tick.
     Single-instance-guarded -- a second daemon for the same scope stands down.
     """
-    from .supervisor_daemon import SupervisorDaemon
-
     # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
     from . import procutil
+    from .supervisor_daemon import SupervisorDaemon
+
     procutil.relocate_off_payload()
 
     machine, env = _registration_scope(args)
@@ -2275,14 +2275,15 @@ def _cmd_supervise_serve(args: argparse.Namespace) -> int:
     if not getattr(args, "no_declared", False):
         from . import registrar_discovery
 
+        registrar_sources = registrar_discovery.RegistrarSources()
         if getattr(args, "legacy_env", False):
             # Back-compat bridge: pointer-discovered declarations PLUS the host's
             # legacy supervisor.env / supervisors/*.env profiles, deduped by name
             # (a first-class declaration wins). Lets a host switch its supervisor
             # unit to `serve` without dropping its existing profiles mid-migration.
-            declared_source = registrar_discovery.discover_with_legacy
+            declared_source = registrar_sources.discover_with_legacy
         else:
-            declared_source = registrar_discovery.discover
+            declared_source = registrar_sources.discover
     elif getattr(args, "legacy_env", False):
         # --no-declared drops pointer discovery but --legacy-env still bridges the
         # legacy env profiles.
@@ -3089,6 +3090,103 @@ def _cmd_registrar(args: argparse.Namespace) -> int:
     from .registrar import RegistrarError
 
     try:
+        if args.registrar_command == "doctor":
+            from .registrar_registry import registrar_dropins_dir
+
+            sources = rd.RegistrarSources()
+            report = sources.refresh(emit_warnings=False)
+            combined = report.combined
+            trusted_names = {declaration.name for declaration in combined.trusted}
+            accepted_plugins = [
+                contributed
+                for contributed in combined.plugins.declarations
+                if contributed.declaration.name not in trusted_names
+            ]
+            plugin_retention_possible = (
+                combined.plugins.snapshot.authority.value == "indeterminate"
+                or any(
+                    finding.status == "indeterminate"
+                    for finding in combined.findings
+                )
+            )
+            payload = {
+                "trusted": {
+                    "registry": "pointers.json",
+                    "path": str(rd.pointers_file()),
+                    "authority": report.trusted_authority.value,
+                    "error": report.trusted_error,
+                    "retention_possible": report.trusted_error is not None,
+                    "declarations": [
+                        _declaration_summary(declaration)
+                        for declaration in combined.trusted
+                    ],
+                },
+                "dropins": {
+                    "registry": "registrar.d",
+                    "path": str(registrar_dropins_dir()),
+                    "authority": combined.plugins.snapshot.authority.value,
+                    "active": [
+                        {
+                            **_declaration_summary(contributed.declaration),
+                            "plugin": contributed.plugin,
+                            "entry": contributed.source_path,
+                            "manifest": contributed.manifest_path,
+                        }
+                        for contributed in accepted_plugins
+                    ],
+                    "findings": [
+                        finding.to_dict() for finding in combined.findings
+                    ],
+                    "fix_available": False,
+                    "active_basis": "current-evidence-only",
+                    "retention_possible": plugin_retention_possible,
+                },
+                "active": [
+                    _declaration_summary(declaration)
+                    for declaration in combined.declarations
+                ],
+                "active_basis": "current-evidence-only",
+            }
+            failed = bool(report.trusted_error or combined.findings)
+            if args.json:
+                _emit(payload)
+            else:
+                trusted_label = (
+                    "[WARN]" if report.trusted_error else "[OK]"
+                )
+                print(
+                    f"{trusted_label} pointers.json is "
+                    f"{report.trusted_authority.value}; "
+                    f"{len(combined.trusted)} trusted declaration(s) confirmed "
+                    "by current evidence."
+                )
+                if report.trusted_error:
+                    print(f"  {report.trusted_error}")
+                    print(
+                        "  A running supervisor may retain its last-known trusted "
+                        "declarations."
+                    )
+                dropin_label = "[WARN]" if combined.findings else "[OK]"
+                print(
+                    f"{dropin_label} registrar.d is "
+                    f"{combined.plugins.snapshot.authority.value}; "
+                    f"{len(accepted_plugins)} plugin declaration(s) confirmed "
+                    "active by current evidence."
+                )
+                if plugin_retention_possible:
+                    print(
+                        "  A running supervisor may retain matching last-known "
+                        "declarations for indeterminate entries."
+                    )
+                for finding in combined.findings:
+                    target = f" -> {finding.target}" if finding.target else ""
+                    print(f"  - {finding.reason}: {finding.entry}{target}")
+                    if finding.detail:
+                        print(f"    {finding.detail}")
+                    if finding.remedy:
+                        print(f"    {finding.remedy}")
+                print("  Cleanup is report-only; no --fix operation is available.")
+            return 1 if failed else 0
         if args.registrar_command == "add-pointer":
             pointer = rd.add_pointer(
                 args.name, args.location, kind=args.kind, owner=args.owner
@@ -3295,6 +3393,16 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--owner", help="provenance stamped on declarations read here")
     rp.set_defaults(func=_cmd_registrar)
     rp = reg_sub.add_parser("list", help="list the recorded discovery pointers")
+    rp.set_defaults(func=_cmd_registrar)
+    rp = reg_sub.add_parser(
+        "doctor",
+        help="audit trusted pointers and attributed registrar.d candidates",
+    )
+    rp.add_argument(
+        "--json",
+        action="store_true",
+        help="emit exhaustive structured registrar findings",
+    )
     rp.set_defaults(func=_cmd_registrar)
     rp = reg_sub.add_parser("remove", help="remove a discovery pointer by name")
     rp.add_argument("name", help="the pointer name to remove")

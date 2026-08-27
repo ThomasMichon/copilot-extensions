@@ -315,6 +315,31 @@ def test_reconcile_stops_paused_registration():
     assert summary.running == []
 
 
+def test_reconcile_starts_and_withdraws_declared_registration():
+    from agent_dispatch.registrar import load_declaration
+
+    declaration = load_declaration(
+        {"name": "plugin-profile", "owner": "producer@example-marketplace"}
+    )
+    current = [[declaration]]
+    client = FakeClient([])
+    launcher = FakeLauncher()
+    daemon = _daemon(
+        client,
+        launcher,
+        declared_source=lambda: current[0],
+    )
+
+    started = daemon.reconcile_once()
+    registration_id = "declared:producer@example-marketplace:plugin-profile"
+    assert started.started == [registration_id]
+
+    current[0] = []
+    stopped = daemon.reconcile_once()
+    assert stopped.stopped == [registration_id]
+    assert launcher.proc_for(registration_id).terminated is True
+
+
 # -- operator overrides (kill-switch) ----------------------------------------
 
 
