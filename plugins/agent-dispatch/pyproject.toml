@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-dispatch"
-version = "0.1.0-dev223"
+version = "0.1.0-dev224"
 description = "Portable agent task-queue + per-host coordinator: a single-writer SQLite work queue so agents coordinate without push latency or an account per agent."
 readme = "README.md"
 license = "MIT"
@@ -19,6 +19,9 @@ dependencies = [
     "pyyaml>=6.0",
     "agent-zdd",
     "agent-procutil",
+    "agent-dropin-registry",
+    "agent-plugin-activation",
+    "agent-plugin-resolve",
 ]
 
 [tool.uv.sources]
@@ -29,6 +32,12 @@ agent-zdd = { path = "libs/zdd" }
 # Shared Windows-headless / detached process-spawn kwargs (module
 # ``agent_procutil``). Vendored per plugin; byte-identical src across copies.
 agent-procutil = { path = "libs/agent-procutil" }
+# Resilient tri-state scans/findings for registrar.d.
+agent-dropin-registry = { path = "libs/dropin-registry" }
+# Effective plugin enablement and identity-verified root resolution.
+agent-plugin-activation = { path = "libs/plugin-activation" }
+# Copilot CLI + Claude marketplace/plugin/settings resolution.
+agent-plugin-resolve = { path = "libs/plugin-resolve" }
 
 [project.optional-dependencies]
 mcp = [

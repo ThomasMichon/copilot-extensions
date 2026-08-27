@@ -22,13 +22,22 @@ over it.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import stat
 import tempfile
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from dropin_registry import Finding, ScanAuthority, WarningTracker
+from plugin_activation import ActivationReport
 
 from .registrar import ProfileDeclaration, RegistrarError, load_declaration
+
+if TYPE_CHECKING:
+    from .registrar_registry import CombinedRegistrarReport, RegistrarCandidate
 
 #: The in-repo convention: a repo declares its supervised work here, discovered on
 #: sync. Relative to the repo root.
@@ -40,6 +49,19 @@ _DECL_SUFFIXES = (".yaml", ".yml", ".json")
 #: Env override for the registrar state dir (parity with the run-dir override), so a
 #: test or an alternate deployment can relocate the pointer registry.
 REGISTRAR_DIR_ENV = "AGENT_DISPATCH_REGISTRAR_DIR"
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+log = logging.getLogger(__name__)
+
+
+class RegistrarIndeterminateError(RegistrarError):
+    """Trusted registrar state could not be read authoritatively."""
+
+
+def _is_reparse(info: os.stat_result) -> bool:
+    return bool(
+        getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    )
 
 
 def registrar_dir() -> Path:
@@ -121,13 +143,25 @@ def repo_pointer(
 
 # -- pointer-registry persistence (the thin index) ---------------------------
 
-def load_pointers(base: Path | None = None) -> list[Pointer]:
-    """Read the persisted pointer registry (empty when the file is absent)."""
+def _load_pointers_with_authority(
+    base: Path | None = None,
+) -> tuple[ScanAuthority, list[Pointer]]:
+    """Read pointers and report absence from the same filesystem operation."""
     path = pointers_file(base)
-    if not path.exists():
-        return []
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return ScanAuthority.ABSENT, []
+    except UnicodeError as exc:
+        raise RegistrarError(
+            f"{path}: invalid pointer registry encoding: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise RegistrarIndeterminateError(
+            f"{path}: pointer registry could not be read: {exc}"
+        ) from exc
+    try:
+        raw = json.loads(text)
     except json.JSONDecodeError as exc:
         raise RegistrarError(f"{path}: invalid pointer registry JSON: {exc}") from exc
     if not isinstance(raw, list):
@@ -140,7 +174,12 @@ def load_pointers(base: Path | None = None) -> list[Pointer]:
             out.append(Pointer.from_dict(item))
         except RegistrarError as exc:
             raise RegistrarError(f"{path}[{i}]: {exc}") from exc
-    return out
+    return ScanAuthority.COMPLETE, out
+
+
+def load_pointers(base: Path | None = None) -> list[Pointer]:
+    """Read the persisted pointer registry (empty when the file is absent)."""
+    return _load_pointers_with_authority(base)[1]
 
 
 def save_pointers(pointers: Iterable[Pointer], base: Path | None = None) -> Path:
@@ -230,18 +269,62 @@ def read_declaration_file(path: str | Path) -> ProfileDeclaration:
             f"{p}: unrecognized declaration suffix {p.suffix!r}; "
             f"expected one of {list(_DECL_SUFFIXES)}"
         )
-    data = _decode(p.read_text(encoding="utf-8"), p.suffix, where=str(p))
+    try:
+        text = p.read_text(encoding="utf-8")
+    except UnicodeError as exc:
+        raise RegistrarError(f"{p}: invalid declaration encoding: {exc}") from exc
+    except OSError as exc:
+        raise RegistrarIndeterminateError(
+            f"{p}: declaration could not be read: {exc}"
+        ) from exc
+    data = _decode(text, p.suffix, where=str(p))
     return load_declaration(data)
 
 
 def _iter_declaration_files(location: Path) -> list[Path]:
     """Declaration documents directly under ``location`` (sorted, deterministic)."""
-    if not location.is_dir():
+    try:
+        root_info = location.lstat()
+    except FileNotFoundError:
         return []
-    return sorted(
-        (f for f in location.iterdir() if f.is_file() and f.suffix in _DECL_SUFFIXES),
-        key=lambda f: f.name,
-    )
+    except OSError as exc:
+        raise RegistrarIndeterminateError(
+            f"{location}: declaration directory could not be inspected: {exc}"
+        ) from exc
+    if (
+        not stat.S_ISDIR(root_info.st_mode)
+        or stat.S_ISLNK(root_info.st_mode)
+        or _is_reparse(root_info)
+    ):
+        raise RegistrarError(
+            f"{location}: declaration location must be a regular non-reparse directory"
+        )
+    try:
+        entries = sorted(location.iterdir(), key=lambda path: path.name)
+    except OSError as exc:
+        raise RegistrarIndeterminateError(
+            f"{location}: declaration directory could not be enumerated: {exc}"
+        ) from exc
+
+    accepted: list[Path] = []
+    for entry in entries:
+        if entry.suffix not in _DECL_SUFFIXES:
+            continue
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise RegistrarIndeterminateError(
+                f"{entry}: declaration entry could not be inspected: {exc}"
+            ) from exc
+        if (
+            stat.S_ISREG(info.st_mode)
+            and not stat.S_ISLNK(info.st_mode)
+            and not _is_reparse(info)
+        ):
+            accepted.append(entry)
+    return accepted
 
 
 def read_location(location: str | Path, *, owner: str | None = None) -> list[ProfileDeclaration]:
@@ -259,11 +342,11 @@ def read_location(location: str | Path, *, owner: str | None = None) -> list[Pro
     return out
 
 
-def discover(
+def discover_trusted(
     pointers: Iterable[Pointer] | None = None,
     *,
     base: Path | None = None,
-) -> list[ProfileDeclaration]:
+) -> tuple[ScanAuthority, list[ProfileDeclaration]]:
     """Aggregate the declared profile set across all pointers.
 
     With no ``pointers`` the persisted registry is used. Declarations are returned
@@ -271,7 +354,10 @@ def discover(
     sources claiming the same unit) and is rejected -- the registry is one source of
     truth, so the ambiguity must be resolved at declaration time.
     """
-    pts = list(pointers) if pointers is not None else load_pointers(base)
+    if pointers is None:
+        authority, pts = _load_pointers_with_authority(base)
+    else:
+        authority, pts = ScanAuthority.COMPLETE, list(pointers)
     by_name: dict[str, tuple[str, ProfileDeclaration]] = {}
     for pointer in pts:
         owner = pointer.effective_owner()
@@ -283,7 +369,19 @@ def discover(
                     f"{prior_owner!r} and {owner!r} -- names must be unique across the registry"
                 )
             by_name[decl.name] = (owner, decl)
-    return [decl for _, decl in sorted(by_name.values(), key=lambda item: item[1].name)]
+    declarations = [
+        decl for _, decl in sorted(by_name.values(), key=lambda item: item[1].name)
+    ]
+    return authority, declarations
+
+
+def discover(
+    pointers: Iterable[Pointer] | None = None,
+    *,
+    base: Path | None = None,
+) -> list[ProfileDeclaration]:
+    """Compatibility wrapper returning trusted declarations only."""
+    return discover_trusted(pointers, base=base)[1]
 
 
 def discover_repo(repo_root: str | Path, *, owner: str | None = None) -> list[ProfileDeclaration]:
@@ -400,3 +498,165 @@ def discover_with_legacy(
         if d.name not in names
     ]
     return [*declared, *legacy]
+
+
+@dataclass(frozen=True)
+class RegistrarDiscoveryReport:
+    """Trusted-pointer and plugin-candidate state from one refresh."""
+
+    trusted_authority: ScanAuthority
+    trusted_error: str | None
+    combined: CombinedRegistrarReport
+
+
+class RegistrarSources:
+    """Stateful runtime view across trusted pointers and plugin candidates.
+
+    Trusted pointer failures retain only the last trusted set. Plugin candidates
+    continue scanning and reconciling independently, so a damaged ``pointers.json``
+    cannot freeze a confirmed plugin disablement or deletion.
+    """
+
+    def __init__(
+        self,
+        *,
+        base: Path | None = None,
+        dropins: Path | None = None,
+        activation_source: Callable[[], ActivationReport] | None = None,
+        warning_tracker: WarningTracker | None = None,
+        trusted_warning_tracker: WarningTracker | None = None,
+    ):
+        self.base = base
+        self.dropins = dropins
+        self.activation_source = activation_source
+        self.warning_tracker = warning_tracker or WarningTracker()
+        self.trusted_warning_tracker = (
+            trusted_warning_tracker or WarningTracker(limit=1)
+        )
+        self._trusted: list[ProfileDeclaration] = []
+        self._plugin_entries: dict[str, RegistrarCandidate] = {}
+        self.last_report: RegistrarDiscoveryReport | None = None
+
+    def _trusted_error_finding(
+        self,
+        exc: Exception,
+        *,
+        reason: str,
+    ) -> Finding:
+        path = pointers_file(self.base)
+        return Finding(
+            registry="pointers.json",
+            entry=str(path),
+            status="indeterminate",
+            reason=reason,
+            remedy=(
+                f"Run `agent-dispatch registrar doctor` and repair {path}; "
+                "the runtime is retaining the last trusted declaration set."
+            ),
+            detail=str(exc),
+        )
+
+    @staticmethod
+    def _emit_batch(batch, *, doctor: str) -> None:
+        for finding in batch.emitted:
+            target = f" -> {finding.target}" if finding.target else ""
+            detail = f": {finding.detail}" if finding.detail else ""
+            log.warning(
+                "%s: %s: %s%s%s; run `%s`",
+                finding.registry,
+                finding.reason,
+                finding.entry,
+                target,
+                detail,
+                doctor,
+            )
+        if batch.suppressed:
+            log.warning(
+                "%s additional registrar finding(s) suppressed; run `%s`",
+                batch.suppressed,
+                doctor,
+            )
+        if batch.recovered:
+            log.info(
+                "%s registrar entry finding(s) recovered; current state is active again",
+                batch.recovered,
+            )
+
+    def refresh(self, *, emit_warnings: bool = True) -> RegistrarDiscoveryReport:
+        """Refresh both tiers while retaining uncertainty only within its tier."""
+        from .registrar_registry import (
+            combine_registrar_sources,
+            scan_registrar_registry,
+        )
+
+        trusted_authority = ScanAuthority.COMPLETE
+        trusted_error: str | None = None
+        trusted_findings: list[Finding] = []
+        try:
+            trusted_authority, trusted = discover_trusted(base=self.base)
+        except RegistrarIndeterminateError as exc:
+            trusted = self._trusted
+            trusted_authority = ScanAuthority.INDETERMINATE
+            trusted_error = str(exc)
+            trusted_findings.append(
+                self._trusted_error_finding(exc, reason="registry-indeterminate")
+            )
+        except RegistrarError as exc:
+            trusted = self._trusted
+            trusted_authority = ScanAuthority.INDETERMINATE
+            trusted_error = str(exc)
+            trusted_findings.append(
+                self._trusted_error_finding(exc, reason="invalid-entry")
+            )
+        else:
+            self._trusted = list(trusted)
+
+        activation = self.activation_source() if self.activation_source else None
+        plugins = scan_registrar_registry(
+            self.dropins,
+            previous=self._plugin_entries,
+            activation_report=activation,
+        )
+        self._plugin_entries = dict(plugins.entries)
+        combined = combine_registrar_sources(trusted, plugins)
+        report = RegistrarDiscoveryReport(
+            trusted_authority=trusted_authority,
+            trusted_error=trusted_error,
+            combined=combined,
+        )
+        self.last_report = report
+
+        if emit_warnings:
+            self._emit_batch(
+                self.trusted_warning_tracker.select(trusted_findings),
+                doctor="agent-dispatch registrar doctor",
+            )
+            self._emit_batch(
+                self.warning_tracker.select(combined.findings),
+                doctor="agent-dispatch registrar doctor",
+            )
+        return report
+
+    def discover(self) -> list[ProfileDeclaration]:
+        """Return the reconciled trusted-plus-plugin declaration set."""
+        report = self.refresh()
+        return list(report.combined.declarations)
+
+    def discover_with_legacy(
+        self,
+        *,
+        env_file: str | Path | None = None,
+        profile_dir: str | Path | None = None,
+    ) -> list[ProfileDeclaration]:
+        """Return current declarations plus non-conflicting legacy env profiles."""
+        declared = self.discover()
+        names = {declaration.name for declaration in declared}
+        legacy = [
+            declaration
+            for declaration in read_legacy_env_profiles(
+                env_file=env_file,
+                profile_dir=profile_dir,
+            )
+            if declaration.name not in names
+        ]
+        return [*declared, *legacy]
