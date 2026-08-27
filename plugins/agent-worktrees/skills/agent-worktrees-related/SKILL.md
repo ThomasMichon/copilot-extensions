@@ -26,7 +26,7 @@ description: >
 
 Use the exact `argv[0]` from the agent-worktrees session command catalog for
 every shell operation below. Replace `<agent-worktrees catalog argv[0]>` with
-that path as one quoted argv token and never search `PATH`.
+that raw path, quote it at each shell call site, and never search `PATH`.
 
 A **control-plane** repo (e.g. a dotfiles/harness repo) coordinates work across
 several OTHER repos. This skill manages the **directional, per-project** index

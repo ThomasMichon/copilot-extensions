@@ -28,8 +28,8 @@ description: >
 Use the exact `argv[0]` from each plugin's session command catalog for the
 interactive operations below. Replace `<agent-worktrees catalog argv[0]>`,
 `<agent-bridge catalog argv[0]>`, `<agent-codespaces catalog argv[0]>`, and
-`<agent-containers catalog argv[0]>` with their published paths as quoted,
-single argv tokens; never search `PATH`.
+`<agent-containers catalog argv[0]>` with their raw published paths. Quote each
+path at its shell call site; never search `PATH`.
 
 You are in a **control-plane** repo and need to do work in a **different** repo.
 Do it without stepping on other flows, without editing things you shouldn't, and

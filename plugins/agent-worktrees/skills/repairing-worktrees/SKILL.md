@@ -26,8 +26,8 @@ description: >
 
 Use the exact `argv[0]` from the agent-worktrees session command catalog for
 every direct runtime operation below. Replace
-`<agent-worktrees catalog argv[0]>` with that path as one quoted argv token
-and never search `PATH`. Cross-plugin
+`<agent-worktrees catalog argv[0]>` with that raw path, quote it at each shell
+call site, and never search `PATH`. Cross-plugin
 `<agent-dispatch catalog argv[0]>` examples use that plugin's exact catalog
 path under the same rule.
 Project-binstub examples remain project entry points.

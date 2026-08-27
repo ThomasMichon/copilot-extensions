@@ -48,14 +48,16 @@ description: >
 > The agent-worktrees session command catalog supplies an exact `argv[0]`
 > owned by this plugin payload. Replace
 > `<agent-worktrees catalog argv[0]>` in direct runtime operations below with
-> that path as one quoted argv token; never paste an absolute path unquoted,
-> search `PATH`, or substitute a same-named command from another payload.
+> that raw path. Quote the path at each shell call site; if assigning it to a
+> variable, store the raw path without embedded quote characters and invoke
+> the variable quoted. Never paste an absolute path unquoted, search `PATH`, or
+> substitute a same-named command from another payload.
 > Project binstubs and commands explicitly labeled as
 > management boundaries remain distinct attributable entry points. In
 > PowerShell, invoke the catalog path as
 > `& "<agent-worktrees catalog argv[0]>" <args>`.
 > Cross-plugin `<agent-codespaces catalog argv[0]>` examples use that plugin's
-> exact catalog path under the same quoted-single-argv-token rule.
+> exact catalog path under the same call-site quoting rule.
 >
 > The payload command provisions its runtime on first use and works without
 > the interactive launcher. If session-start hooks did not publish the

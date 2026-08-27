@@ -4,16 +4,17 @@ Use the exact `argv[0]` from each plugin's session command catalog for
 interactive checks and configuration below. Replace
 `<agent-bridge catalog argv[0]>`, `<agent-codespaces catalog argv[0]>`,
 `<agent-containers catalog argv[0]>`, and `<agent-mcp catalog argv[0]>` with
-their published paths as quoted, single argv tokens. Installer and service launchers remain explicit
+their raw published paths, quoting each at its shell call site. Installer and
+service launchers remain explicit
 management boundaries.
 
 Detailed init/adopt steps for the optional / standalone copilot-extensions
-plugins. See [SKILL.md](../SKILL.md) for the overview and the core
-the worktree and bridge flow.
+plugins. See [SKILL.md](../SKILL.md) for the overview and the core worktree and
+bridge flow.
 
 ## Contents
-- CodeSpaces plugin init (section 5)
-- CodeSpaces plugin adopt (section 6)
+- Codespaces plugin init (section 5)
+- Codespaces plugin adopt (section 6)
 - Container plugin init (section 7)
 - MCP plugin init (section 8)
 

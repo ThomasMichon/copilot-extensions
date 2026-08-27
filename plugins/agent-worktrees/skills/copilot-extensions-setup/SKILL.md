@@ -28,7 +28,7 @@ interactive checks and configuration below. Replace the
 `<agent-worktrees catalog argv[0]>`, `<agent-bridge catalog argv[0]>`,
 `<agent-codespaces catalog argv[0]>`, `<agent-containers catalog argv[0]>`,
 and `<agent-mcp catalog argv[0]>` placeholders with their published paths.
-Treat each substituted path as one quoted argv token.
+Substitute each raw path, then quote it at its shell call site.
 Installer, service, and unified-update commands explicitly labeled as
 management boundaries remain literal global-wrapper invocations.
 
@@ -49,7 +49,7 @@ via their own skills:
 These ship from the same `copilot-extensions` repo. Install order for the
 **mesh**: agent-worktrees first (prerequisite), then agent-codespaces and
 agent-containers, then agent-bridge (the bridge installer imports
-the CodeSpaces and container plugins for their `codespace:` / `container:`
+the Codespaces and container plugins for their `codespace:` / `container:`
 resolvers, so install them before the bridge). agent-mcp is **standalone and
 optional** — install it any time; it has no ordering constraint.
 
@@ -209,7 +209,7 @@ bash "$aw_dir/scripts/init.sh"
 ### Verify
 
 ```bash
-<agent-worktrees catalog argv[0]> --version
+agent-worktrees --version # marketplace-isolation: allow install-verification
 ```
 
 If not found, ensure `~/.local/bin` is on PATH. The init script adds

@@ -27,7 +27,7 @@ description: >
 
 Use the exact `argv[0]` from the agent-worktrees session command catalog for
 every worktree helper below. Replace `<agent-worktrees catalog argv[0]>` with
-that path as one quoted argv token and never search `PATH`.
+that raw path, quote it at each shell call site, and never search `PATH`.
 
 This skill covers the **git collaboration flows** that sit *below* the high-level
 sign-off flow (`push-changes` / `create-pr` / `finalize`, owned by the
@@ -41,7 +41,7 @@ sign-off flow (`push-changes` / `create-pr` / `finalize`, owned by the
    have a turn-key helper.
 
 **The flows are the point; the commands are turn-key helpers.** Each
-the payload-local `git ...` verb just wraps a short git sequence you *could* run by
+payload-local `git ...` verb just wraps a short git sequence you *could* run by
 hand -- it exists so the common path is one safe step that can't silently break a
 shared invariant. Reach for the helper when a flow below calls for it; otherwise
 use plain git.

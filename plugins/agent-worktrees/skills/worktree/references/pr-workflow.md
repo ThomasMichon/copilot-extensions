@@ -3,7 +3,7 @@
 Use the exact `argv[0]` from the agent-worktrees session command catalog for
 every direct runtime operation below. Replace
 `<agent-worktrees catalog argv[0]>` with that path and never search `PATH`.
-Treat the substituted path as one quoted argv token.
+Substitute the raw path and quote it at each shell call site.
 
 Full reference for signing off a worktree through a **pull request** instead of
 direct-push finalization. See [SKILL.md](../SKILL.md) for the overview, the
