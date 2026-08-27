@@ -53,6 +53,11 @@ def clean_env(monkeypatch, tmp_path):
     # Point the global config at a nonexistent file so resolve_context() yields
     # pure defaults (port default, no kpdb).
     monkeypatch.setenv("AGENT_VAULT_CONFIG", str(tmp_path / "none.json"))
+    # A WSL test host may have a real Windows-side daemon advertised under
+    # /mnt/c. Keep that live endpoint out of tests unless a case opts in.
+    monkeypatch.setenv(
+        "AGENT_VAULT_WINDOWS_MOUNT", str(tmp_path / "no-windows-mount")
+    )
 
 
 @pytest.fixture

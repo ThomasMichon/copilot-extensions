@@ -1,0 +1,12 @@
+{
+  "schema": "copilot-extensions.payload-invocation",
+  "version": 1,
+  "command": "agent-vault",
+  "module": "agent_vault",
+  "runtimeRoot": ".agent-vault",
+  "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
+  "purpose": "Fetch and manage machine-local vault credentials",
+  "installer": "install",
+  "windowsCatalogShim": "cmd",
+  "provisionMode": "direct"
+}

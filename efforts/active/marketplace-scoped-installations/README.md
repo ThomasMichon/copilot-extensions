@@ -273,6 +273,11 @@ See [`design.md`](design.md).
   agent-facing logger entry points to exact catalog argv. Scheduled sync,
   installer management, and far-side SSH launches remain explicit management
   boundaries.
+- The agent-mcp slice merged in
+  [#1147](https://github.com/ThomasMichon/copilot-extensions/pull/1147), moving
+  agent-facing shell operations to a payload-local command while preserving
+  static `mcp-servers.command` and generated materialized fleets as explicit
+  startup and management compatibility boundaries.
 
 ### 2026-08-26 — Phase 3 proposal resumed
 

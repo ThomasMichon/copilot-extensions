@@ -2,7 +2,12 @@
 
 `agent-vault` is a standalone, machine-local secret store for Copilot CLI agents and local automation. It uses a user-selected KeePassXC `.kdbx` database, a small local daemon that caches the KeePass master password for a bounded time, and an `agent-vault` CLI that fetches API keys, SSH keys, credentials, and small sealed values on demand.
 
-It does **not** require a repo to be registered with `agent-worktrees`, and it does not require a broker, container, tunnel, or remote service. Sibling plugins can consume it by shelling out to `agent-vault` or by registering extension hooks.
+It does **not** require a repo to be registered with `agent-worktrees`, and it
+does not require a broker, container, tunnel, or remote service. Agent-facing
+skills receive an exact payload-local command from the session catalog.
+Out-of-session automation, Git credential-helper registration, supervision,
+and `vault-askpass` remain explicit compatibility/management boundaries until
+they receive attributable installation context.
 
 ## Setup in one pass
 

@@ -49,6 +49,9 @@ def clean_env(monkeypatch, tmp_path):
     # never read a live/deployed rendezvous file (which would tag transports
     # "discovered-*"). The dir is intentionally left empty/absent.
     monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv(
+        "AGENT_VAULT_WINDOWS_MOUNT", str(tmp_path / "no-windows-mount")
+    )
     return tmp_path
 
 

@@ -14,13 +14,20 @@ description: >
   - 'update the vault runtime'
   - 'deploy agent-vault'
   - 'agent-vault setup'
-  - 'agent-vault status'
-  - 'agent-vault doctor'
+  - 'check agent-vault runtime status'
+  - 'diagnose agent-vault'
   - 'troubleshoot agent-vault'
   - 'uninstall agent-vault'
 ---
 
 # agent-vault Setup
+
+Use installer paths below for install, update, supervision, status, and
+uninstall: those are explicit management boundaries that run outside session
+command context. For runtime CLI checks, use the exact `argv[0]` from the
+plugin's session command catalog. Replace
+`<agent-vault catalog argv[0]>` with that path; in PowerShell invoke it as
+`& "<agent-vault catalog argv[0]>" <args>`.
 
 `agent-vault` is a runtime plugin: a Python package/venv, binstub(s), and an
 optional always-on local daemon. It is also **standalone**: setup does not depend
@@ -44,9 +51,9 @@ Runtime defaults:
 
 The plugin's session-start hook runs `scripts/bootstrap-check.*`. When no deploy
 manifest exists, it performs a cheap `stamp`: copy/record the payload and write a
-self-provisioning binstub. The first real `agent-vault ...` command then builds
-the venv and prints `::agent-provisioning::` (~30-120s). Do not kill that first
-run.
+self-provisioning binstub. The first payload-local runtime command then builds
+the venv and prints `::agent-provisioning::` (~30-120s). Do not kill that
+first run.
 
 Manual stamp from a checkout:
 
@@ -139,24 +146,24 @@ bash plugins/agent-vault/scripts/install.sh start
 bash plugins/agent-vault/scripts/install.sh stop
 ```
 
-There is no `agent-vault doctor` subcommand today. Use status plus these runtime
+There is no `doctor` subcommand today. Use installer status plus these runtime
 checks:
 
 ```bash
-agent-vault which --json      # config resolution and source tiers
-agent-vault ping              # daemon PID, TTL, cache count, lock status, transport
-agent-vault cache-status --json
+<agent-vault catalog argv[0]> which --json
+<agent-vault catalog argv[0]> ping
+<agent-vault catalog argv[0]> cache-status --json
 ```
 
 Common findings:
 
 | Symptom | Check / fix |
 |---------|-------------|
-| `agent-vault` not found | Run `stamp` or `install`; verify `~/.local/bin` is on PATH. |
+| Runtime command unavailable | Invoke the sole installed payload's `bin/agent-vault` / `bin\agent-vault.cmd` directly, or start a new session to refresh the catalog. |
 | First command appears slow | It is probably self-provisioning; wait for the `::agent-provisioning::` run to finish. |
-| `KeePass database path is not configured` | Set `KPDB`, add a named vault, or create `.agent-vault.json`; inspect with `agent-vault which`. |
+| `KeePass database path is not configured` | Set `KPDB`, add a named vault, or create `.agent-vault.json`; inspect with the payload-local `which`. |
 | `keepassxc-cli` missing | Install KeePassXC or add `keepassxc-cli` to PATH. |
-| Locked read fails fast | Run `agent-vault unlock`, `agent-vault unlock --terminal`, or retry `get` with `--prompt`. |
+| Locked read fails fast | Run the payload-local `unlock`, `unlock --terminal`, or retry `get` with `--prompt`. |
 | Cache commands are disabled | Set `AGENT_VAULT_CACHE=1` or `AGENT_VAULT_CACHE_DIR`; install `cryptography` into the runtime venv. |
 
 ## First-run database config
@@ -165,18 +172,19 @@ After install/stamp, configure the database before reading entries:
 
 ```powershell
 $env:KPDB = "C:\Users\you\Secrets\vault.kdbx"
-agent-vault which
-agent-vault unlock
+& "<agent-vault catalog argv[0]>" which
+& "<agent-vault catalog argv[0]>" unlock
 ```
 
 ```bash
 export KPDB="$HOME/Secrets/vault.kdbx"
-agent-vault which
-agent-vault unlock
+<agent-vault catalog argv[0]> which
+<agent-vault catalog argv[0]> unlock
 ```
 
-For multi-vault setup, use `agent-vault vault add`, `vault set-default`, and a
-repo-local `.agent-vault.json`; see the `agent-vault` skill.
+For multi-vault setup, use the payload-local `vault add` and
+`vault set-default` operations plus a repo-local `.agent-vault.json`; see the
+`agent-vault` skill.
 
 ## SUDO_ASKPASS wiring (Linux / WSL)
 
