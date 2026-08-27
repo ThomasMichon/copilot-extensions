@@ -1,14 +1,21 @@
 # Optional Plugins Setup -- Codespaces, Containers, MCP
 
+Use the exact `argv[0]` from each plugin's session command catalog for
+interactive checks and configuration below. Replace
+`<agent-bridge catalog argv[0]>`, `<agent-codespaces catalog argv[0]>`,
+`<agent-containers catalog argv[0]>`, and `<agent-mcp catalog argv[0]>` with
+their published paths as quoted, single argv tokens. Installer and service launchers remain explicit
+management boundaries.
+
 Detailed init/adopt steps for the optional / standalone copilot-extensions
 plugins. See [SKILL.md](../SKILL.md) for the overview and the core
-agent-worktrees + agent-bridge flow.
+the worktree and bridge flow.
 
 ## Contents
-- Agent-Codespaces Init (section 5)
-- Agent-Codespaces Adopt (section 6)
-- Agent-Containers Init (section 7)
-- Agent-MCP Init (section 8)
+- CodeSpaces plugin init (section 5)
+- CodeSpaces plugin adopt (section 6)
+- Container plugin init (section 7)
+- MCP plugin init (section 8)
 
 ---
 ## 5. Agent-Codespaces Init
@@ -31,8 +38,8 @@ bash "$ac_dir/scripts/init.sh"
 ### Verify
 
 ```bash
-agent-codespaces version
-agent-codespaces status      # shows runtime, gh CLI, ssh
+<agent-codespaces catalog argv[0]> version
+<agent-codespaces catalog argv[0]> status      # shows runtime, gh CLI, ssh
 ```
 
 `gh` must be authenticated (`gh auth login`) for CodeSpace operations.
@@ -50,32 +57,33 @@ provision hooks). Run **from inside the repo**.
 
 ```bash
 cd /path/to/repo
-agent-codespaces config init       # scaffold .agent-codespaces/config.yaml (+ auto-adopt)
-agent-codespaces config validate
-agent-codespaces config show
+<agent-codespaces catalog argv[0]> config init       # scaffold .agent-codespaces/config.yaml (+ auto-adopt)
+<agent-codespaces catalog argv[0]> config validate
+<agent-codespaces catalog argv[0]> config show
 ```
 
 For a convention-matching repo, skip the above entirely — see the
 `agent-codespaces:codespaces-setup` skill for when supplementary config is warranted and its
 format. A legacy repo-root `codespaces.yaml` is still read (relocate it with
-`agent-codespaces config migrate`).
+`<agent-codespaces catalog argv[0]> config migrate`).
 
 ### Verify relay + bridge integration
 
 No registration step is needed: when agent-codespaces is installed, the
-agent-bridge service imports it as a sibling and **auto-registers the live
+the bridge service imports it as a sibling and **auto-registers the live
 `codespace:` namespace resolver** at startup, so CodeSpaces are addressable as
 `codespace:<name>` (raw or friendly) on demand.
 
 ```bash
 # CodeSpaces should already appear here -- no `bridge register` required.
-agent-bridge agents          # look for codespace:<name> entries
+<agent-bridge catalog argv[0]> agents          # look for codespace:<name> entries
 ```
 
-If `agent-bridge agents` shows no codespace entries and the bridge install
+If the payload-local `agents` output shows no codespace entries and the bridge install
 WARNED about a missing sibling, re-run the agent-bridge installer **after** the
-agent-codespaces plugin is installed (section 0) so the service venv picks up
-the `agent_codespaces` package. (`agent-codespaces bridge register` exists but
+the CodeSpaces plugin is installed (section 0) so the service venv picks up
+the `agent_codespaces` package.
+(`<agent-codespaces catalog argv[0]> bridge register` exists but
 only POSTs a static `cs-*` snapshot with a TTL — it is optional and superseded
 by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 
@@ -85,7 +93,7 @@ by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 
 Install the agent-containers runtime (CLI binstub + `~/.agent-containers`
 home). agent-containers registers the `container:` namespace with the
-agent-bridge daemon via a `~/.agent-bridge/providers.d/` manifest (the daemon
+bridge daemon via a `~/.agent-bridge/providers.d/` manifest (the daemon
 drives the `agent-containers` binstub over a process boundary, not a venv
 import); this step gives you the standalone
 `agent-containers` CLI for fleet/lease management and owns the
@@ -115,8 +123,8 @@ bash "$an_dir/scripts/init.sh"
 ### Verify
 
 ```bash
-agent-containers version
-agent-containers fleet       # lists local dev containers + lease status
+<agent-containers catalog argv[0]> version
+<agent-containers catalog argv[0]> fleet       # lists local dev containers + lease status
 ```
 
 Docker (Docker Desktop WSL2 backend) must be running for fleet operations.
@@ -160,9 +168,9 @@ You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass
 ### Verify
 
 ```bash
-agent-mcp status            # prerequisites + available bridges
+<agent-mcp catalog argv[0]> status            # prerequisites + available bridges
 ```
 
 Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`),
-then validate it with `agent-mcp validate <name>`. See the `agent-mcp:agent-mcp` skill for
+then validate it with `<agent-mcp catalog argv[0]> validate <name>`. See the `agent-mcp:agent-mcp` skill for
 the config format and how to wire it into an agent's `mcp-servers`.

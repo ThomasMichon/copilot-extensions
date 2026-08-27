@@ -296,7 +296,10 @@ def test_related_skill_distinguishes_conduct_count_from_list_enumeration():
     ).read_text(encoding="utf-8")
     normalized = " ".join(skill.split())
     assert "conduct output itself shows the directional-entry count" in normalized
-    assert "`agent-worktrees related list` enumerates those entries" in normalized
+    assert (
+        "`<agent-worktrees catalog argv[0]> related list` enumerates those entries"
+        in normalized
+    )
     assert "list shows" not in normalized
 
 

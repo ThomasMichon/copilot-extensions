@@ -1,5 +1,10 @@
 # Worktree PR Workflow (PR mode)
 
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+every direct runtime operation below. Replace
+`<agent-worktrees catalog argv[0]>` with that path and never search `PATH`.
+Treat the substituted path as one quoted argv token.
+
 Full reference for signing off a worktree through a **pull request** instead of
 direct-push finalization. See [SKILL.md](../SKILL.md) for the overview, the
 two-phase `push-changes` + `finalize` flow (direct mode), and the safety
@@ -27,10 +32,10 @@ Different repos land work differently, and the `pr-*` verbs apply to different
 subsets. Query the repo's **flow profile** up front:
 
 ```
-agent-worktrees get pr-profile      # direct | pr-human-merge | pr-agent-merge
-agent-worktrees get pr-enabled      # "true" or "false"
-agent-worktrees get pr-required     # "true" -> direct-to-default-branch is blocked
-agent-worktrees get pr-provider     # gitea | github | azure-devops (empty in direct mode)
+<agent-worktrees catalog argv[0]> get pr-profile      # direct | pr-human-merge | pr-agent-merge
+<agent-worktrees catalog argv[0]> get pr-enabled      # "true" or "false"
+<agent-worktrees catalog argv[0]> get pr-required     # "true" -> direct-to-default-branch is blocked
+<agent-worktrees catalog argv[0]> get pr-provider     # gitea | github | azure-devops (empty in direct mode)
 ```
 
 The three profiles (derived purely from config -- provider-generic, no network):
@@ -126,7 +131,8 @@ The `pr` block may come from two places:
 Put PR *policy* (enabled/required/provider) in the in-repo file when it should
 be identical everywhere -- it then needs no per-machine replication. A
 malformed or absent in-repo file safely falls back to machine-local. Either
-way, query the effective values with `agent-worktrees get pr-*`.
+way, query the effective values with
+`<agent-worktrees catalog argv[0]> get pr-*`.
 
 ### `pr.enabled` vs `pr.required` -- available vs mandatory
 
@@ -143,7 +149,7 @@ These are two distinct switches:
   -> merge. There is no local bypass — when `pr-required` is `true`, every
   worktree goes through a PR.
 
-If `agent-worktrees get pr-required` returns `true`, **do not** attempt a
+If `<agent-worktrees catalog argv[0]> get pr-required` returns `true`, **do not** attempt a
 direct `push-changes`/`finalize` for unmerged work — it will be refused. Go
 straight to the end-to-end PR loop below.
 
@@ -230,7 +236,7 @@ Set `head_scheme` per repo to choose; the multi-machine system default is `refsp
 ### Step 1: `create-pr`
 
 ```
-agent-worktrees create-pr --title "Concise PR title"
+<agent-worktrees catalog argv[0]> create-pr --title "Concise PR title"
 ```
 
 Squashes the worktree's commits into one and rebases onto upstream, leaving HEAD
@@ -309,10 +315,11 @@ action you request, not a CLI flag.
 After the sub-agent returns the PR URL and number:
 
 ```
-agent-worktrees set-pr --url <URL> --number <N>
+<agent-worktrees catalog argv[0]> set-pr --url <URL> --number <N>
 ```
 
-Inspect tracked PR state any time with `agent-worktrees pr-status [--json]`.
+Inspect tracked PR state any time with
+`<agent-worktrees catalog argv[0]> pr-status [--json]`.
 Add `--all` to list every tracked PR (serial/parallel), not just the active
 one. When a worktree tracks several PRs, `set-pr` updates the **active** PR by
 default; target a specific one with `--pr <number>` or
@@ -324,9 +331,9 @@ Open a PR as a **draft** when you want it visible (a shareable URL, or a place t
 iterate with `push-changes`) *before* inviting review:
 
 ```
-agent-worktrees create-pr --draft --title "..."   # opens as a DRAFT
+<agent-worktrees catalog argv[0]> create-pr --draft --title "..."   # opens as a DRAFT
 # ... iterate: edit -> commit -> push-changes ...
-agent-worktrees pr-ready                            # draft -> ready-for-review
+<agent-worktrees catalog argv[0]> pr-ready          # draft -> ready-for-review
 ```
 
 `--draft` uses the provider's **native** not-ready-for-review state, and
@@ -373,14 +380,15 @@ when none are live.
   branch with:
 
   ```
-  agent-worktrees git sync
+  <agent-worktrees catalog argv[0]> git sync
   ```
 
   It drops the just-merged (squashed) commits as already-applied and keeps any
   newer local work, so you continue *on top of* the merge rather than starting a
   fresh worktree. See the **`git-collaboration`** skill.
 
-  **Confirming the merge is built into `pr-status`.** `agent-worktrees pr-status`
+  **Confirming the merge is built into `pr-status`.**
+  `<agent-worktrees catalog argv[0]> pr-status`
   reconciles the active PR against the provider before reporting, so a PR merged
   externally (e.g. via the `auto-merge` label, bypassing `finalize`/`pr-watch`)
   shows `state: merged` instead of a stale `open` -- this is your authoritative
@@ -403,7 +411,7 @@ when none are live.
 > *continuation* of its own work.** Reusing the current worktree (sync forward,
 > keep going) is the *only* way to advance serial work, the next stretch of an
 > effort, a follow-up PR, or a finalized worktree. **Do NOT run
-> `agent-worktrees create`** for any of these; from inside an agent session,
+> `<agent-worktrees catalog argv[0]> create`** for any of these; from inside an agent session,
 > create a worktree only when the **operator explicitly requests** it.
 > - **Handoffs are in-place.** A context handoff continues in the **same
 >   worktree** via a **new session** -- the handoff prompt must **never** tell
@@ -426,7 +434,7 @@ To address feedback in the **same** worktree: edit, commit on `worktree/{id}`,
 then update the PR branch with:
 
 ```
-agent-worktrees push-changes
+<agent-worktrees catalog argv[0]> push-changes
 ```
 
 In PR mode `push-changes` updates the PR head, never the default branch. Feedback commits
@@ -442,7 +450,7 @@ does not create a PR; it updates the existing one.
 ### Finalizing a PR-mode worktree
 
 ```
-agent-worktrees finalize
+<agent-worktrees catalog argv[0]> finalize
 ```
 
 **Finalize is decoupled from merge.** A PR-mode worktree finalizes as soon as
