@@ -43,11 +43,11 @@ retry is a fine first move; never force-deploy or kill a process on a hunch.
 | Symptom | Likely cause | Action |
 |---------|--------------|--------|
 | `copilot plugin update` says **"already at latest"** but the code is stale | Version not bumped before merge (marketplace compares versions) | Check the plugin's `plugins[N].version` in the repo vs the deployed `plugin.json`; the fix is a version bump on the *source* side (see `contributing-to-copilot-extensions`). |
-| `plugin update` **succeeded** but the runtime behaves unchanged | Payload refreshed, **runtime not redeployed** — the CLI's "updated" message is payload-only | Use the unified deploy path: `<repo> update` (normally `agent-worktrees update`) on the machine. If the payload/runtime have the same version but content drift is suspected, use `<repo> update --force`. Per-plugin `install.*` / `init.*` is only a local-testing or recovery path. |
+| `plugin update` **succeeded** but the runtime behaves unchanged | Payload refreshed, **runtime not redeployed** — the CLI's "updated" message is payload-only | Use the unified deploy path: `<repo> update` (normally `agent-worktrees update`) on the machine. If the payload/runtime have the same version but content drift is suspected, use `<repo> update --force`. Per-plugin `install.*` / `init.*` is only a local-testing or recovery path. <!-- marketplace-isolation: allow deployment-management --> |
 | `agent-worktrees` / `agent-bridge` **command not found** | Runtime not installed, `~/.local/bin` not on PATH, or an earlier PATH entry shadows the binstub | Check `Get-Command agent-worktrees -All` / `which -a agent-worktrees`; ensure `~/.local/bin` wins; run `<repo> update` to reconcile missing runtime/binstubs. |
 | A **skill won't load** in a session | `experimental` off, plugin not enabled, or session not restarted (plugins scan at startup) | Confirm `experimental: true` in `~/.copilot/settings.json`; confirm the plugin in `enabledPlugins`; **restart the session**. |
-| **agent-bridge not responding** | Service not running, stale routing table, or client assuming an old fixed port | `agent-bridge status` (it resolves the live dynamic port); use `<repo> update` / `agent-bridge status` evidence before restarting. On POSIX check the user service; on Windows current service lifecycle may be user-mode, with legacy scheduled-task artifacts only if installed earlier. |
-| Bridge runs but a **remote send fails** | SSH transport, not the bridge | Test the SSH alias directly; check topology with `agent-bridge machines` / `agent-bridge agents`; fix the alias/key before touching the service. |
+| **agent-bridge not responding** | Service not running, stale routing table, or client assuming an old fixed port | `agent-bridge status` (it resolves the live dynamic port); use `<repo> update` / `agent-bridge status` evidence before restarting. On POSIX check the user service; on Windows current service lifecycle may be user-mode, with legacy scheduled-task artifacts only if installed earlier. <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
+| Bridge runs but a **remote send fails** | SSH transport, not the bridge | Test the SSH alias directly; check topology with `agent-bridge machines` / `agent-bridge agents`; fix the alias/key before touching the service. <!-- marketplace-isolation: allow deployed-runtime-diagnostics --> |
 | Windows: **two `python.exe` daemons**, or one running from `C:\Program Files\Python3XX\python.exe`, looks rogue | **Normal** stdlib-venv shape, not a bug: the versioned-slot `Scripts\python.exe` is a `venvlauncher.exe` **supervisor** that re-execs the **base** interpreter as its **worker** (the worker is what binds the port). It's still the slot's code. | Confirm one daemon: worker's **PPID = the slot-path supervisor**, same start time, `active.json` names the canonical pid; slot `pyvenv.cfg` `home` = the base. Don't `Stop-Process` the `Program Files` worker as "global/rogue". See `agent-bridge-troubleshooting` § split-brain. |
 | **MCP tools unavailable** in a sub-agent | agent-mcp bridge not wired / not ready | Verify the agent's `mcp-servers` entry and the `agent-mcp` bridge config; honor the MCP-readiness pattern (report unavailability, fall back to CLI). |
 | Runtime seems **half-upgraded / corrupt** | Interrupted install, incomplete versioned slot, or same-version drift | Run `<repo> update --force`; if still broken, use the runtime's own uninstall/reinstall path or the baseline reset scope below. |
@@ -56,11 +56,11 @@ retry is a fine first move; never force-deploy or kill a process on a hunch.
 
 ```bash
 copilot plugin list                          # what's installed + enabled
-agent-worktrees update --force               # unified payload + runtime reconcile, forced
-agent-worktrees --version && agent-worktrees status
-agent-bridge version && agent-bridge status  # service health
-agent-codespaces version                     # if adopted
-agent-mcp status                             # if installed
+agent-worktrees update --force               # marketplace-isolation: allow deployed-runtime-diagnostics
+agent-worktrees --version && agent-worktrees status # marketplace-isolation: allow deployed-runtime-diagnostics
+agent-bridge version && agent-bridge status  # marketplace-isolation: allow deployed-runtime-diagnostics
+agent-codespaces version                     # marketplace-isolation: allow deployed-runtime-diagnostics
+agent-mcp status                             # marketplace-isolation: allow deployed-runtime-diagnostics
 ```
 
 Compare a deployed `plugin.json` version against the repo's

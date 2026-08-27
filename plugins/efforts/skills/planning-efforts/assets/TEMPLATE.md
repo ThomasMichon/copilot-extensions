@@ -56,9 +56,9 @@
 - **Topology:** <shared feature branch `feature/<name>` | independent per-slice PRs>
 - **Host (owns PRs):** <agent/machine>
 - **Delegates:** <agent/machine — assigned section(s)>
-- **Handoff:** delegates ff-merge to the shared branch (`agent-worktrees git
-  merge-to-feature <name>`); host syncs forward (`agent-worktrees git
-  feature-branch <name> --sync`). Only the host opens PRs.
+- **Handoff:** delegates use the `git merge-to-feature` operation from the
+  `agent-worktrees:git-collaboration` skill; the host syncs forward with that
+  skill's `git feature-branch <name> --sync` operation. Only the host opens PRs.
 
 ## Context
 

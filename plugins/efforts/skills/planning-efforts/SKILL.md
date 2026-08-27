@@ -21,6 +21,12 @@ description: >
 
 # Planning Efforts
 
+Use the exact `argv[0]` from the agent-worktrees session command catalog for
+state-root and worktree operations below. Replace
+`<agent-worktrees catalog argv[0]>` with the raw path and quote it at each
+shell call site on POSIX; in PowerShell invoke it as
+`& "<agent-worktrees catalog argv[0]>" <args>`.
+
 An **effort** is a planning folder under `efforts/` representing a stretch of
 work. It is the workspace *around* tracked work — deliberately not named
 feature/bug/task (those belong to issue trackers). The effort README is a
@@ -41,7 +47,7 @@ registered as an agent-worktrees harness. If `agent-worktrees` is installed,
 ask it whether this repo redirects personal state to a bound knowledge repo:
 
 ```
-agent-worktrees state-root        # optional; prints the effort home when available
+<agent-worktrees catalog argv[0]> state-root        # optional; prints the effort home when available
 ```
 
 - **Command unavailable** → use the current repo root as the effort home.
@@ -51,7 +57,7 @@ agent-worktrees state-root        # optional; prints the effort home when availa
 - **Non-zero exit** → if the repo requires an external state root, stop and bind
   the knowledge repo first; otherwise use the current repo root.
 
-`agent-worktrees state-root --json` gives the full resolution (`source`, `repo`,
+`<agent-worktrees catalog argv[0]> state-root --json` gives the full resolution (`source`, `repo`,
 `stateless`, `requires_external`, `bound`) when you need to explain where the
 effort landed. All `efforts/` paths below are relative to the resolved effort
 home.
@@ -149,7 +155,8 @@ gate before executing:
    approves; auto-merge merges it.
 3. **Sync forward** — pull the worktree onto the merged (squashed) default branch
    so execution builds *on top of* the reviewed plan. In an agent-worktrees repo,
-   use `agent-worktrees git sync` (see the `agent-worktrees:git-collaboration` skill); otherwise
+   use `<agent-worktrees catalog argv[0]> git sync` (see the
+   `agent-worktrees:git-collaboration` skill); otherwise
    use the repo's normal pull-forward command. Then begin executing the Plan.
 
 **The operator may waive their *own* review — but the agent's review-gate is
