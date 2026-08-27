@@ -21,7 +21,7 @@ if [ ! -f "$Manifest" ]; then
   # back-compatible: only fires when the installer declares a 'stamp' action.
   installer=""
   for candidate in "$PluginDir/scripts/init.sh" "$PluginDir/scripts/install.sh"; do
-    if [ -f "$candidate" ] && grep -qE 'stamp[|)]|ACTION.*stamp' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
+    if [ -f "$candidate" ] && grep -qE '^[[:space:]]*([[:alnum:]_-]+\|)*stamp(\|[[:alnum:]_-]+)*\)' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
   done
   if [ -n "$installer" ]; then
     bash "$installer" stamp >/dev/null 2>&1 || true

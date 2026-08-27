@@ -30,7 +30,9 @@ def test_bootstrap_falls_through_init_shim_to_stamp_capable_installer(tmp_path):
         encoding="utf-8",
     )
     (scripts / "init.sh").write_text(
-        "#!/usr/bin/env bash\nexec bash \"$(dirname \"$0\")/install.sh\" install\n",
+        "#!/usr/bin/env bash\n"
+        "echo 'usage: install|stamp' >/dev/null\n"
+        "exec bash \"$(dirname \"$0\")/install.sh\" install\n",
         encoding="utf-8",
     )
     (scripts / "install.sh").write_text(
