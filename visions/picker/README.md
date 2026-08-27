@@ -7,7 +7,7 @@
 - **Status:** Active
 - **Last revised:** 2026-08-26
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
-  and agent- control-plane) — see [installer](../installer/README.md). It is an
+  and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
   are fully self-sufficient without the Picker present.
 - **Reality docs:**
