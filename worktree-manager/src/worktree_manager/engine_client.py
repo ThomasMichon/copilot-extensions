@@ -227,17 +227,45 @@ class Worktree:
         return "".join(bits)
 
 
-def _to_worktree(d: dict) -> Worktree:
+def _int_field(value: object, *, name: str) -> int:
+    if value in (None, ""):
+        return 0
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+
+
+def _bool_field(value: object, *, name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, "", 0):
+        return False
+    if value == 1:
+        return True
+    if isinstance(value, str):
+        normalized = value.strip().casefold()
+        if normalized in ("true", "yes", "1"):
+            return True
+        if normalized in ("false", "no", "0", ""):
+            return False
+    raise ValueError(f"{name} must be a boolean")
+
+
+def worktree_from_dict(d: dict) -> Worktree:
+    """Build the Manager's cross-cutting worktree model from a contract row."""
     return Worktree(
-        id=str(d.get("id", "")),
+        id=str(d.get("id") or ""),
         repo=str(d.get("repo", "") or ""),
         machine=str(d.get("machine", "") or ""),
         branch=str(d.get("branch", "") or ""),
         title=(d.get("title") if d.get("title") not in (None, "null") else None),
         state=d.get("state"),
-        ahead=int(d.get("ahead") or 0),
-        behind=int(d.get("behind") or 0),
-        dirty=bool(d.get("dirty") or False),
+        ahead=_int_field(d.get("ahead"), name="ahead"),
+        behind=_int_field(d.get("behind"), name="behind"),
+        dirty=_bool_field(d.get("dirty"), name="dirty"),
         status=d.get("status"),
         path=d.get("path"),
         raw=d,
@@ -362,4 +390,4 @@ def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:
     rows = obj.get("worktrees")
     if not isinstance(rows, list):
         return []
-    return [_to_worktree(d) for d in rows if isinstance(d, dict)]
+    return [worktree_from_dict(d) for d in rows if isinstance(d, dict)]

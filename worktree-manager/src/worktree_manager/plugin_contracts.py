@@ -48,6 +48,7 @@ class ActionContract:
     key: str
     label: str
     kind: str
+    shortcut: str | None = None
     run: tuple[str, ...] = ()
     confirm: bool = False
     description: str = ""
@@ -84,9 +85,11 @@ class ConfigSectionContract:
 class PivotContract:
     name: str
     label: str
+    entity: str | None
     after: str
     home: bool
     list_cmd: tuple[str, ...]
+    items_field: str
     id_field: str
     title_field: str
     worktree_field: str | None
@@ -96,6 +99,7 @@ class PivotContract:
     empty_hint: str
     columns: tuple[ColumnContract, ...]
     summary_template: str | None
+    ready_status: str | None
     scope: str
     stream: bool
     subscribe: bool
@@ -291,10 +295,13 @@ def _parse_actions(
         progress = item.get("progress", False)
         if not isinstance(progress, bool):
             raise ContractError(f"`{path}.progress` must be a boolean")
+        shortcut = _optional_path(
+            item.get("shortcut"), where=f"`{path}.shortcut`")
         out.append(ActionContract(
             key=action_key,
             label=label.strip(),
             kind=kind,
+            shortcut=shortcut,
             run=run,
             confirm=bool(item.get("confirm", False)),
             description=str(item.get("description", "")),
@@ -382,6 +389,12 @@ def parse_manifest(
         label = data.get("label")
         if not isinstance(label, str) or not label.strip():
             raise ContractError("`label` is required and must be a non-empty string")
+        entity = data.get("entity")
+        if entity is not None and (
+            not isinstance(entity, str) or not entity.strip()
+        ):
+            raise ContractError(
+                "`entity` must be a non-empty string when present")
         entry = data.get("entry") or {}
         if not isinstance(entry, Mapping):
             raise ContractError("`entry` must be an object when present")
@@ -414,18 +427,26 @@ def parse_manifest(
         summary = data.get("summary")
         if summary is not None and not isinstance(summary, str):
             raise ContractError("`summary` must be a string when present")
+        ready_status = data.get("ready_status")
+        if ready_status is not None and not isinstance(ready_status, str):
+            raise ContractError("`ready_status` must be a string when present")
         after = data.get("after", "Worktrees")
         if not isinstance(after, str) or not after.strip():
             after = "Worktrees"
         empty_hint = data.get("empty_hint", "No entries.")
         if not isinstance(empty_hint, str):
             empty_hint = "No entries."
+        items_field = data.get("items_field", "entries")
+        if not isinstance(items_field, str) or not items_field.strip():
+            raise ContractError("`items_field` must be a non-empty string")
         pivot = PivotContract(
             name=name,
             label=label.strip(),
+            entity=entity.strip() if isinstance(entity, str) else None,
             after=after.strip(),
             home=home,
             list_cmd=_as_argv(data.get("list"), where="`list`"),
+            items_field=items_field.strip(),
             id_field=entry_str("id", "id") or "id",
             title_field=entry_str("title", "title") or "title",
             worktree_field=entry_str("worktree", "target_worktree"),
@@ -435,6 +456,7 @@ def parse_manifest(
             empty_hint=empty_hint,
             columns=_parse_columns(data.get("columns")),
             summary_template=summary,
+            ready_status=ready_status,
             scope=str(scope),
             stream=stream,
             subscribe=subscribe,

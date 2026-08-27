@@ -43,10 +43,19 @@ def _pivot(**extra) -> dict:
 def test_parses_pivot_actions_cards_forms_and_config_sections():
     contribution = parse_manifest(
         _pivot(
+            entity="task",
             home=True,
+            items_field="tasks",
+            ready_status="{count} tasks",
             columns=[{"key": "state", "width": 8, "palette": "state"}],
             actions=[
-                {"key": "open", "label": "Open", "kind": "internal", "verb": "open-cli"},
+                {
+                    "key": "open",
+                    "label": "Open",
+                    "kind": "internal",
+                    "verb": "open-cli",
+                    "shortcut": "o",
+                },
                 {
                     "key": "steer",
                     "label": "Steer",
@@ -73,9 +82,13 @@ def test_parses_pivot_actions_cards_forms_and_config_sections():
     )
     assert contribution.schema_version == CONTRACT_VERSION
     assert contribution.pivot is not None
+    assert contribution.pivot.entity == "task"
+    assert contribution.pivot.items_field == "tasks"
+    assert contribution.pivot.ready_status == "{count} tasks"
     assert contribution.pivot.home is True
     assert contribution.pivot.columns[0].palette == "state"
     assert [a.kind for a in contribution.pivot.actions] == ["internal", "form", "card"]
+    assert contribution.pivot.actions[0].shortcut == "o"
     assert contribution.pivot.view_actions[0].internal == "new"
     assert contribution.pivot.actions[1].form["fields_from"] == "card.request_input"
     assert contribution.worktree_actions[0].key == "send"
@@ -101,6 +114,46 @@ def test_home_requires_boolean():
     with pytest.raises(ContractError, match="`home` must be a boolean"):
         parse_manifest(
             _pivot(home="yes"),
+            name="agent-example",
+            marketplace="example",
+            plugin="agent-example",
+            source_path="/payload/pivots/agent-example.json",
+        )
+
+
+def test_entity_requires_non_empty_string():
+    with pytest.raises(ContractError, match="`entity` must be a non-empty string"):
+        parse_manifest(
+            _pivot(entity=""),
+            name="agent-example",
+            marketplace="example",
+            plugin="agent-example",
+            source_path="/payload/pivots/agent-example.json",
+        )
+
+
+def test_items_field_requires_non_empty_string():
+    with pytest.raises(ContractError, match="`items_field` must be a non-empty string"):
+        parse_manifest(
+            _pivot(items_field=""),
+            name="agent-example",
+            marketplace="example",
+            plugin="agent-example",
+            source_path="/payload/pivots/agent-example.json",
+        )
+
+
+def test_action_shortcut_requires_non_empty_string():
+    with pytest.raises(ContractError, match=r"`actions\[0\]\.shortcut`"):
+        parse_manifest(
+            _pivot(actions=[
+                {
+                    "label": "Open",
+                    "kind": "internal",
+                    "verb": "open",
+                    "shortcut": "",
+                },
+            ]),
             name="agent-example",
             marketplace="example",
             plugin="agent-example",

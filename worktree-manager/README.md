@@ -128,6 +128,12 @@ Available pivot contributions appear beside Worktrees in the Picker. Their list
 commands run in background workers, so the UI opens before cross-process reads
 finish; each pivot keeps its own cached rows and loading/error/empty state, and
 renders either its declared columns or the contract's id/title/badge fallback.
+The current internal Worktrees surface now uses that same declarative pivot
+model (`entity`, home, list envelope, columns, row actions, and view actions)
+while retaining a typed cross-cutting `Worktree` model for launch/session
+integration. This is the migration seam for moving the declaration into the
+agent-worktrees payload without pretending the Manager cannot understand
+worktrees.
 Streaming, actions, cards/forms, and configuration sections remain subsequent
 parity slices; the bundled Picker stays in place until those are complete.
 
