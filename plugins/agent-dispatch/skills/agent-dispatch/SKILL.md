@@ -565,7 +565,7 @@ available.
 
 ```bash
 <agent-dispatch catalog argv[0]> claim --task <id> --evaluation    # win a short exclusive eval window
-# ...assess: dup-check (agent-dispatch list / sweep), feasibility, is-this-for-me...
+# ...assess: dup-check (<agent-dispatch catalog argv[0]> list / sweep), feasibility, is-this-for-me...
 <agent-dispatch catalog argv[0]> start   <id>                      # ACCEPT -> commit to doing the work
 <agent-dispatch catalog argv[0]> yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
 <agent-dispatch catalog argv[0]> abandon <id> --duplicate-of <ref>                                # DUPLICATE
