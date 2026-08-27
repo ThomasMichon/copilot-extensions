@@ -29,3 +29,11 @@ def test_detached_provision_worker_runs_from_home():
     sh = (_PLUGIN / "scripts" / "provision-check.sh").read_text("utf-8")
     assert "-WorkingDirectory $HOME" in ps1
     assert 'cd "$HOME" || exit 0' in sh
+
+
+def test_powershell_diagnostics_are_optional():
+    provision = (_PLUGIN / "scripts" / "provision-check.ps1").read_text("utf-8")
+    launcher = (_PLUGIN / "bin" / "launch-session.ps1").read_text("utf-8")
+    assert "$plan.PSObject.Properties['diagnostics']" in provision
+    assert "function Write-PlanDiagnostics" in launcher
+    assert "$Plan.PSObject.Properties['diagnostics']" in launcher

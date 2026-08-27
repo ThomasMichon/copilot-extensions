@@ -188,6 +188,44 @@ def test_stage_no_drift_when_versions_match(tmp_path: Path, monkeypatch):
     assert result["plugin_changed"] is False
 
 
+def test_stage_selected_context_blocks_legacy_runtime_apply(
+    tmp_path: Path,
+    monkeypatch,
+):
+    from agent_worktrees import reconcile
+
+    home = tmp_path / "home"
+    payload = _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    cell_root = tmp_path / "cell" / "plugins" / "agent-worktrees"
+    cell_root.mkdir(parents=True)
+    (cell_root / "deploy-manifest.json").write_text(
+        json.dumps({"source": {"version": "dev1"}}),
+        encoding="utf-8",
+    )
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+
+    def fake_update():
+        (payload / "plugin.json").write_text(
+            '{"version":"dev2"}', encoding="utf-8"
+        )
+        return True, "updated to dev2"
+
+    monkeypatch.setattr(us, "_run_copilot_update", fake_update)
+    monkeypatch.setattr(
+        reconcile,
+        "_selected_runtime_root",
+        lambda name, plugin_dir, **kwargs: (cell_root, True),
+    )
+
+    result = us.stage(status=status, lock=lock, home=home)
+
+    assert result["plugin_changed"] is False
+    assert result["venv_drift"] is False
+    assert result["runtime_apply_blocked"] == "installation-context-read-only"
+    assert result["context_runtime_root"] == str(cell_root)
+
+
 def test_stage_single_flight_second_call_skips(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})

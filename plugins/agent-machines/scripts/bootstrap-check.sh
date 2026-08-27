@@ -6,16 +6,76 @@
 # that bumps the payload is picked up automatically -- without ever running
 # machine *restoration* itself.
 #
-# Fast path: compare the deployed version (~/.agent-machines/deploy-manifest.json)
-# to the source version (plugin pyproject.toml). If they match and the binstub
-# exists, exit immediately. Otherwise re-run the plugin's own installer
-# (scripts/init.sh) in the BACKGROUND so session start never blocks on a venv
-# build; the versioned-venv swap is atomic, so concurrent use stays safe.
+# Fast path: compare the deployed version to the source version (plugin
+# pyproject.toml). Legacy deployments read ~/.agent-machines/deploy-manifest.json;
+# an explicit validated installation context may redirect that read to its
+# plugin root. Namespaced writes remain blocked until the context-aware
+# installer is operative.
 #
 # Deployed to ~/.agent-machines/bin/ by scripts/init.sh. Only reconciles
 # staleness -- first install is the one-time agent-machines-setup step.
 
+ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PluginDir="$(cd "$ScriptDir/.." && pwd)"
+ContextSelected=0
 InstallDir="$HOME/.agent-machines"
+if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
+  resolver="$ScriptDir/installation-context/installation-context.sh"
+  query="$ScriptDir/installation-context/json-query.awk"
+  if [ ! -f "$resolver" ] || [ ! -f "$query" ]; then
+    echo "[agent-machines] installation context is selected but its validator is unavailable; skipping reconcile." >&2
+    exit 0
+  fi
+  durableHome="$COPILOT_EXTENSIONS_CONTEXT"
+  for _part in 1 2 3 4 5; do durableHome="$(dirname -- "$durableHome")"; done
+  validated="$(mktemp)" || exit 0
+  if ! bash "$resolver" validate \
+      --context "$COPILOT_EXTENSIONS_CONTEXT" \
+      --durable-home "$durableHome" >"$validated"; then
+    rm -f -- "$validated"
+    echo "[agent-machines] installation context is invalid; skipping reconcile without legacy fallback." >&2
+    exit 0
+  fi
+  encoded="$(LC_ALL=C awk -f "$query" -v mode=hex -v query_path=pluginId "$validated" 2>/dev/null || true)"
+  rm -f -- "$validated"
+  contextPlugin=""
+  while [ -n "$encoded" ]; do
+    [ "${#encoded}" -ge 2 ] || { contextPlugin=""; break; }
+    printf -v byte '%b' "\\x${encoded:0:2}"
+    contextPlugin+="$byte"
+    encoded="${encoded:2}"
+  done
+  if [ -z "$contextPlugin" ]; then
+    echo "[agent-machines] installation context is invalid; skipping reconcile without legacy fallback." >&2
+    exit 0
+  fi
+  if [ "$contextPlugin" = agent-machines ]; then
+    resolved="$(mktemp)" || exit 0
+    if ! bash "$resolver" resolve \
+        --context "$COPILOT_EXTENSIONS_CONTEXT" \
+        --plugin-id agent-machines \
+        --payload-root "$PluginDir" \
+        --durable-home "$durableHome" >"$resolved"; then
+      rm -f -- "$resolved"
+      echo "[agent-machines] installation context is invalid; skipping reconcile without legacy fallback." >&2
+      exit 0
+    fi
+    encoded="$(LC_ALL=C awk -f "$query" -v mode=hex -v query_path=pluginRoot "$resolved" 2>/dev/null || true)"
+    rm -f -- "$resolved"
+    InstallDir=""
+    while [ -n "$encoded" ]; do
+      [ "${#encoded}" -ge 2 ] || { InstallDir=""; break; }
+      printf -v byte '%b' "\\x${encoded:0:2}"
+      InstallDir+="$byte"
+      encoded="${encoded:2}"
+    done
+    if [ -z "$InstallDir" ]; then
+      echo "[agent-machines] installation context returned no plugin root; skipping reconcile without legacy fallback." >&2
+      exit 0
+    fi
+    ContextSelected=1
+  fi
+fi
 Manifest="$InstallDir/deploy-manifest.json"
 Binstub="$HOME/.local/bin/agent-machines"
 
@@ -25,8 +85,11 @@ Binstub="$HOME/.local/bin/agent-machines"
 # is the plugin's scripts/ dir even on a fresh box. Fires only when init.sh
 # declares a 'stamp' action; else a safe no-op.
 if [ ! -f "$Manifest" ]; then
-  _selfdir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  _init="$_selfdir/init.sh"
+  if [ "$ContextSelected" = 1 ]; then
+    echo "[agent-machines] selected context has no deploy manifest; namespaced install remains non-operative." >&2
+    exit 0
+  fi
+  _init="$ScriptDir/init.sh"
   if [ -f "$_init" ] && grep -q 'stamp)' "$_init" 2>/dev/null; then
     bash "$_init" stamp >/dev/null 2>&1 || true
   fi
@@ -36,8 +99,12 @@ fi
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || exit 0
 
-pluginDir="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"]["path"])' "$Manifest" 2>/dev/null)"
 deployed="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"].get("version",""))' "$Manifest" 2>/dev/null)"
+if [ "$ContextSelected" = 1 ]; then
+  pluginDir="$PluginDir"
+else
+  pluginDir="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1]))["source"]["path"])' "$Manifest" 2>/dev/null)"
+fi
 [ -n "$pluginDir" ] && [ -d "$pluginDir" ] || exit 0
 
 current="$deployed"
@@ -45,6 +112,11 @@ pyproj="$pluginDir/pyproject.toml"
 if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
+fi
+if [ "$ContextSelected" = 1 ]; then
+  if [ "$deployed" = "$current" ]; then exit 0; fi
+  echo "[agent-machines] selected context runtime $deployed -> $current; context-aware install is not active yet." >&2
+  exit 0
 fi
 
 # Up to date and binstub present -> fast no-op.

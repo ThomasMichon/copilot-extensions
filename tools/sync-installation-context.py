@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Vendor the canonical installation-context bootstrap into its Phase 3 exemplars.
+"""Vendor the canonical installation-context bootstrap into its Phase 3 adopters.
 
-The files remain non-operative until each plugin explicitly changes its
-installer and payload-invocation contract. This tool only guarantees that the
-standalone payload has a byte-identical copy available when that later cutover
-occurs.
+The exemplar files remain non-operative until each plugin explicitly changes
+its installer and payload-invocation contract. Agent Worktrees consumes the
+same validator for read-only reconciliation and update guards. This tool keeps
+every standalone payload byte-identical.
 """
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ FILES = (
     "installation-context.ps1",
     "json-query.awk",
 )
-ADOPTERS = ("agent-machines", "agent-index")
+ADOPTERS = ("agent-machines", "agent-index", "agent-worktrees")
 
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
@@ -99,7 +99,7 @@ def main() -> int:
             return 1
         print(
             "installation-context files in sync across "
-            f"{len(ADOPTERS)} non-operative adopters."
+            f"{len(ADOPTERS)} adopters."
         )
         return 0
 

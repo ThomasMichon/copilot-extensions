@@ -23,15 +23,18 @@ nature via a ``runtimeScope`` field in its ``plugin.json``:
 
 Runtime reconciliation is **local and version-keyed**: it compares the
 installed payload version (``plugin.json``) against the deployed runtime
-version (``~/.<plugin>/deploy-manifest.json`` -> ``source.version``) and only
-acts on drift, so a re-launch with no version change does ~no work. The
-marketplace **payload** install/refresh (``copilot plugin install/update``, a
-network pull that also holds the Windows payload dir open) is **off by default**
-and emitted only when a caller opts in via ``include_payload_refresh`` -- the
-Picker/operator "update flow". The programmatic path (the ``provision-check``
-sessionStart hook + the launch reconcile) is therefore **runtime-only, pull-free
-and lock-free** (#1393): agents never run ``copilot plugin update``; the operator
-does that outside-in (``<repo> update`` via the Worktree Manager).
+version (normally ``~/.<plugin>/deploy-manifest.json`` -> ``source.version``)
+and only acts on drift, so a re-launch with no version change does ~no work. An
+explicit, validated installation context may redirect this inspection to a
+namespaced plugin root, but that path remains read-only until activation
+governance and context-aware installers land. The marketplace **payload**
+install/refresh (``copilot plugin install/update``, a network pull that also
+holds the Windows payload dir open) is **off by default** and emitted only when
+a caller opts in via ``include_payload_refresh`` -- the Picker/operator "update
+flow". The programmatic path (the ``provision-check`` sessionStart hook + the
+launch reconcile) is therefore **runtime-only, pull-free and lock-free**
+(#1393): agents never run ``copilot plugin update``; the operator does that
+outside-in (``<repo> update`` via the Worktree Manager).
 
 This module emits a JSON action plan with the same shape as ``pre-launch``
 so the shell/PowerShell launchers can execute the ``argv`` vectors and
@@ -45,6 +48,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -305,9 +309,15 @@ def runtime_dir(name: str, home: Path | None = None) -> Path:
     return (home or _home()) / f".{name}"
 
 
-def runtime_deployed_version(name: str, home: Path | None = None) -> str | None:
+def runtime_deployed_version(
+    name: str,
+    home: Path | None = None,
+    *,
+    root: Path | None = None,
+) -> str | None:
     """Version recorded in the plugin's runtime deploy manifest, if present."""
-    data = _read_json(runtime_dir(name, home) / "deploy-manifest.json")
+    selected_root = root or runtime_dir(name, home)
+    data = _read_json(selected_root / "deploy-manifest.json")
     if not data:
         return None
     src = data.get("source")
@@ -315,6 +325,161 @@ def runtime_deployed_version(name: str, home: Path | None = None) -> str | None:
         return str(src["version"])
     v = data.get("version")
     return str(v) if v else None
+
+
+def _explicit_context_target() -> tuple[Path, str] | None:
+    """Return the explicitly selected receipt and plugin id, if any.
+
+    The receipt's plugin id is only a routing hint. The plugin-local
+    installation-context primitive performs the authoritative validation before
+    any path from the receipt is used.
+    """
+    raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+    if not raw:
+        return None
+    pointer = Path(raw)
+    if not pointer.is_absolute():
+        raise ValueError("COPILOT_EXTENSIONS_CONTEXT must be an absolute path")
+
+    def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        normalized: set[str] = set()
+        for key, value in pairs:
+            folded = key.casefold()
+            if key in result or folded in normalized:
+                raise ValueError(f"duplicate or case-conflicting JSON key: {key}")
+            result[key] = value
+            normalized.add(folded)
+        return result
+
+    try:
+        receipt = json.loads(
+            pointer.read_text(encoding="utf-8"),
+            object_pairs_hook=_strict_object,
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(
+            f"COPILOT_EXTENSIONS_CONTEXT is unreadable or invalid: {pointer}"
+        ) from error
+    if not isinstance(receipt, dict):
+        raise ValueError(
+            f"COPILOT_EXTENSIONS_CONTEXT must contain a JSON object: {pointer}"
+        )
+    plugin_id = receipt.get("pluginId")
+    if not isinstance(plugin_id, str) or not plugin_id:
+        raise ValueError(
+            f"COPILOT_EXTENSIONS_CONTEXT has no valid pluginId: {pointer}"
+        )
+    return pointer, plugin_id
+
+
+def _selected_runtime_root(
+    name: str,
+    plugin_dir: Path,
+    *,
+    home: Path | None = None,
+) -> tuple[Path, bool]:
+    """Select the runtime root for read-only reconciliation inspection.
+
+    No explicit context preserves the legacy ``~/.<plugin>`` behavior. When an
+    explicit receipt exists, the selected plugin's vendored
+    installation-context primitive must validate the receipt and payload
+    identity before its plugin id is trusted for routing. A validated receipt
+    for another plugin preserves this plugin's legacy root. This prerequisite
+    never activates or mutates a namespaced root.
+    """
+    target = _explicit_context_target()
+    if target is None:
+        return runtime_dir(name, home), False
+
+    pointer, target_name = target
+    helper_candidates: list[Path] = []
+    if name == SELF_PLUGIN:
+        helper_candidates.append(plugin_dir)
+    self_dir = installed_payload_dir(SELF_PLUGIN)
+    if self_dir is not None and self_dir not in helper_candidates:
+        helper_candidates.append(self_dir)
+    if plugin_dir not in helper_candidates:
+        helper_candidates.append(plugin_dir)
+    helper = next(
+        (
+            candidate
+            / "scripts"
+            / "installation-context"
+            / "installation_context.py"
+            for candidate in helper_candidates
+            if (
+                candidate
+                / "scripts"
+                / "installation-context"
+                / "installation_context.py"
+            ).is_file()
+        ),
+        None,
+    )
+    if helper is None:
+        raise ValueError(
+            "no trusted installation-context validator is available"
+        )
+    try:
+        durable_home = pointer.parents[4]
+        expected_cell_root = pointer.parents[2]
+    except IndexError as error:
+        raise ValueError(
+            f"COPILOT_EXTENSIONS_CONTEXT is not in the durable receipt layout: "
+            f"{pointer}"
+        ) from error
+    command = [
+        sys.executable,
+        str(helper),
+        "resolve",
+        "--context",
+        str(pointer),
+        "--plugin-id",
+        target_name,
+        "--durable-home",
+        str(durable_home),
+    ]
+    if target_name == name:
+        command.extend(["--payload-root", str(plugin_dir)])
+    else:
+        command.extend(["--expected-cell-root", str(expected_cell_root)])
+    child_environment = os.environ.copy()
+    child_environment.pop("COPILOT_PLUGIN_ROOT", None)
+    try:
+        process = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            env=child_environment,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise ValueError(
+            "installation-context validation timed out"
+        ) from error
+    except OSError as error:
+        raise ValueError(
+            f"installation-context validator could not run: {error}"
+        ) from error
+    if process.returncode:
+        detail = process.stderr.strip() or process.stdout.strip() or "validation failed"
+        raise ValueError(detail)
+    try:
+        result = json.loads(process.stdout)
+        root = Path(result["pluginRoot"])
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        raise ValueError(
+            "installation-context validator returned invalid output"
+        ) from error
+    if not root.is_absolute():
+        raise ValueError(
+            "installation-context validator returned a relative plugin root"
+        )
+    if target_name != name:
+        return runtime_dir(name, home), False
+    return root, True
 
 
 # Hook shims deployed to ``~/.agent-worktrees/bin/`` by install.ps1's
@@ -725,12 +890,37 @@ def build_plan(
     gate = load_runtime_gate(repo_dir)
     gate_present = gate_manifest_present(repo_dir)
     updates: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
+    try:
+        explicit_context = _explicit_context_target()
+    except ValueError as error:
+        return {
+            "action": "continue",
+            "machine": machine,
+            "diagnostics": [{
+                "service": "*",
+                "phase": "runtime",
+                "reason": "installation-context-invalid",
+                "message": str(error),
+            }],
+        }
 
     for name in names:
         entry: dict[str, Any] = plugins_cache.setdefault(name, {})
         pdir = installed_payload_dir(name)
 
         if pdir is None:
+            if explicit_context is not None and explicit_context[1] == name:
+                diagnostics.append({
+                    "service": name,
+                    "phase": "runtime",
+                    "reason": "installation-context-payload-missing",
+                    "message": (
+                        "the explicitly selected context cannot be validated "
+                        "because its plugin payload is not installed"
+                    ),
+                })
+                continue
             # Payload not installed yet. Installing it is a MARKETPLACE PULL
             # (``copilot plugin install``) -- an operator / Worktree-Manager /
             # Picker "update flow" action, NOT something a programmatic
@@ -752,6 +942,16 @@ def build_plan(
 
         pver = payload_version(pdir)
         entry["payload_version"] = pver
+        try:
+            selected_root, context_selected = _selected_runtime_root(name, pdir)
+        except ValueError as error:
+            diagnostics.append({
+                "service": name,
+                "phase": "runtime",
+                "reason": "installation-context-invalid",
+                "message": str(error),
+            })
+            continue
 
         # Throttled payload refresh (network / MARKETPLACE PULL). Same rule as
         # payload-missing above: the Picker/operator update flow owns it; the
@@ -776,14 +976,39 @@ def build_plan(
         if scope != "none" and runtime_allowed(
             scope, name, machine, gate, gate_present=gate_present
         ):
-            rdep = runtime_deployed_version(name)
-            rrun = runtime_running_version(name)
+            rdep = runtime_deployed_version(
+                name,
+                root=selected_root if context_selected else None,
+            )
+            rrun = (
+                None
+                if context_selected
+                else runtime_running_version(name)
+            )
             # Prefer the *running* version when a live service reports one, so a
             # daemon that lags its installed plugin is healed even though the
             # on-disk manifest already matches the payload (dotfiles #533). No
             # running-version.json (or a dead pid) -> fall back to on-disk.
             rver = rrun if rrun is not None else rdep
             if pver is None or not _versions_equal(rver, pver):
+                if context_selected:
+                    diagnostics.append({
+                        "service": name,
+                        "phase": "runtime",
+                        "reason": (
+                            "context-runtime-missing"
+                            if rver is None
+                            else "context-runtime-version-drift"
+                        ),
+                        "from_version": rver,
+                        "to_version": pver,
+                        "runtime_root": str(selected_root),
+                        "message": (
+                            "namespaced runtime inspection is read-only until "
+                            "activation governance and context-aware installers land"
+                        ),
+                    })
+                    continue
                 # Monotonic guard (#1366): never redeploy a payload that is
                 # strictly OLDER than the running/deployed build -- doing so would
                 # REVERT a newer local `source: local` deploy toward a stale /
@@ -816,9 +1041,14 @@ def build_plan(
     if save:
         save_cache(cache)
 
+    result: dict[str, Any]
     if updates:
-        return {"action": "reconcile", "machine": machine, "updates": updates}
-    return {"action": "continue", "machine": machine}
+        result = {"action": "reconcile", "machine": machine, "updates": updates}
+    else:
+        result = {"action": "continue", "machine": machine}
+    if diagnostics:
+        result["diagnostics"] = diagnostics
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -874,9 +1104,19 @@ def apply_plan(
             repo_dir, machine=machine,
             include_payload_refresh=include_payload_refresh,
         )
+        for diagnostic in plan.get("diagnostics", []):
+            _log(
+                "provision: "
+                f"{diagnostic.get('service', '?')} "
+                f"[{diagnostic.get('reason', 'diagnostic')}] "
+                f"{diagnostic.get('message', '')}".rstrip()
+            )
         if plan.get("action") != "reconcile":
             if pass_no == 1:
-                _log("provision: nothing to do (runtimes current)")
+                if plan.get("diagnostics"):
+                    _log("provision: no executable actions")
+                else:
+                    _log("provision: nothing to do (runtimes current)")
             break
         final_action = "reconcile"
         for upd in plan.get("updates", []):

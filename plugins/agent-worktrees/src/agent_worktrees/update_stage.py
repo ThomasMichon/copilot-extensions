@@ -289,16 +289,26 @@ def stage(
             from . import reconcile
 
             payload_ver = reconcile.payload_version(plugin_dir)
+            runtime_root, context_selected = reconcile._selected_runtime_root(
+                "agent-worktrees", plugin_dir, home=home
+            )
             deployed_ver = reconcile.runtime_deployed_version(
-                "agent-worktrees", home=home
+                "agent-worktrees", root=runtime_root
             )
             result["payload_version"] = payload_ver
             result["deployed_version"] = deployed_ver
-            venv_drift = bool(
-                payload_ver and deployed_ver and payload_ver != deployed_ver
-            )
-        except Exception as e:  # never break the launch on a best-effort check
-            result["venv_drift_error"] = str(e)
+            if context_selected:
+                result["context_runtime_root"] = str(runtime_root)
+                result["runtime_apply_blocked"] = "installation-context-read-only"
+                plugin_changed = False
+            else:
+                venv_drift = bool(
+                    payload_ver and deployed_ver and payload_ver != deployed_ver
+                )
+        except ValueError as error:
+            result["venv_drift_error"] = str(error)
+            result["runtime_apply_blocked"] = "installation-context-invalid"
+            plugin_changed = False
         result["venv_drift"] = venv_drift
         if venv_drift and not plugin_changed:
             plugin_changed = True

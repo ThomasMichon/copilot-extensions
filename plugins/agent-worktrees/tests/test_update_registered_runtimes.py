@@ -148,6 +148,29 @@ def test_force_reinstalls_even_when_current(monkeypatch):
     assert "agent-codespaces" in _installed_names(calls)
 
 
+def test_selected_context_never_runs_legacy_installer(monkeypatch):
+    _install_config(monkeypatch)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=["agent-index"],
+        scopes={"agent-index": "universal"},
+        deployed={"agent-index": "0.1.0"},
+        payload={"agent-index": "0.2.0"},
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_selected_runtime_root",
+        lambda name, pdir: (Path("/cell/plugins") / name, True),
+    )
+    calls = _capture_installers(monkeypatch)
+
+    m._reconcile_registered_runtimes(
+        Path("/plugin/dir"), "linux", force=True
+    )
+
+    assert "agent-index" not in _installed_names(calls)
+
+
 def test_payload_only_plugin_is_skipped(monkeypatch):
     _install_config(monkeypatch)
     _stub_reconcile(
