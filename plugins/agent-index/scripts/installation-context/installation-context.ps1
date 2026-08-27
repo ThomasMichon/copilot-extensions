@@ -132,7 +132,8 @@ public static class CeStrictJson {
         private int index;
 
         internal Parser(string value) {
-            text = value ?? throw new ArgumentNullException(nameof(value));
+            if (value == null) throw new ArgumentNullException("value");
+            text = value;
         }
 
         internal void Parse() {
