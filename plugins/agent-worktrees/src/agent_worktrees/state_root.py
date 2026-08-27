@@ -38,6 +38,7 @@ from pathlib import Path
 import yaml
 
 from . import config as cfg
+from . import git_ops
 from . import repos as repos_mod
 
 
@@ -149,11 +150,12 @@ def _containing_git_checkout(path: Path) -> Path | None:
 def _git_common_dir(checkout: Path) -> Path:
     try:
         proc = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            cwd=checkout,
+            ["git", "-C", str(checkout), "rev-parse", "--git-common-dir"],
             capture_output=True,
             text=True,
             timeout=10,
+            env=git_ops.repository_identity_env(),
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError(
@@ -369,12 +371,14 @@ class StatePair:
 def _git_toplevel(cwd: str | None) -> str | None:
     """Return the git worktree root of ``cwd`` (or the process cwd), or None."""
     try:
+        checkout = cwd or os.getcwd()
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd or None,
+            ["git", "-C", checkout, "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             timeout=10,
+            env=git_ops.repository_identity_env(),
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return None

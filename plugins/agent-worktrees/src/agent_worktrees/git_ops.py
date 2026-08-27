@@ -20,6 +20,21 @@ from pathlib import Path
 
 log = logging.getLogger("agent-worktrees")
 
+
+def repository_identity_env() -> dict[str, str]:
+    """Return ambient process state without inherited Git context.
+
+    Repository identity probes supply their checkout explicitly with ``git -C``.
+    Any inherited ``GIT_*`` variable can override or alter that selection, so
+    none are meaningful to the child. Non-Git environment remains intact.
+    """
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith("GIT_")
+    }
+
+
 # --- Path helpers -----------------------------------------------------------
 
 def _normalize_wt_path(p: str) -> str:
@@ -53,6 +68,7 @@ def resolve_to_anchor(repo_path: Path) -> Path:
             r = subprocess.run(
                 ["git", "-C", str(repo_path), "rev-parse", "--git-common-dir"],
                 capture_output=True, text=True, timeout=5,
+                env=repository_identity_env(),
             )
             if r.returncode == 0:
                 common = Path(r.stdout.strip())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -242,6 +243,96 @@ def test_config_root_rejects_sibling_worktree_from_machine_local_stateless_confi
         cwd=anchor,
         check=True,
     )
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(anchor)),
+        destination=str(sibling / "generated"),
+        cwd=str(anchor),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert str(sibling) in res.error
+
+
+def test_git_common_dir_ignores_inherited_repository_context(
+    tmp_path,
+    monkeypatch,
+):
+    checkout = tmp_path / "checkout"
+    unrelated = tmp_path / "unrelated"
+    checkout.mkdir()
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+    monkeypatch.setenv("BENIGN_SETUP_CONTEXT", "preserved")
+    captured: dict[str, str] = {}
+    original_run = subprocess.run
+
+    def recording_run(*args, **kwargs):
+        captured.update(kwargs["env"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(sr.subprocess, "run", recording_run)
+
+    assert sr._git_common_dir(checkout) == (checkout / ".git").resolve()
+    assert "GIT_DIR" not in captured
+    assert "GIT_WORK_TREE" not in captured
+    assert captured["BENIGN_SETUP_CONTEXT"] == "preserved"
+
+
+def test_git_toplevel_ignores_inherited_repository_context(
+    tmp_path,
+    monkeypatch,
+):
+    checkout = tmp_path / "checkout"
+    unrelated = tmp_path / "unrelated"
+    checkout.mkdir()
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+
+    resolved = sr._git_toplevel(str(checkout))
+    assert resolved is not None
+    assert Path(resolved).resolve() == checkout.resolve()
+
+
+def test_config_root_validation_ignores_inherited_repository_context(
+    tmp_path,
+    monkeypatch,
+):
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    unrelated = tmp_path / "unrelated"
+    anchor.mkdir()
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
 
     res = sr.resolve_config_root(
         _config("harness", stateless=True, anchor=str(anchor)),
