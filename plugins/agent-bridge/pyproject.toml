@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.0-dev371"
+version = "0.4.0-dev372"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -37,6 +37,7 @@ dependencies = [
     "agent-plugin-resolve",
     "agent-procutil",
     "agent-dropin-registry",
+    "agent-plugin-activation",
 ]
 
 [tool.uv.sources]
@@ -64,6 +65,8 @@ agent-plugin-resolve = { path = "libs/plugin-resolve" }
 agent-procutil = { path = "libs/agent-procutil" }
 # Resilient tri-state scans/findings for providers.d.
 agent-dropin-registry = { path = "libs/dropin-registry" }
+# Effective plugin enablement and identity-verified root resolution.
+agent-plugin-activation = { path = "libs/plugin-activation" }
 
 [project.scripts]
 agent-bridge = "agent_bridge.__main__:main"

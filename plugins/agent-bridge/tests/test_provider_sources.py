@@ -7,6 +7,8 @@ import sys
 from types import SimpleNamespace
 
 import pytest
+from dropin_registry import EntryDecision, Finding, ScanAuthority
+from plugin_activation import ActivationReport, ActivePlugin
 
 from agent_bridge.agent_registry import (
     AgentResolver,
@@ -107,6 +109,44 @@ def _write(dir_, name, obj):
     (dir_ / name).write_text(json.dumps(obj), encoding="utf-8")
 
 
+def _activation(
+    root,
+    *,
+    source="agent-codespaces@copilot-extensions",
+    authority=ScanAuthority.COMPLETE,
+    decision=None,
+):
+    if decision is None and authority is not ScanAuthority.INDETERMINATE:
+        name, marketplace = source.split("@", 1)
+        decision = EntryDecision.active(
+            ActivePlugin(
+                source=source,
+                name=name,
+                marketplace=marketplace,
+                root=root.resolve(),
+                scopes=("global",),
+            )
+        )
+    decisions = {source: decision} if decision is not None else {}
+    return ActivationReport(authority=authority, decisions=decisions)
+
+
+def _write_v1_provider(directory, plugin_root, *, name="provider.json"):
+    source = "agent-codespaces@copilot-extensions"
+    _write(
+        directory,
+        name,
+        {
+            "schema_version": 1,
+            "plugin": source,
+            "plugin_root": str(plugin_root),
+            "namespace": "codespace",
+            "command": [sys.executable],
+        },
+    )
+    return source
+
+
 def test_discover_missing_dir_returns_empty(tmp_path):
     assert discover_provider_manifests(tmp_path / "nope") == {}
 
@@ -158,6 +198,105 @@ def test_discover_missing_command_is_inactive(tmp_path):
     assert report.findings[0].reason == "missing-target"
 
 
+def test_v1_provider_requires_current_exact_plugin_root(tmp_path):
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    _write_v1_provider(tmp_path / "providers", plugin_root)
+
+    active = scan_provider_registry(
+        tmp_path / "providers",
+        activation_report=_activation(plugin_root),
+    )
+    assert set(active.manifests) == {"codespace"}
+
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    mismatch = scan_provider_registry(
+        tmp_path / "providers",
+        activation_report=_activation(other_root),
+    )
+    assert mismatch.manifests == {}
+    assert mismatch.findings[0].reason == "identity-mismatch"
+
+
+def test_disabled_v1_provider_withdraws_prior_entry(tmp_path):
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    providers = tmp_path / "providers"
+    _write_v1_provider(providers, plugin_root)
+    first = scan_provider_registry(
+        providers,
+        activation_report=_activation(plugin_root),
+    )
+    disabled = ActivationReport(
+        authority=ScanAuthority.COMPLETE,
+        decisions={},
+    )
+    second = scan_provider_registry(
+        providers,
+        previous=first.entries,
+        activation_report=disabled,
+    )
+    assert second.manifests == {}
+    assert second.findings[0].reason == "not-enabled"
+
+
+def test_indeterminate_activation_retains_prior_but_never_adds(tmp_path):
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    providers = tmp_path / "providers"
+    _write_v1_provider(providers, plugin_root)
+    first = scan_provider_registry(
+        providers,
+        activation_report=_activation(plugin_root),
+    )
+    uncertain = _activation(
+        plugin_root,
+        authority=ScanAuthority.INDETERMINATE,
+    )
+    retained = scan_provider_registry(
+        providers,
+        previous=first.entries,
+        activation_report=uncertain,
+    )
+    assert retained.manifests == first.manifests
+    fresh = scan_provider_registry(
+        providers,
+        activation_report=uncertain,
+    )
+    assert fresh.manifests == {}
+    assert fresh.findings[0].reason == "entry-indeterminate"
+
+
+def test_indeterminate_source_decision_retains_prior(tmp_path):
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    providers = tmp_path / "providers"
+    source = _write_v1_provider(providers, plugin_root)
+    first = scan_provider_registry(
+        providers,
+        activation_report=_activation(plugin_root),
+    )
+    finding = Finding(
+        registry="plugin-activation",
+        entry="settings.json",
+        status="indeterminate",
+        reason="entry-indeterminate",
+    )
+    uncertain = _activation(
+        plugin_root,
+        source=source,
+        decision=EntryDecision.indeterminate(finding),
+    )
+    second = scan_provider_registry(
+        providers,
+        previous=first.entries,
+        activation_report=uncertain,
+    )
+    assert second.manifests == first.manifests
+    assert second.findings[0].reason == "entry-indeterminate"
+
+
 def test_transient_command_access_failure_retains_prior_provider(
     monkeypatch, tmp_path
 ):
@@ -200,6 +339,41 @@ def test_doctor_json_reports_exact_stale_entry(monkeypatch, tmp_path, capsys):
     assert payload["findings"][0]["entry"] == str(stale)
     assert payload["findings"][0]["target"] == str(missing)
     assert payload["findings"][0]["reason"] == "missing-target"
+
+
+def test_doctor_and_runtime_share_disabled_v1_verdict(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    from agent_bridge import __main__ as cli
+    from agent_bridge import provider_sources
+
+    plugin_root = tmp_path / "plugin"
+    plugin_root.mkdir()
+    providers = tmp_path / "providers"
+    _write_v1_provider(providers, plugin_root)
+    monkeypatch.setenv("AGENT_BRIDGE_PROVIDERS_DIR", str(providers))
+    disabled = ActivationReport(
+        authority=ScanAuthority.COMPLETE,
+        decisions={},
+    )
+    monkeypatch.setattr(
+        provider_sources,
+        "resolve_active_plugins",
+        lambda: disabled,
+    )
+
+    resolver = AgentResolver({}, {})
+    resolver.refresh_provider_resolvers(force=True)
+    assert "codespace" not in resolver.namespace_resolvers
+
+    with pytest.raises(SystemExit) as exc:
+        cli._cmd_doctor(SimpleNamespace(json=True))
+    assert exc.value.code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["active"] == []
+    assert payload["findings"][0]["reason"] == "not-enabled"
 
 
 def test_doctor_parser_supports_plain_and_both_json_positions():
