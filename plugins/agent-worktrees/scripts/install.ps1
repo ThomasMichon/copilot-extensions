@@ -807,17 +807,24 @@ function Ensure-UvIndex {
     }
     if (-not $idx) {
         $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
-        if ($python -and $python.Source -notmatch 'WindowsApps') {
-            $result = Invoke-NativeCapture { & $python.Source -m pip config get global.index-url }
+        $pythonPath = if ($python -and $python.Source -notmatch 'WindowsApps') {
+            $python.Source
+        } else {
+            Get-BootstrapPython
+        }
+        if ($pythonPath) {
+            $result = Invoke-NativeCapture { & $pythonPath -m pip config get global.index-url }
             if ($result.ExitCode -eq 0) { $idx = $result.Output }
         }
     }
     if (-not $idx) {
-        $configPaths = @(
-            $env:PIP_CONFIG_FILE,
-            (Join-Path $env:APPDATA 'pip\pip.ini'),
-            (Join-Path $env:PROGRAMDATA 'pip\pip.ini')
-        )
+        $configPaths = @($env:PIP_CONFIG_FILE)
+        if ($env:APPDATA) {
+            $configPaths += Join-Path $env:APPDATA 'pip\pip.ini'
+        }
+        if ($env:PROGRAMDATA) {
+            $configPaths += Join-Path $env:PROGRAMDATA 'pip\pip.ini'
+        }
         foreach ($configPath in $configPaths) {
             if (-not $configPath -or -not (Test-Path -LiteralPath $configPath)) { continue }
             $match = Select-String -LiteralPath $configPath `
@@ -856,10 +863,19 @@ function Ensure-Uv {
     }
 
     $python = Get-Command python -CommandType Application -ErrorAction SilentlyContinue
-    if (-not $python -or $python.Source -match 'WindowsApps') {
-        $python = Get-Command python3 -CommandType Application -ErrorAction SilentlyContinue
+    $pythonPath = if ($python -and $python.Source -notmatch 'WindowsApps') {
+        $python.Source
+    } else {
+        ''
     }
-    if (-not $python) {
+    if (-not $pythonPath) {
+        $python = Get-Command python3 -CommandType Application -ErrorAction SilentlyContinue
+        if ($python -and $python.Source -notmatch 'WindowsApps') {
+            $pythonPath = $python.Source
+        }
+    }
+    if (-not $pythonPath) { $pythonPath = Get-BootstrapPython }
+    if (-not $pythonPath) {
         Write-ServiceErr 'uv is absent and no Python is available to bootstrap it'
         return $false
     }
@@ -918,7 +934,7 @@ finally:
     pathlib.Path(archive).unlink(missing_ok=True)
     shutil.rmtree(staging, ignore_errors=True)
 '@
-    $result = Invoke-NativeCapture { & $python.Source -c $bootstrap $url $toolDir }
+    $result = Invoke-NativeCapture { & $pythonPath -c $bootstrap $url $toolDir }
     if ($result.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $uvPath)) {
         Write-ServiceErr "Failed to vendor uv: $($result.Output)"
         return $false

@@ -12,6 +12,8 @@ PLUGIN = Path(__file__).resolve().parents[1]
 INSTALLER = PLUGIN / "scripts" / "install.ps1"
 SERVICE_UTILS = PLUGIN / "scripts" / "service-utils.ps1"
 
+pytestmark = pytest.mark.guard
+
 
 def test_windows_provision_bootstraps_uv_before_runtime_build():
     installer = INSTALLER.read_text(encoding="utf-8")
@@ -25,6 +27,10 @@ def test_windows_provision_bootstraps_uv_before_runtime_build():
     assert "Invoke-NativeCapture" in installer
     assert "[System.IO.File]::WriteAllText" in manifest
     assert "Set-Content -Path $tmp -Encoding UTF8" not in manifest
+    assert "if ($env:APPDATA)" in installer
+    assert "if ($env:PROGRAMDATA)" in installer
+    assert "$pythonPath = Get-BootstrapPython" in installer
+    assert "& $pythonPath -m pip config get global.index-url" in installer
 
 
 def test_uv_bootstrap_python_survives_windows_powershell_argument_passing():
