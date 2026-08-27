@@ -1,7 +1,8 @@
 ---
 name: agent-bridge
 description: >
-  Agent-bridge control plane -- send prompts to persistent Copilot sessions
+  Persistent Agent-bridge control plane -- send prompts to persistent Copilot
+  sessions
   over the local bridge service: local agents, SSH machines, CodeSpaces,
   containers, and live interactive sessions. Use this for durable/cross-venue
   communication, NOT the Task tool.
@@ -26,20 +27,31 @@ description: >
 
 # Agent-Bridge Control Plane
 
-> **Before you start — readiness (self-provisioning, no agent-worktrees required).**
-> agent-bridge provisions its own runtime on first use and works standalone in any
-> host (CLI, Copilot app, cloud agent). If `command -v agent-bridge` fails, deploy
-> its binstub first (it then self-provisions on first call):
-> `bash "$(ls ~/.copilot/installed-plugins/*/agent-bridge/scripts/install.sh | head -1)" stamp`
-> The first call may take ~30–120s to provision (watch for `::agent-provisioning::`);
-> let it finish. If it reports a provisioning failure (e.g. missing uv / network),
-> surface the exact message — don't improvise a toolchain install.
+> **Before you start — use the payload-local session command.**
+> The agent-bridge session command catalog supplies an exact `argv[0]` owned by
+> this plugin payload. Replace `<agent-bridge catalog argv[0]>` in interactive
+> bridge operations below with that path; never search `PATH` or substitute a
+> same-named command from another payload. Commands explicitly labeled as
+> management boundaries remain literal global-wrapper invocations. In
+> PowerShell, invoke the catalog path as
+> `& "<agent-bridge catalog argv[0]>" <args>`.
+>
+> The payload shim provisions its own runtime on first use and works without
+> agent-worktrees. The first call may take ~30–120s (watch for
+> `::agent-provisioning::`); let it finish and surface any exact provisioning
+> failure instead of improvising a toolchain install.
+>
+> If session-start hooks did not publish the catalog, enumerate installed
+> payloads for this plugin and fail unless exactly one exists. Invoke that
+> payload's `bin/agent-bridge` on POSIX or `bin\agent-bridge.cmd` on Windows
+> directly; never stamp or choose a global wrapper just to recover an in-session
+> command, and never choose the first match from multiple marketplaces.
 
 ## Unexpected behavior is a troubleshooting event, not repair authorization
 
 An isolated disconnect caused by a network disruption or a daemon restart during
 a plugin update is **expected**. Preserve and resume the **same** session. If its
-state is unclear, use `agent-bridge peek <sid>` first; do not assume it is wedged
+state is unclear, use `<agent-bridge catalog argv[0]> peek <sid>` first; do not assume it is wedged
 and do not clear, end, or replace it.
 
 For genuinely **unexpected** bridge, provider, or session behavior -- a resume
@@ -58,8 +70,8 @@ The default response is **preserve and file**, not diagnose or repair:
 2. Unless the operator explicitly requested diagnosis or remediation, **stop
    there**.
 3. When diagnosis is requested, use the guidebook's read-only sequence:
-   `agent-bridge status <sid>`, a bounded
-   `agent-bridge read <sid> --tail N`, then `peek` / persisted traces as
+   `<agent-bridge catalog argv[0]> status <sid>`, a bounded
+   `<agent-bridge catalog argv[0]> read <sid> --tail N`, then `peek` / persisted traces as
    applicable. Mutating steps still require explicit authorization.
 
 Do **not** stop/end/recreate a session, start a replacement session, restart or
@@ -77,17 +89,17 @@ problems:
 | | agent-bridge | Task tool (sub-agents) |
 |---|---|---|
 | **What** | Communicates with persistent Copilot sessions outside this turn: local bridge agents, SSH machines, CodeSpaces, containers, or live interactive sessions | Spawns local background agents in **this session** |
-| **How** | `agent-bridge send <agent> "prompt"` CLI command | `task` function call in your response |
+| **How** | `<agent-bridge catalog argv[0]> send <agent> "prompt"` CLI command | `task` function call in your response |
 | **Transport** | Local bridge service + local process / SSH / provider namespaces / live-session inbox | Local subprocess |
 | **Scope** | Durable cross-session or cross-venue work | Same machine/session only |
 
 **Rule:** When asked to "talk to", "send to", "relay to", or "communicate with"
 a named bridge agent/venue (topology agent, `codespace:...`, `container:...`, or
-live session), **use `agent-bridge send <agent-name> "prompt"`**. Never use the
+live session), **use `<agent-bridge catalog argv[0]> send <agent-name> "prompt"`**. Never use the
 Task tool for cross-machine or durable cross-session communication -- it cannot
 reach those bridge venues.
 
-Run `agent-bridge agents` to see which agent names are available. If
+Run `<agent-bridge catalog argv[0]> agents` to see which agent names are available. If
 your deployment includes a deployment-specific adapter skill (e.g.
 `multi-machine system-agent-bridge`), it will list the concrete machine and agent
 names for your environment.
@@ -119,18 +131,18 @@ self-dispatch see **`pick-and-claim`**.
 ### Relay Chain Pattern
 
 When relaying a message through multiple machines (A -> B -> C), each
-hop uses `agent-bridge send` on **its own local bridge** to reach the
+hop uses the payload-local `send` operation on **its own local bridge** to reach the
 next machine. The chain is:
 
 ```
-Machine A: agent-bridge send agent-on-B "relay this to C"
-Machine B: agent-bridge send agent-on-C "the message"
+Machine A: <agent-bridge catalog argv[0]> send agent-on-B "relay this to C"
+Machine B: <agent-bridge catalog argv[0]> send agent-on-C "the message"
 ```
 
 Each machine's bridge manages its own outbound connections. Do NOT
 create all sessions from one machine (that's a star, not a chain).
 
-Agent-bridge is the inter-agent communication service. It manages
+The bridge is the inter-agent communication service. It manages
 persistent sessions with agents running on any configured machine
 via local subprocess or SSH transport.
 
@@ -140,7 +152,7 @@ Each machine runs its own agent-bridge instance. By default it binds an
 **OS-assigned ephemeral** loopback port and advertises the actual port via its
 routing table (`active.json`), so nothing well-known is reserved and there is no
 Windows/WSL port collision to design around (dotfiles #694); clients discover
-the port (`agent-bridge status` prints it). The topology
+the port (`<agent-bridge catalog argv[0]> status` prints it). The topology
 is a mesh -- each instance manages outbound connections to other machines
 via SSH. Sessions are persistent (SQLite-backed) and survive service
 restarts.
@@ -160,14 +172,15 @@ Provider namespaces from `~/.agent-bridge/providers.d/` work without a topology.
 ## CLI Commands
 
 All commands connect to the local agent-bridge HTTP API; the service must be
-running (`agent-bridge start`). The essential one is **send**:
+running (`agent-bridge start`). <!-- marketplace-isolation: allow service-management -->
+The essential one is **send**:
 
 ```bash
-agent-bridge send <agent|machine|codespace:name|container:name> "<prompt>"
-agent-bridge agents          # list cwd-project agents (--json)
-agent-bridge machines        # list cwd-project machines + SSH readiness (--json)
-agent-bridge --project <repo> agents
-agent-bridge agents --all-projects
+<agent-bridge catalog argv[0]> send <agent|machine|codespace:name|container:name> "<prompt>"
+<agent-bridge catalog argv[0]> agents          # list cwd-project agents (--json)
+<agent-bridge catalog argv[0]> machines        # list cwd-project machines + SSH readiness (--json)
+<agent-bridge catalog argv[0]> --project <repo> agents
+<agent-bridge catalog argv[0]> agents --all-projects
 ```
 
 Core service setup is standalone. Optional sibling providers compose through
@@ -187,36 +200,36 @@ configuration, see `plugins/agent-bridge/docs/machine-config.md`.
 
 ```bash
 # Ask a remote agent to check something
-agent-bridge send server-wsl "Check disk space on /data"
+<agent-bridge catalog argv[0]> send server-wsl "Check disk space on /data"
 
 # Ask another agent to run a command
-agent-bridge send workstation-wsl "Run the test suite"
+<agent-bridge catalog argv[0]> send workstation-wsl "Run the test suite"
 ```
 
 ### Multi-Turn Conversation
 
 ```bash
 # Start a session
-agent-bridge send dev-wsl "Set up a new project" --no-wait
+<agent-bridge catalog argv[0]> send dev-wsl "Set up a new project" --no-wait
 
 # Check sessions to get the ID
-agent-bridge sessions --status running
+<agent-bridge catalog argv[0]> sessions --status running
 
 # Send follow-up
-agent-bridge send <session-id> "Now add the test framework"
+<agent-bridge catalog argv[0]> send <session-id> "Now add the test framework"
 
 # When done
-agent-bridge end <session-id>
+<agent-bridge catalog argv[0]> end <session-id>
 ```
 
 ### Checking What's Running
 
 ```bash
 # See all active sessions (CONTEXT column shows usage %)
-agent-bridge sessions
+<agent-bridge catalog argv[0]> sessions
 
 # Get JSON for programmatic use
-agent-bridge sessions --json
+<agent-bridge catalog argv[0]> sessions --json
 ```
 
 ### Reading liveness -- `stalled` is usually deep thinking, NOT a wedge
@@ -251,13 +264,13 @@ watch for it and unblock it:
 ```bash
 # `status` surfaces a parked question as an ASK: line with its fields + the
 # exact command to answer:
-agent-bridge status <sid>
+<agent-bridge catalog argv[0]> status <sid>
 #   ASK:     Which database engine should I use?
 #            fields: db*=postgres|mysql|sqlite
-#            answer: `agent-bridge answer <sid> --field <key>=<value> …`
+#            answer: `<agent-bridge catalog argv[0]> answer <sid> --field <key>=<value> …`
 
 # Answer it -- the agent's turn then continues:
-agent-bridge answer <sid> --field db=postgres
+<agent-bridge catalog argv[0]> answer <sid> --field db=postgres
 # multiple fields: repeat --field; complex/typed values: --json '{"port": 5432}'
 # not going to answer: --decline (agent proceeds without) or --cancel
 ```
@@ -278,7 +291,7 @@ expensive to get wrong."*
 
 ### Context Window Monitoring
 
-The `CONTEXT` column in `agent-bridge sessions` shows token usage as a
+The `CONTEXT` column in the payload-local `sessions` output shows token usage as a
 fraction with percentage (e.g., `110k/200k (55%)`). Use this as a
 progress indicator -- more tokens consumed generally means more work
 completed.
@@ -286,7 +299,7 @@ completed.
 For detailed usage on a specific session:
 
 ```bash
-agent-bridge session-usage <session-id>
+<agent-bridge catalog argv[0]> session-usage <session-id>
 ```
 
 This shows the full usage snapshot: context size/used/percentage, model,
@@ -310,10 +323,10 @@ prompt itself (which consumes context) and a safety margin before the
 
 ```bash
 # 1. Check usage (do this every 2-3 turns on long-running sessions)
-agent-bridge session-usage <session-id>
+<agent-bridge catalog argv[0]> session-usage <session-id>
 
 # 2. If context_pct >= 70, request a handoff from the remote agent
-agent-bridge send <session-id> \
+<agent-bridge catalog argv[0]> send <session-id> \
   "Your context window is filling up. Generate a continuation prompt
    for a fresh session to resume this work. Include:
    - Original objective
@@ -327,12 +340,12 @@ agent-bridge send <session-id> \
 
 # 4. End the old session (its handoff payload is captured). Ending it also
 #    frees a one-session-per-CodeSpace agent so a fresh one can be created.
-agent-bridge end <session-id>
+<agent-bridge catalog argv[0]> end <session-id>
 
 # 5. Create a fresh session with the handoff as the first prompt. Use
 #    `create` (not `send`) -- `send` would resume the old session instead
 #    of giving the new context window a clean start.
-agent-bridge create <agent-name> "Resume: <captured handoff payload>"
+<agent-bridge catalog argv[0]> create <agent-name> "Resume: <captured handoff payload>"
 ```
 
 **Key points:**
@@ -361,7 +374,7 @@ agent-bridge create <agent-name> "Resume: <captured handoff payload>"
 | 90% | `context_critical` SSE | Emergency -- do not send more prompts |
 
 **Context % as a progress signal:** When listing sessions with
-`agent-bridge sessions`, the CONTEXT column doubles as a rough progress
+the payload-local `sessions` output, the CONTEXT column doubles as a rough progress
 indicator. A session at 60% has done significant work. A session at 10%
 is just getting started. Host agents can use this to prioritize which
 sessions need attention, follow-up, or cycling.
@@ -393,22 +406,15 @@ Write the prompt to a file (or pipe it on stdin) and hand `send`/`create` a path
 ```powershell
 # From a file:
 Set-Content -Path .\dispatch.md -Value $prompt -Encoding UTF8
-agent-bridge create --no-wait <agent> --prompt-file .\dispatch.md
+& "<agent-bridge catalog argv[0]>" create --no-wait <agent> --prompt-file .\dispatch.md
 
 # ...or straight from stdin:
-$prompt | agent-bridge create --no-wait <agent> --prompt-file -
+$prompt | & "<agent-bridge catalog argv[0]>" create --no-wait <agent> --prompt-file -
 ```
 
-If you must pass the prompt inline, call the venv module directly with a
-single-quoted here-string **and keep the body free of embedded double-quotes**
-(use single quotes inside), so PowerShell preserves argv:
-
-```powershell
-$pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
-& $pyb -m agent_bridge create --no-wait <agent> @'
-<your full multi-line prompt — single quotes only, no embedded " >
-'@
-```
+Do not bypass the payload command with a legacy venv path for inline prompts.
+Use `--prompt-file` with a file or stdin so payload ownership and argument
+boundaries are both preserved.
 
 ### 2. You cannot steer a running session — front-load everything
 
@@ -422,18 +428,19 @@ $pyb = "$env:USERPROFILE\.agent-bridge\venv\Scripts\python.exe"
   progress survives a drop, and to emit **structured progress markers** —
   `PROGRESS build=ok`, `PROGRESS tests=ok n=<count>`, `PROGRESS commit=<sha>`,
   `PROGRESS pr=<id>` — which the bridge captures (latest value per key) and
-  surfaces in `agent-bridge status <sid>` under **Progress:**, so you get
+  surfaces in `<agent-bridge catalog argv[0]> status <sid>` under **Progress:**, so you get
   ground-truth milestones (did it build? push? open a PR?) without grepping the
   feed or shelling into the host.
 
 ### 3. Monitor cheaply — through the bridge, at phase boundaries
 
-- Prefer `agent-bridge status <sid>` — one compact screen with the session
+- Prefer `<agent-bridge catalog argv[0]> status <sid>` — one compact screen with the session
   state, the **in-flight tool + elapsed** (so you can tell a busy agent from a
   hung one), and your cursor lag (`behind` N events). It surfaces the
   tool-progress liveness that a plain `read` cannot see.
 - To peek at recent output without disturbing the live cursor, use a
-  cursor-neutral incremental read: `agent-bridge read <sid> --tail N` (last N
+  cursor-neutral incremental read:
+  `<agent-bridge catalog argv[0]> read <sid> --tail N` (last N
   events) or `--since <id>` (only-new after an id). These replace the old
   `--range A:B | tail` slice-the-whole-feed workaround.
 - Do this at the *expected* phase boundaries (after setup, build ETA, test ETA) —
@@ -463,7 +470,8 @@ child is **not** gone: its session host keeps the child alive. **Resume it with
 `send`** — the bridge reattaches to the surviving child (adopts the same ACP
 session id — no respawn) and delivers the prompt. Do **not** reflexively
 `end`+`create` a connection-loss stop; that throws away a live, resumable child
-and its in-flight work. If the state is unclear, run `agent-bridge peek <sid>`;
+and its in-flight work. If the state is unclear, run
+`<agent-bridge catalog argv[0]> peek <sid>`;
 then resume the same session and verify the resumed turn did real work.
 
 **Stale-cancel on the first reattached turn.** If a session was `stop`ped (or
@@ -477,15 +485,15 @@ drains after one turn, so the fix is still `send` — **`send` again**, and the
 now-idle session continues normally:
 
 ```bash
-agent-bridge send <sid> "<same idempotent prompt>"   # first turn ate the stale cancel; this one runs
+<agent-bridge catalog argv[0]> send <sid> "<same idempotent prompt>"   # first turn ate the stale cancel; this one runs
 ```
 
 Only if it **keeps** cancelling (or the session is genuinely gone) and the
 operator authorizes context loss, discard and recreate:
 
 ```bash
-agent-bridge end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too
-agent-bridge create <agent> "<same idempotent prompt>"
+<agent-bridge catalog argv[0]> end <sid>          # a daemon restart can also resurrect an old session as "active" — end that too
+<agent-bridge catalog argv[0]> create <agent> "<same idempotent prompt>"
 ```
 
 > **Fixed in 0.4.0-dev206 — the idle-gap variant.** A distinct root cause used to
@@ -532,13 +540,13 @@ The slices must integrate before any can merge, so they share one branch and the
 **host owns the PR**.
 
 1. **Host** publishes the shared branch from its worktree:
-   `agent-worktrees git feature-branch <name> --push`.
+   `agent-worktrees git feature-branch <name> --push`. <!-- marketplace-isolation: allow agent-worktrees-management -->
 2. **Host** dispatches each slice with a complete, idempotent prompt (per
    *Dispatching Long Autonomous Work* above) that tells the delegate to:
-   - sync to the branch -- `agent-worktrees git feature-branch <name> --sync`;
+   - sync to the branch -- `agent-worktrees git feature-branch <name> --sync`; <!-- marketplace-isolation: allow agent-worktrees-management -->
    - do its assigned `## Coordination` section, committing on its worktree branch;
    - **write back its slice of the effort README**;
-   - hand off -- `agent-worktrees git merge-to-feature <name>` (ff-pushes).
+   - hand off -- `agent-worktrees git merge-to-feature <name>` (ff-pushes). <!-- marketplace-isolation: allow agent-worktrees-management -->
 3. **Host** syncs forward as slices land (`git feature-branch <name> --sync`),
    journaling each dispatch + landing in the effort.
 4. When coordination is done, **only the host** opens the PR(s) from the shared
@@ -568,9 +576,9 @@ e.g. `dev6` / `dev6-wsl` / `cloud1`) plus `<repo>@<machine>` agents from each
 repo's `.agent-worktrees/related.yaml`, and the local project agents
 auto-discovered from `projects.yaml`. (`acp-agents.json` is retired; an explicit
 `agents_config` is still honored as a deprecated override.) Use
-`agent-bridge agents` to list available agents.
+`<agent-bridge catalog argv[0]> agents` to list available agents.
 
-Inside an adopted repo, `agent-bridge agents` and `agent-bridge machines` show
+Inside an adopted repo, the payload-local `agents` and `machines` operations show
 that CWD project's catalog. Use top-level `--project <repo>` to address another
 project without changing directories, or `--all-projects` for the full
 deployment. Derived machine agents also advertise stable SSH aliases; alias
@@ -604,8 +612,8 @@ no registration). You can address one by its **raw** name or its **friendly**
 is **optional**:
 
 ```bash
-agent-bridge send codespace:my-feature "..."   # friendly, prefixed
-agent-bridge send my-feature "..."             # friendly, bare
+<agent-bridge catalog argv[0]> send codespace:my-feature "..."   # friendly, prefixed
+<agent-bridge catalog argv[0]> send my-feature "..."             # friendly, bare
 ```
 
 The bridge resolves the friendly name to the underlying raw CodeSpace and keys
@@ -619,23 +627,25 @@ disambiguate.
 
 When agent-bridge spawns a session for an agent with `project` configured,
 it creates a **new git worktree** on the target machine via
-`agent-worktrees resolve --new`. The `agent-bridge end` command cleans up
+`agent-worktrees resolve --new`. <!-- marketplace-isolation: allow agent-worktrees-management -->
+The payload-local `end` operation cleans up
 the bridge session (subprocess, DB record) but does **not** finalize or
 remove the spawned worktree. Without cleanup, these accumulate as orphaned
 "unused" worktrees.
 
 ### Cleanup Responsibility
 
-The **host agent** (the session that called `agent-bridge send`) is
+The **host agent** (the session that called the payload-local `send` operation) is
 responsible for cleaning up worktrees it caused to be created. During
 the host session's wrap-up:
 
-1. **End bridge sessions first.** Run `agent-bridge sessions` to find
-   any active sessions. End each one with `agent-bridge end <id>`.
+1. **End bridge sessions first.** Run
+   `<agent-bridge catalog argv[0]> sessions` to find any active sessions. End
+   each one with `<agent-bridge catalog argv[0]> end <id>`.
 
 2. **Run worktree cleanup.** After ending bridge sessions, run:
    ```bash
-   agent-worktrees worktrees cleanup
+   agent-worktrees worktrees cleanup # marketplace-isolation: allow agent-worktrees-management
    ```
    This lists worktrees eligible for removal. The default (no flags)
    only removes worktrees that went through proper finalization --
@@ -692,10 +702,10 @@ This marker (same family as `<system_reminder>`) means the turn came from
 `reply-to` address with the same verb you use for any agent:
 
 ```bash
-agent-bridge send <reply-to> "your reply"
+<agent-bridge catalog argv[0]> send <reply-to> "your reply"
 ```
 
-`agent-bridge send` recognizes a live-session target and delivers into it; your
+The payload-local `send` operation recognizes a live-session target and delivers into it; your
 own identity/session ride along so the peer can answer back. See
 [references/agent-messages.md](references/agent-messages.md) for the full
 convention. Delivery is on by default; `/peer` mutes a session.
@@ -716,14 +726,17 @@ two capabilities without the destructive take-over:
   id — unanswerable by a viewer; approval stays at the operator's terminal), and
   a **`driven_by`** field names the steering agent for the "driven by `<agent>`"
   banner (null = operator-launched).
-- **Messaging (write).** The inbox above (`agent-bridge send <live-session>`)
+- **Messaging (write).** The inbox above
+  (`<agent-bridge catalog argv[0]> send <live-session>`)
   delivers an attributed turn *into* a live interactive session — the mirror of
   the read path.
 - **Addressing by worktree handle.** `resolve` maps a worktree handle → its
   currently-live session, so `reply-to` survives a session handoff (an agent is
   a *series of sessions in one worktree*).
-- **Reading the registry (CLI).** `agent-bridge live-sessions list
-  [--worktree-id <id>]` and `agent-bridge live-sessions resolve --handle
+- **Reading the registry (CLI).**
+  `<agent-bridge catalog argv[0]> live-sessions list
+  [--worktree-id <id>]` and
+  `<agent-bridge catalog argv[0]> live-sessions resolve --handle
   <session-id|worktree-handle>` expose the registry from the shell (add global
   `--json` for machine-readable output). Beyond registration/liveness the view
   carries **turn-state** derived from the represented event tail --
@@ -732,21 +745,25 @@ two capabilities without the destructive take-over:
   beat (see below). This is the surface **agent-dispatch** joins against to track
   a CLI-embodied task: a leased task's owner is `<machine>/<worktree>`, so it
   resolves the worktree to its live session and overlays
-  liveness/turn-state/`driven_by` on `agent-dispatch show`/`list` (best-effort;
+  liveness/turn-state/`driven_by` on `agent-dispatch show`/`list` <!-- marketplace-isolation: allow agent-dispatch-management -->
+  (best-effort;
   degrades to status+lease when the bridge is absent).
-- **Progress beat for an operator session (Phase 7 7c).** `agent-bridge
-  live-sessions progress --handle <session-id|worktree-handle> --summary "<one
+- **Progress beat for an operator session (Phase 7 7c).**
+  `<agent-bridge catalog argv[0]> live-sessions progress --handle
+  <session-id|worktree-handle> --summary "<one
   line>" [--phase <p> --pr <ref> --blocker <why>]` records a **bounded,
   latest-only** status beat on the live-session record -- the operator-session
   analogue of a dispatched task's `latest_progress` (a dispatched worker uses
-  `agent-dispatch progress` against its task instead). Every field is hard-capped
+  `agent-dispatch progress` against its task instead). <!-- marketplace-isolation: allow agent-dispatch-management -->
+  Every field is hard-capped
   so the beat stays a status line, never a chat log. The bundled extension nudges
   an operator-driven session to emit one at a gentle cadence.
 
 **Durable work gets a CLI body, not a headless one.** When you *dispatch* work
 meant to outlive its caller, prefer a **CLI-backed autopilot session** (via
-`agent-dispatch create --spawn --spawn-backend embody` → `agent-worktrees embody
---new`, `driven_by=agent-dispatch`) over a headless ACP worker — it is durable,
+`agent-dispatch create --spawn --spawn-backend embody` <!-- marketplace-isolation: allow agent-dispatch-management -->
+→ `agent-worktrees embody --new`, <!-- marketplace-isolation: allow agent-worktrees-management -->
+`driven_by=agent-dispatch`) over a headless ACP worker — it is durable,
 NF-viewable, and completes its task explicitly. Ephemeral, caller-bounded helpers
 still use headless bridge agents (`send`/`create`). A **handoff** is the in-place
 variant: a live cutover replaces the current CLI in its mux with a successor that
@@ -757,20 +774,22 @@ takes the work over (see the `context-handoff:context-handoff` and `agent-dispat
 - **Start with the `agent-bridge-troubleshooting` skill.** Its read-only
   decision tree and persisted traces are authoritative; this short list is only
   a symptom index.
-- **"agent-bridge is not responding"** -- run `agent-bridge status`. Normal
+- **"agent-bridge is not responding"** -- run
+  `<agent-bridge catalog argv[0]> status`. Normal
   daemon-touching commands self-heal a down service. If that fails, capture the
   routing/log evidence from the guidebook and file a bug; do not manually
   restart the shared daemon unless the operator directs it.
-- **"Agent not found"** -- check `agent-bridge agents` for available names.
-  Use `agent-bridge agents --all-projects` if the target belongs to another
+- **"Agent not found"** -- check `<agent-bridge catalog argv[0]> agents` for available names.
+  Use `<agent-bridge catalog argv[0]> agents --all-projects` if the target belongs to another
   topology profile.
   The topology config may not include the agent you're looking for.
 - **Session stuck in RUNNING** -- the downstream agent may be waiting for
   permission or processing a long tool call. Inspect with
-  `agent-bridge status <session-id>` and a bounded
-  `agent-bridge read <session-id> --tail N`. Do not stop or replace it merely
+  `<agent-bridge catalog argv[0]> status <session-id>` and a bounded
+  `<agent-bridge catalog argv[0]> read <session-id> --tail N`. Do not stop or replace it merely
   because the client timed out.
 - **SSH connection failures** -- verify SSH aliases work:
-  `ssh <machine-alias> echo ok`. Check `agent-bridge machines` for
+  `ssh <machine-alias> echo ok`. Check
+  `<agent-bridge catalog argv[0]> machines` for
   SSH readiness status, then follow the guidebook without changing provider
   state.

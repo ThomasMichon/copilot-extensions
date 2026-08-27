@@ -7,6 +7,19 @@ container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+Agent-facing sessions receive an exact payload-local command through the
+session command catalog. That command resolves and, when necessary, provisions
+the runtime from its own payload without searching `PATH` for another
+marketplace's same-named plugin. On Windows the catalog publishes the native
+`.cmd` entry so prompt bodies sent through stdin remain intact.
+
+The legacy global wrappers remain explicit compatibility and management
+boundaries for callers that do not inherit session catalogs: daemon and service
+launchers, picker pivots, remote commands, provider manifests and provider
+process boundaries, elevated launchers, and out-of-session management callers.
+Catalog adoption does not make those callers payload-aware; they retain their
+current commands until an attributable launcher contract reaches each surface.
+
 ## How It Works
 
 Agent Bridge runs as a local HTTP service on an OS-assigned loopback port by

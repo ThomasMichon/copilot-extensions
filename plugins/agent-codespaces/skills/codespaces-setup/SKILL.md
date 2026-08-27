@@ -24,10 +24,10 @@ operations (SSH, listing, bridge), see the `codespaces-lifecycle` skill.
 
 Use the exact `argv` from the agent-codespaces session command catalog for
 CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
-related-repo management. For dispatch, follow the `agent-bridge` skill; its
-current management command remains an explicit compatibility boundary. Append
-the arguments shown below; never substitute a same-named agent-codespaces
-command found through `PATH`.
+related-repo management. For dispatch, use the exact `argv[0]` from the
+session command catalog for agent-bridge and replace
+`<agent-bridge catalog argv[0]>` below with that path. Append the arguments
+shown below; never substitute a same-named plugin command found through `PATH`.
 
 ## Readiness — agent-codespaces provisions its own runtime (standalone)
 
@@ -77,7 +77,7 @@ configure**:
 ```bash
 <agent-codespaces catalog argv[0]> create <your-org>/<standard-repo>
 <agent-codespaces catalog argv[0]> doctor
-agent-bridge send codespace:<name> "<task>" # marketplace-isolation: allow agent-bridge-management
+<agent-bridge catalog argv[0]> send codespace:<name> "<task>"
 ```
 
 Add config **only** when a repo deviates from convention. The rest of this skill

@@ -208,6 +208,12 @@ resolver surfaces of:
 | agent-vault | Service/task/lease identity and durable encrypted state |
 | agent-mcp | Bridge discovery, wildcard installed-plugin scans, overrides and token cache |
 | agent-ssh | Shared ssh-manager sockets, locks, connection configuration and transport processes |
+
+For service-bearing plugins such as agent-bridge, a later cell-qualified
+runtime-root migration must move the service identity and canonical launcher in
+the same operative cutover. Moving only the interactive client would let its
+self-healing path start a cell-local daemon while legacy management commands
+still control the machine-global daemon.
 | agent-machines | Runtime root, machine registry and payload command surface |
 
 ### Repo configuration and command consumers
