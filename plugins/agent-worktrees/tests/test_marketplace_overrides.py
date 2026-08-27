@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -302,6 +303,23 @@ def test_session_start_emits_restart_only_when_changed(
     assert capsys.readouterr().out.strip() == "{}"
 
 
+def test_checkout_root_decodes_filesystem_bytes(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "consumer-\u00e9"
+    repo.mkdir()
+    monkeypatch.setattr(
+        main.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            args=["git"],
+            returncode=0,
+            stdout=os.fsencode(str(repo)) + b"\n",
+            stderr=b"",
+        ),
+    )
+
+    assert main._checkout_root(tmp_path) == repo.resolve()
+
+
 def test_launch_and_hook_surfaces_include_reconciler():
     plugin = Path(__file__).parents[1]
     assert "reconcile-marketplaces" in (
@@ -389,7 +407,6 @@ def test_ensure_ignored_adds_git_exclude_rule(tmp_path: Path, monkeypatch):
     ignored = main.git_ops.git(
         "check-ignore",
         "--quiet",
-        "--no-index",
         "--",
         ".github/copilot/settings.local.json",
         cwd=repo,

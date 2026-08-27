@@ -259,7 +259,7 @@ def _ensure_output_is_local(repo: Path, *, ensure_ignored: bool) -> None:
             f"{tracked.stderr.strip() or tracked.stdout.strip() or 'git failed'}"
         )
 
-    ignored = _git(repo, "check-ignore", "--quiet", "--no-index", "--", rel)
+    ignored = _git(repo, "check-ignore", "--quiet", "--", rel)
     if ignored.returncode == 0:
         return
     if ignored.returncode != 1:
@@ -299,7 +299,7 @@ def _ensure_output_is_local(repo: Path, *, ensure_ignored: bool) -> None:
             f"cannot update Git exclude file {exclude}: {exc}"
         ) from exc
 
-    ignored = _git(repo, "check-ignore", "--quiet", "--no-index", "--", rel)
+    ignored = _git(repo, "check-ignore", "--quiet", "--", rel)
     if ignored.returncode == 1:
         raise MarketplaceOverrideError(
             f"Git exclude rule did not ignore local settings: {repo / _SETTINGS_REL}"

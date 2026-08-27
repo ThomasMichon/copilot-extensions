@@ -13917,15 +13917,15 @@ def _checkout_root(path: str | Path | None) -> Path | None:
         result = subprocess.run(
             ["git", "-C", str(target), "rev-parse", "--show-toplevel"],
             capture_output=True,
-            text=True,
             timeout=5,
         )
     except Exception:
         return None
-    if result.returncode != 0 or not result.stdout.strip():
+    raw_root = result.stdout.strip()
+    if result.returncode != 0 or not raw_root:
         return None
     try:
-        return Path(result.stdout.strip()).resolve()
+        return Path(os.fsdecode(raw_root)).resolve()
     except OSError:
         return None
 
