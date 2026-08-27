@@ -85,6 +85,11 @@ dev = [
     "httpx>=0.27",
 ]
 
+[tool.pytest.ini_options]
+markers = [
+    "guard: fast structural/contract guard tests run automatically in the pre-push hook",
+]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 ignore = ["S104"]  # binding to 0.0.0.0 is intentional in some configs
