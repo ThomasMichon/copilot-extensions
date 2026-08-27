@@ -457,6 +457,21 @@ def test_stamp_generation_conflict_matches_across_runners(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_stamp_ignores_inherited_context_pointer(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    arguments, _ = _stamp_arguments(tmp_path / runner_name)
+    result = _run(
+        command,
+        *arguments,
+        env={"COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / "wrong-install.json")},
+    )
+    assert json.loads(result.stdout)["generation"] == 1
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
 def test_stamp_refuses_generation_overflow_before_replacing_receipt(
     tmp_path: Path,
     runner_name: str,

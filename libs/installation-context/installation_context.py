@@ -1173,6 +1173,9 @@ def stamp_context(
 ) -> dict[str, Any]:
     """Create or update installation receipts under attributable directory locks."""
 
+    caller_environment = environment if environment is not None else os.environ
+    resolution_environment = dict(caller_environment)
+    resolution_environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     resolved = resolve_context(
         payload_root=payload_root,
         plugin_id=plugin_id,
@@ -1181,11 +1184,11 @@ def stamp_context(
         durable_home=durable_home,
         source_descriptor=source_descriptor,
         marketplace_key=marketplace_key,
-        environment=environment,
+        environment=resolution_environment,
     )
     durable = canonical_path(
         durable_home
-        or Path((environment if environment is not None else os.environ).get("HOME") or Path.home())
+        or Path(caller_environment.get("HOME") or Path.home())
         / ".copilot-extensions"
     )
     marketplace_id = _string_property(resolved, "marketplaceId")
@@ -1291,7 +1294,7 @@ def stamp_context(
         expected_marketplace_id=marketplace_id,
         expected_plugin_id=resolved_plugin_id,
         expected_payload_root=_string_property(resolved, "payloadRoot"),
-        environment=environment,
+        environment=caller_environment,
     )
     result.update(
         {

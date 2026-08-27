@@ -291,6 +291,16 @@ def test_stamp_generation_compare_and_swap_rejects_stale_writer(tmp_path: Path) 
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+def test_stamp_ignores_inherited_context_pointer(tmp_path: Path) -> None:
+    arguments, _ = _stamp_arguments(tmp_path)
+    result = _run_ps(
+        *arguments,
+        env={"COPILOT_EXTENSIONS_CONTEXT": str(tmp_path / "wrong-install.json")},
+    )
+    assert json.loads(result.stdout)["generation"] == 1
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_stamp_refuses_generation_overflow_before_replacing_receipt(
     tmp_path: Path,
 ) -> None:
