@@ -1067,13 +1067,16 @@ def _materialize_active_pivots(
         if len(owners) != 1:
             continue
         source, root, template = owners[0]
-        data = _managed_manifest_data(
-            template,
-            source=source,
-            root=root,
-            template_name=name,
-            require_targets=False,
-        )
+        try:
+            data = _managed_manifest_data(
+                template,
+                source=source,
+                root=root,
+                template_name=name,
+                require_targets=False,
+            )
+        except ManifestError:
+            continue
         content = json.dumps(
             data,
             indent=2,

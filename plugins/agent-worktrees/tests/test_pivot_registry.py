@@ -65,6 +65,23 @@ def _active_report(source: str, root: Path) -> ActivationReport:
     )
 
 
+def _active_reports(*items: tuple[str, Path]) -> ActivationReport:
+    decisions = {}
+    for source, root in items:
+        active = ActivePlugin(
+            source=source,
+            name=source.split("@", 1)[0],
+            marketplace=source.split("@", 1)[1],
+            root=root.resolve(),
+            scopes=("global",),
+        )
+        decisions[source] = EntryDecision.active(active)
+    return ActivationReport(
+        authority=ScanAuthority.COMPLETE,
+        decisions=decisions,
+    )
+
+
 def test_active_plugin_materializes_attributed_absolute_command(tmp_path):
     source = "sample@example-marketplace"
     root = tmp_path / "plugin"
@@ -86,6 +103,34 @@ def test_active_plugin_materializes_attributed_absolute_command(tmp_path):
     assert Path(payload["plugin_root"]) == root.resolve()
     assert payload["template"] == "sample.json"
     assert Path(payload["list"][0]) == command.resolve()
+
+
+def test_invalid_plugin_template_does_not_block_valid_peer(tmp_path):
+    bad_source = "bad@example-marketplace"
+    bad_root = tmp_path / "bad"
+    _command(bad_root, "bad")
+    _template(bad_root, filename="bad.json", label="Bad", command="bad")
+    bad_template = bad_root / "pivots" / "bad.json"
+    bad_payload = json.loads(bad_template.read_text(encoding="utf-8"))
+    bad_payload["list"] = []
+    bad_template.write_text(json.dumps(bad_payload), encoding="utf-8")
+
+    good_source = "good@example-marketplace"
+    good_root = tmp_path / "good"
+    _command(good_root, "good")
+    _template(good_root, filename="good.json", label="Good", command="good")
+    registry = tmp_path / "pivots"
+
+    report = pivots.scan_pivot_registry(
+        registry,
+        activation_report=_active_reports(
+            (bad_source, bad_root),
+            (good_source, good_root),
+        ),
+    )
+
+    assert [pivot.label for pivot in report.pivots] == ["Good"]
+    assert not (registry / "bad.json").exists()
 
 
 def test_materializer_refreshes_append_only_without_overwriting(tmp_path):
