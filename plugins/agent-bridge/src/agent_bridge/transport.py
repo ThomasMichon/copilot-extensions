@@ -119,13 +119,13 @@ class SpawnTarget:
     #                                {name, workspace_folder, security_profile,
     #                                 user, ssh, provider_command,
     #                                 relay_remote_port}
-    venue: dict | None = None  # structured venue metadata for provider agents
-    #                            (e.g. container fleets): {workspace_folder,
-    #                            security_profile} from the provider's
-    #                            namespace-resolve -- lets the daemon set the ACP
-    #                            session cwd to the repo checkout and gate any
-    #                            host->venue projection on the fleet's trust
-    #                            posture, without parsing spawn_command.
+    venue: dict | None = None  # versioned provider-owned venue metadata.
+    #                            At minimum, compatibility consumers use
+    #                            {workspace_folder, security_profile}; richer
+    #                            providers may add stable target/instance ids,
+    #                            readiness, transport, and capability posture.
+    #                            Persisted unchanged so the bridge never invents
+    #                            a parallel venue identity.
     auth_hooks: list[dict] = field(default_factory=list)  # serializable auth hook dicts
 
     def to_json(self) -> str:

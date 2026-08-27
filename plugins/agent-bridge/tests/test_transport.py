@@ -71,6 +71,24 @@ class TestSpawnTargetSerialization:
         assert data["type"] == "ssh"
         assert data["host"] == "test"
 
+    def test_roundtrip_provider_venue_metadata(self):
+        venue = {
+            "schema_version": 1,
+            "provider": "agent-containers",
+            "target_id": "container:restricted-1",
+            "instance_id": "instance-123",
+            "workspace_folder": "/workspace/repo",
+            "security_profile": "restricted",
+            "ready": True,
+        }
+        target = SpawnTarget(
+            type="command",
+            spawn_command=["provider", "exec", "restricted-1"],
+            venue=venue,
+        )
+        restored = SpawnTarget.from_json(target.to_json())
+        assert restored.venue == venue
+
 
 class TestBuildRemoteCmd:
     """Tests for _build_remote_cmd -- remote command string construction."""

@@ -118,8 +118,7 @@ async def test_resolve_builds_spawn_target_and_argv():
 
 @pytest.mark.asyncio
 async def test_resolve_carries_venue_metadata():
-    """workspace_folder + security_profile from namespace-resolve land on
-    SpawnTarget.venue (container fleets surface them for cwd + trust gating)."""
+    """The provider-owned venue contract survives the process boundary."""
     fb = _Fallback()
 
     container = {
@@ -128,6 +127,18 @@ async def test_resolve_carries_venue_metadata():
         "security_profile": "trusted",
         "ssh": {"host_alias": "agent-container-odsp-web-1"},
         "provider_command": ["python", "-m", "agent_containers"],
+    }
+    venue = {
+        "schema_version": 1,
+        "provider": "agent-containers",
+        "kind": "container",
+        "target_id": "container:odsp-web-1",
+        "scope": "provider-instance",
+        "instance_id": "instance-123",
+        "workspace_folder": "/workspaces/odsp-web",
+        "security_profile": "trusted",
+        "ready": True,
+        "posture_verified": False,
     }
 
     def _run(argv, **_kw):
@@ -138,17 +149,175 @@ async def test_resolve_carries_venue_metadata():
             "workspace_folder": "/workspaces/odsp-web",
             "security_profile": "trusted",
             "container": container,
+            "venue": venue,
         }))
 
     with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
         t = await CliNamespaceResolver("container", "agent-containers", fb).resolve(
             "odsp-web-1",
         )
-    assert t.venue == {
-        "workspace_folder": "/workspaces/odsp-web",
+    assert t.venue == venue
+    assert t.container == container
+
+
+@pytest.mark.asyncio
+async def test_resolve_builds_legacy_venue_metadata():
+    """Older providers still get the original workspace/profile venue shape."""
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["c", "exec", "--stdio", "legacy-1"],
+            "workspace_folder": "/workspaces/legacy",
+            "security_profile": "trusted",
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        target = await CliNamespaceResolver(
+            "container", "agent-containers", fb
+        ).resolve("legacy-1")
+
+    assert target.venue == {
+        "workspace_folder": "/workspaces/legacy",
         "security_profile": "trusted",
     }
-    assert t.container == container
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_conflicting_venue_workspace():
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["provider", "exec"],
+            "workspace_folder": "/workspaces/safe",
+            "security_profile": "restricted",
+            "venue": {
+                "workspace_folder": "/",
+                "security_profile": "restricted",
+            },
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        with pytest.raises(RuntimeError, match="conflicting workspace_folder"):
+            await CliNamespaceResolver(
+                "container", "agent-containers", fb
+            ).resolve("restricted-1")
+    assert "resolve" not in fb.calls
+
+
+@pytest.mark.asyncio
+async def test_resolve_security_conflict_fails_closed():
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["provider", "exec"],
+            "workspace_folder": "/workspaces/repo",
+            "security_profile": "restricted",
+            "venue": {
+                "workspace_folder": "/workspaces/repo",
+                "security_profile": "trusted",
+                "ready": True,
+            },
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        target = await CliNamespaceResolver(
+            "container", "agent-containers", fb
+        ).resolve("restricted-1")
+
+    assert target.venue["security_profile"] == "restricted"
+    assert target.venue["ready"] is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_malformed_venue_without_fallback():
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["provider", "exec"],
+            "security_profile": "restricted",
+            "venue": ["not", "an", "object"],
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        with pytest.raises(RuntimeError, match="non-object venue"):
+            await CliNamespaceResolver(
+                "container", "agent-containers", fb
+            ).resolve("restricted-1")
+    assert "resolve" not in fb.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("target_type", "spawn_command", "message"),
+    [
+        ("local", ["copilot"], "unsupported target type"),
+        ("ssh", ["ssh", "host"], "unsupported target type"),
+        ("command", [], "invalid spawn_command"),
+        ("command", "provider exec", "invalid spawn_command"),
+        ("command", ["provider", ""], "invalid spawn_command"),
+        ("command", ["provider\x00exec"], "invalid spawn_command"),
+    ],
+)
+async def test_resolve_rejects_invalid_provider_target_shape(
+    target_type, spawn_command, message
+):
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": target_type,
+            "spawn_command": spawn_command,
+            "venue": {
+                "security_profile": "restricted",
+                "ready": False,
+            },
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        with pytest.raises(RuntimeError, match=message):
+            await CliNamespaceResolver(
+                "container", "agent-containers", fb
+            ).resolve("restricted-1")
+    assert "resolve" not in fb.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("venue", "message"),
+    [
+        ({"workspace_folder": 7}, "venue.workspace_folder"),
+        ({"security_profile": ["restricted"]}, "venue.security_profile"),
+        ({"ready": "yes"}, "venue.ready"),
+        ({"posture_verified": 1}, "venue.posture_verified"),
+        ({"schema_version": 0}, "venue.schema_version"),
+        ({"instance_id": 42}, "venue.instance_id"),
+        ({"capabilities": {"host_credentials": "no"}}, "venue.capabilities"),
+    ],
+)
+async def test_resolve_rejects_invalid_known_venue_fields(venue, message):
+    fb = _Fallback()
+
+    def _run(argv, **_kw):
+        return _cp(0, json.dumps({
+            "type": "command",
+            "spawn_command": ["provider", "exec"],
+            "venue": venue,
+        }))
+
+    with patch("shutil.which", _which), patch("subprocess.run", side_effect=_run):
+        with pytest.raises(RuntimeError, match=message):
+            await CliNamespaceResolver(
+                "container", "agent-containers", fb
+            ).resolve("restricted-1")
+    assert "resolve" not in fb.calls
 
 
 @pytest.mark.asyncio
