@@ -22,7 +22,11 @@ from typing import TYPE_CHECKING, Any
 from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 
 from . import __version__
-from .parity_harness import FRONTEND_RESTART_HOSTINDEX_LOSS, RELAY_INTERRUPTION
+from .parity_harness import (
+    FAILED_ACP_HANDSHAKE_FAULT,
+    FRONTEND_RESTART_HOSTINDEX_LOSS,
+    RELAY_INTERRUPTION,
+)
 
 if TYPE_CHECKING:
     from .client import BridgeClientError
@@ -4241,11 +4245,15 @@ def build_parser() -> argparse.ArgumentParser:
     parity_p.add_argument("--keep-session", action="store_true")
     parity_p.add_argument(
         "--fault",
-        choices=[FRONTEND_RESTART_HOSTINDEX_LOSS, RELAY_INTERRUPTION],
+        choices=[
+            FRONTEND_RESTART_HOSTINDEX_LOSS,
+            RELAY_INTERRUPTION,
+            FAILED_ACP_HANDSHAKE_FAULT,
+        ],
         help=(
             "Run an explicit destructive fault scenario. Faults refuse other "
             "active managed sessions and affect only the harness-created "
-            "session's HostIndex or supervised credential relay."
+            "launch transaction, HostIndex, or supervised credential relay."
         ),
     )
     parity_p.add_argument(

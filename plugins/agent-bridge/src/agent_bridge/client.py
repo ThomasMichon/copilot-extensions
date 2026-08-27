@@ -708,6 +708,7 @@ class BridgeClient:
         sender_repo: str | None = None,
         caller_owner_ref: str | None = None,
         force_new: bool = False,
+        parity_fault: str | None = None,
         worktree_id: str | None = None,
         reclaim: bool = False,
         env: dict[str, str] | None = None,
@@ -740,6 +741,19 @@ class BridgeClient:
             body["caller_owner_ref"] = caller_owner_ref
         if force_new:
             body["force_new"] = True
+        if parity_fault:
+            from .protocol import FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION
+
+            if not self.daemon_supports(
+                FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION
+            ):
+                raise BridgeClientError(
+                    426,
+                    "The active agent-bridge daemon does not support failed "
+                    "ACP handshake parity injection. Update the agent-bridge "
+                    "runtime before running this fault scenario.",
+                )
+            body["parity_fault"] = parity_fault
         if worktree_id:
             body["worktree_id"] = worktree_id
         if reclaim:
