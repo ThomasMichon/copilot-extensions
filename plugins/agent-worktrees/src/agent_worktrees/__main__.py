@@ -29,6 +29,7 @@ Usage (direct):
     agent-worktrees repos list [--type project|repo] [--json]
     agent-worktrees repos find <name>
     agent-worktrees repos srcroot [--set PATH] [--platform P]
+    agent-worktrees config-root [--destination PATH] [--json]
     agent-worktrees knowledge compose-plugins [--json] [--cwd PATH]
     agent-worktrees reconcile-marketplaces [--json] [--cwd PATH]
     agent-worktrees pre-launch
@@ -1009,6 +1010,8 @@ def _create_worktree_core(
     parent_session: str | None = None,
     caller_worktree: str | None = None,
     owner_ref: str | None = None,
+    launch_preflight: LaunchPreflight | None = None,
+    recovery: bool = False,
 ) -> dict:
     """Create a new worktree and return a dict with worktree info + launch plan.
 
@@ -1036,6 +1039,21 @@ def _create_worktree_core(
         worktree_id = f"{config.machine}-{plat_short}-{timestamp}-{suffix}"
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
+
+    launches_copilot = kind != "system"
+    fake_args = None
+    if launches_copilot:
+        fake_args = argparse.Namespace(
+            copilot_args=[], recovery=recovery, no_mux=no_mux,
+            no_resume=False, profile=None,
+        )
+        launch_preflight = launch_preflight or _preflight_launch(
+            config,
+            fake_args,
+            worktree_path,
+        )
+        if launch_preflight.error:
+            raise LaunchPreflightError(launch_preflight.error)
 
     # Ensure root exists
     Path(repo.worktree_root).mkdir(parents=True, exist_ok=True)
@@ -1166,17 +1184,23 @@ def _create_worktree_core(
     # direct launch commands see registered local marketplaces immediately.
     _reconcile_marketplaces_for_checkout(worktree_path, ensure_ignored=True)
 
-    # Build launch command (for caller to use)
-    fake_args = argparse.Namespace(
-        copilot_args=[], recovery=False, no_mux=no_mux,
-        no_resume=False, profile=None,
+    result = {"worktree": _worktree_to_dict(record)}
+    if not launches_copilot:
+        return result
+
+    # Build launch command (for caller to use).
+    assert fake_args is not None
+    assert launch_preflight is not None
+    launch_cmd = _build_launch_cmd(
+        config,
+        fake_args,
+        worktree_path,
+        profile=profile,
+        preflight=launch_preflight,
     )
-    launch_cmd = _build_launch_cmd(config, fake_args, worktree_path, profile=profile)
     env = _build_env(profile, _repo_session_env(config, worktree_path), work_dir=worktree_path)
 
-    return {
-        "worktree": _worktree_to_dict(record),
-        "launch": {
+    result["launch"] = {
             "action": "exec",
             "work_dir": worktree_path,
             "cmd": launch_cmd,
@@ -1184,8 +1208,8 @@ def _create_worktree_core(
             "worktree_id": worktree_id,
             "post_exit": True,
             "no_mux": no_mux,
-        },
     }
+    return result
 
 
 def _self_owner_ref(work_dir: str | None) -> str | None:
@@ -1308,11 +1332,72 @@ def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
     return out
 
 
+@dataclasses.dataclass(frozen=True)
+class LaunchPreflight:
+    """Read-only validation required before constructing a launch plan."""
+
+    config_root: state_root_mod.ConfigRoot | None = None
+
+    @property
+    def error(self) -> str | None:
+        if self.config_root is None or self.config_root.path:
+            return None
+        return (
+            self.config_root.error
+            or "could not resolve the machine-local configuration root"
+        )
+
+    @property
+    def config_root_path(self) -> str:
+        return (self.config_root.path or "") if self.config_root else ""
+
+
+class LaunchPreflightError(RuntimeError):
+    """A launch plan cannot be built without mutating unsafe state."""
+
+
+def _preflight_launch(
+    config: cfg.Config,
+    args: argparse.Namespace,
+    work_dir: str,
+) -> LaunchPreflight:
+    """Validate normalized setup state before any launch-side mutation."""
+    recovery = getattr(args, "recovery", False)
+    repo = config.default_repo
+    plat_key = config.platform if config.platform != "wsl" else "linux"
+    launch_map = repo.launch_recovery if recovery else repo.launch
+    if recovery or plat_key in launch_map or not repo.setup_hook.get(plat_key):
+        return LaunchPreflight()
+    return LaunchPreflight(
+        config_root=state_root_mod.resolve_config_root(
+            config,
+            cwd=work_dir,
+            project=cfg.active_project(),
+        )
+    )
+
+
+def _launch_preflight_error(
+    preflight: LaunchPreflight,
+    *,
+    json_output: bool = False,
+) -> int:
+    """Emit a controlled launch error in the caller's established format."""
+    message = preflight.error or "launch preflight failed"
+    if json_output:
+        return _json_error(message, exit_code=3)
+    print(f"  \u2717 {message}", file=sys.stderr)
+    _emit_plan({"action": "error", "error": message, "exit_code": 3})
+    return 3
+
+
 def _build_launch_cmd(
     config: cfg.Config,
     args: argparse.Namespace,
     work_dir: str,
     profile: cfg.CopilotProfile | None = None,
+    *,
+    preflight: LaunchPreflight | None = None,
 ) -> list[str]:
     """Build the launch command from config or fallback convention.
 
@@ -1328,6 +1413,9 @@ def _build_launch_cmd(
     repo = config.default_repo
     plat = config.platform  # "windows", "wsl", or "linux"
     plat_key = plat if plat != "wsl" else "linux"
+    preflight = preflight or _preflight_launch(config, args, work_dir)
+    if preflight.error:
+        raise LaunchPreflightError(preflight.error)
 
     # Try config-driven launch commands first
     launch_map = repo.launch_recovery if recovery else repo.launch
@@ -1386,6 +1474,7 @@ def _build_launch_cmd(
             resolved_hook = hook_path.format(**variables)
             if not os.path.isabs(resolved_hook):
                 resolved_hook = str(Path(anchor) / resolved_hook)
+            config_root_path = preflight.config_root_path
             if is_windows:
                 launcher = str(inst.install_dir() / "scripts" / "default-setup.ps1")
                 cmd = [
@@ -1393,6 +1482,11 @@ def _build_launch_cmd(
                     launcher, "-Machine", config.machine,
                     "-SetupHook", resolved_hook,
                 ]
+                if config_root_path:
+                    cmd += [
+                        "-ConfigRoot", config_root_path,
+                        "-RuntimePython", sys.executable,
+                    ]
                 if session_path_arg:
                     cmd += ["-SessionPath", session_path_arg]
                 if resolved_env_script:
@@ -1407,6 +1501,11 @@ def _build_launch_cmd(
                     "bash", launcher, "--machine", config.machine,
                     "--setup-hook", resolved_hook,
                 ]
+                if config_root_path:
+                    cmd += [
+                        "--config-root", config_root_path,
+                        "--runtime-python", sys.executable,
+                    ]
                 if session_path_arg:
                     cmd += ["--session-path", session_path_arg]
                 if resolved_env_script:
@@ -1625,7 +1724,15 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         return _json_error(f"Worktree not found: {wt_id}")
     record = tracking.load_record(yaml_path)
 
-    launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
+    launch_preflight = _preflight_launch(config, args, record.worktree_path)
+    if launch_preflight.error:
+        return _json_error(launch_preflight.error, exit_code=3)
+    launch_cmd = _build_launch_cmd(
+        config,
+        args,
+        record.worktree_path,
+        preflight=launch_preflight,
+    )
     env = _build_env(
         None, _repo_session_env(config, record.worktree_path),
         work_dir=record.worktree_path,
@@ -1738,7 +1845,14 @@ def cmd_embody(args: argparse.Namespace) -> int:
     if make_new:
         try:
             with output.stdout_to_stderr():
-                created = _create_worktree_core(config, no_mux=True, kind="session")
+                created = _create_worktree_core(
+                    config,
+                    no_mux=True,
+                    kind="session",
+                    recovery=getattr(args, "recovery", False),
+                )
+        except LaunchPreflightError as e:
+            return _json_error(str(e), exit_code=3)
         except Exception as e:
             return _json_error(f"failed to create worktree: {e}")
         wt_id = created["worktree"]["id"]
@@ -1754,9 +1868,19 @@ def cmd_embody(args: argparse.Namespace) -> int:
     # duplicate (one live session per cwd). Report it and stop.
     already = sessions.has_mux_session(wt_id)
     seed = getattr(args, "seed", None)
+    launch_preflight = None
+    if getattr(args, "dry_run", False) or not already:
+        launch_preflight = _preflight_launch(config, args, work_dir)
+        if launch_preflight.error:
+            return _json_error(launch_preflight.error, exit_code=3)
 
     if getattr(args, "dry_run", False):
-        launch_cmd = _build_launch_cmd(config, args, work_dir)
+        launch_cmd = _build_launch_cmd(
+            config,
+            args,
+            work_dir,
+            preflight=launch_preflight,
+        )
         _json_output({
             "ok": True, "dry_run": True, "worktree_id": wt_id,
             "session": f"wt-{wt_id}", "work_dir": work_dir,
@@ -1777,7 +1901,12 @@ def cmd_embody(args: argparse.Namespace) -> int:
         })
         return 0
 
-    launch_cmd = _build_launch_cmd(config, args, work_dir)
+    launch_cmd = _build_launch_cmd(
+        config,
+        args,
+        work_dir,
+        preflight=launch_preflight,
+    )
     env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
     # D4: stamp the driver so the embodied session registers a "driven by
     # <agent>" banner (legible when a human takes it over in Neuron Forge).
@@ -1933,7 +2062,15 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             repo = config.default_repo
             work_dir = repo.anchor
-            launch_cmd = _build_launch_cmd(config, args, work_dir)
+            launch_preflight = _preflight_launch(config, args, work_dir)
+            if launch_preflight.error:
+                return _json_error(launch_preflight.error, exit_code=3)
+            launch_cmd = _build_launch_cmd(
+                config,
+                args,
+                work_dir,
+                preflight=launch_preflight,
+            )
             env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
 
             _emit_plan({
@@ -1963,6 +2100,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                         parent_session=getattr(args, "parent_session", None),
                         caller_worktree=getattr(args, "caller_worktree", None),
                         owner_ref=getattr(args, "owner_ref", None),
+                        recovery=getattr(args, "recovery", False),
                     )
                 except RuntimeError as e:
                     return _json_error(str(e))
@@ -1973,6 +2111,13 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
             if not yaml_path.exists():
                 return _json_error(f"Worktree not found: {wt_id}")
+            launch_preflight = _preflight_launch(
+                config,
+                args,
+                tracking.load_record(yaml_path).worktree_path,
+            )
+            if launch_preflight.error:
+                return _json_error(launch_preflight.error, exit_code=3)
             # Foreground RMW (#4547): reload + bump the resume stamp under the
             # blocking record lock so a concurrent Picker liveness sweep can't
             # clobber the increment (and vice versa). No I/O in the window.
@@ -1988,7 +2133,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 resume_count=record.resume_count,
             )
 
-            launch_cmd = _build_launch_cmd(config, args, record.worktree_path)
+            launch_cmd = _build_launch_cmd(
+                config,
+                args,
+                record.worktree_path,
+                preflight=launch_preflight,
+            )
             env = _build_env(
                 None, _repo_session_env(config, record.worktree_path),
                 work_dir=record.worktree_path,
@@ -3184,6 +3334,9 @@ def _resolve_base_repo(
 ) -> int:
     """Resolve launch plan for base repo mode."""
     repo = config.default_repo
+    launch_preflight = _preflight_launch(config, args, repo.anchor)
+    if launch_preflight.error:
+        return _launch_preflight_error(launch_preflight)
     print()
     print("📂 Base Repo Mode -- No Worktree")
     print(f"   Path: {repo.anchor}")
@@ -3200,7 +3353,13 @@ def _resolve_base_repo(
             print(f"     ... and {len(dirty) - 5} more")
         print()
 
-    launch_cmd = _build_launch_cmd(config, args, repo.anchor, profile=profile)
+    launch_cmd = _build_launch_cmd(
+        config,
+        args,
+        repo.anchor,
+        profile=profile,
+        preflight=launch_preflight,
+    )
     merged_env = _build_env(profile, _repo_session_env(config, repo.anchor), work_dir=repo.anchor)
     if args.dry_run:
         output.dry_run(f"Would launch: {' '.join(launch_cmd)}")
@@ -3393,24 +3552,6 @@ def _resolve_resume(
     print(f"🌳 Resuming worktree: {record.worktree_id}")
     print(f"   Path: {record.worktree_path}")
 
-    # Foreground RMW (#4547): bump the resume stamp under the blocking record
-    # lock. `record` here is the picker's (possibly cached) snapshot, so reload
-    # fresh inside the lock, increment, save, then reflect the two stamped
-    # fields back onto the in-memory record the launch plan below reuses.
-    with tracking._RecordLock(record.yaml_path):
-        fresh = tracking.load_record(record.yaml_path)
-        tracking.mark_resumed(fresh, save=False)
-        tracking.save_record(fresh)
-    record.resume_count = fresh.resume_count
-    record.last_resumed_at = fresh.last_resumed_at
-
-    activity.log_event(
-        "worktree_resumed",
-        worktree_id=record.worktree_id,
-        branch=record.branch,
-        resume_count=record.resume_count,
-    )
-
     # ── Execution-time fallback ladder (run AFTER the operator hits Enter) ────
     # Open / Resume / Bare resume all land here, differing only by the
     # no_mux/bare_resume options carried on the decision. The picker row those
@@ -3421,6 +3562,7 @@ def _resolve_resume(
     # paths need clean stdio and their explicit no_mux/no_resume respected, and
     # an ACP worktree has no mux to reattach anyway.
     _interactive = not getattr(args, "json", False) and not getattr(args, "base", False)
+    _verdict = None
     if _interactive and not args.dry_run:
         try:
             _verdict = sessions.verify_worktree_active(record)
@@ -3439,26 +3581,41 @@ def _resolve_resume(
                       "(overriding the requested launch mode).")
             args.no_mux = False
             args.bare_resume = False
-        # (2) Persist this fresh verdict to the record cache BEFORE we hand the
-        # plan to the launcher, so the NEXT picker paint reflects reality even
-        # if this (re)attach crashes. The scenario: the pre-Enter row was stale
-        # (looked stopped -> only "Resume", no "Stop"); at Enter we discover a
-        # live mux and reattach, but the mux then crashes internally. Without a
-        # write-back the next launch repaints that same stale row and the
-        # operator still can't "Stop" the crashing mux. Stamping the mux + bound
-        # liveness we just authoritatively resolved makes the next first-paint
-        # offer Open/Stop (live mux) or Reclaim (bound/bare Copilot). Same
-        # authoritative source + hint the engine's menu-open stamp uses;
-        # best-effort, never blocks or fails the launch.
-        if _verdict is not None:
-            try:
-                tracking.stamp_mux_live(
-                    record.worktree_id, _verdict.mux_live, refresh=True)
-                tracking.stamp_bound_live(
-                    record.worktree_id, bool(_verdict.live_session_ids),
-                    refresh=True)
-            except Exception:
-                pass
+
+    bare_resume = getattr(args, "bare_resume", False)
+    plan_work_dir = os.path.expanduser("~") if bare_resume else record.worktree_path
+    launch_preflight = _preflight_launch(config, args, plan_work_dir)
+    if launch_preflight.error:
+        return _launch_preflight_error(launch_preflight)
+
+    # Foreground RMW (#4547): bump the resume stamp under the blocking record
+    # lock. `record` here is the picker's (possibly cached) snapshot, so reload
+    # fresh inside the lock, increment, save, then reflect the two stamped
+    # fields back onto the in-memory record the launch plan below reuses.
+    with tracking._RecordLock(record.yaml_path):
+        fresh = tracking.load_record(record.yaml_path)
+        tracking.mark_resumed(fresh, save=False)
+        tracking.save_record(fresh)
+    record.resume_count = fresh.resume_count
+    record.last_resumed_at = fresh.last_resumed_at
+
+    activity.log_event(
+        "worktree_resumed",
+        worktree_id=record.worktree_id,
+        branch=record.branch,
+        resume_count=record.resume_count,
+    )
+
+    # Persist the read-only liveness verdict only after launch preflight passes.
+    if _verdict is not None:
+        try:
+            tracking.stamp_mux_live(
+                record.worktree_id, _verdict.mux_live, refresh=True)
+            tracking.stamp_bound_live(
+                record.worktree_id, bool(_verdict.live_session_ids),
+                refresh=True)
+        except Exception:
+            pass
 
     # Auto-fast-forward a stale-but-clean worktree before launch so the
     # session (and any setup script) sees an up-to-date tree.  This is a
@@ -3486,7 +3643,13 @@ def _resolve_resume(
         elif ff.reason in ("ahead", "diverged"):
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
-    launch_cmd = _build_launch_cmd(config, args, record.worktree_path, profile=profile)
+    launch_cmd = _build_launch_cmd(
+        config,
+        args,
+        record.worktree_path,
+        profile=profile,
+        preflight=launch_preflight,
+    )
     merged_env = _build_env(
         profile, _repo_session_env(config, record.worktree_path),
         work_dir=record.worktree_path,
@@ -3499,11 +3662,14 @@ def _resolve_resume(
     # ``status_path`` (the real worktree) so the status bar renders the
     # worktree's locus + git disposition despite the HOME pane cwd; the operator
     # restores the conversation with a manual ``/resume <id>``.
-    bare_resume = getattr(args, "bare_resume", False)
-    plan_work_dir = record.worktree_path
     if bare_resume:
-        plan_work_dir = os.path.expanduser("~")
-        launch_cmd = _build_launch_cmd(config, args, plan_work_dir, profile=profile)
+        launch_cmd = _build_launch_cmd(
+            config,
+            args,
+            plan_work_dir,
+            profile=profile,
+            preflight=launch_preflight,
+        )
         merged_env = _build_env(
             profile, _repo_session_env(config, plan_work_dir),
             work_dir=plan_work_dir,
@@ -3605,13 +3771,23 @@ def _resolve_new(
     print(f"   Path:     {worktree_path}")
     print()
 
+    launch_preflight = _preflight_launch(config, args, worktree_path)
+    if launch_preflight.error:
+        return _launch_preflight_error(launch_preflight)
+
     if args.dry_run:
         output.dry_run(f"Would fetch from {repo.remote}")
         output.dry_run(f"Would create worktree at {worktree_path} on branch {branch}")
         output.dry_run("Would write tracking YAML")
         output.dry_run("Would clone permissions")
         output.dry_run("Would add worktree path to trustedFolders")
-        launch_cmd = _build_launch_cmd(config, args, worktree_path, profile=profile)
+        launch_cmd = _build_launch_cmd(
+            config,
+            args,
+            worktree_path,
+            profile=profile,
+            preflight=launch_preflight,
+        )
         merged_env = _build_env(
             profile, _repo_session_env(config, worktree_path),
             work_dir=worktree_path,
@@ -3630,6 +3806,8 @@ def _resolve_new(
         parent_session=getattr(args, "parent_session", None),
         caller_worktree=getattr(args, "caller_worktree", None),
         owner_ref=getattr(args, "owner_ref", None),
+        launch_preflight=launch_preflight,
+        recovery=getattr(args, "recovery", False),
     )
     _emit_plan({
         "action": "exec",
@@ -13803,6 +13981,63 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     return 0 if res.path else 3
 
 
+def cmd_config_root_dispatch(argv: list[str]) -> int:
+    """Resolve the guarded machine-local root for supported setup writers."""
+    p = argparse.ArgumentParser(
+        prog="agent-worktrees config-root",
+        description=(
+            "Resolve the machine-local configuration root for the current "
+            "project and reject an explicit stateless-checkout destination."
+        ),
+    )
+    p.add_argument(
+        "--destination",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Validate an explicit configuration root instead of resolving the "
+            "default machine-local root"
+        ),
+    )
+    p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit config_root/source/repo/stateless/bound/error as JSON",
+    )
+    try:
+        args = p.parse_args(argv)
+    except SystemExit as exc:
+        return int(exc.code or 0)
+
+    try:
+        if args.destination and not cfg.active_project():
+            res = state_root_mod.validate_config_destination(args.destination)
+        else:
+            project = cfg.project_name()
+            res = state_root_mod.resolve_config_root(
+                cfg.load_config(),
+                destination=args.destination,
+                project=project,
+            )
+    except (OSError, RuntimeError, ValueError) as exc:
+        res = state_root_mod.ConfigRoot(
+            None,
+            "explicit" if args.destination else "machine_local",
+            "",
+            False,
+            False,
+            error=str(exc),
+        )
+    if args.json:
+        print(json.dumps(res.as_dict(), indent=2))
+    else:
+        if res.path:
+            print(res.path)
+        if res.error:
+            print(res.error, file=sys.stderr)
+    return 0 if res.path else 3
+
+
 def cmd_knowledge_dispatch(argv: list[str]) -> int:
     """Manage the launch-time harness/knowledge composition boundary."""
     p = argparse.ArgumentParser(
@@ -15858,6 +16093,14 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Emit the full resolution as JSON")
     sp.add_argument("--repo", default=None, metavar="NAME",
                     help="Explicit override: resolve this registered repo")
+
+    # config-root -- dispatched pre-argparse (see cmd_config_root_dispatch)
+    sp = sub.add_parser(
+        "config-root",
+        help="Resolve/validate the machine-local root for setup configuration",
+    )
+    sp.add_argument("--destination", default=None, metavar="PATH")
+    sp.add_argument("--json", action="store_true")
 
     # knowledge -- dispatched pre-argparse (see cmd_knowledge_dispatch)
     sub.add_parser(
@@ -18155,6 +18398,8 @@ def _git_toplevel(path: Path | None) -> Path | None:
         r = subprocess.run(
             ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
             capture_output=True, text=True, timeout=5,
+            env=git_ops.repository_identity_env(),
+            stdin=subprocess.DEVNULL,
         )
         if r.returncode == 0 and r.stdout.strip():
             return git_ops.resolve_to_anchor(Path(r.stdout.strip()).resolve())
@@ -18198,7 +18443,12 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     command = args_list[0]
     if command in _NO_PROJECT_COMMANDS or command.startswith("-"):
         return True
-    return command == "list-sessions" and "--all-projects" in args_list[1:]
+    if command == "list-sessions" and "--all-projects" in args_list[1:]:
+        return True
+    return command == "config-root" and any(
+        arg == "--destination" or arg.startswith("--destination=")
+        for arg in args_list[1:]
+    )
 
 
 # Machine-global verbs where ``--project`` can NEVER matter: the pure registries
@@ -19720,10 +19970,15 @@ def main(argv: list[str] | None = None) -> int:
     # Only auto-derive from CWD for project-requiring commands (skip the git
     # subprocess for global no-project commands and bare flags).
     _needs_project = not _is_no_project_invocation(args_list)
+    _optional_project = (
+        bool(args_list)
+        and args_list[0] == "config-root"
+        and _is_no_project_invocation(args_list)
+    )
 
     if _proj:
         _project, _assumed = _resolve_active_project(_proj)
-    elif _needs_project:
+    elif _needs_project or _optional_project:
         _project, _assumed = _resolve_active_project(None)
     else:
         _project, _assumed = None, None
@@ -19852,6 +20107,14 @@ def main(argv: list[str] | None = None) -> int:
     if args_list[0] == "state-root":
         try:
             return cmd_state_root_dispatch(args_list[1:])
+        except KeyboardInterrupt:
+            print("\nCancelled.")
+            return 130
+
+    # config-root (guarded machine-local setup destination) -- manual dispatch.
+    if args_list[0] == "config-root":
+        try:
+            return cmd_config_root_dispatch(args_list[1:])
         except KeyboardInterrupt:
             print("\nCancelled.")
             return 130

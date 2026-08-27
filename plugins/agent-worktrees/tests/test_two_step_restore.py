@@ -54,8 +54,10 @@ def _patch_resume(monkeypatch, *, mux_live=False, live_ids=None):
     monkeypatch.setattr(m.tracking, "save_record", lambda r, path=None: None)
     monkeypatch.setattr(m.tracking, "mark_resumed", lambda r, *, save=True: None)
     monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+    monkeypatch.setattr(
+        m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
     monkeypatch.setattr(m, "_build_launch_cmd",
-                        lambda cfg, args, wd, profile=None: ["copilot"])
+                        lambda cfg, args, wd, profile=None, **k: ["copilot"])
     monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
     monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
     monkeypatch.setattr(m.sessions, "find_latest_session_id_fast",

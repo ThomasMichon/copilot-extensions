@@ -225,6 +225,14 @@ Post-exit checks                   # detect completion markers
   +-- status: active  --> preserve worktree for later resume
 ```
 
+A config-declared normalized `setup_hook` receives one guarded writer root in
+`AGENT_WORKTREES_CONFIG_ROOT`. The launcher resolves the default to the
+per-project machine-local config directory and validates any explicit
+destination before invoking the hook. This is an enforceable cooperative
+boundary, not universal filesystem interception: custom launch commands and
+legacy setup scripts remain responsible for entering through
+`agent-worktrees config-root` before writing concrete setup configuration.
+
 ### Current session, conclusion, and succession (the head pointer)
 
 A worktree is a *series of sessions*, not a single one. The tracking record

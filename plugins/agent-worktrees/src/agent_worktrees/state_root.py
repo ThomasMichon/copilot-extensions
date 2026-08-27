@@ -33,8 +33,12 @@ from __future__ import annotations
 import os
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
 
 from . import config as cfg
+from . import git_ops
 from . import repos as repos_mod
 
 
@@ -72,6 +76,259 @@ class StateRoot:
             "bound": self.bound,
             "error": self.error,
         }
+
+
+@dataclass(frozen=True)
+class ConfigRoot:
+    """A guarded machine-local configuration destination."""
+
+    path: str | None
+    """Absolute configuration root, or ``None`` when validation failed."""
+    source: str
+    """``"machine_local"`` for the default or ``"explicit"`` for a caller path."""
+    repo: str
+    """Name of the launch repo whose machine-local configuration is targeted."""
+    stateless: bool
+    """Whether the launch repo requires an external state root."""
+    bound: bool
+    """True when the destination is safe for a supported setup writer."""
+    error: str | None = None
+    """Actionable validation error, or ``None`` on success."""
+
+    def as_dict(self) -> dict:
+        return {
+            "config_root": self.path,
+            "source": self.source,
+            "repo": self.repo,
+            "stateless": self.stateless,
+            "bound": self.bound,
+            "error": self.error,
+        }
+
+
+def _normalized_path(path: str, *, cwd: str | None = None) -> Path:
+    expanded = os.path.expanduser(path)
+    if not os.path.isabs(expanded):
+        expanded = os.path.join(cwd or os.getcwd(), expanded)
+    return Path(expanded).resolve(strict=False)
+
+
+def _path_within(path: Path, root: Path) -> bool:
+    target = os.path.normcase(os.path.normpath(str(path)))
+    parent = os.path.normcase(os.path.normpath(str(root.resolve(strict=False))))
+    return target == parent or target.startswith(parent + os.sep)
+
+
+def _declares_external_state_root(root: Path) -> bool:
+    config_path = root / ".agent-worktrees" / "config.yaml"
+    if not config_path.is_file():
+        return False
+    try:
+        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ValueError(
+            f"cannot validate config destination because '{config_path}' "
+            f"could not be read: {exc}"
+        ) from exc
+    if raw is None:
+        return False
+    if not isinstance(raw, dict):
+        raise ValueError(
+            f"cannot validate config destination because '{config_path}' "
+            "must contain a YAML mapping"
+        )
+    return bool(raw.get("stateless") or raw.get("requires_external_state_root"))
+
+
+def _containing_git_checkouts(path: Path) -> list[Path]:
+    """Return every enclosing Git checkout, nearest first."""
+    return [
+        candidate
+        for candidate in (path, *path.parents)
+        if (candidate / ".git").exists()
+    ]
+
+
+def _git_common_dir(checkout: Path) -> Path:
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=git_ops.repository_identity_env(),
+            stdin=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(
+            f"cannot validate config destination repository at '{checkout}': {exc}"
+        ) from exc
+    common = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not common:
+        detail = (proc.stderr or "").strip() or "git common directory is unavailable"
+        raise ValueError(
+            f"cannot validate config destination repository at '{checkout}': "
+            f"{detail}"
+        )
+    path = Path(common)
+    if not path.is_absolute():
+        path = checkout / path
+    return path.resolve(strict=False)
+
+
+def _enclosing_checkout_with_common_dir(
+    path: Path,
+    common_dir: Path,
+) -> Path | None:
+    """Return the nearest enclosing checkout with ``common_dir`` identity."""
+    for checkout in _containing_git_checkouts(path):
+        if _git_common_dir(checkout) == common_dir:
+            return checkout
+    return None
+
+
+def _containing_stateless_checkout(path: Path) -> Path | None:
+    """Return a stateless checkout containing ``path``, if any."""
+    for candidate in _containing_git_checkouts(path):
+        if _declares_external_state_root(candidate):
+            return candidate
+    return None
+
+
+def validate_config_destination(
+    destination: str,
+    *,
+    cwd: str | None = None,
+    repo: str = "",
+) -> ConfigRoot:
+    """Validate an explicit setup configuration destination.
+
+    This path-only guard deliberately does not require an adopted project, so a
+    supported setup entry point can reject a stateless checkout during initial
+    bootstrap.
+    """
+    launch_stateless = False
+    try:
+        launch_path = _normalized_path(cwd or os.getcwd())
+        launch_checkout = _containing_stateless_checkout(launch_path)
+        launch_stateless = launch_checkout is not None
+        target = _normalized_path(destination, cwd=cwd)
+        if target.exists() and not target.is_dir():
+            raise ValueError(f"config root '{target}' is not a directory")
+        unsafe_root = None
+        if launch_checkout is not None:
+            unsafe_root = _enclosing_checkout_with_common_dir(
+                target,
+                _git_common_dir(launch_checkout),
+            )
+        if unsafe_root is None:
+            unsafe_root = _containing_stateless_checkout(target)
+    except (OSError, ValueError) as exc:
+        return ConfigRoot(
+            None,
+            "explicit",
+            repo,
+            launch_stateless,
+            False,
+            error=str(exc),
+        )
+    if unsafe_root is not None:
+        return ConfigRoot(
+            None,
+            "explicit",
+            repo,
+            launch_stateless,
+            False,
+            error=(
+                f"config destination '{target}' is inside stateless checkout "
+                f"'{unsafe_root}'. Use `agent-worktrees config-root` without "
+                "--destination to resolve the machine-local configuration root; "
+                "the checkout is not a supported destination for concrete "
+                "operator or product configuration."
+            ),
+        )
+    return ConfigRoot(str(target), "explicit", repo, launch_stateless, True)
+
+
+def resolve_config_root(
+    config: cfg.Config,
+    *,
+    destination: str | None = None,
+    cwd: str | None = None,
+    project: str | None = None,
+) -> ConfigRoot:
+    """Resolve and guard the configuration root for supported setup writers.
+
+    The default is the launch repo's per-project machine-local root
+    (``~/.<project>/``). A caller may supply an explicit destination, but it is
+    rejected when it targets the launch repo's stateless checkout or any other
+    checkout that declares an external state root.
+    """
+    try:
+        repo_cfg = config.default_repo
+    except KeyError:
+        repo_cfg = None
+    repo = config.repo_name or "?"
+    stateless = bool(
+        getattr(repo_cfg, "stateless", False)
+        or getattr(repo_cfg, "requires_external_state_root", False)
+    )
+    source = "explicit" if destination else "machine_local"
+    project_name = project or cfg.active_project() or repo
+
+    try:
+        target = _normalized_path(
+            destination or str(cfg.project_dir(project_name)),
+            cwd=cwd,
+        )
+        if target.exists() and not target.is_dir():
+            raise ValueError(f"config root '{target}' is not a directory")
+        unsafe_root: Path | None = None
+        if stateless and repo_cfg is not None:
+            roots = [repo_cfg.anchor, _git_toplevel(cwd)]
+            for raw_root in roots:
+                if raw_root and _path_within(target, _normalized_path(raw_root)):
+                    unsafe_root = _normalized_path(raw_root)
+                    break
+            if unsafe_root is None:
+                anchor_checkouts = _containing_git_checkouts(
+                    _normalized_path(repo_cfg.anchor)
+                )
+                if anchor_checkouts:
+                    anchor_common_dir = _git_common_dir(anchor_checkouts[0])
+                    unsafe_root = _enclosing_checkout_with_common_dir(
+                        target,
+                        anchor_common_dir,
+                    )
+        if unsafe_root is None:
+            unsafe_root = _containing_stateless_checkout(target)
+    except (OSError, ValueError) as exc:
+        return ConfigRoot(
+            None,
+            source,
+            repo,
+            stateless,
+            False,
+            error=str(exc),
+        )
+
+    if unsafe_root is not None:
+        return ConfigRoot(
+            None,
+            source,
+            repo,
+            stateless,
+            False,
+            error=(
+                f"config destination '{target}' is inside stateless checkout "
+                f"'{unsafe_root}'. Use `agent-worktrees config-root` without "
+                "--destination to resolve the machine-local configuration root; "
+                "the checkout is not a supported destination for concrete "
+                "operator or product configuration."
+            ),
+        )
+
+    return ConfigRoot(str(target), source, repo, stateless, True)
 
 
 @dataclass(frozen=True)
@@ -135,12 +392,14 @@ class StatePair:
 def _git_toplevel(cwd: str | None) -> str | None:
     """Return the git worktree root of ``cwd`` (or the process cwd), or None."""
     try:
+        checkout = cwd or os.getcwd()
         proc = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd or None,
+            ["git", "-C", checkout, "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             timeout=10,
+            env=git_ops.repository_identity_env(),
+            stdin=subprocess.DEVNULL,
         )
     except (OSError, subprocess.SubprocessError):
         return None

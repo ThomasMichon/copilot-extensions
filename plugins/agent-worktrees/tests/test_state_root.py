@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
+from pathlib import Path
+
 import pytest
 
 from agent_worktrees import config as cfg
@@ -158,6 +162,690 @@ def test_explicit_override_unregistered(fake_checkouts):
     assert res.path is None
     assert res.source == "explicit"
     assert "not a registered repo" in res.error
+
+
+def test_config_root_defaults_to_machine_local_project_dir(monkeypatch, tmp_path):
+    machine_root = tmp_path / ".harness"
+    monkeypatch.setattr(cfg, "project_dir", lambda _name=None: machine_root)
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(tmp_path / "harness"))
+    )
+
+    assert res.path == str(machine_root.resolve())
+    assert res.source == "machine_local"
+    assert res.repo == "harness"
+    assert res.stateless is True
+    assert res.bound is True
+    assert res.error is None
+
+
+def test_config_root_defaults_to_active_project_not_selected_repo(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+    monkeypatch.setattr(cfg, "active_project", lambda: "control-project")
+
+    def project_dir(name=None):
+        captured["name"] = name
+        return tmp_path / f".{name}"
+
+    monkeypatch.setattr(cfg, "project_dir", project_dir)
+    config = _config("selected-repo")
+
+    res = sr.resolve_config_root(config)
+
+    assert captured["name"] == "control-project"
+    assert res.path == str((tmp_path / ".control-project").resolve())
+    assert res.repo == "selected-repo"
+
+
+def test_config_root_explicit_project_overrides_ambient_project(
+    monkeypatch,
+    tmp_path,
+):
+    captured = {}
+    monkeypatch.setattr(cfg, "active_project", lambda: "ambient-project")
+
+    def project_dir(name=None):
+        captured["name"] = name
+        return tmp_path / f".{name}"
+
+    monkeypatch.setattr(cfg, "project_dir", project_dir)
+
+    res = sr.resolve_config_root(_config("selected-repo"), project="explicit-project")
+
+    assert captured["name"] == "explicit-project"
+    assert res.path == str((tmp_path / ".explicit-project").resolve())
+
+
+def test_config_root_rejects_explicit_stateless_checkout(tmp_path):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(harness)),
+        destination=str(harness / "generated"),
+        cwd=str(harness),
+    )
+
+    assert res.path is None
+    assert res.source == "explicit"
+    assert res.bound is False
+    assert "inside stateless checkout" in res.error
+    assert "agent-worktrees config-root" in res.error
+
+
+def test_config_root_rejects_other_declared_stateless_checkout(tmp_path):
+    launch = tmp_path / "launch"
+    launch.mkdir()
+    target = tmp_path / "other-harness"
+    (target / ".git").mkdir(parents=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "requires_external_state_root: true\n",
+        encoding="utf-8",
+    )
+
+    res = sr.resolve_config_root(
+        _config("launch", anchor=str(launch)),
+        destination=str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is False
+    assert str(target) in res.error
+
+
+def test_config_root_rejects_sibling_worktree_from_machine_local_stateless_config(
+    tmp_path,
+):
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    anchor.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(anchor)),
+        destination=str(sibling / "generated"),
+        cwd=str(anchor),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert str(sibling) in res.error
+
+
+@pytest.mark.parametrize("nested_kind", ["repository", "gitfile"])
+def test_config_root_rejects_nested_checkout_inside_stateless_sibling(
+    tmp_path,
+    nested_kind,
+):
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    nested = sibling / "nested"
+    anchor.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+    nested.mkdir()
+    if nested_kind == "repository":
+        subprocess.run(["git", "init", "--quiet"], cwd=nested, check=True)
+    else:
+        git_dir = anchor / ".git" / "modules" / "nested"
+        git_dir.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "git",
+                "init",
+                "--quiet",
+                "--separate-git-dir",
+                str(git_dir),
+                str(nested),
+            ],
+            check=True,
+        )
+        assert (nested / ".git").is_file()
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(anchor)),
+        destination=str(nested / "generated"),
+        cwd=str(anchor),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is True
+    assert str(sibling) in res.error
+
+
+def test_validate_config_destination_rejection_has_no_launch_statelessness(tmp_path):
+    launch = tmp_path / "launch"
+    target = tmp_path / "target"
+    (launch / ".git").mkdir(parents=True)
+    (target / ".git").mkdir(parents=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+
+    res = sr.validate_config_destination(
+        str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is False
+    assert res.repo == ""
+
+
+def test_validate_config_destination_preserves_launch_statelessness(tmp_path):
+    launch = tmp_path / "launch"
+    target = tmp_path / "target"
+    (launch / ".git").mkdir(parents=True)
+    (launch / ".agent-worktrees").mkdir()
+    (launch / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+    (target / ".git").mkdir(parents=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+
+    res = sr.validate_config_destination(
+        str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is True
+
+
+@pytest.mark.parametrize("nested_kind", [None, "repository", "gitfile"])
+def test_unadopted_stateless_launch_rejects_stale_sibling_checkout(
+    tmp_path,
+    nested_kind,
+):
+    launch = tmp_path / "harness"
+    sibling = tmp_path / "stale-worktree"
+    launch.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=launch, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=launch,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=launch,
+        check=True,
+    )
+    (launch / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=launch, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "initial"], cwd=launch, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "stale", str(sibling)],
+        cwd=launch,
+        check=True,
+    )
+    (launch / ".agent-worktrees").mkdir()
+    (launch / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", ".agent-worktrees/config.yaml"], cwd=launch, check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "declare stateless"],
+        cwd=launch,
+        check=True,
+    )
+    assert not (sibling / ".agent-worktrees" / "config.yaml").exists()
+
+    target = sibling
+    if nested_kind is not None:
+        target = sibling / "nested"
+        target.mkdir()
+        if nested_kind == "repository":
+            subprocess.run(["git", "init", "--quiet"], cwd=target, check=True)
+        else:
+            git_dir = launch / ".git" / "modules" / "nested"
+            git_dir.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(
+                [
+                    "git",
+                    "init",
+                    "--quiet",
+                    "--separate-git-dir",
+                    str(git_dir),
+                    str(target),
+                ],
+                check=True,
+            )
+            assert (target / ".git").is_file()
+
+    res = sr.validate_config_destination(
+        str(target / "generated"),
+        cwd=str(launch),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert res.stateless is True
+    assert str(sibling) in res.error
+
+
+def test_git_common_dir_ignores_inherited_repository_context(
+    tmp_path,
+    monkeypatch,
+):
+    checkout = tmp_path / "checkout"
+    unrelated = tmp_path / "unrelated"
+    checkout.mkdir()
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "global.gitconfig"))
+    monkeypatch.setenv("GIT_TRACE", "1")
+    monkeypatch.setenv("BENIGN_SETUP_CONTEXT", "preserved")
+    captured: dict[str, str] = {}
+    original_run = subprocess.run
+
+    def recording_run(*args, **kwargs):
+        captured.update(kwargs["env"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(sr.subprocess, "run", recording_run)
+
+    assert sr._git_common_dir(checkout) == (checkout / ".git").resolve()
+    assert "GIT_DIR" not in captured
+    assert "GIT_WORK_TREE" not in captured
+    assert captured["GIT_CONFIG_GLOBAL"] == str(tmp_path / "global.gitconfig")
+    assert captured["GIT_TRACE"] == "1"
+    assert captured["GIT_TERMINAL_PROMPT"] == "0"
+    assert captured["BENIGN_SETUP_CONTEXT"] == "preserved"
+
+
+def test_git_toplevel_ignores_inherited_repository_context(
+    tmp_path,
+    monkeypatch,
+):
+    checkout = tmp_path / "checkout"
+    unrelated = tmp_path / "unrelated"
+    checkout.mkdir()
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=checkout, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+
+    resolved = sr._git_toplevel(str(checkout))
+    assert resolved is not None
+    assert Path(resolved).resolve() == checkout.resolve()
+
+
+def test_config_root_validation_ignores_inherited_repository_context(
+    tmp_path,
+    monkeypatch,
+):
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    unrelated = tmp_path / "unrelated"
+    anchor.mkdir()
+    unrelated.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(anchor)),
+        destination=str(sibling / "generated"),
+        cwd=str(anchor),
+    )
+
+    assert res.path is None
+    assert res.bound is False
+    assert str(sibling) in res.error
+
+
+def test_config_root_allows_explicit_machine_local_destination(tmp_path):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    machine_root = tmp_path / "home" / ".harness"
+
+    res = sr.resolve_config_root(
+        _config("harness", stateless=True, anchor=str(harness)),
+        destination=str(machine_root),
+        cwd=str(harness),
+    )
+
+    assert res.path == str(machine_root.resolve())
+    assert res.source == "explicit"
+    assert res.bound is True
+    assert res.error is None
+
+
+def test_config_root_cli_honors_machine_local_stateless_config(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    from agent_worktrees import __main__ as main
+
+    harness = tmp_path / "harness"
+    (harness / ".git").mkdir(parents=True)
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: _config("harness", stateless=True, anchor=str(harness)),
+    )
+
+    main.cfg.set_active_project("harness")
+    try:
+        rc = main.cmd_config_root_dispatch(["--destination", str(harness)])
+    finally:
+        main.cfg.set_active_project(None)
+
+    assert rc == 3
+    assert "inside stateless checkout" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("launch_stateless", [False, True])
+def test_config_root_cli_json_preserves_launch_statelessness(
+    tmp_path,
+    monkeypatch,
+    capsys,
+    launch_stateless,
+):
+    from agent_worktrees import __main__ as main
+
+    launch = tmp_path / "launch"
+    target = tmp_path / "target"
+    launch.mkdir()
+    target.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=launch, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=target, check=True)
+    (target / ".agent-worktrees").mkdir()
+    (target / ".agent-worktrees" / "config.yaml").write_text(
+        "stateless: true\n",
+        encoding="utf-8",
+    )
+    main.cfg.set_active_project("launch")
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: _config(
+            "launch",
+            stateless=launch_stateless,
+            anchor=str(launch),
+        ),
+    )
+
+    try:
+        rc = main.cmd_config_root_dispatch([
+            "--destination",
+            str(target / "generated"),
+            "--json",
+        ])
+    finally:
+        main.cfg.set_active_project(None)
+
+    data = json.loads(capsys.readouterr().out)
+    assert rc == 3
+    assert data["config_root"] is None
+    assert data["bound"] is False
+    assert data["stateless"] is launch_stateless
+    assert data["repo"] == "launch"
+    assert "inside stateless checkout" in data["error"]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_config_root_cli_load_failure_is_controlled(
+    monkeypatch,
+    capsys,
+    json_output,
+):
+    from agent_worktrees import __main__ as main
+
+    main.cfg.set_active_project("unknown")
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: (_ for _ in ()).throw(ValueError("unknown project config")),
+    )
+    argv = ["--json"] if json_output else []
+    try:
+        rc = main.cmd_config_root_dispatch(argv)
+    finally:
+        main.cfg.set_active_project(None)
+
+    captured = capsys.readouterr()
+    assert rc == 3
+    assert "Traceback" not in captured.out + captured.err
+    if json_output:
+        data = json.loads(captured.out)
+        assert data["config_root"] is None
+        assert data["bound"] is False
+        assert data["error"] == "unknown project config"
+        assert captured.err == ""
+    else:
+        assert captured.out == ""
+        assert "unknown project config" in captured.err
+
+
+def test_main_unknown_project_config_root_json_is_controlled(
+    monkeypatch,
+    capfd,
+):
+    from agent_worktrees import __main__ as main
+
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: (_ for _ in ()).throw(ValueError("unknown project config")),
+    )
+    main.cfg.set_active_project(None)
+    try:
+        rc = main.main([
+            "--project",
+            "unknown",
+            "config-root",
+            "--json",
+        ])
+    finally:
+        main.cfg.set_active_project(None)
+
+    captured = capfd.readouterr()
+    assert rc == 3
+    assert "Traceback" not in captured.out + captured.err
+    data = json.loads(captured.out)
+    assert data["config_root"] is None
+    assert data["bound"] is False
+    assert data["error"] == "unknown project config"
+    assert captured.err == ""
+
+
+@pytest.fixture
+def contaminated_main_project_resolution(tmp_path, monkeypatch):
+    from agent_worktrees import __main__ as main
+
+    anchor = tmp_path / "harness"
+    sibling = tmp_path / "harness-worktree"
+    unrelated = tmp_path / "unrelated"
+    knowledge = tmp_path / "knowledge"
+    anchor.mkdir()
+    unrelated.mkdir()
+    knowledge.mkdir()
+    subprocess.run(["git", "init", "--quiet"], cwd=anchor, check=True)
+    subprocess.run(["git", "init", "--quiet"], cwd=unrelated, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=anchor,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=anchor,
+        check=True,
+    )
+    (anchor / "README.md").write_text("harness\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=anchor, check=True)
+    subprocess.run(["git", "commit", "--quiet", "-m", "init"], cwd=anchor, check=True)
+    subprocess.run(
+        ["git", "worktree", "add", "--quiet", "-b", "sibling", str(sibling)],
+        cwd=anchor,
+        check=True,
+    )
+    configs = {
+        "harness": _config(
+            "harness",
+            stateless=True,
+            knowledge_repo="knowledge",
+            anchor=str(anchor),
+        ),
+        "unrelated": _config("unrelated", anchor=str(unrelated)),
+    }
+    monkeypatch.setattr(
+        main.inst,
+        "read_projects_registry",
+        lambda: {
+            "projects": {
+                "harness": {"anchor": str(anchor)},
+                "unrelated": {"anchor": str(unrelated)},
+            }
+        },
+    )
+    monkeypatch.setattr(
+        main.cfg,
+        "load_config",
+        lambda: configs[main.cfg.active_project()],
+    )
+    monkeypatch.setattr(sr, "_checkout_path", lambda name: (
+        str(knowledge) if name == "knowledge" else None
+    ))
+    monkeypatch.chdir(sibling)
+    monkeypatch.setenv("GIT_DIR", str(unrelated / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(unrelated))
+    main.cfg.set_active_project(None)
+    yield main, sibling, knowledge
+    main.cfg.set_active_project(None)
+
+
+def test_main_config_root_contamination_cannot_bypass_sibling_guard(
+    contaminated_main_project_resolution,
+    capsys,
+):
+    main, sibling, _knowledge = contaminated_main_project_resolution
+
+    rc = main.main([
+        "config-root",
+        "--destination",
+        str(sibling / "generated"),
+    ])
+
+    assert rc == 3
+    assert main.cfg.active_project() == "harness"
+    assert "inside stateless checkout" in capsys.readouterr().err
+
+
+def test_main_state_root_contamination_cannot_redirect_project(
+    contaminated_main_project_resolution,
+    capsys,
+):
+    main, _sibling, knowledge = contaminated_main_project_resolution
+
+    rc = main.main(["state-root"])
+
+    assert rc == 0
+    assert main.cfg.active_project() == "harness"
+    assert Path(capsys.readouterr().out.strip()).resolve() == knowledge.resolve()
+
+
+def test_config_root_explicit_destination_can_guard_without_adoption():
+    from agent_worktrees import __main__ as main
+
+    assert main._is_no_project_invocation(
+        ["config-root", "--destination", "/tmp/harness"]
+    )
+    assert main._is_no_project_invocation(
+        ["config-root", "--destination=/tmp/harness"]
+    )
+    assert not main._is_no_project_invocation(["config-root"])
+
+
+def test_config_root_as_dict_shape(monkeypatch, tmp_path):
+    machine_root = tmp_path / ".h"
+    monkeypatch.setattr(cfg, "project_dir", lambda _name=None: machine_root)
+    data = sr.resolve_config_root(_config("h")).as_dict()
+
+    assert set(data) == {
+        "config_root", "source", "repo", "stateless", "bound", "error",
+    }
+    assert data["config_root"] == str(machine_root.resolve())
 
 
 def test_as_dict_shape(fake_checkouts):
