@@ -12,12 +12,16 @@ state live at ~/.{project}/.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import platform
+import re
+import shlex
 import shutil
 import subprocess
 import sys
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -438,13 +442,13 @@ def _write_binstub_if_changed(dst: Path, content: str) -> bool:
 
     if dst.exists():
         try:
-            existing = dst.read_text(errors="replace")
+            existing = dst.read_text(encoding="utf-8", errors="replace")
             if _norm(existing) == _norm(content):
                 return False
         except OSError:
             pass
     # newline="" preserves the literal \r\n / \n already embedded in content
-    dst.write_text(content, newline="")
+    dst.write_text(content, encoding="utf-8", newline="")
     return True
 
 
@@ -455,6 +459,207 @@ def _write_binstub_if_changed(dst: Path, content: str) -> bool:
 # A project accidentally registered under a reserved name (e.g. install.ps1 run
 # from the plugin checkout) is therefore inert to binstub reconciliation.
 _RESERVED_BINSTUB_NAMES = frozenset({"agent-worktrees"})
+_BINSTUB_RECEIPT_SCHEMA = "agent-worktrees.project-binstub-ownership"
+_BINSTUB_RECEIPT_VERSION = 1
+
+
+class BinstubOwnershipError(RuntimeError):
+    """A global project command is owned by another attributable payload."""
+
+
+class BinstubContentError(BinstubOwnershipError):
+    """A project command cannot be refreshed without overwriting unknown bytes."""
+
+
+class ProjectBinstubRegistration:
+    """Commit token for a registry mutation guarded by launcher ownership."""
+
+    def __init__(self) -> None:
+        self.committed = False
+
+    def commit(self) -> None:
+        self.committed = True
+
+
+def is_reserved_project_command(project: str) -> bool:
+    key = project.casefold() if platform.system() == "Windows" else project
+    return key in _RESERVED_BINSTUB_NAMES
+
+
+def _payload_root(repo_dir: str | Path | None = None) -> Path:
+    explicit = os.environ.get("AGENT_WORKTREES_PAYLOAD_ROOT")
+    if explicit:
+        candidate = Path(explicit).expanduser()
+        if (candidate / "plugin.json").is_file():
+            return candidate.resolve()
+    if repo_dir is not None:
+        candidate = find_package_source(repo_dir).parent.parent
+        if (candidate / "plugin.json").is_file():
+            return candidate.resolve()
+    manifest = install_dir() / "deploy-manifest.json"
+    try:
+        source = json.loads(manifest.read_text(encoding="utf-8"))["source"]["path"]
+        candidate = Path(source).expanduser()
+        if (candidate / "plugin.json").is_file():
+            return candidate.resolve()
+    except (OSError, KeyError, TypeError, ValueError):
+        pass
+    candidate = Path(__file__).resolve().parents[2]
+    if (candidate / "plugin.json").is_file():
+        return candidate
+    raise BinstubOwnershipError(
+        "cannot resolve the owning agent-worktrees payload root"
+    )
+
+
+def _binstub_owner(repo_dir: str | Path | None = None) -> dict[str, str]:
+    root = _payload_root(repo_dir)
+    try:
+        manifest = json.loads((root / "plugin.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        manifest = {}
+    normalized = root.as_posix()
+    match = re.search(
+        r"/\.copilot/installed-plugins/([^/]+)/agent-worktrees(?:/|$)",
+        normalized,
+    )
+    return {
+        "marketplace": match.group(1) if match else "local",
+        "plugin": str(manifest.get("name") or "agent-worktrees"),
+        "payload_root": normalized,
+        "repository": str(manifest.get("repository") or ""),
+        "plugin_version": str(manifest.get("version") or ""),
+    }
+
+
+def _project_identity(project: str, repo_dir: str | Path | None = None) -> dict[str, str]:
+    remote = ""
+    path = ""
+    try:
+        from . import repos as repos_mod
+
+        entry = repos_mod.find_repo(project)
+        if entry is not None:
+            remote = entry.remote or ""
+            path = entry.local_path() or ""
+    except Exception:
+        pass
+    if repo_dir is not None:
+        path = str(Path(repo_dir).expanduser().resolve())
+        try:
+            result = subprocess.run(
+                ["git", "-C", path, "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0:
+                remote = result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    elif path:
+        path = str(Path(path).expanduser().resolve())
+    name = project.casefold() if platform.system() == "Windows" else project
+    return {"name": name, "remote": remote, "path": path}
+
+
+def _receipt_path(project: str) -> Path:
+    key = project.casefold() if platform.system() == "Windows" else project
+    return install_dir() / "binstub-receipts" / f"{key}.json"
+
+
+def _read_receipt(project: str) -> dict | None:
+    path = _receipt_path(project)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    except (OSError, ValueError) as exc:
+        raise BinstubOwnershipError(
+            f"project command receipt is unreadable for {project}: {path}: {exc}"
+        ) from exc
+    if (
+        not isinstance(data, dict)
+        or data.get("schema") != _BINSTUB_RECEIPT_SCHEMA
+        or data.get("version") != _BINSTUB_RECEIPT_VERSION
+        or not isinstance(data.get("owner"), dict)
+        or not isinstance(data.get("project"), dict)
+        or not isinstance(data.get("stubs"), dict)
+        or not all(
+            isinstance(key, str) and isinstance(value, str)
+            for section in ("owner", "project", "stubs")
+            for key, value in data[section].items()
+        )
+    ):
+        raise BinstubOwnershipError(
+            f"project command receipt is invalid for {project}: {path}"
+        )
+    return data
+
+
+def _same_identity(left: dict, right: dict, fields: tuple[str, ...]) -> bool:
+    return all(left.get(field, "") == right.get(field, "") for field in fields)
+
+
+def _write_receipt(project: str, data: dict) -> None:
+    path = _receipt_path(project)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _stub_key(name: str) -> str:
+    return name.casefold() if platform.system() == "Windows" else name
+
+
+def _stub_hash(receipt: dict, path: Path) -> str | None:
+    hashes = receipt.get("stubs", {})
+    key = _stub_key(path.name)
+    if key in hashes:
+        return hashes[key]
+    if platform.system() == "Windows":
+        return next(
+            (
+                value
+                for name, value in hashes.items()
+                if name.casefold() == key
+            ),
+            None,
+        )
+    return None
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@contextmanager
+def _binstub_lock(project: str):
+    key = project.casefold() if platform.system() == "Windows" else project
+    path = install_dir() / "binstub-receipts" / f".{key}.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as stream:
+        if stream.tell() == 0:
+            stream.write(b"\0")
+            stream.flush()
+        if os.name == "nt":
+            import msvcrt
+
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 # A file in ~/.local/bin is one of *our* project binstubs when it carries this
@@ -464,12 +669,18 @@ _RESERVED_BINSTUB_NAMES = frozenset({"agent-worktrees"})
 # never touched by reconciliation. The global `agent-worktrees` stub matches too,
 # so callers must exclude it by name.
 def _is_project_binstub(text: str) -> bool:
+    if "bin/payload/agent-worktrees" in text.replace("\\", "/"):
+        return True
     if "agent_worktrees --project" in text:
         return True
     return "WORKTREE_PROJECT" in text and ".agent-worktrees" in text
 
 
-def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
+def _project_binstub_specs(
+    project: str,
+    *,
+    repo_dir: str | Path | None = None,
+) -> list[tuple[Path, str]]:
     """Return ``(dst_path, content)`` for each project binstub on this platform.
 
     Single source of truth for project-launcher content -- kept byte-compatible
@@ -478,100 +689,127 @@ def _project_binstub_specs(project: str) -> list[tuple[Path, str]]:
     primary pwsh resolution) plus a ``.cmd`` fallback; posix gets one bare stub.
     """
     lb = local_bin()
+    payload = _payload_root(repo_dir)
     if platform.system() == "Windows":
+        payload_cmd = payload / "bin" / "payload" / "agent-worktrees.cmd"
+        payload_ps1 = payload / "bin" / "payload" / "agent-worktrees.ps1"
+        cmd_path = str(payload_cmd).replace("%", "%%")
+        ps1_path = str(payload_ps1).replace("'", "''")
+        ps1_project = project.replace("'", "''")
         cmd_content = "\r\n".join([
             "@echo off",
             'set "PYTHONUTF8=1"',
-            "rem Context resolves from CWD / --project (git-like); the binstub names its",
-            "rem project via --project, not an ambient env var.",
-            "rem Resolve the runtime slot python via the junction-free current-version",
-            "rem marker (the .venv junction is retired on Windows -- #637/#1085/#1106).",
-            'set "_ROOT=%USERPROFILE%\\.agent-worktrees"',
-            'set "_VER="',
-            'if exist "%_ROOT%\\current-version" set /p _VER=<"%_ROOT%\\current-version"',
-            'set "_PY=%_ROOT%\\versions\\%_VER%\\Scripts\\python.exe"',
-            'if not exist "%_PY%" goto :_aw_fallback',
-            f'"%_PY%" -m agent_worktrees --project {project} %*',
-            "exit /b %ERRORLEVEL%",
-            ":_aw_fallback",
-            "rem Recovery (venv missing): launch-session reads WORKTREE_PROJECT",
-            f'set "WORKTREE_PROJECT={project}"',
-            '"%USERPROFILE%\\.agent-worktrees\\bin\\launch-session.cmd" %*',
+            "rem This attributable project entry point is pinned to its owning payload.",
+            f'"{cmd_path}" --project {project} %*',
             "exit /b %ERRORLEVEL%",
         ])
         ps1_content = "\r\n".join([
             "$env:PYTHONUTF8 = '1'",
-            "# Context resolves from CWD / --project (git-like). This .ps1 runs in-process in",
-            "# the caller's session, so it names its project via --project (not an ambient",
-            "# env var), leaving the live session env untouched. Recovery (venv missing)",
-            "# passes the project to launch-session via a scoped, restored WORKTREE_PROJECT.",
-            "# Resolve the runtime slot python via the junction-free current-version marker",
-            "# (the .venv junction is retired -- #637/#1085/#1106).",
-            "$_root = Join-Path $env:USERPROFILE '.agent-worktrees'",
-            "$_py = ''",
-            "$_ver = ''",
-            "try { $_ver = ([IO.File]::ReadAllText((Join-Path $_root 'current-version'))).Trim() } catch {}",
-            "$_py = if ($_ver) { Join-Path $_root ('versions\\' + $_ver + '\\Scripts\\python.exe') } else { '' }",
-            "if (-not ($_py -and (Test-Path -LiteralPath $_py))) { $_py = Get-ChildItem (Join-Path $_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path $_.FullName 'Scripts\\python.exe' } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Last 1 }",
-            "if ($_py -and (Test-Path -LiteralPath $_py)) {",
-            f"    & $_py -m agent_worktrees --project '{project}' @args",
-            "    exit $LASTEXITCODE",
-            "}",
-            "$_savedProj = $env:WORKTREE_PROJECT",
-            f"$env:WORKTREE_PROJECT = '{project}'",
-            "try {",
-            '    & "$env:USERPROFILE\\.agent-worktrees\\bin\\launch-session.cmd" @args',
-            "    $_rc = $LASTEXITCODE",
-            "} finally {",
-            "    if ($null -eq $_savedProj) { Remove-Item Env:WORKTREE_PROJECT -ErrorAction SilentlyContinue } else { $env:WORKTREE_PROJECT = $_savedProj }",
-            "}",
-            "exit $_rc",
+            "# This attributable project entry point is pinned to its owning payload.",
+            f"& '{ps1_path}' --project '{ps1_project}' @args",
+            "exit $LASTEXITCODE",
         ])
         return [
             (lb / f"{project}.ps1", ps1_content),
             (lb / f"{project}.cmd", cmd_content),
         ]
+    payload_cmd = payload / "bin" / "payload" / "agent-worktrees"
     sh_content = (
         "#!/usr/bin/env bash\n"
         "export PYTHONUTF8=1\n"
-        "# Context resolves from CWD / --project (git-like); the binstub\n"
-        "# names its project via --project, not an ambient env var.\n"
-        "# Resolve the active versioned runtime directly (the .venv junction is\n"
-        "# retired -- #637/#1085/#1106); NEVER exec this binstub itself, which\n"
-        "# would recurse into an unbounded process storm.\n"
-        '_root="$HOME/.agent-worktrees"\n'
-        '_ver="$(cat "$_root/current-version" 2>/dev/null)"\n'
-        '_py="$_root/versions/$_ver/bin/python"\n'
-        'if [[ ! -x "$_py" ]]; then\n'
-        '    _py="$(ls -1d "$_root"/versions/*/bin/python 2>/dev/null'
-        " | sort | tail -n1)\"\n"
-        'fi\n'
-        'if [[ -n "$_py" && -x "$_py" ]]; then\n'
-        f'    exec "$_py" -m agent_worktrees --project {project} "$@"\n'
-        'fi\n'
-        '# Recovery (venv missing): launch-session reads WORKTREE_PROJECT\n'
-        f'export WORKTREE_PROJECT="{project}"\n'
-        'exec "$HOME/.agent-worktrees/bin/launch-session.sh" "$@"\n'
+        "# This attributable project entry point is pinned to its owning payload.\n"
+        f"exec {shlex.quote(str(payload_cmd))} --project "
+        f"{shlex.quote(project)} \"$@\"\n"
     )
     return [(lb / project, sh_content)]
 
 
-def _deploy_project_binstub(project: str) -> int:
-    """Write a single project's binstub file(s). Returns the count written.
+def _project_binstub_context(
+    project: str,
+    *,
+    repo_dir: str | Path | None = None,
+    transfer: bool = False,
+) -> tuple[dict[str, str], dict[str, str], list[tuple[Path, str]]]:
+    if not project or not cfg._PROJECT_NAME_RE.fullmatch(project):
+        raise ValueError(
+            "project command name must be 1-64 alphanumeric/dash/dot/underscore "
+            f"characters: {project!r}"
+        )
+    command_key = project.casefold() if platform.system() == "Windows" else project
+    if is_reserved_project_command(project):
+        raise BinstubOwnershipError(
+            f"project command name is reserved: {project}"
+        )
+    if platform.system() == "Windows":
+        collisions = [
+            name
+            for name in read_projects_registry().get("projects", {})
+            if name != project and name.casefold() == command_key
+        ]
+        if collisions:
+            raise BinstubOwnershipError(
+                f"project command name collides with {collisions[0]!r}: {project!r}"
+            )
+    local_bin().mkdir(parents=True, exist_ok=True)
+    owner = _binstub_owner(repo_dir)
+    project_identity = _project_identity(project, repo_dir)
+    specs = _project_binstub_specs(project, repo_dir=repo_dir)
+    try:
+        receipt = _read_receipt(project)
+    except BinstubOwnershipError:
+        if not transfer:
+            raise
+        receipt = None
+    existing = [(path, content) for path, content in specs if path.exists()]
+    if receipt is not None and not transfer:
+        if not _same_identity(
+            receipt.get("owner", {}),
+            owner,
+            ("marketplace", "plugin", "payload_root", "repository"),
+        ) or not _same_identity(
+            receipt.get("project", {}),
+            project_identity,
+            ("name",),
+        ):
+            raise BinstubOwnershipError(
+                f"refusing project command ownership transfer for {project}; "
+                f"existing receipt: {_receipt_path(project)}"
+            )
+        modified = [
+            path
+            for path, _content in existing
+            if _stub_hash(receipt, path) != _file_sha256(path)
+        ]
+        if modified:
+            raise BinstubContentError(
+                f"refusing to replace modified project command for {project}; "
+                f"use reconcile-binstubs --transfer {project} to replace it"
+            )
+    elif existing and not transfer:
+        raise BinstubContentError(
+            f"refusing to replace unreceipted project command for {project}; "
+            f"use reconcile-binstubs --transfer {project} to claim it"
+        )
+    return owner, project_identity, specs
 
-    Reserved-name guard: ``agent-worktrees`` is the runtime's own global command
-    (the project-agnostic shim deployed from ``bin/agent-worktrees``), never a
-    per-project launcher. A project stub for that name writes to the SAME
-    ~/.local/bin path as the global shim -- clobbering it with a
-    self-``--project`` binstub. Historically that project-form was the seed of a
-    fork-storm, so refuse it here at the single chokepoint for project-form
-    content, regardless of caller or deploy ordering.
-    """
-    if not project or project in _RESERVED_BINSTUB_NAMES:
-        return 0
+
+def _deploy_project_binstub_unlocked(
+    project: str,
+    *,
+    repo_dir: str | Path | None = None,
+    transfer: bool = False,
+) -> int:
+    """Write a single project's receipt-gated binstub file(s)."""
+    owner, project_identity, specs = _project_binstub_context(
+        project,
+        repo_dir=repo_dir,
+        transfer=transfer,
+    )
+
     is_windows = platform.system() == "Windows"
     written = 0
-    for dst, content in _project_binstub_specs(project):
+    hashes: dict[str, str] = {}
+    for dst, content in specs:
         if _write_binstub_if_changed(dst, content):
             written += 1
         if not is_windows:
@@ -579,7 +817,58 @@ def _deploy_project_binstub(project: str) -> int:
                 dst.chmod(0o755)
             except OSError:
                 pass
+        hashes[_stub_key(dst.name)] = _file_sha256(dst)
+    _write_receipt(
+        project,
+        {
+            "schema": _BINSTUB_RECEIPT_SCHEMA,
+            "version": _BINSTUB_RECEIPT_VERSION,
+            "owner": owner,
+            "project": project_identity,
+            "runtime": {"root": str(install_dir()), "resolver": "payload-local"},
+            "stubs": hashes,
+        },
+    )
     return written
+
+
+@contextmanager
+def project_binstub_registration(
+    project: str,
+    *,
+    repo_dir: str | Path | None,
+):
+    """Hold ownership from registry preflight through launcher publication."""
+    with _binstub_lock("__registries__"), _binstub_lock(project):
+        registration = ProjectBinstubRegistration()
+        content_error: BinstubContentError | None = None
+        try:
+            _project_binstub_context(project, repo_dir=repo_dir)
+        except BinstubContentError as exc:
+            content_error = exc
+        yield registration
+        if not registration.committed:
+            return
+        if content_error is not None:
+            output.warn(str(content_error))
+            return
+        _deploy_project_binstub_unlocked(project, repo_dir=repo_dir)
+
+
+def _deploy_project_binstub(
+    project: str,
+    *,
+    repo_dir: str | Path | None = None,
+    transfer: bool = False,
+) -> int:
+    if is_reserved_project_command(project):
+        return 0
+    with _binstub_lock(project):
+        return _deploy_project_binstub_unlocked(
+            project,
+            repo_dir=repo_dir,
+            transfer=transfer,
+        )
 
 
 def _discover_project_binstubs() -> dict[str, list[Path]]:
@@ -599,10 +888,8 @@ def _discover_project_binstubs() -> dict[str, list[Path]]:
         if is_windows:
             if f.suffix.lower() not in (".cmd", ".ps1"):
                 continue
-        elif f.suffix:
-            continue
         name = f.stem if is_windows else f.name
-        if name in _RESERVED_BINSTUB_NAMES:
+        if is_reserved_project_command(name):
             continue
         try:
             text = f.read_text(errors="replace")
@@ -613,7 +900,7 @@ def _discover_project_binstubs() -> dict[str, list[Path]]:
     return found
 
 
-def prune_reserved_projects() -> list[str]:
+def _prune_reserved_projects_unlocked() -> list[str]:
     """Remove any reserved-name entries from projects.yaml (self-heal).
 
     The runtime's own name (``agent-worktrees``) is not a project. A prior buggy
@@ -627,7 +914,14 @@ def prune_reserved_projects() -> list[str]:
     projects = registry.get("projects", {})
     if not isinstance(projects, dict):
         return []
-    removed = [n for n in list(projects) if n in _RESERVED_BINSTUB_NAMES]
+    is_windows = platform.system() == "Windows"
+    removed = [
+        name
+        for name in list(projects)
+        if (
+            name.casefold() if is_windows else name
+        ) in _RESERVED_BINSTUB_NAMES
+    ]
     if removed:
         for n in removed:
             projects.pop(n, None)
@@ -638,33 +932,87 @@ def prune_reserved_projects() -> list[str]:
     return removed
 
 
-def reconcile_binstubs() -> dict:
+def prune_reserved_projects() -> list[str]:
+    """Remove reserved registry entries under the shared registry lock."""
+    with _binstub_lock("__registries__"):
+        return _prune_reserved_projects_unlocked()
+
+
+def _reconcile_binstubs_unlocked() -> dict:
     """Reconcile project binstubs against the projects registry.
 
-    Deploys a complete binstub set for every registered project (add / refresh
-    missing or stale files) and removes signature-matched stubs whose project is
-    no longer registered. Runs without a project context, so it is safe to call
-    from a plugin-driven ``update`` where no single project is in scope.
+    Deploys receipt-owned binstubs for registered projects and removes stale
+    files only when their receipt and hashes still prove ownership.
     """
     # Self-heal: a reserved runtime name must never be a registered project.
-    prune_reserved_projects()
+    _prune_reserved_projects_unlocked()
 
     registered = set(read_projects_registry().get("projects", {}).keys())
+    registered_keys = {_stub_key(project) for project in registered}
+    if platform.system() == "Windows":
+        seen: dict[str, str] = {}
+        for project in sorted(registered):
+            key = project.casefold()
+            if key in seen and seen[key] != project:
+                raise BinstubOwnershipError(
+                    "case-insensitive project command collision: "
+                    f"{seen[key]!r} and {project!r}"
+                )
+            seen[key] = project
 
     added = 0
+    preserved: list[str] = []
     for project in sorted(registered):
-        if project in _RESERVED_BINSTUB_NAMES:
+        command_key = (
+            project.casefold() if platform.system() == "Windows" else project
+        )
+        if command_key in _RESERVED_BINSTUB_NAMES:
             continue
-        added += _deploy_project_binstub(project)
+        try:
+            added += _deploy_project_binstub(project)
+        except BinstubOwnershipError as exc:
+            preserved.append(project)
+            output.warn(str(exc))
 
     removed: list[Path] = []
     for name, paths in _discover_project_binstubs().items():
-        if name in registered:
+        if _stub_key(name) in registered_keys:
             continue
-        for p in paths:
+        with _binstub_lock(name):
             try:
-                p.unlink()
-                removed.append(p)
+                receipt = _read_receipt(name)
+            except BinstubOwnershipError as exc:
+                preserved.append(name)
+                output.warn(str(exc))
+                continue
+            if receipt is None or not _same_identity(
+                receipt.get("owner", {}),
+                _binstub_owner(),
+                ("marketplace", "plugin", "payload_root", "repository"),
+            ):
+                preserved.append(name)
+                output.warn(
+                    f"Binstubs: preserved unowned project command(s) for {name}"
+                )
+                continue
+            if any(
+                not path.exists()
+                or _stub_hash(receipt, path) != _file_sha256(path)
+                for path in paths
+            ):
+                preserved.append(name)
+                output.warn(
+                    f"Binstubs: preserved modified project command(s) for {name}"
+                )
+                continue
+            for p in paths:
+                try:
+                    p.unlink()
+                    removed.append(p)
+                except OSError:
+                    pass
+            try:
+                _receipt_path(name).unlink()
             except OSError:
                 pass
 
@@ -679,9 +1027,75 @@ def reconcile_binstubs() -> dict:
     if not added and not removed:
         output.skipped(f"Binstubs: in sync ({len(registered)} project(s))")
 
-    return {"registered": sorted(registered),
-            "added": added,
-            "removed": [str(p) for p in removed]}
+    return {
+        "registered": sorted(registered),
+        "added": added,
+        "removed": [str(p) for p in removed],
+        "preserved": sorted(set(preserved)),
+    }
+
+
+def reconcile_binstubs() -> dict:
+    """Reconcile project commands while excluding concurrent registrations."""
+    with _binstub_lock("__registries__"):
+        return _reconcile_binstubs_unlocked()
+
+
+def transfer_project_binstub(project: str) -> int:
+    """Explicitly transfer a registered project command to this payload."""
+    with _binstub_lock("__registries__"):
+        registered = read_projects_registry().get("projects", {})
+        if platform.system() == "Windows":
+            project = next(
+                (
+                    name
+                    for name in registered
+                    if name.casefold() == project.casefold()
+                ),
+                project,
+            )
+        if project not in registered:
+            raise BinstubOwnershipError(
+                f"cannot transfer unregistered project command: {project}"
+            )
+        return _deploy_project_binstub(project, transfer=True)
+
+
+def remove_project_binstub(project: str) -> list[Path]:
+    """Remove only a project command owned byte-for-byte by this payload."""
+    with _binstub_lock(project):
+        receipt = _read_receipt(project)
+        if receipt is None or not _same_identity(
+            receipt.get("owner", {}),
+            _binstub_owner(),
+            ("marketplace", "plugin", "payload_root", "repository"),
+        ):
+            raise BinstubOwnershipError(
+                f"refusing to remove unowned project command for {project}"
+            )
+        allowed = {
+            _stub_key(path.name): path
+            for path, _ in _project_binstub_specs(project)
+        }
+        hashes = {
+            _stub_key(name): value
+            for name, value in receipt.get("stubs", {}).items()
+        }
+        paths = [allowed[name] for name in hashes if name in allowed]
+        if set(hashes) != set(allowed) or any(
+            not path.exists()
+            or hashes.get(_stub_key(path.name)) != _file_sha256(path)
+            for path in paths
+        ):
+            raise BinstubOwnershipError(
+                f"refusing to remove modified project command for {project}"
+            )
+        removed: list[Path] = []
+        for path in paths:
+            path.unlink()
+            removed.append(path)
+        _receipt_path(project).unlink()
+        return removed
 
 
 def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
@@ -707,8 +1121,8 @@ def deploy_binstubs(repo_dir: str | Path, project: str) -> bool:
     # silently created no launcher at all; and on Windows it emitted only the
     # `.cmd`, leaving pwsh to fall through to the child-cmd path.
     if project:
-        _deploy_project_binstub(project)
-        for dst, _ in _project_binstub_specs(project):
+        _deploy_project_binstub(project, repo_dir=repo_dir)
+        for dst, _ in _project_binstub_specs(project, repo_dir=repo_dir):
             output.ok(f"Binstub: {dst}")
 
     # Unified agent-worktrees command (project-agnostic; routes straight to the
@@ -1125,13 +1539,28 @@ def register_project(
     # ``_RESERVED_BINSTUB_NAMES`` already made such an entry inert to binstub
     # reconciliation; refuse the registry *write* here too so it never appears in
     # the first place (the single owning writer is the right place to enforce it).
-    if project in _RESERVED_BINSTUB_NAMES:
+    is_windows = platform.system() == "Windows"
+    command_key = project.casefold() if is_windows else project
+    if command_key in _RESERVED_BINSTUB_NAMES:
         output.skipped(
             f"'{project}' is the runtime itself, not a project -- "
             "skipping projects.yaml registration")
         return
 
     registry = read_projects_registry()
+    if is_windows:
+        collision = next(
+            (
+                name
+                for name in registry["projects"]
+                if name != project and name.casefold() == command_key
+            ),
+            None,
+        )
+        if collision is not None:
+            raise BinstubOwnershipError(
+                f"project command name collides with {collision!r}: {project!r}"
+            )
     existing = registry["projects"].get(project, {})
     if not isinstance(existing, dict):
         existing = {}

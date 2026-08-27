@@ -22,6 +22,20 @@ Agent Worktrees has three shipped pieces:
 - **Project binstubs** -- one launcher per registered project, plus the global
   `agent-worktrees` CLI
 
+Project launchers are attributable global entry points. Each launcher invokes
+the absolute payload-local agent-worktrees command that created it and carries
+an ownership receipt under `~/.agent-worktrees/binstub-receipts/`. Routine
+install, update, repair, and reconciliation refuse to replace a command owned
+by another payload, replace any unreceipted command, or remove a receipt-owned
+command whose bytes changed. Legacy launchers require the same explicit
+transfer as every other unreceipted file. Windows command names are compared
+case-insensitively. An operator can explicitly transfer a registered project
+command with:
+
+```bash
+agent-worktrees reconcile-binstubs --transfer <project>
+```
+
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
