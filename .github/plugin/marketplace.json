@@ -6,25 +6,25 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev642"
+    "version": "1.7.5-dev643"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev624",
+      "version": "1.5.3-dev625",
       "source": "plugins/agent-worktrees"
     },
     {
       "name": "agent-bridge",
       "description": "Persistent inter-agent communication service - session management, SSE event streaming, agent subprocess spawning, and an ACP-over-WebSocket transport (+ built-in status UX) for external ACP clients like acp-ui",
-      "version": "0.4.0-dev367",
+      "version": "0.4.0-dev368",
       "source": "plugins/agent-bridge"
     },
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev80",
+      "version": "0.4.0-dev81",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -108,7 +108,7 @@
     {
       "name": "agent-machines",
       "description": "Portable restore-machinestate for Copilot CLI - converge the current machine to desired state declared in in-repo requirement packages (Copilot settings first, then repo-local modules). Machine-scoped union restore discovered from the adopted-projects registry, a seven-disposition model (enforce/ensure-present/capture-only/ignore/exclude/prune/prerequisite-check), a conflict validator that detects (never auto-arbitrates) cross-package clashes, and a repo-local module runner (dry-run-aware, gated, cross-platform) so sensitive OS-mutating modules stay in each harness repo while the engine stays generic.",
-      "version": "0.1.0-dev43",
+      "version": "0.1.0-dev44",
       "source": "plugins/agent-machines"
     },
     {

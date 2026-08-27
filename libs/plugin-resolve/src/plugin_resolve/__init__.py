@@ -23,6 +23,7 @@ from .conventions import (
     MARKETPLACE_MANIFEST_RELS,
     PLUGIN_MANIFEST_RELS,
     SETTINGS_RELS,
+    MarketplaceSourceKind,
     has_plugin_manifest,
 )
 from .marketplace import (
@@ -36,6 +37,7 @@ from .resolve import ResolvedPlugins, resolve_repo_plugins
 from .settings import (
     RepoPluginSettings,
     local_marketplace_path,
+    marketplace_source_kind,
     read_repo_settings,
     split_source,
 )
@@ -46,12 +48,14 @@ __all__ = [
     "SETTINGS_RELS",
     "Marketplace",
     "MarketplacePlugin",
+    "MarketplaceSourceKind",
     "RepoPluginSettings",
     "ResolvedPlugins",
     "has_plugin_manifest",
     "load_marketplace",
     "local_marketplace_path",
     "marketplace_manifest_path",
+    "marketplace_source_kind",
     "plugin_dir",
     "read_repo_settings",
     "resolve_repo_plugins",

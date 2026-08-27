@@ -70,7 +70,11 @@ def resolve_repo_plugins(repo_dir: str | Path) -> ResolvedPlugins:
         if mp is None and key not in loaded:
             mp = load_marketplace(mp_path)
             loaded[key] = mp
-        d = plugin_dir(mp, name) if mp is not None else None
+        d = (
+            plugin_dir(mp, name)
+            if mp is not None and mp.name == marketplace
+            else None
+        )
         if d is not None:
             result.resolved[source] = d
         else:
