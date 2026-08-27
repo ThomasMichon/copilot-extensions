@@ -23,6 +23,7 @@ Every new manifest declares:
   "schema_version": 1,
   "label": "Tasks",
   "after": "Worktrees",
+  "home": false,
   "list": ["agent-example", "list", "--json"],
   "entry": {
     "id": "id",
@@ -38,7 +39,11 @@ Every new manifest declares:
 Version-1 compatibility also covers the existing declarative fields:
 
 - `columns`, `summary`, `scope`, `stream`, and `subscribe`;
+- `home: true` to designate the ordinary initial pivot through the same generic
+  contract as every peer (at most one enabled contribution should declare it);
 - pivot `actions`, including command, `internal`, `form`, and `card` kinds;
+- pivot `view_actions`, with the same action kinds, for operations that do not
+  target a selected row;
 - top-level `worktree_actions`;
 - top-level `config_sections`.
 
@@ -61,6 +66,9 @@ reads the plugin's private state.
 - Command readiness is per surface: a missing pivot list command disables that
   pivot, while a missing optional action/config command disables only that
   action or section.
+- Multiple enabled `home: true` pivots remain loadable but produce a
+  `duplicate-home-pivot` finding; the first available contribution in discovery
+  order wins deterministically.
 - A manifest requiring a newer schema is reported as
   `unsupported-schema-version`, with an update-the-Manager remediation rather
   than being classified as corrupt.
