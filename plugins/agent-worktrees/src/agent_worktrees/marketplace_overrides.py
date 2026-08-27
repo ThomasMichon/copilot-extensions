@@ -223,12 +223,20 @@ def _assert_safe_output_path(repo: Path, output_path: Path) -> None:
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        ["git", "-C", str(repo), *args],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    command = ["git", "-C", str(repo), *args]
+    try:
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="strict",
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired, UnicodeError) as exc:
+        raise MarketplaceOverrideError(
+            f"cannot inspect Git ownership for {repo}: {exc}"
+        ) from exc
 
 
 def _ensure_output_is_local(repo: Path, *, ensure_ignored: bool) -> None:
@@ -245,10 +253,20 @@ def _ensure_output_is_local(repo: Path, *, ensure_ignored: bool) -> None:
         raise MarketplaceOverrideError(
             f"cannot manage tracked repository file: {repo / _SETTINGS_REL}"
         )
+    if tracked.returncode != 1:
+        raise MarketplaceOverrideError(
+            f"cannot determine whether local settings are tracked: "
+            f"{tracked.stderr.strip() or tracked.stdout.strip() or 'git failed'}"
+        )
 
     ignored = _git(repo, "check-ignore", "--quiet", "--no-index", "--", rel)
     if ignored.returncode == 0:
         return
+    if ignored.returncode != 1:
+        raise MarketplaceOverrideError(
+            f"cannot determine whether local settings are ignored: "
+            f"{ignored.stderr.strip() or ignored.stdout.strip() or 'git failed'}"
+        )
     if not ensure_ignored:
         raise MarketplaceOverrideError(
             f"cannot manage unignored local settings: {repo / _SETTINGS_REL}"
@@ -282,9 +300,14 @@ def _ensure_output_is_local(repo: Path, *, ensure_ignored: bool) -> None:
         ) from exc
 
     ignored = _git(repo, "check-ignore", "--quiet", "--no-index", "--", rel)
-    if ignored.returncode != 0:
+    if ignored.returncode == 1:
         raise MarketplaceOverrideError(
             f"Git exclude rule did not ignore local settings: {repo / _SETTINGS_REL}"
+        )
+    if ignored.returncode != 0:
+        raise MarketplaceOverrideError(
+            f"cannot verify Git exclude rule for local settings: "
+            f"{ignored.stderr.strip() or ignored.stdout.strip() or 'git failed'}"
         )
 
 

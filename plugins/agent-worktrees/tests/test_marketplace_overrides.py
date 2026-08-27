@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -335,6 +336,34 @@ def test_case_variant_tracked_local_settings_are_rejected(tmp_path: Path):
     main.git_ops.git("add", ".github/Copilot/settings.local.json", cwd=repo)
 
     with pytest.raises(mo.MarketplaceOverrideError, match="tracked"):
+        mo.reconcile(repo, ensure_ignored=True)
+
+
+def test_git_status_error_fails_closed(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+    monkeypatch.setattr(
+        mo,
+        "_git",
+        lambda *_args: subprocess.CompletedProcess(
+            args=["git"], returncode=128, stdout="", stderr="not a repository"
+        ),
+    )
+
+    with pytest.raises(mo.MarketplaceOverrideError, match="cannot determine"):
+        mo.reconcile(repo, ensure_ignored=True)
+
+
+def test_git_subprocess_exception_fails_closed(tmp_path: Path, monkeypatch):
+    repo = tmp_path / "consumer"
+    repo.mkdir()
+
+    def _raise(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(["git"], timeout=10)
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    with pytest.raises(mo.MarketplaceOverrideError, match="Git ownership"):
         mo.reconcile(repo, ensure_ignored=True)
 
 
