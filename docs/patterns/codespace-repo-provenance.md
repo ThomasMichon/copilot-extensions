@@ -60,11 +60,15 @@ discoverable by dropping a **pointer** into the user-level
 └── scripts/register-config-provider.{sh,ps1}
 ```
 
-The hook writes one small file — `~/.agent-codespaces/config.d/<repo>-harness.conf`
-— whose first non-comment line is the **absolute path** to the plugin's in-place
-`config.yaml`. `agent-codespaces` (`discover_dropin_configs`) reads each pointer,
-loads the referenced config, and merges it at the **lowest precedence** — a
-provider *default* that any adopted-repo/cwd config still overrides.
+The hook writes one schema-v1 JSON pointer — normally through
+`agent-codespaces/scripts/write-config-dropin.{ps1,sh}` — into
+`~/.agent-codespaces/config.d/`. It records the plugin's exact
+`name@marketplace`, canonical in-place plugin root, and absolute `config.yaml`
+target. `agent-codespaces` verifies that the source is effectively enabled and
+still resolves to that exact root before it reads the target, then merges it at
+the **lowest precedence** — a provider *default* that any adopted-repo/cwd config
+still overrides. The old `<repo>-harness.conf` single-path shape remains a
+recognized, advisory legacy format only during migration.
 
 The provenance itself lives under `repos.<vessel>`:
 

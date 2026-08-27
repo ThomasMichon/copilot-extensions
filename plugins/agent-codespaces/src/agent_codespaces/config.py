@@ -13,13 +13,27 @@ merges in memory; a CLI run inside a repo also auto-discovers that repo's config
 
 from __future__ import annotations
 
+import json
 import logging
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+import os
+import re
+import stat
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
+from dropin_registry import (
+    EntryDecision,
+    EntryStatus,
+    Finding,
+    ScanAuthority,
+    ScanSnapshot,
+    WarningTracker,
+    scan_directory,
+)
+from plugin_activation import ActivationReport, ActivePlugin, resolve_active_plugins
 
 log = logging.getLogger("agent-codespaces")
 
@@ -72,6 +86,97 @@ CONFIG_FILENAME = "codespaces.yaml"
 # dynamically; neither writes into the other's repo, and a plugin update keeps the
 # pointed config live (no stale copy).
 CONFIG_D_DIR_NAME = "config.d"
+CONFIG_D_REGISTRY_NAME = "config.d"
+CONFIG_D_POINTER_SCHEMA_VERSION = 1
+_MANAGED_POINTER_KEYS = frozenset(
+    {"schema_version", "plugin", "plugin_root", "target"}
+)
+_PLUGIN_SOURCE_RE = re.compile(r"^[^@/\\\s]+@[^@/\\\s]+$")
+_LEGACY_PROVIDER_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._-]*-harness\.conf$"
+)
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+
+@dataclass(frozen=True)
+class ConfigDropin:
+    """One validated config.d contribution selected for config merging."""
+
+    entry: Path
+    target: Path
+    entry_class: str
+    raw_config: dict[str, Any]
+    owner: str | None = None
+
+    def to_dict(self) -> dict[str, str]:
+        """Return the active-contribution shape used by doctor JSON."""
+        result = {
+            "entry": str(self.entry),
+            "target": str(self.target),
+            "class": self.entry_class,
+        }
+        if self.owner:
+            result["owner"] = self.owner
+        return result
+
+
+@dataclass(frozen=True)
+class ConfigDropinRegistryReport:
+    """The one config.d scan/classification result used by runtime and doctor."""
+
+    snapshot: ScanSnapshot[ConfigDropin]
+    active_entries: dict[str, ConfigDropin]
+    entry_classes: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def authority(self) -> ScanAuthority:
+        """Whether this scan was authoritative for reconciliation."""
+        return self.snapshot.authority
+
+    @property
+    def findings(self) -> tuple[Finding, ...]:
+        """All current, exhaustive findings."""
+        return self.snapshot.findings
+
+    @property
+    def active_configs(self) -> list[ConfigDropin]:
+        """Validated target configs in deterministic registry-entry order."""
+        return [
+            self.active_entries[key]
+            for key in sorted(self.active_entries)
+        ]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Render exhaustive, machine-readable registry diagnostics."""
+        entries: list[dict[str, str]] = []
+        for entry, decision in sorted(self.snapshot.decisions.items()):
+            item = {
+                "entry": entry,
+                "status": decision.status.value,
+                "class": self.entry_classes.get(entry, "unknown"),
+            }
+            if decision.value is not None:
+                item["target"] = str(decision.value.target)
+                if decision.value.owner:
+                    item["owner"] = decision.value.owner
+            entries.append(item)
+        return {
+            "registry": CONFIG_D_REGISTRY_NAME,
+            "authority": self.authority.value,
+            "active_entries": [
+                contribution.to_dict() for contribution in self.active_configs
+            ],
+            "entries": entries,
+            "findings": [finding.to_dict() for finding in self.findings],
+        }
+
+
+# Config loading is normally one-shot, but a daemon can reload it while a
+# registry entry is transiently unreadable. Keep only the last selected value
+# per entry, and clear it on an authoritative absent scan.
+_CONFIG_D_LAST_KNOWN: dict[str, ConfigDropin] = {}
+_CONFIG_D_LAST_KNOWN_ROOT: Path | None = None
+_CONFIG_D_WARNING_TRACKER = WarningTracker()
 
 
 def config_d_dir() -> Path:
@@ -79,39 +184,781 @@ def config_d_dir() -> Path:
     return RUNTIME_DIR / CONFIG_D_DIR_NAME
 
 
-def discover_dropin_configs() -> list[Path]:
-    """Resolve the drop-in config providers under ~/.agent-codespaces/config.d/.
+def _config_d_root_identity(directory: Path) -> Path:
+    """Return the canonical identity used to scope implicit retained state."""
+    try:
+        return directory.expanduser().resolve(strict=False)
+    except OSError:
+        return Path(os.path.abspath(os.path.expanduser(str(directory))))
 
-    Each file in ``config.d/`` is a **pointer**: its content's first non-empty,
-    non-comment line is a path to a ``config.yaml``. Returns the resolved,
-    existing config-file paths in deterministic (sorted-filename) order. A pointer
-    naming a missing file is skipped -- a stale/uninstalled provider must never
-    break discovery. As a convenience a ``config.d/`` entry that is itself a
-    ``.yaml``/``.yml`` file is used directly.
+
+def _is_reparse(info: os.stat_result) -> bool:
+    """Whether a Windows stat result names a reparse point."""
+    return bool(
+        getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
+        or getattr(info, "st_reparse_tag", 0)
+    )
+
+
+def _config_d_remedy(
+    entry: Path,
+    *,
+    entry_class: str,
+    owner: str | None = None,
+) -> str:
+    """Give report-only remediation without claiming ownership of an entry."""
+    if entry_class == "managed-plugin" and owner:
+        return (
+            f"Re-enable or reinstall {owner}, then run its config-provider hook "
+            f"to recreate {entry}."
+        )
+    if entry_class == "legacy-plugin":
+        return (
+            f"Update or re-enable the legacy provider that wrote {entry} so it "
+            "rewrites this entry as schema v1; remove it only if no longer intended."
+        )
+    if entry_class == "operator":
+        return f"Fix the operator-owned YAML at {entry}; agent-codespaces will not remove it."
+    return f"Fix or remove the unrecognized entry {entry} if it is no longer intended."
+
+
+def _config_d_finding(
+    entry: Path,
+    reason: str,
+    *,
+    status: str = "inactive",
+    target: Path | str | None = None,
+    entry_class: str,
+    owner: str | None = None,
+    detail: str | None = None,
+) -> Finding:
+    """Create a config.d finding with a precise, report-only remedy."""
+    return Finding(
+        registry=CONFIG_D_REGISTRY_NAME,
+        entry=str(entry),
+        status=status,
+        reason=reason,
+        target=str(target) if target is not None else None,
+        owner=owner,
+        remedy=_config_d_remedy(entry, entry_class=entry_class, owner=owner),
+        detail=detail,
+    )
+
+
+def _regular_target(
+    entry: Path,
+    target: Path,
+    *,
+    entry_class: str,
+    owner: str | None,
+) -> tuple[Path | None, EntryDecision[ConfigDropin] | None]:
+    """Resolve a regular, non-reparse config target or return its verdict."""
+    try:
+        info = target.lstat()
+    except FileNotFoundError:
+        return None, EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "missing-target",
+                target=target,
+                entry_class=entry_class,
+                owner=owner,
+            )
+        )
+    except OSError as exc:
+        return None, EntryDecision.indeterminate(
+            _config_d_finding(
+                entry,
+                "target-unusable",
+                status="indeterminate",
+                target=target,
+                entry_class=entry_class,
+                owner=owner,
+                detail=str(exc),
+            )
+        )
+    if (
+        not stat.S_ISREG(info.st_mode)
+        or stat.S_ISLNK(info.st_mode)
+        or _is_reparse(info)
+    ):
+        return None, EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "target-unusable",
+                target=target,
+                entry_class=entry_class,
+                owner=owner,
+                detail="target must be a regular non-reparse file",
+            )
+        )
+    try:
+        return target.resolve(strict=True), None
+    except FileNotFoundError:
+        return None, EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "missing-target",
+                target=target,
+                entry_class=entry_class,
+                owner=owner,
+            )
+        )
+    except OSError as exc:
+        return None, EntryDecision.indeterminate(
+            _config_d_finding(
+                entry,
+                "target-unusable",
+                status="indeterminate",
+                target=target,
+                entry_class=entry_class,
+                owner=owner,
+                detail=str(exc),
+            )
+        )
+
+
+def _validated_config_target(
+    entry: Path,
+    target: Path,
+    *,
+    entry_class: str,
+    owner: str | None = None,
+) -> EntryDecision[ConfigDropin]:
+    """Validate a target config's file identity and non-empty YAML mapping."""
+    canonical, verdict = _regular_target(
+        entry, target, entry_class=entry_class, owner=owner
+    )
+    if verdict is not None:
+        return verdict
+    canonical = cast(Path, canonical)
+    try:
+        raw = yaml.safe_load(canonical.read_text(encoding="utf-8"))
+    except UnicodeDecodeError as exc:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "invalid-entry",
+                target=canonical,
+                entry_class=entry_class,
+                owner=owner,
+                detail=f"target config is not valid UTF-8: {exc}",
+            )
+        )
+    except OSError as exc:
+        return EntryDecision.indeterminate(
+            _config_d_finding(
+                entry,
+                "target-unusable",
+                status="indeterminate",
+                target=canonical,
+                entry_class=entry_class,
+                owner=owner,
+                detail=str(exc),
+            )
+        )
+    except yaml.YAMLError as exc:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "invalid-entry",
+                target=canonical,
+                entry_class=entry_class,
+                owner=owner,
+                detail=f"target config is not valid YAML: {exc}",
+            )
+        )
+    validation_error = _validate_dropin_config(raw)
+    if validation_error is not None:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "invalid-entry",
+                target=canonical,
+                entry_class=entry_class,
+                owner=owner,
+                detail=validation_error,
+            )
+        )
+    return EntryDecision.active(
+        ConfigDropin(
+            entry=entry,
+            target=canonical,
+            entry_class=entry_class,
+            raw_config=raw,
+            owner=owner,
+        )
+    )
+
+
+def _validate_dropin_provision(
+    raw: object,
+    *,
+    location: str,
+) -> str | None:
+    """Validate the provision shape consumed by ``_parse_provision``."""
+    if not isinstance(raw, dict):
+        return f"{location} must be a mapping"
+    for name in ("files", "on_connect", "on_create"):
+        value = raw.get(name)
+        if name in raw and not isinstance(value, list):
+            return f"{location}.{name} must be a list"
+    for index, file_spec in enumerate(raw.get("files", [])):
+        if not isinstance(file_spec, dict):
+            return f"{location}.files[{index}] must be a mapping"
+        for name in ("src", "dest"):
+            value = file_spec.get(name)
+            if not isinstance(value, str) or not value.strip():
+                return (
+                    f"{location}.files[{index}].{name} must be a non-empty string"
+                )
+    return None
+
+
+def _validate_dropin_string_list(raw: list[object], *, location: str) -> str | None:
+    """Require the string lists that later merge and launch code relies on."""
+    if any(not isinstance(value, str) or not value.strip() for value in raw):
+        return f"{location} entries must be non-empty strings"
+    return None
+
+
+def _validate_dropin_config(raw: object) -> str | None:
+    """Validate the mapping shapes assumed by ``load_merged_config``.
+
+    The normal repo loader predates provider drop-ins and can surface its own
+    configuration errors. A drop-in is an independently fault-isolated
+    contributor, so every shape the merge path calls ``.get()``, ``.items()``,
+    or iterates must be proven before it is allowed to become active.
     """
-    d = config_d_dir()
-    if not d.is_dir():
-        return []
-    resolved: list[Path] = []
-    for entry in sorted(d.iterdir()):
-        if not entry.is_file():
-            continue
-        if entry.suffix in (".yaml", ".yml"):
-            resolved.append(entry)
+    if not isinstance(raw, dict) or not raw:
+        return "target config must be a non-empty YAML mapping"
+
+    for name in ("defaults", "credentials", "connection_owner", "repos", "provision"):
+        if name in raw and not isinstance(raw[name], dict):
+            return f"{name} must be a mapping"
+    if "codespace_plugins" in raw and not isinstance(raw["codespace_plugins"], list):
+        return "codespace_plugins must be a list"
+    for index, plugin in enumerate(raw.get("codespace_plugins", [])):
+        if not isinstance(plugin, dict):
+            return f"codespace_plugins[{index}] must be a mapping"
+
+    credentials = raw.get("credentials", {})
+    if "feed_token_env" in credentials and not isinstance(
+        credentials["feed_token_env"], list
+    ):
+        return "credentials.feed_token_env must be a list"
+    if "feed_token_env" in credentials:
+        error = _validate_dropin_string_list(
+            credentials["feed_token_env"],
+            location="credentials.feed_token_env",
+        )
+        if error is not None:
+            return error
+    sources = credentials.get("sources", {})
+    if not isinstance(sources, dict):
+        return "credentials.sources must be a mapping"
+    for source_name, source in sources.items():
+        if not isinstance(source_name, str) or not isinstance(source, dict):
+            return "credentials.sources entries must have string names and mapping values"
+        for name in ("allowed_hosts", "allowed_resources"):
+            if name in source and not isinstance(source[name], list):
+                return f"credentials.sources.{source_name}.{name} must be a list"
+            if name in source:
+                error = _validate_dropin_string_list(
+                    source[name],
+                    location=f"credentials.sources.{source_name}.{name}",
+                )
+                if error is not None:
+                    return error
+
+    connection_owner = raw.get("connection_owner", {})
+    if "reconcile_interval" in connection_owner and (
+        isinstance(connection_owner["reconcile_interval"], bool)
+        or not isinstance(connection_owner["reconcile_interval"], (int, float))
+    ):
+        return "connection_owner.reconcile_interval must be a number"
+
+    repos = raw.get("repos", {})
+    for repo_name, repo in repos.items():
+        if not isinstance(repo_name, str) or not isinstance(repo, dict):
+            return "repos entries must have string names and mapping values"
+        if "bootstrap" in repo and not isinstance(repo["bootstrap"], dict):
+            return f"repos.{repo_name}.bootstrap must be a mapping"
+        if "provision" in repo:
+            error = _validate_dropin_provision(
+                repo["provision"], location=f"repos.{repo_name}.provision"
+            )
+            if error is not None:
+                return error
+
+    if "provision" in raw:
+        return _validate_dropin_provision(raw["provision"], location="provision")
+    return None
+
+
+def _legacy_target(entry: Path, text: str) -> Path | None:
+    """Recognize only the documented pre-v1 harness pointer shape."""
+    if not _LEGACY_PROVIDER_RE.fullmatch(entry.name):
+        return None
+    candidates = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if len(candidates) != 1:
+        return None
+    target = Path(candidates[0]).expanduser()
+    if not target.is_absolute():
+        return None
+    if (
+        target.name != CONFIG_FILE_IN_DIR
+        or target.parent.name != CONFIG_DIR_NAME.removeprefix(".")
+        or target.parent.parent.name != "references"
+    ):
+        return None
+    return target
+
+
+def _activation_indeterminate_finding(
+    entry: Path,
+    *,
+    source: str,
+    target: Path,
+    report: ActivationReport,
+) -> Finding:
+    """Translate shared activation uncertainty to this registry's entry."""
+    details = [
+        finding.detail or finding.reason
+        for finding in report.findings
+        if finding.owner in {None, source} or finding.target == source
+    ]
+    detail = "plugin eligibility could not be determined"
+    if details:
+        detail = f"{detail}: {'; '.join(details[:2])}"
+    return _config_d_finding(
+        entry,
+        "entry-indeterminate",
+        status="indeterminate",
+        target=target,
+        entry_class="managed-plugin",
+        owner=source,
+        detail=detail,
+    )
+
+
+def _managed_pointer_decision(
+    entry: Path,
+    data: object,
+    *,
+    activation_resolver: Callable[[], ActivationReport],
+) -> EntryDecision[ConfigDropin]:
+    """Classify an attributed v1 pointer against effective plugin activation."""
+    if (
+        not isinstance(data, dict)
+        or set(data) != _MANAGED_POINTER_KEYS
+        or type(data.get("schema_version")) is not int
+        or data.get("schema_version") != CONFIG_D_POINTER_SCHEMA_VERSION
+        or not all(
+            isinstance(data.get(key), str) and data[key].strip()
+            for key in ("plugin", "plugin_root", "target")
+        )
+    ):
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "invalid-entry",
+                entry_class="managed-plugin",
+                detail=(
+                    "managed pointers require exactly schema_version, plugin, "
+                    "plugin_root, and target (schema_version=1)"
+                ),
+            )
+        )
+
+    source = data["plugin"].strip()
+    raw_root = data["plugin_root"].strip()
+    raw_target = data["target"].strip()
+    if not _PLUGIN_SOURCE_RE.fullmatch(source):
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "invalid-entry",
+                target=raw_target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail="plugin must be an exact name@marketplace identity",
+            )
+        )
+    stored_root = Path(raw_root).expanduser()
+    target = Path(raw_target).expanduser()
+    if not stored_root.is_absolute() or not target.is_absolute():
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "invalid-entry",
+                target=target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail="plugin_root and target must be absolute paths",
+            )
+        )
+
+    activation_report = activation_resolver()
+    source_decision = activation_report.decisions.get(source)
+    if (
+        activation_report.authority is ScanAuthority.INDETERMINATE
+        or (
+            source_decision is not None
+            and source_decision.status is EntryStatus.INDETERMINATE
+        )
+    ):
+        return EntryDecision.indeterminate(
+            _activation_indeterminate_finding(
+                entry,
+                source=source,
+                target=target,
+                report=activation_report,
+            )
+        )
+    if source_decision is None:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "not-enabled",
+                target=target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail="plugin is not effectively enabled in global or adopted-project scope",
+            )
+        )
+    if source_decision.status is EntryStatus.INACTIVE:
+        finding = next(
+            (f for f in source_decision.findings if f.status != "indeterminate"),
+            None,
+        )
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                finding.reason if finding else "identity-mismatch",
+                target=target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail=(
+                    finding.detail
+                    if finding and finding.detail
+                    else "plugin source is no longer available at its verified root"
+                ),
+            )
+        )
+
+    active = cast(ActivePlugin, source_decision.value)
+    try:
+        canonical_stored_root = stored_root.resolve(strict=True)
+    except FileNotFoundError as exc:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "identity-mismatch",
+                target=target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail=f"pointer plugin_root is not the current verified root: {exc}",
+            )
+        )
+    except OSError as exc:
+        return EntryDecision.indeterminate(
+            _config_d_finding(
+                entry,
+                "entry-indeterminate",
+                status="indeterminate",
+                target=target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail=f"pointer plugin_root could not be read: {exc}",
+            )
+        )
+    if canonical_stored_root != active.root:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "identity-mismatch",
+                target=target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail=(
+                    "pointer plugin_root differs from the current identity-verified "
+                    f"root ({active.root})"
+                ),
+            )
+        )
+
+    canonical_target, verdict = _regular_target(
+        entry, target, entry_class="managed-plugin", owner=source
+    )
+    if verdict is not None:
+        return verdict
+    canonical_target = cast(Path, canonical_target)
+    try:
+        canonical_target.relative_to(active.root)
+    except ValueError:
+        return EntryDecision.inactive(
+            _config_d_finding(
+                entry,
+                "identity-mismatch",
+                target=canonical_target,
+                entry_class="managed-plugin",
+                owner=source,
+                detail="target escapes the identity-verified plugin root",
+            )
+        )
+    return _validated_config_target(
+        entry,
+        canonical_target,
+        entry_class="managed-plugin",
+        owner=source,
+    )
+
+
+def _withdraw_confirmed_disappearances(
+    snapshot: ScanSnapshot[ConfigDropin],
+) -> ScanSnapshot[ConfigDropin]:
+    """Omit entries confirmed absent after a complete directory enumeration."""
+    if snapshot.authority is not ScanAuthority.COMPLETE:
+        return snapshot
+    decisions = dict(snapshot.decisions)
+    findings = list(snapshot.findings)
+    for key, decision in tuple(decisions.items()):
+        if decision.status is not EntryStatus.INDETERMINATE:
             continue
         try:
-            text = entry.read_text("utf-8")
-        except (OSError, UnicodeDecodeError):
+            Path(key).lstat()
+        except FileNotFoundError:
+            del decisions[key]
+            findings = [finding for finding in findings if finding.entry != key]
+        except OSError:
             continue
-        target: Path | None = None
-        for line in text.splitlines():
-            stripped = line.strip()
-            if stripped and not stripped.startswith("#"):
-                target = Path(stripped).expanduser()
-                break
-        if target is not None and target.is_file():
-            resolved.append(target)
-    return resolved
+    return ScanSnapshot(
+        registry=snapshot.registry,
+        authority=snapshot.authority,
+        decisions=decisions,
+        findings=tuple(findings),
+    )
+
+
+def scan_config_dropin_registry(
+    *,
+    previous: dict[str, ConfigDropin] | None = None,
+) -> ConfigDropinRegistryReport:
+    """Scan, classify, and reconcile config.d without silent stale authority."""
+    global _CONFIG_D_LAST_KNOWN, _CONFIG_D_LAST_KNOWN_ROOT
+
+    entry_classes: dict[str, str] = {}
+    activation: ActivationReport | None = None
+    directory = config_d_dir()
+
+    def activation_report() -> ActivationReport:
+        nonlocal activation
+        if activation is None:
+            activation = resolve_active_plugins()
+        return activation
+
+    def classify(entry: Path) -> EntryDecision[ConfigDropin]:
+        entry_key = str(entry)
+        if entry.suffix.lower() in {".yaml", ".yml"}:
+            entry_classes[entry_key] = "operator"
+            return _validated_config_target(
+                entry, entry, entry_class="operator"
+            )
+        try:
+            text = entry.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            entry_classes[entry_key] = "unknown"
+            return EntryDecision.inactive(
+                _config_d_finding(
+                    entry,
+                    "invalid-entry",
+                    entry_class="unknown",
+                    detail=f"pointer is not valid UTF-8: {exc}",
+                )
+            )
+        except OSError as exc:
+            entry_classes[entry_key] = "unknown"
+            return EntryDecision.indeterminate(
+                _config_d_finding(
+                    entry,
+                    "entry-indeterminate",
+                    status="indeterminate",
+                    entry_class="unknown",
+                    detail=str(exc),
+                )
+            )
+
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if parsed is not None:
+            entry_classes[entry_key] = "managed-plugin"
+            return _managed_pointer_decision(
+                entry, parsed, activation_resolver=activation_report
+            )
+
+        target = _legacy_target(entry, text)
+        if target is None:
+            entry_classes[entry_key] = "unknown"
+            return EntryDecision.inactive(
+                _config_d_finding(
+                    entry,
+                    "invalid-entry",
+                    entry_class="unknown",
+                    detail=(
+                        "entry is neither an operator YAML fragment nor a schema v1 "
+                        "managed pointer nor the documented legacy harness pointer"
+                    ),
+                )
+            )
+        entry_classes[entry_key] = "legacy-plugin"
+        decision = _validated_config_target(
+            entry,
+            target,
+            entry_class="legacy-plugin",
+            owner=entry.stem,
+        )
+        if decision.status is EntryStatus.ACTIVE:
+            contribution = cast(ConfigDropin, decision.value)
+            return EntryDecision.advisory(
+                contribution,
+                _config_d_finding(
+                    entry,
+                    "legacy-unattributed",
+                    status="active-with-advisory",
+                    target=contribution.target,
+                    entry_class="legacy-plugin",
+                    owner=entry.stem,
+                    detail="legacy provider pointer remains active during compatibility migration",
+                ),
+            )
+        return decision
+
+    snapshot = scan_directory(
+        directory,
+        classify,
+        registry=CONFIG_D_REGISTRY_NAME,
+    )
+    snapshot = _withdraw_confirmed_disappearances(snapshot)
+    snapshot = _add_config_d_remedies(snapshot, entry_classes, directory)
+
+    if previous is None:
+        root_identity = _config_d_root_identity(directory)
+        prior = dict(
+            _CONFIG_D_LAST_KNOWN
+            if _CONFIG_D_LAST_KNOWN_ROOT == root_identity
+            else {}
+        )
+    else:
+        root_identity = None
+        prior = dict(previous)
+    reconciled_entries = snapshot.reconcile(prior)
+    active_entries = dict(reconciled_entries)
+
+    # Config fragments are target-exclusive. Reconcile first so a retained
+    # indeterminate entry competes with newly active entries, then choose one
+    # stable winner per canonical target for runtime and doctor alike.
+    decisions = dict(snapshot.decisions)
+    findings = list(snapshot.findings)
+    seen_targets: dict[Path, str] = {}
+    for key in sorted(active_entries):
+        contribution = active_entries[key]
+        winner = seen_targets.get(contribution.target)
+        if winner is None:
+            seen_targets[contribution.target] = key
+            continue
+        active_entries.pop(key)
+        decision = decisions.get(key)
+        if decision is None or decision.status is EntryStatus.INDETERMINATE:
+            continue
+        duplicate = _config_d_finding(
+            Path(key),
+            "duplicate",
+            target=contribution.target,
+            entry_class=entry_classes.get(key, "unknown"),
+            owner=contribution.owner,
+            detail=f"same target is already supplied by {winner}",
+        )
+        decisions[key] = EntryDecision.inactive(duplicate)
+        findings = [finding for finding in findings if finding.entry != key]
+        findings.append(duplicate)
+    snapshot = ScanSnapshot(
+        registry=snapshot.registry,
+        authority=snapshot.authority,
+        decisions=decisions,
+        findings=tuple(findings),
+    )
+
+    if previous is None:
+        _CONFIG_D_LAST_KNOWN = reconciled_entries
+        _CONFIG_D_LAST_KNOWN_ROOT = root_identity
+    return ConfigDropinRegistryReport(
+        snapshot=snapshot,
+        active_entries=active_entries,
+        entry_classes=entry_classes,
+    )
+
+
+def _warn_config_dropin_findings(report: ConfigDropinRegistryReport) -> None:
+    """Emit bounded, deduplicated operational findings for config loading."""
+    batch = _CONFIG_D_WARNING_TRACKER.select(report.findings)
+    for finding in batch.emitted:
+        target = f" target={finding.target}" if finding.target else ""
+        log.warning(
+            "%s entry=%s reason=%s%s; run `agent-codespaces doctor`",
+            CONFIG_D_REGISTRY_NAME,
+            finding.entry,
+            finding.reason,
+            target,
+        )
+    if batch.suppressed:
+        log.warning(
+            "%s: %d additional findings suppressed; run `agent-codespaces doctor`",
+            CONFIG_D_REGISTRY_NAME,
+            batch.suppressed,
+        )
+
+
+def _add_config_d_remedies(
+    snapshot: ScanSnapshot[ConfigDropin],
+    entry_classes: dict[str, str],
+    directory: Path,
+) -> ScanSnapshot[ConfigDropin]:
+    """Attach consumer-specific report-only remedies to scanner findings."""
+    findings: list[Finding] = []
+    for finding in snapshot.findings:
+        if finding.remedy:
+            findings.append(finding)
+            continue
+        if finding.reason == "registry-indeterminate":
+            remedy = (
+                f"Restore readable access to {directory}, then run "
+                "`agent-codespaces doctor` again; current entries are retained."
+            )
+        else:
+            remedy = _config_d_remedy(
+                Path(finding.entry),
+                entry_class=entry_classes.get(finding.entry, "unknown"),
+                owner=finding.owner,
+            )
+        findings.append(replace(finding, remedy=remedy))
+    return ScanSnapshot(
+        registry=snapshot.registry,
+        authority=snapshot.authority,
+        decisions=snapshot.decisions,
+        findings=tuple(findings),
+    )
+
+
+def discover_dropin_configs() -> list[Path]:
+    """Compatibility wrapper returning current reconciled config.d targets."""
+    return [contribution.target for contribution in scan_config_dropin_registry().active_configs]
 
 
 def repo_config_path(repo_path: Path) -> Path | None:
@@ -847,16 +1694,16 @@ def load_merged_config(include_cwd: bool = True) -> CodespacesConfig:
         if raw is None:
             continue
         sources.append((raw, config_dir, repo_root))
-    for cfg_file in discover_dropin_configs():
-        try:
-            with open(cfg_file, encoding="utf-8") as f:
-                dropin_raw = yaml.safe_load(f) or {}
-        except (OSError, UnicodeDecodeError, yaml.YAMLError):
-            continue
-        if isinstance(dropin_raw, dict) and dropin_raw:
-            # config_dir = the pointed config's own dir, so its provision `src`
-            # paths resolve relative to the plugin payload it ships in.
-            sources.append((dropin_raw, cfg_file.parent, cfg_file.parent))
+    dropin_report = scan_config_dropin_registry()
+    _warn_config_dropin_findings(dropin_report)
+    for contribution in dropin_report.active_configs:
+        # The registry classifier already read and structurally validated this
+        # target. Re-use its exact result so runtime and doctor cannot diverge.
+        sources.append((
+            contribution.raw_config,
+            contribution.target.parent,
+            contribution.target.parent,
+        ))
 
     for raw, config_dir, source_path in sources:
         merged.source_paths.append(source_path)

@@ -28,14 +28,14 @@ import shlex
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from collections.abc import Callable
 
-from .codespace_config import CodespaceSource
-from . import relay_launch
 from . import pool as pool_mod
+from . import relay_launch
+from .codespace_config import CodespaceSource
 from .config import (
     ADOPTED_REPOS_FILE,
     CANONICAL_CONFIG_REL,
@@ -49,6 +49,7 @@ from .config import (
     repo_config_path,
     repo_has_config,
     save_adopted_repos,
+    scan_config_dropin_registry,
     validate_config,
 )
 from .connect import (
@@ -651,10 +652,14 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("status", help="Show service status")
 
     # --- doctor ---
-    sub.add_parser(
+    doctor_parser = sub.add_parser(
         "doctor",
-        help="Check gh auth + the 'codespace' scope every CodeSpace op needs; "
-             "print remedies and exit non-zero when any account lacks it (#980)",
+        help="Check gh auth and config.d registry hygiene; print remedies and "
+             "exit non-zero when either has findings (#980)",
+    )
+    doctor_parser.add_argument(
+        "--json", dest="json_output", action="store_true",
+        help="Output exhaustive gh-auth and config.d diagnostics as JSON",
     )
 
     # --- version ---
@@ -825,7 +830,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             return _cmd_status()
         if args.command == "doctor":
-            return _cmd_doctor()
+            return _cmd_doctor(json_output=args.json_output)
         if args.command == "version":
             return _cmd_version()
         if args.command == "acp-model-flags":
@@ -2777,25 +2782,56 @@ def _require_codespace_scope(op: str) -> int | None:
     return 3
 
 
-def _cmd_doctor() -> int:
-    """Check gh auth + the ``codespace`` scope for the ambient account and every
-    account the pool/connect paths route to (#980).
+def _cmd_doctor(*, json_output: bool = False) -> int:
+    """Check gh auth and exhaustively report config.d registry hygiene.
 
-    Prints each finding with its exact ``gh auth refresh`` remedy and exits
-    **non-zero** when any account is unauthenticated or missing the scope -- so
-    setup/CI (and ``codespaces-setup``) can gate on it -- else prints an all-clear
-    and exits 0. Read-only; never mutates auth.
+    Read-only and available even without ``gh``. Exit behavior remains nonzero
+    for auth failures and now also reports stale/invalid config.d entries.
     """
-    msgs = _gh_auth_preflight()
-    if not msgs:
+    auth_findings = _gh_auth_preflight()
+    config_report = scan_config_dropin_registry()
+    has_findings = bool(auth_findings or config_report.findings)
+
+    if json_output:
+        print(json.dumps({
+            "gh": {
+               "ok": not auth_findings,
+               "findings": auth_findings,
+            },
+            "config_d": config_report.to_dict(),
+        }, indent=2, sort_keys=True))
+        return 1 if has_findings else 0
+
+    if not auth_findings:
         print("[OK] gh is authenticated with the 'codespace' scope "
               "(ambient + all mapped accounts).")
-        return 0
-    print("[gh] CodeSpace auth issue(s) -- `gh codespace` ops will fail until "
-          "resolved:", file=sys.stderr)
-    for m in msgs:
-        print(f"  - {m}", file=sys.stderr)
-    return 1
+    else:
+        print("[gh] CodeSpace auth issue(s) -- `gh codespace` ops will fail until "
+              "resolved:", file=sys.stderr)
+        for finding in auth_findings:
+            print(f"  - {finding}", file=sys.stderr)
+
+    print(f"[config.d] authority: {config_report.authority.value}")
+    if config_report.active_configs:
+        print("[config.d] active entries:")
+        for contribution in config_report.active_configs:
+            owner = f" ({contribution.owner})" if contribution.owner else ""
+            print(
+               f"  - {contribution.entry} -> {contribution.target} "
+               f"[{contribution.entry_class}]{owner}"
+            )
+    if not config_report.findings:
+        print("[OK] config.d has no registry findings.")
+    else:
+        print("[config.d] registry finding(s):", file=sys.stderr)
+        for finding in config_report.findings:
+            target = f" target={finding.target}" if finding.target else ""
+            print(
+               f"  - {finding.entry}: {finding.reason}{target}\n"
+               f"    Remedy: {finding.remedy}",
+               file=sys.stderr,
+            )
+    return 1 if has_findings else 0
 
 
 def _account_login_remedy(login: str) -> str:
