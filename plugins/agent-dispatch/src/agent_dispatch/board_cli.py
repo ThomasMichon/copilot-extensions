@@ -14,6 +14,7 @@ import urllib.request
 from pathlib import Path
 
 from .procutil import no_window_kwargs as _no_window_kwargs
+from .procutil import windowless_python
 
 GROUPS = ("Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned")
 TERMINAL = frozenset({"Completed", "Abandoned"})
@@ -168,7 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     local = _local_machine()
     if local and local != args.machine.casefold():
         command = [
-            "agent-dispatch",
+            windowless_python(sys.executable),
+            "-m",
+            "agent_dispatch",
             "inbox",
             "--machine",
             args.machine,
