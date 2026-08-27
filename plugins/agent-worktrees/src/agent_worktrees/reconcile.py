@@ -46,6 +46,7 @@ from __future__ import annotations
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -369,6 +370,25 @@ def _explicit_context_target() -> tuple[Path, str] | None:
     if not isinstance(plugin_id, str) or not plugin_id:
         raise ValueError(
             f"COPILOT_EXTENSIONS_CONTEXT has no valid pluginId: {pointer}"
+        )
+    if (
+        not re.fullmatch(
+            r"[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?",
+            plugin_id,
+        )
+        or plugin_id in {".", ".."}
+    ):
+        raise ValueError(
+            f"COPILOT_EXTENSIONS_CONTEXT has an unsafe pluginId: {pointer}"
+        )
+    basename = plugin_id.split(".", 1)[0].upper()
+    if (
+        basename in {"CON", "PRN", "AUX", "NUL"}
+        or re.fullmatch(r"COM[1-9]", basename)
+        or re.fullmatch(r"LPT[1-9]", basename)
+    ):
+        raise ValueError(
+            f"COPILOT_EXTENSIONS_CONTEXT has an unsafe pluginId: {pointer}"
         )
     return pointer, plugin_id
 

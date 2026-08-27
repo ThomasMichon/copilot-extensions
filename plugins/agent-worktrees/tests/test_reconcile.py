@@ -579,8 +579,12 @@ def test_invalid_cross_plugin_context_does_not_enable_legacy_reconcile(
     assert plan["diagnostics"][0]["reason"] == "installation-context-invalid"
 
 
+@pytest.mark.parametrize(
+    "plugin_id",
+    ("/tmp/untrusted", "../untrusted", r"name\child", "CON"),
+)
 def test_untrusted_plugin_id_does_not_select_validator_path(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, plugin_id
 ):
     payload = tmp_path / "payload"
     helper = (
@@ -601,7 +605,7 @@ def test_untrusted_plugin_id_does_not_select_validator_path(
         / "install.json"
     )
     context.parent.mkdir(parents=True)
-    context.write_text('{"pluginId":"/tmp/untrusted"}', encoding="utf-8")
+    context.write_text(json.dumps({"pluginId": plugin_id}), encoding="utf-8")
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(context))
 
     def installed_payload(name):
