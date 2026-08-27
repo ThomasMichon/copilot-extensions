@@ -11,11 +11,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import pytest
 import yaml
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import config_migrations, installer
-
 
 # ---------------------------------------------------------------------------
 # v1 -> v2 migrator
@@ -183,6 +183,68 @@ def test_subcommand_force_no_expose_agent(monkeypatch, tmp_path: Path):
     assert data["projects"]["myproj"]["expose_agent"] is False
 
 
+def test_subcommand_registers_repo_identity_before_project(monkeypatch, tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    order: list[str] = []
+    monkeypatch.setattr("agent_worktrees.repos.find_repo", lambda _name: None)
+    monkeypatch.setattr(
+        "agent_worktrees.repos.add_repo",
+        lambda *args, **kwargs: order.append("repo"),
+    )
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda *args, **kwargs: argparse.Namespace(returncode=1, stdout=""),
+    )
+    monkeypatch.setattr(
+        installer,
+        "register_project",
+        lambda *args, **kwargs: order.append("project"),
+    )
+
+    rc = m.cmd_register_project_entry(_entry_args(repo_dir=str(repo)))
+
+    assert rc == 0
+    assert order == ["repo", "project"]
+
+
+def test_subcommand_preserves_hidden_repo_with_repo_dir(monkeypatch, tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    seen: dict[str, object] = {}
+
+    class _Entry:
+        repo_class = "worktree"
+        agent = False
+
+    monkeypatch.setattr(
+        "agent_worktrees.repos.find_repo",
+        lambda _name: _Entry(),
+    )
+    monkeypatch.setattr(
+        "agent_worktrees.repos.add_repo",
+        lambda *args, **kwargs: seen.update(repo_agent=kwargs["agent"]),
+    )
+    monkeypatch.setattr(
+        m.subprocess,
+        "run",
+        lambda *args, **kwargs: argparse.Namespace(returncode=1, stdout=""),
+    )
+    monkeypatch.setattr(
+        installer,
+        "register_project",
+        lambda *args, **kwargs: seen.update(
+            project_exposure=kwargs["expose_agent"]
+        ),
+    )
+
+    rc = m.cmd_register_project_entry(_entry_args(repo_dir=str(repo)))
+
+    assert rc == 0
+    assert seen == {"repo_agent": False, "project_exposure": False}
+
+
 # ---------------------------------------------------------------------------
 # Reserved-name guard -- the runtime is not a project
 # ---------------------------------------------------------------------------
@@ -200,6 +262,35 @@ def test_register_refuses_reserved_runtime_name(monkeypatch, tmp_path: Path):
     if target.exists():
         data = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
         assert "agent-worktrees" not in (data.get("projects") or {})
+
+
+def test_windows_register_refuses_reserved_name_case_insensitively(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(installer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(installer.output, "skipped", lambda *_a, **_k: None)
+    target = _patch_registry_path(monkeypatch, tmp_path)
+
+    installer.register_project("Agent-Worktrees", expose_agent=True)
+
+    assert not target.exists()
+
+
+def test_windows_register_rejects_casefolded_project_collision(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(installer.platform, "system", lambda: "Windows")
+    target = _patch_registry_path(monkeypatch, tmp_path)
+    installer.register_project("demo", expose_agent=True)
+
+    with pytest.raises(
+        installer.BinstubOwnershipError,
+        match="collides with 'demo'",
+    ):
+        installer.register_project("Demo", expose_agent=True)
+
+    data = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert set(data["projects"]) == {"demo"}
 
 
 def test_prune_reserved_projects_self_heals(monkeypatch, tmp_path: Path):
@@ -234,4 +325,3 @@ def test_prune_reserved_projects_noop_when_clean(monkeypatch, tmp_path: Path):
     assert installer.prune_reserved_projects() == []
     # Untouched when there is nothing reserved to prune.
     assert target.read_text(encoding="utf-8") == before
-

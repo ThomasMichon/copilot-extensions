@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import json
 import platform
+import shlex
+from contextlib import contextmanager
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import installer as inst
+
+PLUGIN = Path(__file__).resolve().parents[1]
 
 
 def _project_binstub(lb: Path, project: str) -> str:
@@ -31,19 +38,12 @@ def test_project_binstub_uses_project_flag(monkeypatch, tmp_path: Path):
     # WORKTREE_PROJECT survives ONLY in the recovery (venv-missing) branch,
     # never on the primary CLI path.
     if platform.system() == "Windows":
-        assert '"%_PY%" -m agent_worktrees --project demoproj' in content
-        assert 'set "WORKTREE_PROJECT=demoproj"' in content  # recovery only
+        assert "bin\\payload\\agent-worktrees.cmd" in content
+        assert "--project demoproj" in content
     else:
-        assert "-m agent_worktrees --project demoproj" in content
-        assert 'export WORKTREE_PROJECT="demoproj"' in content  # recovery only
-        # Regression guard (process-storm): the POSIX binstub must resolve the
-        # versioned runtime directly (current-version -> versions/<ver>/bin/
-        # python), NEVER exec ~/.local/bin/agent-worktrees -- delegating to
-        # itself (or the global stub, which delegates to itself) recurses into
-        # an unbounded fork/exec storm.
+        assert "bin/payload/agent-worktrees" in content
+        assert "--project demoproj" in content
         assert ".local/bin/agent-worktrees" not in content
-        assert "current-version" in content
-        assert "versions/" in content
 
 
 def test_global_stub_does_not_clear_worktree_id(monkeypatch, tmp_path: Path):
@@ -85,8 +85,8 @@ def test_posix_stubs_never_self_reference(monkeypatch, tmp_path: Path):
     # never delegating to (and thus recursing through) the global stub.
     pcontent = (lb / "demoproj").read_text()
     assert ".local/bin/agent-worktrees" not in pcontent, "project stub self-references"
-    assert "-m agent_worktrees --project demoproj" in pcontent
-    assert "current-version" in pcontent and "versions/" in pcontent
+    assert "bin/payload/agent-worktrees" in pcontent
+    assert "--project demoproj" in pcontent
 
 
 def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path):
@@ -122,13 +122,16 @@ def test_windows_binstubs_resolve_via_current_version_marker(monkeypatch, tmp_pa
 
     assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
 
-    for name in ("agent-worktrees.cmd", "demoproj.cmd", "demoproj.ps1"):
+    for name in ("agent-worktrees.cmd",):
         content = (lb / name).read_text()
         assert "current-version" in content, f"{name} must resolve via the marker"
         assert "versions" in content
         # The retired junction-target parse must be gone.
         assert "dir /a:l" not in content, f"{name} must not parse a .venv junction"
         assert "\\.venv\\" not in content, f"{name} must not resolve through .venv"
+    for name in ("demoproj.cmd", "demoproj.ps1"):
+        content = (lb / name).read_text()
+        assert "bin\\payload\\agent-worktrees" in content
 
 
 def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_path: Path):
@@ -151,6 +154,11 @@ def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_p
     this test fails."""
     lb = tmp_path / "bin"
     monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(
+        inst,
+        "_receipt_path",
+        lambda project: tmp_path / "receipts" / f"{project}.json",
+    )
 
     def _generate_under(install_root: Path) -> dict[str, bytes]:
         # Point every live-runtime accessor at a distinct, bogus root. A hermetic
@@ -168,11 +176,9 @@ def test_binstub_content_is_independent_of_live_install_state(monkeypatch, tmp_p
     second = _generate_under(tmp_path / "install-B")
 
     assert first == second, "binstub content must not depend on live install state"
-    # And it must be the marker-based resolver, not a live-state snapshot.
-    if platform.system() == "Windows":
-        content = first["demoproj.cmd"].decode()
-        assert "current-version" in content
-        assert "\\.venv\\" not in content
+    assert b"bin/payload/agent-worktrees" in next(iter(first.values())).replace(
+        b"\\", b"/"
+    )
 
 
 def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
@@ -190,7 +196,8 @@ def test_deploy_binstubs_writes_ps1_on_windows(monkeypatch, tmp_path: Path):
     ps1 = lb / "demoproj.ps1"
     assert ps1.exists()
     content = ps1.read_text()
-    assert "-m agent_worktrees --project 'demoproj'" in content
+    assert "bin\\payload\\agent-worktrees.ps1" in content
+    assert "--project 'demoproj'" in content
 
 
 def _reg(monkeypatch, names: list[str]) -> None:
@@ -208,9 +215,8 @@ def test_reconcile_adds_registered_and_removes_stale(monkeypatch, tmp_path: Path
     monkeypatch.setattr(inst, "local_bin", lambda: lb)
     _reg(monkeypatch, ["keepproj"])
 
-    # Pre-seed a stale *ours* stub for a project no longer registered.
-    for p, c in inst._project_binstub_specs("staleproj"):
-        p.write_text(c, newline="")
+    # Pre-seed a stale receipt-owned stub for a project no longer registered.
+    inst._deploy_project_binstub("staleproj")
     # And a foreign stub from another tool (no WORKTREE_PROJECT / --project marker).
     foreign = lb / ("othertool.cmd" if platform.system() == "Windows" else "othertool")
     foreign.write_text("@echo off\r\necho not ours\r\n", newline="")
@@ -278,3 +284,496 @@ def test_deploy_project_binstub_refuses_reserved_name(monkeypatch, tmp_path: Pat
     assert inst._deploy_project_binstub("agent-worktrees") == 0
     for p, _ in inst._project_binstub_specs("agent-worktrees"):
         assert not p.exists()
+
+
+def test_project_binstub_writes_attributable_receipt(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    monkeypatch.setattr(
+        inst,
+        "_binstub_owner",
+        lambda repo_dir=None: {
+            "marketplace": "example",
+            "plugin": "agent-worktrees",
+            "payload_root": "/payload/example/agent-worktrees",
+            "repository": "https://example.invalid/tools.git",
+            "plugin_version": "1.0.0",
+        },
+    )
+
+    assert inst._deploy_project_binstub("demo") > 0
+    receipt = inst._read_receipt("demo")
+    assert receipt is not None
+    assert receipt["owner"]["marketplace"] == "example"
+    assert receipt["project"]["name"] == "demo"
+    assert receipt["runtime"]["resolver"] == "payload-local"
+    assert set(receipt["stubs"]) == {
+        path.name for path, _ in inst._project_binstub_specs("demo")
+    }
+
+
+def test_project_binstub_rejects_ownership_transfer(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    owner = {
+        "marketplace": "one",
+        "plugin": "agent-worktrees",
+        "payload_root": "/payload/one/agent-worktrees",
+        "repository": "https://example.invalid/tools.git",
+        "plugin_version": "1.0.0",
+    }
+    monkeypatch.setattr(inst, "_binstub_owner", lambda repo_dir=None: dict(owner))
+    inst._deploy_project_binstub("demo")
+    before = {path: path.read_bytes() for path, _ in inst._project_binstub_specs("demo")}
+
+    owner["marketplace"] = "two"
+    owner["payload_root"] = "/payload/two/agent-worktrees"
+    with pytest.raises(inst.BinstubOwnershipError, match="ownership transfer"):
+        inst._deploy_project_binstub("demo")
+    assert {path: path.read_bytes() for path in before} == before
+
+
+def test_project_binstub_preserves_unreceipted_foreign_file(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    lb.mkdir()
+    target = inst._project_binstub_specs("demo")[0][0]
+    target.write_text("#!/bin/sh\necho foreign\n", encoding="utf-8")
+
+    with pytest.raises(inst.BinstubOwnershipError, match="unreceipted"):
+        inst._deploy_project_binstub("demo")
+    assert target.read_text(encoding="utf-8") == "#!/bin/sh\necho foreign\n"
+
+
+def test_project_binstub_requires_transfer_for_exact_legacy_signature(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    lb.mkdir()
+    target = inst._project_binstub_specs("demo")[0][0]
+    target.write_text(
+        "#!/bin/sh\nexec python -m agent_worktrees --project demo \"$@\"\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(inst.BinstubOwnershipError, match="unreceipted"):
+        inst._deploy_project_binstub("demo")
+    assert "python -m agent_worktrees" in target.read_text(encoding="utf-8")
+
+    _reg(monkeypatch, ["demo"])
+    inst.transfer_project_binstub("demo")
+    assert inst._read_receipt("demo") is not None
+    assert "bin/payload/agent-worktrees" in target.read_text(encoding="utf-8")
+
+
+def test_registration_preflight_rejects_transfer_before_registry_mutation(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    owner = {
+        "marketplace": "one",
+        "plugin": "agent-worktrees",
+        "payload_root": "/payload/one/agent-worktrees",
+        "repository": "https://example.invalid/tools.git",
+        "plugin_version": "1.0.0",
+    }
+    monkeypatch.setattr(inst, "_binstub_owner", lambda repo_dir=None: dict(owner))
+    inst._deploy_project_binstub("demo", repo_dir=tmp_path)
+    owner["marketplace"] = "two"
+    owner["payload_root"] = "/payload/two/agent-worktrees"
+    mutated = False
+
+    with pytest.raises(inst.BinstubOwnershipError, match="ownership transfer"):
+        with inst.project_binstub_registration(
+            "demo", repo_dir=tmp_path
+        ) as registration:
+            mutated = True
+            registration.commit()
+
+    assert mutated is False
+
+
+def test_registration_preserves_unreceipted_command_without_aborting(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    lb.mkdir()
+    target = inst._project_binstub_specs("demo", repo_dir=tmp_path)[0][0]
+    target.write_text("#!/bin/sh\necho legacy\n", encoding="utf-8")
+    mutated = False
+
+    with inst.project_binstub_registration("demo", repo_dir=tmp_path):
+        mutated = True
+
+    assert mutated is True
+    assert target.read_text(encoding="utf-8") == "#!/bin/sh\necho legacy\n"
+    assert inst._read_receipt("demo") is None
+
+
+def test_registration_serializes_shared_registries_before_project(
+    monkeypatch, tmp_path: Path
+):
+    events: list[str] = []
+
+    @contextmanager
+    def _lock(name: str):
+        events.append(f"acquire:{name}")
+        try:
+            yield
+        finally:
+            events.append(f"release:{name}")
+
+    monkeypatch.setattr(inst, "_binstub_lock", _lock)
+    monkeypatch.setattr(
+        inst,
+        "_project_binstub_context",
+        lambda *args, **kwargs: events.append("preflight"),
+    )
+    monkeypatch.setattr(
+        inst,
+        "_deploy_project_binstub_unlocked",
+        lambda *args, **kwargs: events.append("publish"),
+    )
+
+    with inst.project_binstub_registration(
+        "demo", repo_dir=tmp_path
+    ) as registration:
+        events.append("registry-write")
+        registration.commit()
+
+    assert events == [
+        "acquire:__registries__",
+        "acquire:demo",
+        "preflight",
+        "registry-write",
+        "publish",
+        "release:demo",
+        "release:__registries__",
+    ]
+
+
+def test_registration_without_commit_does_not_publish(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
+    monkeypatch.setattr(inst, "install_dir", lambda: tmp_path / "runtime")
+
+    with inst.project_binstub_registration("demo", repo_dir=tmp_path):
+        pass
+
+    assert not inst._project_binstub_specs("demo", repo_dir=tmp_path)[0][0].exists()
+    assert inst._read_receipt("demo") is None
+
+
+def test_reconcile_preserves_modified_receipt_owned_stub(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, [])
+    inst._deploy_project_binstub("demo")
+    target = inst._project_binstub_specs("demo")[0][0]
+    target.write_text("modified\n", encoding="utf-8")
+
+    result = inst.reconcile_binstubs()
+
+    assert target.exists()
+    assert target.read_text(encoding="utf-8") == "modified\n"
+    assert result["removed"] == []
+
+
+def test_explicit_transfer_replaces_other_owner(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    owner = {
+        "marketplace": "one",
+        "plugin": "agent-worktrees",
+        "payload_root": "/payload/one/agent-worktrees",
+        "repository": "https://example.invalid/tools.git",
+        "plugin_version": "1.0.0",
+    }
+    monkeypatch.setattr(inst, "_binstub_owner", lambda repo_dir=None: dict(owner))
+    inst._deploy_project_binstub("demo")
+    owner["marketplace"] = "two"
+    owner["payload_root"] = "/payload/two/agent-worktrees"
+
+    inst.transfer_project_binstub("demo")
+
+    receipt = inst._read_receipt("demo")
+    assert receipt is not None
+    assert receipt["owner"]["marketplace"] == "two"
+
+
+def test_reconcile_continues_past_foreign_owner(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    owner = {
+        "marketplace": "one",
+        "plugin": "agent-worktrees",
+        "payload_root": "/payload/one/agent-worktrees",
+        "repository": "https://example.invalid/tools.git",
+        "plugin_version": "1.0.0",
+    }
+    monkeypatch.setattr(inst, "_binstub_owner", lambda repo_dir=None: dict(owner))
+    _reg(monkeypatch, ["foreign", "local"])
+    inst._deploy_project_binstub("foreign")
+    owner["marketplace"] = "two"
+    owner["payload_root"] = "/payload/two/agent-worktrees"
+
+    result = inst.reconcile_binstubs()
+
+    assert "foreign" in result["preserved"]
+    assert inst._project_binstub_specs("local")[0][0].exists()
+
+
+def test_explicit_payload_root_precedes_stale_manifest(monkeypatch, tmp_path: Path):
+    current = tmp_path / "current"
+    stale = tmp_path / "stale"
+    for root in (current, stale):
+        root.mkdir()
+        (root / "plugin.json").write_text(
+            '{"name":"agent-worktrees"}\n', encoding="utf-8"
+        )
+    runtime = tmp_path / "runtime"
+    runtime.mkdir()
+    (runtime / "deploy-manifest.json").write_text(
+        json.dumps({"source": {"path": str(stale)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(inst, "install_dir", lambda: runtime)
+    monkeypatch.setenv("AGENT_WORKTREES_PAYLOAD_ROOT", str(current))
+
+    assert inst._payload_root() == current.resolve()
+
+
+def test_project_binstub_escapes_payload_paths(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
+    payload = tmp_path / "payload with 'quote' and $dollar"
+    monkeypatch.setattr(inst, "_payload_root", lambda repo_dir=None: payload)
+
+    if platform.system() == "Windows":
+        specs = dict(inst._project_binstub_specs("demo"))
+        ps1 = specs[tmp_path / "bin" / "demo.ps1"]
+        assert str(payload).replace("'", "''") in ps1
+    else:
+        content = inst._project_binstub_specs("demo")[0][1]
+        assert shlex.quote(str(payload / "bin/payload/agent-worktrees")) in content
+
+
+def test_payload_shims_propagate_ownership_root() -> None:
+    posix = (PLUGIN / "bin" / "payload" / "agent-worktrees").read_text(
+        encoding="utf-8"
+    )
+    powershell = (
+        PLUGIN / "bin" / "payload" / "agent-worktrees.ps1"
+    ).read_text(encoding="utf-8")
+    assert 'export AGENT_WORKTREES_PAYLOAD_ROOT="$_payload_root"' in posix
+    assert "$env:AGENT_WORKTREES_PAYLOAD_ROOT = $_payloadRoot" in powershell
+    assert "[Environment]::GetEnvironmentVariable" in powershell
+    assert "Remove-Item Env:AGENT_WORKTREES_PAYLOAD_ROOT" in powershell
+
+
+def test_project_binstub_rejects_invalid_command_name(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(inst, "local_bin", lambda: tmp_path / "bin")
+    monkeypatch.setattr(inst, "install_dir", lambda: tmp_path / "runtime")
+    with pytest.raises(ValueError, match="project command name"):
+        inst._deploy_project_binstub("bad & name")
+
+
+def test_reconcile_preserves_malformed_stale_receipt(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, [])
+    inst._deploy_project_binstub("demo")
+    inst._receipt_path("demo").write_text("{bad", encoding="utf-8")
+
+    result = inst.reconcile_binstubs()
+
+    assert "demo" in result["preserved"]
+    assert inst._project_binstub_specs("demo")[0][0].exists()
+
+
+def test_explicit_transfer_recovers_malformed_receipt(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, ["demo"])
+    inst._deploy_project_binstub("demo")
+    inst._receipt_path("demo").write_text("{bad", encoding="utf-8")
+
+    inst.transfer_project_binstub("demo")
+
+    assert inst._read_receipt("demo") is not None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("owner", []), ("project", "bad"), ("stubs", [])],
+)
+def test_reconcile_preserves_structurally_invalid_receipt(
+    monkeypatch, tmp_path: Path, field: str, value: object
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, [])
+    inst._deploy_project_binstub("demo")
+    receipt = json.loads(inst._receipt_path("demo").read_text(encoding="utf-8"))
+    receipt[field] = value
+    inst._receipt_path("demo").write_text(
+        json.dumps(receipt), encoding="utf-8"
+    )
+
+    result = inst.reconcile_binstubs()
+
+    assert "demo" in result["preserved"]
+    assert inst._project_binstub_specs("demo")[0][0].exists()
+
+
+def test_native_reconcilers_pin_stable_staged_origin() -> None:
+    posix = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    powershell = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    assert '${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}' in posix
+    assert "$env:COPILOT_PLUGIN_STAGED_FROM" in powershell
+    assert '"path": "$stable_plugin"' in posix
+    assert "$pluginPath = if ($env:COPILOT_PLUGIN_STAGED_FROM)" in powershell
+    assert "Project registration failed (exit $LASTEXITCODE)" in powershell
+    assert (
+        'AGENT_WORKTREES_PAYLOAD_ROOT="${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}"'
+        in posix
+    )
+    assert "$env:AGENT_WORKTREES_PAYLOAD_ROOT = if " in powershell
+    assert 'reconcile-binstubs --remove "$PROJECT_NAME"' in posix
+    assert "reconcile-binstubs --remove $ProjectName" in powershell
+
+
+def test_receipt_hashes_the_bytes_left_on_disk(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    monkeypatch.setattr(inst.platform, "system", lambda: "Windows")
+    lb.mkdir()
+    for path, content in inst._project_binstub_specs("Demo"):
+        path.write_text(
+            content.replace("\r\n", "\n"),
+            encoding="utf-8",
+            newline="",
+        )
+    _reg(monkeypatch, ["Demo"])
+
+    inst.transfer_project_binstub("Demo")
+
+    receipt = inst._read_receipt("demo")
+    assert receipt is not None
+    for path, _content in inst._project_binstub_specs("Demo"):
+        assert receipt["stubs"][path.name.casefold()] == inst._file_sha256(path)
+
+
+def test_windows_receipt_hash_lookup_is_case_insensitive(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(inst.platform, "system", lambda: "Windows")
+    path = tmp_path / "Demo.CMD"
+    path.write_bytes(b"launcher\r\n")
+    receipt = {"stubs": {"demo.cmd": inst._file_sha256(path)}}
+
+    assert inst._stub_hash(receipt, path) == inst._file_sha256(path)
+
+
+def test_project_identity_canonicalizes_registered_anchor(
+    monkeypatch, tmp_path: Path
+):
+    real = tmp_path / "real"
+    real.mkdir()
+    linked = tmp_path / "linked"
+    linked.symlink_to(real, target_is_directory=True)
+
+    class _Entry:
+        remote = ""
+
+        @staticmethod
+        def local_path():
+            return str(linked)
+
+    monkeypatch.setattr("agent_worktrees.repos.find_repo", lambda _name: _Entry())
+
+    assert inst._project_identity("demo") == inst._project_identity(
+        "demo", repo_dir=real
+    )
+
+
+def test_remove_project_binstub_requires_owner_and_exact_hash(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    inst._deploy_project_binstub("demo")
+    paths = [path for path, _ in inst._project_binstub_specs("demo")]
+
+    removed = inst.remove_project_binstub("demo")
+
+    assert removed == paths
+    assert not inst._receipt_path("demo").exists()
+    assert not any(path.exists() for path in paths)
+
+
+def test_remove_project_binstub_preserves_modified_file(
+    monkeypatch, tmp_path: Path
+):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    inst._deploy_project_binstub("demo")
+    target = inst._project_binstub_specs("demo")[0][0]
+    target.write_text("modified\n", encoding="utf-8")
+
+    with pytest.raises(inst.BinstubOwnershipError, match="modified"):
+        inst.remove_project_binstub("demo")
+    assert target.exists()
+    assert inst._receipt_path("demo").exists()
+
+
+@pytest.mark.skipif(platform.system() == "Windows", reason="POSIX dotted name")
+def test_reconcile_discovers_dotted_project_name(monkeypatch, tmp_path: Path):
+    lb = tmp_path / "bin"
+    root = tmp_path / "runtime"
+    monkeypatch.setattr(inst, "local_bin", lambda: lb)
+    monkeypatch.setattr(inst, "install_dir", lambda: root)
+    _reg(monkeypatch, [])
+    inst._deploy_project_binstub("example.tools")
+    target = inst._project_binstub_specs("example.tools")[0][0]
+
+    result = inst.reconcile_binstubs()
+
+    assert str(target) in result["removed"]
+    assert not target.exists()

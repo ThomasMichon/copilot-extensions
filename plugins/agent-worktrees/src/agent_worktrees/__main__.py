@@ -64,8 +64,7 @@ from datetime import datetime
 from pathlib import Path
 
 import yaml
-
-from agent_procutil import detached_kwargs, windowless_python, no_window_flags
+from agent_procutil import detached_kwargs, no_window_flags, windowless_python
 
 from . import (
     activity,
@@ -74,6 +73,7 @@ from . import (
     git_ops,
     list_cache,
     locks,
+    obligations,
     output,
     permissions,
     pr_ops,
@@ -87,7 +87,6 @@ from . import claimant as claimant_mod
 from . import config as cfg
 from . import finalize as fin
 from . import installer as inst
-from . import obligations
 from . import services as svc
 from . import state_root as state_root_mod
 from . import validate as val
@@ -10384,18 +10383,49 @@ def cmd_install(args: argparse.Namespace) -> int:
     if not inst.deploy_wrappers(repo_dir):
         return 1
 
-    # Deploy project-specific binstubs
-    if not inst.deploy_binstubs(repo_dir, project=project):
-        return 1
-
-    # Update projects registry. Honor the repos.yaml agent-exposure
-    # classification (default ON) so a repo marked ``agent: false`` (e.g. a
-    # contributor/owner repo that hosts no agent) is registered reference-only
-    # instead of silently exposing a same-machine agent on (re-)install.
+    # Register repository identity before project state or its attributable
+    # launcher, so every first-install receipt is stable.
     from . import repos as _repos
-    _entry = _repos.find_repo(project)
-    _expose_agent = _entry.agent if _entry else True
-    inst.register_project(project, repo_dir=repo_dir, expose_agent=_expose_agent)
+    with inst.project_binstub_registration(
+        project, repo_dir=repo_dir
+    ) as binstub_registration:
+        _entry = _repos.find_repo(project)
+        _reg_class = (
+            _entry.repo_class
+            if _entry is not None and _entry.repo_class != "reference"
+            else "worktree"
+        )
+        _remote = ""
+        _remote_result = subprocess.run(
+            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if _remote_result.returncode == 0:
+            _remote = _remote_result.stdout.strip()
+        _repos.add_repo(
+            project,
+            str(repo_dir),
+            repo_class=_reg_class,
+            remote=_remote,
+            agent=_entry.agent if _entry else True,
+            plat=plat,
+        )
+
+        # Update projects registry. Honor the repos.yaml agent-exposure
+        # classification (default ON) so reference-only repos stay hidden.
+        _entry = _repos.find_repo(project)
+        _expose_agent = _entry.agent if _entry else True
+        inst.register_project(
+            project, repo_dir=repo_dir, expose_agent=_expose_agent
+        )
+        binstub_registration.commit()
+
+    # Project publication above owns its launcher; this call refreshes only the
+    # project-agnostic global tool shim.
+    if not inst.deploy_binstubs(repo_dir, project=""):
+        return 1
 
     # Reconcile all project binstubs against the registry (add missing, incl.
     # the .ps1 primary on Windows; remove stubs for deregistered projects).
@@ -10778,10 +10808,6 @@ def cmd_register(args: argparse.Namespace) -> int:
     else:
         _cleanup_stale_instructions(proj_dir)
 
-    # Generate binstub
-    if not inst.deploy_binstubs(repo_dir, project=project):
-        return 1
-
     # Update projects registry -- include WSL state only when actually in WSL
     wsl_state: str | None = None
     wsl_distro: str | None = None
@@ -10791,18 +10817,6 @@ def cmd_register(args: argparse.Namespace) -> int:
         wsl_state = "adopted"
         wsl_distro = wsl_distro_name
         wsl_path = str(repo_dir)
-
-    inst.register_project(
-        project,
-        repo_dir=repo_dir,
-        default_branch=default_branch,
-        expose_agent=expose_agent,
-        base_repo=getattr(args, "base_repo", False),
-        elevated=getattr(args, "elevated", False),
-        wsl_state=wsl_state,
-        wsl_distro=wsl_distro,
-        wsl_path=wsl_path,
-    )
 
     # #282: ensure the repo has a repos.yaml entry so CWD->project discovery
     # resolves it. projects.yaml is deliberately lean -- it defers identity and
@@ -10815,33 +10829,53 @@ def cmd_register(args: argparse.Namespace) -> int:
     # the CURRENT platform (so a WSL adoption is filed under 'wsl', not 'linux'),
     # merging into any existing entry and preserving a deliberate non-worktree
     # class (add_repo only upgrades away from the 'reference' default).
-    try:
-        from . import repos as _repos_reg
-        _existing_repo = _repos_reg.find_repo(project)
-        _reg_class = (
-            _existing_repo.repo_class
-            if _existing_repo is not None
-            and _existing_repo.repo_class != "reference"
-            else "worktree"
-        )
-        _reg_remote_url = ""
-        _rru = subprocess.run(
-            ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
-            capture_output=True, text=True, timeout=5,
-        )
-        if _rru.returncode == 0:
-            _reg_remote_url = _rru.stdout.strip()
-        _repos_reg.add_repo(
+    with inst.project_binstub_registration(
+        project, repo_dir=repo_dir
+    ) as binstub_registration:
+        try:
+            from . import repos as _repos_reg
+            _existing_repo = _repos_reg.find_repo(project)
+            _reg_class = (
+                _existing_repo.repo_class
+                if _existing_repo is not None
+                and _existing_repo.repo_class != "reference"
+                else "worktree"
+            )
+            _reg_remote_url = ""
+            _rru = subprocess.run(
+                ["git", "-C", str(repo_dir), "remote", "get-url", "origin"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if _rru.returncode == 0:
+                _reg_remote_url = _rru.stdout.strip()
+            _repos_reg.add_repo(
+                project,
+                str(repo_dir),
+                repo_class=_reg_class,
+                remote=_reg_remote_url,
+                default_branch=default_branch,
+                agent=expose_agent,
+                plat=plat,
+            )
+        except Exception as _e:
+            output.err(f"Could not record repos.yaml entry for '{project}': {_e}")
+            return 1
+
+        inst.register_project(
             project,
-            str(repo_dir),
-            repo_class=_reg_class,
-            remote=_reg_remote_url,
+            repo_dir=repo_dir,
             default_branch=default_branch,
-            agent=expose_agent,
-            plat=plat,
+            expose_agent=expose_agent,
+            base_repo=getattr(args, "base_repo", False),
+            elevated=getattr(args, "elevated", False),
+            wsl_state=wsl_state,
+            wsl_distro=wsl_distro,
+            wsl_path=wsl_path,
         )
-    except Exception as _e:
-        output.warn(f"Could not record repos.yaml entry for '{project}': {_e}")
+        binstub_registration.commit()
+
+    if not inst.deploy_binstubs(repo_dir, project=""):
+        return 1
 
     # #537: adopting a repo is the moment to pin its gh account. If the account
     # only resolves by falling back to an org owner that isn't an authenticated
@@ -10908,16 +10942,13 @@ def cmd_register(args: argparse.Namespace) -> int:
 def cmd_uninstall(args: argparse.Namespace) -> int:
     output.header("Uninstalling Agent Worktrees")
 
-    # Remove binstub
-    lb = inst.local_bin()
+    # Remove only this payload's receipt-owned project binstub.
     project = cfg.project_name()
-    if platform.system() == "Windows":
-        bs = lb / f"{project}.cmd"
-    else:
-        bs = lb / project
-    if bs.exists():
-        bs.unlink()
-        output.changed(f"Removed binstub: {bs}")
+    try:
+        for path in inst.remove_project_binstub(project):
+            output.changed(f"Removed binstub: {path}")
+    except inst.BinstubOwnershipError as exc:
+        output.warn(str(exc))
 
     # Remove wrappers
     bd = inst.bin_dir()
@@ -15764,10 +15795,21 @@ def build_parser() -> argparse.ArgumentParser:
                          "Picker/operator update flow opts in (#1393).")
 
     # reconcile-binstubs (project launchers in ~/.local/bin vs projects.yaml)
-    sub.add_parser(
+    reconcile_binstubs_parser = sub.add_parser(
         "reconcile-binstubs",
         help="Reconcile ~/.local/bin project binstubs against projects.yaml "
              "(add for every registered project, remove deregistered ones)")
+    ownership_action = reconcile_binstubs_parser.add_mutually_exclusive_group()
+    ownership_action.add_argument(
+        "--transfer",
+        metavar="PROJECT",
+        help="explicitly transfer one registered project command to this payload",
+    )
+    ownership_action.add_argument(
+        "--remove",
+        metavar="PROJECT",
+        help="remove one project command only when this payload owns its receipt",
+    )
 
     # register-project-entry (single Python owner of the projects.yaml write --
     # both installers call this instead of reimplementing the registry logic)
@@ -15780,7 +15822,7 @@ def build_parser() -> argparse.ArgumentParser:
     # before argparse dispatches to this subparser.
     sp.add_argument("project", help="Project name")
     sp.add_argument("--repo-dir", default=None,
-                    help="Anchor dir (only for WSL path capture; not persisted)")
+                    help="Anchor dir used to register repository identity")
     sp.add_argument("--display-name", default=None,
                     help="Harness display casing override")
     _ea = sp.add_mutually_exclusive_group()
@@ -17357,7 +17399,16 @@ def cmd_reconcile_plugins(args: argparse.Namespace) -> int:
 
 def cmd_reconcile_binstubs(args: argparse.Namespace) -> int:
     """Reconcile ~/.local/bin project binstubs against the projects registry."""
-    inst.reconcile_binstubs()
+    try:
+        if getattr(args, "transfer", None):
+            inst.transfer_project_binstub(args.transfer)
+        elif getattr(args, "remove", None):
+            inst.remove_project_binstub(args.remove)
+        else:
+            inst.reconcile_binstubs()
+    except inst.BinstubOwnershipError as exc:
+        output.err(str(exc))
+        return 1
     return 0
 
 
@@ -17372,27 +17423,76 @@ def cmd_register_project_entry(args: argparse.Namespace) -> int:
     to preserve-existing in :func:`installer.register_project`.
     """
     project = args.project
-    expose = getattr(args, "expose_agent", None)
-    if expose is None:
-        try:
-            from . import repos as _repos
-            entry = _repos.find_repo(project)
-            if entry is not None:
-                expose = entry.agent
-        except Exception:
-            expose = None
+    repo_dir = getattr(args, "repo_dir", None)
+    if inst.is_reserved_project_command(project):
+        output.skipped(f"'{project}' is the runtime itself, not a project")
+        return 0
+    with inst.project_binstub_registration(
+        project, repo_dir=repo_dir
+    ) as binstub_registration:
+        if repo_dir:
+            try:
+                from . import repos as _repos
 
-    inst.register_project(
-        project,
-        repo_dir=getattr(args, "repo_dir", None),
-        expose_agent=expose,
-        base_repo=getattr(args, "base_repo", None),
-        elevated=getattr(args, "elevated", None),
-        display_name=getattr(args, "display_name", None),
-        wsl_state=getattr(args, "wsl_state", None),
-        wsl_distro=getattr(args, "wsl_distro", None),
-        wsl_path=getattr(args, "wsl_path", None),
-    )
+                existing_repo = _repos.find_repo(project)
+                repo_class = (
+                    existing_repo.repo_class
+                    if existing_repo is not None
+                    and existing_repo.repo_class != "reference"
+                    else "worktree"
+                )
+                remote = ""
+                result = subprocess.run(
+                    ["git", "-C", repo_dir, "remote", "get-url", "origin"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                if result.returncode == 0:
+                    remote = result.stdout.strip()
+                requested_exposure = getattr(args, "expose_agent", None)
+                repo_exposure = (
+                    requested_exposure
+                    if requested_exposure is not None
+                    else existing_repo.agent
+                    if existing_repo is not None
+                    else True
+                )
+                _repos.add_repo(
+                    project,
+                    repo_dir,
+                    repo_class=repo_class,
+                    remote=remote,
+                    agent=repo_exposure,
+                    plat=cfg.detect_platform(),
+                )
+            except Exception as exc:
+                output.err(
+                    f"Could not record repository identity for {project}: {exc}"
+                )
+                return 1
+        expose = getattr(args, "expose_agent", None)
+        if expose is None:
+            try:
+                from . import repos as _repos
+                entry = _repos.find_repo(project)
+                if entry is not None:
+                    expose = entry.agent
+            except Exception:
+                expose = None
+
+        inst.register_project(
+            project,
+            repo_dir=repo_dir,
+            expose_agent=expose,
+            base_repo=getattr(args, "base_repo", None),
+            elevated=getattr(args, "elevated", None),
+            display_name=getattr(args, "display_name", None),
+            wsl_state=getattr(args, "wsl_state", None),
+            wsl_distro=getattr(args, "wsl_distro", None),
+            wsl_path=getattr(args, "wsl_path", None),
+        )
+        binstub_registration.commit()
     return 0
 
 
@@ -19653,7 +19753,7 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             return handler(args)
-        except (FileNotFoundError, ValueError) as e:
+        except (FileNotFoundError, ValueError, inst.BinstubOwnershipError) as e:
             output.err(str(e))
             return 1
         except KeyboardInterrupt:

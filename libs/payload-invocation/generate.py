@@ -105,10 +105,16 @@ def load_manifest(path: Path) -> dict[str, object]:
     provision_mode = data.get("provisionMode", "snapshot")
     if provision_mode not in _PROVISION_MODES:
         raise ValueError(f"{path}: invalid provisionMode: {provision_mode!r}")
+    payload_root_env = data.get("payloadRootEnv", "")
+    if not isinstance(payload_root_env, str) or (
+        payload_root_env and not _ENV.fullmatch(payload_root_env)
+    ):
+        raise ValueError(f"{path}: invalid payloadRootEnv: {payload_root_env!r}")
     data["outputDir"] = output_dir
     data["installer"] = installer
     data["windowsCatalogShim"] = windows_catalog_shim
     data["provisionMode"] = provision_mode
+    data["payloadRootEnv"] = payload_root_env
     data["plugin"] = plugin
     data["commands"] = commands
     data["multiCommandManifest"] = raw_commands is not None
@@ -220,6 +226,31 @@ def render(
         "WINDOWS_CATALOG_SHELL": windows_catalog_shell,
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,
+        "PAYLOAD_ROOT_ENV_POSIX": (
+            f'export {data["payloadRootEnv"]}="$_payload_root"\n'
+            if data["payloadRootEnv"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POWERSHELL_BEFORE": (
+            "    $_payloadRootEnvPrevious = "
+            f"[Environment]::GetEnvironmentVariable('{data['payloadRootEnv']}', "
+            "'Process')\n"
+            f"    $env:{data['payloadRootEnv']} = $_payloadRoot\n"
+            if data["payloadRootEnv"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POWERSHELL_AFTER": (
+            "    $_payloadRc = $LASTEXITCODE\n"
+            "    if ($null -eq $_payloadRootEnvPrevious) { "
+            f"Remove-Item Env:{data['payloadRootEnv']} "
+            "-ErrorAction SilentlyContinue } else { "
+            f"$env:{data['payloadRootEnv']} = $_payloadRootEnvPrevious }}\n"
+            if data["payloadRootEnv"]
+            else ""
+        ),
+        "PAYLOAD_ROOT_ENV_POWERSHELL_EXIT_CODE": (
+            "$_payloadRc" if data["payloadRootEnv"] else "$LASTEXITCODE"
+        ),
         "CATALOG_SPECS_JSON": json.dumps(
             catalog_specs, ensure_ascii=True, separators=(",", ":")
         ),
