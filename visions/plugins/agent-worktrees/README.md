@@ -6,7 +6,7 @@
   session is live, and owns the transports that produce that truth.
 - **Scope:** leaf (concrete component; child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-08-19
+- **Last revised:** 2026-08-26
 - **Reality docs:** the agent-worktrees plugin `docs/` (worktree lifecycle +
   tracking) · the Worktree-Picker performance/IO effort (dotfiles#948) as the
   most recent reality on the state store
@@ -16,10 +16,13 @@
 
 agent-worktrees is the **foundation the rest of the agent fabric builds on**, and
 tracking the Copilot session **the normal way is its job** — not a favour done by
-a higher layer. It owns the raw materials of truth: **local file state, SSH reach,
-the multiplexer, PowerShell/process visibility, and lifecycle hooks.** Because it
-owns those transports, it — and only it — is the authority on *what worktrees
-exist*, *what work each is doing*, and *whether a session is live*.
+a higher layer. It owns the raw materials of truth: **local file state, worktree and
+source-control mechanics, process/lock visibility, session bindings, and
+lifecycle hooks.** It can consume optional observations from SSH, a multiplexer,
+or higher eventing layers without owning their human-facing orchestration.
+Because it owns and reduces the ground-layer records, it — and only it — is the
+authority on *what worktrees exist*, *what work each is doing*, and *whether a
+session is live*.
 
 The north star is that this state behaves like a **live database with a single
 owner**, not a loose pile of files each consumer races to read and rewrite. It is
@@ -130,6 +133,16 @@ layer's event sink. These events are the natural fit for agent-bridge because th
 that raises fidelity and cuts polling when the bridge happens to be in the session;
 it is **never required** for tracking to be correct.
 
+### The Worktrees presentation contribution — owned here, rendered elsewhere
+The ground layer publishes a **declarative Worktrees presentation contribution**
+over its machine-readable CLI: the fleet rows, semantic fields, actions, and
+ordinary landing role a human control-plane can render. This is the presentation
+counterpart of single-sourced state: agent-worktrees defines and serves worktree
+semantics, while the optional Worktree Manager supplies only generic rendering
+and interaction primitives. The contribution contains no UI stack and creates no
+dependency on the Manager; without that control-plane, the CLI remains the whole
+ground-layer product.
+
 ## Features
 
 ### single-sourced live state
@@ -175,6 +188,14 @@ agent-worktrees' own **native-event extension** (source of the crisp rest/idle a
 intent signals) and agent-bridge's **ACP tool/message events**. Each enriches when
 present; none is required, and a producer failing to initialize never subtracts
 from what the backbone already guarantees.
+
+### provider-owned Worktrees surface
+The Worktrees pivot and its actions are described by the ground layer and backed
+by the same machine-readable operations agents use. An optional presentation
+host discovers that contribution rather than carrying a second, special-purpose
+worktree client. Disabling the contribution removes the interactive Worktrees
+surface without changing any headless worktree, tracking, claim, lease, sync, or
+source-control capability.
 
 ### explicit session binding
 A session becomes **bound to its worktree by declaring so**, and a session that is
@@ -269,6 +290,15 @@ from the store alone; richer transports make a handoff *smoother* when present, 
 none is a **precondition** for the worktree remembering itself. The durable record
 is the floor under recovery, not an optimization layered on a fragile transfer.
 
+### presentation is declarative and process-boundary only
+agent-worktrees exports presentation semantics but never imports or hosts the
+Picker. Its contribution is consumed through machine-readable process
+boundaries, uses the same composition model as sibling fabric layers, and cannot
+make the Manager or an interactive UI a prerequisite for ground-layer behavior.
+The contribution remains bound to the exact installed agent-worktrees instance
+that published it, so another marketplace's same-named runtime cannot
+accidentally serve its state or actions.
+
 ## Non-Goals / Boundaries
 
 - **Not dependent on agent-bridge for tracking.** agent-bridge is an *optional*
@@ -293,9 +323,11 @@ is the floor under recovery, not an optimization layered on a fragile transfer.
   references) — it is **not** a transcript, an event stream, or an audit log, and
   must stay bounded. Rich session history and replay are the session-sync / record
   domain, not this store.
-- **Not the presentation surface.** How this state is *displayed and acted on*
-  interactively is the Worktree Picker's subject (its own vision); this vision is
-  about *owning and serving* the state, not rendering it.
+- **Not the presentation host.** agent-worktrees owns and contributes Worktrees
+  semantics, but does not render or host the interactive surface, carry a TUI
+  framework, own human terminal/multiplexer choreography, or require the
+  Worktree Manager. How contributions are composed and displayed is the Worktree
+  Picker's subject.
 
 ## See Also
 
@@ -364,3 +396,8 @@ is the floor under recovery, not an optimization layered on a fragile transfer.
   **record-first**, independent of any transport or a successful live cutover. Mined
   from an operator design conversation carved into the aperture-labs
   `worktree-self-knowledge` effort.
+- **2026-08-26** — Added the ground layer's declarative **Worktrees
+  presentation contribution** and removed implied ownership of the human
+  presentation/multiplexer host. Worktrees remains agent-worktrees-owned
+  semantics and state, but is rendered by the optional Manager through the same
+  process-boundary contribution model as sibling layers.
