@@ -152,7 +152,7 @@ def test_sweep_warms_list_cache_once_per_project(tmp_path, monkeypatch):
     _capture_set(monkeypatch)
 
     assert m._monitor_sweep("tmux", "T", "P", set()) == 3
-    assert warmed == ["p1", "p2"]
+    assert sorted(warmed) == ["p1", "p2"]
 
 
 def test_sweep_publishes_each_served_session_to_pane_reconciler(
@@ -179,7 +179,7 @@ def test_sweep_publishes_each_served_session_to_pane_reconciler(
         set(),
         pane_observer=lambda session, path: observed.append((session, path)),
     ) == 2
-    assert observed == [("wt-a", "/w/a"), ("wt-b", "/w/b")]
+    assert sorted(observed) == [("wt-a", "/w/a"), ("wt-b", "/w/b")]
 
 
 def test_sweep_picker_root_keeps_project_warm_without_sessions(

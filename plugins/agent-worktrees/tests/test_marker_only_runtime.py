@@ -161,6 +161,28 @@ def _resolve(home: Path) -> str:
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
+def test_posix_resolver_exports_payload_invocation_contract(tmp_path):
+    _make_slot(tmp_path, "1.2.3")
+    runtime = tmp_path / ".agent-worktrees"
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    resolver = _SCRIPTS / "resolve-runtime.sh"
+    script = (
+        f'. "{resolver}"; '
+        'printf "%s\\n%s\\n" "$AW_PY" "$AGENT_RT_PY"'
+    )
+    result = subprocess.run(
+        ["sh", "-c", script],
+        capture_output=True,
+        text=True,
+        env={"HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+    )
+    assert result.returncode == 0, result.stderr
+    aw_py, agent_rt_py = result.stdout.splitlines()
+    assert Path(aw_py).name == "python"
+    assert agent_rt_py == aw_py
+
+
+@pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")
 def test_resolver_tier1_prefers_current_version_marker(tmp_path):
     aw = tmp_path / ".agent-worktrees"
     _make_slot(tmp_path, "0.1.0")
