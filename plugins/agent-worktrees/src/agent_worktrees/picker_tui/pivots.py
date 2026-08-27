@@ -27,16 +27,16 @@ absent pivot simply doesn't appear.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
 import stat
-import hashlib
 import tempfile
-from copy import deepcopy
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, cast
@@ -502,17 +502,39 @@ def parse_manifest(data: Mapping[str, object], *, name: str, source_path: str) -
             internal = None
             form = {
                 "fields_from": fields_from.strip(),
-                "title_from": _opt_path(a.get("title_from"), where=f"`actions[{i}].title_from`"),
-                "body_from": _opt_path(a.get("body_from"), where=f"`actions[{i}].body_from`"),
+                "title_from": _opt_path(
+                    a.get("title_from"),
+                    where=f"`actions[{i}].title_from`",
+                ),
+                "body_from": _opt_path(
+                    a.get("body_from"),
+                    where=f"`actions[{i}].body_from`",
+                ),
             }
         elif kind == "card":
             run = ()
             internal = None
             card = {
-                "title_from": _opt_path(a.get("title_from"), where=f"`actions[{i}].title_from`") or "card.title",
-                "status_from": _opt_path(a.get("status_from"), where=f"`actions[{i}].status_from`") or "card.status",
-                "link_from": _opt_path(a.get("link_from"), where=f"`actions[{i}].link_from`") or "card.link",
-                "body_from": _opt_path(a.get("body_from"), where=f"`actions[{i}].body_from`") or "card.body",
+                "title_from": _opt_path(
+                    a.get("title_from"),
+                    where=f"`actions[{i}].title_from`",
+                )
+                or "card.title",
+                "status_from": _opt_path(
+                    a.get("status_from"),
+                    where=f"`actions[{i}].status_from`",
+                )
+                or "card.status",
+                "link_from": _opt_path(
+                    a.get("link_from"),
+                    where=f"`actions[{i}].link_from`",
+                )
+                or "card.link",
+                "body_from": _opt_path(
+                    a.get("body_from"),
+                    where=f"`actions[{i}].body_from`",
+                )
+                or "card.body",
             }
         else:
             run = _as_argv(a.get("run"), where=f"`actions[{i}].run`")
@@ -663,7 +685,7 @@ def parse_list_payload(data: object) -> tuple[list[dict], dict]:
 
 def parse_worktree_actions(
     data: Mapping[str, object], *, name: str
-) -> tuple["WorktreeAction", ...]:
+) -> tuple[WorktreeAction, ...]:
     """Parse a manifest's optional ``worktree_actions`` array (independent of
     whether the manifest also contributes a ``list`` pivot). A malformed entry
     raises :class:`ManifestError` so the caller can skip the whole manifest's
@@ -724,7 +746,7 @@ def _compat_manifest_documents(
 
 def discover_worktree_actions(
     base: str | os.PathLike[str] | None = None,
-) -> list["WorktreeAction"]:
+) -> list[WorktreeAction]:
     """Return active worktree actions.
 
     An explicit directory keeps the historical parser-only helper behavior for
@@ -756,7 +778,7 @@ def entry_matches(when: Mapping[str, object] | None, rec: Mapping[str, object]) 
 
 
 def worktree_action_matches(
-    action: "WorktreeAction", rec: Mapping[str, object]
+    action: WorktreeAction, rec: Mapping[str, object]
 ) -> bool:
     """True when ``action`` should appear for worktree record ``rec``: its
     ``when`` is empty, or every ``when`` field matches the record (the record's
@@ -767,7 +789,7 @@ def worktree_action_matches(
 
 def parse_config_sections(
     data: Mapping[str, object], *, name: str
-) -> tuple["ConfigSection", ...]:
+) -> tuple[ConfigSection, ...]:
     """Parse a manifest's optional ``config_sections`` array (independent of
     whether the manifest also contributes a ``list`` pivot or ``worktree_actions``).
     Each entry declares a ``label`` and a ``run`` argv template opened on Enter.
@@ -800,7 +822,7 @@ def parse_config_sections(
 
 def discover_config_sections(
     base: str | os.PathLike[str] | None = None,
-) -> list["ConfigSection"]:
+) -> list[ConfigSection]:
     """Return active config sections, with parser-only explicit-dir support."""
     out: list[ConfigSection] = []
     for path, data in _compat_manifest_documents(pivots_dir(base)):
@@ -1091,7 +1113,10 @@ def _materialize_active_pivots(
         base_target = destination / name
         target = base_target
         try:
-            if base_target.exists() and base_target.read_text(encoding="utf-8") == content:
+            if (
+                base_target.exists()
+                and base_target.read_text(encoding="utf-8") == content
+            ):
                 continue
         except OSError:
             pass

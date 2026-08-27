@@ -637,7 +637,10 @@ def test_duplicate_identity_isolated_and_activation_ambiguity_propagates(tmp_pat
         activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
     )
     assert [pivot.label for pivot in report.pivots] == ["Same"]
-    assert report.snapshot.decisions[str(registry / "b.json")].status is EntryStatus.INACTIVE
+    assert (
+        report.snapshot.decisions[str(registry / "b.json")].status
+        is EntryStatus.INACTIVE
+    )
     assert report.findings[0].reason == "duplicate"
 
     source = "sample@example-marketplace"

@@ -236,7 +236,10 @@ def test_malformed_local_override_is_indeterminate(tmp_path):
     prior = _prior()
     assert report.authority is ScanAuthority.INDETERMINATE
     assert report.reconcile({"demo@local": prior}) == {"demo@local": prior}
-    assert any(f.entry == str(override) and f.status == "indeterminate" for f in report.findings)
+    assert any(
+        finding.entry == str(override) and finding.status == "indeterminate"
+        for finding in report.findings
+    )
 
 
 def test_unreadable_global_settings_is_indeterminate(tmp_path, monkeypatch):
