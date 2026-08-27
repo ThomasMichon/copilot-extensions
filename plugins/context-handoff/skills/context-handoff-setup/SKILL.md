@@ -19,7 +19,7 @@ description: >
 # Context Handoff Setup
 
 The **context-handoff extension** (the live context-window monitor: token
-tracking + cost-aware 150K/250K caps with 55%/70% small-window fallbacks +
+tracking + percentage-based 55%/70% defaults with optional repository config +
 `generate_handoff_prompt` /
 `save_handoff_prompt` / `continue_handoff` tools, plus `/handoff-continue` and
 `/resume-handoff`) is **plugin-contributed** -- there is no runtime install

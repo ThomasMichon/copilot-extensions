@@ -43,9 +43,11 @@ import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { leadFrom, buildCutoverSeed } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
+import { loadContextHandoffConfig } from "./config.mjs";
 import { contextPressure, formatContextUsage } from "./thresholds.mjs";
 
 // --- State ---
+const handoffConfig = loadContextHandoffConfig(process.cwd());
 const state = {
   turnCount: 0,
   sessionId: null,
@@ -1458,6 +1460,9 @@ const session = await joinSession({
 state.sessionId = session.sessionId ?? state.sessionId ?? null;
 state.cwd = state.cwd || process.cwd();
 state.turnCount = 0;
+if (handoffConfig.warning) {
+  session.log(`[Context Handoff] ${handoffConfig.warning}`, { level: "warning" });
+}
 
 // Turn counting + first-prompt capture (replaces onUserPromptSubmitted).
 session.on("user.message", (event) => {
@@ -1553,14 +1558,14 @@ session.on("session.idle", () => {
   const msg = level === "hard"
     ? `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
       `(${usage.tokens}). ` +
-      `The cost-aware hard threshold was reached; auto-compaction still triggers ` +
+      `The configured hard threshold was reached; auto-compaction still triggers ` +
       `at ~80%. Invoke the context-handoff skill now to ` +
       `hand off before context is lost -- under a mux session it cuts over to a ` +
       `fresh successor Copilot in place, automatically (no copy/paste); otherwise ` +
       `it stores the handoff and hands you a short resume prompt.`
     : `[Context Handoff -- automated] Context utilization is ${usage.utilization} ` +
       `(${usage.tokens}). ` +
-      `The cost-aware soft threshold was reached. Invoke the context-handoff skill ` +
+      `The configured soft threshold was reached. Invoke the context-handoff skill ` +
       `at the next clean boundary -- under a mux session it cuts over to a fresh ` +
       `successor Copilot in place.`;
   session.send(msg).catch((e) =>
@@ -1582,7 +1587,11 @@ session.on("session.usage_info", (event) => {
   state.messagesLength = d.messagesLength;
   state.lastUtilization = d.tokenLimit > 0 ? d.currentTokens / d.tokenLimit : 0;
 
-  const pressure = contextPressure(d.currentTokens, d.tokenLimit);
+  const pressure = contextPressure(
+    d.currentTokens,
+    d.tokenLimit,
+    handoffConfig.thresholds,
+  );
   const usage = formatContextUsage(d.currentTokens, d.tokenLimit);
 
   // Queue an agent-facing nudge once per threshold, delivered on the next
@@ -1609,7 +1618,8 @@ session.on("session.usage_info", (event) => {
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
       `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Cost-aware threshold ${Math.round(pressure.softThreshold).toLocaleString()} ` +
+      `Configured ${pressure.softPercent}% threshold ` +
+      `${Math.round(pressure.softThreshold).toLocaleString()} ` +
       `tokens reached. Hand off at the next clean boundary ` +
       `(invoke the context-handoff skill).`,
       { level: "warning" }
@@ -1627,7 +1637,8 @@ session.on("session.usage_info", (event) => {
       `conversation ${(d.conversationTokens ?? 0).toLocaleString()}, ` +
       `system ${(d.systemTokens ?? 0).toLocaleString()}, ` +
       `tool-defs ${(d.toolDefinitionsTokens ?? 0).toLocaleString()}). ` +
-      `Cost-aware hard threshold ${Math.round(pressure.hardThreshold).toLocaleString()} ` +
+      `Configured ${pressure.hardPercent}% hard threshold ` +
+      `${Math.round(pressure.hardThreshold).toLocaleString()} ` +
       `tokens reached; auto-compaction still triggers at ~80%. ` +
       `Hand off NOW -- invoke the context-handoff skill.`,
       { level: "warning" }

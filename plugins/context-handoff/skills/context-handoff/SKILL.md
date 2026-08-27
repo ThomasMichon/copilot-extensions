@@ -61,8 +61,10 @@ is a task list.
   **exact token counts** and, on the next idle, sends you an **agent-facing
   nudge that tells you to invoke this skill** when context utilization crosses
   a threshold:
-  - **`min(150K tokens, 55% of the window)`** — hand off at the next clean boundary
-  - **`min(250K tokens, 70% of the window)`** — hand off now; compaction remains at ~80%
+  - **55% of the window by default** — hand off at the next clean boundary
+  - **70% of the window by default** — hand off now; compaction remains at ~80%
+  An owning repository may override these percentages in
+  `.context-handoff/config.yaml`.
   The nudge deliberately **does not prescribe individual tool calls** or a
   "write a file" outcome — it hands you to this skill, which owns the
   sequencing. When you receive it **under a mux session**, the correct response

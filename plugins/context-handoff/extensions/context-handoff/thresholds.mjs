@@ -1,34 +1,45 @@
-// Cost-aware context handoff thresholds.
-//
-// Large context windows make percentage-only thresholds wait too long: a
-// linearly growing prefix incurs roughly quadratic cumulative cache reads. The
-// absolute caps trigger earlier there, while the percentage limits preserve the
-// established pre-compaction safety behavior for smaller windows.
-
-export const SOFT_TOKEN_CAP = 150_000;
-export const HARD_TOKEN_CAP = 250_000;
+// Percentage-based context handoff thresholds. Repositories may override these
+// defaults through .context-handoff/config.yaml.
 export const SOFT_UTILIZATION_PERCENT = 55;
 export const HARD_UTILIZATION_PERCENT = 70;
 
-export function contextPressure(currentTokens, tokenLimit) {
+export const DEFAULT_THRESHOLDS = Object.freeze({
+  softPercent: SOFT_UTILIZATION_PERCENT,
+  hardPercent: HARD_UTILIZATION_PERCENT,
+});
+
+export function validateThresholds(thresholds, source = "thresholds") {
+  const { softPercent, hardPercent } = thresholds;
+  for (const [name, value] of Object.entries({ softPercent, hardPercent })) {
+    if (!Number.isInteger(value) || value < 1 || value > 79) {
+      throw new Error(`${source}: ${name} must be an integer from 1 through 79`);
+    }
+  }
+  if (softPercent >= hardPercent) {
+    throw new Error(`${source}: softPercent must be less than hardPercent`);
+  }
+  return Object.freeze({ softPercent, hardPercent });
+}
+
+export function contextPressure(
+  currentTokens,
+  tokenLimit,
+  thresholds = DEFAULT_THRESHOLDS,
+) {
   const validLimit = Number.isFinite(tokenLimit) && tokenLimit > 0;
   const softThreshold = validLimit
-    ? Math.min(
-      SOFT_TOKEN_CAP,
-      Math.ceil(tokenLimit * SOFT_UTILIZATION_PERCENT / 100),
-    )
-    : SOFT_TOKEN_CAP;
+    ? Math.ceil(tokenLimit * thresholds.softPercent / 100)
+    : null;
   const hardThreshold = validLimit
-    ? Math.min(
-      HARD_TOKEN_CAP,
-      Math.ceil(tokenLimit * HARD_UTILIZATION_PERCENT / 100),
-    )
-    : HARD_TOKEN_CAP;
+    ? Math.ceil(tokenLimit * thresholds.hardPercent / 100)
+    : null;
   return {
+    softPercent: thresholds.softPercent,
+    hardPercent: thresholds.hardPercent,
     softThreshold,
     hardThreshold,
-    soft: currentTokens >= softThreshold,
-    hard: currentTokens >= hardThreshold,
+    soft: validLimit && currentTokens >= softThreshold,
+    hard: validLimit && currentTokens >= hardThreshold,
   };
 }
 

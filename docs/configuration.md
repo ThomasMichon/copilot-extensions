@@ -48,6 +48,7 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 | `<repo>/.agent-codespaces/config.yaml` | **Supplementary** Codespace overrides + credential-relay policy (control repo). Most repos need none — machine defaults, `/workspaces/<basename>`, and the git-credential relay are convention-derived. Legacy repo-root `codespaces.yaml` still read (relocate with `config migrate`). | `codespaces-setup` |
 | `containers.yaml` | Container fleet defaults (control repo) | `containers-fleet` |
 | `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
+| `<repo>/.context-handoff/config.yaml` | Optional repository-owned soft/hard context utilization percentages | you / adopt |
 | `tools/setup/setup.{ps1,sh}` | The session setup script run before Copilot launches | `create-setup-script` |
 
 ### Machine-local / user-global (never committed)
