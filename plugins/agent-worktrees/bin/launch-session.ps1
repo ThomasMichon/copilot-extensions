@@ -670,6 +670,25 @@ if ($knowledgeExit -eq 0) {
     exit $knowledgeExit
 }
 
+$marketplaceArgs = @('-m', 'agent_worktrees', 'reconcile-marketplaces',
+    '--cwd', $knowledgeCwd, '--ensure-ignored', '--json')
+$savedErrorAction = $ErrorActionPreference
+try {
+    $ErrorActionPreference = 'Continue'
+    $marketplaceOutput = & $VenvPython @marketplaceArgs 2>&1
+    $marketplaceExit = $LASTEXITCODE
+} finally {
+    $ErrorActionPreference = $savedErrorAction
+}
+$marketplaceText = (($marketplaceOutput | ForEach-Object { "$_" }) -join '').Trim()
+if ($marketplaceExit -eq 0) {
+    Write-SetupLog "Marketplace override preflight completed: $marketplaceText"
+} else {
+    Write-SetupLog "Marketplace override preflight failed (exit ${marketplaceExit}): $marketplaceText" 'ERROR'
+    [Console]::Error.WriteLine("ERROR: Marketplace override preflight failed: $marketplaceText")
+    exit $marketplaceExit
+}
+
 # Apply environment variables from the launch plan
 if ($plan.env) {
     foreach ($prop in $plan.env.PSObject.Properties) {

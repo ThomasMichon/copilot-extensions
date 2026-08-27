@@ -332,6 +332,7 @@ HOOK_SHIM_FILES = (
     "register-session.ps1", "register-session.sh",
     "deregister-session.ps1", "deregister-session.sh",
     "anchor-hygiene-check.ps1", "anchor-hygiene-check.sh",
+    "marketplace-overrides.ps1", "marketplace-overrides.sh",
     "provision-check.ps1", "provision-check.sh",
     "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
 )
@@ -902,4 +903,3 @@ def apply_plan(
             executed.append({"service": service, "argv": argv, "ok": ok})
 
     return {"action": final_action, "passes": passes, "executed": executed}
-

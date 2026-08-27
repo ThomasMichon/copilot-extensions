@@ -55,6 +55,27 @@ The Worktree Picker launcher runs this command after resolving the selected
 worktree and before starting Copilot. `--cwd` supplies the real worktree during
 Bare resume, where the launch process itself starts from the user's home.
 
+## Local marketplace source overrides
+
+Portable repository settings may keep a Git-backed marketplace source while a
+developer has a same-named checkout registered with agent-worktrees:
+
+```bash
+agent-worktrees reconcile-marketplaces [--cwd PATH] [--json]
+```
+
+The reconciler reads user-global and repository marketplace declarations. For
+each `github` or `git` source, it uses only an exact same-named `repos.yaml`
+entry, requires a contained `.ai` marketplace whose manifest name matches, and
+writes a source-only `directory` override to the checkout's gitignored
+`.github/copilot/settings.local.json`. Missing, stale, mismatched, or removed
+checkouts fall back to the committed remote source. Unrelated local settings
+and all `enabledPlugins` values are preserved.
+
+Worktree creation, adoption, and the launcher preflight seed the override before
+Copilot plugin discovery. A session-start repair pass reconciles later drift and
+asks for a restart only when it changes the file.
+
 ## Headless projects (CLI-only)
 
 Adopt an external repo as a **headless** project to drive its worktree
