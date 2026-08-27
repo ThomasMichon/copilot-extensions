@@ -1411,6 +1411,7 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
 
     $genesisLock = Join-Path (Join-Path $ResolvedDurableHome 'marketplaces/.locks') ($marketplaceId + '.genesis')
     Acquire-Lock $genesisLock 'genesis' $marketplaceId
+    $genesisFailed = $false
     try {
         $existingNamespace = $null
         $namespaceGeneration = 0
@@ -1468,12 +1469,25 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
             $namespaceChanged = $true
         }
     }
+    catch {
+        $genesisFailed = $true
+        throw
+    }
     finally {
-        if ($script:HeldLockPath) { Release-Lock }
+        if ($script:HeldLockPath) {
+            try { Release-Lock }
+            catch {
+                if (-not $genesisFailed) { throw }
+                [Console]::Error.WriteLine(
+                    "installation-context: $($_.Exception.Message) while preserving the original mutation failure."
+                )
+            }
+        }
     }
 
     $installLock = Join-Path (Join-Path $cellRoot '.locks') ($receiptPluginId + '.install.lock')
     Acquire-Lock $installLock 'install' $marketplaceId $receiptPluginId
+    $installFailed = $false
     try {
         $existingInstall = $null
         $installGeneration = 0
@@ -1558,8 +1572,20 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
             $installChanged = $true
         }
     }
+    catch {
+        $installFailed = $true
+        throw
+    }
     finally {
-        if ($script:HeldLockPath) { Release-Lock }
+        if ($script:HeldLockPath) {
+            try { Release-Lock }
+            catch {
+                if (-not $installFailed) { throw }
+                [Console]::Error.WriteLine(
+                    "installation-context: $($_.Exception.Message) while preserving the original mutation failure."
+                )
+            }
+        }
     }
 
     $validated = Validate-ContextReceipt $installPath $ResolvedDurableHome $marketplaceId $receiptPluginId $Resolved.payloadRoot $cellRoot

@@ -1,6 +1,7 @@
 """Python and dependency-light POSIX installation-context parity tests."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -31,6 +32,15 @@ RUNNERS = (
     ("posix", (str(POSIX_SCRIPT),)),
 )
 PYTHON_COMMAND = RUNNERS[0][1]
+
+
+def _load_python_module():
+    spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _vectors() -> list[dict[str, object]]:
@@ -253,6 +263,27 @@ def test_python_stamp_updates_receipt_with_generation_compare_and_swap(
     receipt = json.loads(Path(first["installReceipt"]).read_text(encoding="utf-8"))
     assert receipt["generation"] == 2
     assert receipt["state"] == "inactive"
+
+
+def test_python_lock_release_does_not_mask_mutation_failure(tmp_path: Path) -> None:
+    module = _load_python_module()
+
+    class BrokenReleaseLock(module._DirectoryLock):
+        def acquire(self) -> None:
+            self.acquired = True
+
+        def release(self) -> None:
+            raise module.InstallationContextError("secondary release failure")
+
+    lock = BrokenReleaseLock(
+        tmp_path / "lock",
+        kind="genesis",
+        marketplace_id="example--0123456789abcdef",
+    )
+    with pytest.warns(RuntimeWarning, match="secondary release failure"):
+        with pytest.raises(RuntimeError, match="primary mutation failure"):
+            with lock:
+                raise RuntimeError("primary mutation failure")
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)

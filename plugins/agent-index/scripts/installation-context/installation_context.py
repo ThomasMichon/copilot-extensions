@@ -12,6 +12,7 @@ import secrets
 import socket
 import sys
 import time
+import warnings
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -296,7 +297,17 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
         return self
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
-        self.release()
+        if exc_type is None:
+            self.release()
+            return
+        try:
+            self.release()
+        except InstallationContextError as release_error:
+            warnings.warn(
+                f"{release_error} while preserving the original mutation failure.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
 
 def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
