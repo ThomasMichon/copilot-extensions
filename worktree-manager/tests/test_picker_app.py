@@ -136,6 +136,7 @@ def _contribution(
     label: str,
     *,
     after: str = "Worktrees",
+    home: bool = False,
     columns: list[dict] | None = None,
 ):
     return parse_manifest(
@@ -143,6 +144,7 @@ def _contribution(
             "schema_version": 1,
             "label": label,
             "after": after,
+            "home": home,
             "list": ["agent-example", "list", "--machine", "{machine}"],
             "entry": {
                 "id": "id",
@@ -180,6 +182,60 @@ def test_contributed_pivot_order_is_stable_and_resolves_forward_anchors():
         "Child",
         "Orphan",
     ]
+
+
+def test_home_contribution_is_the_initial_pivot():
+    home = _contribution("Home", home=True)
+
+    def loader(pivot, context):
+        return PivotPayload(rows=({"id": "1", "title": "home row"},), summary={})
+
+    async def _run() -> tuple[str, str, int]:
+        app = picker_app.WorktreeManagerApp(
+            lambda: list(_FIX),
+            project="r",
+            contributions=[home],
+            pivot_loader=loader,
+        )
+        async with app.run_test(size=(100, 24)):
+            await app.workers.wait_for_complete()
+            from textual.widgets import DataTable, Tabs
+            return (
+                app._active_key,
+                app.query_one(Tabs).active or "",
+                app.query_one(DataTable).row_count,
+            )
+
+    active_key, active_tab, row_count = asyncio.run(_run())
+    assert active_key == "contribution-0"
+    assert active_tab == "pivot-1"
+    assert row_count == 1
+
+
+def test_unavailable_home_falls_back_to_builtin_worktrees_during_migration():
+    home = replace(_contribution("Home", home=True), command_available=False)
+    app = picker_app.WorktreeManagerApp(
+        lambda: list(_FIX),
+        project="r",
+        contributions=[home],
+    )
+
+    assert app._initial_pivot.key == "worktrees"
+
+
+def test_first_available_home_wins_in_discovery_order_not_tab_order():
+    first = _contribution("First", home=True, after="Second")
+    second = _contribution("Second", home=True)
+    app = picker_app.WorktreeManagerApp(
+        lambda: list(_FIX),
+        project="r",
+        contributions=[first, second],
+    )
+
+    assert [pivot.label for pivot in app._pivots] == [
+        "Worktrees", "Second", "First"
+    ]
+    assert app._initial_pivot.contribution is first
 
 
 def test_contributed_pivot_loads_off_event_loop_and_renders_columns():
