@@ -823,6 +823,15 @@ class BridgeClient:
         timeout: float = 90.0,
     ) -> dict[str, Any]:
         """Interrupt one harness-owned session's supervised credential relay."""
+        from .protocol import RELAY_INTERRUPT_PROTOCOL_VERSION
+
+        if not self.daemon_supports(RELAY_INTERRUPT_PROTOCOL_VERSION):
+            raise BridgeClientError(
+                426,
+                "The active agent-bridge daemon does not support parity relay "
+                "interruption. Update the agent-bridge runtime before running "
+                "this fault scenario.",
+            )
         return self._request(
             "POST",
             f"/api/v1/sessions/{session_id}/parity/interrupt-relays",

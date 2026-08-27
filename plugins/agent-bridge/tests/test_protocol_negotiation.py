@@ -8,14 +8,16 @@ blind-sending to an older daemon.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent_bridge.app import create_app
-from agent_bridge.client import BridgeClient
+from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import ServiceConfig
 from agent_bridge.protocol import (
     HTTP_PROTOCOL_MIN_SUPPORTED,
     HTTP_PROTOCOL_VERSION,
+    RELAY_INTERRUPT_PROTOCOL_VERSION,
     UNVERSIONED,
 )
 
@@ -60,6 +62,44 @@ def test_daemon_supports_gates_on_version():
     assert c.daemon_supports(1) is True
     assert c.daemon_supports(2) is True
     assert c.daemon_supports(3) is False  # newer client feature, older daemon
+
+
+def test_relay_interruption_refuses_daemon_before_capability_version():
+    c = _client({
+        "protocol_version": RELAY_INTERRUPT_PROTOCOL_VERSION - 1,
+        "min_protocol_version": 1,
+    })
+
+    with pytest.raises(BridgeClientError) as raised:
+        c.interrupt_relays_for_parity("session-1")
+
+    assert raised.value.status == 426
+
+
+def test_relay_interruption_calls_supported_daemon():
+    c = _client({
+        "protocol_version": RELAY_INTERRUPT_PROTOCOL_VERSION,
+        "min_protocol_version": 1,
+    })
+    captured = {}
+
+    def request(method, path, body=None, **kwargs):
+        captured.update({
+            "method": method,
+            "path": path,
+            "body": body,
+            "kwargs": kwargs,
+        })
+        return {"all_recovered": True}
+
+    c._request = request  # type: ignore[method-assign]
+
+    result = c.interrupt_relays_for_parity("session-1", timeout=12)
+
+    assert result == {"all_recovered": True}
+    assert captured["method"] == "POST"
+    assert captured["path"].endswith("/session-1/parity/interrupt-relays")
+    assert captured["kwargs"]["params"] == {"timeout": "12"}
 
 
 def test_assert_client_supported_ok_when_at_or_above_floor():

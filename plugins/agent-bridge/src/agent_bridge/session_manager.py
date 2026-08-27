@@ -2163,7 +2163,11 @@ class SessionManager:
                 ) from exc
             interrupted += 1
         for process in processes_before:
-            with contextlib.suppress(ProcessLookupError):
+            with contextlib.suppress(
+                ProcessLookupError,
+                TimeoutError,
+                asyncio.TimeoutError,
+            ):
                 await asyncio.wait_for(process.wait(), timeout=5.0)
 
         deadline = time.monotonic() + max(1.0, timeout)

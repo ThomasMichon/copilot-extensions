@@ -858,7 +858,7 @@ async def interrupt_relays_for_parity(
         raise HTTPException(status_code=403, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
-    except TimeoutError as exc:
+    except (TimeoutError, asyncio.TimeoutError) as exc:
         raise HTTPException(status_code=504, detail=str(exc))
 
 
