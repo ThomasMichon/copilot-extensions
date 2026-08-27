@@ -274,7 +274,7 @@ acquire_lock() {
         [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] ||
             fail "Installation lock owner receipt '$owner' is invalid."
         if [[ "$owner_host" == "$host" ]]; then
-            if ! kill -0 "$owner_pid" 2>/dev/null; then
+            if ! kill -0 "$owner_pid" 2>/dev/null && [[ ! -d "/proc/$owner_pid" ]]; then
                 fail "Installation lock '$path' has a stale owner (host=$owner_host, pid=$owner_pid); explicit repair is required."
             fi
             sleep 0.01
