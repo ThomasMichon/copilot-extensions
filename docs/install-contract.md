@@ -52,6 +52,17 @@ complete.
    legacy activation is quiesced; uninstall removes only receipt-matching
    artifacts.
 
+The canonical dependency-light primitive lives in
+`libs/installation-context/`. Its `stamp` operation is the only Phase 3
+receipt-mutation surface: it creates or updates `namespace.json` under the
+marketplace genesis lock, then `install.json` under the plugin installation
+lock. Both existing-receipt mutations require the caller-observed generation
+and fail when it changed. Lock directories contain attributable live-owner
+receipts; writers revalidate their ownership token immediately before atomic
+same-directory replacement. `tools/sync-installation-context.py` keeps the
+future `agent-machines` and `agent-index` exemplar copies byte-identical while
+they remain non-operative.
+
 Payload-local command shims are generated from the canonical templates in
 `libs/payload-invocation/`. Each adopting plugin commits a
 `payload-invocation.json` manifest plus generated POSIX, PowerShell, and CMD

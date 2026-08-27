@@ -34,6 +34,7 @@ python tools/check-install-contract.py         # runtime-plugin install contract
 python tools/check-version-consistency.py      # plugin.json / pyproject / marketplace versions agree
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
 python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests
+python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
 ```
 
 ## Per-plugin coverage (unit suites)
