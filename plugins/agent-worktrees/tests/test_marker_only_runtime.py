@@ -239,6 +239,8 @@ def test_resolver_tier3_newest_on_true_first_run(tmp_path):
     _make_slot(tmp_path, "0.1.0-dev9")
     _make_slot(tmp_path, "0.1.0-dev10")
     assert _resolve(tmp_path).endswith("versions/0.1.0-dev10/bin/python")
+    _make_slot(tmp_path, "0.1.0")
+    assert _resolve(tmp_path).endswith("versions/0.1.0/bin/python")
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh binstub")
@@ -271,6 +273,24 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "1.5.3-dev10"
+
+    slot = runtime / "versions" / "1.5.3"
+    command = slot / "bin" / "agent-worktrees"
+    command.parent.mkdir(parents=True)
+    command.write_text("#!/bin/sh\nprintf '%s' '1.5.3'\n", encoding="utf-8")
+    command.chmod(0o755)
+    (slot / ".install-complete.json").write_text(
+        json.dumps({"version": "1.5.3"}), encoding="utf-8"
+    )
+    result = subprocess.run(
+        [str(_BIN / "agent-worktrees"), "status"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "1.5.3"
 
 
 @pytest.mark.skipif(__import__("os").name == "nt", reason="POSIX sh resolver")

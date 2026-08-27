@@ -278,6 +278,10 @@ def test_version_key_is_stdlib_and_orders_supported_dev_versions(monkeypatch):
         ["0.4.0-dev10", "0.4.0-dev2", "0.4.0-dev9"],
         key=vr._version_key,
     ) == ["0.4.0-dev2", "0.4.0-dev9", "0.4.0-dev10"]
+    assert sorted(
+        ["0.4.0", "0.4.0-dev10", "0.4.0-dev9"],
+        key=vr._version_key,
+    ) == ["0.4.0-dev9", "0.4.0-dev10", "0.4.0"]
 
 
 # ---------------------------------------------------------------------------

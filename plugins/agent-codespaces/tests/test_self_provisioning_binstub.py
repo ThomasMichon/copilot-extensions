@@ -131,6 +131,24 @@ def test_posix_binstub_tier3_prefers_dev10_over_dev9(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert result.stdout == "0.4.0-dev10"
 
+    slot = home / ".agent-codespaces" / "versions" / "0.4.0"
+    python = slot / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nprintf '%s' '0.4.0'\n", encoding="utf-8")
+    python.chmod(0o755)
+    (slot / ".install-complete.json").write_text(
+        '{"version":"0.4.0"}', encoding="utf-8"
+    )
+    result = subprocess.run(
+        [shutil.which("bash"), str(binstub), "version"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "0.4.0"
+
 
 def test_windows_binstubs_share_safe_resolution_and_locking() -> None:
     text = INSTALL_PS1.read_text(encoding="utf-8")

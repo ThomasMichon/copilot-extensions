@@ -38,6 +38,15 @@ if [ -n "$_rt_root" ]; then
     awk '
       {
         original = $0
+        if (original ~ /^[0-9]+\.[0-9]+\.[0-9]+(-dev[0-9]+)?$/) {
+          count = split(original, part, /[.-]/)
+          phase = (count == 4) ? 0 : 1
+          dev = (count == 4) ? part[4] : "dev0"
+          sub(/^dev/, "", dev)
+          printf "0:%020d.%020d.%020d.%d.%020d\t%s\n", \
+            part[1] + 0, part[2] + 0, part[3] + 0, phase, dev + 0, original
+          next
+        }
         key = ""
         rest = $0
         while (match(rest, /[0-9]+/)) {
@@ -46,7 +55,7 @@ if [ -n "$_rt_root" ]; then
           key = key sprintf("%020d", number + 0)
           rest = substr(rest, RSTART + RLENGTH)
         }
-        print key rest "\t" original
+        print "1:" key rest "\t" original
       }
     '
   }

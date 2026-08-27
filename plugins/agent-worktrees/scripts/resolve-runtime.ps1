@@ -36,7 +36,17 @@ function _Aw-TrySlot([string]$ver) {
 }
 
 function _Aw-VersionKey([string]$ver) {
-  return [regex]::Replace(
+  if ($ver -match '^(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?$') {
+    $phase = if ($Matches[4]) { '0' } else { '1' }
+    $dev = if ($Matches[4]) { $Matches[4] } else { '0' }
+    return '0:{0}.{1}.{2}.{3}.{4}' -f
+      $Matches[1].PadLeft(20, '0'),
+      $Matches[2].PadLeft(20, '0'),
+      $Matches[3].PadLeft(20, '0'),
+      $phase,
+      $dev.PadLeft(20, '0')
+  }
+  return '1:' + [regex]::Replace(
     $ver.ToLowerInvariant(), '\d+',
     { param($m) $m.Value.PadLeft(20, '0') }
   )

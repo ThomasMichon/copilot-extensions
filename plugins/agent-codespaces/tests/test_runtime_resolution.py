@@ -90,6 +90,16 @@ def test_powershell_tier3_is_version_aware_and_cross_platform(
     subpath = Path("Scripts/python.exe") if os.name == "nt" else Path("bin/python")
     assert Path(result.stdout) == newest / subpath
 
+    release = _slot(root, "0.4.0", complete=True, interpreter=True)
+    result = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", command],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout) == release / subpath
+
 
 @pytest.mark.skipif(
     os.name == "nt" or shutil.which("bash") is None,
@@ -159,3 +169,14 @@ def test_posix_tier3_orders_dev_versions_without_sort_v(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     assert Path(result.stdout) == newest / "bin" / "python"
+
+    release = _slot(root, "0.4.0", complete=True, interpreter=True)
+    result = subprocess.run(
+        [shutil.which("bash"), "-c", command],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert Path(result.stdout) == release / "bin" / "python"
