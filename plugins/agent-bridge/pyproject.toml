@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-bridge"
-version = "0.4.0-dev376"
+version = "0.4.0-dev377"
 description = "Persistent inter-agent communication service for Copilot CLI"
 readme = "README.md"
 license = "MIT"
@@ -83,6 +83,11 @@ dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "guard: fast structural/contract guard tests run automatically in the pre-push hook",
 ]
 
 [tool.ruff.lint]
