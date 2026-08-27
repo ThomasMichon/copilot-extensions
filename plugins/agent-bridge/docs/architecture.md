@@ -279,6 +279,14 @@ restart does not inherently close the child's pipes.
   lock cleanup, and durable session removal before a normal launch may reacquire
   the same target. Inconclusive remote or ownership cleanup is fail-closed: the
   failed session and target ownership remain in place to block a duplicate.
+  The container-only `--fault container-recreate` mode asks the provider to
+  remove exactly the identity-checked trusted container instance and recreate
+  its deterministic target name. The bridge transfers the existing target lock
+  to the replacement launch without an unlocked window, treats the confirmed
+  instance change as authoritative death of the old Host, and retires the old
+  session/index/forward/relay only after the replacement reaches idle with a
+  fresh Host, child, and ACP session. Provider, authority, or replacement-launch
+  uncertainty keeps a durable failed owner and refuses a duplicate.
 
 ## Zero-Downtime Redeploy
 

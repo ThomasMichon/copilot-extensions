@@ -7,9 +7,11 @@ from types import SimpleNamespace
 import pytest
 
 from agent_bridge.session_host.container_transport import (
+    ContainerRecreateAfterRemovalError,
     ContainerTransport,
     _run_provider,
     build_container_spawner,
+    recreate_container_for_parity,
 )
 
 
@@ -158,3 +160,30 @@ async def test_container_state_requires_running_matching_identity(
     )
 
     assert await transport.is_running() is expected
+
+
+@pytest.mark.asyncio
+async def test_recreate_reports_confirmed_old_identity_removal(monkeypatch):
+    async def fake_provider(command, *, timeout):
+        return 2, (
+            b'{"name":"odsp-web-1","old_container_removed":true,'
+            b'"error":"replacement failed"}'
+        ), b""
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport._run_provider",
+        fake_provider,
+    )
+
+    with pytest.raises(
+        ContainerRecreateAfterRemovalError,
+        match="replacement failed",
+    ):
+        await recreate_container_for_parity(
+            {
+                "name": "odsp-web-1",
+                "provider_command": ["agent-containers"],
+            },
+            expected_container_id="a" * 64,
+            timeout=1,
+        )

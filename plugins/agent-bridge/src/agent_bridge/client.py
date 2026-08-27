@@ -853,6 +853,31 @@ class BridgeClient:
             request_timeout=timeout + 15.0,
         ) or {}
 
+    def recreate_container_for_parity(
+        self,
+        session_id: str,
+        *,
+        timeout: float = 600.0,
+    ) -> dict[str, Any]:
+        """Recreate one harness-owned container session and replace it."""
+        from .protocol import CONTAINER_RECREATE_PROTOCOL_VERSION
+
+        if not self.daemon_supports(CONTAINER_RECREATE_PROTOCOL_VERSION):
+            raise BridgeClientError(
+                426,
+                "The active agent-bridge daemon does not support parity "
+                "container recreation. Update the runtime before running "
+                "this fault scenario.",
+            )
+        return self._request(
+            "POST",
+            f"/api/v1/sessions/{session_id}/parity/recreate-container",
+            params={"timeout": str(timeout)},
+            # The provider recreation consumes ``timeout``; the same request
+            # then waits through a complete cold replacement ACP launch.
+            request_timeout=timeout + 3600.0,
+        ) or {}
+
     def resume_session(
         self,
         session_id: str,

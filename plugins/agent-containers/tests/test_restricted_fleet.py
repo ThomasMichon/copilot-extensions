@@ -15,6 +15,116 @@ def _ok(stdout: str = ""):
     return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
 
+def test_recreate_member_replaces_one_identity_checked_trusted_container(
+    monkeypatch,
+):
+    old = DockerContainerInfo(
+        name="example-1",
+        container_id="a" * 64,
+        image="example",
+        state="running",
+        status="Up",
+        fleet="example",
+    )
+    new = DockerContainerInfo(
+        name="example-1",
+        container_id="b" * 64,
+        image="example",
+        state="running",
+        status="Up",
+        fleet="example",
+    )
+    config = ContainersConfig(
+        fleets={
+            "example": FleetConfig(
+                devcontainer_path="D:/src/example",
+            ),
+        },
+    )
+    calls = []
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(
+        fleet_mod,
+        "get_container",
+        lambda *_args: old if not calls else new,
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda name, force=False: calls.append(("remove", name, force)),
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "_devcontainer_up",
+        lambda *args, **kwargs: calls.append(("create", args[2])) or args[2],
+    )
+
+    result = fleet_mod.recreate_member(
+        config,
+        "example-1",
+        expected_container_id=old.container_id,
+    )
+
+    assert result["old_container_id"] == old.container_id
+    assert result["new_container_id"] == new.container_id
+    assert result["identity_changed"] is True
+    assert calls == [
+        ("remove", old.container_id, True),
+        ("create", "example-1"),
+    ]
+
+
+def test_recreate_member_rejects_mismatched_replacement_posture(monkeypatch):
+    old = DockerContainerInfo(
+        name="example-1",
+        container_id="a" * 64,
+        image="example",
+        state="running",
+        status="Up",
+        fleet="example",
+    )
+    mismatched = DockerContainerInfo(
+        name="example-1",
+        container_id="b" * 64,
+        image="example",
+        state="running",
+        status="Up",
+        fleet="other",
+        security_profile="restricted",
+    )
+    config = ContainersConfig(
+        fleets={
+            "example": FleetConfig(
+                devcontainer_path="D:/src/example",
+            ),
+        },
+    )
+    calls = []
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(
+        fleet_mod,
+        "get_container",
+        lambda *_args: old if not calls else mismatched,
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda *args, **kwargs: calls.append(args),
+    )
+    monkeypatch.setattr(
+        fleet_mod,
+        "_devcontainer_up",
+        lambda *args, **kwargs: args[2],
+    )
+
+    with pytest.raises(RuntimeError, match="does not match"):
+        fleet_mod.recreate_member(
+            config,
+            "example-1",
+            expected_container_id=old.container_id,
+        )
+
+
 def test_restricted_image_run_applies_boundary_flags(monkeypatch):
     calls: list[list[str]] = []
 

@@ -13,8 +13,10 @@ from agent_bridge.db import Database
 from agent_bridge.events import EventLog
 from agent_bridge.models import SessionStatus
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
+from agent_bridge.session_host.host_index import HostRecord
 from agent_bridge.session_manager import (
     _STALL_AFTER_S,
+    RemoteHostRecoveryPendingError,
     Session,
     SessionManager,
     _default_cwd,
@@ -1015,6 +1017,534 @@ async def test_failed_handshake_claim_release_failure_retains_session(
     assert result["ownership_retained"] is True
     assert result["durable_session_retained"] is True
     assert manager.get_session(session.session_id) is session
+
+
+@pytest.mark.asyncio
+async def test_container_recreate_retires_old_session_and_transfers_lock(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "example-1",
+            "security_profile": "trusted",
+            "provider_command": ["agent-containers"],
+            "state_command": [
+                "agent-containers",
+                "session-host-state",
+                "example-1",
+            ],
+            "acp_command": "copilot --acp --stdio",
+        },
+    )
+    old = Session(
+        "session-1",
+        "old",
+        target,
+        agent_name="container:example-1",
+        caller_id="venue-parity:test",
+    )
+    old.status = SessionStatus.IDLE
+    old.acp_session_id = "acp-1"
+    old.client = MagicMock(is_running=True, pid=123)
+    old.mcp_servers = [{"name": "example", "command": "example-mcp"}]
+    old.event_log = EventLog(db=tmp_db, session_id=old.session_id)
+    manager._sessions[old.session_id] = old
+    tmp_db.create_session(
+        session_id=old.session_id,
+        name=old.name,
+        agent_name=old.agent_name,
+        caller_id=old.caller_id,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    manager._host_index.register(HostRecord(
+        session_id=old.session_id,
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="container",
+    ))
+    manager._container_lock_sessions[old.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), old.session_id)
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.container_state",
+        AsyncMock(return_value={
+            "name": "example-1",
+            "running": True,
+            "container_id": "a" * 64,
+        }),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "recreate_container_for_parity",
+        AsyncMock(return_value={
+            "name": "example-1",
+            "old_container_id": "a" * 64,
+            "new_container_id": "b" * 64,
+            "running": True,
+            "identity_changed": True,
+        }),
+    )
+    monkeypatch.setattr(manager, "_stop_relays", AsyncMock())
+
+    async def fake_end(session_id, *, force=False):
+        assert session_id == old.session_id
+        manager._sessions.pop(session_id)
+        tmp_db.delete_session(session_id)
+
+    async def fake_start(
+        replacement_target,
+        agent_name=None,
+        caller_id=None,
+        **kwargs,
+    ):
+        assert kwargs["mcp_servers"] == [
+            {"name": "example", "command": "example-mcp"}
+        ]
+        new = Session(
+            "session-2",
+            "new",
+            replacement_target,
+            agent_name=agent_name,
+            caller_id=caller_id,
+        )
+        new.status = SessionStatus.IDLE
+        new.acp_session_id = "acp-2"
+        new.client = MagicMock(is_running=True, pid=456)
+        manager._sessions[new.session_id] = new
+        manager._transfer_container_lock(
+            old.session_id,
+            new.session_id,
+            "example-1",
+        )
+        manager._host_index.register(HostRecord(
+            session_id=new.session_id,
+            port=5001,
+            host_pid=400,
+            child_pid=456,
+            boundary="container",
+        ))
+        return new
+
+    monkeypatch.setattr(manager, "end_session", fake_end)
+    monkeypatch.setattr(manager, "start_session", fake_start)
+
+    result = await manager.recreate_container_for_parity(
+        old.session_id,
+        timeout=1,
+    )
+
+    assert result["container_identity_changed"] is True
+    assert result["old_session_removed"] is True
+    assert result["old_host_index_removed"] is True
+    assert result["target_lock_transferred"] is True
+    assert result["old_host_pid"] == 300
+    assert result["replacement_host_pid"] == 400
+    assert result["old_child_pid"] == 123
+    assert result["replacement_child_pid"] == 456
+
+
+@pytest.mark.asyncio
+async def test_container_recreate_failed_replacement_keeps_target_owned(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "example-1",
+            "security_profile": "trusted",
+            "provider_command": ["agent-containers"],
+            "state_command": [
+                "agent-containers",
+                "session-host-state",
+                "example-1",
+            ],
+            "acp_command": "copilot --acp --stdio",
+        },
+    )
+    old = Session(
+        "session-1",
+        "old",
+        target,
+        agent_name="container:example-1",
+        caller_id="venue-parity:test",
+    )
+    old.status = SessionStatus.IDLE
+    old.acp_session_id = "acp-1"
+    old.client = MagicMock(is_running=True, pid=123)
+    manager._sessions[old.session_id] = old
+    tmp_db.create_session(
+        session_id=old.session_id,
+        name=old.name,
+        agent_name=old.agent_name,
+        caller_id=old.caller_id,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    manager._host_index.register(HostRecord(
+        session_id=old.session_id,
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="container",
+    ))
+    manager._container_lock_sessions[old.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), old.session_id)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.container_state",
+        AsyncMock(return_value={
+            "name": "example-1",
+            "running": True,
+            "container_id": "a" * 64,
+        }),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "recreate_container_for_parity",
+        AsyncMock(return_value={
+            "name": "example-1",
+            "old_container_id": "a" * 64,
+            "new_container_id": "b" * 64,
+            "running": True,
+            "identity_changed": True,
+        }),
+    )
+
+    async def failed_start(
+        replacement_target,
+        agent_name=None,
+        caller_id=None,
+        **kwargs,
+    ):
+        failed = Session(
+            "session-2",
+            "failed",
+            replacement_target,
+            agent_name=agent_name,
+            caller_id=caller_id,
+        )
+        failed.status = SessionStatus.FAILED
+        manager._sessions[failed.session_id] = failed
+        manager._transfer_container_lock(
+            old.session_id,
+            failed.session_id,
+            "example-1",
+        )
+        return failed
+
+    monkeypatch.setattr(manager, "start_session", failed_start)
+
+    with pytest.raises(
+        RuntimeError,
+        match="session-2 failed to reach idle and retains target ownership",
+    ):
+        await manager.recreate_container_for_parity(old.session_id, timeout=1)
+
+    assert manager.get_session(old.session_id) is old
+    assert old.status == SessionStatus.FAILED
+    assert manager._host_index.get(old.session_id) is not None
+    assert tmp_db.get_session(old.session_id)["status"] == SessionStatus.FAILED.value
+    assert manager._container_lock_sessions["session-2"] == "example-1"
+    assert (
+        manager.get_session("session-2").target.container[
+            "recreate_failed_without_host"
+        ]
+        is True
+    )
+    with pytest.raises(RuntimeError, match="already owned"):
+        manager._acquire_container_lock("session-3", "example-1")
+
+    await manager.end_session("session-2", force=True)
+    assert "session-2" not in manager._container_lock_sessions
+    assert "example-1" not in manager._container_locks
+
+
+@pytest.mark.asyncio
+async def test_end_with_inconclusive_missing_host_retains_session_and_lock(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-1"},
+    )
+    session = Session("session-1", "container", target)
+    session.status = SessionStatus.IDLE
+    manager._sessions[session.session_id] = session
+    manager._container_lock_sessions[session.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), session.session_id)
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=None,
+        caller_id=None,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+
+    async def inconclusive(*args, **kwargs):
+        manager._remote_recovery_inconclusive.add(session.session_id)
+        return 0
+
+    monkeypatch.setattr(
+        manager,
+        "_recover_remote_host_records",
+        inconclusive,
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError, match="inconclusive"):
+        await manager.end_session(session.session_id, force=True)
+
+    assert manager.get_session(session.session_id) is session
+    assert tmp_db.get_session(session.session_id) is not None
+    assert manager._container_lock_sessions[session.session_id] == "example-1"
+    assert manager._container_locks["example-1"][1] == session.session_id
+
+
+@pytest.mark.asyncio
+async def test_end_with_confirmed_missing_host_releases_container_lock(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-1"},
+    )
+    session = Session("session-1", "container", target)
+    session.status = SessionStatus.FAILED
+    manager._sessions[session.session_id] = session
+    manager._container_lock_sessions[session.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), session.session_id)
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=None,
+        caller_id=None,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.FAILED.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    monkeypatch.setattr(
+        manager,
+        "_recover_remote_host_records",
+        AsyncMock(return_value=0),
+    )
+
+    await manager.end_session(session.session_id, force=True)
+
+    assert manager.get_session(session.session_id) is None
+    assert session.session_id not in manager._container_lock_sessions
+    assert "example-1" not in manager._container_locks
+
+
+@pytest.mark.asyncio
+async def test_end_with_recovered_live_host_retains_owner_when_reap_fails(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-1"},
+    )
+    session = Session("session-1", "container", target)
+    session.status = SessionStatus.IDLE
+    manager._sessions[session.session_id] = session
+    manager._container_lock_sessions[session.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), session.session_id)
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=None,
+        caller_id=None,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+
+    async def recover(*args, **kwargs):
+        manager._host_index.register(HostRecord(
+            session_id=session.session_id,
+            port=5000,
+            host_pid=300,
+            child_pid=123,
+            boundary="container",
+            endpoint={"kind": "container"},
+        ))
+        return 1
+
+    monkeypatch.setattr(manager, "_recover_remote_host_records", recover)
+    monkeypatch.setattr(
+        manager,
+        "_remote_reap",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError, match="reap is inconclusive"):
+        await manager.end_session(session.session_id, force=True)
+
+    assert manager.get_session(session.session_id) is session
+    assert session.status == SessionStatus.FAILED
+    assert tmp_db.get_session(session.session_id) is not None
+    assert manager._host_index.get(session.session_id) is not None
+    assert manager._container_lock_sessions[session.session_id] == "example-1"
+
+
+@pytest.mark.asyncio
+async def test_end_with_recovered_live_host_deletes_after_confirmed_reap(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={"name": "example-1"},
+    )
+    session = Session("session-1", "container", target)
+    session.status = SessionStatus.IDLE
+    manager._sessions[session.session_id] = session
+    manager._container_lock_sessions[session.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), session.session_id)
+    tmp_db.create_session(
+        session_id=session.session_id,
+        name=session.name,
+        agent_name=None,
+        caller_id=None,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    manager._host_index.register(HostRecord(
+        session_id=session.session_id,
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="container",
+        endpoint={"kind": "container"},
+    ))
+
+    async def confirmed_reap(rec, endpoint):
+        manager._release_container_lock(rec.session_id)
+        return True
+
+    monkeypatch.setattr(manager, "_remote_reap", confirmed_reap)
+
+    await manager.end_session(session.session_id, force=True)
+
+    assert manager.get_session(session.session_id) is None
+    assert manager._host_index.get(session.session_id) is None
+    assert session.session_id not in manager._container_lock_sessions
+    assert "example-1" not in manager._container_locks
+
+
+@pytest.mark.asyncio
+async def test_container_recreate_post_removal_failure_marks_predecessor_failed(
+    tmp_db,
+    monkeypatch,
+) -> None:
+    from agent_bridge.session_host.container_transport import (
+        ContainerRecreateAfterRemovalError,
+    )
+
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "example-1",
+            "security_profile": "trusted",
+            "provider_command": ["agent-containers"],
+            "state_command": [
+                "agent-containers",
+                "session-host-state",
+                "example-1",
+            ],
+        },
+    )
+    old = Session(
+        "session-1",
+        "old",
+        target,
+        agent_name="container:example-1",
+        caller_id="venue-parity:test",
+    )
+    old.status = SessionStatus.IDLE
+    old.client = MagicMock(is_running=True, pid=123)
+    manager._sessions[old.session_id] = old
+    tmp_db.create_session(
+        session_id=old.session_id,
+        name=old.name,
+        agent_name=old.agent_name,
+        caller_id=old.caller_id,
+        target_dir=None,
+        target_type="command",
+        status=SessionStatus.IDLE.value,
+        now=1,
+        target_json=target.to_json(),
+    )
+    manager._host_index.register(HostRecord(
+        session_id=old.session_id,
+        port=5000,
+        host_pid=300,
+        child_pid=123,
+        boundary="container",
+    ))
+    manager._container_lock_sessions[old.session_id] = "example-1"
+    manager._container_locks["example-1"] = (MagicMock(), old.session_id)
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport.container_state",
+        AsyncMock(return_value={
+            "name": "example-1",
+            "running": True,
+            "container_id": "a" * 64,
+        }),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.container_transport."
+        "recreate_container_for_parity",
+        AsyncMock(side_effect=ContainerRecreateAfterRemovalError(
+            "replacement failed"
+        )),
+    )
+
+    with pytest.raises(
+        ContainerRecreateAfterRemovalError,
+        match="replacement failed",
+    ):
+        await manager.recreate_container_for_parity(old.session_id, timeout=1)
+
+    assert old.status == SessionStatus.FAILED
+    assert tmp_db.get_session(old.session_id)["status"] == SessionStatus.FAILED.value
+    assert manager._host_index.get(old.session_id) is not None
+    assert manager._container_lock_sessions[old.session_id] == "example-1"
+
+    old.client = None
+    await manager.end_session(old.session_id, force=True)
+    assert manager._host_index.get(old.session_id) is None
+    assert old.session_id not in manager._container_lock_sessions
+    assert "example-1" not in manager._container_locks
 
 
 class _ParityRelayProcess:

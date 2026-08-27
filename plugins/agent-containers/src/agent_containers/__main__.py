@@ -171,6 +171,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Exit 0 if the container is running/startable, else exit 1.",
     )
     ns_ready_p.add_argument("name", help="Container name")
+    ns_recreate_p = sub.add_parser(
+        "namespace-recreate",
+        help="Identity-check and recreate one trusted fleet member.",
+    )
+    ns_recreate_p.add_argument("name", help="Container name")
+    ns_recreate_p.add_argument("--expected-container-id", required=True)
 
     # --- relay-profile (declarative credential-relay seam for agent-bridge #892 Inc 2)
     sub.add_parser(
@@ -230,6 +236,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "namespace-ensure-ready":
             return _cmd_namespace_ensure_ready(args)
+        if args.command == "namespace-recreate":
+            return _cmd_namespace_recreate(args)
         if args.command == "relay-profile":
             return _cmd_relay_profile()
     except RuntimeError as e:
@@ -432,6 +440,27 @@ def _cmd_namespace_ensure_ready(args: argparse.Namespace) -> int:
     except Exception as e:
         print(str(e), file=sys.stderr)
         return 1
+    return 0
+
+
+def _cmd_namespace_recreate(args: argparse.Namespace) -> int:
+    """Recreate one exact trusted container and emit redacted identity data."""
+    from .fleet import RecreateMemberError, recreate_member
+
+    try:
+        result = recreate_member(
+            load_config(),
+            args.name,
+            expected_container_id=args.expected_container_id,
+        )
+    except RecreateMemberError as exc:
+        print(json.dumps({
+            "name": args.name,
+            "old_container_removed": exc.old_container_removed,
+            "error": str(exc),
+        }))
+        return 2
+    print(json.dumps(result))
     return 0
 
 

@@ -73,6 +73,53 @@ def test_namespace_ensure_ready_ok_and_fail(capsys):
         assert main(["namespace-ensure-ready", "example-web-1"]) == 1
 
 
+def test_namespace_recreate_emits_identity_change(capsys):
+    result = {
+        "name": "example-web-1",
+        "old_container_id": "a" * 64,
+        "new_container_id": "b" * 64,
+        "running": True,
+        "identity_changed": True,
+    }
+    with patch(
+        "agent_containers.fleet.recreate_member",
+        return_value=result,
+    ) as recreate:
+        assert main([
+            "namespace-recreate",
+            "example-web-1",
+            "--expected-container-id",
+            "a" * 64,
+        ]) == 0
+
+    assert json.loads(capsys.readouterr().out) == result
+    recreate.assert_called_once()
+
+
+def test_namespace_recreate_reports_post_removal_failure(capsys):
+    from agent_containers.fleet import RecreateMemberError
+
+    with patch(
+        "agent_containers.fleet.recreate_member",
+        side_effect=RecreateMemberError(
+            "replacement failed",
+            old_container_removed=True,
+        ),
+    ):
+        assert main([
+            "namespace-recreate",
+            "example-web-1",
+            "--expected-container-id",
+            "a" * 64,
+        ]) == 2
+
+    assert json.loads(capsys.readouterr().out) == {
+        "name": "example-web-1",
+        "old_container_removed": True,
+        "error": "replacement failed",
+    }
+
+
 def test_session_host_prepare_returns_only_env_backed_launch_data(capsys):
     config = types.SimpleNamespace(
         relay_port=9857,
