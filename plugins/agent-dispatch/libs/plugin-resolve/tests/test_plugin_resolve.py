@@ -75,7 +75,7 @@ def test_split_source():
 # ---------------------------------------------------------------------------
 
 def _make_ai_marketplace(root: Path, name: str, plugin: str) -> None:
-    """The `.ai` / SPO.Core layout: manifest at .claude-plugin, plugin under root."""
+    """The `.ai` layout: manifest at .claude-plugin, plugin under root."""
     _w(root / ".claude-plugin" / "marketplace.json", {
         "name": name,
         "plugins": [{"name": plugin, "source": f"./{plugin}"}],
@@ -101,11 +101,11 @@ def test_manifest_path_prefers_native(tmp_path):
 
 
 def test_load_ai_marketplace_and_plugin_dir(tmp_path):
-    _make_ai_marketplace(tmp_path, "dotfiles-plugins", "generating-connect")
+    _make_ai_marketplace(tmp_path, "local-plugins", "example-capability")
     mp = load_marketplace(tmp_path)
-    assert mp is not None and mp.name == "dotfiles-plugins"
-    d = plugin_dir(mp, "generating-connect")
-    assert d == (tmp_path / "generating-connect").resolve()
+    assert mp is not None and mp.name == "local-plugins"
+    d = plugin_dir(mp, "example-capability")
+    assert d == (tmp_path / "example-capability").resolve()
 
 
 def test_load_native_marketplace_and_plugin_dir(tmp_path):
@@ -155,17 +155,17 @@ def test_load_marketplace_missing(tmp_path):
 
 def test_resolve_repo_plugins_ai_directory(tmp_path):
     repo = tmp_path / "repo"
-    _make_ai_marketplace(repo / ".ai", "dotfiles-plugins", "generating-connect")
+    _make_ai_marketplace(repo / ".ai", "local-plugins", "example-capability")
     _w(repo / ".github" / "copilot" / "settings.json", {
         "extraKnownMarketplaces": {
-            "dotfiles-plugins": {"source": {"source": "directory", "path": "./.ai"}},
+            "local-plugins": {"source": {"source": "directory", "path": "./.ai"}},
         },
-        "enabledPlugins": {"generating-connect@dotfiles-plugins": True},
+        "enabledPlugins": {"example-capability@local-plugins": True},
     })
     res = resolve_repo_plugins(repo)
-    assert "generating-connect@dotfiles-plugins" in res.resolved
-    assert res.resolved["generating-connect@dotfiles-plugins"] == (
-        (repo / ".ai" / "generating-connect").resolve()
+    assert "example-capability@local-plugins" in res.resolved
+    assert res.resolved["example-capability@local-plugins"] == (
+        (repo / ".ai" / "example-capability").resolve()
     )
     assert res.unresolved == []
 
