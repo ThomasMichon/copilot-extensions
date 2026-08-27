@@ -8,8 +8,7 @@
     directory operations, and config utility bridging.
 
     Usage from an installer:
-        . "$PSScriptRoot\..\..\services\service-utils.ps1"   # shared service
-        . "$PSScriptRoot\..\..\..\services\service-utils.ps1" # machine service
+        . (Join-Path $PSScriptRoot 'service-utils.ps1')
 #>
 
 Set-StrictMode -Version Latest
