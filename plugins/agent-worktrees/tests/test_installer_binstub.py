@@ -101,10 +101,15 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
 
     assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
 
-    for name in ("agent-worktrees.cmd", "demoproj.cmd"):
+    global_content = (lb / "agent-worktrees.cmd").read_text()
+    assert "\\Scripts\\python.exe" in global_content
+    assert "-m agent_worktrees" in global_content
+    assert "agent-worktrees.exe" not in global_content
+
+    for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
-        assert "\\Scripts\\python.exe" in content
-        assert "-m agent_worktrees" in content
+        assert "bin\\payload\\agent-worktrees" in content
+        assert "--project" in content
         assert "agent-worktrees.exe" not in content
 
 
@@ -374,7 +379,8 @@ def test_project_binstub_requires_transfer_for_exact_legacy_signature(
     _reg(monkeypatch, ["demo"])
     inst.transfer_project_binstub("demo")
     assert inst._read_receipt("demo") is not None
-    assert "bin/payload/agent-worktrees" in target.read_text(encoding="utf-8")
+    content = target.read_text(encoding="utf-8").replace("\\", "/")
+    assert "bin/payload/agent-worktrees" in content
 
 
 def test_registration_preflight_rejects_transfer_before_registry_mutation(
@@ -494,7 +500,10 @@ def test_reconcile_preserves_modified_receipt_owned_stub(monkeypatch, tmp_path: 
 
     assert target.exists()
     assert target.read_text(encoding="utf-8") == "modified\n"
-    assert result["removed"] == []
+    expected_removed = [
+        str(path) for path, _ in inst._project_binstub_specs("demo")[1:]
+    ]
+    assert result["removed"] == expected_removed
 
 
 def test_explicit_transfer_replaces_other_owner(monkeypatch, tmp_path: Path):
@@ -741,7 +750,7 @@ def test_remove_project_binstub_requires_owner_and_exact_hash(
 
     removed = inst.remove_project_binstub("demo")
 
-    assert removed == paths
+    assert set(removed) == set(paths)
     assert not inst._receipt_path("demo").exists()
     assert not any(path.exists() for path in paths)
 

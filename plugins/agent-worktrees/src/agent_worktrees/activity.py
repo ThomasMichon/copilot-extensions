@@ -25,6 +25,7 @@ Events are intentionally high-level:
   pane_exited               the wrapped pane command exited (pane wrapper) --
                             the only mark carrying the mux pane's real exit_code
   mux_attached              a tmux/psmux session was attached/joined (launcher)
+  mux_failed                the requested tmux/psmux launch failed closed
   mux_detached              the attach returned -- user detached or session ended
   changes_pushed            worktree content was pushed to the default branch
   worktree_finalized        finalize completed (content on upstream)
