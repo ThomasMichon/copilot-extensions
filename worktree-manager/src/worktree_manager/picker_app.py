@@ -130,7 +130,23 @@ class WorktreeManagerApp(App):
         self._pivot_by_tab = {
             f"pivot-{index}": pivot for index, pivot in enumerate(self._pivots)
         }
-        self._active_key = _WORKTREES
+        home_contribution = next(
+            (
+                contribution for contribution in contributions
+                if contribution.pivot is not None
+                and contribution.pivot.home
+                and contribution.command_available
+            ),
+            None,
+        )
+        self._initial_pivot = next(
+            (
+                pivot for pivot in self._pivots
+                if pivot.contribution is home_contribution
+            ),
+            self._pivots[0],
+        )
+        self._active_key = self._initial_pivot.key
         self._states = {pivot.key: _ViewState() for pivot in self._pivots}
         self._last_status = ""
         self._worktrees: list[Worktree] = []
@@ -153,7 +169,12 @@ class WorktreeManagerApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._activate(self._pivots[0])
+        initial_tab = next(
+            tab_id for tab_id, pivot in self._pivot_by_tab.items()
+            if pivot.key == self._initial_pivot.key
+        )
+        self.query_one(Tabs).active = initial_tab
+        self._activate(self._initial_pivot)
         self.query_one(DataTable).focus()
 
     @staticmethod

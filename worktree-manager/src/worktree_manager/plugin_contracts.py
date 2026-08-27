@@ -85,6 +85,7 @@ class PivotContract:
     name: str
     label: str
     after: str
+    home: bool
     list_cmd: tuple[str, ...]
     id_field: str
     title_field: str
@@ -99,6 +100,7 @@ class PivotContract:
     stream: bool
     subscribe: bool
     actions: tuple[ActionContract, ...]
+    view_actions: tuple[ActionContract, ...]
 
 
 @dataclass(frozen=True)
@@ -217,73 +219,78 @@ def _parse_columns(raw: object) -> tuple[ColumnContract, ...]:
     return tuple(out)
 
 
-def _parse_actions(raw: object) -> tuple[ActionContract, ...]:
+def _parse_actions(
+    raw: object,
+    *,
+    field_name: str = "actions",
+) -> tuple[ActionContract, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
-        raise ContractError("`actions` must be an array when present")
+        raise ContractError(f"`{field_name}` must be an array when present")
     out: list[ActionContract] = []
     for i, item in enumerate(raw):
+        path = f"{field_name}[{i}]"
         if not isinstance(item, Mapping):
-            raise ContractError(f"`actions[{i}]` must be an object")
+            raise ContractError(f"`{path}` must be an object")
         label = item.get("label")
         if not isinstance(label, str) or not label.strip():
-            raise ContractError(f"`actions[{i}].label` is required")
+            raise ContractError(f"`{path}.label` is required")
         key = item.get("key")
         action_key = key if isinstance(key, str) and key else f"action{i}"
         kind = item.get("kind") or "command"
         if kind not in ("command", "internal", "form", "card"):
-            raise ContractError(f"`actions[{i}].kind` is unsupported")
+            raise ContractError(f"`{path}.kind` is unsupported")
         internal = None
         form = None
         card = None
         if kind == "internal":
             verb = item.get("verb")
             if not isinstance(verb, str) or not verb.strip():
-                raise ContractError(f"`actions[{i}].verb` is required")
+                raise ContractError(f"`{path}.verb` is required")
             args = item.get("args", [])
             if not isinstance(args, Sequence) or isinstance(args, (str, bytes)):
-                raise ContractError(f"`actions[{i}].args` must be an array")
+                raise ContractError(f"`{path}.args` must be an array")
             if any(not isinstance(arg, str) for arg in args):
-                raise ContractError(f"`actions[{i}].args` must contain only strings")
+                raise ContractError(f"`{path}.args` must contain only strings")
             run = tuple(args)
             internal = verb.strip()
         elif kind == "form":
             fields_from = item.get("fields_from")
             if not isinstance(fields_from, str) or not fields_from.strip():
-                raise ContractError(f"`actions[{i}].fields_from` is required")
-            run = _as_argv(item.get("run"), where=f"`actions[{i}].run`")
+                raise ContractError(f"`{path}.fields_from` is required")
+            run = _as_argv(item.get("run"), where=f"`{path}.run`")
             form = {
                 "fields_from": fields_from.strip(),
                 "title_from": _optional_path(
-                    item.get("title_from"), where=f"`actions[{i}].title_from"),
+                    item.get("title_from"), where=f"`{path}.title_from`"),
                 "body_from": _optional_path(
-                    item.get("body_from"), where=f"`actions[{i}].body_from"),
+                    item.get("body_from"), where=f"`{path}.body_from`"),
             }
         elif kind == "card":
             run = ()
             card = {
                 "title_from": _optional_path(
-                    item.get("title_from"), where=f"`actions[{i}].title_from")
+                    item.get("title_from"), where=f"`{path}.title_from`")
                 or "card.title",
                 "status_from": _optional_path(
-                    item.get("status_from"), where=f"`actions[{i}].status_from")
+                    item.get("status_from"), where=f"`{path}.status_from`")
                 or "card.status",
                 "link_from": _optional_path(
-                    item.get("link_from"), where=f"`actions[{i}].link_from")
+                    item.get("link_from"), where=f"`{path}.link_from`")
                 or "card.link",
                 "body_from": _optional_path(
-                    item.get("body_from"), where=f"`actions[{i}].body_from")
+                    item.get("body_from"), where=f"`{path}.body_from`")
                 or "card.body",
             }
         else:
-            run = _as_argv(item.get("run"), where=f"`actions[{i}].run`")
+            run = _as_argv(item.get("run"), where=f"`{path}.run`")
         when = item.get("when")
         if when is not None and not isinstance(when, Mapping):
-            raise ContractError(f"`actions[{i}].when` must be an object")
+            raise ContractError(f"`{path}.when` must be an object")
         progress = item.get("progress", False)
         if not isinstance(progress, bool):
-            raise ContractError(f"`actions[{i}].progress` must be a boolean")
+            raise ContractError(f"`{path}.progress` must be a boolean")
         out.append(ActionContract(
             key=action_key,
             label=label.strip(),
@@ -401,6 +408,9 @@ def parse_manifest(
         subscribe = data.get("subscribe", False)
         if not isinstance(stream, bool) or not isinstance(subscribe, bool):
             raise ContractError("`stream` and `subscribe` must be booleans")
+        home = data.get("home", False)
+        if not isinstance(home, bool):
+            raise ContractError("`home` must be a boolean")
         summary = data.get("summary")
         if summary is not None and not isinstance(summary, str):
             raise ContractError("`summary` must be a string when present")
@@ -414,6 +424,7 @@ def parse_manifest(
             name=name,
             label=label.strip(),
             after=after.strip(),
+            home=home,
             list_cmd=_as_argv(data.get("list"), where="`list`"),
             id_field=entry_str("id", "id") or "id",
             title_field=entry_str("title", "title") or "title",
@@ -428,6 +439,8 @@ def parse_manifest(
             stream=stream,
             subscribe=subscribe,
             actions=_parse_actions(data.get("actions")),
+            view_actions=_parse_actions(
+                data.get("view_actions"), field_name="view_actions"),
         )
 
     worktree_actions = _parse_worktree_actions(data.get("worktree_actions"), name=name)
@@ -482,6 +495,16 @@ def _probe_commands(
                     missing.append(f"action {action.key}: {command}")
             actions.append(replace(action, available=available))
         pivot = replace(pivot, actions=tuple(actions))
+        view_actions = []
+        for action in pivot.view_actions:
+            available = True
+            if action.kind in ("command", "form") and action.run:
+                command = action.run[0]
+                if shutil.which(command) is None:
+                    available = False
+                    missing.append(f"view action {action.key}: {command}")
+            view_actions.append(replace(action, available=available))
+        pivot = replace(pivot, view_actions=tuple(view_actions))
 
     worktree_actions = []
     for action in contribution.worktree_actions:
@@ -529,6 +552,7 @@ def discover_contracts(
     contributions: list[PluginContribution] = []
     findings: list[ContractFinding] = []
     seen_labels: dict[str, PluginContribution] = {}
+    home_contributions: list[PluginContribution] = []
     enabled_payloads: dict[str, list[Path]] = {}
 
     try:
@@ -658,6 +682,22 @@ def discover_contracts(
         elif label_key:
             seen_labels[label_key] = contribution
         contributions.append(contribution)
+        if contribution.pivot and contribution.pivot.home:
+            home_contributions.append(contribution)
+
+    if len(home_contributions) > 1:
+        for contribution in home_contributions:
+            findings.append(ContractFinding(
+                code="duplicate-home-pivot",
+                severity="warning",
+                marketplace=contribution.marketplace,
+                plugin=contribution.plugin,
+                source_path=contribution.source_path,
+                detail=(
+                    "more than one enabled pivot declares `home: true`; "
+                    "the Manager uses the first available contribution"
+                ),
+            ))
 
     legacy_dir = _legacy_pivots_dir(home_dir)
     try:

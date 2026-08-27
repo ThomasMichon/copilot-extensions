@@ -121,6 +121,9 @@ versioned manifest contract and reports disabled, malformed, duplicate, legacy,
 or missing-command contributions without importing plugin code or requiring a
 plugin installer to write into Manager-owned state. See
 [`docs/plugin-contribution-contract.md`](docs/plugin-contribution-contract.md).
+The contract also lets one available contribution designate the initial home
+pivot and lets providers declare view-scoped actions alongside row actions, so
+the Manager does not need a provider-specific home or "New" path.
 Available pivot contributions appear beside Worktrees in the Picker. Their list
 commands run in background workers, so the UI opens before cross-process reads
 finish; each pivot keeps its own cached rows and loading/error/empty state, and

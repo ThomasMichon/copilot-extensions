@@ -43,6 +43,7 @@ def _pivot(**extra) -> dict:
 def test_parses_pivot_actions_cards_forms_and_config_sections():
     contribution = parse_manifest(
         _pivot(
+            home=True,
             columns=[{"key": "state", "width": 8, "palette": "state"}],
             actions=[
                 {"key": "open", "label": "Open", "kind": "internal", "verb": "open-cli"},
@@ -54,6 +55,9 @@ def test_parses_pivot_actions_cards_forms_and_config_sections():
                     "run": ["agent-example", "steer", "{fields}"],
                 },
                 {"key": "card", "label": "Card", "kind": "card"},
+            ],
+            view_actions=[
+                {"key": "new", "label": "New", "kind": "internal", "verb": "new"},
             ],
             worktree_actions=[
                 {"key": "send", "label": "Send", "run": ["agent-example", "send", "{id}"]},
@@ -69,8 +73,10 @@ def test_parses_pivot_actions_cards_forms_and_config_sections():
     )
     assert contribution.schema_version == CONTRACT_VERSION
     assert contribution.pivot is not None
+    assert contribution.pivot.home is True
     assert contribution.pivot.columns[0].palette == "state"
     assert [a.kind for a in contribution.pivot.actions] == ["internal", "form", "card"]
+    assert contribution.pivot.view_actions[0].internal == "new"
     assert contribution.pivot.actions[1].form["fields_from"] == "card.request_input"
     assert contribution.worktree_actions[0].key == "send"
     assert contribution.config_sections[0].key == "settings"
@@ -84,6 +90,28 @@ def test_argv_rejects_non_string_or_empty_elements(argv):
     with pytest.raises(ContractError):
         parse_manifest(
             _pivot(list=argv),
+            name="agent-example",
+            marketplace="example",
+            plugin="agent-example",
+            source_path="/payload/pivots/agent-example.json",
+        )
+
+
+def test_home_requires_boolean():
+    with pytest.raises(ContractError, match="`home` must be a boolean"):
+        parse_manifest(
+            _pivot(home="yes"),
+            name="agent-example",
+            marketplace="example",
+            plugin="agent-example",
+            source_path="/payload/pivots/agent-example.json",
+        )
+
+
+def test_view_action_errors_name_the_view_actions_field():
+    with pytest.raises(ContractError, match=r"`view_actions\[0\]` must be an object"):
+        parse_manifest(
+            _pivot(view_actions=["invalid"]),
             name="agent-example",
             marketplace="example",
             plugin="agent-example",
@@ -202,6 +230,23 @@ def test_invalid_and_duplicate_contributions_are_isolated(tmp_path: Path, monkey
     assert any(f.code == "invalid-json" for f in report.findings)
 
 
+def test_duplicate_home_pivots_are_reported(tmp_path: Path, monkeypatch):
+    home = tmp_path / "home"
+    plugins = home / ".copilot" / "installed-plugins"
+    _settings(home, {
+        "agent-a@example": True,
+        "agent-b@example": True,
+    })
+    _manifest(plugins, "example", "agent-a", "a", _pivot(label="A", home=True))
+    _manifest(plugins, "example", "agent-b", "b", _pivot(label="B", home=True))
+    monkeypatch.setattr("worktree_manager.plugin_contracts.shutil.which", lambda _: "/bin/tool")
+
+    report = discover_contracts(home_dir=home)
+
+    assert len(report.contributions) == 2
+    assert sum(f.code == "duplicate-home-pivot" for f in report.findings) == 2
+
+
 def test_non_utf8_manifest_isolated(tmp_path: Path):
     home = tmp_path / "home"
     plugins = home / ".copilot" / "installed-plugins"
@@ -243,10 +288,14 @@ def test_missing_optional_action_command_does_not_disable_pivot(
     _manifest(plugins, "example", "agent-example", "example", _pivot(actions=[
         {"key": "local", "label": "Local", "run": ["agent-example", "open"]},
         {"key": "peer", "label": "Peer", "run": ["agent-peer", "open"]},
+    ], view_actions=[
+        {"key": "new", "label": "New", "run": ["agent-missing", "new"]},
     ]))
     monkeypatch.setattr(
         "worktree_manager.plugin_contracts.shutil.which",
-        lambda command: None if command == "agent-peer" else f"/bin/{command}",
+        lambda command: (
+            None if command in ("agent-peer", "agent-missing") else f"/bin/{command}"
+        ),
     )
 
     report = discover_contracts(home_dir=home)
@@ -254,7 +303,9 @@ def test_missing_optional_action_command_does_not_disable_pivot(
     assert contribution.command_available is True
     assert contribution.pivot is not None
     assert [a.available for a in contribution.pivot.actions] == [True, False]
+    assert contribution.pivot.view_actions[0].available is False
     assert any("action peer: agent-peer" in f.detail for f in report.findings)
+    assert any("view action new: agent-missing" in f.detail for f in report.findings)
 
 
 def test_contracts_command_emits_machine_readable_report(
