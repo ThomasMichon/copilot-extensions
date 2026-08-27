@@ -5,9 +5,9 @@
   worktree-backed agents of a project.
 - **Scope:** leaf (concrete component; child of the agent-fabric vision)
 - **Status:** Active
-- **Last revised:** 2026-08-14
+- **Last revised:** 2026-08-26
 - **Home:** delivered by the **Installer & Configurator** (the optional worktree-
-  and agent- control-plane) — see [installer](../installer/README.md). It is an
+  and agent-control-plane) — see [installer](../installer/README.md). It is an
   **optional** surface: the plugins provide the in-session tools agents use and
   are fully self-sufficient without the Picker present.
 - **Reality docs:**
@@ -41,15 +41,17 @@ session for another is a class of error the Picker exists to abolish.
 
 Finally, the Picker is the fabric's **unified presentation surface**. It is
 delivered by the **Configurator** — the optional worktree/agent control-plane
-(see [installer](../installer/README.md)) — and is *not* only about worktrees:
-every fabric layer an operator installs — coordination, delegation, connectivity,
-venue providers, the vault, the model-context bridge — finds a **home** in the
-Picker. The more of the fabric a user adopts, the richer the Picker's capability
-becomes, without the base ever getting heavier for someone who adopted less. And
-because it lives in the *optional* control-plane, a user who wants only the
-in-session plugin tools need never run it: the Picker enriches how a **human**
-drives the fleet; it is never a prerequisite for the plugins or their agents to
-function.
+(see [installer](../installer/README.md)) — but owns no operational layer's home
+itself. Every fabric layer an operator installs — **including the worktree ground
+layer** — contributes its own pivot, actions, and configuration affordances
+through the same presentation contract. The Manager supplies the generic shell,
+interaction language, and onboarding floor; it never hard-codes a privileged
+Worktrees client beside the contributed layers. The more of the fabric a user
+adopts, the richer the Picker's capability becomes, without the base ever getting
+heavier for someone who adopted less. And because it lives in the *optional*
+control-plane, a user who wants only the in-session plugin tools need never run
+it: the Picker enriches how a **human** drives the fleet; it is never a
+prerequisite for the plugins or their agents to function.
 
 ## Concepts & Components
 
@@ -57,11 +59,14 @@ function.
   binstub — that opens onto the whole worktree lifecycle. There is one obvious
   way in, and it is the same for every registered project.
 - **Pivots (top-level views).** The Picker is organized around a small set of
-  top-level pivots. **Worktrees** is the home view; other fabric layers
-  contribute their own pivots (Bridges, Dispatch, CodeSpaces, Containers, …) and
-  a right-aligned **Configuration** region hosts settings-shaped surfaces
-  (Profiles, SSH, MCP, …). Pivots are the Picker's expression of the fabric's
-  layered composition: each installed layer lights up its own home.
+  contributed top-level pivots. The worktree ground layer contributes
+  **Worktrees** and designates it as the ordinary fleet home when that layer is
+  present; coordination and venue layers contribute Bridges, Dispatch,
+  CodeSpaces, Containers, and their peers through the same contract. A
+  right-aligned **Configuration** region hosts contributed settings-shaped
+  surfaces (Profiles, SSH, MCP, …). No operational pivot is built into the
+  Manager: pivots are the Picker's expression of the fabric's layered
+  composition, and each installed layer lights up its own home.
 - **Venue / machine scope.** Within a pivot, the operator scopes the view across
   the fabric's machines (and other venues) so the whole multi-machine fleet is
   legible from one place, not one terminal per host.
@@ -142,10 +147,12 @@ than a per-host chore. Where a fleet member lives is a scoping detail, not a
 reason to open another terminal.
 
 ### plugin-pivot-extensibility
-Every fabric layer an operator installs finds a **home** in the Picker — as a
-top-level pivot, as additional per-worktree actions or waypoints, or as a
-Configuration-region section — discovered without the Picker having to hard-code
-that layer. The capability set **grows with adoption**: the more of the fabric a
+Every fabric layer an operator installs finds a **home** in the Picker — the
+worktree ground layer included — as a top-level pivot, additional row or
+view-scoped actions, waypoints, or a Configuration-region section, discovered
+without the Picker hard-coding that layer. A contribution can identify the
+ordinary landing surface without becoming privileged implementation inside the
+Manager. The capability set **grows with adoption**: the more of the fabric a
 user leverages, the richer the Picker becomes, and a user who adopted less is
 never burdened by pivots for layers they don't have.
 
@@ -210,6 +217,21 @@ derive-don't-duplicate rule at the presentation surface. When it shows a
 worktree's lifecycle, a task's status, or an agent's pulse, that truth belongs to
 the owning layer; the Picker is its faithful mirror.
 
+### provider-neutral-composition
+The Manager treats every operational layer through one contribution model.
+Worktrees is not a privileged built-in data source or action path: the ground
+layer contributes it just as coordination and venue providers contribute their
+own surfaces. Provider identity may determine what is shown and which actions are
+valid, but never which in-process presentation implementation the Manager uses.
+
+### provenance-bound-contributions
+Every contributed surface remains attributable to the exact installed provider
+that owns it. The Manager invokes that provider's provenanced process boundary,
+never an ambient same-named command or a runtime selected only by a bare plugin
+name. Independently installed ecosystems can therefore contribute equivalent
+surfaces without one installation's actions or state being silently served by
+another.
+
 ### live-not-snapshot
 What the Picker shows reflects **live** derived state, not a frozen snapshot: it
 refreshes on demand, re-scans for newly-contributed layer surfaces, and surfaces
@@ -218,24 +240,26 @@ stale data. When it cannot show something fresh, it says so rather than implying
 currency it lacks.
 
 ### graceful-capability-scaling
-With only the ground layer present, the Picker is a **complete, coherent front
-door** — coarse but whole. Installing a higher fabric layer *adds* its pivot,
-actions, or configuration section without altering or breaking the base
-experience. Capability scales with what the operator has adopted; nothing a lower
-configuration relied on is removed by adding more.
+With only the ground layer present, its contributed Worktrees surface makes the
+Picker a **complete, coherent front door** — coarse but whole. Installing a
+higher fabric layer *adds* its pivot, actions, or configuration section without
+altering or breaking the base experience. Capability scales with what the
+operator has adopted; nothing a lower configuration relied on is removed by
+adding more. With no operational layer provisioned, the Manager's onboarding
+floor remains coherent without pretending a missing provider's pivot exists.
 
 ### provisioning-aware-empty-states
-A pivot whose underlying source is **not yet provisioned** — no worktree engine, no
-configured machines, no adopted repo — is **never a dead or blank load and never a
-bare error**. It renders a **guided empty state that names what is missing and
-offers the action to provision it** (install the core, adopt a repo, add a machine,
-enable a repo's plugins), so the absence *becomes the next step* rather than a wall.
-This is the "never a silent dead end — always guide to the next correct step"
-contract applied to the front door, and the **zero-layer floor** of
-`§Behaviors/graceful-capability-scaling`: below "coarse but whole with only the
-ground layer" sits "coherent and self-guiding with **no** layer yet." The Picker
-never presents a promise (a Worktrees list, a Machines switcher) it cannot yet
-source; it presents the path to earning it.
+With **no operational provider installed**, the Manager shows only its
+provider-free onboarding floor: it does not synthesize a Worktrees or Machines
+pivot whose owner is absent. Once a provider contributes a pivot, but its own
+backing resources are incomplete — for example no configured machines or no
+adopted repo — that pivot is **never a dead or blank load and never a bare
+error**. It renders a **guided empty state that names what is missing and offers
+the action to provision it**, so the absence becomes the next step rather than a
+wall. This is the "never a silent dead end — always guide to the next correct
+step" contract applied at both levels: onboarding for a missing provider,
+provider-owned guidance for missing resources. The Picker never presents a
+promise it cannot source; it presents the path to earning it.
 
 ### renderable-and-assertable-headless
 The Picker can be instantiated **headlessly** — no live terminal, no human, no
@@ -271,6 +295,12 @@ regression is something a test can catch before an operator does.
 - **Not the owner of cross-layer semantics.** Lifecycle states, disposition and
   pulse, task records, machine reachability, and venue reach are **defined** by
   the owning fabric layers; the Picker surfaces them and must not redefine them.
+- **No built-in operational provider.** The Manager does not carry a bespoke
+  Worktrees table, worktree data model, or worktree-only launch/action path.
+  Those affordances arrive from the ground layer through the same contribution
+  model as every other operational surface. The Manager owns only generic
+  presentation and interaction primitives plus the provider-free onboarding
+  floor.
 - **Not a specification.** This vision fixes the Picker's *role, guarantees, and
   interaction promises*, not its wiring — it does not pin a widget framework, key
   bindings, color values, screen layout, pivot manifest format, or command
@@ -364,3 +394,8 @@ regression is something a test can catch before an operator does.
   so the front door must guide provisioning rather than dead-load. Tracked as
   #542 (with #540/#541 the install-side prerequisites);
   see also #85 (advance-to-vision) and #357 (Phase-4 configurator).
+- **2026-08-26** — Strengthened `plugin-pivot-extensibility` into fully
+  **provider-neutral composition**: Worktrees is contributed by the ground layer
+  through the same contract as every other operational pivot, rather than
+  remaining a privileged Manager implementation. The Manager retains only the
+  generic shell, interaction primitives, and provider-free onboarding floor.
