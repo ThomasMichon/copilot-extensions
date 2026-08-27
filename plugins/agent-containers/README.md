@@ -40,9 +40,13 @@ addressing (`container:<name>`) is unavailable.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
   is served through agent-bridge's declarative provider registry. The
   `agent-containers` binstub implements `namespace-list`,
-  `namespace-resolve`, `namespace-ensure-ready`, and `relay-profile`; bridge
-  shells out to those commands rather than requiring this package in the bridge
-  venv. Resolution spawns `agent-containers exec --stdio <name>`, whose wrapper
+  `namespace-resolve`, `namespace-ensure-ready`, `namespace-recreate`, and
+  `relay-profile`; bridge shells out to those commands rather than requiring
+  this package in the bridge venv. `namespace-recreate` is the destructive,
+  target-scoped parity seam: it removes only the identity-checked Docker
+  instance of one trusted configured member, recreates the same deterministic
+  name, and reports the new instance identity without exposing launch data.
+  Resolution spawns `agent-containers exec --stdio <name>`, whose wrapper
   provisions a machine-local SSH key for trusted fleets and opens OpenSSH with
   `docker exec -i <name> /usr/sbin/sshd -i -e` as its `ProxyCommand`. The
   wrapper fetches the host `gh auth token` at spawn time and stages launch-only

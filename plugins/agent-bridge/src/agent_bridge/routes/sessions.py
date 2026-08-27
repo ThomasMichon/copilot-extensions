@@ -892,6 +892,8 @@ async def stop_session(
         raise HTTPException(status_code=409, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post("/{session_id}/parity/interrupt-relays")
@@ -904,6 +906,29 @@ async def interrupt_relays_for_parity(
     mgr: SessionManager = request.app.state.session_manager
     try:
         return await mgr.interrupt_relays_for_parity(
+            session_id,
+            timeout=timeout,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except (TimeoutError, asyncio.TimeoutError) as exc:
+        raise HTTPException(status_code=504, detail=str(exc))
+
+
+@router.post("/{session_id}/parity/recreate-container")
+async def recreate_container_for_parity(
+    session_id: str,
+    request: Request,
+    timeout: float = 600.0,
+):
+    """Recreate one harness-owned container and return its replacement."""
+    mgr: SessionManager = request.app.state.session_manager
+    try:
+        return await mgr.recreate_container_for_parity(
             session_id,
             timeout=timeout,
         )
@@ -1026,3 +1051,5 @@ async def end_session(session_id: str, request: Request, force: bool = False):
         raise HTTPException(status_code=409, detail=str(exc))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))

@@ -15,6 +15,7 @@ from agent_bridge.app import create_app
 from agent_bridge.client import BridgeClient, BridgeClientError
 from agent_bridge.models import ServiceConfig
 from agent_bridge.protocol import (
+    CONTAINER_RECREATE_PROTOCOL_VERSION,
     FAILED_ACP_HANDSHAKE_FAULT,
     FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION,
     HTTP_PROTOCOL_MIN_SUPPORTED,
@@ -148,6 +149,45 @@ def test_failed_handshake_fault_is_sent_to_supported_daemon():
 
     assert result["parity_fault_result"]["cleanup_confirmed"] is True
     assert captured["body"]["parity_fault"] == FAILED_ACP_HANDSHAKE_FAULT
+
+
+def test_container_recreate_refuses_daemon_before_capability_version():
+    c = _client({
+        "protocol_version": CONTAINER_RECREATE_PROTOCOL_VERSION - 1,
+        "min_protocol_version": 1,
+    })
+
+    with pytest.raises(BridgeClientError) as raised:
+        c.recreate_container_for_parity("session-1")
+
+    assert raised.value.status == 426
+
+
+def test_container_recreate_calls_supported_daemon():
+    c = _client({
+        "protocol_version": CONTAINER_RECREATE_PROTOCOL_VERSION,
+        "min_protocol_version": 1,
+    })
+    captured = {}
+
+    def request(method, path, body=None, **kwargs):
+        captured.update({
+            "method": method,
+            "path": path,
+            "body": body,
+            "kwargs": kwargs,
+        })
+        return {"replacement_session_id": "session-2"}
+
+    c._request = request  # type: ignore[method-assign]
+
+    result = c.recreate_container_for_parity("session-1", timeout=12)
+
+    assert result == {"replacement_session_id": "session-2"}
+    assert captured["method"] == "POST"
+    assert captured["path"].endswith("/session-1/parity/recreate-container")
+    assert captured["kwargs"]["params"] == {"timeout": "12"}
+    assert captured["kwargs"]["request_timeout"] == 3612
 
 
 def test_assert_client_supported_ok_when_at_or_above_floor():

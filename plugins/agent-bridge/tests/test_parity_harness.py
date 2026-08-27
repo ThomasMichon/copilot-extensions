@@ -8,7 +8,10 @@ import pytest
 
 from agent_bridge import __main__ as cli
 from agent_bridge import parity_harness as parity
-from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
+from agent_bridge.protocol import (
+    CONTAINER_RECREATE_FAULT,
+    FAILED_ACP_HANDSHAKE_FAULT,
+)
 from agent_bridge.session_host.host_index import HostIndex, HostRecord
 
 
@@ -33,6 +36,7 @@ class FakeClient:
         self.handshake_fault_calls = 0
         self.start_calls = 0
         self.normal_started = False
+        self.container_recreate_calls = 0
         self.other_sessions = []
 
     def start_session(self, **kwargs):
@@ -141,6 +145,36 @@ class FakeClient:
             "all_recovered": True,
             "owner_identity_preserved": True,
             "processes_replaced": True,
+        }
+
+    def recreate_container_for_parity(self, session_id, *, timeout=600):
+        self.container_recreate_calls += 1
+        assert session_id == "session-1"
+        self.events = []
+        self.session = {
+            "session_id": "session-2",
+            "status": "idle",
+            "acp_session_id": "acp-2",
+            "pid": 456,
+            "target_type": "command",
+        }
+        return {
+            "old_session_id": "session-1",
+            "replacement_session_id": "session-2",
+            "old_acp_session_id": "acp-1",
+            "replacement_acp_session_id": "acp-2",
+            "old_container_id": "a" * 64,
+            "replacement_container_id": "b" * 64,
+            "old_host_pid": 300,
+            "replacement_host_pid": 400,
+            "old_child_pid": 123,
+            "replacement_child_pid": 456,
+            "container_identity_changed": True,
+            "old_session_removed": True,
+            "old_host_index_removed": True,
+            "old_forward_removed": True,
+            "old_relay_removed": True,
+            "target_lock_transferred": True,
         }
 
     def end_session(self, session_id, *, force=False):
@@ -439,6 +473,36 @@ def test_failed_handshake_fault_rolls_back_then_acquires_same_target():
     ] is True
     assert client.handshake_fault_calls == 1
     assert client.start_calls == 2
+    assert client.ended is True
+
+
+def test_container_recreate_fault_uses_fresh_identity_and_reprobes():
+    client = FakeClient()
+
+    result = parity.run(
+        client,
+        "container:example-1",
+        expected_workspace="/workspaces/example",
+        expected_capability="local-skill",
+        startup_timeout=1,
+        turn_timeout=1,
+        fault=CONTAINER_RECREATE_FAULT,
+    )
+
+    assert result.ok is True
+    assert result.session_id == "session-2"
+    assert result.initial_host_pid == 300
+    assert result.resumed_host_pid == 400
+    assert result.resumed_acp_session_id == "acp-2"
+    assert result.resumed_child_pid == 456
+    assert result.checks["container_identity_changed"] is True
+    assert result.checks["fresh_acp_session"] is True
+    assert result.checks["fresh_host"] is True
+    assert result.checks["fresh_child"] is True
+    assert result.checks["replacement_workspace"] is True
+    assert result.checks["replacement_capability"] is True
+    assert client.container_recreate_calls == 1
+    assert len(client.prompts) == 3
     assert client.ended is True
 
 

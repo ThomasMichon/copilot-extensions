@@ -441,6 +441,21 @@ class TestSessionRoutes:
         resp = client.delete("/api/v1/sessions/nonexistent")
         assert resp.status_code == 404
 
+    def test_delete_cleanup_pending_returns_conflict(
+        self,
+        client,
+        app,
+    ) -> None:
+        with patch.object(
+            app.state.session_manager,
+            "end_session",
+            AsyncMock(side_effect=RuntimeError("retained target ownership")),
+        ):
+            resp = client.delete("/api/v1/sessions/session-1")
+
+        assert resp.status_code == 409
+        assert "retained target ownership" in resp.json()["detail"]
+
     def test_resume_nonexistent(self, client) -> None:
         resp = client.post("/api/v1/sessions/nonexistent/resume")
         assert resp.status_code == 404

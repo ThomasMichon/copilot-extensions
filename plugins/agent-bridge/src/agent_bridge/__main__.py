@@ -24,6 +24,7 @@ from agent_procutil import detached_kwargs, no_window_kwargs, windowless_python
 from . import __version__
 from .parity_harness import (
     FAILED_ACP_HANDSHAKE_FAULT,
+    CONTAINER_RECREATE_FAULT,
     FRONTEND_RESTART_HOSTINDEX_LOSS,
     RELAY_INTERRUPTION,
 )
@@ -1640,6 +1641,16 @@ def _cmd_parity(args: argparse.Namespace) -> None:
         else:
             print(f"[FAIL] venue parity: {message}", file=sys.stderr)
         sys.exit(2)
+    if (
+        args.fault == CONTAINER_RECREATE_FAULT
+        and not args.target.startswith("container:")
+    ):
+        message = "--fault container-recreate requires a container: target"
+        if args.json:
+            _json_out({"ok": False, "target": args.target, "error": message})
+        else:
+            print(f"[FAIL] venue parity: {message}", file=sys.stderr)
+        sys.exit(2)
     client = _get_client()
     fault_handler = (
         _fault_frontend_restart_hostindex_loss
@@ -1694,10 +1705,20 @@ def _cmd_parity(args: argparse.Namespace) -> None:
         _json_out(result)
         return
     print(f"[OK] venue parity: {args.target}")
+    summary_pid = (
+        result["resumed_child_pid"]
+        if args.fault == CONTAINER_RECREATE_FAULT
+        else result["initial_child_pid"]
+    )
+    summary_acp = (
+        result["resumed_acp_session_id"]
+        if args.fault == CONTAINER_RECREATE_FAULT
+        else result["initial_acp_session_id"]
+    )
     print(
         f"  session={result['session_id']} "
-        f"pid={result['initial_child_pid']} "
-        f"acp={result['initial_acp_session_id']}"
+        f"pid={summary_pid} "
+        f"acp={summary_acp}"
     )
     for name, ok in result["checks"].items():
         print(f"  {'PASS' if ok else 'FAIL'} {name}")
@@ -4249,6 +4270,7 @@ def build_parser() -> argparse.ArgumentParser:
             FRONTEND_RESTART_HOSTINDEX_LOSS,
             RELAY_INTERRUPTION,
             FAILED_ACP_HANDSHAKE_FAULT,
+            CONTAINER_RECREATE_FAULT,
         ],
         help=(
             "Run an explicit destructive fault scenario. Faults refuse other "

@@ -40,6 +40,7 @@ from .lifecycle import (
     DockerContainerInfo,
     _check_docker,
     _docker,
+    get_container,
     list_containers,
     remove_container,
     start_container,
@@ -47,6 +48,14 @@ from .lifecycle import (
 )
 
 log = logging.getLogger("agent-containers")
+
+
+class RecreateMemberError(RuntimeError):
+    """A targeted recreation failed after reporting its destructive boundary."""
+
+    def __init__(self, message: str, *, old_container_removed: bool) -> None:
+        self.old_container_removed = old_container_removed
+        super().__init__(message)
 
 
 def _creation_flags() -> int:
@@ -506,6 +515,97 @@ def up(
                 )
             )
     return created
+
+
+def recreate_member(
+    config: ContainersConfig,
+    name: str,
+    *,
+    expected_container_id: str,
+) -> dict[str, str | bool]:
+    """Recreate one trusted fleet member after an identity-checked remove."""
+    _check_docker()
+    info = get_container(config, name)
+    if info is None:
+        raise RuntimeError(f"Container '{name}' is not a discovered fleet member")
+    if info.container_id.lower() != expected_container_id.lower():
+        raise RuntimeError(
+            f"Container '{name}' identity changed before recreation"
+        )
+    fleet_name = info.fleet or ""
+    fleet = config.fleets.get(fleet_name)
+    if fleet is None:
+        raise RuntimeError(
+            f"Container '{name}' has no matching fleet configuration"
+        )
+    if fleet.restricted or info.security_profile != "trusted":
+        raise RuntimeError(
+            "Targeted parity recreation is supported only for trusted fleets"
+        )
+
+    old_id = info.container_id
+    remove_container(old_id, force=True)
+    workspace_folder = fleet.workspace_folder or config.workspace_folder
+    exec_user = fleet.exec_user or config.exec_user
+    try:
+        if fleet.devcontainer_path:
+            _devcontainer_up(
+                fleet_name,
+                fleet,
+                name,
+                dotfiles=config.dotfiles,
+                harness=config.harness,
+                exec_user=exec_user,
+            )
+        else:
+            _image_run(
+                fleet_name,
+                fleet,
+                name,
+                workspace_folder=workspace_folder,
+                exec_user=exec_user,
+            )
+    except Exception as exc:
+        raise RecreateMemberError(
+            f"Container '{name}' was removed but its replacement failed",
+            old_container_removed=True,
+        ) from exc
+
+    try:
+        replacement = get_container(config, name)
+        if replacement is None:
+            raise RuntimeError(
+                f"Container '{name}' replacement was not discoverable"
+            )
+        if replacement.state != "running":
+            raise RuntimeError(
+                f"Container '{name}' replacement is not running "
+                f"(state={replacement.state!r})"
+            )
+        if (
+            replacement.name != name
+            or replacement.fleet != fleet_name
+            or replacement.security_profile != "trusted"
+        ):
+            raise RuntimeError(
+                f"Container '{name}' replacement does not match its trusted fleet"
+            )
+        if replacement.container_id.lower() == old_id.lower():
+            raise RuntimeError(
+                f"Container '{name}' recreation preserved the old identity"
+            )
+    except Exception as exc:
+        raise RecreateMemberError(
+            str(exc),
+            old_container_removed=True,
+        ) from exc
+    return {
+        "name": name,
+        "old_container_id": old_id,
+        "new_container_id": replacement.container_id,
+        "running": True,
+        "identity_changed": True,
+    }
 
 
 def down(config: ContainersConfig, fleet_name: str) -> list[str]:
