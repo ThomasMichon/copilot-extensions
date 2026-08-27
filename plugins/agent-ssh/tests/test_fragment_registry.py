@@ -594,6 +594,7 @@ def test_duplicate_host_identity_quarantines_both_fragments(tmp_path: Path) -> N
         "duplicate",
         "duplicate",
     ]
+    assert report.snapshot.findings == report.findings
 
 
 def test_current_and_stale_host_collision_quarantines_current_alias(
@@ -653,6 +654,36 @@ def test_legacy_fragment_is_active_with_advisory(tmp_path: Path) -> None:
 
     assert str(legacy) in report.entries
     assert report.findings[0].reason == "legacy-unattributed"
+    assert "original sources" in (report.findings[0].remedy or "")
+
+
+def test_displaced_schema_metadata_is_not_downgraded_to_legacy(
+    tmp_path: Path,
+) -> None:
+    config_d = tmp_path / "config.d"
+    registry, module_path, registry_data, module_data = _sources(tmp_path, "direct")
+    fragment = _managed_fragment(
+        config_d,
+        registry,
+        module_path,
+        registry_data,
+        module_data,
+    )
+    lines = fragment.read_text(encoding="utf-8").splitlines()
+    fragment.write_text(
+        "\n".join([lines[0], "# inserted comment", *lines[1:]]) + "\n",
+        encoding="utf-8",
+    )
+
+    report = fragment_registry.scan_fragment_registry(
+        config_d,
+        syntax_check=_no_syntax_error,
+    )
+
+    assert report.entries == {}
+    assert report.blocked_aliases == frozenset({"host-a"})
+    assert report.findings[0].reason == "invalid-entry"
+    assert "immediately follow" in (report.findings[0].detail or "")
 
 
 def test_crlf_fragment_matches_posix_rendered_sources(tmp_path: Path) -> None:

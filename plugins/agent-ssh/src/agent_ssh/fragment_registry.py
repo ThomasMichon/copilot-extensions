@@ -213,8 +213,8 @@ def _finding(
         )
     elif reason == "legacy-unattributed":
         remedy = (
-            f"Re-run `agent-ssh emit-profile` for {entry} to stamp current source "
-            "identity; cleanup remains report-only."
+            "Re-run `agent-ssh emit-profile <registry> --module <module>` with "
+            f"the original sources for {entry}; cleanup remains report-only."
         )
     else:
         remedy = (
@@ -351,9 +351,26 @@ def _parse_structure(
         aliases.append(alias)
         in_host_block = True
     metadata: FragmentMetadata | None = None
-    if len(lines) > 1 and lines[1].startswith(ssh_profile.METADATA_PREFIX):
+    metadata_lines = [
+        (index, line)
+        for index, line in enumerate(lines)
+        if line.startswith(ssh_profile.METADATA_PREFIX)
+    ]
+    if len(metadata_lines) > 1:
+        raise FragmentParseError(
+            "multiple schema-v1 metadata lines are not allowed",
+            transport=transport,
+            aliases=tuple(aliases),
+        )
+    if metadata_lines and metadata_lines[0][0] != 1:
+        raise FragmentParseError(
+            "schema-v1 metadata must immediately follow the transport header",
+            transport=transport,
+            aliases=tuple(aliases),
+        )
+    if metadata_lines:
         try:
-            metadata = _parse_metadata(lines[1])
+            metadata = _parse_metadata(metadata_lines[0][1])
         except (json.JSONDecodeError, ValueError) as exc:
             raise FragmentParseError(
                 str(exc),
@@ -948,11 +965,7 @@ def scan_fragment_registry(
         registry=REGISTRY_NAME,
         authority=ScanAuthority.COMPLETE,
         decisions=decisions,
-        findings=tuple(
-            finding
-            for decision in decisions.values()
-            for finding in decision.findings
-        ),
+        findings=tuple(findings),
     )
     return FragmentRegistryReport(
         snapshot=snapshot,
