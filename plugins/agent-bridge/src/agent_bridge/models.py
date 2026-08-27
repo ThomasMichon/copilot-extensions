@@ -407,6 +407,9 @@ class SendMessageRequest(BaseModel):
     #: session -- so a steer addressed to a rolled/taken-over incarnation fails
     #: fast instead of durably queuing a wrong-incarnation write.
     expected_session_id: str | None = None
+    #: Stable producer key. Repeating a send with the same key returns the
+    #: original message id instead of enqueuing a duplicate.
+    idempotency_key: str | None = None
 
 
 class SendMessageResult(BaseModel):

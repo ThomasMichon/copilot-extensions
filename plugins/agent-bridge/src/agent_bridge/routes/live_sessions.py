@@ -392,6 +392,7 @@ async def post_live_message(
         reply_to=body.reply_to,
         kind=body.kind,
         expected_session_id=body.expected_session_id,
+        idempotency_key=body.idempotency_key,
     )
     if reason == "not_found":
         raise HTTPException(status_code=404, detail="live session not found")
@@ -420,6 +421,14 @@ async def post_live_message(
                 f"expected live session {body.expected_session_id} is not the "
                 f"current live registration (current is {current or 'none'}); "
                 "refusing delivery"
+            ),
+        )
+    if reason == "idempotency_conflict":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"idempotency key {body.idempotency_key!r} is already bound "
+                "to a different live-message request"
             ),
         )
     if message_id is None:  # defensive: unreachable when reason is None

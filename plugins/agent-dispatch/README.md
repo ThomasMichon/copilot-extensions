@@ -123,7 +123,7 @@ The installer drops a pivot manifest at
 `~/.agent-worktrees/pivots/agent-dispatch.json` so the agent-worktrees Textual
 picker grows a **Tasks** pivot (between Worktrees and Maintenance). It renders the
 status-grouped board through the stdlib-only `agent-dispatch-board` API client
-(Blocked / Proposed / Queued / Started / recently terminal). A separate **ACTIVE** badge appears only
+(Blocked / Proposed / Queued / Started / Suspended / recently terminal). A separate **ACTIVE** badge appears only
 when embodiment tracking reports an assigned agent executing a turn; **STALLED**
 marks a running turn with no recent activity. That execution badge is independent
 from lifecycle phase -- `Started` alone never implies a live agent. The
@@ -208,6 +208,10 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
                 +-- decline/yield ---+
                 ^
                 +-- owner-gone (liveness GC requeue, attempts++)
+started -> suspended -> started                              (resume; same owner)
+               |
+               +-----------> queued                          (release; replacement)
+               +-----------> completed                       (condition resolved)
    (any non-terminal) --------------------------> abandoned   (terminal, permission-gated)
 ```
 
@@ -215,6 +219,9 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
 - **queued** -- claimable.
 - **claimed** -- held by a worker (may evaluate before committing).
 - **started** -- under active implementation.
+- **suspended** -- previously started but dormant and non-claimable; retains the
+  same owner/session, worktree identity, generation, progress, and card while
+  clearing active lease/activity.
 - **completed** / **abandoned** / **dead_letter** -- terminal (abandon requires
   permission; **dead_letter** is where a task lands when GC has requeued it past
   the attempts cap -- its owner kept going gone -- an actionable failure state).
@@ -226,6 +233,37 @@ proposed -> queued -> claimed -> started -> completed        (terminal)
   reused worktree or a resuming stale worker can't corrupt recovery. The
   coordinator runs GC automatically every `AGENT_DISPATCH_GC_INTERVAL` seconds
   (default 60; `0` disables); `recover` forces a pass on demand.
+- `suspend <id> --reason <why>` is owner-gated and moves **started → suspended**.
+  For an interactive owner, `resume <id>` restores **suspended → started** under
+  the same owner and atomically enqueues its durable wake. A supervised owner
+  without a captured interactive inbox instead releases to **queued** and
+  settles its reservation for safe re-embodiment. `release <id>`
+  explicitly clears ownership and moves **suspended → queued**. Suspended tasks
+  do not participate in liveness GC, supervisor capacity/claiming, or retry
+  accounting.
+- `complete <id> <owner>` is also legal directly from **suspended**. An external
+  resolver may therefore record a satisfied dormant goal atomically under the
+  preserved owner without waking a process or fabricating an active turn.
+- A steer submitted while suspended is stored and either resumes an interactive
+  task to   **started** with a durable wake, or releases a task without a captured inbox to
+  **queued** for re-embodiment, in the same transaction. A replacement body
+  consumes pending steering immediately after it starts. The HTTP request never
+  calls the bridge. The coordinator service drains interactive wakes
+  asynchronously, retries with exponential backoff across restarts, and uses
+  the stable wake id as the bridge idempotency key. Task
+  generation, owner/session identity, lifecycle status, and latest-wake identity
+  fence stale delivery after a requeue, completion, or newer wake. Delivery is
+  additionally fenced by the bridge against the exact captured session. Only
+  the active coordinator route claims wakes; short delivery leases let its
+  promoted successor recover an interrupted claim without racing a live
+  predecessor. Wakes are edge-triggered: the resumed/replacement worker runs
+  `steer take <id> --all` to atomically drain every pending answer. Suspension
+  is refused while an untaken steer exists, closing the response-before-park
+  race. The response
+  reports `steer_wake_status: pending`; `wakes <id>`, `/tasks/{id}/wakes`, task
+  events, `task.wake` SSE events, and `/health` wake metrics expose
+  pending/delivering/delivered/failed/stale state. The steer is durable even
+  when all delivery attempts fail.
 
 ### Goal-bearing tasks -- a durable goal, not a fire-once prompt
 
@@ -575,8 +613,8 @@ agent-dispatch card show <id>
 # The operator answers; --wake nudges the owning worktree to resume (default on):
 agent-dispatch steer submit <id> --field decision=Proceed
 
-# The resumed worker consumes the answer and continues toward its goal:
-agent-dispatch steer take <id>              # -> {"steer": {"fields": {...}, "sender": ...}}
+# The resumed worker drains all answers and continues toward its goal:
+agent-dispatch steer take <id> --all        # -> {"steers": [{"fields": {...}, "sender": ...}]}
 ```
 
 - **`card`** is a latest-only object on the task (`title`/`status`/`link`/`body`/
@@ -594,8 +632,9 @@ agent-dispatch steer take <id>              # -> {"steer": {"fields": {...}, "se
   surface acting for them, answers). After persistence, the coordinator asks
   agent-bridge to resume the owner immediately (and queues the prompt if that
   owner is busy), regardless of which surface submitted the answer. Bridge
-  failure never loses the durable steer. `steer take` is the owner-gated
-  wake-side read that hands the next answer to the resumed worker.
+  failure never loses the durable steer. `steer take --all` is the owner-gated
+  wake-side read that atomically drains every pending answer for the resumed
+  worker; plain `steer take` remains the one-at-a-time inspection form.
 - **General, not domain-specific.** The coordinator stores card/steer objects
   opaquely, so any dispatched agent that must block on operator input uses this --
   the same transport a picker "form" surface or an `ask_user` skill writes through.
@@ -630,6 +669,9 @@ agent-dispatch claim                     # lease my assigned/eligible task (iden
 agent-dispatch claim  <task-id>          # claim THAT specific task (positional = task id, like the verbs below)
 agent-dispatch claim  <task-id> --worker <owner>   # ...as an explicit owner (rarely needed; default: CWD identity)
 agent-dispatch start  <id>  <owner>
+agent-dispatch suspend <id> <owner> --reason "waiting for an external result"
+agent-dispatch resume <id> <owner>                 # same owner; durable async wake
+agent-dispatch release <id> <owner> --reason "use a replacement"
 agent-dispatch complete <id> <owner> --result-ref pr/123
 agent-dispatch list --status queued
 agent-dispatch recover                                 # requeue tasks whose owner is gone
@@ -657,7 +699,8 @@ are untargeted or targeted at its own machine/worktree. Pass `--machine` /
 `--worktree` to override the resolution (or where `agent-worktrees` is absent).
 
 The coordinator publishes `task.created` / `.proposed` / `.approved` / `.claimed`
-/ `.started` / `.yielded` / `.completed` / `.abandoned` / `.detached` events on
+/ `.started` / `.suspended` / `.resumed` / `.released` / `.yielded` /
+`.completed` / `.abandoned` / `.detached` events on
 `GET /events` (Server-Sent Events) — the hook a subscriber (e.g. agent-bridge)
 reacts to.
 
@@ -792,13 +835,16 @@ Point a Copilot sub-agent (or any MCP client) at it:
 }
 ```
 
-It exposes the queue as 20 tools: `dispatch_create` / `dispatch_approve` /
+It exposes the queue as 24 tools: `dispatch_create` / `dispatch_approve` /
 `dispatch_find` / `dispatch_sweep` / `dispatch_recipe_list` /
 `dispatch_recipe_render` / `dispatch_recipe_kick` / `dispatch_list` /
-`dispatch_show` / `dispatch_events` / `dispatch_payload` /
+`dispatch_show` / `dispatch_events` / `dispatch_wakes` / `dispatch_payload` /
 `dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
-`dispatch_yield` / `dispatch_complete` / `dispatch_abandon` /
-`dispatch_heartbeat` / `dispatch_detach` / `dispatch_recover`.
+`dispatch_yield` / `dispatch_suspend` / `dispatch_resume` /
+`dispatch_release` / `dispatch_complete` / `dispatch_abandon` /
+`dispatch_heartbeat` / `dispatch_detach` / `dispatch_recover`. Wake-bearing
+operations return after scheduling delivery; inspect the task audit trail for
+the eventual result, or use `agent-dispatch wakes <id>`.
 `dispatch_create` takes an inline `payload` the coordinator spills to a blob when
 large.
 

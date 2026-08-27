@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import types
 from pathlib import Path
 
@@ -16,6 +17,7 @@ def _cfg():
 def _reset(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(server, "routing_dir", lambda: tmp_path)
     server._lifecycle_started = False
+    server._wake_route_owned = False
 
 
 def test_publish_sweeps_and_records_start_then_stop(tmp_path: Path, monkeypatch):
@@ -40,6 +42,45 @@ def test_passive_records_nothing(tmp_path: Path, monkeypatch):
     server._publish_routing(_cfg(), 9999, passive=True)
     server._clear_routing()  # never logged START -> no orphan STOP
     assert lifecycle.read_events(tmp_path) == []
+
+
+def test_wake_drain_follows_active_routing_owner(tmp_path: Path, monkeypatch):
+    _reset(monkeypatch, tmp_path)
+    assert server._owns_active_route() is False
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid()
+    )
+    assert server._owns_active_route() is True
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=9998, pid=os.getpid() + 1
+    )
+    assert server._owns_active_route() is False
+
+
+def test_wake_drain_retains_last_owner_during_routing_read_failure(
+    tmp_path: Path, monkeypatch
+):
+    _reset(monkeypatch, tmp_path)
+    routing.publish_active(
+        tmp_path, bind="127.0.0.1", port=9999, pid=os.getpid()
+    )
+    assert server._owns_active_route() is True
+    monkeypatch.setattr(routing, "read_table", lambda _path: (_ for _ in ()).throw(
+        OSError("routing unavailable")
+    ))
+
+    assert server._owns_active_route() is True
+
+
+def test_wake_drain_does_not_promote_passive_on_routing_read_failure(
+    tmp_path: Path, monkeypatch
+):
+    _reset(monkeypatch, tmp_path)
+    monkeypatch.setattr(routing, "read_table", lambda _path: (_ for _ in ()).throw(
+        OSError("routing unavailable")
+    ))
+
+    assert server._owns_active_route() is False
 
 
 def test_stop_emitted_even_after_demotion(tmp_path: Path, monkeypatch):

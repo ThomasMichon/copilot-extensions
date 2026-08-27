@@ -23,6 +23,7 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     # machine/worktree and live-session tracking can join it).
     assert "agent-dispatch claim --task abc123" in prompt
     assert "agent-dispatch start abc123" in prompt
+    assert "agent-dispatch steer take abc123 --all" in prompt
     assert "agent-dispatch complete abc123" in prompt
     # The progress-beat rhythm (Phase 7 Channel B): report at transitions.
     assert "agent-dispatch progress abc123" in prompt

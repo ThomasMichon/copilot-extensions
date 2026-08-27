@@ -54,6 +54,7 @@ def test_worker_prompt_mentions_task_and_verbs():
     assert "w9" in prompt
     assert "http://c" in prompt
     assert "agent-dispatch claim abc123 --worker w9" in prompt
+    assert "agent-dispatch steer take abc123 w9 --all" in prompt
 
 
 def test_spawn_worker_unavailable_when_no_bridge(monkeypatch):
@@ -185,9 +186,12 @@ def test_resume_steered_owner_queues_work_prompt(monkeypatch):
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
-    assert bridge.resume_steered_owner("host/worktree-1", "task-42") is True
+    assert bridge.resume_steered_owner(
+        "host/worktree-1", "task-42", owner_session_id="session-42"
+    ) is True
     cmd = calls["cmd"]
     assert cmd[:8] == [
         "/usr/bin/agent-bridge",
@@ -199,13 +203,37 @@ def test_resume_steered_owner_queues_work_prompt(monkeypatch):
         "--sender",
         "agent-dispatch-steer",
     ]
-    assert cmd[8] == "host/worktree-1"
-    assert "agent-dispatch steer take task-42" in cmd[9]
+    assert cmd[8:10] == ["--expected-session-id", "session-42"]
+    assert cmd[10:] == ["worktree-1", "--prompt-file", "-"]
+    assert "agent-dispatch steer take task-42 --all" in calls["kwargs"]["input"]
 
 
 def test_resume_steered_owner_degrades_when_bridge_unavailable(monkeypatch):
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
     assert bridge.resume_steered_owner("host/worktree-1", "task-42") is False
+
+
+def test_resume_steered_owner_forwards_idempotency_key(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["agent-bridge"]
+    )
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
+
+    def fake_run(cmd, **_kwargs):
+        calls["cmd"] = cmd
+        return type("Result", (), {"returncode": 0})()
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    assert bridge.resume_steered_owner(
+        "host/worktree-1",
+        "task-42",
+        owner_session_id="session-42",
+        idempotency_key="wake:task-42:1:1",
+    )
+    index = calls["cmd"].index("--idempotency-key")
+    assert calls["cmd"][index + 1] == "wake:task-42:1:1"
 
 
 def test_resume_steered_owner_preserves_custom_message(monkeypatch):
@@ -213,20 +241,75 @@ def test_resume_steered_owner_preserves_custom_message(monkeypatch):
 
     def fake_run(cmd, **kwargs):
         calls["cmd"] = cmd
+        calls["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 1, "", "not live")
 
     monkeypatch.setattr(
         bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
     )
+    monkeypatch.setattr(bridge.remote_dispatch, "local_machine", lambda: "host")
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
     assert (
         bridge.resume_steered_owner(
-            "host/worktree-1", "task-42", "Continue with the operator's choice."
+            "host/worktree-1",
+            "task-42",
+            "Continue with the operator's choice.",
+            owner_session_id="session-42",
         )
         is False
     )
-    assert calls["cmd"][-1] == "Continue with the operator's choice."
+    assert calls["cmd"][-3:] == ["worktree-1", "--prompt-file", "-"]
+    assert calls["kwargs"]["input"] == "Continue with the operator's choice."
+
+
+def test_resume_steered_owner_requires_captured_session(monkeypatch):
+    monkeypatch.setattr(
+        bridge, "_agent_bridge_launch_prefix", lambda: ["/usr/bin/agent-bridge"]
+    )
+    assert bridge.resume_steered_owner("host/worktree-1", "task-42") is False
+
+
+def test_resume_steered_owner_routes_remote_machine_over_ssh(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(
+        bridge.remote_dispatch, "local_machine", lambda: "coordinator"
+    )
+    monkeypatch.setattr(
+        bridge.shutil,
+        "which",
+        lambda command: "/usr/bin/ssh" if command == "ssh" else None,
+    )
+
+    def fake_run(cmd, **kwargs):
+        calls["cmd"] = cmd
+        calls["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+
+    assert bridge.resume_steered_owner(
+        "Worker-Host/worktree-1",
+        "task-42",
+        "resume now",
+        owner_session_id="session-42",
+        idempotency_key="wake:task-42:1:2",
+    )
+
+    assert calls["cmd"] == [
+        "/usr/bin/ssh",
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=3",
+        "worker-host",
+        (
+            "agent-bridge send --no-wait --queue --kind prompt --sender "
+            "agent-dispatch-steer --idempotency-key wake:task-42:1:2 "
+            "--expected-session-id session-42 worktree-1 --prompt-file -"
+        ),
+    ]
+    assert calls["kwargs"]["input"] == "resume now"
 
 
 # -- registered-agent preflight ----------------------------------------------

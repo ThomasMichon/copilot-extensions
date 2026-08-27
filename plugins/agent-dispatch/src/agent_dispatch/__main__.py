@@ -1098,7 +1098,9 @@ def _cmd_claimant(args: argparse.Namespace) -> int:
         task = c.get(args.task_id)
     status = task.get("status")
     owner = task.get("owner")
-    claimed = bool(owner) and status in ("claimed", "started", "completed")
+    claimed = bool(owner) and status in (
+        "claimed", "started", "suspended", "completed"
+    )
     if claimed:
         machine, worktree = _split_owner(owner)
         source = "owner"
@@ -1191,6 +1193,41 @@ def _cmd_start(args: argparse.Namespace) -> int:
         return _emit(c.start(args.task_id, worker_id))
 
 
+def _cmd_suspend(args: argparse.Namespace) -> int:
+    worker_id = _resolve_owner(args, verb="suspend")
+    if worker_id is None:
+        return 2
+    with _client(args) as c:
+        return _emit(
+            c.suspend(args.task_id, worker_id, reason=args.reason)
+        )
+
+
+def _cmd_resume(args: argparse.Namespace) -> int:
+    worker_id = _resolve_owner(args, verb="resume")
+    if worker_id is None:
+        return 2
+    with _client(args) as c:
+        return _emit(
+            c.resume(
+                args.task_id,
+                worker_id,
+                wake=args.wake,
+                message=args.message,
+            )
+        )
+
+
+def _cmd_release(args: argparse.Namespace) -> int:
+    worker_id = _resolve_owner(args, verb="release")
+    if worker_id is None:
+        return 2
+    with _client(args) as c:
+        return _emit(
+            c.release(args.task_id, worker_id, reason=args.reason)
+        )
+
+
 def _cmd_progress(args: argparse.Namespace) -> int:
     worker_id = _resolve_owner(args, verb="progress")
     if worker_id is None:
@@ -1272,27 +1309,28 @@ def _cmd_steer(args: argparse.Namespace) -> int:
             wake=args.wake,
             message=args.message,
         )
-        coordinator_reported_wake = "steer_woken" in result
         woken = result.pop("steer_woken", None)
-        owner = result.get("owner")
-        # Compatibility with a coordinator from before wake delivery moved
-        # server-side: old Pydantic models ignore the new request fields and old
-        # responses omit ``steer_woken``.
-        if args.wake and owner and not coordinator_reported_wake:
-            from . import bridge
-
-            woken = bridge.resume_steered_owner(owner, args.task_id, args.message)
-    return _emit({"task": result, "woken": woken})
+        wake_status = result.pop("steer_wake_status", None)
+        if args.wake and wake_status is None:
+            wake_status = "unsupported"
+    return _emit(
+        {"task": result, "woken": woken, "wake_status": wake_status}
+    )
 
 
 def _cmd_steer_take(args: argparse.Namespace) -> int:
-    """Consume the next pending steer for a task the worker owns (the wake-side
-    read a resumed reviewer runs to learn what the operator answered)."""
+    """Consume pending steering for a task the worker owns."""
     worker_id = _resolve_owner(args, verb="steer take")
     if worker_id is None:
         return 2
     with _client(args) as c:
-        return _emit(c.steer_take(args.task_id, worker_id))
+        return _emit(
+            c.steer_take(
+                args.task_id,
+                worker_id,
+                all_pending=getattr(args, "all_pending", False),
+            )
+        )
 
 
 def _cmd_focus(args: argparse.Namespace) -> int:
@@ -1454,7 +1492,15 @@ def _cmd_list(args: argparse.Namespace) -> int:
 #: the sort key; the string is the pivot section header. ``--board`` tags each
 #: task with its group and orders by this sequence so the picker's first-seen
 #: grouping renders the sections in exactly this order.
-_BOARD_GROUPS = ("Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned")
+_BOARD_GROUPS = (
+    "Blocked",
+    "Proposed",
+    "Queued",
+    "Started",
+    "Suspended",
+    "Completed",
+    "Abandoned",
+)
 _BOARD_TERMINAL = frozenset({"Completed", "Abandoned"})
 
 
@@ -1465,8 +1511,8 @@ def _board_group(task: dict) -> str:
     task can carry a stale ``awaiting_steer`` flag after being abandoned while
     blocked, and a finished task is never "Blocked". Otherwise ``awaiting_steer``
     (a live task needing the operator's steer) wins over the raw lifecycle state,
-    then proposed/queued, else any other owned in-flight state reads as
-    *Started*."""
+    then proposed/queued/suspended, else any other owned in-flight state reads
+    as *Started*."""
     st = task.get("status")
     if st == "completed":
         return "Completed"
@@ -1478,6 +1524,8 @@ def _board_group(task: dict) -> str:
         return "Proposed"
     if st == "queued":
         return "Queued"
+    if st == "suspended":
+        return "Suspended"
     return "Started"
 
 
@@ -1569,7 +1617,10 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
 
         from .queue import machine_matches
 
-        status = "proposed,queued,claimed,started,completed,abandoned,dead_letter"
+        status = (
+            "proposed,queued,claimed,started,suspended,"
+            "completed,abandoned,dead_letter"
+        )
         with _client(args) as c:
             tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
         inbox = [t for t in tasks if machine_matches(t.get("target_machine"), machine)]
@@ -1596,7 +1647,7 @@ def _cmd_inbox(args: argparse.Namespace) -> int:
     # "what I can start + what needs my answer", without the rest of the owned
     # in-progress queue.
     steer_only = getattr(args, "awaiting_steer", False)
-    status = "proposed,claimed,started" if steer_only else args.status
+    status = "proposed,claimed,started,suspended" if steer_only else args.status
     with _client(args) as c:
         tasks = c.list(repo=None, status=status, label=args.label, limit=args.limit)
     from .queue import machine_matches
@@ -1700,9 +1751,11 @@ def _cmd_consume(args: argparse.Namespace) -> int:
       <id>`` **explicitly** only when it reaches the handoff's goal -- so
       ``completed`` means *the work is done*, not *the baton was handed over*.
 
-    Transitions are best-effort and idempotent: an already-advanced task just
-    prints its payload (never an error), and a task the caller can't take
-    ownership of is still read and printed.
+    Ordinary transitions are best-effort and idempotent: an already-advanced
+    task just prints its payload. Suspended pickup is stricter: deferred mode
+    atomically adopts the task into the successor's current session, while
+    baton mode completes only the exact suspended incarnation that was read.
+    If either fence loses a race, the payload is not replayed.
 
     **Replay debounce (a *completed handoff* is spent).** A handoff is a baton:
     once it has been picked up and its work driven to ``completed``, re-consuming
@@ -1754,21 +1807,60 @@ def _cmd_consume(args: argparse.Namespace) -> int:
                     owner = (claimed or {}).get("owner")
                 except DispatchError:
                     owner = None
-            elif status in ("claimed", "started"):
+            elif status in ("claimed", "started", "suspended"):
                 owner = task.get("owner")
             if owner:
-                try:
-                    c.start(task_id, owner)
-                except DispatchError:
-                    pass
-                # Deferred pickup stops at 'started': the successor completes
-                # explicitly when the work is done. Baton mode completes now.
-                if not defer:
-                    result_ref = args.result_ref or f"consumed:{worktree or 'successor'}"
+                if status == "suspended":
+                    if defer:
+                        try:
+                            c.resume(
+                                task_id,
+                                owner,
+                                wake=False,
+                                adopt_session=True,
+                                expected_owner_session_id=task.get(
+                                    "owner_session_id"
+                                ),
+                                expected_generation=task.get("generation"),
+                            )
+                        except DispatchError as exc:
+                            print(f"agent-dispatch: {exc}", file=sys.stderr)
+                            return 1
+                    else:
+                        result_ref = (
+                            args.result_ref
+                            or f"consumed:{worktree or 'successor'}"
+                        )
+                        try:
+                            c.complete(
+                                task_id,
+                                owner,
+                                result_ref=result_ref,
+                                expected_status="suspended",
+                                expected_owner_session_id=task.get(
+                                    "owner_session_id"
+                                ),
+                                expected_generation=task.get("generation"),
+                            )
+                        except DispatchError as exc:
+                            print(f"agent-dispatch: {exc}", file=sys.stderr)
+                            return 1
+                else:
                     try:
-                        c.complete(task_id, owner, result_ref=result_ref)
+                        c.start(task_id, owner)
                     except DispatchError:
                         pass
+                    # Deferred pickup stops at 'started': the successor completes
+                    # explicitly when the work is done. Baton mode completes now.
+                    if not defer:
+                        result_ref = (
+                            args.result_ref
+                            or f"consumed:{worktree or 'successor'}"
+                        )
+                        try:
+                            c.complete(task_id, owner, result_ref=result_ref)
+                        except DispatchError:
+                            pass
         result = c.payload(task_id)
     content = result.get("payload")
     if content is None:
@@ -3281,6 +3373,55 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_cmd_start)
 
     p = sub.add_parser(
+        "suspend",
+        help="park a started task as dormant while retaining its owner",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "worker_id", nargs="?",
+        help="owner id (default: composed from machine/worktree)",
+    )
+    p.add_argument(
+        "--reason", required=True,
+        help="required meaningful reason recorded in the task audit trail",
+    )
+    p.add_argument("--machine", help="override the resolved machine identity")
+    p.add_argument("--worktree", help="override the resolved worktree identity")
+    p.set_defaults(func=_cmd_suspend)
+
+    p = sub.add_parser(
+        "resume",
+        help="resume a suspended task under the same owner and wake it",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "worker_id", nargs="?",
+        help="owner id (default: composed from machine/worktree)",
+    )
+    p.add_argument("--message", help="override the wake nudge text")
+    p.add_argument(
+        "--no-wake", dest="wake", action="store_false",
+        help="resume the lifecycle without sending an agent-bridge wake nudge",
+    )
+    p.add_argument("--machine", help="override the resolved machine identity")
+    p.add_argument("--worktree", help="override the resolved worktree identity")
+    p.set_defaults(func=_cmd_resume, wake=True)
+
+    p = sub.add_parser(
+        "release",
+        help="release a suspended task to queued for replacement embodiment",
+    )
+    p.add_argument("task_id")
+    p.add_argument(
+        "worker_id", nargs="?",
+        help="owner id (default: composed from machine/worktree)",
+    )
+    p.add_argument("--reason", help="optional release note for the audit trail")
+    p.add_argument("--machine", help="override the resolved machine identity")
+    p.add_argument("--worktree", help="override the resolved worktree identity")
+    p.set_defaults(func=_cmd_release)
+
+    p = sub.add_parser(
         "yield",
         help="return a held task to queued (with a note; identity auto-resolved)",
     )
@@ -3305,7 +3446,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--worktree", help="override the resolved worktree id (targeting identity)")
     p.set_defaults(func=_cmd_yield)
 
-    p = sub.add_parser("complete", help="mark a started task completed")
+    p = sub.add_parser(
+        "complete",
+        help="mark a started or suspended task completed under its owner",
+    )
     p.add_argument("task_id")
     p.add_argument(
         "worker_id", nargs="?",
@@ -3461,6 +3605,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     stk.add_argument("--machine", help="override the resolved machine")
     stk.add_argument("--worktree", help="override the resolved worktree id")
+    stk.add_argument(
+        "--all",
+        dest="all_pending",
+        action="store_true",
+        help="atomically consume every pending steer (required after a wake)",
+    )
     stk.set_defaults(func=_cmd_steer_take)
 
     p = sub.add_parser("list", help="list tasks (scoped to the calling repo by default)")
@@ -3500,15 +3650,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--awaiting-steer", dest="awaiting_steer", action="store_true",
         help="show the picker steer surface: pickable (proposed) tasks PLUS any "
              "task blocked on operator steering (a posted card's request_input, "
-             "in claimed/started), and nothing else of the owned queue. Overrides "
+             "in claimed/started/suspended), and nothing else of the owned queue. "
+             "Overrides "
              "--status.",
     )
     p.add_argument(
         "--board", action="store_true",
         help="status-grouped board for the picker Tasks pivot: tasks across "
-             "proposed/queued/claimed/started PLUS recently completed/abandoned, "
-             "each tagged with a display `group` (Blocked/Proposed/Queued/Started/"
-             "Completed/Abandoned) and ordered by that priority. Overrides "
+             "proposed/queued/claimed/started/suspended PLUS recently "
+             "completed/abandoned, each tagged with a display `group` "
+             "(Blocked/Proposed/Queued/Started/Suspended/Completed/Abandoned) "
+             "and ordered by that priority. Overrides "
              "--status and --awaiting-steer.",
     )
     p.add_argument(
@@ -3558,6 +3710,12 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("events", help="show a task's audit trail")
     p.add_argument("task_id")
     p.set_defaults(func=_simple("events", "task_id"))
+
+    p = sub.add_parser(
+        "wakes", help="show a task's durable wake outbox operations"
+    )
+    p.add_argument("task_id")
+    p.set_defaults(func=_simple("wakes", "task_id"))
 
     p = sub.add_parser("payload", help="show a task's resolved payload (inline or blob)")
     p.add_argument("task_id")

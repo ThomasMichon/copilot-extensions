@@ -15,7 +15,7 @@ from typing import Any
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -197,6 +197,7 @@ CREATE TABLE IF NOT EXISTS live_messages (
     body TEXT NOT NULL,
     reply_to TEXT,
     kind TEXT NOT NULL DEFAULT 'prompt',
+    idempotency_key TEXT,
     created_at REAL NOT NULL,
     delivered_at REAL
 );
@@ -473,6 +474,22 @@ class Database:
             # migration (or a table created without a column) self-heals rather
             # than failing every write to that column (dotfiles #815).
             self._ensure_columns(conn)
+            live_columns = {
+                row[1]
+                for row in conn.execute(
+                    "PRAGMA table_info(live_messages)"
+                ).fetchall()
+            }
+            if "idempotency_key" not in live_columns:
+                conn.execute(
+                    "ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT"
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "idx_live_messages_idempotency ON live_messages(idempotency_key)"
+                " WHERE idempotency_key IS NOT NULL"
+            )
+            conn.commit()
 
     def _ensure_columns(self, conn: sqlite3.Connection) -> None:
         """Idempotently add any missing post-base ``sessions`` columns.
@@ -787,6 +804,26 @@ class Database:
             conn.execute("UPDATE schema_version SET version=?", (15,))
             conn.commit()
             log.info("Schema migrated to version 15: session succession links")
+
+        if from_version < 16:
+            cols = [
+                r[1]
+                for r in conn.execute(
+                    "PRAGMA table_info(live_messages)"
+                ).fetchall()
+            ]
+            if "idempotency_key" not in cols:
+                conn.execute(
+                    "ALTER TABLE live_messages ADD COLUMN idempotency_key TEXT"
+                )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "idx_live_messages_idempotency ON live_messages(idempotency_key)"
+                " WHERE idempotency_key IS NOT NULL"
+            )
+            conn.execute("UPDATE schema_version SET version=?", (16,))
+            conn.commit()
+            log.info("Schema migrated to version 16: live-message idempotency")
 
     def execute_write(self, sql: str, params: tuple[Any, ...] = ()) -> sqlite3.Cursor:
         """Execute a write query under the write lock."""
@@ -1386,10 +1423,10 @@ class Database:
           1. exact ``session_id`` match (returned regardless of freshness, to
              preserve direct-id delivery; a durable message queue waits for the
              session either way);
-          2. else the **freshest non-stale** row whose ``worktree_id`` equals
-             the handle (``updated_at`` within ``stale_seconds``). A handoff's
-             abandoned predecessor row (no longer heartbeating) is excluded, so
-             the live successor wins even before any reaper removes the corpse.
+          2. else the **current fresh live incarnation** whose ``worktree_id``
+             equals the handle, using the same immutable-registration ordering
+             as the atomic enqueue fence. A later heartbeat on an older
+             incarnation cannot make it current again.
 
         Returns None when the handle is neither a known session id nor a
         currently-live worktree.
@@ -1400,8 +1437,8 @@ class Database:
         cutoff = now - stale_seconds
         rows = self.execute_read(
             "SELECT * FROM live_sessions "
-            "WHERE worktree_id=? AND updated_at>=? "
-            "ORDER BY updated_at DESC LIMIT 1",
+            "WHERE worktree_id=? AND status='live' AND updated_at>=? "
+            "ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
             (handle, cutoff),
         )
         return dict(rows[0]) if rows else None
@@ -1443,6 +1480,7 @@ class Database:
     def enqueue_live_message(
         self, session_id: str, sender: str, body: str, now: float,
         reply_to: str | None = None, kind: str = "prompt",
+        idempotency_key: str | None = None,
     ) -> int:
         """Enqueue a message for delivery into a live session; return its id.
 
@@ -1453,8 +1491,8 @@ class Database:
         """
         cur = self.execute_write(
             "INSERT INTO live_messages (session_id, sender, body, reply_to, "
-            "kind, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (session_id, sender, body, reply_to, kind, now),
+            "kind, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, sender, body, reply_to, kind, idempotency_key, now),
         )
         return int(cur.lastrowid or 0)
 
@@ -1468,6 +1506,7 @@ class Database:
         reply_to: str | None = None,
         kind: str = "prompt",
         expected_session_id: str | None = None,
+        idempotency_key: str | None = None,
         stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
     ) -> tuple[int | None, str | None]:
         """Atomically lease-check the target registration and enqueue, or reject.
@@ -1493,9 +1532,9 @@ class Database:
         """
         cutoff = now - stale_seconds
         cur = self.execute_write(
-            "INSERT INTO live_messages "
-            "(session_id, sender, body, reply_to, kind, created_at) "
-            "SELECT ?, ?, ?, ?, ?, ? "
+            "INSERT OR IGNORE INTO live_messages "
+            "(session_id, sender, body, reply_to, kind, idempotency_key, created_at) "
+            "SELECT ?, ?, ?, ?, ?, ?, ? "
             "WHERE EXISTS ("
             "  SELECT 1 FROM live_sessions ls "
             "  WHERE ls.session_id = ? AND ls.status = 'live' "
@@ -1511,13 +1550,35 @@ class Database:
             "    AND (? IS NULL OR ? = ls.session_id)"
             ")",
             (
-                session_id, sender, body, reply_to, kind, now,
+                session_id, sender, body, reply_to, kind, idempotency_key, now,
                 session_id, cutoff, cutoff,
                 expected_session_id, expected_session_id,
             ),
         )
         if cur.rowcount == 1:
             return int(cur.lastrowid or 0), None
+        if idempotency_key:
+            existing = self.execute_read(
+                "SELECT id, session_id, sender, body, reply_to, kind "
+                "FROM live_messages WHERE idempotency_key = ?",
+                (idempotency_key,),
+            )
+            if existing:
+                original = existing[0]
+                same_request = (
+                    original["session_id"] == session_id
+                    and original["sender"] == sender
+                    and original["body"] == body
+                    and original["reply_to"] == reply_to
+                    and original["kind"] == kind
+                    and (
+                        expected_session_id is None
+                        or expected_session_id == session_id
+                    )
+                )
+                if same_request:
+                    return int(original["id"]), None
+                return None, "idempotency_conflict"
         # Rejected -- derive a reason for the error message (best-effort; the
         # authoritative decision was the 0-row insert above).
         row = self.get_live_session(session_id)

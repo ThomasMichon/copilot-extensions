@@ -14,8 +14,9 @@ consumer registers a sink.
 Vocabulary
 ----------
 The coordinator publishes task-lifecycle events of type ``task.<verb>``
-(``proposed`` / ``created`` / ``claimed`` / ``started`` / ``yielded`` /
-``completed`` / ``abandoned`` / ``detached``). :func:`task_lifecycle_event`
+(``proposed`` / ``created`` / ``claimed`` / ``started`` / ``suspended`` /
+``resumed`` / ``released`` / ``yielded`` / ``completed`` / ``abandoned`` /
+``detached``). :func:`task_lifecycle_event`
 shapes one of those into a generic **state-transition** record carrying only
 lifecycle *state and structure* -- never the task prompt, payload, or any
 secret. A consumer maps that record onto whatever telemetry schema it uses.

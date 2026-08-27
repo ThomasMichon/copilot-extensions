@@ -2221,8 +2221,24 @@ def _cmd_send(args: argparse.Namespace) -> None:
     # handle to whichever session is live now, so a reply survives a handoff.
     live = client.resolve_live_session(target)
     if live:
+        expected_session_id = getattr(args, "expected_session_id", None)
+        if expected_session_id and live["session_id"] != expected_session_id:
+            print(
+                f"[FAIL] Target {target!r} now resolves to session "
+                f"{live['session_id']!r}, not expected session "
+                f"{expected_session_id!r}.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
+    if getattr(args, "expected_session_id", None):
+        print(
+            f"[FAIL] Target {target!r} has no live session matching "
+            f"{args.expected_session_id!r}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     caller_id = _caller_id_for(args)
 
@@ -2336,9 +2352,17 @@ def _deliver_to_live_session(
     kind = _live_message_kind(args)
     wait = not getattr(args, "no_wait", False)
     wait_timeout = getattr(args, "reply_timeout", 120.0)
+    idempotency = getattr(args, "idempotency_key", None)
+    expected_session_id = getattr(args, "expected_session_id", None)
+    delivery_options = {}
+    if idempotency:
+        delivery_options["idempotency_key"] = idempotency
+    if expected_session_id:
+        delivery_options["expected_session_id"] = expected_session_id
     result = client.send_live_message(
         session_id, sender=sender, body=prompt, reply_to=reply_to,
         kind=kind, wait=wait, wait_timeout=wait_timeout,
+        **delivery_options,
     )
     if args.json:
         _json_out({"delivered": True, "target": session_id, **result})
@@ -4555,6 +4579,16 @@ def build_parser() -> argparse.ArgumentParser:
              "delivery when the current turn settles -- surviving a caller "
              "remount and a bridge/host restart -- instead of rejecting it. "
              "The opposite of --force: it preserves the in-flight turn.",
+    )
+    send_p.add_argument(
+        "--idempotency-key",
+        help="stable producer key; retries return the original live-message id "
+             "instead of enqueuing a duplicate",
+    )
+    send_p.add_argument(
+        "--expected-session-id",
+        help="deliver only if the target still resolves to this exact live "
+             "session id (checked again atomically when enqueuing)",
     )
     _add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)

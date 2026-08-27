@@ -207,6 +207,55 @@ def test_message_roundtrip_poll_and_ack(client: TestClient) -> None:
     ).json()["acked"] == 0
 
 
+def test_message_post_is_idempotent_with_producer_key(
+    client: TestClient,
+) -> None:
+    _register(client)
+    payload = {
+        "sender": "worker",
+        "body": "resume",
+        "idempotency_key": "wake:task-1:2:1",
+    }
+    first = client.post(
+        "/api/v1/live-sessions/cli-1/messages", json=payload
+    )
+    second = client.post(
+        "/api/v1/live-sessions/cli-1/messages", json=payload
+    )
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["message_id"] == first.json()["message_id"]
+    pending = client.get(
+        "/api/v1/live-sessions/cli-1/messages"
+    ).json()["messages"]
+    assert len(pending) == 1
+
+
+def test_message_post_rejects_idempotency_key_reuse_for_different_request(
+    client: TestClient,
+) -> None:
+    _register(client)
+    first = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={
+            "sender": "worker",
+            "body": "resume",
+            "idempotency_key": "wake:task-1:2:1",
+        },
+    )
+    conflict = client.post(
+        "/api/v1/live-sessions/cli-1/messages",
+        json={
+            "sender": "worker",
+            "body": "different",
+            "idempotency_key": "wake:task-1:2:1",
+        },
+    )
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert "already bound" in conflict.json()["detail"]
+
+
 def test_poll_and_ack_require_registration(client: TestClient) -> None:
     assert client.get("/api/v1/live-sessions/ghost/messages").status_code == 404
     assert client.post(

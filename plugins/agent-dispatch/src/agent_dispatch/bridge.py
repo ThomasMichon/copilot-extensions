@@ -10,9 +10,12 @@ remains a standalone plugin usable where no bridge exists.
 from __future__ import annotations
 
 import json
+import shlex
+import shutil
 import subprocess
 from collections.abc import Sequence
 
+from . import remote_dispatch
 from .procutil import agent_bridge_launch_prefix, no_window_kwargs
 
 DEFAULT_WORKER_AGENT = "task-worker"
@@ -61,8 +64,10 @@ def worker_prompt(task_id: str, *, coordinator_url: str, worker_id: str) -> str:
         f"Steps: (1) read it with `agent-dispatch show {task_id}`; "
         f"(2) claim it with `agent-dispatch claim {task_id} --worker {worker_id}` "
         f"(add `--capability <cap>` for each capability the task requires); "
-        f"(3) `agent-dispatch start {task_id} {worker_id}`, do the work described "
-        f"in the task's prompt/payload, then "
+        f"(3) `agent-dispatch start {task_id} {worker_id}`, then run "
+        f"`agent-dispatch steer take {task_id} {worker_id} --all` and incorporate any "
+        f"pending operator guidance before doing the work described in the "
+        f"task's prompt/payload; "
         f"(4) `agent-dispatch complete {task_id} {worker_id} --result-ref <ref>`. "
         f"On a recoverable snag, `agent-dispatch yield {task_id} {worker_id} "
         f"--note <why>` returns it to the queue."
@@ -157,26 +162,34 @@ def resume_steered_owner(
     task_id: str,
     message: str | None = None,
     *,
+    owner_session_id: str | None = None,
+    idempotency_key: str | None = None,
     timeout: float | None = 20.0,
 ) -> bool:
     """Resume a task owner immediately after an operator submits steering.
 
     Unlike :func:`send_nudge`, this is a work-bearing ``prompt`` delivery. The
     bridge queues it when the owner is busy so the current turn is preserved and
-    the steering prompt runs next. Delivery is best-effort: the steer itself is
-    already durable in agent-dispatch, so an unavailable bridge or failed send
-    returns ``False`` without consuming or losing the operator's answer.
+    the steering prompt runs next. The canonical ``machine/worktree`` owner is
+    split at this boundary: the bare worktree is the bridge address, and a
+    remote machine is reached over SSH. Delivery is best-effort: the steer
+    itself is already durable in agent-dispatch, so an unavailable bridge or
+    failed send returns ``False`` without consuming or losing the operator's
+    answer.
     """
-    exe = _agent_bridge_launch_prefix()
-    if exe is None:
+    if not owner_session_id:
+        return False
+    machine, separator, worktree = owner.partition("/")
+    if not separator or not machine or not worktree:
         return False
     prompt = message or (
         f"The operator answered your card on task {task_id}. Resume, run "
-        f"`agent-dispatch steer take {task_id}` to read the answer, and continue "
+        f"`agent-dispatch steer take {task_id} --all` to read every pending "
+        f"answer, and continue "
         f"toward your goal."
     )
-    cmd = [
-        *exe,
+    bridge_argv = [
+        "agent-bridge",
         "send",
         "--no-wait",
         "--queue",
@@ -184,12 +197,45 @@ def resume_steered_owner(
         "prompt",
         "--sender",
         "agent-dispatch-steer",
-        owner,
-        prompt,
+        *(
+            ["--idempotency-key", idempotency_key]
+            if idempotency_key
+            else []
+        ),
+        "--expected-session-id",
+        owner_session_id,
+        worktree,
+        "--prompt-file",
+        "-",
     ]
+    local_machine = remote_dispatch.local_machine()
+    is_remote = (
+        local_machine is not None
+        and machine.casefold() != local_machine.casefold()
+    )
+    if is_remote:
+        ssh = shutil.which("ssh")
+        if ssh is None:
+            return False
+        remote_cmd = " ".join(shlex.quote(arg) for arg in bridge_argv)
+        cmd = [
+            ssh,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            machine.lower(),
+            remote_cmd,
+        ]
+    else:
+        exe = _agent_bridge_launch_prefix()
+        if exe is None:
+            return False
+        cmd = [*exe, *bridge_argv[1:]]
     try:
         proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
             cmd,
+            input=prompt,
             check=False,
             capture_output=True,
             text=True,

@@ -84,6 +84,25 @@ def test_full_lifecycle(tools):
     assert done["result_ref"] == "pr/1"
 
 
+def test_suspended_lifecycle(tools, monkeypatch):
+    from agent_dispatch import bridge
+
+    monkeypatch.setattr(
+        bridge, "resume_steered_owner", lambda *_args, **_kwargs: True
+    )
+    t = tools.create("work")
+    owner = tools.claim()["owner"]
+    tools.start(t["id"], owner)
+    parked = tools.suspend(t["id"], owner, "waiting for input")
+    assert parked["status"] == Status.SUSPENDED
+    resumed = tools.resume(t["id"], owner)
+    assert resumed["status"] == Status.STARTED
+    assert resumed["resume_woken"] is None
+    assert resumed["resume_wake_status"] == "pending"
+    tools.suspend(t["id"], owner, "waiting again")
+    assert tools.release(t["id"], owner)["status"] == Status.QUEUED
+
+
 def test_worktree_status_inbox(tools):
     tools.create("for-me", target_worktree="wt-1")
     r = tools.worktree_status()
@@ -122,3 +141,5 @@ def test_build_server_registers_tools():
     )
     names = {t.name for t in asyncio.new_event_loop().run_until_complete(mcp.list_tools())}
     assert {"dispatch_create", "dispatch_claim", "dispatch_complete", "dispatch_payload"} <= names
+    assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= names
+    assert "dispatch_wakes" in names

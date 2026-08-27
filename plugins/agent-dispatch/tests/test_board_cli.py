@@ -32,6 +32,11 @@ def test_build_groups_and_expires_activity(monkeypatch):
                 "awaiting_steer": True,
                 "updated_at": 11,
             },
+            {
+                "id": "dormant",
+                "status": "suspended",
+                "updated_at": 8,
+            },
         ],
         machine="m1",
         recent_mins=120,
@@ -42,6 +47,7 @@ def test_build_groups_and_expires_activity(monkeypatch):
     assert by_id["active"]["repo_name"] == "repo"
     assert by_id["stale"]["activity"] is None
     assert by_id["blocked"]["group"] == "Blocked"
+    assert by_id["dormant"]["group"] == "Suspended"
 
 
 def test_main_reads_local_coordinator(monkeypatch, tmp_path, capsys):

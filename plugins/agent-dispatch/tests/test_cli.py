@@ -130,7 +130,8 @@ def test_steer_uses_coordinator_wake_result(monkeypatch, capsys):
             return {
                 "id": task_id,
                 "owner": "host/worktree-1",
-                "steer_woken": True,
+                "steer_woken": None,
+                "steer_wake_status": "pending",
             }
 
     monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
@@ -138,16 +139,16 @@ def test_steer_uses_coordinator_wake_result(monkeypatch, capsys):
 
     assert args.func(args) == 0
     output = json.loads(capsys.readouterr().out)
-    assert output["woken"] is True
+    assert output["woken"] is None
+    assert output["wake_status"] == "pending"
     assert "steer_woken" not in output["task"]
+    assert "steer_wake_status" not in output["task"]
 
 
-def test_steer_falls_back_when_old_coordinator_omits_wake_result(
+def test_steer_never_performs_local_wake_for_old_coordinator(
     monkeypatch, capsys
 ):
     import json
-
-    from agent_dispatch import bridge
 
     class FakeClient:
         def __enter__(self):
@@ -159,20 +160,13 @@ def test_steer_falls_back_when_old_coordinator_omits_wake_result(
         def steer(self, task_id, **_kwargs):
             return {"id": task_id, "owner": "host/worktree-1"}
 
-    calls = []
     monkeypatch.setattr("agent_dispatch.__main__._client", lambda _args: FakeClient())
-    monkeypatch.setattr(
-        bridge,
-        "resume_steered_owner",
-        lambda owner, task_id, message=None: calls.append(
-            (owner, task_id, message)
-        ) or True,
-    )
     args = _args(["steer", "submit", "task-1", "--field", "decision=continue"])
 
     assert args.func(args) == 0
-    assert json.loads(capsys.readouterr().out)["woken"] is True
-    assert calls == [("host/worktree-1", "task-1", None)]
+    output = json.loads(capsys.readouterr().out)
+    assert output["woken"] is None
+    assert output["wake_status"] == "unsupported"
 
 
 # -- coordinator target resolution: local vs shared/elected -----------------
@@ -488,6 +482,32 @@ def test_parser_worktree_status():
     assert args.command == "worktree-status"
 
 
+def test_parser_suspended_lifecycle_verbs():
+    suspend = build_parser().parse_args(
+        ["suspend", "task-1", "worker-1", "--reason", "waiting"]
+    )
+    assert suspend.command == "suspend"
+    assert suspend.reason == "waiting"
+    resume = build_parser().parse_args(
+        ["resume", "task-1", "worker-1", "--no-wake"]
+    )
+    assert resume.command == "resume"
+    assert resume.wake is False
+    release = build_parser().parse_args(
+        ["release", "task-1", "worker-1", "--reason", "replace it"]
+    )
+    assert release.command == "release"
+    assert release.reason == "replace it"
+    wakes = build_parser().parse_args(["wakes", "task-1"])
+    assert wakes.command == "wakes"
+    assert wakes.task_id == "task-1"
+
+
+def test_parser_steer_take_all():
+    args = build_parser().parse_args(["steer", "take", "task-1", "--all"])
+    assert args.all_pending is True
+
+
 def test_parser_claimant():
     args = build_parser().parse_args(["claimant", "task-123"])
     assert args.command == "claimant"
@@ -688,6 +708,8 @@ def test_inbox_awaiting_steer_surfaces_proposed_plus_awaiting(monkeypatch, capsy
          "awaiting_steer": True},   # blocked on steering -> kept
         {"id": "s1", "target_machine": None, "status": "started",
          "awaiting_steer": False},  # owned, not awaiting -> dropped
+        {"id": "z1", "target_machine": "host-a", "status": "suspended",
+         "awaiting_steer": True},   # dormant but awaiting -> kept
         {"id": "c2", "target_machine": "host-b", "status": "claimed",
          "awaiting_steer": True},   # awaiting but other machine -> dropped
     ]
@@ -699,16 +721,21 @@ def test_inbox_awaiting_steer_surfaces_proposed_plus_awaiting(monkeypatch, capsy
     assert args.func(args) == 0
 
     # The fetch widens to the owned states (a card-blocked task is claimed/
-    # started, not a filterable "held").
+    # started/suspended, not a filterable "held").
     assert fake.calls == [
-        {"repo": None, "status": "proposed,claimed,started", "label": None, "limit": 200}
+        {
+            "repo": None,
+            "status": "proposed,claimed,started,suspended",
+            "label": None,
+            "limit": 200,
+        }
     ]
     emitted = json.loads(capsys.readouterr().out)
     ids = {t["id"] for t in emitted}
     # Pickable proposed (p1) + awaiting-steer on this machine (c1); the owned-but-
     # not-awaiting started task (s1) and the other machine's awaiting task (c2)
     # are dropped.
-    assert ids == {"p1", "c1"}
+    assert ids == {"p1", "c1", "z1"}
 
 
 # -- Deferred-completion pickup (takeover) + complete owner auto-resolution ---
@@ -1026,12 +1053,30 @@ def test_claim_conflicting_task_ids_errors(monkeypatch, capsys):
 class _PickupClient:
     """A fake client tracking the consume lifecycle transitions."""
 
-    def __init__(self, status="queued"):
+    def __init__(
+        self,
+        status="queued",
+        *,
+        owner=None,
+        owner_session_id=None,
+        generation=0,
+    ):
         self.status = status
+        self.owner = owner
+        self.owner_session_id = owner_session_id
+        self.generation = generation
         self.transitions: list[str] = []
+        self.resume_kwargs: dict = {}
+        self.complete_kwargs: dict = {}
 
     def get(self, task_id):
-        return {"id": task_id, "status": self.status, "owner": None}
+        return {
+            "id": task_id,
+            "status": self.status,
+            "owner": self.owner,
+            "owner_session_id": self.owner_session_id,
+            "generation": self.generation,
+        }
 
     def approve(self, task_id):
         self.transitions.append("approve")
@@ -1045,8 +1090,14 @@ class _PickupClient:
         self.transitions.append("start")
         return {"id": task_id, "status": "started", "owner": owner}
 
-    def complete(self, task_id, owner, *, result_ref=None):
+    def resume(self, task_id, owner, **kwargs):
+        self.transitions.append("resume")
+        self.resume_kwargs = kwargs
+        return {"id": task_id, "status": "started", "owner": owner}
+
+    def complete(self, task_id, owner, **kwargs):
         self.transitions.append("complete")
+        self.complete_kwargs = kwargs
         return {"id": task_id, "status": "completed", "owner": owner}
 
     def payload(self, task_id):
@@ -1087,6 +1138,58 @@ def test_consume_defer_complete_stops_at_started(monkeypatch, capsys):
     # Deferred: take ownership + start, but NEVER complete -- the successor does.
     assert fake.transitions == ["approve", "claim", "start"]
     assert "complete" not in fake.transitions
+    assert "the brief" in capsys.readouterr().out
+
+
+def test_consume_deferred_suspended_task_resumes_preserved_owner(
+    monkeypatch, capsys
+):
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient(
+        "suspended",
+        owner="m/wt",
+        owner_session_id="session-old",
+        generation=4,
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1", "--defer-complete"])
+    assert args.func(args) == 0
+    assert fake.transitions == ["resume"]
+    assert fake.resume_kwargs == {
+        "wake": False,
+        "adopt_session": True,
+        "expected_owner_session_id": "session-old",
+        "expected_generation": 4,
+    }
+    assert "the brief" in capsys.readouterr().out
+
+
+def test_consume_baton_completes_suspended_task_directly(monkeypatch, capsys):
+    from agent_dispatch import __main__, identity
+
+    fake = _PickupClient(
+        "suspended",
+        owner="m/wt",
+        owner_session_id="session-old",
+        generation=4,
+    )
+    monkeypatch.setattr(__main__, "_client", lambda args: fake)
+    monkeypatch.setattr(identity, "resolve_identity", lambda: ("m", "wt"))
+    monkeypatch.setattr(__main__, "_scope_repo", lambda args: "repo")
+
+    args = build_parser().parse_args(["consume", "T1"])
+    assert args.func(args) == 0
+    assert fake.transitions == ["complete"]
+    assert fake.complete_kwargs == {
+        "result_ref": "consumed:wt",
+        "expected_status": "suspended",
+        "expected_owner_session_id": "session-old",
+        "expected_generation": 4,
+    }
     assert "the brief" in capsys.readouterr().out
 
 
@@ -1434,6 +1537,7 @@ class TestInboxBoard:
         assert self._grp(status="queued") == "Queued"
         assert self._grp(status="claimed") == "Started"
         assert self._grp(status="started") == "Started"
+        assert self._grp(status="suspended") == "Suspended"
         assert self._grp(status="completed") == "Completed"
         assert self._grp(status="abandoned") == "Abandoned"
         assert self._grp(status="dead_letter") == "Abandoned"
@@ -1443,6 +1547,7 @@ class TestInboxBoard:
         # its underlying lifecycle state.
         assert self._grp(status="started", awaiting_steer=True) == "Blocked"
         assert self._grp(status="claimed", awaiting_steer=True) == "Blocked"
+        assert self._grp(status="suspended", awaiting_steer=True) == "Blocked"
 
     def test_terminal_wins_over_stale_awaiting_steer(self):
         # A task abandoned/completed WHILE awaiting-steer keeps a stale flag; it
@@ -1507,10 +1612,12 @@ class TestInboxBoard:
             {"status": "proposed", "updated_at": 100},
             {"status": "abandoned", "updated_at": 100},
             {"status": "started", "updated_at": 100},
+            {"status": "suspended", "updated_at": 100},
         ]
         tasks.sort(key=m._board_sort_key)
         assert [m._board_group(t) for t in tasks] == [
-            "Blocked", "Proposed", "Queued", "Started", "Completed", "Abandoned",
+            "Blocked", "Proposed", "Queued", "Started", "Suspended",
+            "Completed", "Abandoned",
         ]
 
     def test_sort_within_group_is_recent_first(self):

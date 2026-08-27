@@ -289,6 +289,11 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         """Return a task's append-only audit trail."""
         return queue.events(task_id)
 
+    @mcp.tool(name="dispatch_wakes")
+    def wakes(task_id: str) -> list[dict]:
+        """Return a task's durable wake outbox operations."""
+        return [asdict(wake) for wake in queue.list_wakes(task_id)]
+
     @mcp.tool(name="dispatch_payload")
     def payload(task_id: str) -> dict:
         """Return a task's resolved payload (inline text or blob content)."""
@@ -380,9 +385,60 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         """Return a held task to ``queued`` with a note (recoverable snag)."""
         return _mutate(lambda: queue.yield_task(task_id, worker_id, note=note), "task.yielded")
 
+    @mcp.tool(name="dispatch_suspend")
+    def suspend(task_id: str, worker_id: str, reason: str) -> dict:
+        """Park a started task as owner-preserving, dormant ``suspended`` work."""
+        return _mutate(
+            lambda: queue.suspend(task_id, worker_id, reason=reason),
+            "task.suspended",
+        )
+
+    @mcp.tool(name="dispatch_resume")
+    def resume(
+        task_id: str,
+        worker_id: str,
+        wake: bool = True,
+        message: str | None = None,
+    ) -> dict:
+        """Resume a suspended task under the same owner and optionally wake it."""
+        wake_message = message or (
+            f"Task {task_id} has been resumed. Continue toward its goal "
+            "from the durable progress already recorded."
+        )
+        task = _mutate(
+            lambda: queue.resume(
+                task_id,
+                worker_id,
+                wake_requested=wake,
+                wake_message=wake_message,
+            ),
+            "task.resumed",
+        )
+        return {
+            **task,
+            "resume_woken": None,
+            "resume_wake_status": (
+                task.get("wake_status") if wake else "not_requested"
+            ),
+        }
+
+    @mcp.tool(name="dispatch_release")
+    def release(
+        task_id: str,
+        worker_id: str,
+        reason: str | None = None,
+    ) -> dict:
+        """Release a suspended task to ``queued`` for replacement embodiment."""
+        return _mutate(
+            lambda: queue.release_suspended(
+                task_id, worker_id, reason=reason
+            ),
+            "task.released",
+        )
+
     @mcp.tool(name="dispatch_complete")
     def complete(task_id: str, worker_id: str, result_ref: str | None = None) -> dict:
-        """Mark a started task ``completed``."""
+        """Complete a started or suspended task under its preserved owner."""
         return _mutate(
             lambda: queue.complete(task_id, worker_id, result_ref=result_ref), "task.completed"
         )

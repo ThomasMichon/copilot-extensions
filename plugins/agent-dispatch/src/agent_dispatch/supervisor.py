@@ -559,9 +559,19 @@ class Supervisor:
         return out
 
     def _active_reservations(self) -> list[dict]:
-        return self.client.list_reservations(
+        reservations = self.client.list_reservations(
             state=f"{SpawnState.RESERVING},{SpawnState.SPAWNED}", limit=500
         )
+        active: list[dict] = []
+        for reservation in reservations:
+            try:
+                task = self.client.get(reservation["task_id"])
+            except DispatchError:
+                active.append(reservation)
+                continue
+            if task.get("status") != Status.SUSPENDED:
+                active.append(reservation)
+        return active
 
     # -- phases --------------------------------------------------------------
 
@@ -638,20 +648,15 @@ class Supervisor:
         worker's own activity still extends its lease). Returns the count held.
         """
         tracking = _tracking()
-        local_sessions = (
-            tracking.list_local_body_sessions() if self.publish_activity else None
-        )
-        local_by_id = {
-            str(row.get("session_id")): row
-            for row in (local_sessions or [])
-            if isinstance(row, dict) and row.get("session_id")
-        }
+        local_by_id: dict[str, dict] | None = None
         held = 0
         for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
             worktree = res.get("worktree")
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
+                continue
+            if task.get("status") == Status.SUSPENDED:
                 continue
             owner = task.get("owner")
             # Headless fleet body: probe its agent-bridge session on the pool host;
@@ -695,6 +700,12 @@ class Supervisor:
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is not None:
                 if self.publish_activity:
+                    if local_by_id is None:
+                        local_by_id = {
+                            str(row.get("session_id")): row
+                            for row in tracking.list_local_body_sessions()
+                            if isinstance(row, dict) and row.get("session_id")
+                        }
                     try:
                         self.client.set_activity(
                             task["id"],
@@ -800,6 +811,8 @@ class Supervisor:
             status = task.get("status")
             if status in _TERMINAL:
                 continue  # reconcile() settles provably-finished tasks
+            if status == Status.SUSPENDED:
+                continue  # dormant ownership is intentional, not a gone body
             if status == Status.DEAD_LETTER:
                 try:
                     self.client.settle_spawn(res["key"], detail="task dead_lettered")

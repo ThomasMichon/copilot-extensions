@@ -280,10 +280,11 @@ class _LiveFakeClient:
         return dict(self._resolved) if self._resolved else {}
 
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
-                          kind="prompt", wait=False, wait_timeout=None):
+                          kind="prompt", wait=False, wait_timeout=None, **options):
         self.delivered.append(
             {"session_id": session_id, "sender": sender,
-             "body": body, "reply_to": reply_to, "kind": kind, "wait": wait}
+             "body": body, "reply_to": reply_to, "kind": kind, "wait": wait,
+             **options}
         )
         return {"message_id": 1, "replied": False}
 
@@ -308,7 +309,7 @@ def test_cmd_send_resolves_worktree_handle_and_delivers(monkeypatch, capsys):
 
 class _ReplyingLiveClient(_LiveFakeClient):
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
-                          kind="prompt", wait=False, wait_timeout=None):
+                          kind="prompt", wait=False, wait_timeout=None, **_options):
         self.delivered.append({"wait": wait, "wait_timeout": wait_timeout})
         return {"message_id": 7, "replied": True, "reply": "done - rebased",
                 "stop_reason": "end_turn"}
@@ -349,7 +350,7 @@ def test_live_message_kind_precedence():
 
 class _KindCapturingClient(_LiveFakeClient):
     def send_live_message(self, session_id, *, sender, body, reply_to=None,
-                          kind="prompt", wait=False, wait_timeout=None):
+                          kind="prompt", wait=False, wait_timeout=None, **_options):
         self.delivered.append({"kind": kind, "wait": wait})
         return {"message_id": 3, "replied": False}
 
@@ -366,6 +367,33 @@ def test_cmd_send_passes_status_check_kind(monkeypatch):
     )
     m._cmd_send(args)
     assert client.delivered == [{"kind": "status-check", "wait": True}]
+
+
+def test_cmd_send_forwards_expected_session_id(monkeypatch):
+    client = _LiveFakeClient(resolved={"session_id": "live-sess-1"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    monkeypatch.setattr(m, "_live_sender_label", lambda args: "peer")
+    monkeypatch.setattr(m, "_live_reply_to", lambda args: "wt-caller")
+    args = argparse.Namespace(
+        target="wt-target", prompt="wake", new=False, json=False, no_wait=True,
+        expected_session_id="live-sess-1",
+    )
+    m._cmd_send(args)
+    assert client.delivered[0]["expected_session_id"] == "live-sess-1"
+
+
+def test_cmd_send_rejects_replaced_session(monkeypatch, capsys):
+    client = _LiveFakeClient(resolved={"session_id": "replacement"})
+    monkeypatch.setattr(m, "_get_client", lambda: client)
+    args = argparse.Namespace(
+        target="wt-target", prompt="wake", new=False,
+        expected_session_id="original",
+    )
+    with pytest.raises(SystemExit) as exc:
+        m._cmd_send(args)
+    assert exc.value.code == 1
+    assert client.delivered == []
+    assert "not expected session" in capsys.readouterr().err
 
 
 def test_cmd_create_refuses_on_conflict(monkeypatch):

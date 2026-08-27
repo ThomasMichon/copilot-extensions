@@ -265,6 +265,11 @@ class DispatchTools:
         with self._client_factory() as c:
             return c.events(task_id)
 
+    def wakes(self, task_id: str) -> list[dict]:
+        """Return a task's durable wake outbox operations."""
+        with self._client_factory() as c:
+            return c.wakes(task_id)
+
     def payload(self, task_id: str) -> dict:
         """Return a task's resolved payload (inline text or blob content)."""
         with self._client_factory() as c:
@@ -327,8 +332,36 @@ class DispatchTools:
         with self._client_factory() as c:
             return c.yield_task(task_id, worker_id, note=note)
 
+    def suspend(self, task_id: str, worker_id: str, reason: str) -> dict:
+        """Park a started task as owner-preserving, dormant ``suspended`` work."""
+        with self._client_factory() as c:
+            return c.suspend(task_id, worker_id, reason=reason)
+
+    def resume(
+        self,
+        task_id: str,
+        worker_id: str,
+        wake: bool = True,
+        message: str | None = None,
+    ) -> dict:
+        """Resume a suspended task under the same owner and optionally wake it."""
+        with self._client_factory() as c:
+            return c.resume(
+                task_id, worker_id, wake=wake, message=message
+            )
+
+    def release(
+        self,
+        task_id: str,
+        worker_id: str,
+        reason: str | None = None,
+    ) -> dict:
+        """Release a suspended task to ``queued`` for replacement embodiment."""
+        with self._client_factory() as c:
+            return c.release(task_id, worker_id, reason=reason)
+
     def complete(self, task_id: str, worker_id: str, result_ref: str | None = None) -> dict:
-        """Mark a started task ``completed``."""
+        """Complete a started or suspended task under its preserved owner."""
         with self._client_factory() as c:
             return c.complete(task_id, worker_id, result_ref=result_ref)
 
@@ -387,11 +420,15 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_list")(t.list)
     mcp.tool(name="dispatch_show")(t.show)
     mcp.tool(name="dispatch_events")(t.events)
+    mcp.tool(name="dispatch_wakes")(t.wakes)
     mcp.tool(name="dispatch_payload")(t.payload)
     mcp.tool(name="dispatch_worktree_status")(t.worktree_status)
     mcp.tool(name="dispatch_claim")(t.claim)
     mcp.tool(name="dispatch_start")(t.start)
     mcp.tool(name="dispatch_yield")(t.yield_task)
+    mcp.tool(name="dispatch_suspend")(t.suspend)
+    mcp.tool(name="dispatch_resume")(t.resume)
+    mcp.tool(name="dispatch_release")(t.release)
     mcp.tool(name="dispatch_complete")(t.complete)
     mcp.tool(name="dispatch_abandon")(t.abandon)
     mcp.tool(name="dispatch_heartbeat")(t.heartbeat)
