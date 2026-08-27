@@ -309,6 +309,10 @@ def stage(
             result["venv_drift_error"] = str(error)
             result["runtime_apply_blocked"] = "installation-context-invalid"
             plugin_changed = False
+        except Exception as error:
+            result["venv_drift_error"] = str(error)
+            result["runtime_apply_blocked"] = "venv-drift-check-failed"
+            plugin_changed = False
         result["venv_drift"] = venv_drift
         if venv_drift and not plugin_changed:
             plugin_changed = True

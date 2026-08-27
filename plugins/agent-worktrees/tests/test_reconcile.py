@@ -462,12 +462,22 @@ def test_payload_refresh_suppressed_by_default(env):
 # Explicit installation-context manifest selection
 # ---------------------------------------------------------------------------
 
-def test_context_selected_current_runtime_avoids_legacy_reinstall(env):
+def test_context_selected_current_runtime_avoids_legacy_reinstall(
+    env, monkeypatch
+):
     env.write_settings({f"agent-index@{MKT}": True})
     payload = env.install_payload("agent-index", "2.0.0", scope="universal")
     _context, plugin_root = env.select_context(
         "agent-index", payload, "2.0.0", "2.0.0"
     )
+    child_environments = []
+    original_run = reconcile.subprocess.run
+
+    def track_environment(*args, **kwargs):
+        child_environments.append(kwargs["env"])
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(reconcile.subprocess, "run", track_environment)
 
     plan = reconcile.build_plan(
         env.repo, machine="m1", cache={}, save=False
@@ -478,6 +488,8 @@ def test_context_selected_current_runtime_avoids_legacy_reinstall(env):
     assert plan.get("diagnostics") is None
     assert not (env.home / ".agent-index").exists()
     assert (plugin_root / "deploy-manifest.json").is_file()
+    assert len(child_environments) == 1
+    assert "PYTHONPATH" not in child_environments[0]
 
 
 def test_context_selected_drift_is_diagnostic_not_legacy_install(env):

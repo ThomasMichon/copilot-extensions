@@ -226,6 +226,34 @@ def test_stage_selected_context_blocks_legacy_runtime_apply(
     assert result["context_runtime_root"] == str(cell_root)
 
 
+def test_stage_unexpected_drift_check_failure_is_reported(
+    tmp_path: Path, monkeypatch
+):
+    from agent_worktrees import reconcile
+
+    home = tmp_path / "home"
+    _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})
+    status = tmp_path / "status.json"
+    lock = tmp_path / "lock"
+    monkeypatch.setattr(
+        us, "_run_copilot_update", lambda: (True, "already at latest")
+    )
+    monkeypatch.setattr(
+        reconcile,
+        "_selected_runtime_root",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("unexpected validator failure")
+        ),
+    )
+
+    result = us.stage(status=status, lock=lock, home=home)
+
+    assert result["plugin_changed"] is False
+    assert result["venv_drift"] is False
+    assert result["venv_drift_error"] == "unexpected validator failure"
+    assert result["runtime_apply_blocked"] == "venv-drift-check-failed"
+
+
 def test_stage_single_flight_second_call_skips(tmp_path: Path, monkeypatch):
     home = tmp_path / "home"
     _make_marketplace(home, {"plugin.json": '{"version":"dev1"}'})

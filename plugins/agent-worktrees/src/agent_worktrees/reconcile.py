@@ -393,14 +393,10 @@ def _selected_runtime_root(
         return runtime_dir(name, home), False
 
     pointer, target_name = target
-    helper_candidates: list[Path] = []
-    if name == SELF_PLUGIN:
-        helper_candidates.append(plugin_dir)
+    helper_candidates: list[Path] = [plugin_dir]
     self_dir = installed_payload_dir(SELF_PLUGIN)
     if self_dir is not None and self_dir not in helper_candidates:
         helper_candidates.append(self_dir)
-    if plugin_dir not in helper_candidates:
-        helper_candidates.append(plugin_dir)
     helper = next(
         (
             candidate
@@ -446,6 +442,7 @@ def _selected_runtime_root(
         command.extend(["--expected-cell-root", str(expected_cell_root)])
     child_environment = os.environ.copy()
     child_environment.pop("COPILOT_PLUGIN_ROOT", None)
+    child_environment.pop("PYTHONPATH", None)
     try:
         process = subprocess.run(
             command,
