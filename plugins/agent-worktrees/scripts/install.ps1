@@ -605,7 +605,7 @@ function Invoke-NativeCapture {
     $previousErrorAction = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        $output = (& $Command 2>&1 | Out-String).Trim()
+        $output = (& $Command 2>&1 | Out-String -Width 4096).Trim()
         $exitCode = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousErrorAction
@@ -1014,7 +1014,11 @@ function Invoke-VenvPackageInstall {
                     $pipOut = "$pipOut`n$($result.Output)".Trim()
                     $rc = $result.ExitCode
                 }
-                $out = if ($out) { "$out`n$pipOut" } else { $pipOut }
+                $out = if ($out) {
+                    @($out, $pipOut) -join [Environment]::NewLine
+                } else {
+                    $pipOut
+                }
             }
         }
     } finally {
