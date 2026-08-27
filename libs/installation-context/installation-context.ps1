@@ -1160,6 +1160,28 @@ function Assert-ReceiptState($Value, [string]$Name) {
 }
 
 function Assert-ReceiptGeneration($Value, [string]$Name) {
+    $maximumText = [int64]::MaxValue.ToString([Globalization.CultureInfo]::InvariantCulture)
+    if ($Value -is [Numerics.BigInteger]) {
+        if ($Value -gt [Numerics.BigInteger]::Parse($maximumText)) {
+            Fail "$Name exceeds the portable signed 64-bit maximum."
+        }
+    }
+    elseif ($Value -is [decimal] -or $Value -is [uint64]) {
+        if ([decimal]$Value -gt [decimal]::Parse(
+            $maximumText,
+            [Globalization.CultureInfo]::InvariantCulture
+        )) {
+            Fail "$Name exceeds the portable signed 64-bit maximum."
+        }
+    }
+    elseif ($Value -is [double] -or $Value -is [single]) {
+        if ([double]$Value -gt [double]::Parse(
+            $maximumText,
+            [Globalization.CultureInfo]::InvariantCulture
+        )) {
+            Fail "$Name exceeds the portable signed 64-bit maximum."
+        }
+    }
     Assert-PositiveInteger $Value $Name
 }
 

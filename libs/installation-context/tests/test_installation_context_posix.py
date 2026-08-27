@@ -520,6 +520,32 @@ def test_stamp_refuses_generation_overflow_before_replacing_receipt(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_validate_rejects_generation_above_portable_maximum(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    runner_root = tmp_path / runner_name
+    runner_root.mkdir()
+    layout = _receipt_layout(runner_root)
+    namespace = Path(layout["namespace"])
+    receipt = json.loads(namespace.read_text(encoding="utf-8"))
+    receipt["generation"] = 9223372036854775808
+    _write_json(namespace, receipt)
+    result = _run(
+        command,
+        "validate",
+        "--context",
+        layout["install"],
+        "--durable-home",
+        layout["durable"],
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "exceeds the portable signed 64-bit maximum" in result.stderr
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
 def test_source_identity_matches_portable_vectors(
     runner_name: str,
     command: tuple[str, ...],

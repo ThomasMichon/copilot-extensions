@@ -75,7 +75,8 @@ def sync() -> list[str]:
         destination.parent.mkdir(parents=True, exist_ok=True)
         if not content_matches:
             shutil.copyfile(source, destination)
-        os.chmod(destination, source.stat().st_mode & 0o777)
+        if os.name != "nt":
+            os.chmod(destination, source.stat().st_mode & 0o777)
         written.append(destination.relative_to(REPO).as_posix())
     return written
 
