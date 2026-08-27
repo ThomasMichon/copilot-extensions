@@ -931,7 +931,10 @@ try:
         os.replace(staging / 'uvx.exe', target / 'uvx.exe')
     os.replace(staging / 'uv.exe', target / 'uv.exe')
 finally:
-    pathlib.Path(archive).unlink(missing_ok=True)
+    try:
+        pathlib.Path(archive).unlink()
+    except FileNotFoundError:
+        pass
     shutil.rmtree(staging, ignore_errors=True)
 '@
     $result = Invoke-NativeCapture { & $pythonPath -c $bootstrap $url $toolDir }

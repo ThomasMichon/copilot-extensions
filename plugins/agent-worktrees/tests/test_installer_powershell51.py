@@ -38,6 +38,7 @@ def test_uv_bootstrap_python_survives_windows_powershell_argument_passing():
     bootstrap = installer.split("$bootstrap = @'", 1)[1].split("'@", 1)[0]
 
     assert '"' not in bootstrap
+    assert "missing_ok" not in bootstrap
     assert "$ErrorActionPreference = 'Continue'" in installer
 
 
