@@ -326,6 +326,50 @@ def test_managed_relative_command_cannot_escape_plugin_root(tmp_path):
     assert "escapes" in report.findings[0].detail
 
 
+def test_dot_relative_commands_resolve_in_their_authority_root(
+    tmp_path, monkeypatch
+):
+    source = "sample@example-marketplace"
+    root = tmp_path / "plugin"
+    root.mkdir()
+    command_name = "tool.cmd" if os.name == "nt" else "tool"
+    relative_command = f"./{command_name}"
+    managed_command = root / command_name
+    managed_command.write_text(
+        "@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n"
+    )
+    if os.name != "nt":
+        managed_command.chmod(0o755)
+    _template(root, command=relative_command)
+    managed = pivots.scan_pivot_registry(
+        tmp_path / "managed",
+        activation_report=_active_report(source, root),
+    )
+    assert Path(managed.pivots[0].list_cmd[0]) == managed_command.resolve()
+
+    operator_root = tmp_path / "operator"
+    operator_root.mkdir()
+    operator_command = operator_root / command_name
+    operator_command.write_text(
+        "@exit /b 0\n" if os.name == "nt" else "#!/bin/sh\nexit 0\n"
+    )
+    if os.name != "nt":
+        operator_command.chmod(0o755)
+    registry = operator_root / "pivots"
+    registry.mkdir()
+    (registry / "operator.json").write_text(
+        json.dumps({"label": "Operator", "list": [relative_command]}),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(operator_root)
+    operator = pivots.scan_pivot_registry(
+        registry,
+        materialize=False,
+        activation_report=ActivationReport(ScanAuthority.COMPLETE, {}),
+    )
+    assert Path(operator.pivots[0].list_cmd[0]) == operator_command.resolve()
+
+
 def test_malformed_operator_peer_does_not_block_valid_operator(tmp_path):
     registry = tmp_path / "pivots"
     registry.mkdir()

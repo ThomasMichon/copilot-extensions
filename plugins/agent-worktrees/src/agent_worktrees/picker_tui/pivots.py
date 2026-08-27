@@ -908,7 +908,7 @@ def _resolve_command(command: Sequence[str], *, root: Path | None = None) -> lis
     first = command[0]
     payload = _payload_command(root, first)
     candidate = Path(first).expanduser()
-    has_path = candidate.is_absolute() or candidate.parent != Path(".")
+    has_path = candidate.is_absolute() or "/" in first or "\\" in first
     if payload is not None:
         resolved = str(payload)
     elif has_path:

@@ -139,7 +139,7 @@ that entry's last-known contribution. Operational warnings are bounded;
 `agent-worktrees doctor [--json]` is exhaustive and report-only.
 
 Use it for service-owned settings that shouldn't live in the committed repo
-config. Example — the Aperture Vault registering its askpass path so
+config. Example — a credential helper registering its askpass path so
 `sudo -A` works in the session, without leaking a vault-specific key into the
 shared repo config:
 
