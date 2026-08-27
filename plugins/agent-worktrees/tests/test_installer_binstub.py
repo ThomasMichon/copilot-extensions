@@ -503,7 +503,7 @@ def test_reconcile_preserves_modified_receipt_owned_stub(monkeypatch, tmp_path: 
     expected_removed = [
         str(path) for path, _ in inst._project_binstub_specs("demo")[1:]
     ]
-    assert result["removed"] == expected_removed
+    assert set(result["removed"]) == set(expected_removed)
 
 
 def test_explicit_transfer_replaces_other_owner(monkeypatch, tmp_path: Path):

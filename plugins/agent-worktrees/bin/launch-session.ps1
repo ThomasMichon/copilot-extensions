@@ -923,9 +923,9 @@ if (-not $noMux) {
         $detail = if ($probeError) { ": $probeError" } else { '' }
         $message = "psmux launch probe failed (exit code $probeExit)$detail. Use --no-mux to request a direct session explicitly."
         Write-SetupLog $message 'ERROR'
-        Write-AwMuxFailure -Reason 'launch_probe_failed'
+        Write-AwMuxFailure -Reason 'launch_probe_failed' -ExitCode $probeExit
         Write-Error $message -ErrorAction Continue
-        exit 1
+        exit $probeExit
     }
 }
 

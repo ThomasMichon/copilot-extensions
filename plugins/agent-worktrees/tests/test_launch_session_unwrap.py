@@ -253,6 +253,8 @@ def test_launchers_propagate_attach_failures_without_killing_shared_sessions():
     assert "Failed to attach to new psmux session" in ps
     assert "Write-AwMuxFailure -Reason 'attach_failed'" in ps
     assert "& $script:AwPsmuxBin --version" in ps
+    assert "Write-AwMuxFailure -Reason 'launch_probe_failed' -ExitCode $probeExit" in ps
+    assert "exit $probeExit" in ps
 
     assert "_aw_owned_tmux_session_id" in sh
     assert "display-message -p" in sh
