@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  describeError,
   findRepositoryRoot,
   loadContextHandoffConfig,
   parseThresholdConfig,
@@ -53,6 +54,11 @@ test("rejects unknown and unsafe configuration", () => {
     ),
     /softPercent must be less than hardPercent/,
   );
+});
+
+test("describes non-Error throw values safely", () => {
+  assert.equal(describeError("read failed"), "read failed");
+  assert.equal(describeError(new Error("parse failed")), "parse failed");
 });
 
 test("discovers config from a nested directory in a git worktree", () => {
@@ -101,5 +107,20 @@ test("symlinked repository config is rejected", { skip: process.platform === "wi
 
     const loaded = loadContextHandoffConfig(root);
     assert.match(loaded.warning, /non-symlink/);
+  });
+});
+
+test("symlinked config directory is rejected", { skip: process.platform === "win32" }, () => {
+  withRepository((root) => {
+    const target = join(root, "redirected-config");
+    mkdirSync(target);
+    writeFileSync(
+      join(target, "config.yaml"),
+      "thresholds:\n  soft_percent: 65\n",
+    );
+    symlinkSync(target, join(root, ".context-handoff"), "dir");
+
+    const loaded = loadContextHandoffConfig(root);
+    assert.match(loaded.warning, /non-symlink directory/);
   });
 });

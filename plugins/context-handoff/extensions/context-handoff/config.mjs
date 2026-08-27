@@ -9,6 +9,10 @@ import { DEFAULT_THRESHOLDS, validateThresholds } from "./thresholds.mjs";
 
 export const CONFIG_RELATIVE_PATH = join(".context-handoff", "config.yaml");
 
+export function describeError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function findRepositoryRoot(startDir) {
   let current = resolve(startDir);
   while (true) {
@@ -77,7 +81,8 @@ export function loadContextHandoffConfig(startDir) {
     };
   }
 
-  const configPath = join(repositoryRoot, CONFIG_RELATIVE_PATH);
+  const configDir = join(repositoryRoot, ".context-handoff");
+  const configPath = join(configDir, "config.yaml");
   if (!existsSync(configPath)) {
     return {
       thresholds: DEFAULT_THRESHOLDS,
@@ -87,6 +92,10 @@ export function loadContextHandoffConfig(startDir) {
   }
 
   try {
+    const dirStat = lstatSync(configDir);
+    if (!dirStat.isDirectory() || dirStat.isSymbolicLink()) {
+      throw new Error("config directory must be a regular, non-symlink directory");
+    }
     const stat = lstatSync(configPath);
     if (!stat.isFile() || stat.isSymbolicLink()) {
       throw new Error("config must be a regular, non-symlink file");
@@ -103,7 +112,7 @@ export function loadContextHandoffConfig(startDir) {
       warning:
         `Invalid ${CONFIG_RELATIVE_PATH}; using defaults ` +
         `(${DEFAULT_THRESHOLDS.softPercent}%/${DEFAULT_THRESHOLDS.hardPercent}%): ` +
-        error.message,
+        describeError(error),
     };
   }
 }
