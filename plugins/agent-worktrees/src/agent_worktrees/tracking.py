@@ -992,6 +992,8 @@ def load_record(path: Path) -> WorktreeRecord:
                             if not isinstance(raw_activation, dict):
                                 continue
                             act_started = raw_activation.get("started_at", "")
+                            if act_started in (None, "", "null"):
+                                continue
                             if hasattr(act_started, "isoformat"):
                                 act_started = act_started.isoformat()
                             act_ended = raw_activation.get("ended_at")
@@ -1002,6 +1004,8 @@ def load_record(path: Path) -> WorktreeRecord:
                             start_recorded = raw_activation.get(
                                 "start_recorded_at", act_started
                             )
+                            if start_recorded in (None, "", "null"):
+                                start_recorded = act_started
                             if hasattr(start_recorded, "isoformat"):
                                 start_recorded = start_recorded.isoformat()
                             end_recorded = raw_activation.get("end_recorded_at")

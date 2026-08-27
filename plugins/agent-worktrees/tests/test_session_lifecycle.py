@@ -94,6 +94,21 @@ class TestBackwardCompat:
         rec = load_record(p)
         assert rec.session_entry("s1").state == "active"
 
+    def test_null_activation_start_is_skipped(self, tmp_tracking_dir: Path):
+        p = tmp_tracking_dir / "wt-1.yaml"
+        p.write_text(
+            "worktree_id: wt-1\nbranch: worktree/wt-1\n"
+            "worktree_path: /tmp/wt-1\nrepo: r\nmachine: m\nplatform: wsl\n"
+            "started_at: 2026-01-01T00:00:00\n"
+            "last_resumed_at: 2026-01-01T00:00:00\nresume_count: 0\n"
+            "title: null\nstatus: active\ncompleted_at: null\n"
+            "sessions:\n- session_id: s1\n  started_at: 2026-01-01T00:00:00\n"
+            "  activations:\n  - ordinal: 1\n    started_at: null\n"
+            "    start_recorded_at: null\n"
+        )
+        entry = load_record(p).session_entry("s1")
+        assert entry.activations == []
+
 
 class TestResolvedHead:
     def test_no_sessions_is_none(self, tmp_tracking_dir: Path):
