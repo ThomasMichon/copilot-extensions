@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from dropin_registry import ScanAuthority, ScanSnapshot
+
 from agent_codespaces import __main__ as m
+from agent_codespaces.config import ConfigDropinRegistryReport
 
 _STATUS = """github.com
   x Logged in to github.com account ThomasMichon (keyring)
@@ -15,6 +18,16 @@ _STATUS = """github.com
   - Active account: false
   - Token scopes: 'gist', 'read:org', 'repo', 'workflow'
 """
+
+
+def _clean_config_d_report() -> ConfigDropinRegistryReport:
+    return ConfigDropinRegistryReport(
+        snapshot=ScanSnapshot(
+            registry="config.d",
+            authority=ScanAuthority.COMPLETE,
+        ),
+        active_entries={},
+    )
 
 
 def test_parse_gh_account_scopes():
@@ -113,13 +126,20 @@ def test_require_scope_escape_hatch(monkeypatch):
 
 
 def test_doctor_exit_zero_when_clean(capsys):
-    with patch.object(m, "_gh_auth_preflight", return_value=[]):
+    with patch.object(m, "_gh_auth_preflight", return_value=[]), \
+         patch.object(
+             m, "scan_config_dropin_registry", return_value=_clean_config_d_report()
+         ):
         assert m._cmd_doctor() == 0
     assert "[OK]" in capsys.readouterr().out
 
 
 def test_doctor_exit_nonzero_on_issues(capsys):
-    with patch.object(m, "_gh_auth_preflight",
-                      return_value=["gh token is missing the 'codespace' scope"]):
+    with patch.object(
+        m, "_gh_auth_preflight",
+        return_value=["gh token is missing the 'codespace' scope"],
+    ), patch.object(
+        m, "scan_config_dropin_registry", return_value=_clean_config_d_report()
+    ):
         assert m._cmd_doctor() == 1
     assert "codespace" in capsys.readouterr().err
