@@ -149,7 +149,7 @@ def render(
         "cmd" if data["windowsCatalogShim"] == "cmd" else "direct"
     )
     windows_cmd_host_block = (
-        "where pwsh >nul 2>&1\n"
+        '"%SystemRoot%\\System32\\where.exe" pwsh >nul 2>&1\n'
         "if %ERRORLEVEL%==0 (\n"
         '  set "_PSHOST=pwsh"\n'
         ") else (\n"

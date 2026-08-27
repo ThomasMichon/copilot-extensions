@@ -172,6 +172,7 @@ def test_manifest_can_select_cmd_for_windows_catalog(tmp_path: Path) -> None:
     cmd = generated[manifest.parent / "bin" / "agent-example.cmd"]
     assert r"bin\agent-example.cmd" in catalog
     assert "shell = 'cmd'" in catalog
+    assert r'"%SystemRoot%\System32\where.exe" pwsh' in cmd
     assert r"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" in cmd
     assert '"%_PSHOST%" -NoProfile' in cmd
 

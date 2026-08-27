@@ -7,7 +7,7 @@ if not exist "%_PS1%" (
   echo [agent-logger] payload PowerShell shim not found: %_PS1% 1>&2
   exit /b 127
 )
-where pwsh >nul 2>&1
+"%SystemRoot%\System32\where.exe" pwsh >nul 2>&1
 if %ERRORLEVEL%==0 (
   set "_PSHOST=pwsh"
 ) else (
