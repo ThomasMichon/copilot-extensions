@@ -3,6 +3,8 @@
 Verbs:
 * ``version``  -- print the engine version
 * ``discover`` -- show this machine's requirement-package set (from repos.yaml)
+* ``doctor``   -- diagnose canonical, legacy, mixed, and malformed package layouts
+* ``migrate``  -- move one legacy repo layout to the canonical namespace
 * ``plan``     -- read-only restore plan (managed surfaces + drift key)
 * ``validate`` -- run the conflict validator over the package union
 * ``restore``  -- converge the machine (``--dry-run`` prints the plan; apply lands in #4006)
@@ -17,6 +19,7 @@ import sys
 
 from . import __version__
 from . import discover as _discover
+from . import layout as _layout
 from . import reconcile as _reconcile
 from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
@@ -49,6 +52,48 @@ def _cmd_discover(args: argparse.Namespace) -> int:
         print(json.dumps({"machine": machine, "repos": out}, indent=2))
         return 0
     return _discover._main()
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    machine = args.machine or _discover.current_machine()
+    reports = _layout.inspect_layouts(machine, repo=args.repo)
+    ok = all(report.ok for report in reports)
+    if args.json:
+        print(json.dumps({
+            "machine": machine,
+            "ok": ok,
+            "repos": [report.to_dict() for report in reports],
+        }, indent=2))
+        return 0 if ok else 1
+
+    print(f"doctor for {machine}")
+    if not reports:
+        print("  no adopted repos found")
+        return 0
+    for report in reports:
+        print(f"  {report.repo} [{report.status}] ({report.path})")
+        if report.package_count:
+            print(f"      {report.package_count} applicable package(s)")
+        for finding in report.findings:
+            print(f"      [{finding.level}] {finding.code}: {finding.message}")
+    return 0 if ok else 1
+
+
+def _cmd_migrate(args: argparse.Namespace) -> int:
+    repo_name, repo_path = _layout.resolve_repo(args.repo)
+    result = _layout.migrate_repo_layout(repo_path, repo_name, apply=args.apply)
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0
+
+    mode = "APPLY" if args.apply else "DRY-RUN"
+    print(f"migrate [{mode}] {result.repo} ({result.path}): {result.status}")
+    for move in result.moves:
+        verb = "moved" if args.apply else "would move"
+        print(f"  {verb}: {move.source} -> {move.target}")
+    if result.status == "would-migrate":
+        print("  re-run with --apply to perform the migration")
+    return 0
 
 
 def _cmd_plan(args: argparse.Namespace) -> int:
@@ -194,6 +239,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
     add("version", _cmd_version)
     add("discover", _cmd_discover)
+    doctor = add("doctor", _cmd_doctor)
+    doctor.add_argument(
+        "--repo",
+        help="inspect one adopted repo name or directory (default: every adopted repo)",
+    )
+    migrate = sub.add_parser("migrate")
+    migrate.add_argument("--json", action="store_true", help="emit JSON")
+    migrate.set_defaults(func=_cmd_migrate)
+    migrate.add_argument(
+        "--repo",
+        required=True,
+        help="adopted repo name or directory to migrate",
+    )
+    migrate.add_argument(
+        "--apply",
+        action="store_true",
+        help="perform the migration (default is a dry-run preview)",
+    )
     add("plan", _cmd_plan)
     add("validate", _cmd_validate)
     restore = add("restore", _cmd_restore)
@@ -218,7 +281,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except ManifestError as exc:
-        print(f"manifest error: {exc}", file=sys.stderr)
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": str(exc)}, indent=2))
+        else:
+            print(f"manifest error: {exc}", file=sys.stderr)
         return 2
 
 

@@ -52,6 +52,14 @@ The legacy `.github/machine-state/` directory is read only when the canonical
 `.agent-machines/` root is absent. This makes migration atomic per repo and
 prevents duplicate settings, resources, or module executions.
 
+`src\agent_machines\layout.py` owns layout diagnosis and migration.
+`agent-machines doctor` inspects canonical and legacy locations without
+activating modules; `agent-machines migrate --repo ...` is dry-run by default
+and moves legacy YAML byte-for-byte into `all/`. Its preflight rejects mixed
+layouts, unknown entries, invalid manifests, and destination collisions before
+writing. Apply rolls back completed moves if a later filesystem operation
+fails. It never guesses machine scoping from package gates.
+
 ## Requirement-package schema
 
 `src\agent_machines\manifest.py` parses schema version `1` packages. Required

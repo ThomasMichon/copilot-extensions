@@ -110,3 +110,22 @@ plugins (`agent-worktrees`, `agent-machines`); if a package manages
 marketplace or the validator errors.
 
 Run `<catalog argv[0]> validate` after authoring to catch conflicts.
+
+## Diagnose and migrate package layout
+
+Run `<catalog argv[0]> doctor` to inspect every adopted repo for canonical,
+legacy, mixed, malformed, unavailable, or absent package layouts. Use
+`--repo <name-or-path>` to scope it and `--json` for structured output.
+
+For a legacy-only repo:
+
+```
+<catalog argv[0]> migrate --repo <name-or-path>          # dry-run
+<catalog argv[0]> migrate --repo <name-or-path> --apply  # move files
+```
+
+Migration preserves package bytes and gates, placing YAML in
+`.agent-machines/all/`; it moves a legacy `README.md` to the canonical root.
+It refuses mixed layouts, collisions, nested content, and unknown entries.
+Moving a package into `machines/<machine>/` remains a deliberate follow-up
+because the engine does not infer machine scope from a gate.
