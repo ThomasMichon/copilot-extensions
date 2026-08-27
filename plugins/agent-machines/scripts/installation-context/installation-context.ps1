@@ -485,7 +485,12 @@ function Acquire-Lock(
         Fail "Installation lock '$Path' is busy (host=$ownerHost, pid=$ownerPid)."
     }
     if (-not (Test-Path -LiteralPath (Join-Path $Path 'owner.json') -PathType Leaf)) {
-        Fail "Installation lock '$Path' has no owner receipt; explicit repair is required."
+        $lockDirectory = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
+        if ($null -ne $lockDirectory -and
+            ([DateTime]::UtcNow - $lockDirectory.LastWriteTimeUtc).TotalSeconds -ge 5) {
+            Fail "Installation lock '$Path' has no owner receipt; explicit repair is required."
+        }
+        Fail "Installation lock '$Path' remained busy."
     }
     Fail "Installation lock '$Path' remained busy."
 }

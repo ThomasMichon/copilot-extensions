@@ -269,8 +269,8 @@ acquire_lock() {
            "$owner_plugin" == "$plugin_id" &&
            -n "$owner_token" ]] ||
             fail "Installation lock owner receipt '$owner' is invalid."
-        assert_json_type "$owner_snapshot" version number "installation lock version"
-        assert_json_type "$owner_snapshot" pid number "installation lock pid"
+        assert_json_type "$owner_snapshot" version number "installation lock version in '$owner'"
+        assert_json_type "$owner_snapshot" pid number "installation lock pid in '$owner'"
         [[ "$owner_pid" =~ ^[1-9][0-9]*$ ]] ||
             fail "Installation lock owner receipt '$owner' is invalid."
         if [[ "$owner_host" == "$host" ]]; then
@@ -283,7 +283,14 @@ acquire_lock() {
         fail "Installation lock '$path' is busy (host=$owner_host, pid=$owner_pid)."
     done
     if [[ ! -f "$path/owner.json" ]]; then
-        fail "Installation lock '$path' has no owner receipt; explicit repair is required."
+        local modified now
+        if modified="$(stat -c %Y -- "$path" 2>/dev/null)"; then
+            now="$(date +%s)"
+            if ((now - modified >= 5)); then
+                fail "Installation lock '$path' has no owner receipt; explicit repair is required."
+            fi
+        fi
+        fail "Installation lock '$path' remained busy."
     fi
     fail "Installation lock '$path' remained busy."
 }

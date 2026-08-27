@@ -76,7 +76,7 @@ def sync() -> list[str]:
         if not content_matches:
             shutil.copyfile(source, destination)
         if os.name != "nt":
-            os.chmod(destination, source.stat().st_mode & 0o777)
+            shutil.copymode(source, destination)
         written.append(destination.relative_to(REPO).as_posix())
     return written
 
