@@ -195,7 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     verify = sub.add_parser("verify", help="Probe SSH reachability by host alias.")
     verify.add_argument("--timeout", type=int, default=8, help="SSH ConnectTimeout seconds.")
-    verify.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
+    verify.add_argument(
+        "--config-d",
+        type=Path,
+        default=None,
+        help="Override the managed-fragment audit directory; SSH still uses its active config.",
+    )
     verify.add_argument("names", nargs="*", help="Host aliases to probe.")
     verify.set_defaults(func=_cmd_verify)
 
@@ -211,7 +216,12 @@ def build_parser() -> argparse.ArgumentParser:
     explore.add_argument(
         "--json", action="store_true", help="Emit the structured result as JSON."
     )
-    explore.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
+    explore.add_argument(
+        "--config-d",
+        type=Path,
+        default=None,
+        help="Override the managed-fragment audit directory; SSH still uses its active config.",
+    )
     explore.set_defaults(func=_cmd_explore)
 
     mesh = sub.add_parser(
@@ -231,7 +241,12 @@ def build_parser() -> argparse.ArgumentParser:
     mesh.add_argument(
         "--summary", action="store_true", help="Print a one-line summary only."
     )
-    mesh.add_argument("--config-d", type=Path, default=None, help="Override ~/.ssh/config.d.")
+    mesh.add_argument(
+        "--config-d",
+        type=Path,
+        default=None,
+        help="Override the managed-fragment audit directory only.",
+    )
     mesh.set_defaults(func=_cmd_mesh_status)
 
     doctor = sub.add_parser(

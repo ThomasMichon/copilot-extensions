@@ -458,6 +458,28 @@ def test_render_rejects_path_escape_include_and_host_injection() -> None:
         )
 
 
+def test_boolean_options_render_as_openssh_yes_no() -> None:
+    rendered = ssh_profile.render_fragment(
+        {
+            "transport": "direct",
+            "machines": [
+                {
+                    "name": "host-a",
+                    "options": {
+                        "IdentitiesOnly": True,
+                        "Compression": False,
+                    },
+                }
+            ],
+        },
+        {"module": "direct"},
+    )
+    assert "IdentitiesOnly yes" in rendered
+    assert "Compression no" in rendered
+    assert "True" not in rendered
+    assert "False" not in rendered
+
+
 def test_profile_validation_rejects_duplicate_aliases() -> None:
     with pytest.raises(ValueError, match="duplicates another Host alias"):
         ssh_profile.validate_profile_inputs(
@@ -761,6 +783,8 @@ def test_write_fragment_uses_unique_temporary_outside_included_directory(
     assert captured[0].parent != config_d
     assert captured[0].name.startswith(".agent-ssh-fragment-")
     assert not captured[0].exists()
+    include = (tmp_path / "config").read_text(encoding="utf-8").splitlines()[0]
+    assert include == ssh_profile._include_line(config_d)
 
 
 def test_root_include_update_is_serialized_and_atomic(

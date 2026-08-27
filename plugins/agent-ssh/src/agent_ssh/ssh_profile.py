@@ -223,10 +223,16 @@ def _emit_options(lines: list[str], opts: dict[str, Any]) -> None:
     remaining = dict(_require_option(key, value) for key, value in opts.items())
     for key in _OPTION_ORDER:
         if key in remaining and remaining[key] not in (None, ""):
-            lines.append(f"    {key} {remaining.pop(key)}")
+            value = remaining.pop(key)
+            if isinstance(value, bool):
+                value = "yes" if value else "no"
+            lines.append(f"    {key} {value}")
     for key in sorted(remaining):
         if remaining[key] not in (None, ""):
-            lines.append(f"    {key} {remaining[key]}")
+            value = remaining[key]
+            if isinstance(value, bool):
+                value = "yes" if value else "no"
+            lines.append(f"    {key} {value}")
 
 
 def render_gate_block(gate: dict[str, Any], module: dict[str, Any], proxy_binary: str) -> str:
@@ -384,16 +390,34 @@ def _root_config_target(path: Path) -> Path:
     return path
 
 
-def ensure_root_include(ssh_config: Path | None = None) -> bool:
+def _include_line(config_d: Path | None = None) -> str:
+    if config_d is None:
+        return ROOT_INCLUDE
+    default = (_ssh_dir() / "config.d").resolve()
+    resolved = config_d.expanduser().resolve()
+    if resolved == default:
+        return ROOT_INCLUDE
+    text = resolved.as_posix()
+    if any(char in text for char in "\r\n\0\""):
+        raise ValueError("config.d path cannot be represented safely in an SSH Include")
+    return f'Include "{text}/*"'
+
+
+def ensure_root_include(
+    ssh_config: Path | None = None,
+    *,
+    config_d: Path | None = None,
+) -> bool:
     ssh_config = ssh_config or (_ssh_dir() / "config")
+    include_line = _include_line(config_d)
     ssh_config.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_path = ssh_config.parent / ".agent-ssh-locks" / "root-config.lock"
     with exclusive_file_lock(lock_path):
         target = _root_config_target(ssh_config)
         existing = target.read_text(encoding="utf-8") if target.exists() else ""
-        if any(line.strip() == ROOT_INCLUDE for line in existing.splitlines()):
+        if any(line.strip() == include_line for line in existing.splitlines()):
             return False
-        content = f"{ROOT_INCLUDE}\n\n{existing}".rstrip() + "\n"
+        content = f"{include_line}\n\n{existing}".rstrip() + "\n"
         fd, temporary = tempfile.mkstemp(
             dir=str(target.parent),
             prefix=".agent-ssh-root-config-",
@@ -460,7 +484,7 @@ def write_fragment(
                 tmp.unlink()
             except FileNotFoundError:
                 pass
-    ensure_root_include(ssh_config)
+    ensure_root_include(ssh_config, config_d=config_d)
     return frag
 
 
