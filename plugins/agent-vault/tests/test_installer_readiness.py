@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent_vault import cli
+from agent_vault import cli, rendezvous
 from agent_vault.config import ResolvedVault
 from agent_vault.installer_readiness import emit, evaluate
 from agent_vault.service import VaultService
@@ -344,6 +344,92 @@ def test_normal_endpoint_discovery_tolerates_invalid_utf8(tmp_path, monkeypatch)
     assert cli._discover_endpoint(_context("example.kdbx")) is None
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("schema", float("inf")),
+        ("schema", True),
+        ("schema", 1.0),
+        ("schema", 10**100),
+        ("pid", float("inf")),
+        ("pid", True),
+        ("pid", 1.0),
+        ("pid", -1),
+        ("pid", 10**100),
+    ),
+)
+def test_normal_endpoint_discovery_tolerates_invalid_numeric_fields(
+    field, value, tmp_path, monkeypatch
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    record = {
+        "schema": 1,
+        "transport": "pipe",
+        "endpoint": r"\\.\pipe\agent-vault",
+        "pid": None,
+        "started_at": None,
+    }
+    record[field] = value
+    (run_dir / "endpoint.json").write_text(
+        json.dumps(record),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(cli, "IS_WSL", False)
+
+    assert cli._discover_endpoint(_context("example.kdbx")) is None
+
+
+def test_normal_endpoint_discovery_accepts_valid_record(tmp_path, monkeypatch):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    record = {
+        "schema": 1,
+        "transport": "pipe",
+        "endpoint": r"\\.\pipe\agent-vault",
+        "pid": None,
+        "started_at": None,
+    }
+    (run_dir / "endpoint.json").write_text(
+        json.dumps(record),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(cli, "IS_WSL", False)
+
+    endpoint = cli._discover_endpoint(_context("example.kdbx"))
+
+    assert endpoint == rendezvous.Endpoint(
+        transport="pipe",
+        address=r"\\.\pipe\agent-vault",
+    )
+
+
+def test_strict_windows_endpoint_accepts_unsigned_32_bit_pid(
+    tmp_path, monkeypatch
+):
+    run_dir = tmp_path / "windows-run"
+    run_dir.mkdir()
+    rendezvous.write_endpoint(
+        run_dir,
+        "pipe",
+        r"\\.\pipe\agent-vault",
+        pid=2**31,
+    )
+    monkeypatch.setenv("AGENT_VAULT_WINDOWS_RUN_DIR", str(run_dir))
+
+    endpoint = cli._read_windows_endpoint(strict=True)
+
+    assert endpoint is not None
+    assert endpoint.pid == 2**31
+    assert endpoint.source == "windows"
+
+
+def test_pid_alive_rejects_values_outside_local_platform_range():
+    assert rendezvous.pid_alive(rendezvous._MAX_LOCAL_PID + 1) is False
+
+
 def test_normal_endpoint_discovery_ignores_malformed_alternates(
     tmp_path, monkeypatch
 ):
@@ -517,7 +603,7 @@ def test_readiness_rejects_wrong_shaped_endpoint_before_legacy_fallback(
     assert "malformed endpoint state" in result["detail"]
 
 
-@pytest.mark.parametrize("schema", (True, 1.0, "1", None))
+@pytest.mark.parametrize("schema", (True, 1.0, float("inf"), "1", None))
 def test_readiness_requires_exact_integer_endpoint_schema(
     schema, tmp_path, monkeypatch, capsys
 ):
@@ -546,3 +632,37 @@ def test_readiness_requires_exact_integer_endpoint_schema(
     result = json.loads(capsys.readouterr().out)
     assert result["state"] == "failed"
     assert "endpoint schema must be an integer" in result["detail"]
+
+
+@pytest.mark.parametrize(
+    "pid",
+    (True, 1.0, float("inf"), -1, 0, rendezvous.MAX_PID + 1, 10**100),
+)
+def test_readiness_rejects_invalid_endpoint_pid(
+    pid, tmp_path, monkeypatch, capsys
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "endpoint.json").write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "transport": "tcp",
+                "endpoint": "127.0.0.1:19999",
+                "pid": pid,
+                "started_at": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(
+        cli,
+        "_send_tcp",
+        lambda *_args, **_kwargs: pytest.fail("must not use legacy fallback"),
+    )
+
+    assert cli.main(["installer-readiness"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert "pid must be a positive integer" in result["detail"]
