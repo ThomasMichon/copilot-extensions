@@ -20,6 +20,7 @@ import json
 import logging
 import shutil
 import subprocess
+from dataclasses import dataclass, field
 
 from agent_procutil import no_window_flags
 
@@ -41,6 +42,7 @@ from .lifecycle import (
     _check_docker,
     _docker,
     get_container,
+    inspect_container,
     list_containers,
     remove_container,
     start_container,
@@ -58,12 +60,31 @@ class RecreateMemberError(RuntimeError):
         super().__init__(message)
 
 
+@dataclass
+class FleetOperationResult:
+    """Per-member result for a fleet lifecycle operation."""
+
+    created: list[str] = field(default_factory=list)
+    stopped: list[str] = field(default_factory=list)
+    unchanged: dict[str, str] = field(default_factory=dict)
+    removed: list[str] = field(default_factory=list)
+    recreated: list[str] = field(default_factory=list)
+    deferred: dict[str, str] = field(default_factory=dict)
+    rescues: dict[str, dict] = field(default_factory=dict)
+    telemetry_abandoned: list[str] = field(default_factory=list)
+
+
 def _creation_flags() -> int:
     return no_window_flags()
 
 
 def _fleet_members(config: ContainersConfig, fleet_name: str) -> list[DockerContainerInfo]:
-    """All existing containers belonging to a fleet."""
+    """All existing members or deterministic-name conflicts for a fleet.
+
+    An explicit foreign fleet label remains visible when the name occupies this
+    fleet's deterministic slot, so callers can report/defer the conflict rather
+    than silently ignoring or acting through the foreign configuration.
+    """
     members = list_containers(config)
     prefix = None
     fleet = config.fleets.get(fleet_name)
@@ -409,26 +430,27 @@ def _image_run(
     return name
 
 
-def up(
+def reconcile_up(
     config: ContainersConfig,
     fleet_name: str,
     count: int | None = None,
     recreate: bool = False,
-) -> list[str]:
+    force_abandon: bool = False,
+) -> FleetOperationResult:
     """Provision (or top up) a fleet to ``count`` containers.
 
-    Returns the names of containers created during this call. Existing
-    members are left in place (warm reuse).
+    Returns independent create/recreate/defer results. Existing members are
+    left in place (warm reuse).
 
     ``recreate`` addresses image/policy drift: a restricted fleet's containers
     pin the image ID and security policy they were built against, so after the
     fleet image is rebuilt (or the policy changes) a still-running member no
     longer matches and dispatch is refused. Without ``recreate`` such drift
     raises (the historical behavior); with it, the drifted members are removed
-    and re-provisioned fresh on the current image/policy. Container names are
-    deterministic and leases are keyed by name, so a recreated member keeps its
-    lease -- but any per-container bootstrap (e.g. credentials seeded into the
-    ephemeral rootfs) must be re-run by the caller afterward.
+    and re-provisioned fresh on the current image/policy. Active, unknown, or
+    leased members remain running and are reported as deferred. Container names
+    are deterministic, but replacement is admitted only after any lease is
+    released.
     """
     _check_docker()
     fleet = config.fleets.get(fleet_name)
@@ -460,9 +482,13 @@ def up(
             exec_user,
         )
         stale = [
-            c.name
+            c
             for c in existing
-            if c.security_profile != fleet.security_profile
+            if (
+                getattr(c, "fleet", None) is not None
+                and getattr(c, "fleet", None) != fleet_name
+            )
+            or c.security_profile != fleet.security_profile
             or c.security_policy != expected_policy
             or (current_image_id and c.security_image_id != current_image_id)
         ]
@@ -470,34 +496,75 @@ def up(
             if not recreate:
                 raise RuntimeError(
                     f"Restricted fleet '{fleet_name}' has containers with a stale "
-                    f"or mismatched security policy: {', '.join(stale)}. "
+                    f"or mismatched security policy: "
+                    f"{', '.join(c.name for c in stale)}. "
                     "Recreate them before dispatch (pass recreate=True / "
                     "`up --recreate`)."
                 )
-            for name in stale:
+            from .replacement import destroy_restricted_member
+            from .rescue import RescueError
+
+            result = FleetOperationResult()
+            removed_names = set()
+            for member in stale:
+                if (
+                    getattr(member, "fleet", None)
+                    and getattr(member, "fleet", None) != fleet_name
+                ):
+                    result.deferred[member.name] = (
+                        f"container fleet label {member.fleet!r} conflicts with "
+                        f"requested fleet {fleet_name!r}"
+                    )
+                    continue
                 log.info(
                     "Recreating drifted fleet container %s (image/policy mismatch)",
-                    name,
+                    member.name,
                 )
-                remove_container(name, force=True)
-            # Re-read membership so the removed members are re-provisioned below
-            # (deterministic names -> the same names are reused, preserving leases).
-            existing = _fleet_members(config, fleet_name)
+                try:
+                    decision = destroy_restricted_member(
+                        config,
+                        fleet,
+                        member,
+                        operation="recreate",
+                        force_remove=True,
+                        force_abandon=force_abandon,
+                    )
+                except RescueError as exc:
+                    result.deferred[member.name] = str(exc)
+                    continue
+                except RuntimeError as exc:
+                    result.deferred[member.name] = str(exc)
+                    continue
+                if decision.status == "removed":
+                    removed_names.add(member.name)
+                    result.removed.append(member.name)
+                    if decision.rescue:
+                        result.rescues[member.name] = decision.rescue
+                    if decision.telemetry_abandoned:
+                        result.telemetry_abandoned.append(member.name)
+                else:
+                    result.deferred[member.name] = (
+                        decision.reason or "replacement deferred"
+                    )
+            existing = [c for c in existing if c.name not in removed_names]
+        else:
+            result = FleetOperationResult()
+    else:
+        result = FleetOperationResult()
     need = target - len(existing)
     if need <= 0:
         log.info(
             "Fleet '%s' already has %d/%d containers", fleet_name, len(existing), target
         )
-        return []
+        return result
 
     prefix = fleet.prefix(fleet_name)
     indices = _next_indices(existing, prefix, need)
-    created: list[str] = []
     for idx in indices:
         name = f"{prefix}-{idx}"
         log.info("Provisioning fleet container %s", name)
         if fleet.devcontainer_path:
-            created.append(
+            result.created.append(
                 _devcontainer_up(
                     fleet_name, fleet, name,
                     dotfiles=config.dotfiles, harness=config.harness,
@@ -505,7 +572,7 @@ def up(
                 )
             )
         else:
-            created.append(
+            result.created.append(
                 _image_run(
                     fleet_name,
                     fleet,
@@ -514,7 +581,26 @@ def up(
                     exec_user=exec_user,
                 )
             )
-    return created
+        if name in result.removed:
+            result.recreated.append(name)
+    return result
+
+
+def up(
+    config: ContainersConfig,
+    fleet_name: str,
+    count: int | None = None,
+    recreate: bool = False,
+    force_abandon: bool = False,
+) -> list[str]:
+    """Compatibility wrapper returning only members created during this call."""
+    return reconcile_up(
+        config,
+        fleet_name,
+        count=count,
+        recreate=recreate,
+        force_abandon=force_abandon,
+    ).created
 
 
 def recreate_member(
@@ -609,14 +695,107 @@ def recreate_member(
     }
 
 
-def down(config: ContainersConfig, fleet_name: str) -> list[str]:
-    """Stop all running containers in a fleet (kept warm, not removed)."""
-    stopped = []
+def down_fleet(
+    config: ContainersConfig,
+    fleet_name: str,
+    *,
+    force_abandon: bool = False,
+) -> FleetOperationResult:
+    """Stop members independently, rescuing restricted tmpfs evidence first."""
+    result = FleetOperationResult()
+    fleet = config.fleets.get(fleet_name)
     for c in _fleet_members(config, fleet_name):
-        if c.is_running:
+        if c.fleet and c.fleet != fleet_name:
+            result.deferred[c.name] = (
+                f"container fleet label {c.fleet!r} conflicts with "
+                f"requested fleet {fleet_name!r}"
+            )
+            continue
+        restricted = (fleet and fleet.restricted) or c.security_profile == "restricted"
+        if restricted and (fleet is None or not fleet.restricted):
+            result.deferred[c.name] = (
+                "restricted container has no matching restricted fleet configuration"
+            )
+            continue
+        if restricted and c.state == "running":
+            from .replacement import stop_restricted_member
+            from .rescue import RescueError
+
+            try:
+                decision = stop_restricted_member(
+                    config,
+                    fleet,
+                    c,
+                    force_abandon=force_abandon,
+                )
+            except RescueError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
+            except RuntimeError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
+            if decision.status != "stopped":
+                result.deferred[c.name] = decision.reason or "stop deferred"
+                continue
+            if decision.rescue:
+                result.rescues[c.name] = decision.rescue
+            if decision.telemetry_abandoned:
+                result.telemetry_abandoned.append(c.name)
+            result.stopped.append(c.name)
+        elif restricted and c.state in {"exited", "created"}:
+            from .rescue import (
+                RescueError,
+                container_generation,
+                record_telemetry_loss,
+                verified_capture_for_instance,
+            )
+
+            try:
+                generation = container_generation(inspect_container(c.container_id))
+                if (
+                    verified_capture_for_instance(
+                        c.name,
+                        c.container_id,
+                        generation,
+                    )
+                    is None
+                ):
+                    record_telemetry_loss(
+                        container=c.name,
+                        container_instance=c.container_id,
+                        container_generation=generation,
+                        reason="already_stopped",
+                    )
+            except RescueError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
+            except RuntimeError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
+            result.unchanged[c.name] = (
+                "already stopped; tmpfs evidence unavailable or previously rescued"
+            )
+        elif restricted:
+            result.deferred[c.name] = (
+                f"container state {c.state!r} is not safely stoppable"
+            )
+        elif c.is_running:
             stop_container(c.name)
-            stopped.append(c.name)
-    return stopped
+            result.stopped.append(c.name)
+    return result
+
+
+def down(
+    config: ContainersConfig,
+    fleet_name: str,
+    force_abandon: bool = False,
+) -> list[str]:
+    """Compatibility wrapper returning only members stopped during this call."""
+    return down_fleet(
+        config,
+        fleet_name,
+        force_abandon=force_abandon,
+    ).stopped
 
 
 def start(config: ContainersConfig, fleet_name: str) -> list[str]:
@@ -650,10 +829,71 @@ def start(config: ContainersConfig, fleet_name: str) -> list[str]:
     return started
 
 
-def rm(config: ContainersConfig, fleet_name: str, force: bool = False) -> list[str]:
-    """Remove all containers in a fleet (destructive)."""
-    removed = []
+def remove_fleet(
+    config: ContainersConfig,
+    fleet_name: str,
+    *,
+    force: bool = False,
+    force_abandon: bool = False,
+) -> FleetOperationResult:
+    """Remove fleet members independently, deferring unsafe restricted members."""
+    result = FleetOperationResult()
+    requested_fleet = config.fleets.get(fleet_name)
     for c in _fleet_members(config, fleet_name):
-        remove_container(c.name, force=force)
-        removed.append(c.name)
-    return removed
+        if c.fleet and c.fleet != fleet_name:
+            result.deferred[c.name] = (
+                f"container fleet label {c.fleet!r} conflicts with "
+                f"requested fleet {fleet_name!r}"
+            )
+            continue
+        fleet = requested_fleet
+        if (fleet and fleet.restricted) or c.security_profile == "restricted":
+            if fleet is None or not fleet.restricted:
+                result.deferred[c.name] = (
+                    "restricted container has no matching restricted fleet configuration"
+                )
+                continue
+            from .replacement import destroy_restricted_member
+            from .rescue import RescueError
+
+            try:
+                decision = destroy_restricted_member(
+                    config,
+                    fleet,
+                    c,
+                    operation="remove",
+                    force_remove=force,
+                    force_abandon=force_abandon,
+                )
+            except RescueError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
+            except RuntimeError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
+            if decision.status != "removed":
+                result.deferred[c.name] = decision.reason or "removal deferred"
+                continue
+            if decision.rescue:
+                result.rescues[c.name] = decision.rescue
+            if decision.telemetry_abandoned:
+                result.telemetry_abandoned.append(c.name)
+        else:
+            remove_container(c.name, force=force)
+        result.removed.append(c.name)
+    return result
+
+
+def rm(
+    config: ContainersConfig,
+    fleet_name: str,
+    force: bool = False,
+    force_abandon: bool = False,
+) -> list[str]:
+    """Compatibility wrapper returning only members removed during this call."""
+    return remove_fleet(
+        config,
+        fleet_name,
+        force=force,
+        force_abandon=force_abandon,
+    ).removed

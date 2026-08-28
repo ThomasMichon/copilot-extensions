@@ -99,7 +99,7 @@ flowchart TB
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
       RB["~/.agent-bridge/<br/>versions/ • current-version • config.yaml • sessions.db"]
       RC["~/.agent-codespaces/<br/>versions/ • current-version"]
-      RN["~/.agent-containers/<br/>versions/ • current-version • leases.json"]
+      RN["~/.agent-containers/<br/>versions/ • current-version • leases/holds • rescues"]
       RM["~/.agent-mcp/<br/>versions/ • current-version • deploy-manifest.json"]
       RS["~/.agent-ssh/<br/>versions/ • current-version • deploy-manifest.json"]
       RL["~/.agent-logger/<br/>versions/ • current-version • digests • sync task"]
@@ -263,7 +263,11 @@ flowchart LR
 - `agent-containers` reads `containers.yaml` (resolved via
   `$AGENT_CONTAINERS_CONFIG`, `./containers.yaml`, or
   `~/.agent-containers/containers.yaml`) — keep it in the control repo to share
-  fleet defaults.
+  fleet defaults. Mutable coordination state defaults to
+  `~/.agent-containers/`; a
+  Windows/WSL pair intentionally sharing one Docker provider can set the same
+  filesystem-visible `$AGENT_CONTAINERS_STATE_DIR` so admission records remain
+  atomic across both environments.
 
 > agent-mcp is **not** wired to the control repo — its bridge configs are
 > per-agent files: preferably **in-repo** (`--config .github/agents/<name>.mcp.yaml`)
@@ -320,9 +324,11 @@ flowchart TB
   friendly/display name; the `codespace:` prefix is optional), auto-starts a
   Shutdown CodeSpace, opens SSH with the relay tunnel, and the bridge spawns
   `copilot --acp` inside it.
-- **Container** — agent-containers resolves `container:<name>` to a leased local
-  dev container, runs `copilot --acp` over `docker exec`, and forwards the host
-  `gh auth token` (as `GH_TOKEN`) so the in-container agent is authenticated.
+- **Container** — agent-containers resolves `container:<name>` to a local
+  trust-profiled venue. Trusted development members retain SSH plus host
+  credential projection; restricted members use direct `docker exec`, admit no
+  host authority, and gate destructive replacement on confirmed-idle liveness
+  plus an atomic host-owned rescue of allowlisted session evidence.
 
 > **Note:** agent-mcp has no `agent-bridge send` path — it is not an inter-agent
 > transport. It is wrapped directly by an agent's `mcp-servers` config to expose

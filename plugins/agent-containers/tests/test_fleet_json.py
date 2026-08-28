@@ -5,9 +5,25 @@ from __future__ import annotations
 import argparse
 import json
 
+import pytest
+
 from agent_containers import __main__ as cli
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.lifecycle import DockerContainerInfo
+
+
+@pytest.fixture(autouse=True)
+def _no_lifecycle_state(monkeypatch):
+    import agent_containers.lease as lease
+    import agent_containers.rescue as rescue
+
+    monkeypatch.setattr(lease, "get_deploy_hold", lambda _name: None)
+    monkeypatch.setattr(
+        lease,
+        "deploy_hold_status",
+        lambda _name: {"state": "none", "operation": None, "reason": None},
+    )
+    monkeypatch.setattr(rescue, "latest_rescue_status", lambda _name: None)
 
 
 def _container(name, **kw):
@@ -62,7 +78,7 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
         "fleet", "local_folder", "lease", "security_profile",
         "configured_security_profile", "security_policy_current",
         "security_policy_errors", "network", "environment_names",
-        "host_credentials",
+        "host_credentials", "lifecycle_hold", "rescue",
     }
     assert row["name"] == "aperture-1"
     assert row["state"] == "running"
@@ -71,6 +87,12 @@ def test_fleet_json_emits_bare_array_with_expected_fields(monkeypatch, capsys):
     assert row["security_profile"] == "trusted"
     assert row["configured_security_profile"] == "trusted"
     assert row["security_policy_current"] is True
+    assert row["lifecycle_hold"] == {
+        "state": "none",
+        "operation": None,
+        "reason": None,
+    }
+    assert row["rescue"] is None
     assert row["host_credentials"] == {
         "github_token": True,
         "relay": True,
@@ -82,6 +104,26 @@ def test_fleet_json_lease_is_null_when_unheld(monkeypatch, capsys):
     cli._cmd_fleet(argparse.Namespace(json=True))
     data = json.loads(capsys.readouterr().out)
     assert data[0]["lease"] is None
+
+
+def test_fleet_json_reports_unknown_hold_state_without_failing(monkeypatch, capsys):
+    _patch(monkeypatch, [_container("example-1")])
+    import agent_containers.lease as lease
+
+    monkeypatch.setattr(
+        lease,
+        "deploy_hold_status",
+        lambda _name: {
+            "state": "unknown",
+            "operation": None,
+            "reason": "deploy-holds.json is unreadable",
+        },
+    )
+
+    cli._cmd_fleet(argparse.Namespace(json=True))
+
+    row = json.loads(capsys.readouterr().out)[0]
+    assert row["lifecycle_hold"]["state"] == "unknown"
 
 
 def test_fleet_json_empty_is_empty_array(monkeypatch, capsys):

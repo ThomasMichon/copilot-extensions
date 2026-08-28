@@ -34,6 +34,17 @@ log = logging.getLogger("agent-containers")
 # "exited"/"created" as startable.
 RUNNING = "running"
 STARTABLE_STATES = {"exited", "created", "paused"}
+_SAFE_DOCKER_TARGET_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_EXEC_OPTIONS_WITH_VALUE = {
+    "-e",
+    "--env",
+    "--env-file",
+    "-u",
+    "--user",
+    "-w",
+    "--workdir",
+    "--detach-keys",
+}
 
 
 def _creation_flags() -> int:
@@ -52,6 +63,38 @@ def _docker(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProce
         )
     except FileNotFoundError:
         raise RuntimeError("docker CLI not found on PATH") from None
+    except subprocess.TimeoutExpired as exc:
+        command = _docker_operation_label(args)
+        raise RuntimeError(
+            f"{command} timed out after {timeout:.0f}s"
+        ) from exc
+
+
+def _docker_operation_label(args: list[str]) -> str:
+    """Return a minimal timeout label without environment/command payloads."""
+    if not args:
+        return "docker operation"
+    verb = args[0]
+    target = None
+    if verb == "exec":
+        index = 1
+        while index < len(args):
+            value = args[index]
+            if value in _EXEC_OPTIONS_WITH_VALUE:
+                index += 2
+                continue
+            if value.startswith("-"):
+                index += 1
+                continue
+            target = value
+            break
+    elif verb in {"inspect", "start", "stop", "unpause", "rm"} and len(args) > 1:
+        target = args[-1]
+    safe_verb = verb if re.fullmatch(r"[a-z][a-z0-9-]*", verb) else "operation"
+    label = f"docker {safe_verb}"
+    if target and _SAFE_DOCKER_TARGET_RE.fullmatch(target):
+        label += f" {target}"
+    return label
 
 
 def _check_docker() -> None:
@@ -407,6 +450,13 @@ def start_container(name: str, timeout: float = 60.0) -> None:
     res = _docker(["start", name], timeout=timeout)
     if res.returncode != 0:
         raise RuntimeError(f"docker start {name} failed: {res.stderr.strip()}")
+
+
+def unpause_container(name: str, timeout: float = 60.0) -> None:
+    """Unpause a paused container so liveness and evidence can be inspected."""
+    res = _docker(["unpause", name], timeout=timeout)
+    if res.returncode != 0:
+        raise RuntimeError(f"docker unpause {name} failed: {res.stderr.strip()}")
 
 
 def stop_container(name: str, timeout: float = 60.0) -> None:
