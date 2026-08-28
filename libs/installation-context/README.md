@@ -24,13 +24,12 @@ read-only `snapshot-validate` provenance actions plus read-only `status` and
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
 publishes only `installation-activation.json` after pinning the caller-observed
 namespace, install, and activation generations. The cross-runner actions do not
-create a version slot, migrate legacy state, launch a runtime, or wire an
-automatic caller. The Python reference additionally exposes explicit
-`slot-provision` and `slot-validate` actions. They create or validate only an
-immutable ownership marker in a cell-local version slot and never activate it.
-They are not yet implemented by the dependency-light Bash or PowerShell
-runners, and no installer or bootstrap calls them. Every mutation requires an
-explicit `--context` / `-Context`; it never adopts an ambient
+otherwise migrate legacy state, launch a runtime, or wire an automatic caller.
+The Python module additionally exposes importable slot APIs. All three runners
+provide equivalent `slot-provision` and `slot-validate` CLI actions that create
+or validate only an immutable ownership marker in a cell-local version slot and
+never activate it. No installer or bootstrap calls them yet. Every mutation
+requires an explicit `--context` / `-Context`; it never adopts an ambient
 `COPILOT_EXTENSIONS_CONTEXT` as authorization.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
@@ -93,6 +92,20 @@ writes an actionable error to stderr and exits nonzero.
   -ExpectedMarketplaceId example--0123456789abcdef `
   -ExpectedPluginId agent-example `
   -SnapshotId 1.0.0
+
+.\installation-context.ps1 slot-provision `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -SnapshotId 1.0.0 `
+  -RuntimeVersion 1.0.0
+
+.\installation-context.ps1 slot-validate `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -SnapshotId 1.0.0 `
+  -RuntimeVersion 1.0.0
 
 .\installation-context.ps1 status `
   -PayloadRoot $env:COPILOT_PLUGIN_ROOT `
@@ -157,6 +170,20 @@ writes an actionable error to stderr and exits nonzero.
   --expected-plugin-id agent-example \
   --snapshot-id 1.0.0
 
+./installation-context.sh slot-provision \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
+./installation-context.sh slot-validate \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
 ./installation-context.sh status \
   --payload-root "$COPILOT_PLUGIN_ROOT" \
   --plugin-id agent-example \
@@ -201,32 +228,36 @@ sidecar. Validation requires non-sidecar snapshot content to remain present.
 The sidecar is immutable, cell-local, and non-operative. It provides same-user
 ownership consistency and stale-generation detection, not cryptographic
 attestation of snapshot contents.
-Python management callers may then use `provision_runtime_slot` or the
-`slot-provision` action to create one empty
+Management callers may use the cross-runner `slot-provision` action, or Python's
+`provision_runtime_slot` API, to create one empty
 `<versionsRoot>/<runtime-version>/` directory containing only
 `.runtime-slot-ownership.json`. The transaction revalidates the context and
 snapshot provenance while holding the marketplace genesis lock and plugin
 installation lock. Existing slots are reusable only when their immutable marker
 exactly matches the requested marketplace, plugin, source, runtime version,
-snapshot, receipt paths, and pinned generations. Markerless, malformed, copied,
-linked, stale, or conflicting slots fail without replacement. `slot-validate`
+snapshot provenance bytes, receipt paths, and pinned generations. Markerless,
+malformed, copied, linked, stale, or conflicting slots fail without replacement. `slot-validate`
 and `validate_runtime_slot_ownership` perform the same read-only validation.
 Creating a new slot requires the snapshot generations and payload to match the
 current active receipts. Once published, an owned slot remains attributable
 when those receipts advance for later updates: its marker must still match its
 immutable snapshot sidecar and stable cell identity, and current generations
 may not regress below the pinned values.
-Python publication prepares a reserved
+Python and PowerShell publication prepare a reserved
 `<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>` sibling outside
-`versionsRoot` and uses an atomic no-replace directory rename.
-An interruption that bypasses in-process cleanup can leave such a hidden
-sibling; it is inert, lies outside canonical runtime-slot enumeration, and
-requires explicit later reconciliation rather than automatic deletion.
+`versionsRoot` and use an OS-native atomic no-replace directory rename. An interruption
+that bypasses in-process cleanup can leave such a hidden sibling; it is inert,
+lies outside canonical runtime-slot enumeration, and requires explicit later
+reconciliation rather than automatic deletion. Bash uses atomic final-slot
+`mkdir` reservation followed by no-replace hard-link publication of the
+ownership marker from a temporary file inside the reserved slot. An ordinary
+in-process failure removes its still-empty reservation; an interruption between
+those operations leaves a visible markerless slot that every runner preserves
+and rejects until a later explicit repair/release transaction.
 Neither action writes completion markers, current/LKG markers, activation
-receipts, launchers, services, state, or tombstones. This Python-only reference
-is deliberately not an adoption surface until Bash and PowerShell parity lands.
-Parity must preserve exclusive no-clobber reservation and fail-closed
-validation, but may use a runner-appropriate primitive. Results expose
+receipts, launchers, services, state, or tombstones. The parity-proven primitive
+is deliberately not an adoption surface until an installer or bootstrap
+explicitly wires it. Results expose
 `namespaceState`, `installState`, and `slotEmpty`; `ready` means attributable
 ownership, not an active or complete runtime. Runtime versions cannot be
 reassigned to another snapshot, and this foundation intentionally provides no

@@ -1,6 +1,7 @@
 """Cross-runner tests for immutable snapshot provenance."""
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -158,6 +159,7 @@ def _command(
     layout: dict[str, Path | str],
     *,
     snapshot_id: str = "1.0.0",
+    runtime_version: str = "3.4.5",
     expected_namespace_generation: int | str = 1,
     expected_install_generation: int | str = 2,
 ) -> list[str]:
@@ -185,6 +187,13 @@ def _command(
                 str(expected_install_generation),
             ]
         )
+    if action in {"slot-provision", "slot-validate"}:
+        command.extend(
+            [
+                _flag(style, "runtime-version"),
+                runtime_version,
+            ]
+        )
     return command
 
 
@@ -194,19 +203,24 @@ def _run(
     layout: dict[str, Path | str],
     *,
     snapshot_id: str = "1.0.0",
+    runtime_version: str = "3.4.5",
     expected_namespace_generation: int | str = 1,
     expected_install_generation: int | str = 2,
+    environment_overrides: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
+    if environment_overrides:
+        environment.update(environment_overrides)
     result = subprocess.run(
         _command(
             runner,
             action,
             layout,
             snapshot_id=snapshot_id,
+            runtime_version=runtime_version,
             expected_namespace_generation=expected_namespace_generation,
             expected_install_generation=expected_install_generation,
         ),
@@ -222,6 +236,25 @@ def _run(
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
     return result
+
+
+def _run_slot(
+    runner: Runner,
+    action: str,
+    layout: dict[str, Path | str],
+    *,
+    runtime_version: str = "3.4.5",
+    environment_overrides: dict[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return _run(
+        runner,
+        action,
+        layout,
+        runtime_version=runtime_version,
+        environment_overrides=environment_overrides,
+        check=check,
+    )
 
 
 def _run_context_validate(
@@ -355,6 +388,493 @@ def test_importable_python_snapshot_api_matches_cli(tmp_path: Path) -> None:
     assert validated["provenance"] == stamped["provenance"]
 
 
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_actions_publish_validate_and_reuse_without_activation(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    snapshot = json.loads(_run(runner, "snapshot-stamp", layout).stdout)
+    plugin_root = Path(layout["plugin_root"])
+    activation_paths = (
+        plugin_root / "current-version",
+        plugin_root / "last-known-good",
+        plugin_root / "installation-activation.json",
+    )
+
+    first = json.loads(_run_slot(runner, "slot-provision", layout).stdout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+
+    assert first["slotChanged"] is True
+    assert first["activated"] is False
+    assert first["operative"] is False
+    assert first["slotEmpty"] is True
+    assert first["namespaceState"] == "active"
+    assert first["installState"] == "active"
+    assert ownership == {
+        "schema": "copilot-extensions.runtime-slot-ownership",
+        "version": 1,
+        "marketplaceId": layout["marketplace_id"],
+        "pluginId": layout["plugin_id"],
+        "sourceFingerprint": snapshot["sourceFingerprint"],
+        "runtime": {
+            "version": "3.4.5",
+            "root": str(plugin_root / "versions" / "3.4.5"),
+        },
+        "snapshot": {
+            "id": "1.0.0",
+            "root": snapshot["snapshotRoot"],
+            "provenance": snapshot["provenance"],
+            "provenanceSha256": hashlib.sha256(
+                Path(snapshot["provenance"]).read_bytes()
+            ).hexdigest(),
+        },
+        "namespaceReceipt": {
+            "path": snapshot["namespaceReceipt"],
+            "generation": 1,
+        },
+        "installReceipt": {
+            "path": snapshot["installReceipt"],
+            "generation": 2,
+        },
+        "createdAt": ownership["createdAt"],
+    }
+    marker_bytes = marker.read_bytes()
+    (Path(first["slotRoot"]) / "payload.txt").write_text(
+        "built later\n",
+        encoding="utf-8",
+    )
+
+    validated = json.loads(_run_slot(runner, "slot-validate", layout).stdout)
+    reused = json.loads(_run_slot(runner, "slot-provision", layout).stdout)
+
+    assert validated["reason"] == "runtime-slot-ownership-valid"
+    assert validated["slotEmpty"] is False
+    assert reused["reason"] == "runtime-slot-ownership-current"
+    assert reused["slotChanged"] is False
+    assert marker.read_bytes() == marker_bytes
+    assert all(not path.exists() for path in activation_paths)
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_new_publication_requires_current_snapshot(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _run(runner, "snapshot-stamp", layout)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["generation"] = 3
+    _write_json(install_path, install)
+
+    result = _run_slot(runner, "slot-provision", layout, check=False)
+
+    assert result.returncode != 0
+    assert "Snapshot provenance install generation is stale" in result.stderr
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_owned_runtime_slot_survives_receipt_advance_and_rejects_regression(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _run(runner, "snapshot-stamp", layout)
+    first = json.loads(_run_slot(runner, "slot-provision", layout).stdout)
+    namespace_path = Path(layout["namespace"])
+    namespace = json.loads(namespace_path.read_text(encoding="utf-8"))
+    namespace["generation"] = 2
+    namespace["state"] = "inactive"
+    _write_json(namespace_path, namespace)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["generation"] = 3
+    install["state"] = "inactive"
+    install["payload"]["version"] = "2.0.0"
+    _write_json(install_path, install)
+
+    validated = json.loads(_run_slot(runner, "slot-validate", layout).stdout)
+    reused = json.loads(_run_slot(runner, "slot-provision", layout).stdout)
+
+    assert validated["namespaceGeneration"] == 1
+    assert validated["installGeneration"] == 2
+    assert validated["namespaceState"] == "inactive"
+    assert validated["installState"] == "inactive"
+    assert reused["slotChanged"] is False
+    assert reused["ownership"] == first["ownership"]
+
+    install["generation"] = 1
+    _write_json(install_path, install)
+    rejected = _run_slot(runner, "slot-validate", layout, check=False)
+    assert rejected.returncode != 0
+    assert "Current receipt generation predates the owned runtime slot" in rejected.stderr
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("marker_kind", ["missing", "malformed"])
+def test_runtime_slot_preserves_markerless_or_malformed_existing_slot(
+    runner: Runner,
+    marker_kind: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _run(runner, "snapshot-stamp", layout)
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+    slot.mkdir(parents=True)
+    marker = slot / ".runtime-slot-ownership.json"
+    if marker_kind == "malformed":
+        marker.write_text('{"schema":"other","version":1}\n', encoding="utf-8")
+    payload = slot / "existing.txt"
+    payload.write_text("preserve me\n", encoding="utf-8")
+    before = _tree_snapshot(slot)
+
+    result = _run_slot(runner, "slot-provision", layout, check=False)
+
+    assert result.returncode != 0
+    expected = "Runtime slot ownership must exist"
+    if marker_kind == "malformed":
+        expected = (
+            "unsupported schema or version"
+            if runner[0] == "python"
+            else "unknown or missing fields"
+        )
+    assert expected in result.stderr
+    assert _tree_snapshot(slot) == before
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_rejects_copied_cross_plugin_ownership(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    source_layout = _receipt_layout(tmp_path, plugin_id="agent-source")
+    target_layout = _receipt_layout(tmp_path, plugin_id="agent-target")
+    _stamp_with_python(source_layout)
+    _stamp_with_python(target_layout)
+    source = _provision_slot_with_python(source_layout)
+    target_slot = Path(target_layout["plugin_root"]) / "versions" / "3.4.5"
+    target_slot.mkdir(parents=True)
+    copied_marker = target_slot / ".runtime-slot-ownership.json"
+    shutil.copyfile(source["ownership"], copied_marker)
+    before = copied_marker.read_bytes()
+
+    result = _run_slot(runner, "slot-provision", target_layout, check=False)
+
+    assert result.returncode != 0
+    assert "does not match the validated snapshot" in result.stderr
+    assert copied_marker.read_bytes() == before
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("malformed_generation", [True, 1.0, "1"])
+def test_runtime_slot_validation_rejects_noninteger_ownership_generations(
+    runner: Runner,
+    malformed_generation: object,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+    ownership["namespaceReceipt"]["generation"] = malformed_generation
+    _write_json(marker, ownership)
+
+    result = _run_slot(runner, "slot-validate", layout, check=False)
+
+    assert result.returncode != 0
+    assert "runtime slot ownership namespace generation" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_validation_rejects_unknown_ownership_fields(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+    ownership["unexpected"] = "value"
+    _write_json(marker, ownership)
+
+    result = _run_slot(runner, "slot-validate", layout, check=False)
+
+    assert result.returncode != 0
+    expected = (
+        "does not match the validated snapshot"
+        if runner[0] == "python"
+        else "unknown or missing fields"
+    )
+    assert expected in result.stderr
+
+
+@pytest.mark.parametrize("producer", RUNNERS, ids=lambda runner: f"from-{runner[0]}")
+@pytest.mark.parametrize("consumer", RUNNERS, ids=lambda runner: f"to-{runner[0]}")
+def test_runtime_slot_ownership_interoperates_across_runners(
+    producer: Runner,
+    consumer: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+
+    published = json.loads(_run_slot(producer, "slot-provision", layout).stdout)
+    validated = json.loads(_run_slot(consumer, "slot-validate", layout).stdout)
+
+    assert validated["ownership"] == published["ownership"]
+    assert validated["reason"] == "runtime-slot-ownership-valid"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_rejects_snapshot_provenance_tampering(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    _run_slot(runner, "slot-provision", layout)
+    provenance_path = _provenance_path(layout)
+    provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    provenance["payload"]["version"] = "9.9.9"
+    _write_json(provenance_path, provenance)
+
+    result = _run_slot(runner, "slot-validate", layout, check=False)
+
+    assert result.returncode != 0
+    assert "does not match the validated snapshot" in result.stderr
+
+
+def test_posix_slot_publication_failure_releases_owned_empty_reservation(
+    tmp_path: Path,
+) -> None:
+    posix = next(runner for runner in RUNNERS if runner[0] == "posix")
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_ln = fake_bin / "ln"
+    fake_ln.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    fake_ln.chmod(fake_ln.stat().st_mode | stat.S_IXUSR)
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+
+    failed = _run_slot(
+        posix,
+        "slot-provision",
+        layout,
+        environment_overrides={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        check=False,
+    )
+
+    assert failed.returncode != 0
+    assert "Cannot publish runtime slot ownership" in failed.stderr
+    assert not slot.exists()
+    assert json.loads(_run_slot(posix, "slot-provision", layout).stdout)["slotChanged"]
+
+
+def test_posix_slot_digest_failure_releases_owned_empty_reservation(
+    tmp_path: Path,
+) -> None:
+    posix = next(runner for runner in RUNNERS if runner[0] == "posix")
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    real_sha256sum = shutil.which("sha256sum")
+    assert real_sha256sum is not None
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_sha256sum = fake_bin / "sha256sum"
+    fake_sha256sum.write_text(
+        "#!/bin/sh\n"
+        'if [ "$#" -gt 0 ]; then exit 1; fi\n'
+        f'exec "{real_sha256sum}"\n',
+        encoding="utf-8",
+    )
+    fake_sha256sum.chmod(fake_sha256sum.stat().st_mode | stat.S_IXUSR)
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+
+    failed = _run_slot(
+        posix,
+        "slot-provision",
+        layout,
+        environment_overrides={"PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}"},
+        check=False,
+    )
+
+    assert failed.returncode != 0
+    assert not slot.exists()
+    assert json.loads(_run_slot(posix, "slot-provision", layout).stdout)["slotChanged"]
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_validation_uses_canonical_path_equality(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+    slot = Path(first["slotRoot"])
+    ownership["runtime"]["root"] = str(slot.parent / ".." / "versions" / slot.name)
+    _write_json(marker, ownership)
+
+    result = json.loads(_run_slot(runner, "slot-validate", layout).stdout)
+
+    assert result["reason"] == "runtime-slot-ownership-valid"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_supports_nested_versions_root(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["roots"]["versions"] = "runtime/versions"
+    _write_json(install_path, install)
+    _run(runner, "snapshot-stamp", layout)
+
+    result = json.loads(_run_slot(runner, "slot-provision", layout).stdout)
+
+    assert Path(result["slotRoot"]) == (
+        Path(layout["plugin_root"]) / "runtime" / "versions" / "3.4.5"
+    )
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("file_component", ["versions", "runtime"])
+def test_runtime_slot_rejects_file_in_versions_root_chain(
+    runner: Runner,
+    file_component: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    if file_component == "runtime":
+        install["roots"]["versions"] = "runtime/versions"
+        _write_json(install_path, install)
+    (Path(layout["plugin_root"]) / file_component).write_text(
+        "not a directory\n",
+        encoding="utf-8",
+    )
+    _run(runner, "snapshot-stamp", layout)
+
+    result = _run_slot(runner, "slot-provision", layout, check=False)
+
+    assert result.returncode != 0
+    assert "ordinary directories" in result.stderr
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("linked_path", ["versions", "slot"])
+def test_runtime_slot_rejects_linked_path_components(
+    runner: Runner,
+    linked_path: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    plugin_root = Path(layout["plugin_root"])
+    target = tmp_path / f"outside-{linked_path}"
+    target.mkdir()
+    _run(runner, "snapshot-stamp", layout)
+    if linked_path == "versions":
+        (plugin_root / "versions").symlink_to(target, target_is_directory=True)
+    else:
+        versions = plugin_root / "versions"
+        versions.mkdir()
+        (versions / "3.4.5").symlink_to(target, target_is_directory=True)
+
+    result = _run_slot(runner, "slot-provision", layout, check=False)
+
+    assert result.returncode != 0
+    assert not (target / ".runtime-slot-ownership.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_rejects_linked_ownership_marker(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+    slot.mkdir(parents=True)
+    target = tmp_path / "outside-ownership.json"
+    target.write_text("{}\n", encoding="utf-8")
+    (slot / ".runtime-slot-ownership.json").symlink_to(target)
+
+    result = _run_slot(runner, "slot-provision", layout, check=False)
+
+    assert result.returncode != 0
+    assert target.read_text(encoding="utf-8") == "{}\n"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    "runtime_version",
+    [
+        "../escape",
+        "/absolute",
+        r"C:\escape",
+        ".",
+        "..",
+        "CON",
+        ".hidden",
+        "trailing.",
+        "a" * 129,
+    ],
+)
+def test_runtime_slot_rejects_nonportable_runtime_versions(
+    runner: Runner,
+    runtime_version: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _run(runner, "snapshot-stamp", layout)
+
+    result = _run_slot(
+        runner,
+        "slot-provision",
+        layout,
+        runtime_version=runtime_version,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "runtime version" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_serializes_concurrent_publishers(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _run(runner, "snapshot-stamp", layout)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completed = list(
+            executor.map(
+                lambda _: _run_slot(runner, "slot-provision", layout),
+                range(2),
+            )
+        )
+    results = [json.loads(result.stdout) for result in completed]
+
+    assert sorted(result["slotChanged"] for result in results) == [False, True]
+    assert len({result["ownership"] for result in results}) == 1
+    assert Path(results[0]["ownership"]).is_file()
+
+
 def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
     tmp_path: Path,
 ) -> None:
@@ -392,6 +912,9 @@ def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
             "id": "1.0.0",
             "root": snapshot["snapshotRoot"],
             "provenance": snapshot["provenance"],
+            "provenanceSha256": hashlib.sha256(
+                Path(snapshot["provenance"]).read_bytes()
+            ).hexdigest(),
         },
         "namespaceReceipt": {
             "path": snapshot["namespaceReceipt"],

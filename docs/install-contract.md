@@ -167,7 +167,8 @@ marker within the slot:
   "snapshot": {
     "id": "1.0.0",
     "root": "<absolute canonical snapshot root>",
-    "provenance": "<absolute canonical snapshot-provenance.json>"
+    "provenance": "<absolute canonical snapshot-provenance.json>",
+    "provenanceSha256": "<full lowercase SHA-256 digest>"
   },
   "namespaceReceipt": {
     "path": "<absolute canonical namespace.json>",
@@ -187,7 +188,7 @@ locations and may not be links or reparse points. A matching existing slot is
 idempotently reusable; a markerless, malformed, copied, linked, stale, or
 conflicting slot fails without replacement. The ownership marker cannot
 authorize a different marketplace, plugin, source fingerprint, runtime version,
-snapshot, receipt path, or receipt generation.
+snapshot, provenance byte sequence, receipt path, or receipt generation.
 
 Creating a new slot requires the snapshot's pinned generations and payload to
 match the current active receipts. After publication, a slot remains
@@ -196,13 +197,19 @@ marker must still match the immutable snapshot sidecar and stable current cell
 identity, while the current namespace and install generations may advance but
 may not regress below the pinned values.
 
-Python publication prepares a hidden
+Python and PowerShell publication prepare a hidden
 `<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>/` sibling outside
-`versionsRoot` and atomically renames it into place with no
-replacement. If another slot appears first, publication fails and preserves it.
-An interruption outside normal in-process cleanup may leave the hidden sibling;
-it is inert, lies outside canonical version-slot enumeration, and requires
-explicit reconciliation rather than automatic deletion.
+`versionsRoot` and use an OS-native atomic no-replace directory rename. If
+another slot appears first, publication fails and preserves it. An interruption
+outside normal in-process cleanup may leave the hidden sibling; it is inert,
+lies outside canonical version-slot enumeration, and requires explicit
+reconciliation rather than automatic deletion. Dependency-light Bash reserves
+the final slot with atomic `mkdir`, then publishes the marker with a no-replace
+hard link from a completed temporary file within that reserved slot. Ordinary
+in-process failures remove the still-empty reservation they own; an interruption
+between reservation and marker publication can leave a markerless slot. That
+visible slot is ambiguous, remains untouched, and fails closed until an explicit
+repair/release transaction.
 
 Slot ownership is non-activating. Publication does not write payload content,
 `.install-complete.json`, `current-version`, `last-known-good`,
@@ -217,12 +224,17 @@ identity and cannot be reassigned to another snapshot. Markerless or conflicting
 slots require an explicit future repair/release transaction; this foundation
 does not delete or reclaim them.
 
-The initial `slot-provision` / `slot-validate` reference is available only from
-the Python installation-context runner and has no automatic caller. Bootstrap or
-installer adoption requires equivalent dependency-light Bash and PowerShell
-semantics first. Parity must preserve exclusive no-clobber reservation and
-fail-closed validation, but may use a runner-appropriate primitive rather than
-Python's directory-rename API.
+Slot provisioning allows up to 30 seconds to serialize under the shared
+genesis and installation locks so slower dependency-light runners retain the
+same contention behavior. The ownerless-lock initialization grace remains five
+seconds.
+
+The `slot-provision` / `slot-validate` primitive is available from the Python,
+dependency-light Bash, and PowerShell installation-context runners with
+cross-runner fixture coverage. It still has no automatic caller: bootstrap or
+installer adoption is a separate explicit lifecycle slice. Every runner
+preserves exclusive no-clobber reservation and fail-closed validation while
+using the platform-appropriate publication primitive described above.
 
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
