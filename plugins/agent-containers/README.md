@@ -319,6 +319,8 @@ a lifecycle hold uses the same exit code.
 Docker command timeouts are normalized into per-member deferred results:
 liveness timeouts become unknown, while stop/remove/confirmation timeouts leave
 the hold fail-closed and do not abort reconciliation of sibling members.
+Typed rescue/generation/pin failures follow the same per-member rule across
+`up`, `down`, and `rm`.
 
 Deploy holds expire after 15 minutes without heartbeat; session admissions
 expire after 5 minutes without heartbeat. This bounds PID-reuse failures.
@@ -326,6 +328,10 @@ Windows and WSL cannot inspect each other's PIDs, so a fresh record written by
 the other environment stays fail-closed until its heartbeat expires.
 `lifecycle-clear` removes only records proven dead/expired (or corrupt files
 older than the bound); it never clears a fresh unknown owner.
+Cleanup is deliberately fail-silent: if the hold/admission record becomes
+unreadable while an operation exits, cleanup leaves it fail-closed for
+TTL/`lifecycle-clear`, logs the condition, and preserves the operation's
+original result or exception.
 
 Host capture limits are optional top-level `containers.yaml` settings, expressed
 as byte counts:

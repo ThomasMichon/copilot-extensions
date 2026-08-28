@@ -13,6 +13,7 @@ from agent_containers.config import (
     FleetConfig,
 )
 from agent_containers.lifecycle import DockerContainerInfo, restricted_policy_errors
+from agent_containers.rescue import RescueError
 
 
 def _ok(stdout: str = ""):
@@ -520,7 +521,17 @@ def test_restricted_recreate_defers_members_independently(monkeypatch):
     assert provisioned == ["sandbox-1"]
 
 
-def test_recreate_timeout_defers_one_member_and_continues(monkeypatch):
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("docker rm timed out after 30s"),
+        RescueError("rescue generation unavailable"),
+    ],
+)
+def test_recreate_timeout_defers_one_member_and_continues(
+    monkeypatch,
+    failure,
+):
     from agent_containers import replacement
 
     config = ContainersConfig(
@@ -553,7 +564,7 @@ def test_recreate_timeout_defers_one_member_and_continues(monkeypatch):
 
     def destroy(_config, _fleet, info, **_kwargs):
         if info.name == "sandbox-1":
-            raise RuntimeError("docker rm timed out after 30s")
+            raise failure
         return replacement.DestructiveResult(info.name, "removed")
 
     monkeypatch.setattr(replacement, "destroy_restricted_member", destroy)
@@ -566,7 +577,7 @@ def test_recreate_timeout_defers_one_member_and_continues(monkeypatch):
 
     result = fleet_mod.reconcile_up(config, "sandbox", recreate=True)
 
-    assert "timed out" in result.deferred["sandbox-1"]
+    assert str(failure) in result.deferred["sandbox-1"]
     assert result.recreated == ["sandbox-2"]
     assert created == ["sandbox-2"]
 
@@ -699,7 +710,17 @@ def test_restricted_down_uses_safe_per_member_stop(monkeypatch):
     }
 
 
-def test_restricted_down_timeout_defers_member_and_continues(monkeypatch):
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("docker stop timed out after 30s"),
+        RescueError("container generation unavailable"),
+    ],
+)
+def test_restricted_down_timeout_defers_member_and_continues(
+    monkeypatch,
+    failure,
+):
     from agent_containers import replacement
 
     config = ContainersConfig(
@@ -727,18 +748,28 @@ def test_restricted_down_timeout_defers_member_and_continues(monkeypatch):
 
     def stop(_config, _fleet, info, **_kwargs):
         if info.name == "sandbox-1":
-            raise RuntimeError("docker stop timed out after 30s")
+            raise failure
         return replacement.DestructiveResult(info.name, "stopped")
 
     monkeypatch.setattr(replacement, "stop_restricted_member", stop)
 
     result = fleet_mod.down_fleet(config, "sandbox")
 
-    assert "timed out" in result.deferred["sandbox-1"]
+    assert str(failure) in result.deferred["sandbox-1"]
     assert result.stopped == ["sandbox-2"]
 
 
-def test_restricted_remove_timeout_defers_member_and_continues(monkeypatch):
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("docker inspect timed out after 30s"),
+        RescueError("rescue pin unavailable"),
+    ],
+)
+def test_restricted_remove_timeout_defers_member_and_continues(
+    monkeypatch,
+    failure,
+):
     from agent_containers import replacement
 
     config = ContainersConfig(
@@ -766,14 +797,14 @@ def test_restricted_remove_timeout_defers_member_and_continues(monkeypatch):
 
     def destroy(_config, _fleet, info, **_kwargs):
         if info.name == "sandbox-1":
-            raise RuntimeError("docker inspect timed out after 30s")
+            raise failure
         return replacement.DestructiveResult(info.name, "removed")
 
     monkeypatch.setattr(replacement, "destroy_restricted_member", destroy)
 
     result = fleet_mod.remove_fleet(config, "sandbox", force=True)
 
-    assert "timed out" in result.deferred["sandbox-1"]
+    assert str(failure) in result.deferred["sandbox-1"]
     assert result.removed == ["sandbox-2"]
 
 
@@ -862,3 +893,48 @@ def test_restricted_down_classifies_stopped_paused_and_unknown_states(monkeypatc
         "sandbox-exited",
         "sandbox-created",
     }
+
+
+def test_down_generation_failure_defers_only_affected_stopped_member(monkeypatch):
+    from agent_containers import rescue
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"instance-{index}",
+            image="example/agent",
+            state="exited",
+            status="Exited",
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(
+        fleet_mod,
+        "inspect_container",
+        lambda name: {
+            "Id": name,
+            "State": {"StartedAt": "good" if name.endswith("-2") else ""},
+        },
+    )
+    monkeypatch.setattr(
+        rescue,
+        "verified_capture_for_instance",
+        lambda *_args: {"status": "verified"},
+    )
+
+    result = fleet_mod.down_fleet(config, "sandbox")
+
+    assert "execution generation" in result.deferred["sandbox-1"]
+    assert "sandbox-2" in result.unchanged

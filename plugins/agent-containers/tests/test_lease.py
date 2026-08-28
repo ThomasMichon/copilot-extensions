@@ -385,3 +385,36 @@ def test_coordination_json_writes_are_owner_only_under_open_umask(
         lease_mod.LEASE_FILE.parent,
     ]
     assert not list(lease_mod._DEPLOY_HOLDS_FILE.parent.glob(".*.tmp"))
+
+
+def test_deploy_hold_cleanup_corruption_preserves_original_exception(
+    fleet,
+    caplog,
+):
+    with pytest.raises(ValueError, match="original failure"):
+        with lease_mod.deploy_hold("myrepo-1", "remove"):
+            lease_mod._DEPLOY_HOLDS_FILE.write_text(
+                "{corrupt",
+                encoding="utf-8",
+            )
+            raise ValueError("original failure")
+
+    assert "leaving it fail-closed" in caplog.text
+    assert lease_mod._DEPLOY_HOLDS_FILE.exists()
+
+
+def test_session_admission_cleanup_corruption_preserves_return_value(
+    fleet,
+    caplog,
+):
+    def operation():
+        with lease_mod.session_admission("myrepo-1"):
+            lease_mod._SESSION_ADMISSIONS_FILE.write_text(
+                "{corrupt",
+                encoding="utf-8",
+            )
+            return "completed"
+
+    assert operation() == "completed"
+    assert "leaving it fail-closed" in caplog.text
+    assert lease_mod._SESSION_ADMISSIONS_FILE.exists()

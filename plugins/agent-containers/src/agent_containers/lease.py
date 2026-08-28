@@ -287,6 +287,35 @@ def _heartbeat_record(
             log.exception("Could not heartbeat provider admission record")
 
 
+def _cleanup_record_silent(
+    path: Path,
+    record_type,
+    ttl: float,
+    key: str,
+    token: str,
+    *,
+    preserve_uncertain: bool = False,
+) -> None:
+    """Best-effort cleanup that never masks the protected operation result."""
+    try:
+        with _lease_lock():
+            records = _read_live_records(path, record_type, ttl)
+            current = records.get(key)
+            if current is None or current.token != token:
+                return
+            if preserve_uncertain and getattr(current, "uncertain", False):
+                return
+            del records[key]
+            _write_records(path, records)
+    except (OSError, RuntimeError) as exc:
+        log.warning(
+            "Could not clean provider admission record %s; leaving it "
+            "fail-closed for TTL/lifecycle-clear: %s",
+            path.name,
+            exc,
+        )
+
+
 def _is_stale(lease: Lease, ttl: float) -> bool:
     """A lease is stale once it exceeds the TTL since its last heartbeat.
 
@@ -639,20 +668,14 @@ def deploy_hold(
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=2)
-        with _lease_lock():
-            holds = _read_live_records(
-                _DEPLOY_HOLDS_FILE,
-                DeployHold,
-                DEPLOY_HOLD_TTL,
-            )
-            current = holds.get(container)
-            if (
-                current is not None
-                and current.token == token
-                and not current.uncertain
-            ):
-                del holds[container]
-                _write_records(_DEPLOY_HOLDS_FILE, holds)
+        _cleanup_record_silent(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+            container,
+            token,
+            preserve_uncertain=True,
+        )
 
 
 @contextmanager
@@ -707,13 +730,10 @@ def session_admission(container: str) -> Iterator[SessionAdmission]:
     finally:
         heartbeat_stop.set()
         heartbeat_thread.join(timeout=2)
-        with _lease_lock():
-            admissions = _read_live_records(
-                _SESSION_ADMISSIONS_FILE,
-                SessionAdmission,
-                SESSION_ADMISSION_TTL,
-            )
-            current = admissions.get(key)
-            if current is not None and current.token == token:
-                del admissions[key]
-                _write_records(_SESSION_ADMISSIONS_FILE, admissions)
+        _cleanup_record_silent(
+            _SESSION_ADMISSIONS_FILE,
+            SessionAdmission,
+            SESSION_ADMISSION_TTL,
+            key,
+            token,
+        )

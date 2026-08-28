@@ -467,3 +467,8 @@ key and relay projection; restricted venues never enter that path.
   chmod calls, and made lifecycle-pin publication complete-before-visible with
   atomic no-clobber semantics. Malformed/truncated pin remnants remain
   fail-closed briefly, then expire so retention cannot be wedged permanently.
+- Latest review made context-manager cleanup non-interfering: corrupt hold or
+  admission state during `finally` is logged and left fail-closed for
+  TTL/stale-clear rather than masking the protected return value or exception.
+  Fleet sibling loops now explicitly classify rescue/generation/pin exceptions
+  as per-member deferrals across up/down/remove.

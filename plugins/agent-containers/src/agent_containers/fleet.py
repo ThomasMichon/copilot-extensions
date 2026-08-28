@@ -502,6 +502,7 @@ def reconcile_up(
                     "`up --recreate`)."
                 )
             from .replacement import destroy_restricted_member
+            from .rescue import RescueError
 
             result = FleetOperationResult()
             removed_names = set()
@@ -528,6 +529,9 @@ def reconcile_up(
                         force_remove=True,
                         force_abandon=force_abandon,
                     )
+                except RescueError as exc:
+                    result.deferred[member.name] = str(exc)
+                    continue
                 except RuntimeError as exc:
                     result.deferred[member.name] = str(exc)
                     continue
@@ -715,6 +719,7 @@ def down_fleet(
             continue
         if restricted and c.state == "running":
             from .replacement import stop_restricted_member
+            from .rescue import RescueError
 
             try:
                 decision = stop_restricted_member(
@@ -723,6 +728,9 @@ def down_fleet(
                     c,
                     force_abandon=force_abandon,
                 )
+            except RescueError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
             except RuntimeError as exc:
                 result.deferred[c.name] = str(exc)
                 continue
@@ -736,6 +744,7 @@ def down_fleet(
             result.stopped.append(c.name)
         elif restricted and c.state in {"exited", "created"}:
             from .rescue import (
+                RescueError,
                 container_generation,
                 record_telemetry_loss,
                 verified_capture_for_instance,
@@ -757,6 +766,9 @@ def down_fleet(
                         container_generation=generation,
                         reason="already_stopped",
                     )
+            except RescueError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
             except RuntimeError as exc:
                 result.deferred[c.name] = str(exc)
                 continue
@@ -842,6 +854,7 @@ def remove_fleet(
                 )
                 continue
             from .replacement import destroy_restricted_member
+            from .rescue import RescueError
 
             try:
                 decision = destroy_restricted_member(
@@ -852,6 +865,9 @@ def remove_fleet(
                     force_remove=force,
                     force_abandon=force_abandon,
                 )
+            except RescueError as exc:
+                result.deferred[c.name] = str(exc)
+                continue
             except RuntimeError as exc:
                 result.deferred[c.name] = str(exc)
                 continue
