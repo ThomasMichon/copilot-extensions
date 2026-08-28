@@ -472,3 +472,8 @@ key and relay projection; restricted venues never enter that path.
   TTL/stale-clear rather than masking the protected return value or exception.
   Fleet sibling loops now explicitly classify rescue/generation/pin exceptions
   as per-member deferrals across up/down/remove.
+- Newest review made rescue member files owner-only at the initial `os.open`
+  rather than after creation, eliminating an open-umask visibility window.
+  Docker timeout diagnostics now report only a parsed verb plus safe
+  container/target identity (for example `docker exec <member>`), never option,
+  environment, or command payload prefixes.

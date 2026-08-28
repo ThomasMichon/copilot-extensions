@@ -491,6 +491,48 @@ def test_stream_is_host_bounded_even_if_descriptor_grows(monkeypatch, tmp_path):
     assert not destination.exists()
 
 
+def test_member_destination_is_0600_at_initial_open_under_open_umask(
+    monkeypatch,
+    tmp_path,
+):
+    payload = b"event\n"
+    monkeypatch.setattr(
+        rescue_protocol.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _FakeProcess(payload, b"OK\t6\n"),
+    )
+    destination = tmp_path / "member"
+    real_open = os.open
+    observed = {}
+
+    def tracking_open(path, flags, mode=0o777):
+        fd = real_open(path, flags, mode)
+        if str(path) == str(destination):
+            observed["requested"] = mode
+            observed["created"] = stat.S_IMODE(os.fstat(fd).st_mode)
+        return fd
+
+    monkeypatch.setattr(rescue_protocol.os, "open", tracking_open)
+    previous = os.umask(0)
+    try:
+        result = rescue_protocol._stream_member(
+            "instance",
+            "agent",
+            "/usr/local/bin/node",
+            "/home/agent",
+            SESSION_ID,
+            "events.jsonl",
+            destination,
+            max_bytes=64,
+            deadline=None,
+        )
+    finally:
+        os.umask(previous)
+
+    assert result.status == "captured"
+    assert observed == {"requested": 0o600, "created": 0o600}
+
+
 def test_member_stream_wall_clock_deadline_terminates_child(monkeypatch, tmp_path):
     proc = _FakeProcess(b"", b"OK\t1\n")
     proc.stdout = _BlockingStream()

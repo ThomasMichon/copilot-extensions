@@ -35,7 +35,34 @@ def test_remove_container_surfaces_bounded_timeout(monkeypatch):
         remove_container("example-1", force=True)
 
 
-def test_docker_timeout_is_normalized_to_runtime_error(monkeypatch):
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (["inspect", "example-1"], "docker inspect example-1"),
+        (["stop", "example-1"], "docker stop example-1"),
+        (["rm", "-f", "example-1"], "docker rm example-1"),
+        (
+            [
+                "exec",
+                "-u",
+                "agent",
+                "-e",
+                "LD_PRELOAD=",
+                "-i",
+                "example-1",
+                "/bin/bash",
+                "-c",
+                "private command",
+            ],
+            "docker exec example-1",
+        ),
+    ],
+)
+def test_docker_timeout_is_normalized_to_safe_operation_label(
+    monkeypatch,
+    args,
+    expected,
+):
     monkeypatch.setattr(
         "agent_containers.lifecycle.subprocess.run",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
@@ -45,11 +72,13 @@ def test_docker_timeout_is_normalized_to_runtime_error(monkeypatch):
 
     with pytest.raises(
         RuntimeError,
-        match="docker inspect example-1 timed out after 30s",
-    ):
+        match=rf"{expected} timed out after 30s",
+    ) as caught:
         from agent_containers.lifecycle import _docker
 
-        _docker(["inspect", "example-1"], timeout=30)
+        _docker(args, timeout=30)
+    assert "private command" not in str(caught.value)
+    assert "LD_PRELOAD" not in str(caught.value)
 
 
 def test_unpause_container_uses_explicit_docker_operation(monkeypatch):

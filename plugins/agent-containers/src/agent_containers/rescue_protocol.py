@@ -466,7 +466,12 @@ def _stream_member(
     reader = threading.Thread(target=read_stdout, daemon=True)
     reader.start()
     try:
-        with destination.open("xb") as target:
+        destination_fd = os.open(
+            str(destination),
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        with os.fdopen(destination_fd, "wb") as target:
             enforce_mode(destination, 0o600)
             while True:
                 try:
