@@ -182,7 +182,13 @@ public face:
 
 - **Claim work with a GitHub issue** before starting a stretch -- search open
   issues first, then take or comment on one. It's the shared token other drivers
-  and outside contributors can see.
+  and outside contributors can see. Run those operations through
+  `agent-worktrees repos gh ThomasMichon/copilot-extensions -- ...`; verify the
+  scoped login and never switch the global active `gh` account. If no authorized
+  public identity is available, continue locally under the downstream issue's
+  claim plus its deduplicated dispatch task, keep all downstream context private,
+  and repeat the public search before publication. The full fallback is in the
+  contribution skill.
 - **Keep every public artifact generic.** Commits, issues, and docs are
   world-readable -- write them self-contained, with no downstream-private names,
   systems, or context. The proprietary "why" stays in the driver's own private

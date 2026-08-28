@@ -216,6 +216,55 @@ racing the same files.
 - Link the issue from your *private* effort/plan — the public issue coordinates,
   the private effort carries the "why".
 
+#### Use a repository-scoped identity, never a global account switch
+
+A coordinating session may be running under an identity that cannot access this
+public repository (for example, an Enterprise Managed User). Resolve and inject
+the repository's configured account for each command instead of changing the
+machine-global active `gh` account:
+
+```bash
+<agent-worktrees catalog argv[0]> repos account-for ThomasMichon/copilot-extensions
+<agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- api user --jq .login
+<agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- issue list \
+  --repo ThomasMichon/copilot-extensions --state open --search "<generic subject>"
+<agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- issue create \
+  --repo ThomasMichon/copilot-extensions --title "<generic title>" --body "<public-safe body>"
+```
+
+The first command names the expected login; the scoped `api user` result must
+match it before any mutation. If `repos gh` warns that it could not mint that
+account's token, exits non-zero, or reports another login, **do not let its
+ambient-auth fallback create/comment/close anything**. Repair the account map
+or token when possible; never use `gh auth switch` as a routine workaround on a
+shared machine.
+
+#### No authorized public identity: preserve coordination and keep moving
+
+An unavailable public identity must not block local implementation. Until an
+authorized repository-scoped identity is available:
+
+1. Use the originating downstream issue's active `agent-issue-claim:v1` marker
+   plus its deduplicated `agent-dispatch` task as the temporary coordination
+   token. The claim must identify the owning worktree and target this upstream
+   repository so other workers in that control plane can detect the reservation.
+2. Keep the downstream issue, task ID, private URL, machine/worktree identity,
+   and proprietary motivation **only downstream**. Never mention or link them in
+   this public repository's issue, commit, PR, tests, or docs.
+3. Proceed in an isolated upstream worktree and record private progress beats.
+   Re-run the scoped public search before publication. If access becomes
+   available, create or claim the generic public issue and link to it from the
+   downstream tracker — never link back from public to private.
+4. If publication itself still lacks an authorized identity, leave the local
+   work and downstream claim resumable rather than switching global auth. This
+   fallback coordinates implementation; it does not bypass repository
+   authorization or the required PR gate.
+
+If a public issue or conflicting implementation appears when access is restored,
+reconcile or yield before publishing. The temporary downstream claim prevents a
+blocked identity from duplicating work within its control plane; the required
+pre-publication search closes the cross-control-repo gap.
+
 ### Serial, single-writer merges
 
 Treat `main` as a single-writer lane:
