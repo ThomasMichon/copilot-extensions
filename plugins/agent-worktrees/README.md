@@ -130,6 +130,7 @@ standalone-behavior changes.
 | `agent-worktrees-wsl-provision` | Provision the current project in WSL |
 | `agent-worktrees-repos` | Repos registry -- known repos and source roots |
 | `agent-worktrees-related` | Directional related-repo index and locus/delegation plan |
+| `resolving-state-home` | Native stateless-harness state routing and paired knowledge-worktree resolution |
 | `repairing-worktrees` | Diagnose/repair worktree+session health via `doctor` |
 | `create-setup-script` | Generate repo-specific session setup scripts |
 | `agent-ssh` | SSH transport helpers |

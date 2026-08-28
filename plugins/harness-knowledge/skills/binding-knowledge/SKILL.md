@@ -5,11 +5,11 @@ description: >
   private knowledge repo on this machine. Use after cloning a stateless harness
   (or forking one) when it has no knowledge repo bound yet -- it asks for (or
   creates) the knowledge repo, registers both repos, writes the machine-local
-  knowledge_repo pointer, and assembles a machine-local instructions fragment
-  labeling the concrete harness/knowledge/product paths. When given both repo
-  paths, it also renders the harness's machine-local personal-plugin overlay from
-  the knowledge repo's local marketplaces. Also use to re-point the harness at a
-  different knowledge repo or repair a broken binding.
+  knowledge_repo pointer, and lets agent-worktrees resolve the state/worktree
+  split natively. When given both repo paths, it also renders the harness's
+  machine-local personal-plugin overlay from the knowledge repo's local
+  marketplaces. Also use to re-point the harness at a different knowledge repo
+  or repair a broken binding.
   Trigger phrases include:
   - 'bind the knowledge repo'
   - 'set up this harness'
@@ -96,7 +96,7 @@ repos are **direct-commit, low-ceremony** -- no PR gate.
 So the state-root resolver can find the knowledge checkout by name:
 
 ```
-<agent-worktrees catalog argv[0]> repos add <knowledge-name> "<knowledge-path>" --class singleton
+<agent-worktrees catalog argv[0]> repos add <knowledge-name> "<knowledge-path>" --class worktree
 ```
 
 (The harness itself is normally already registered from its own adoption. If not,
@@ -105,10 +105,8 @@ register it too.)
 ## 3. Write the machine-local binding
 
 Run the configurator (idempotent -- safe to re-run). It writes the
-`knowledge_repo:` pointer into `~/.<harness>/config.yaml`, assembles the
-machine-local instructions fragment labeling the concrete paths, and (when both
-repo paths are supplied) renders the personal-plugin overlay described in step
-3b:
+`knowledge_repo:` pointer into `~/.<harness>/config.yaml` and (when both repo
+paths are supplied) renders the personal-plugin overlay described in step 3b:
 
 ```
 python skills/binding-knowledge/scripts/bind_knowledge.py \
@@ -116,15 +114,11 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
   --knowledge <knowledge-name> \
   --knowledge-path "<knowledge-path>" \
   --harness-path "<harness-anchor-path>" \
-  [--product <name>=<path> ...]
 ```
 
-`--product` (repeatable) labels any coordinated product repos so the assembled
-fragment names them for this machine. The fragment is **machine-local**
-(`~/.<harness>/knowledge-binding.md`, **emitted at session start by the
-harness-knowledge `sessionStart` hook**) -- it is **never** committed into the
-harness, and it does **not** use the related-registry `add` operation (that would write
-a repo name into the harness's committed `related.yaml` and break statelessness).
+The binding is **machine-local** and is never committed into the harness.
+`agent-worktrees` owns the session-start state/worktree context and related-repo
+resolution; do not materialize those values into committed `related.yaml`.
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's
@@ -185,14 +179,25 @@ exact managed values are tracked so stale entries can be retired safely.
 ```
 
 Expect `requires_external: true`, `bound: true`, and `state_root` pointing at the
-knowledge checkout. As a final proof, a fresh ask like *"start an effort for X"*
-should land the effort in the **knowledge** repo, with the harness tree clean.
+knowledge anchor. Then launch or create a harness worktree through
+`agent-worktrees`; the worktree manager creates/selects its paired knowledge
+worktree. Confirm from the harness worktree:
+
+```
+<agent-worktrees catalog argv[0]> state-root --pair --json
+```
+
+Expect `paired: true` and a `sibling` with `role: knowledge`, `kind: worktree`,
+and the exact writable path. The anchor returned by plain `state-root` identifies
+the bound repo but is not the task workspace. As a final proof, a fresh ask like
+*"start an effort for X"* should land the effort in the paired **knowledge**
+worktree, with the harness tree clean.
 
 ## Idempotence & re-pointing
 
-Re-running is safe: the configurator replaces the `knowledge_repo:` line in place
-(preserving the rest of the config), rewrites the binding fragment, retires any
-managed legacy auto-loaded fragment, and refreshes the managed local-plugin
-overlay entries while preserving unmanaged local settings. To re-point at a
-different knowledge repo, register the new one (step 2) and re-run step 3 with
-the new `--knowledge`/`--knowledge-path`.
+Re-running is safe: the configurator replaces the `knowledge_repo:` line in
+place (preserving the rest of the config), retires managed legacy instruction
+fragments, and refreshes the managed local-plugin overlay entries while
+preserving unmanaged local settings. To re-point at a different knowledge repo,
+register the new one (step 2) and re-run step 3 with the new
+`--knowledge`/`--knowledge-path`.

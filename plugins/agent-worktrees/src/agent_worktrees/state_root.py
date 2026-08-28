@@ -767,55 +767,130 @@ def resolve_pair(config: cfg.Config | None, *, cwd: str | None = None) -> StateP
     )
 
 
-def state_repo_definition(res: StateRoot) -> str:
+def _same_path(left: str | None, right: str | None) -> bool:
+    if not left or not right:
+        return False
+    return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+        os.path.abspath(right)
+    )
+
+
+def _code(value: str) -> str:
+    safe = value.replace("`", "'")
+    return f"`{safe}`"
+
+
+def state_repo_definition(
+    res: StateRoot,
+    *,
+    pair: StatePair | None = None,
+    launch_path: str | None = None,
+    launch_anchor: str | None = None,
+) -> str:
     """Return the sessionStart **"the user's state repo"** definition (Markdown).
 
     This is the single, authoritative binding of the term *"the user's state
     repo"* that agent-worktrees injects into session context (via the
-    ``session-conduct`` sessionStart hook, ``state-root --conduct``). Downstream
-    plugins/skills refer to "the user's state repo" in **plain prose** and never
-    invoke agent-worktrees themselves; this injection binds the term to the
-    concrete resolved checkout so those references resolve. When agent-worktrees
-    is not installed nothing is injected, and the prose degrades to its plain
-    meaning (the checkout where the user keeps their personal state).
+    ``session-conduct`` sessionStart hook, ``state-root --conduct``). It binds
+    the configured repository identity to the exact paired worktree when one is
+    available and otherwise makes the no-write degraded state explicit.
 
     The returned string is a self-contained paragraph (no trailing newline);
     the hook merges it into ``additionalContext`` ahead of any static conduct
-    fragments. When a knowledge repo is bound (``source == "knowledge_repo"``)
-    the harness and the state repo are distinct checkouts, so the definition
-    also carries a **write-routing** clause: shared-harness changes go in the
-    harness repo, everything else in the user's state repo.
+    fragments. When a knowledge repo is bound (``source == "knowledge_repo"``),
+    the definition also carries the harness/knowledge/product routing boundary.
     """
     if res.path:
-        if res.source == "knowledge_repo":
-            where = "your machine's bound knowledge repo"
-        elif res.source == "explicit":
+        if res.source == "explicit":
             where = f"the '{res.repo}' repo"
-        else:
+        elif res.source != "knowledge_repo":
             where = "your current repo (self-hosted)"
-        text = (
-            f"**The user's state repo** is `{res.path}` — {where}: the checkout "
-            "for personal state and reference data (efforts, logs, visions, and "
-            "skill references). Resolve any instruction naming it under this "
-            "checkout."
-        )
-        # When a knowledge repo is bound, the shared harness and the user's
-        # state repo are two DISTINCT checkouts -- so tell the agent which
-        # changes belong where. (For a self-hosted repo there is only one
-        # checkout, so this routing guidance would be noise.)
-        if res.source == "knowledge_repo":
-            text += (
-                " **Where changes go:** generic, reusable, name-free configuration, "
-                "skills, agents, `AGENTS.md`, and docs belong in the shared harness "
-                "repo (your current checkout). Personal preferences, personal "
-                "skills/config, private/reference data, and ambiguous or rootless "
-                "writes belong in the state repo above."
+            return (
+                f"**The user's state repo** is {_code(res.path)} — {where}: the "
+                "current writable checkout for personal state and reference data "
+                "(efforts, logs, visions, and skill references)."
             )
-        return text
+        if res.source == "explicit":
+            return (
+                f"**The user's state repo** is {_code(res.path)} — {where}: the "
+                "explicitly selected checkout for personal state and reference "
+                "data."
+            )
+
+        sibling = pair.sibling if pair and pair.paired and not pair.error else None
+        writable = (
+            sibling
+            if sibling and sibling.role == "knowledge" and sibling.kind == "worktree"
+            else None
+        )
+        current = pair.current if pair else None
+        if current and current.kind == "worktree":
+            checkout = (
+                f"Current: managed harness worktree "
+                f"{_code(current.path)}."
+            )
+        elif launch_path and _same_path(launch_path, launch_anchor):
+            checkout = (
+                f"Current: harness anchor {_code(launch_path)} (read-only); "
+                "create/select a harness worktree before editing."
+            )
+        elif launch_path:
+            checkout = (
+                f"Current: untracked checkout {_code(launch_path)}; resolve its "
+                "management state before editing."
+            )
+        else:
+            checkout = ""
+
+        if writable:
+            knowledge = (
+                f"Knowledge: {_code(res.repo)}; registered anchor {_code(res.path)} "
+                f"(read-only identity); writable paired worktree "
+                f"{_code(writable.path)}. Use the pair, never the anchor."
+            )
+        else:
+            diagnostic = (
+                f" Pair resolution: {pair.error}."
+                if pair and pair.error
+                else ""
+            )
+            knowledge = (
+                f"Knowledge: {_code(res.repo)}; registered anchor {_code(res.path)} "
+                "(read-only identity); no writable paired knowledge worktree. Before "
+                "writing, create/select one with "
+                f"`agent-worktrees -p {res.repo} create --json` from the session "
+                f"command catalog.{diagnostic}"
+            )
+
+        return (
+            f"**State/worktree:** {checkout} {knowledge} **Routing:** harness "
+            "instructions/configuration, skills, agents, plugins, and docs -> "
+            "harness worktree; personal preferences, efforts, logs, notes, private "
+            "data/plugins, and ambiguous writes -> knowledge worktree; product "
+            "changes -> product repo. For another repo or machine, use "
+            "`agent-worktrees related resolve <name>` and honor class, locus, and "
+            "delegate. Never edit anchors; follow the injected worktree lifecycle."
+        )
+
+    if res.repo:
+        binding = (
+            f"is configured as {_code(res.repo)} but cannot be resolved on this "
+            "machine"
+        )
+        action = (
+            f"Repair/register {_code(res.repo)} as worktree-class before writing."
+        )
+    else:
+        binding = "is not configured on this machine"
+        action = (
+            "Run `binding-knowledge` to attach an existing checkout, clone a "
+            "remote, or create a private repo; declining leaves state writes blocked."
+        )
+    detail = f" Diagnostic: {res.error}" if res.error else ""
     return (
-        "**The user's state repo** (personal efforts, logs, visions, and skill "
-        "reference data) is not bound on this machine. Stop before writing such "
-        "state and bind it through harness setup."
+        f"**The user's state repo** {binding}. Stateful workflows are blocked: "
+        "do not write personal state into the launch repo or another fallback. "
+        f"{action}{detail}"
     )
 
 
