@@ -1,23 +1,25 @@
 ---
 name: defining-subagents
 description: >
-  Define Copilot CLI custom agents (sub-agents) for delegation -- the .agent.md
-  file format, frontmatter properties, tool aliases, invocation, owning MCP
-  servers per-agent, reliable materialized CLI fallback, and the anti-recursion
-  / MCP-readiness pattern. Use when
-  creating or editing a custom agent, a .agent.md file, or configuring sub-agent
-  delegation.
+  Defines and reviews Copilot CLI custom-agent and sub-agent definitions -- the
+  .agent.md format, frontmatter, tool aliases, bounded execution contracts,
+  per-agent MCP ownership, materialized CLI fallback, and anti-recursion /
+  MCP-readiness rules. Use when creating, defining, editing, or reviewing a
+  custom agent or its frontmatter, not when deciding how to route the current
+  runtime task.
   Trigger phrases include:
   - 'custom agent'
-  - 'sub-agent'
-  - 'subagent'
+  - 'create a custom agent'
+  - 'define a custom agent'
+  - 'review a custom agent'
+  - 'create a sub-agent'
+  - 'define a sub-agent'
+  - 'review a sub-agent'
+  - 'custom-agent frontmatter'
   - 'agent definition'
   - '.agent.md'
-  - 'delegate to an agent'
-  - 'create an agent'
-  - 'anti-recursion'
-  - 'agent fallback'
-  - 'sub-agent fallback policy'
+  - 'anti-recursion guard'
+  - 'MCP readiness section'
 ---
 
 # Defining Sub-Agents
@@ -31,6 +33,11 @@ Custom agents are specialized profiles Copilot can delegate to. Each runs in its
 own subagent process with a separate context window. They are for **delegation**
 -- not host/machine identity (which a control harness handles through its own
 `AGENTS.md` / host-specific skills).
+
+This skill owns **authoring and review**, not runtime task routing. To decide
+whether the current task should be delegated, use
+`delegation-guidance:delegating-work`; do not give this skill bare runtime
+phrases such as `sub-agent`, `delegate`, or `which agent`.
 
 Reference: https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/create-custom-agents-for-cli
 · config reference: https://docs.github.com/en/copilot/reference/custom-agents-configuration
@@ -118,14 +125,35 @@ tools with `'server-name/*'` or `'server-name/tool-name'` in the tools list.
 > agent defined in the *same* plugin. The identical convention covers cross-plugin
 > **skill** references (see the authoring-skills skill).
 
+## Execution contract
+
+Author every agent to **execute its assigned scope directly** and return an
+integration-ready result. Its prompt should define a bounded responsibility,
+inputs, exclusions, and output shape; the agent should return compact findings,
+citations, changed-file lists, and validation results rather than raw source,
+tool catalogs, or verbose API payloads.
+
+A leaf agent does not create child agents. A coordinator-style custom agent may
+delegate distinct child scopes only when its definition and invocation prompt
+explicitly authorize that role, but it still must not spawn another copy of
+itself. The caller retains final synthesis, integration, and completion unless
+the contract explicitly assigns one of those responsibilities.
+
 ## Per-agent MCP ownership
 
-Sub-agents that depend on MCP tools should **define those servers in their own
-frontmatter** via the `mcp-servers` block. Copilot CLI starts the server when the
-sub-agent is spawned and manages the lifecycle automatically. Project-level
-`.mcp.json` is reserved for servers the **main agent** uses directly;
-domain-specific MCP servers belong in the sub-agent that uses them. For the full
-registration hierarchy, see the **registering-mcp-servers** skill.
+Domain or service agents that depend on MCP tools should **define those servers
+in their own frontmatter** via the `mcp-servers` block. Copilot CLI starts the
+server when the sub-agent is spawned and manages the lifecycle automatically.
+The owning agent absorbs the service schema, authentication particulars,
+verbose round trips, and raw payloads, then returns only the bounded result its
+caller needs.
+
+Project-level `.mcp.json` is reserved for servers the **main coordinator** uses
+directly. Keep compact, broadly useful research and orchestration tools there
+when their results support decomposition, arbitration, shared history, or task
+state and delegating every lookup would cost more than it saves. Domain-specific
+service catalogs and calls belong in the domain agent. For the full registration
+hierarchy, see the **registering-mcp-servers** skill.
 
 An **agent-mcp-backed** agent needs two authorization-equivalent surfaces over
 one bridge config: the primary `mcp-servers` catalog and an explicit materialized
@@ -147,8 +175,21 @@ their fallback is the wider raw catalog and must be documented honestly. A raw
 Give agents `tools: ["*"]` (or omit the field) so they have full access to file
 I/O, shell, grep, and other tools. Do **not** restrict `tools` as an
 anti-recursion mechanism -- it cripples agents that need to read docs, inspect
-config, or run commands. Instead, prevent self-delegation via
-**instruction-based guards**:
+config, or run commands. Narrow tools only when the agent genuinely must not
+have a capability. An agent whose explicit tools list omits `agent` / Task is
+Task-disabled and exempt from the self-delegation guard.
+
+Every Task-capable agent -- including a coordinator that may spawn other agent
+types -- must include this literal, agent-specific line:
+
+```markdown
+Do NOT use the task tool to spawn another `<agent-name>` agent.
+```
+
+This prevents recursive copies without forbidding a deliberately authorized
+coordinator from delegating distinct scopes. For MCP-owning agents, keep that
+line in the required `## MCP Readiness` section beside the readiness and
+fallback behavior:
 
 1. **MCP readiness check.** Every agent with MCP servers must probe one tool on
    startup and preserve the exact observed error if the catalog does not load.
@@ -160,13 +201,8 @@ config, or run commands. Instead, prevent self-delegation via
    `--no-serve` and verify identity/capability before acting. If both surfaces
    fail, report both errors and stop. This fallback does not bypass an auth
    failure, authorization boundary, confirmation gate, or upstream outage.
-3. **Anti-self-delegation rule.** Every agent's instructions must include, **as
-   a literal line**: "Do NOT use the task tool to spawn another `<agent-name>`
-   agent." This prevents the recursive loop where an MCP failure makes the agent
-   delegate to a fresh copy of itself, which also fails, ad infinitum.
-
-All three guards belong in the agent's `## MCP Readiness` section. Start from
-this compact body template, then substitute the real fleet, probe, and identity:
+Start from this compact body template, then substitute the real fleet, probe,
+and identity:
 
 ```markdown
 ## MCP Readiness
@@ -190,13 +226,14 @@ sub-agent*.
 > **Keep an explicit "Do NOT … spawn / delegate" line — a reworded guard slips
 > past the scanner as *missing*.** The `reviewing-customizations` scan detects
 > this guard with a loose regex over the collapsed agent body — roughly *do not …
-> (task tool | spawn | delegate)* within a short span. It does **not** require
-> the exact canonical sentence, but it **does** require that construction:
-> paraphrases that drop the "do not" opener or those anchor words — "never call
-> `task`", "no sub-agent fallback", "don't re-invoke myself" — do not match, so
-> the agent is flagged as missing the guard (BLOCKING). Safest is to keep the
-> canonical literal line `Do NOT use the task tool to spawn another <agent-name>
-> agent`; rewording it out is a common regression.
+> (task tool | spawn | delegate)* within a short span, followed by the explicit
+> `<agent-name> agent` type. It does **not** require the exact canonical sentence,
+> but it **does** require that construction: paraphrases that drop the "do not"
+> opener, those anchor words, or the named agent type — "never call `task`", "no
+> sub-agent fallback", "don't re-invoke myself" — do not match, so the agent is
+> flagged as missing the guard (BLOCKING). Safest is to keep the canonical
+> literal line `Do NOT use the task tool to spawn another <agent-name> agent`;
+> rewording it out is a common regression.
 
 ### Hard-rule validation checklist
 
@@ -205,6 +242,11 @@ These are **not** suggestions — they are conformance gates. The
 fallback, and anti-recursion text; reviewers must still verify bridge/identity
 equivalence. An agent **fails** review if any applicable box is unchecked:
 
+- [ ] **Every Task-capable agent forbids self-spawn.** Agents with omitted
+      `tools`, `tools: ["*"]`, or an explicit `agent` / Task grant include the
+      canonical line naming their own agent type. A Task-disabled agent is
+      exempt. A coordinator may delegate other types when explicitly authorized
+      but may not create another copy of itself.
 - [ ] **Tools are not narrowed for anti-recursion.** `tools` is omitted or
       `["*"]` (or lists only *additive* MCP grants); it is **never** trimmed to
       "prevent recursion" — that cripples the agent, it doesn't protect it.
@@ -227,7 +269,7 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       requires the explicit marker `Materialized CLI fallback: disabled
       (conditional authorization gate)`; shape-only decorators yield a wider
       raw catalog that the agent documents.
-- [ ] **Anti-self-delegation line present.** The section contains an explicit
+- [ ] **MCP anti-self-delegation line present.** The section contains an explicit
       "Do NOT … (task tool / spawn / delegate) …" directive — canonically the
       literal line "Do NOT use the task tool to spawn another `<agent-name>`
       agent" (with the agent's own name substituted). The scan requires that
@@ -238,8 +280,8 @@ equivalence. An agent **fails** review if any applicable box is unchecked:
       no readiness/anti-recursion text is a **blocking** finding, not a nit — a
       single missing guard is the exact failure this rule exists to prevent.
 
-An agent with **no** `mcp-servers` still owes the tools rule (row 1) but is
-exempt from the MCP-readiness rows.
+An agent with **no** `mcp-servers` is exempt from the MCP-readiness rows but
+still owes the Task-capability and anti-self-delegation rules above.
 
 ### Invoking MCP tools from the shell (sanctioned CLI path)
 
