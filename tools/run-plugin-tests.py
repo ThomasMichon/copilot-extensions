@@ -23,6 +23,12 @@ Design notes:
   agent-codespaces, ...) resolve correctly -- plain ``pip`` cannot.
 * **Cached venvs** live under ``.test-venvs/<platform>/<plugin>`` (git-ignored)
   and are reused across runs; ``--reinstall`` rebuilds one.
+* **Host admission.** Potentially heavy runs share one per-user host lease
+  across every checkout/worktree, so concurrent agents fail fast or wait for a
+  bounded interval instead of multiplying load.
+* **State isolation.** Default suites receive runner-owned home, XDG, Copilot,
+  plugin-state, and temporary roots. Credential-dependent end-to-end checks
+  must opt into host state explicitly.
 * **Windows-safe temp.** Passes a randomized ``--basetemp`` so pytest's tmp
   cleanup does not trip the ``pytest-current`` junction ``PermissionError`` on
   Windows (teardown noise that would otherwise mask a green run).
@@ -61,6 +67,40 @@ PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs" / sys.platform
 PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
 RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
+LEASE_LIB = REPO / "libs" / "single-instance-lease" / "src"
+
+# The runner is a repository tool, so consume the canonical shared source
+# directly rather than growing another lock implementation.
+sys.path.insert(0, str(LEASE_LIB))
+from single_instance_lease import AlreadyRunningError, SingleInstance  # noqa: E402
+
+_ADMISSION_SERVICE = "copilot-extensions-test-runner"
+
+
+def _admission_dir() -> Path:
+    """Return a per-user, host-wide lock directory shared by all worktrees."""
+    if os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "copilot-extensions" / "test-runner"
+
+
+def _acquire_admission(wait_seconds: float) -> SingleInstance:
+    """Acquire the host test slot, waiting for at most ``wait_seconds``."""
+    if wait_seconds < 0:
+        raise ValueError("admission wait must be non-negative")
+    lease = SingleInstance(_admission_dir(), service=_ADMISSION_SERVICE)
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            lease.acquire()
+            return lease
+        except AlreadyRunningError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise
+            time.sleep(min(0.25, remaining))
 
 
 def _plugin_dir(name: str) -> Path:
@@ -232,12 +272,14 @@ def run_plugin(
     guards: bool = False,
     collect_only: bool = False,
     allow_explicit_tiers: bool = False,
+    allow_host_state: bool = False,
 ) -> int:
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
-    print(f"[RUN ] {name}: preparing venv + {label} ...")
+    state_mode = "host state (explicit opt-in)" if allow_host_state else "isolated state"
+    print(f"[RUN ] {name}: preparing venv + {label} [{state_mode}] ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
     sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
     sandbox_parent.mkdir(parents=True, exist_ok=True)
@@ -252,6 +294,7 @@ def run_plugin(
             os.environ,
             sandbox,
             allow_explicit_tiers=allow_explicit_tiers,
+            allow_host_state=allow_host_state,
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
@@ -335,6 +378,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--collect-only", dest="collect_only", action="store_true",
                     help="build the venv and collect tests but do not run them "
                          "(cheap import/collection smoke)")
+    ap.add_argument(
+        "--admission-wait",
+        type=float,
+        default=0.0,
+        metavar="SECONDS",
+        help="wait up to SECONDS for the host-wide heavy-test slot (default: fail fast)",
+    )
+    ap.add_argument(
+        "--allow-host-state",
+        action="store_true",
+        help="explicitly let tests use the caller's HOME/config/state; intended only "
+             "for opt-in end-to-end checks that require host credentials",
+    )
     ap.add_argument("--exclude", action="append", default=[], metavar="PLUGIN",
                     help="drop a plugin from the resolved set (repeatable)")
     ap.add_argument("--list", dest="list_only", action="store_true",
@@ -375,6 +431,12 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("test_timeout must be positive")
         if args.max_files_per_sub_suite <= 0:
             raise ValueError("max_files_per_sub_suite must be positive")
+        if args.admission_wait < 0:
+            raise ValueError("admission_wait must be non-negative")
+        if args.allow_host_state and not args.allow_explicit_tiers:
+            raise ValueError(
+                "allow_host_state requires --allow-explicit-tiers"
+            )
     except ValueError as exc:
         ap.error(str(exc))
 
@@ -406,28 +468,54 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[ERROR] {msg} Install uv: https://docs.astral.sh/uv/", file=sys.stderr)
         return 2
 
-    print(f"Test targets: {', '.join(targets)}")
-    failed: list[str] = []
-    for name in targets:
+    lease: SingleInstance | None = None
+    needs_admission = not args.guards and not args.collect_only
+    if needs_admission:
+        if args.admission_wait:
+            print(f"Waiting up to {args.admission_wait:g}s for the host test slot ...")
         try:
-            rc = run_plugin(name, uv, reinstall=args.reinstall, kexpr=args.kexpr,
-                            limits=limits, guards=args.guards,
-                            plugin_timeout=args.plugin_timeout,
-                            test_timeout=args.test_timeout,
-                            max_files_per_subsuite=args.max_files_per_sub_suite,
-                            collect_only=args.collect_only,
-                            allow_explicit_tiers=args.allow_explicit_tiers)
-        except (ContainmentError, subprocess.CalledProcessError) as exc:
-            print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)
-            rc = 1
-        if rc != 0:
-            failed.append(name)
+            lease = _acquire_admission(args.admission_wait)
+        except AlreadyRunningError as exc:
+            print(
+                f"[BUSY] Another heavy plugin test run is active: {exc}. "
+                "Use --admission-wait SECONDS to wait for it.",
+                file=sys.stderr,
+            )
+            return 3
 
-    if failed:
-        print(f"\nFAILED plugins: {', '.join(failed)}")
-        return 1
-    print(f"\nAll {len(targets)} plugin suite(s) passed.")
-    return 0
+    try:
+        print(f"Test targets: {', '.join(targets)}")
+        failed: list[str] = []
+        for name in targets:
+            try:
+                rc = run_plugin(
+                    name,
+                    uv,
+                    reinstall=args.reinstall,
+                    kexpr=args.kexpr,
+                    limits=limits,
+                    plugin_timeout=args.plugin_timeout,
+                    test_timeout=args.test_timeout,
+                    max_files_per_subsuite=args.max_files_per_sub_suite,
+                    guards=args.guards,
+                    collect_only=args.collect_only,
+                    allow_explicit_tiers=args.allow_explicit_tiers,
+                    allow_host_state=args.allow_host_state,
+                )
+            except (ContainmentError, subprocess.CalledProcessError) as exc:
+                print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)
+                rc = 1
+            if rc != 0:
+                failed.append(name)
+
+        if failed:
+            print(f"\nFAILED plugins: {', '.join(failed)}")
+            return 1
+        print(f"\nAll {len(targets)} plugin suite(s) passed.")
+        return 0
+    finally:
+        if lease is not None:
+            lease.release()
 
 
 if __name__ == "__main__":

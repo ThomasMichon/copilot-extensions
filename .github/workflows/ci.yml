@@ -4,6 +4,7 @@ name: CI
 #
 # Design (see tools/run-plugin-tests.py + the repo guards under tools/):
 #   * checks         - repo guards + repo-wide ruff F/E9. Cheap (~1 min); always.
+#   * test-runner    - Linux/Windows admission + state-isolation contract.
 #   * discover       - resolve which plugin suites to run (changed on PR, all on
 #                      push to main), split into a fast set (smoke) and the one
 #                      heavy plugin (agent-worktrees, ~11 min) handled separately.
@@ -188,6 +189,29 @@ jobs:
       - name: Test worktree-manager
         working-directory: worktree-manager
         run: uv run --extra dev pytest -q
+
+  test-runner:
+    name: test runner (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test tooling
+        run: python -m pip install pytest
+      - name: Test runner admission and isolation
+        env:
+          PYTHONPATH: libs/single-instance-lease/src
+        run: >-
+          python -m pytest -q
+          libs/single-instance-lease/tests/test_lease.py
+          tools/test_run_plugin_tests.py
 
   discover:
     name: discover suites

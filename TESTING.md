@@ -48,11 +48,23 @@ python tools/run-plugin-tests.py agent-dispatch \
 Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
 than repeatedly importing file groups that contain no selected tests.
 
+Potentially heavy runs (everything except `--guards` and `--collect-only`) also
+take one host-wide admission lease shared by every checkout and worktree. A
+second run fails fast and names the live holder instead of competing for CPU,
+memory, and process slots. Use a bounded wait when joining an existing queue is
+preferable:
+
+```bash
+python tools/run-plugin-tests.py agent-worktrees --admission-wait 900
+```
+
 Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
 `@pytest.mark.effect(...)` markers. The injected policy rejects effects that do
 not belong in the declared tier. T3 clean-room and T4 end-to-end families are
 skipped unless the caller passes `--allow-explicit-tiers`; target-specific
-environment gates still apply.
+environment gates still apply. Credential-dependent explicit-tier checks may
+also pass `--allow-host-state`; this preserves host credentials and config
+roots while still removing live Copilot session and worktree-owner bindings.
 
 The shared `agent-procutil` spawn helper detects contained test runs and
 suppresses deliberate Windows Job breakaway and POSIX session detachment.
@@ -252,8 +264,12 @@ hardened.
 **Run** (with the four `AGENT_BRIDGE_E2E_*` variables exported):
 
 ```bash
-python tools/run-plugin-tests.py agent-bridge -k e2e
+python tools/run-plugin-tests.py agent-bridge -k e2e \
+  --allow-explicit-tiers --allow-host-state
 ```
+
+The explicit host-state escape hatch is required because these opt-in checks
+intentionally use the caller's authenticated provider configuration.
 
 **Flows:**
 1. `test_e2e_dispatch_and_single_turn` — cold dispatch reaches `IDLE` with a live

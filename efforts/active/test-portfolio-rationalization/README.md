@@ -105,6 +105,9 @@ suites first.
 
 ### Phase 1 — Containment before measurement
 
+- [x] Serialize potentially heavy local runner invocations behind one
+  host-wide, liveness-reconciled admission lease while leaving guards and
+  collection smoke available as cheap concurrent feedback.
 - [ ] Make the test runner own the complete descendant process tree on Windows
   and POSIX, including cleanup after interruption and timeout.
 - [ ] Enforce individual-test, sequential sub-suite, and plugin-aggregate
@@ -257,6 +260,12 @@ the inventory and evidence gates are available.
 - Began the repository-owned containment supervisor: isolated mutable state,
   runner-owned process trees, configurable wall/process/memory/temp budgets, and
   collection-time tier/effect validation.
+- Added the local admission boundary: non-guard/non-collection runs share one
+  host-wide kernel lease, fail fast on contention, and may request a bounded
+  wait.
+- Credential-dependent explicit-tier checks may opt into host credentials and
+  config roots without inheriting live Copilot session or worktree ownership.
+- Added focused Linux and Windows CI coverage for the admission contract.
 - Broad suite execution remains prohibited until adversarial containment tests
   pass and production breakaway requests are suppressed in test mode.
 
