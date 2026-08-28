@@ -162,6 +162,10 @@ reachable when their ownership is explicit.
     activating a runtime slot.
   - [ ] Carry validated snapshot identity into provision/runtime-slot ownership,
     cutover, rollback, and uninstall.
+    - [x] Establish the non-activating Python reference for immutable,
+      generation-pinned runtime-slot ownership.
+    - [ ] Add dependency-light Bash and PowerShell parity before installer or
+      bootstrap adoption.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
   simultaneous marketplace cells before broad rollout.
 
@@ -616,3 +620,24 @@ See [`design.md`](design.md).
 - Kept the slice non-operative: no version slot, activation, migration,
   tombstone, cutover, rollback, or uninstall behavior is created. Provisioning
   and later lifecycle ownership remain unchecked.
+
+### 2026-08-28 — Python runtime-slot ownership reference
+
+- Added explicit Python `slot-provision` and `slot-validate` transactions that
+  revalidate the context receipt and snapshot provenance under both receipt
+  locks, then atomically reserve one exact cell-local runtime slot with an
+  immutable `.runtime-slot-ownership.json` marker.
+- Bound the marker to marketplace, plugin, source fingerprint, runtime version,
+  snapshot root/provenance, canonical receipt paths, and pinned generations.
+  Existing markerless, malformed, copied, linked, stale, or conflicting slots
+  fail without replacement; matching ownership is idempotent.
+- Preserved rollback viability across later receipt generations: new slots
+  require current active snapshot provenance, while existing slots validate
+  against their immutable snapshot and stable cell identity and reject
+  generation regression. Atomic no-replace publication preserves any
+  concurrently appearing slot, with hidden staging kept outside
+  `versionsRoot` so existing version enumeration cannot observe it.
+- Kept the reference non-activating and unadopted. It does not write runtime
+  payloads, completion/current/LKG markers, activation receipts, launchers,
+  services, state, or tombstones. Bash/PowerShell parity and installer wiring
+  remain required before runtime-slot provisioning becomes operative.
