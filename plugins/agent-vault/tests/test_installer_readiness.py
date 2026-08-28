@@ -181,6 +181,31 @@ def test_strict_context_rejects_invalid_environment_port(monkeypatch):
         raise AssertionError("strict resolution accepted an invalid port")
 
 
+def test_strict_context_treats_null_port_as_default(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    path.write_text('{"port": null}\n', encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(path))
+
+    from agent_vault import config
+
+    assert config.resolve_context(strict=True).port == config.DEFAULT_TCP_PORT
+    assert config.resolve_context().port == config.DEFAULT_TCP_PORT
+
+
+@pytest.mark.parametrize("port", (True, 0, 65536, "not-a-port"))
+def test_strict_context_still_rejects_invalid_non_null_port(
+    port, tmp_path, monkeypatch
+):
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({"port": port}), encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_CONFIG", str(path))
+
+    from agent_vault import config
+
+    with pytest.raises(RuntimeError, match="port must be an integer"):
+        config.resolve_context(strict=True)
+
+
 def test_readiness_allows_absent_endpoint_state_to_use_legacy_fallback(
     tmp_path, monkeypatch, capsys
 ):

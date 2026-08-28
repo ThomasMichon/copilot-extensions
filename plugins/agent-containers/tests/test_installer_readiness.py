@@ -147,3 +147,34 @@ def test_strict_config_accepts_empty_yaml_document(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
 
     assert cli.load_config(strict=True).fleets == {}
+
+
+@pytest.mark.parametrize(
+    ("value", "content"),
+    (
+        ("false", "fleets: false\n"),
+        ("zero", "fleets: 0\n"),
+        ("empty string", 'fleets: ""\n'),
+        ("array", "fleets: []\n"),
+    ),
+)
+def test_strict_config_rejects_every_falsy_non_mapping_fleets_value(
+    value, content, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    with pytest.raises(RuntimeError, match="fleets config must be a key/value mapping"):
+        cli.load_config(strict=True)
+
+
+@pytest.mark.parametrize("content", ("{}\n", "fleets: null\n"))
+def test_strict_config_treats_missing_or_null_fleets_as_empty(
+    content, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config(strict=True).fleets == {}

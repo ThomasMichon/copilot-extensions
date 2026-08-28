@@ -157,7 +157,7 @@ def _validate_config_data(data: dict[str, Any], label: str) -> None:
         value = data.get(key)
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise RuntimeError(f"{label}: {key} must be a non-empty string")
-    if "port" in data:
+    if "port" in data and data["port"] is not None:
         port = data["port"]
         if isinstance(port, bool):
             raise RuntimeError(f"{label}: port must be an integer from 1 to 65535")

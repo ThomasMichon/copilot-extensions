@@ -600,7 +600,8 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
     )
     config.rescue.validate()
 
-    fleets = data.get("fleets", {}) or {}
+    raw_fleets = data.get("fleets")
+    fleets = {} if raw_fleets is None else raw_fleets
     if not isinstance(fleets, dict):
         if strict:
             raise RuntimeError("fleets config must be a key/value mapping")
