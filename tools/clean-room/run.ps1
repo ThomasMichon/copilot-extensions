@@ -275,6 +275,7 @@ $DriveAgent = "cleanroom:$Container"        # the namespaced agent-bridge addres
 # Invoke-Eval can set it before Invoke-BridgeRegister bakes it into the manifest.
 $script:AcpCommand = 'copilot --acp --stdio --allow-all-tools'
 $script:AcpCwd = ''
+$script:BridgeContainerId = ''
 
 if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
 if (-not $ResultsDir) {
@@ -452,7 +453,28 @@ function Invoke-Shell {
 }
 
 function Invoke-Down {
-    docker rm -f $Container 2>$null | Out-Null
+    $containerId = $script:BridgeContainerId
+    if (-not $containerId) {
+        $containerId = (& docker inspect -f '{{.Id}}' $Container 2>$null | Out-String).Trim()
+    }
+    if (-not $containerId) {
+        try {
+            Invoke-BridgeUnregister | Out-Null
+        } catch {
+            throw "no container found and stale registration cleanup failed for ${Container}: $_"
+        }
+        Write-Host "removed $Container" -ForegroundColor Green
+        return
+    }
+    docker rm -f $containerId 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "could not remove $Container ($containerId)"
+    }
+    try {
+        Invoke-BridgeUnregister -ContainerId $containerId | Out-Null
+    } catch {
+        throw "removed $Container but could not unregister it from agent-bridge: $_"
+    }
     Write-Host "removed $Container" -ForegroundColor Green
 }
 
@@ -468,14 +490,35 @@ function Invoke-BridgeRegister {
     $bridgeArgs = @('--acp-command', $script:AcpCommand)
     if ($script:AcpCwd) { $bridgeArgs += @('--acp-cwd', $script:AcpCwd) }
     $bridgeArgs += @('register', '--container', $Container, '--name', $AgentName)
-    & $py.Source (Join-Path $Here 'bridge_register.py') @bridgeArgs
+    $response = (& $py.Source (Join-Path $Here 'bridge_register.py') @bridgeArgs | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw "bridge registration failed" }
+    try {
+        $registration = $response | ConvertFrom-Json
+        $script:BridgeContainerId = [string]$registration.container_id
+    } catch {
+        throw "bridge registration returned invalid JSON"
+    }
+    if (-not $script:BridgeContainerId) {
+        throw "bridge registration returned no container ID"
+    }
+    Write-Host $response
     Write-Host "drive it:  agent-bridge create $DriveAgent `"<prompt>`"" -ForegroundColor Green
 }
-function Invoke-BridgeUnregister {
+function Invoke-BridgeUnregister([string]$ContainerId = '') {
     $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
     if (-not $py) { throw "python not found on PATH" }
-    & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName --container $Container
+    if (-not $ContainerId) { $ContainerId = $script:BridgeContainerId }
+    if (-not $ContainerId) {
+        $ContainerId = (& docker inspect -f '{{.Id}}' $Container 2>$null | Out-String).Trim()
+    }
+    $unregisterArgs = @('unregister', '--name', $AgentName, '--container', $Container)
+    if ($ContainerId) {
+        $unregisterArgs += @('--container-id', $ContainerId)
+    } else {
+        $unregisterArgs += @('--stale')
+    }
+    & $py.Source (Join-Path $Here 'bridge_register.py') @unregisterArgs
+    if ($LASTEXITCODE -ne 0) { throw "bridge unregistration failed" }
 }
 # End any prior agent-bridge session for an agent so a fresh `create` isn't
 # refused with "already has an active session" (a recreated box leaves the old
@@ -703,7 +746,13 @@ print(cwd)
     }
 
     # --- 7) unregister the bridge agent --------------------------------------
-    Invoke-BridgeUnregister 2>$null
+    $bridgeCleanupError = ''
+    try {
+        Invoke-BridgeUnregister 2>$null
+    } catch {
+        $bridgeCleanupError = "could not unregister $Container from agent-bridge: $_"
+        Write-Warning $bridgeCleanupError
+    }
 
     # --- write the eval run-manifest (judge packet index) --------------------
     $copilotVer = (docker exec $Container /bin/bash -lc 'copilot --version 2>/dev/null' 2>$null | Select-Object -First 1)
@@ -722,6 +771,7 @@ print(cwd)
         docs_hash        = $docsHash
         per_turn_timeout_s = $perTurnTimeout
         tier_p_precondition = if ($SkipTierPGate) { "$tierPCmd (SKIPPED)" } else { $tierPCmd }
+        bridge_cleanup_error = $bridgeCleanupError
         max_credits_note = "runs.max_credits is advisory: the agent-bridge `create` transport does not expose per-turn credits, so it cannot be hard-enforced from the runner (see TIER-E-EXECUTION.md)."
         report       = 'cr-report.json'
         cr_logs      = 'cr-logs/'
@@ -742,6 +792,7 @@ print(cwd)
         'shell' { Invoke-Shell }
         'down'  { Invoke-Down }
     }
+    if ($bridgeCleanupError) { throw $bridgeCleanupError }
 }
 
 switch ($Mode) {

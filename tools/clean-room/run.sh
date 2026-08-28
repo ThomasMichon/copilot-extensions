@@ -96,6 +96,7 @@ CONTAINER="cr-$IMAGE$NAME_TAIL"
 AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # legacy label (kept for logs)
 DRIVE_AGENT="cleanroom:$CONTAINER"        # the namespaced agent-bridge address
 ACP_COMMAND='copilot --acp --stdio --allow-all-tools'  # eval may add --plugin-dir
+BRIDGE_CONTAINER_ID=""
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
     RESULTS="$CR_RESULTS_DIR"
@@ -214,7 +215,30 @@ do_shell() {
     echo "   run '$0 --image $IMAGE${NAME_SUFFIX:+ --name-suffix $NAME_SUFFIX} down' to remove it."
     docker exec -it "$CONTAINER" /bin/bash -l
 }
-do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CONTAINER"; }
+do_down() {
+    local container_id="${BRIDGE_CONTAINER_ID:-}"
+    if [ -z "$container_id" ]; then
+        container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER" 2>/dev/null || true)"
+    fi
+    if [ -z "$container_id" ]; then
+        if ! do_bridge_unregister >/dev/null; then
+            echo "warn: no container found and stale registration cleanup failed for $CONTAINER" >&2
+            return 1
+        fi
+        echo "removed $CONTAINER"
+        return 0
+    fi
+    if ! docker rm -f "$container_id" >/dev/null 2>&1; then
+        echo "error: could not remove $CONTAINER ($container_id)" >&2
+        return 1
+    fi
+    BRIDGE_CONTAINER_ID="$container_id"
+    if ! do_bridge_unregister >/dev/null; then
+        echo "warn: removed $CONTAINER but could not unregister it from agent-bridge" >&2
+        return 1
+    fi
+    echo "removed $CONTAINER"
+}
 # Register/unregister the container with agent-bridge (drive the in-container
 # Copilot with `agent-bridge create cleanroom:<container> ...`). Uses the
 # declarative providers.d/ namespace-provider model (agent-bridge >= dev307; the
@@ -224,11 +248,32 @@ _py() { command -v python3 || command -v python; }
 do_bridge_register() {
     ensure_container
     local bridge_args=(--acp-command "$ACP_COMMAND")
+    local response
     [ -n "${ACP_CWD:-}" ] && bridge_args+=(--acp-cwd "$ACP_CWD")
-    "$(_py)" "$HERE/bridge_register.py" "${bridge_args[@]}" register --container "$CONTAINER" --name "$AGENT_NAME"
+    if ! response="$("$(_py)" "$HERE/bridge_register.py" "${bridge_args[@]}" register --container "$CONTAINER" --name "$AGENT_NAME")"; then
+        return 1
+    fi
+    printf '%s\n' "$response"
+    BRIDGE_CONTAINER_ID="$(printf '%s' "$response" | "$(_py)" -c '
+import json, sys
+print(json.load(sys.stdin).get("container_id", ""))
+')"
+    [ -n "$BRIDGE_CONTAINER_ID" ] || return 1
     echo "drive it:  agent-bridge create $DRIVE_AGENT \"<prompt>\""
 }
-do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME" --container "$CONTAINER"; }
+do_bridge_unregister() {
+    local container_id="${BRIDGE_CONTAINER_ID:-}"
+    if [ -z "$container_id" ]; then
+        container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER" 2>/dev/null || true)"
+    fi
+    local unregister_args=(unregister --name "$AGENT_NAME" --container "$CONTAINER")
+    if [ -n "$container_id" ]; then
+        unregister_args+=(--container-id "$container_id")
+    else
+        unregister_args+=(--stale)
+    fi
+    "$(_py)" "$HERE/bridge_register.py" "${unregister_args[@]}"
+}
 # End any prior agent-bridge session for an agent so a fresh `create` isn't
 # refused with "already has an active session". Idempotent + best-effort.
 end_agent_sessions() {
@@ -422,14 +467,16 @@ for value in json.loads(sys.argv[1]):
         echo "== eval: Tier-P precondition ($TIERP) =="
         if ! docker exec "$CONTAINER" /bin/bash -lc "$TIERP" >/dev/null 2>&1; then
             echo "eval: Tier-P precondition '$TIERP' failed -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass --skip-tier-p-gate to force." >&2
-            do_bridge_unregister >/dev/null 2>&1 || true
             exit 1
         fi
         echo "   precondition OK"
     fi
 
     # --- 3) register the box as a bridge agent -------------------------------
-    do_bridge_register
+    if ! do_bridge_register; then
+        echo "eval: could not register $CONTAINER with agent-bridge" >&2
+        exit 1
+    fi
 
     # --- reproducibility fingerprints (prompt hash computed above) -----------
     local docs_hash copilot_ver
@@ -463,13 +510,18 @@ for value in json.loads(sys.argv[1]):
     fi
 
     # --- 7) unregister the bridge agent --------------------------------------
-    do_bridge_unregister >/dev/null 2>&1 || true
+    local bridge_cleanup_error=""
+    if ! do_bridge_unregister >/dev/null 2>&1; then
+        bridge_cleanup_error="could not unregister $CONTAINER from agent-bridge"
+        echo "warn: $bridge_cleanup_error" >&2
+    fi
 
     # --- write the eval run-manifest (judge packet index) --------------------
     copilot_ver="$(docker exec "$CONTAINER" /bin/bash -lc 'copilot --version 2>/dev/null' 2>/dev/null | head -1)"
     CR_SCENARIO_NAME="$SCENARIO_NAME" CR_FAMILY="$FAMILY" CR_IMAGE="$IMAGE" CR_RUN_COUNT="$RUN_COUNT" \
     CR_AGG="$AGG" CR_COPILOT_VER="$copilot_ver" CR_PROMPT_HASH="$PROMPT_HASH" CR_DOCS_HASH="$docs_hash" \
     CR_PER_TURN="${PER_TURN:-0}" CR_TIERP="$TIERP" CR_SKIP_TIER_P="${SKIP_TIER_P:-0}" \
+    CR_BRIDGE_CLEANUP_ERROR="$bridge_cleanup_error" \
     "$(_py)" - "$recs" > "$eval_dir/eval-run.json" <<'PY'
 import json, os, sys
 recs_path = sys.argv[1]
@@ -491,6 +543,7 @@ meta = {
     "copilot_version": e["CR_COPILOT_VER"], "prompt_hash": e["CR_PROMPT_HASH"], "docs_hash": e["CR_DOCS_HASH"],
     "per_turn_timeout_s": int(e["CR_PER_TURN"]),
     "tier_p_precondition": tierp_field,
+    "bridge_cleanup_error": e["CR_BRIDGE_CLEANUP_ERROR"],
     "max_credits_note": "runs.max_credits is advisory: the agent-bridge create transport does not expose per-turn credits, so it cannot be hard-enforced from the runner (see TIER-E-EXECUTION.md).",
     "report": "cr-report.json", "cr_logs": "cr-logs/", "judged": False,
     "note": "Run clean-room-judge on this packet, then write cr-eval.json (see TIER-E-EXECUTION.md).",
@@ -507,10 +560,16 @@ PY
     echo "  report + logs    : $RESULTS"
     echo "  run index        : $eval_dir/eval-run.json"
     echo "results dir: $RESULTS"
+    local teardown_error=""
     case "$THEN" in
         shell) do_shell ;;
-        down)  do_down ;;
+        down)
+            if ! do_down; then
+                teardown_error="could not tear down $CONTAINER"
+            fi
+            ;;
     esac
+    [ -z "$bridge_cleanup_error" ] && [ -z "$teardown_error" ] || return 1
 }
 
 case "$MODE" in

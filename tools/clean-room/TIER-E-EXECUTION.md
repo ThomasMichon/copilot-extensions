@@ -183,6 +183,17 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
 }
 ```
 
+Each running clean-room container has its own provider registration record,
+bound to that container's immutable Docker ID. Concurrent evaluations therefore
+keep their own ACP command and resolved workspace folder even though they share
+the `cleanroom:` namespace manifest. The manifest invokes a stable provider copy
+under agent-bridge state rather than a disposable source-worktree path. Resolve
+and readiness checks require the same running container ID and a still-existing
+ACP cwd. Normal unregister compares the caller-retained immutable ID; explicit
+stale cleanup only removes a record after its recorded ID is gone. Cleanup
+failures are reported in `eval-run.json` instead of discarding an otherwise
+complete judge packet.
+
 **Design choices:**
 
 - **Setup and eval are separated.** `setup.sh` only *arranges* the box (it may use
