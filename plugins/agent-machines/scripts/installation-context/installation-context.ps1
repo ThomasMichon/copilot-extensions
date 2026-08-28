@@ -1,7 +1,6 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidateSet('source-id', 'resolve', 'validate', 'stamp')]
     [string]$Action,
     [string]$SourceJson,
     [string]$SourceFile,
@@ -17,15 +16,16 @@ param(
     [string]$ExpectedPayloadRoot,
     [string]$ExpectedCellRoot,
     [string]$PayloadVersion,
-    [ValidateSet('', 'installed', 'directory', 'staged', 'explicit')]
     [string]$PayloadOrigin,
     [string]$PayloadOriginReceipt,
     [long]$ExpectedNamespaceGeneration = -1,
     [long]$ExpectedInstallGeneration = -1,
-    [ValidateSet('active', 'inactive', 'orphaned', 'removing')]
     [string]$NamespaceState = 'active',
-    [ValidateSet('active', 'inactive', 'orphaned', 'removing')]
-    [string]$InstallState = 'active'
+    [string]$InstallState = 'active',
+    [string]$LegacyRoot,
+    [string]$LegacyProbeJson,
+    [string]$LegacyProbeFile,
+    [string]$PolicyPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -121,10 +121,51 @@ public static class CePosixPath {
 '@
 }
 
+if ($env:OS -ne 'Windows_NT' -and -not ('CePosixAccount' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class CePosixAccount {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Passwd {
+        public IntPtr pw_name;
+        public IntPtr pw_passwd;
+        public uint pw_uid;
+        public uint pw_gid;
+        public IntPtr pw_gecos;
+        public IntPtr pw_dir;
+        public IntPtr pw_shell;
+    }
+
+    [DllImport("libc")]
+    private static extern uint geteuid();
+
+    [DllImport("libc", SetLastError = true)]
+    private static extern IntPtr getpwuid(uint uid);
+
+    public static string Home() {
+        IntPtr pointer = getpwuid(geteuid());
+        if (pointer == IntPtr.Zero) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        Passwd entry = (Passwd)Marshal.PtrToStructure(pointer, typeof(Passwd));
+        string home = Marshal.PtrToStringAnsi(entry.pw_dir);
+        if (string.IsNullOrEmpty(home)) {
+            throw new Win32Exception("passwd entry is missing a home directory");
+        }
+        return home;
+    }
+}
+'@
+}
+
 if (-not ('CeStrictJson' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
 using System.Collections.Generic;
+using System.Text;
 
 public static class CeStrictJson {
     private sealed class Parser {
@@ -314,6 +355,30 @@ public static class CeStrictJson {
 
     public static void Validate(string value) {
         new Parser(value).Parse();
+    }
+
+    public static string ProtectStrings(string value, string marker) {
+        var result = new StringBuilder(value.Length + marker.Length);
+        bool inString = false;
+        bool escaped = false;
+        foreach (char current in value) {
+            result.Append(current);
+            if (!inString) {
+                if (current == '"') {
+                    result.Append(marker);
+                    inString = true;
+                }
+                continue;
+            }
+            if (escaped) {
+                escaped = false;
+            } else if (current == '\\') {
+                escaped = true;
+            } else if (current == '"') {
+                inString = false;
+            }
+        }
+        return result.ToString();
     }
 }
 '@
@@ -601,6 +666,44 @@ function Paths-Equal([string]$Left, [string]$Right) {
     )
 }
 
+function Restore-ProtectedJsonValue($Value, [string]$Marker) {
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string]) {
+        if (-not $Value.StartsWith($Marker, [StringComparison]::Ordinal)) {
+            Fail 'JSON string protection marker is missing.'
+        }
+        return $Value.Substring($Marker.Length)
+    }
+    if ($Value -is [System.Management.Automation.PSCustomObject]) {
+        $result = [ordered]@{}
+        foreach ($property in $Value.PSObject.Properties) {
+            if (-not $property.Name.StartsWith($Marker, [StringComparison]::Ordinal)) {
+                Fail 'JSON property protection marker is missing.'
+            }
+            $name = $property.Name.Substring($Marker.Length)
+            $result[$name] = Restore-ProtectedJsonValue $property.Value $Marker
+        }
+        return [pscustomobject]$result
+    }
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = @()
+        foreach ($item in $Value) {
+            $items += ,(Restore-ProtectedJsonValue $item $Marker)
+        }
+        return ,$items
+    }
+    return $Value
+}
+
+function ConvertFrom-StrictJson([string]$Value) {
+    do {
+        $marker = "__CE_JSON_$([Guid]::NewGuid().ToString('N'))__"
+    } while ($Value.Contains($marker))
+    $protected = [CeStrictJson]::ProtectStrings($Value, $marker)
+    $parsed = $protected | ConvertFrom-Json
+    return Restore-ProtectedJsonValue $parsed $marker
+}
+
 function Read-Json([string]$Path) {
     $canonical = Canonical-Path $Path -MustExist
     try {
@@ -611,10 +714,23 @@ function Read-Json([string]$Path) {
         }
         $text = $strictUtf8.GetString($bytes)
         [CeStrictJson]::Validate($text)
-        return ($text | ConvertFrom-Json)
+        return ConvertFrom-StrictJson $text
     }
     catch {
         Fail "Invalid JSON in '$canonical': $($_.Exception.Message)"
+    }
+}
+
+function Read-JsonText([string]$Value, [string]$Label) {
+    if ($Value.Length -gt 0 -and $Value[0] -eq [char]0xFEFF) {
+        Fail "UTF-8 BOM is not allowed in $Label."
+    }
+    try {
+        [CeStrictJson]::Validate($Value)
+        return ConvertFrom-StrictJson $Value
+    }
+    catch {
+        Fail "Invalid ${Label}: $($_.Exception.Message)"
     }
 }
 
@@ -624,14 +740,7 @@ function Read-SourceDescriptor {
     }
     if ($SourceFile) { return Read-Json $SourceFile }
     if ($SourceJson) {
-        if ($SourceJson[0] -eq [char]0xFEFF) {
-            Fail 'UTF-8 BOM is not allowed in -SourceJson.'
-        }
-        try {
-            [CeStrictJson]::Validate($SourceJson)
-            return ($SourceJson | ConvertFrom-Json)
-        }
-        catch { Fail "Invalid -SourceJson: $($_.Exception.Message)" }
+        return Read-JsonText $SourceJson '-SourceJson'
     }
     return $null
 }
@@ -1408,6 +1517,1090 @@ function Validate-ContextReceipt(
     }
 }
 
+function Assert-ExactChoice([string]$Value, [string[]]$Allowed, [string]$Name) {
+    if ($Allowed -cnotcontains $Value) {
+        Fail "$Name must be one of: $($Allowed -join ', ')."
+    }
+}
+
+function Assert-MarketplaceId([string]$Value) {
+    if ($Value -notmatch '^[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{16}$') {
+        Fail "Invalid source-derived marketplace id '$Value'."
+    }
+}
+
+function Assert-JsonObject($Value, [string]$Name) {
+    if ($null -eq $Value -or
+        ($Value.GetType().Name -ne 'PSCustomObject' -and
+         $Value -isnot [System.Collections.IDictionary])) {
+        Fail "$Name must be an object."
+    }
+}
+
+function Has-ExactProperty($Object, [string]$Name) {
+    if ($null -eq $Object) { return $false }
+    foreach ($property in $Object.PSObject.Properties) {
+        if ($property.Name -ceq $Name) { return $true }
+        if ($property.Name -ieq $Name) {
+            Fail "JSON property '$($property.Name)' conflicts with exact case '$Name'."
+        }
+    }
+    return $false
+}
+
+function Get-OptionalBooleanField($Object, [string]$Name, [string]$Label) {
+    if (-not (Has-ExactProperty $Object $Name)) {
+        return [pscustomobject][ordered]@{
+            present = $false
+            value = $false
+        }
+    }
+    $value = Get-PropertyValue $Object $Name
+    if ($value -isnot [bool]) {
+        Fail "$Label must be a boolean."
+    }
+    return [pscustomobject][ordered]@{
+        present = $true
+        value = [bool]$value
+    }
+}
+
+function Normalize-ShortHost([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return '' }
+    return $Value.Split('.')[0].ToLowerInvariant()
+}
+
+function Read-ExactUtcTimestampValue($Value, [string]$Name) {
+    if ($Value -isnot [string]) {
+        Fail "$Name must be a string."
+    }
+    if ($Value -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') {
+        Fail "$Name must be an RFC3339 UTC timestamp with seconds and Z."
+    }
+    $styles = [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+    $parsed = [DateTime]::MinValue
+    if (-not [DateTime]::TryParseExact(
+        $Value,
+        'yyyy-MM-ddTHH:mm:ssZ',
+        [Globalization.CultureInfo]::InvariantCulture,
+        $styles,
+        [ref]$parsed
+    )) {
+        Fail "$Name must be an RFC3339 UTC timestamp with seconds and Z."
+    }
+    return $parsed.ToUniversalTime().ToString(
+        'yyyy-MM-ddTHH:mm:ssZ',
+        [Globalization.CultureInfo]::InvariantCulture
+    )
+}
+
+function Test-SameEnvironment($Left, $Right) {
+    if ($null -eq $Left -or $null -eq $Right) { return $false }
+    if ((Get-StringProperty $Left 'platform') -cne (Get-StringProperty $Right 'platform')) {
+        return $false
+    }
+    if ((Get-StringProperty $Left 'homeRealPath') -cne (Get-StringProperty $Right 'homeRealPath')) {
+        return $false
+    }
+    $leftDistro = Get-PropertyValue $Left 'wslDistro'
+    $rightDistro = Get-PropertyValue $Right 'wslDistro'
+    if ($null -eq $leftDistro -and $null -eq $rightDistro) { return $true }
+    if ($leftDistro -isnot [string] -or $rightDistro -isnot [string]) { return $false }
+    return $leftDistro -ceq $rightDistro
+}
+
+function Get-CurrentEnvironment {
+    if ($env:OS -eq 'Windows_NT') {
+        if (-not $env:USERPROFILE) { Fail 'USERPROFILE is required on Windows.' }
+        if (-not [IO.Path]::IsPathRooted($env:USERPROFILE)) {
+            Fail 'USERPROFILE must be absolute.'
+        }
+        $homeRealPath = Canonical-Path $env:USERPROFILE -MustExist
+        return [pscustomobject][ordered]@{
+            platform = 'windows'
+            homeRealPath = $homeRealPath
+            wslDistro = $null
+        }
+    }
+
+    try {
+        $passwdHome = [CePosixAccount]::Home()
+    }
+    catch {
+        Fail "Cannot determine the account home from the passwd database: $($_.Exception.Message)"
+    }
+    if (-not [IO.Path]::IsPathRooted($passwdHome)) {
+        Fail 'The passwd database home must be absolute.'
+    }
+    $homeRealPath = Canonical-Path $passwdHome -MustExist
+    $wslDistro = $null
+    if (-not [string]::IsNullOrEmpty($env:WSL_DISTRO_NAME)) {
+        $wslDistro = [string]$env:WSL_DISTRO_NAME
+    }
+    return [pscustomobject][ordered]@{
+        platform = 'posix'
+        homeRealPath = $homeRealPath
+        wslDistro = $wslDistro
+    }
+}
+
+function Read-EnvironmentObject($EnvironmentObject, [string]$Label) {
+    Assert-JsonObject $EnvironmentObject $Label
+    $platform = Get-StringProperty $EnvironmentObject 'platform'
+    if ($platform -cnotin @('windows', 'posix')) {
+        Fail "$Label.platform must be windows or posix."
+    }
+    $homeRealPath = Get-StringProperty $EnvironmentObject 'homeRealPath'
+    if (-not [IO.Path]::IsPathRooted($homeRealPath)) {
+        Fail "$Label.homeRealPath must be absolute."
+    }
+    if (-not (Has-ExactProperty $EnvironmentObject 'wslDistro')) {
+        Fail "$Label.wslDistro is required."
+    }
+    $wslDistro = Get-PropertyValue $EnvironmentObject 'wslDistro'
+    if ($null -ne $wslDistro -and $wslDistro -isnot [string]) {
+        Fail "$Label.wslDistro must be a string or null."
+    }
+    if ($platform -ceq 'windows' -and $null -ne $wslDistro) {
+        Fail "$Label.wslDistro must be null on Windows."
+    }
+    return [pscustomobject][ordered]@{
+        platform = $platform
+        homeRealPath = $homeRealPath
+        wslDistro = $wslDistro
+    }
+}
+
+function Invoke-WithoutPluginRoot([scriptblock]$ScriptBlock) {
+    $hadVariable = Test-Path Env:COPILOT_PLUGIN_ROOT
+    $savedValue = $env:COPILOT_PLUGIN_ROOT
+    try {
+        Remove-Item Env:COPILOT_PLUGIN_ROOT -ErrorAction SilentlyContinue
+        return & $ScriptBlock
+    }
+    finally {
+        if ($hadVariable) {
+            $env:COPILOT_PLUGIN_ROOT = $savedValue
+        }
+        else {
+            Remove-Item Env:COPILOT_PLUGIN_ROOT -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Read-LegacyProbe {
+    if ($LegacyProbeJson -and $LegacyProbeFile) {
+        Fail 'Specify only one of -LegacyProbeJson and -LegacyProbeFile.'
+    }
+
+    if ($LegacyProbeJson) {
+        $probe = Read-JsonText $LegacyProbeJson '-LegacyProbeJson'
+    }
+    elseif ($LegacyProbeFile) {
+        $probe = Read-Json $LegacyProbeFile
+    }
+    else {
+        $probe = [pscustomobject][ordered]@{
+            declared = $false
+            result = 'unknown'
+            checkedAt = $null
+        }
+    }
+
+    Assert-JsonObject $probe 'legacy probe'
+    if (-not (Has-ExactProperty $probe 'declared')) {
+        Fail 'legacy probe.declared is required.'
+    }
+    $declared = Get-PropertyValue $probe 'declared'
+    if ($declared -isnot [bool]) {
+        Fail 'legacy probe.declared must be a boolean.'
+    }
+    if (-not (Has-ExactProperty $probe 'result')) {
+        Fail 'legacy probe.result is required.'
+    }
+    $result = Get-StringProperty $probe 'result'
+    if ($result -cnotin @('absent', 'present', 'unknown')) {
+        Fail 'legacy probe.result must be absent, present, or unknown.'
+    }
+    if (-not (Has-ExactProperty $probe 'checkedAt')) {
+        Fail 'legacy probe.checkedAt is required.'
+    }
+    $checkedAt = Get-PropertyValue $probe 'checkedAt'
+    if ($null -ne $checkedAt) {
+        $checkedAt = Read-ExactUtcTimestampValue $checkedAt 'legacy probe.checkedAt'
+    }
+    if (-not $declared -and $result -cne 'unknown') {
+        Fail 'legacy probe.result must be unknown when declared is false.'
+    }
+    return [pscustomobject][ordered]@{
+        declared = [bool]$declared
+        result = $result
+        checkedAt = $checkedAt
+    }
+}
+
+function Test-ProvenanceBlockedMessage([string]$Message) {
+    return (
+        $Message -like 'No user or explicit project extraKnownMarketplaces declaration found*' -or
+        $Message -like 'Conflicting declarations for marketplace key*' -or
+        $Message -like 'Cannot establish marketplace provenance*' -or
+        $Message -like "Source '*' already owns cell/locator*"
+    )
+}
+
+function Get-InstalledPayloadPluginId(
+    [string]$ResolvedPayload,
+    [string]$ResolvedCopilotHome
+) {
+    $installed = Canonical-Path (Join-Path $ResolvedCopilotHome 'installed-plugins')
+    $prefix = $installed + [IO.Path]::DirectorySeparatorChar
+    $comparison = [StringComparison]::Ordinal
+    if ($env:OS -eq 'Windows_NT') { $comparison = [StringComparison]::OrdinalIgnoreCase }
+    if (-not $ResolvedPayload.StartsWith($prefix, $comparison)) { return '' }
+    $relative = $ResolvedPayload.Substring($prefix.Length)
+    $parts = @($relative -split '[\\/]')
+    if ($parts.Count -ne 2) { return '' }
+    return $parts[1]
+}
+
+function Resolve-StatusTarget(
+    [string]$ResolvedCopilotHome,
+    [string]$ResolvedProjectRoot,
+    [string]$ResolvedDurableHome
+) {
+    $target = [ordered]@{
+        provenanceBlocked = $false
+        provenanceReason = ''
+        invalidContext = $false
+        invalidReason = ''
+        marketplaceId = $null
+        pluginId = $null
+        payloadRoot = $null
+        cellRoot = $null
+        pluginRoot = $null
+        namespaceReceipt = $null
+        installReceipt = $null
+        source = $null
+        sourceFingerprint = $null
+        validatedContext = $null
+    }
+
+    $pointer = $Context
+    if (-not $pointer) { $pointer = $env:COPILOT_EXTENSIONS_CONTEXT }
+    if ($pointer) {
+        if (-not [IO.Path]::IsPathRooted($pointer)) {
+            Fail 'The installation-context receipt pointer must be absolute.'
+        }
+        $pointerPath = Canonical-Path $pointer
+        $payloadExpectation = $ExpectedPayloadRoot
+        if (-not $payloadExpectation -and $PayloadRoot) { $payloadExpectation = $PayloadRoot }
+        if (-not $payloadExpectation -and $env:COPILOT_PLUGIN_ROOT) {
+            $payloadExpectation = $env:COPILOT_PLUGIN_ROOT
+        }
+        $pluginExpectation = $PluginId
+        if (-not $pluginExpectation) { $pluginExpectation = $ExpectedPluginId }
+        try {
+            $pointerPath = Canonical-Path $pointer -MustExist
+            $validated = Validate-ContextReceipt $pointerPath $ResolvedDurableHome $ExpectedMarketplaceId $pluginExpectation $payloadExpectation $ExpectedCellRoot
+            $target.marketplaceId = [string]$validated.marketplaceId
+            $target.pluginId = [string]$validated.pluginId
+            $target.payloadRoot = [string]$validated.payloadRoot
+            $target.cellRoot = [string]$validated.cellRoot
+            $target.pluginRoot = [string]$validated.pluginRoot
+            $target.namespaceReceipt = [string]$validated.namespaceReceipt
+            $target.installReceipt = [string]$validated.installReceipt
+            $target.source = $validated.source
+            $target.sourceFingerprint = [string]$validated.sourceFingerprint
+            $target.validatedContext = $validated
+            return [pscustomobject]$target
+        }
+        catch {
+            $target.invalidContext = $true
+            $target.invalidReason = $_.Exception.Message
+            if ((Split-Path -Leaf $pointerPath) -ceq 'install.json') {
+                $pluginRoot = Split-Path -Parent $pointerPath
+                $pluginsRoot = Split-Path -Parent $pluginRoot
+                $cellRoot = Split-Path -Parent $pluginsRoot
+                if ((Split-Path -Leaf $pluginsRoot) -ceq 'plugins') {
+                    $target.pluginId = Split-Path -Leaf $pluginRoot
+                    $target.marketplaceId = Split-Path -Leaf $cellRoot
+                    $target.cellRoot = $cellRoot
+                    $target.pluginRoot = $pluginRoot
+                    $target.namespaceReceipt = Canonical-Path (Join-Path $cellRoot 'namespace.json')
+                    $target.installReceipt = $pointerPath
+                }
+            }
+            return [pscustomobject]$target
+        }
+    }
+
+    if (-not $PayloadRoot) { $PayloadRoot = $env:COPILOT_PLUGIN_ROOT }
+    if (-not $PayloadRoot) { Fail "$Action requires -PayloadRoot or COPILOT_PLUGIN_ROOT." }
+    if (-not [IO.Path]::IsPathRooted($PayloadRoot)) {
+        Fail 'The payload root must be absolute.'
+    }
+
+    $resolvedPayload = Canonical-Path $PayloadRoot -MustExist
+    if (-not (Test-Path -LiteralPath $resolvedPayload -PathType Container)) {
+        Fail "The payload root must be an existing directory: $resolvedPayload"
+    }
+    if ($env:COPILOT_PLUGIN_ROOT) {
+        if (-not [IO.Path]::IsPathRooted($env:COPILOT_PLUGIN_ROOT)) {
+            Fail 'COPILOT_PLUGIN_ROOT must be absolute.'
+        }
+        if (-not (Paths-Equal $resolvedPayload $env:COPILOT_PLUGIN_ROOT)) {
+            Fail 'COPILOT_PLUGIN_ROOT conflicts with -PayloadRoot.'
+        }
+    }
+    $target.payloadRoot = $resolvedPayload
+
+    $descriptor = Read-SourceDescriptor
+    $evidence = $null
+    if ($null -ne $descriptor) {
+        if (-not $PluginId) { Fail 'Explicit source resolution requires -PluginId.' }
+        $evidence = [pscustomobject]@{
+            source = Normalize-Source $descriptor ''
+            pluginId = $PluginId
+            readableName = $(if ($MarketplaceKey) { $MarketplaceKey } else { 'marketplace' })
+            locator = $null
+        }
+    }
+    else {
+        try {
+            $evidence = Resolve-InstalledEvidence $resolvedPayload $ResolvedCopilotHome $ResolvedProjectRoot
+        }
+        catch {
+            if (Test-ProvenanceBlockedMessage $_.Exception.Message) {
+                $target.provenanceBlocked = $true
+                $target.provenanceReason = $_.Exception.Message
+                $target.pluginId = $(if ($PluginId) { $PluginId } else { Get-InstalledPayloadPluginId $resolvedPayload $ResolvedCopilotHome })
+                return [pscustomobject]$target
+            }
+            throw
+        }
+        if ($null -eq $evidence) {
+            try {
+                $evidence = Resolve-DirectoryEvidence $resolvedPayload $PluginId
+            }
+            catch {
+                if (Test-ProvenanceBlockedMessage $_.Exception.Message) {
+                    $target.provenanceBlocked = $true
+                    $target.provenanceReason = $_.Exception.Message
+                    $target.pluginId = $PluginId
+                    return [pscustomobject]$target
+                }
+                throw
+            }
+        }
+        if ($null -eq $evidence) {
+            $target.provenanceBlocked = $true
+            $target.provenanceReason = "Cannot establish marketplace provenance for payload '$resolvedPayload'. Supply an explicit source descriptor for management/development mode."
+            $target.pluginId = $PluginId
+            return [pscustomobject]$target
+        }
+        if ($PluginId -and $PluginId -cne $evidence.pluginId) {
+            Fail "Expected plugin '$PluginId', payload evidence identifies '$($evidence.pluginId)'."
+        }
+    }
+
+    Assert-PluginId $evidence.pluginId
+    $identity = Source-Identity $evidence.source $evidence.readableName
+    $existing = @(Find-ExistingSource $ResolvedDurableHome $identity.fingerprint $identity.marketplaceId $evidence.locator)
+    $rebind = @($existing | Where-Object { -not $_.sameId -or -not $_.locatorMatch })
+    if ($rebind.Count -gt 0) {
+        $target.provenanceBlocked = $true
+        $target.provenanceReason = "Source '$($identity.fingerprint)' already owns cell/locator '$((@($rebind | ForEach-Object { $_.marketplaceId }) -join ', '))'; explicit rebind or new-cell intent is required."
+    }
+    $target.marketplaceId = [string]$identity.marketplaceId
+    $target.pluginId = [string]$evidence.pluginId
+    $target.source = [pscustomobject][ordered]@{
+        kind = $identity.kind
+        canonical = $identity.canonical
+        ref = $identity.ref
+    }
+    $target.sourceFingerprint = [string]$identity.fingerprint
+    $target.cellRoot = Canonical-Path (Join-Path (Join-Path $ResolvedDurableHome 'marketplaces') $identity.marketplaceId)
+    $target.pluginRoot = Canonical-Path (Join-Path (Join-Path $target.cellRoot 'plugins') $evidence.pluginId)
+    $target.namespaceReceipt = Canonical-Path (Join-Path $target.cellRoot 'namespace.json')
+    $target.installReceipt = Canonical-Path (Join-Path $target.pluginRoot 'install.json')
+    if ($target.provenanceBlocked) {
+        return [pscustomobject]$target
+    }
+    if (Test-Path -LiteralPath $target.installReceipt -PathType Leaf) {
+        try {
+            $validated = Validate-ContextReceipt $target.installReceipt $ResolvedDurableHome $identity.marketplaceId $evidence.pluginId $resolvedPayload $target.cellRoot
+            $target.validatedContext = $validated
+        }
+        catch {
+            $target.invalidContext = $true
+            $target.invalidReason = $_.Exception.Message
+        }
+    }
+    return [pscustomobject]$target
+}
+
+function Read-PolicyDecision(
+    $CurrentEnvironment,
+    [string]$MarketplaceId,
+    [string]$PluginId
+) {
+    $pathEntry = Join-Path (Join-Path $CurrentEnvironment.homeRealPath '.copilot-extensions') 'installation-mode.json'
+    $authoritative = $true
+    if ($PolicyPath) {
+        if (-not [IO.Path]::IsPathRooted($PolicyPath)) {
+            Fail '-PolicyPath must be absolute.'
+        }
+        $pathEntry = $PolicyPath
+        $authoritative = $false
+    }
+    $path = Canonical-Path $pathEntry
+
+    $policy = [ordered]@{
+        path = $path
+        authoritative = $authoritative
+        state = 'missing'
+        scope = 'default'
+        enabled = $false
+        reason = 'policy-default-false'
+    }
+
+    $pathItem = Get-Item -LiteralPath $pathEntry -Force -ErrorAction SilentlyContinue
+    if ($null -eq $pathItem) {
+        if (-not $authoritative) {
+            $policy.reason = 'policy-injected-non-authoritative'
+        }
+        return [pscustomobject]$policy
+    }
+    $linkType = Get-PropertyValue $pathItem 'LinkType'
+    if ($pathItem.PSIsContainer -or $linkType) {
+        $policy.state = 'invalid'
+        $policy.enabled = $null
+        $policy.reason = 'policy-invalid'
+        return [pscustomobject]$policy
+    }
+
+    try {
+        $document = Read-Json $path
+        Assert-JsonObject $document 'installation-mode.json'
+        if ((Get-StringProperty $document 'schema') -cne 'copilot-extensions.installation-mode') {
+            Fail 'installation-mode.json has an unsupported schema.'
+        }
+        $version = Get-PropertyValue $document 'version'
+        Assert-PositiveInteger $version 'installation-mode.json version'
+        if ($version -gt 1) {
+            $policy.state = 'unsupported'
+            $policy.enabled = $null
+            $policy.reason = 'policy-version-unsupported'
+            return [pscustomobject]$policy
+        }
+        if ($version -ne 1) {
+            Fail 'installation-mode.json has an unsupported schema.'
+        }
+
+        if (Has-ExactProperty $document 'installationMode') {
+            $installationMode = Get-PropertyValue $document 'installationMode'
+            Assert-JsonObject $installationMode 'installation-mode.json installationMode'
+        }
+        else {
+            $installationMode = [pscustomobject]@{}
+        }
+
+        $winningScope = 'default'
+        $winningEnabled = $false
+        $winningReason = 'policy-default-false'
+
+        $globalEnabled = Get-OptionalBooleanField $installationMode 'enabled' 'installationMode.enabled'
+        if ($globalEnabled.present) {
+            $winningScope = 'global'
+            $winningEnabled = $globalEnabled.value
+            $winningReason = $(if ($globalEnabled.value) { 'policy-global-true' } else { 'policy-global-false' })
+        }
+
+        $marketplaces = $null
+        if (Has-ExactProperty $installationMode 'marketplaces') {
+            $marketplaces = Get-PropertyValue $installationMode 'marketplaces'
+            Assert-JsonObject $marketplaces 'installationMode.marketplaces'
+            foreach ($marketplaceProperty in $marketplaces.PSObject.Properties) {
+                Assert-MarketplaceId $marketplaceProperty.Name
+                Assert-JsonObject $marketplaceProperty.Value "installationMode.marketplaces.$($marketplaceProperty.Name)"
+                $marketplaceEnabled = Get-OptionalBooleanField $marketplaceProperty.Value 'enabled' "installationMode.marketplaces.$($marketplaceProperty.Name).enabled"
+                if ($MarketplaceId -and $marketplaceProperty.Name -ceq $MarketplaceId -and $marketplaceEnabled.present) {
+                    $winningScope = 'marketplace'
+                    $winningEnabled = $marketplaceEnabled.value
+                    $winningReason = $(if ($marketplaceEnabled.value) { 'policy-marketplace-true' } else { 'policy-marketplace-false' })
+                }
+
+                if (Has-ExactProperty $marketplaceProperty.Value 'plugins') {
+                    $plugins = Get-PropertyValue $marketplaceProperty.Value 'plugins'
+                    Assert-JsonObject $plugins "installationMode.marketplaces.$($marketplaceProperty.Name).plugins"
+                    foreach ($pluginProperty in $plugins.PSObject.Properties) {
+                        Assert-PluginId $pluginProperty.Name
+                        Assert-JsonObject $pluginProperty.Value "installationMode.marketplaces.$($marketplaceProperty.Name).plugins.$($pluginProperty.Name)"
+                        $pluginEnabled = Get-OptionalBooleanField $pluginProperty.Value 'enabled' "installationMode.marketplaces.$($marketplaceProperty.Name).plugins.$($pluginProperty.Name).enabled"
+                        if ($MarketplaceId -and $PluginId -and
+                            $marketplaceProperty.Name -ceq $MarketplaceId -and
+                            $pluginProperty.Name -ceq $PluginId -and
+                            $pluginEnabled.present) {
+                            $winningScope = 'plugin'
+                            $winningEnabled = $pluginEnabled.value
+                            $winningReason = $(if ($pluginEnabled.value) { 'policy-plugin-true' } else { 'policy-plugin-false' })
+                        }
+                    }
+                }
+            }
+        }
+
+        $policy.state = 'valid'
+        $policy.scope = $winningScope
+        $policy.enabled = $winningEnabled
+        $policy.reason = $winningReason
+        if (-not $authoritative) {
+            $policy.reason = 'policy-injected-non-authoritative'
+        }
+        return [pscustomobject]$policy
+    }
+    catch {
+        $policy.state = 'invalid'
+        $policy.enabled = $null
+        $policy.reason = 'policy-invalid'
+        return [pscustomobject]$policy
+    }
+}
+
+function Read-MaintenanceState([string]$MarkerPath, [string]$SidecarPath, [string]$Scope) {
+    $maintenance = [ordered]@{
+        state = 'inactive'
+        scope = 'none'
+        marker = $null
+        sidecar = $null
+        reason = ''
+    }
+    $markerItem = Get-Item -LiteralPath $MarkerPath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $markerItem) {
+        return [pscustomobject]$maintenance
+    }
+
+    $maintenance.scope = $Scope
+    $maintenance.marker = [IO.Path]::GetFullPath($MarkerPath)
+    $maintenance.sidecar = [IO.Path]::GetFullPath($SidecarPath)
+    $markerLinkType = Get-PropertyValue $markerItem 'LinkType'
+    $sidecarItem = Get-Item -LiteralPath $SidecarPath -Force -ErrorAction SilentlyContinue
+    $sidecarLinkType = Get-PropertyValue $sidecarItem 'LinkType'
+    if ($markerLinkType -or $null -eq $sidecarItem -or
+        $sidecarItem.PSIsContainer -or $sidecarLinkType) {
+        $maintenance.state = 'stale'
+        $maintenance.reason = 'maintenance-stale'
+        return [pscustomobject]$maintenance
+    }
+    $maintenance.sidecar = Canonical-Path $SidecarPath -MustExist
+
+    try {
+        $sidecar = Read-Json $maintenance.sidecar
+        Assert-JsonObject $sidecar 'maintenance.json'
+        $owner = Get-StringProperty $sidecar 'owner'
+        $host = Get-StringProperty $sidecar 'host'
+        $pid = Get-PropertyValue $sidecar 'pid'
+        $reason = Get-StringProperty $sidecar 'reason'
+        $enteredAt = Read-ExactUtcTimestampValue (Get-PropertyValue $sidecar 'enteredAt') 'maintenance.json enteredAt'
+        $expectedUntil = Read-ExactUtcTimestampValue (Get-PropertyValue $sidecar 'expectedUntil') 'maintenance.json expectedUntil'
+        if (-not $owner) { Fail 'maintenance.json owner must be non-empty.' }
+        if (-not $reason) { Fail 'maintenance.json reason must be non-empty.' }
+        Assert-PositiveInteger $pid 'maintenance.json pid'
+        $now = [DateTime]::UtcNow
+        $currentHost = Normalize-ShortHost ([Environment]::MachineName)
+        $enteredTime = [DateTime]::ParseExact(
+            $enteredAt,
+            'yyyy-MM-ddTHH:mm:ssZ',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+        )
+        $expectedTime = [DateTime]::ParseExact(
+            $expectedUntil,
+            'yyyy-MM-ddTHH:mm:ssZ',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal -bor [Globalization.DateTimeStyles]::AdjustToUniversal
+        )
+        if ((Normalize-ShortHost $host) -ceq $currentHost -and
+            $enteredTime -le $now -and
+            $now -le $expectedTime -and
+            $null -ne (Get-Process -Id ([int]$pid) -ErrorAction SilentlyContinue)) {
+            $maintenance.state = 'active'
+            $maintenance.reason = 'maintenance-active'
+            return [pscustomobject]$maintenance
+        }
+        $maintenance.state = 'stale'
+        $maintenance.reason = 'maintenance-stale'
+        return [pscustomobject]$maintenance
+    }
+    catch {
+        $maintenance.state = 'stale'
+        $maintenance.reason = 'maintenance-stale'
+        return [pscustomobject]$maintenance
+    }
+}
+
+function Read-EffectiveMaintenance($CurrentEnvironment, [string]$PluginRoot) {
+    $userBase = Join-Path $CurrentEnvironment.homeRealPath '.copilot-extensions'
+    $user = Read-MaintenanceState (Join-Path $userBase 'maintenance') (Join-Path $userBase 'maintenance.json') 'user'
+    if ($user.scope -cne 'none') { return $user }
+    if (-not $PluginRoot) { return $user }
+    return Read-MaintenanceState (Join-Path $PluginRoot 'maintenance') (Join-Path $PluginRoot 'maintenance.json') 'plugin'
+}
+
+function Validate-ActivationReceipt(
+    [string]$ActivationPath,
+    [string]$ResolvedDurableHome,
+    [string]$ExpectedMarketplaceId,
+    [string]$ExpectedPluginId,
+    [string]$ResolvedLegacyRoot,
+    $CurrentEnvironment
+) {
+    $result = [ordered]@{
+        path = $null
+        present = $false
+        classification = 'absent'
+        marketplaceId = $ExpectedMarketplaceId
+        pluginId = $ExpectedPluginId
+        mode = $null
+        state = $null
+        context = $null
+        runtimeRoot = $null
+        activationGeneration = $null
+        namespaceGeneration = $null
+        installGeneration = $null
+    }
+    if ([string]::IsNullOrWhiteSpace($ActivationPath)) {
+        return [pscustomobject]$result
+    }
+    $activationItem = Get-Item -LiteralPath $ActivationPath -Force -ErrorAction SilentlyContinue
+    if ($null -eq $activationItem) {
+        return [pscustomobject]$result
+    }
+
+    $result.present = $true
+    $result.path = Canonical-Path $ActivationPath
+    $activationLinkType = Get-PropertyValue $activationItem 'LinkType'
+    if ($activationItem.PSIsContainer -or $activationLinkType) {
+        $result.classification = 'invalid'
+        return [pscustomobject]$result
+    }
+    $result.path = Canonical-Path $ActivationPath -MustExist
+    try {
+        $activation = Read-Json $result.path
+        Assert-JsonObject $activation 'installation-activation.json'
+        $version = Get-PropertyValue $activation 'version'
+        Assert-PositiveInteger $version 'installation-activation.json version'
+        if ((Get-StringProperty $activation 'schema') -cne 'copilot-extensions.installation-activation' -or
+            $version -ne 1) {
+            Fail 'installation-activation.json has an unsupported schema or version.'
+        }
+        $marketplaceId = Get-StringProperty $activation 'marketplaceId'
+        $pluginId = Get-StringProperty $activation 'pluginId'
+        if ($marketplaceId -cne $ExpectedMarketplaceId -or $pluginId -cne $ExpectedPluginId) {
+            Fail 'installation-activation.json does not match its canonical cell/plugin location.'
+        }
+        $mode = Get-StringProperty $activation 'mode'
+        $state = Get-StringProperty $activation 'state'
+        if ($mode -ceq 'namespaced' -and $state -ceq 'active') {
+        }
+        elseif ($mode -ceq 'legacy' -and $state -ceq 'deactivated') {
+        }
+        else {
+            Fail 'installation-activation.json mode/state pair is invalid.'
+        }
+        $result.mode = $mode
+        $result.state = $state
+        $environment = Read-EnvironmentObject (Get-PropertyValue $activation 'environment') 'installation-activation.json environment'
+        if (-not (Test-SameEnvironment $environment $CurrentEnvironment)) {
+            $result.classification = 'foreign-environment'
+            return [pscustomobject]$result
+        }
+        $context = Get-StringProperty $activation 'context'
+        if (-not [IO.Path]::IsPathRooted($context)) {
+            Fail 'installation-activation.json context must be absolute.'
+        }
+        $cellRoot = Canonical-Path (Join-Path (Join-Path $ResolvedDurableHome 'marketplaces') $ExpectedMarketplaceId)
+        $validatedContext = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' $cellRoot
+        }
+        $namespaceGeneration = Get-PropertyValue $activation 'namespaceGeneration'
+        $installGeneration = Get-PropertyValue $activation 'installGeneration'
+        $generation = Get-PropertyValue $activation 'generation'
+        Assert-ReceiptGeneration $namespaceGeneration 'installation-activation.json namespaceGeneration'
+        Assert-ReceiptGeneration $installGeneration 'installation-activation.json installGeneration'
+        Assert-ReceiptGeneration $generation 'installation-activation.json generation'
+        $result.activationGeneration = [long]$generation
+        $result.namespaceGeneration = [long]$namespaceGeneration
+        $result.installGeneration = [long]$installGeneration
+        $legacyEvidence = Get-PropertyValue $activation 'legacy'
+        Assert-JsonObject $legacyEvidence 'installation-activation.json legacy'
+        $legacyDisposition = Get-StringProperty $legacyEvidence 'disposition'
+        if ($legacyDisposition -cnotin @('absent', 'quiesced', 'retained-inert', 'restored')) {
+            Fail 'installation-activation.json legacy.disposition is invalid.'
+        }
+        $recordedProbe = Get-PropertyValue $legacyEvidence 'probe'
+        Assert-JsonObject $recordedProbe 'installation-activation.json legacy.probe'
+        $recordedDeclared = Get-PropertyValue $recordedProbe 'declared'
+        if ($recordedDeclared -isnot [bool]) {
+            Fail 'installation-activation.json legacy.probe.declared must be a boolean.'
+        }
+        $recordedResult = Get-StringProperty $recordedProbe 'result'
+        if ($recordedResult -cnotin @('absent', 'present', 'unknown')) {
+            Fail 'installation-activation.json legacy.probe.result is invalid.'
+        }
+        if (-not $recordedDeclared -and $recordedResult -cne 'unknown') {
+            Fail 'installation-activation.json undeclared legacy probe must be unknown.'
+        }
+        if (-not (Has-ExactProperty $recordedProbe 'checkedAt')) {
+            Fail 'installation-activation.json legacy.probe.checkedAt is required.'
+        }
+        $recordedCheckedAt = Get-PropertyValue $recordedProbe 'checkedAt'
+        if ($null -ne $recordedCheckedAt) {
+            [void](Read-ExactUtcTimestampValue $recordedCheckedAt 'installation-activation.json legacy.probe.checkedAt')
+        }
+        $createdAt = Read-ExactUtcTimestampValue (Get-PropertyValue $activation 'createdAt') 'installation-activation.json createdAt'
+        $updatedAt = Read-ExactUtcTimestampValue (Get-PropertyValue $activation 'updatedAt') 'installation-activation.json updatedAt'
+        if ([string]::CompareOrdinal($updatedAt, $createdAt) -lt 0) {
+            Fail 'installation-activation.json updatedAt precedes createdAt.'
+        }
+        $result.context = [string]$validatedContext.installReceipt
+        $result.installGeneration = [long]$validatedContext.generation
+        if ($mode -ceq 'namespaced') {
+            $result.runtimeRoot = [string]$validatedContext.pluginRoot
+        }
+        else {
+            $result.runtimeRoot = $ResolvedLegacyRoot
+        }
+        if ([long]$validatedContext.namespaceGeneration -ne [long]$namespaceGeneration -or
+            [long]$validatedContext.generation -ne [long]$installGeneration) {
+            $result.classification = 'revalidation-required'
+            return [pscustomobject]$result
+        }
+        $result.classification = 'valid'
+        return [pscustomobject]$result
+    }
+    catch {
+        $result.classification = 'invalid'
+        return [pscustomobject]$result
+    }
+}
+
+function Read-LegacyOwnership(
+    [string]$ResolvedLegacyRoot,
+    [string]$ResolvedDurableHome,
+    [string]$CurrentMarketplaceId,
+    [string]$CurrentPluginId,
+    $CurrentEnvironment
+) {
+    $legacy = [ordered]@{
+        root = $ResolvedLegacyRoot
+        probe = $null
+        tombstone = $null
+        disposition = 'active'
+        ownerMarketplaceId = $null
+        classification = 'none'
+    }
+
+    $tombstoneEntry = Join-Path $ResolvedLegacyRoot '.installation-ownership.json'
+    $tombstonePath = Canonical-Path $tombstoneEntry
+    $tombstoneItem = Get-Item -LiteralPath $tombstoneEntry -Force -ErrorAction SilentlyContinue
+    if ($null -eq $tombstoneItem) {
+        return [pscustomobject]$legacy
+    }
+    $legacy.tombstone = $tombstonePath
+    $tombstoneLinkType = Get-PropertyValue $tombstoneItem 'LinkType'
+    if ($tombstoneItem.PSIsContainer -or $tombstoneLinkType) {
+        $legacy.disposition = 'orphaned-transfer'
+        $legacy.classification = 'orphaned-transfer'
+        return [pscustomobject]$legacy
+    }
+
+    try {
+        $tombstone = Read-Json $tombstonePath
+        Assert-JsonObject $tombstone '.installation-ownership.json'
+        $version = Get-PropertyValue $tombstone 'version'
+        Assert-PositiveInteger $version '.installation-ownership.json version'
+        if ((Get-StringProperty $tombstone 'schema') -cne 'copilot-extensions.legacy-installation-ownership' -or
+            $version -ne 1) {
+            Fail '.installation-ownership.json has an unsupported schema or version.'
+        }
+        $ownerMarketplaceId = Get-StringProperty $tombstone 'marketplaceId'
+        Assert-MarketplaceId $ownerMarketplaceId
+        $legacy.ownerMarketplaceId = $ownerMarketplaceId
+        $ownerPluginId = Get-StringProperty $tombstone 'pluginId'
+        Assert-PluginId $ownerPluginId
+        if ($CurrentPluginId -and $ownerPluginId -cne $CurrentPluginId) {
+            Fail '.installation-ownership.json pluginId does not match the current plugin.'
+        }
+        if (-not $CurrentPluginId) { $CurrentPluginId = $ownerPluginId }
+        $environment = Read-EnvironmentObject (Get-PropertyValue $tombstone 'environment') '.installation-ownership.json environment'
+        if (-not (Test-SameEnvironment $environment $CurrentEnvironment)) {
+            $legacy.disposition = 'orphaned-transfer'
+            $legacy.classification = 'foreign-environment'
+            return [pscustomobject]$legacy
+        }
+        $activation = Get-PropertyValue $tombstone 'activation'
+        Assert-JsonObject $activation '.installation-ownership.json activation'
+        $activationPath = Get-StringProperty $activation 'path'
+        if (-not [IO.Path]::IsPathRooted($activationPath)) {
+            Fail '.installation-ownership.json activation.path must be absolute.'
+        }
+        $activationGeneration = Get-PropertyValue $activation 'generation'
+        Assert-ReceiptGeneration $activationGeneration '.installation-ownership.json activation.generation'
+        [void](Read-ExactUtcTimestampValue (Get-PropertyValue $tombstone 'transferredAt') '.installation-ownership.json transferredAt')
+        $expectedActivationPath = Canonical-Path (
+            Join-Path (
+                Join-Path (
+                    Join-Path (
+                        Join-Path $ResolvedDurableHome 'marketplaces'
+                    ) $ownerMarketplaceId
+                ) 'plugins'
+            ) (Join-Path $CurrentPluginId 'installation-activation.json')
+        )
+        if (-not (Paths-Equal $activationPath $expectedActivationPath)) {
+            Fail '.installation-ownership.json activation.path is not canonical.'
+        }
+        $validatedActivation = Validate-ActivationReceipt $activationPath $ResolvedDurableHome $ownerMarketplaceId $CurrentPluginId $ResolvedLegacyRoot $CurrentEnvironment
+        if ($validatedActivation.classification -ceq 'foreign-environment') {
+            $legacy.disposition = 'orphaned-transfer'
+            $legacy.classification = 'orphaned-transfer'
+            return [pscustomobject]$legacy
+        }
+        if ($validatedActivation.classification -cne 'valid' -or
+            $validatedActivation.mode -cne 'namespaced' -or
+            [long]$validatedActivation.activationGeneration -ne [long]$activationGeneration) {
+            Fail '.installation-ownership.json points to a stale or invalid activation.'
+        }
+        if ($CurrentMarketplaceId -and $ownerMarketplaceId -ceq $CurrentMarketplaceId) {
+            $legacy.disposition = 'owned-by-current-cell'
+        }
+        else {
+            $legacy.disposition = 'owned-by-other-cell'
+        }
+        $legacy.classification = 'valid'
+        return [pscustomobject]$legacy
+    }
+    catch {
+        $legacy.disposition = 'orphaned-transfer'
+        if ($legacy.classification -cne 'foreign-environment') {
+            $legacy.classification = 'orphaned-transfer'
+        }
+        return [pscustomobject]$legacy
+    }
+}
+
+function Resolve-InstallationStatus(
+    [string]$ResolvedCopilotHome,
+    [string]$ResolvedProjectRoot,
+    [string]$ResolvedDurableHome
+) {
+    if (-not $LegacyRoot) {
+        Fail "$Action requires -LegacyRoot."
+    }
+    if (-not [IO.Path]::IsPathRooted($LegacyRoot)) {
+        Fail '-LegacyRoot must be absolute.'
+    }
+
+    $currentEnvironment = Get-CurrentEnvironment
+    $resolvedLegacyRoot = Canonical-Path $LegacyRoot
+    $legacyProbe = Read-LegacyProbe
+    $target = Resolve-StatusTarget $ResolvedCopilotHome $ResolvedProjectRoot $ResolvedDurableHome
+    $policy = Read-PolicyDecision $currentEnvironment $target.marketplaceId $target.pluginId
+
+    $legacy = Read-LegacyOwnership $resolvedLegacyRoot $ResolvedDurableHome $target.marketplaceId $target.pluginId $currentEnvironment
+    $legacy.probe = $legacyProbe
+
+    $maintenance = Read-EffectiveMaintenance $currentEnvironment $target.pluginRoot
+    $activationPath = $null
+    if ($target.pluginRoot) {
+        $activationPath = Canonical-Path (Join-Path $target.pluginRoot 'installation-activation.json')
+    }
+    $activation = Validate-ActivationReceipt $activationPath $ResolvedDurableHome $target.marketplaceId $target.pluginId $resolvedLegacyRoot $currentEnvironment
+
+    $desiredMode = $null
+    if (-not $policy.authoritative -and
+        @('valid', 'revalidation-required') -ccontains $activation.classification -and
+        $activation.mode -ceq 'namespaced') {
+        $desiredMode = 'namespaced'
+    }
+    elseif (($policy.state -ceq 'valid' -or $policy.state -ceq 'missing') -and
+            $policy.enabled -and $policy.authoritative) {
+        $desiredMode = 'namespaced'
+    }
+    elseif ($policy.state -ceq 'valid' -or $policy.state -ceq 'missing') {
+        $desiredMode = 'legacy'
+    }
+
+    $actualMode = 'legacy'
+    $runtimeRoot = $resolvedLegacyRoot
+    $context = $null
+    $activationPointer = $null
+    $activationGeneration = $null
+    $installGeneration = $null
+    if ($activation.present) {
+        $activationPointer = $activation.path
+        $activationGeneration = $activation.activationGeneration
+    }
+    if ($activation.classification -ceq 'valid') {
+        $actualMode = $activation.mode
+        $runtimeRoot = $activation.runtimeRoot
+        $context = $activation.context
+        $installGeneration = $activation.installGeneration
+    }
+    elseif ($activation.classification -ceq 'revalidation-required') {
+        $actualMode = $activation.mode
+        $runtimeRoot = $activation.runtimeRoot
+        $context = $activation.context
+        $installGeneration = $activation.installGeneration
+    }
+    elseif ($activation.classification -ceq 'foreign-environment' -or
+            $activation.classification -ceq 'invalid') {
+        $actualMode = $null
+        $runtimeRoot = $null
+        $context = $null
+        $installGeneration = $null
+    }
+    if ($target.provenanceBlocked -or $target.invalidContext) {
+        $desiredMode = $null
+        $actualMode = $null
+        $runtimeRoot = $null
+        $context = $null
+        $activationPointer = $null
+        $activationGeneration = $null
+        $installGeneration = $null
+    }
+
+    $status = 'ready'
+    $reason = ''
+    if ($policy.state -ceq 'invalid' -or $policy.state -ceq 'unsupported' -or $target.invalidContext -or $activation.classification -ceq 'invalid') {
+        $status = 'invalid'
+        if ($policy.state -ceq 'invalid' -or $policy.state -ceq 'unsupported') {
+            $reason = $policy.reason
+        }
+        elseif ($target.invalidContext) {
+            $reason = 'context-invalid'
+        }
+        elseif ($activation.classification -ceq 'invalid') {
+            $reason = 'activation-invalid'
+        }
+        else {
+            $reason = 'invalid'
+        }
+    }
+    elseif ($maintenance.scope -cne 'none') {
+        $status = 'maintenance-blocked'
+        $reason = $maintenance.reason
+    }
+    elseif ($activation.classification -ceq 'foreign-environment' -or $legacy.classification -ceq 'foreign-environment') {
+        $status = 'foreign-environment'
+        $reason = 'foreign-environment'
+    }
+    elseif ($legacy.disposition -ceq 'orphaned-transfer') {
+        $status = 'orphaned-transfer'
+        $reason = 'orphaned-transfer'
+    }
+    elseif ($activation.classification -ceq 'revalidation-required') {
+        $status = 'revalidation-required'
+        $reason = 'revalidation-required'
+    }
+    elseif ($activation.classification -ceq 'valid' -and $activation.mode -ceq 'namespaced' -and $desiredMode -ceq 'legacy') {
+        $status = 'deactivation-required'
+        $reason = 'deactivation-required'
+    }
+    elseif ($target.provenanceBlocked) {
+        $status = 'provenance-blocked'
+        $reason = 'provenance-blocked'
+    }
+    elseif ($desiredMode -ceq 'namespaced' -and -not ($activation.classification -ceq 'valid' -and $activation.mode -ceq 'namespaced')) {
+        if ($activation.classification -ceq 'absent' -and
+            $legacyProbe.declared -and $legacyProbe.result -ceq 'absent') {
+            $status = 'ready'
+            $reason = 'activation-required'
+        }
+        else {
+            $status = 'migration-required'
+            $reason = 'migration-required'
+        }
+    }
+    elseif ($activation.classification -ceq 'valid' -and $activation.mode -ceq 'namespaced') {
+        $status = 'ready'
+        $reason = 'namespaced-active'
+    }
+    else {
+        $status = 'ready'
+        $reason = $policy.reason
+    }
+
+    $result = [ordered]@{
+        schema = 'copilot-extensions.installation-resolution'
+        version = 1
+        marketplaceId = $target.marketplaceId
+        pluginId = $target.pluginId
+        environment = [pscustomobject][ordered]@{
+            platform = $currentEnvironment.platform
+            homeRealPath = $currentEnvironment.homeRealPath
+            wslDistro = $currentEnvironment.wslDistro
+        }
+        desiredMode = $desiredMode
+        actualMode = $actualMode
+        status = $status
+        maintenance = [pscustomobject][ordered]@{
+            state = $maintenance.state
+            scope = $maintenance.scope
+            marker = $maintenance.marker
+            sidecar = $maintenance.sidecar
+        }
+        runtimeRoot = $runtimeRoot
+        context = $context
+        activation = $activationPointer
+        activationGeneration = $activationGeneration
+        installGeneration = $installGeneration
+        reason = $reason
+        policy = [pscustomobject][ordered]@{
+            path = $policy.path
+            authoritative = $policy.authoritative
+            state = $policy.state
+            scope = $policy.scope
+            enabled = $policy.enabled
+            reason = $policy.reason
+        }
+        legacy = [pscustomobject][ordered]@{
+            root = $legacy.root
+            probe = $legacy.probe
+            tombstone = $legacy.tombstone
+            disposition = $legacy.disposition
+            ownerMarketplaceId = $legacy.ownerMarketplaceId
+        }
+    }
+
+    if ($Action -ceq 'probe-legacy') {
+        $allowMutation = $false
+        $probeReason = $reason
+        if ($status -ceq 'ready' -and $actualMode -ceq 'namespaced') {
+            $probeReason = 'namespaced-active'
+        }
+        elseif ($legacy.disposition -ceq 'owned-by-current-cell' -or
+                $legacy.disposition -ceq 'owned-by-other-cell') {
+            $probeReason = 'legacy-owned-by-other-cell'
+        }
+        elseif ($status -ceq 'ready' -and $reason -ceq 'activation-required') {
+            $probeReason = 'namespaced-requested'
+        }
+        elseif ($status -ceq 'migration-required') {
+            $allowMutation = $true
+            $probeReason = 'migration-required'
+        }
+        elseif ($status -ceq 'ready' -and $actualMode -ceq 'legacy') {
+            $allowMutation = $true
+            $probeReason = 'legacy-active'
+        }
+        $result.allowMutation = $allowMutation
+        $result.probeReason = $probeReason
+    }
+
+    return [pscustomobject]$result
+}
+
 function Assert-ExpectedGeneration(
     [long]$Actual,
     [long]$Expected,
@@ -1646,6 +2839,13 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
 }
 
 try {
+    Assert-ExactChoice $Action @('source-id', 'resolve', 'validate', 'stamp', 'status', 'probe-legacy') 'Action'
+    if ($PayloadOrigin -cnotin @('', 'installed', 'directory', 'staged', 'explicit')) {
+        Fail 'payload origin must be installed, directory, staged, or explicit.'
+    }
+    Assert-ReceiptState $NamespaceState 'NamespaceState'
+    Assert-ReceiptState $InstallState 'InstallState'
+
     if (-not $CopilotHome) { $CopilotHome = Get-DefaultHome '.copilot' }
     if (-not $DurableHome) { $DurableHome = Get-DefaultHome '.copilot-extensions' }
     if (-not [IO.Path]::IsPathRooted($CopilotHome) -or
@@ -1666,6 +2866,9 @@ try {
         $name = $MarketplaceKey
         if (-not $name) { $name = 'marketplace' }
         $result = Source-Identity $normalized $name
+    }
+    elseif ($Action -eq 'status' -or $Action -eq 'probe-legacy') {
+        $result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome
     }
     elseif ($Action -eq 'validate') {
         $pointer = $Context
@@ -1784,6 +2987,9 @@ try {
         }
     }
     $result | ConvertTo-Json -Depth 12 -Compress
+    if ($Action -eq 'probe-legacy' -and -not $result.allowMutation) {
+        exit 3
+    }
     exit 0
 }
 catch {

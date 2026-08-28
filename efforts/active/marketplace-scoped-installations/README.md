@@ -143,10 +143,11 @@ reachable when their ownership is explicit.
   - [x] Make Agent Machines, Agent Index, and agent-worktrees reconciliation
     inspect an explicitly selected, validated deploy manifest without activating
     or mutating the namespaced runtime root.
-  - [ ] Implement the reviewed
+  - [x] Implement the reviewed
     [user-local installation-mode governance](installation-mode-governance.md):
     OS-profile-pinned default legacy policy, exact marketplace/plugin overrides,
-    sticky actual mode, and the normative resolver/status contract.
+    sticky actual mode, the normative read-only resolver/status contract, and
+    the non-mutating legacy-entrypoint decision probe.
   - [ ] Add the tiny shared legacy-entrypoint probe and complete declared
     path/service/task footprints for each exemplar; no exemplar becomes
     operative until every legacy installer/bootstrap mutation refuses
@@ -428,6 +429,20 @@ See [`design.md`](design.md).
   Agent Machines, Agent Index, and the Agent Worktrees management copy.
 - Kept agent-worktrees project state, activation policy, service identity,
   migration, and runtime-root mutation unchanged.
+
+### 2026-08-27 — Non-operative activation-governance prerequisite
+
+- Added cross-platform read-only `status` and `probe-legacy` actions to the
+  canonical installation-context primitive, including OS-profile policy
+  precedence, exact environment binding, activation/tombstone validation,
+  maintenance diagnostics, stable reasons, and deterministic probe exit codes.
+- Added fixture-backed Python, no-Python POSIX, and PowerShell parity coverage
+  for clean pre-activation, active and deactivated receipts, changed
+  generations, foreign environments, ownership tombstones, maintenance,
+  status precedence, probe decisions, and read-only filesystem behavior.
+- Kept the slice non-operative: no activation or tombstone writer, two-lock
+  migration, installer/bootstrap caller wiring, declared exemplar footprint,
+  payload-invocation change, runtime-root switch, or cutover is implemented.
 
 ### 2026-08-26 — Runtime plugin hook audit
 

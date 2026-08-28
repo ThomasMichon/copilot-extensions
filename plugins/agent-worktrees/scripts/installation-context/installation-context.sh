@@ -50,16 +50,62 @@ path_join() {
 }
 
 json_query() {
-    local mode="$1" file="$2" path="$3"
+    local mode="$1" file="$2" path="$3" variable
+    if [[ "$file" == @* ]]; then
+        variable="${file#@}"
+        LC_ALL=C awk -f "$JSON_QUERY" -v "mode=$mode" -v "query_path=$path" - <<<"${!variable-}"
+        return
+    fi
     LC_ALL=C awk -f "$JSON_QUERY" -v "mode=$mode" -v "query_path=$path" "$file"
+}
+
+json_source_label() {
+    case "$1" in
+        @SOURCE_JSON) printf -- '--source-json' ;;
+        @LEGACY_PROBE_JSON) printf -- '--legacy-probe-json' ;;
+        @*) printf 'inline JSON' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+json_try_query() {
+    local target="$1" mode="$2" file="$3" path="$4" output status
+    set +e
+    output="$(json_query "$mode" "$file" "$path")"
+    status=$?
+    set -e
+    printf -v "$target" '%s' "$output"
+    return "$status"
+}
+
+json_object_keys_query() {
+    json_query keys "$1" "$2"
+}
+
+json_object_keys() {
+    local file="$1" path="$2" raw status
+    set +e
+    raw="$(json_object_keys_query "$file" "$path")"
+    status=$?
+    set -e
+    case "$status" in
+        0) ;;
+        2) fail "Invalid JSON in '$(json_source_label "$file")'." ;;
+        3) fail "Missing JSON object in '$(json_source_label "$file")'." ;;
+        4) fail "Expected a JSON object in '$(json_source_label "$file")'." ;;
+        5) fail "JSON property must use exact case in '$(json_source_label "$file")'." ;;
+        *) fail "Cannot read JSON object keys in '$(json_source_label "$file")'." ;;
+    esac
+    printf '%s\n' "$raw"
 }
 
 json_optional_into() {
     local target="$1" file="$2" path="$3" default_value="${4-}" encoded status escapes="" decoded=""
-    set +e
-    encoded="$(json_query hex "$file" "$path")"
-    status=$?
-    set -e
+    if json_try_query encoded hex "$file" "$path"; then
+        status=0
+    else
+        status=$?
+    fi
     case "$status" in
         0)
             while [[ -n "$encoded" ]]; do
@@ -72,10 +118,10 @@ json_optional_into() {
             printf -v "$target" '%s' "$decoded"
             ;;
         3) printf -v "$target" '%s' "$default_value" ;;
-        2) fail "Invalid JSON in '$file'." ;;
-        4) fail "Expected a scalar JSON value in '$file'." ;;
-        5) fail "JSON property must use exact case in '$file'." ;;
-        *) fail "Cannot read JSON value in '$file'." ;;
+        2) fail "Invalid JSON in '$(json_source_label "$file")'." ;;
+        4) fail "Expected a scalar JSON value in '$(json_source_label "$file")'." ;;
+        5) fail "JSON property must use exact case in '$(json_source_label "$file")'." ;;
+        *) fail "Cannot read JSON value in '$(json_source_label "$file")'." ;;
     esac
 }
 
@@ -106,36 +152,52 @@ json_optional_string_into() {
 
 json_type_path() {
     local file="$1" path="$2" result status
-    set +e
-    result="$(json_query type "$file" "$path")"
-    status=$?
-    set -e
+    if json_try_query result type "$file" "$path"; then
+        status=0
+    else
+        status=$?
+    fi
     case "$status" in
         0) printf '%s' "$result" ;;
         3) ;;
-        2) fail "Invalid JSON in '$file'." ;;
-        5) fail "JSON property must use exact case in '$file'." ;;
-        *) fail "Cannot read JSON type in '$file'." ;;
+        2) fail "Invalid JSON in '$(json_source_label "$file")'." ;;
+        5) fail "JSON property must use exact case in '$(json_source_label "$file")'." ;;
+        *) fail "Cannot read JSON type in '$(json_source_label "$file")'." ;;
     esac
+    return 0
 }
 
 json_optional_type_path() {
-    json_type_path "$1" "$2"
+    local file="$1" path="$2" result status
+    if json_try_query result type "$file" "$path"; then
+        status=0
+    else
+        status=$?
+    fi
+    case "$status" in
+        0) printf '%s' "$result" ;;
+        3) ;;
+        2) fail "Invalid JSON in '$(json_source_label "$file")'." ;;
+        5) fail "JSON property must use exact case in '$(json_source_label "$file")'." ;;
+        *) fail "Cannot read JSON type in '$(json_source_label "$file")'." ;;
+    esac
+    return 0
 }
 
 json_length_path() {
     local file="$1" path="$2" result status
-    set +e
-    result="$(json_query len "$file" "$path")"
-    status=$?
-    set -e
+    if json_try_query result len "$file" "$path"; then
+        status=0
+    else
+        status=$?
+    fi
     case "$status" in
         0) printf '%s' "$result" ;;
-        2) fail "Invalid JSON in '$file'." ;;
-        3) fail "Missing JSON array or object in '$file'." ;;
-        4) fail "Expected a JSON array or object in '$file'." ;;
-        5) fail "JSON property must use exact case in '$file'." ;;
-        *) fail "Cannot read JSON length in '$file'." ;;
+        2) fail "Invalid JSON in '$(json_source_label "$file")'." ;;
+        3) fail "Missing JSON array or object in '$(json_source_label "$file")'." ;;
+        4) fail "Expected a JSON array or object in '$(json_source_label "$file")'." ;;
+        5) fail "JSON property must use exact case in '$(json_source_label "$file")'." ;;
+        *) fail "Cannot read JSON length in '$(json_source_label "$file")'." ;;
     esac
 }
 
@@ -1362,9 +1424,1053 @@ emit_resolved_context() {
     printf ',"existingCells":%s,"rebindRequired":false,"operative":false}\n' "$EXISTING_JSON"
 }
 
+capture_output() {
+    local target="$1"
+    shift
+    local output status
+    set +e
+    output="$("$@" 2>&1)"
+    status=$?
+    set -e
+    printf -v "$target" '%s' "$output"
+    return "$status"
+}
+
+snapshot_value() {
+    local snapshot="$1" key="$2" prefix line
+    prefix="$key"$'\t'
+    while IFS= read -r line; do
+        if [[ "$line" == "$prefix"* ]]; then
+            printf '%s' "${line#"$prefix"}"
+            return 0
+        fi
+    done <<<"$snapshot"
+    return 1
+}
+
+snapshot_hex() {
+    LC_ALL=C od -An -v -tx1 | tr -d ' \n'
+}
+
+snapshot_hex_into() {
+    local target="$1" snapshot="$2" key="$3" encoded escapes="" decoded=""
+    encoded="$(snapshot_value "$snapshot" "${key}Hex")" || return 1
+    [[ "$encoded" =~ ^([0-9a-f]{2})*$ ]] ||
+        fail "Invalid encoded snapshot value for '$key'."
+    while [[ -n "$encoded" ]]; do
+        escapes+="\\x${encoded:0:2}"
+        encoded="${encoded:2}"
+    done
+    printf -v decoded '%b' "$escapes"
+    printf -v "$target" '%s' "$decoded"
+}
+
+normalized_short_host() {
+    local host
+    host="$(hostname 2>/dev/null || uname -n 2>/dev/null || printf '')"
+    host="${host%%.*}"
+    printf '%s' "${host,,}"
+}
+
+pid_is_live() {
+    local pid="$1"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+    if kill -0 "$pid" 2>/dev/null; then
+        return 0
+    fi
+    [[ -d "/proc/$pid" ]]
+}
+
+parse_utc_epoch() {
+    local value="$1" epoch
+    [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] ||
+        return 1
+    epoch="$(date -u -d "$value" +%s 2>/dev/null)" || return 1
+    [[ "$(date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" == "$value" ]] ||
+        return 1
+    printf '%s' "$epoch"
+}
+
+json_bool_literal_or_null() {
+    case "$1" in
+        true | false) printf '%s' "$1" ;;
+        *) printf 'null' ;;
+    esac
+}
+
+json_number_literal_or_null() {
+    if [[ -n "$1" ]]; then
+        printf '%s' "$1"
+    else
+        printf 'null'
+    fi
+}
+
+json_string_or_null() {
+    if [[ -n "$1" ]]; then
+        json_quote "$1"
+    else
+        printf 'null'
+    fi
+}
+
+CURRENT_PLATFORM=""
+CURRENT_PROFILE_HOME=""
+CURRENT_WSL_DISTRO=""
+CURRENT_WSL_DISTRO_TYPE=null
+CURRENT_HOST=""
+
+resolve_current_environment() {
+    local uid passwd_entry home_path
+    [[ -n "$CURRENT_PROFILE_HOME" ]] && return 0
+    CURRENT_PLATFORM=posix
+    CURRENT_HOST="$(normalized_short_host)"
+    uid="$(id -u 2>/dev/null)" || fail "Cannot determine the current account identity."
+    if command -v getent >/dev/null 2>&1; then
+        passwd_entry="$(getent passwd "$uid" 2>/dev/null || true)"
+    fi
+    if [[ -z "$passwd_entry" && -r /etc/passwd ]]; then
+        passwd_entry="$(LC_ALL=C awk -F: -v uid="$uid" '$3 == uid { print; exit }' /etc/passwd)"
+    fi
+    [[ -n "$passwd_entry" ]] ||
+        fail "Cannot determine the current account home from the passwd database."
+    home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
+    [[ -n "$home_path" ]] ||
+        fail "Cannot determine the current account home from the passwd database."
+    CURRENT_PROFILE_HOME="$(canonical_path "$home_path" true)"
+    CURRENT_WSL_DISTRO="${WSL_DISTRO_NAME:-}"
+    if [[ -n "$CURRENT_WSL_DISTRO" ]]; then
+        CURRENT_WSL_DISTRO_TYPE=string
+    fi
+}
+
+READ_ENV_PLATFORM=""
+READ_ENV_HOME_REAL_PATH=""
+READ_ENV_WSL_DISTRO=""
+READ_ENV_WSL_DISTRO_TYPE=""
+
+read_environment_tuple() {
+    local file="$1" prefix="$2" label="$3" wsl_type
+    [[ "$(json_type_path "$file" "$prefix")" == object ]] ||
+        fail "$label must be a JSON object."
+    json_optional_string_into READ_ENV_PLATFORM "$file" "$(path_join "$prefix" platform)"
+    case "$READ_ENV_PLATFORM" in
+        windows | posix) ;;
+        *) fail "$label.platform must be windows or posix." ;;
+    esac
+    json_optional_string_into READ_ENV_HOME_REAL_PATH "$file" "$(path_join "$prefix" homeRealPath)"
+    [[ -n "$READ_ENV_HOME_REAL_PATH" ]] ||
+        fail "$label.homeRealPath must be a non-empty string."
+    if [[ "$READ_ENV_PLATFORM" == windows ]]; then
+        [[ "$READ_ENV_HOME_REAL_PATH" =~ ^[A-Za-z]:[\\/]|^\\\\ ]] ||
+            fail "$label.homeRealPath must be absolute."
+    else
+        is_absolute "$READ_ENV_HOME_REAL_PATH" ||
+            fail "$label.homeRealPath must be absolute."
+    fi
+    wsl_type="$(json_optional_type_path "$file" "$(path_join "$prefix" wslDistro)")"
+    READ_ENV_WSL_DISTRO_TYPE="$wsl_type"
+    case "$wsl_type" in
+        null) READ_ENV_WSL_DISTRO="" ;;
+        string) json_optional_string_into READ_ENV_WSL_DISTRO "$file" "$(path_join "$prefix" wslDistro)" ;;
+        *) fail "$label.wslDistro must be a string or null." ;;
+    esac
+    if [[ "$READ_ENV_PLATFORM" == windows && "$wsl_type" != null ]]; then
+        fail "$label.wslDistro must be null on Windows."
+    fi
+}
+
+LEGACY_PROBE_DECLARED=false
+LEGACY_PROBE_RESULT=unknown
+LEGACY_PROBE_CHECKED_AT=""
+
+legacy_probe_snapshot() {
+    local file="$1" prefix="${2-}" declared_path result_path checked_path checked_type checked_epoch
+    declared_path="$(path_join "$prefix" declared)"
+    result_path="$(path_join "$prefix" result)"
+    checked_path="$(path_join "$prefix" checkedAt)"
+    [[ "$(json_type_path "$file" "$prefix")" == object ]] ||
+        fail "Legacy probe input must be a JSON object."
+    [[ -n "$(json_optional_type_path "$file" "$declared_path")" ]] ||
+        fail "Legacy probe input requires declared."
+    [[ "$(json_type_path "$file" "$declared_path")" == boolean ]] ||
+        fail "Legacy probe input declared must be a boolean."
+    [[ -n "$(json_optional_type_path "$file" "$result_path")" ]] ||
+        fail "Legacy probe input requires result."
+    [[ "$(json_type_path "$file" "$result_path")" == string ]] ||
+        fail "Legacy probe input result must be a string."
+    [[ -n "$(json_optional_type_path "$file" "$checked_path")" ]] ||
+        fail "Legacy probe input requires checkedAt."
+    LEGACY_PROBE_DECLARED="$(json_optional_path "$file" "$declared_path")"
+    json_optional_string_into LEGACY_PROBE_RESULT "$file" "$result_path"
+    case "$LEGACY_PROBE_RESULT" in
+        absent | present | unknown) ;;
+        *) fail "Legacy probe input result must be absent, present, or unknown." ;;
+    esac
+    if [[ "$LEGACY_PROBE_DECLARED" != true && "$LEGACY_PROBE_RESULT" != unknown ]]; then
+        fail "Legacy probe input result must be unknown when declared is false."
+    fi
+    checked_type="$(json_optional_type_path "$file" "$checked_path")"
+    case "$checked_type" in
+        null) LEGACY_PROBE_CHECKED_AT="" ;;
+        string)
+            json_optional_string_into LEGACY_PROBE_CHECKED_AT "$file" "$checked_path"
+            checked_epoch="$(parse_utc_epoch "$LEGACY_PROBE_CHECKED_AT")" ||
+                fail "Legacy probe input checkedAt must be RFC3339 UTC."
+            [[ -n "$checked_epoch" ]] || fail "Legacy probe input checkedAt must be RFC3339 UTC."
+            ;;
+        *) fail "Legacy probe input checkedAt must be a string or null." ;;
+    esac
+}
+
+policy_snapshot() {
+    local file="$1" marketplace_id="$2" plugin_id="$3"
+    local schema version installation_mode_type marketplaces_type path keys marketplace_key plugins_type
+    local enabled_type plugin_path marketplace_path enabled reason scope plugin_key
+    local global_enabled="" marketplace_enabled="" plugin_enabled=""
+    [[ "$(json_type_path "$file" "")" == object ]] ||
+        fail "Policy file must be a JSON object."
+    [[ "$(json_type_path "$file" schema)" == string ]] ||
+        fail "Policy schema must be a string."
+    json_optional_string_into schema "$file" schema
+    [[ "$schema" == copilot-extensions.installation-mode ]] ||
+        fail "Policy schema must be copilot-extensions.installation-mode."
+    [[ "$(json_type_path "$file" version)" == number ]] ||
+        fail "Policy version must be a number."
+    version="$(json_optional_path "$file" version)"
+    [[ "$version" =~ ^[0-9]+$ ]] ||
+        fail "Policy version must be a positive integer."
+    if ((version > 1)); then
+        printf 'state\tunsupported\nscope\tdefault\nenabled\tnull\nreason\tpolicy-version-unsupported\n'
+        return 0
+    fi
+    ((version == 1)) || fail "Policy version must be 1."
+    installation_mode_type="$(json_optional_type_path "$file" installationMode)"
+    case "$installation_mode_type" in
+        "") printf 'state\tvalid\nscope\tdefault\nenabled\tfalse\nreason\tpolicy-default-false\n'; return 0 ;;
+        object) ;;
+        *) fail "installationMode must be a JSON object." ;;
+    esac
+
+    enabled_type="$(json_optional_type_path "$file" "$(path_join installationMode enabled)")"
+    case "$enabled_type" in
+        "") ;;
+        boolean) global_enabled="$(json_optional_path "$file" "$(path_join installationMode enabled)")" ;;
+        *) fail "installationMode.enabled must be a boolean." ;;
+    esac
+
+    marketplaces_type="$(json_optional_type_path "$file" "$(path_join installationMode marketplaces)")"
+    case "$marketplaces_type" in
+        "") ;;
+        object)
+            keys="$(json_object_keys "$file" "$(path_join installationMode marketplaces)")"
+            while IFS= read -r marketplace_key; do
+                [[ -n "$marketplace_key" ]] || continue
+                [[ "$marketplace_key" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+                    fail "Policy marketplace ids must be exact source-derived ids."
+                marketplace_path="$(path_join "$(path_join installationMode marketplaces)" "$marketplace_key")"
+                [[ "$(json_type_path "$file" "$marketplace_path")" == object ]] ||
+                    fail "Policy marketplace entries must be JSON objects."
+                enabled_type="$(json_optional_type_path "$file" "$(path_join "$marketplace_path" enabled)")"
+                case "$enabled_type" in
+                    "") ;;
+                    boolean)
+                        if [[ "$marketplace_key" == "$marketplace_id" ]]; then
+                            marketplace_enabled="$(json_optional_path "$file" "$(path_join "$marketplace_path" enabled)")"
+                        fi
+                        ;;
+                    *) fail "Policy marketplace enabled values must be booleans." ;;
+                esac
+                plugins_type="$(json_optional_type_path "$file" "$(path_join "$marketplace_path" plugins)")"
+                case "$plugins_type" in
+                    "") ;;
+                    object)
+                        path="$(path_join "$marketplace_path" plugins)"
+                        while IFS= read -r plugin_key; do
+                            [[ -n "$plugin_key" ]] || continue
+                            assert_plugin_id "$plugin_key"
+                            plugin_path="$(path_join "$path" "$plugin_key")"
+                            [[ "$(json_type_path "$file" "$plugin_path")" == object ]] ||
+                                fail "Policy plugin entries must be JSON objects."
+                            enabled_type="$(json_optional_type_path "$file" "$(path_join "$plugin_path" enabled)")"
+                            case "$enabled_type" in
+                                "") ;;
+                                boolean)
+                                    if [[ "$marketplace_key" == "$marketplace_id" && "$plugin_key" == "$plugin_id" ]]; then
+                                        plugin_enabled="$(json_optional_path "$file" "$(path_join "$plugin_path" enabled)")"
+                                    fi
+                                    ;;
+                                *) fail "Policy plugin enabled values must be booleans." ;;
+                            esac
+                        done < <(json_object_keys "$file" "$path")
+                        ;;
+                    *) fail "Policy marketplace plugin maps must be JSON objects." ;;
+                esac
+            done <<<"$keys"
+            ;;
+        *) fail "installationMode.marketplaces must be a JSON object." ;;
+    esac
+
+    if [[ -n "$plugin_enabled" ]]; then
+        scope=plugin
+        enabled="$plugin_enabled"
+    elif [[ -n "$marketplace_enabled" ]]; then
+        scope=marketplace
+        enabled="$marketplace_enabled"
+    elif [[ -n "$global_enabled" ]]; then
+        scope=global
+        enabled="$global_enabled"
+    else
+        scope=default
+        enabled=false
+    fi
+    if [[ "$enabled" == true ]]; then
+        reason="policy-${scope}-true"
+    else
+        reason="policy-${scope}-false"
+    fi
+    printf 'state\tvalid\nscope\t%s\nenabled\t%s\nreason\t%s\n' "$scope" "$enabled" "$reason"
+}
+
+maintenance_sidecar_snapshot() {
+    local file="$1" owner host pid reason entered_at expected_until entered_epoch expected_epoch now_epoch state
+    [[ "$(json_type_path "$file" "")" == object ]] ||
+        fail "Maintenance sidecar must be a JSON object."
+    [[ "$(json_type_path "$file" owner)" == string ]] || fail "Maintenance owner must be a string."
+    [[ "$(json_type_path "$file" host)" == string ]] || fail "Maintenance host must be a string."
+    [[ "$(json_type_path "$file" pid)" == number ]] || fail "Maintenance pid must be a number."
+    [[ "$(json_type_path "$file" reason)" == string ]] || fail "Maintenance reason must be a string."
+    [[ "$(json_type_path "$file" enteredAt)" == string ]] || fail "Maintenance enteredAt must be a string."
+    [[ "$(json_type_path "$file" expectedUntil)" == string ]] || fail "Maintenance expectedUntil must be a string."
+    json_optional_string_into owner "$file" owner
+    json_optional_string_into host "$file" host
+    pid="$(json_optional_path "$file" pid)"
+    json_optional_string_into reason "$file" reason
+    json_optional_string_into entered_at "$file" enteredAt
+    json_optional_string_into expected_until "$file" expectedUntil
+    [[ -n "$owner" && -n "$host" && -n "$reason" ]] ||
+        fail "Maintenance sidecar fields must be non-empty."
+    host="${host%%.*}"
+    host="${host,,}"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] ||
+        fail "Maintenance pid must be a positive integer."
+    entered_epoch="$(parse_utc_epoch "$entered_at")" ||
+        fail "Maintenance enteredAt must be RFC3339 UTC."
+    expected_epoch="$(parse_utc_epoch "$expected_until")" ||
+        fail "Maintenance expectedUntil must be RFC3339 UTC."
+    now_epoch="$(date -u +%s)"
+    state=stale
+    if [[ "$host" == "$CURRENT_HOST" ]] && pid_is_live "$pid" &&
+        ((entered_epoch <= now_epoch)) && ((now_epoch <= expected_epoch)); then
+        state=active
+    fi
+    printf 'state\t%s\nowner\t%s\nhost\t%s\npid\t%s\nreason\t%s\nenteredAt\t%s\nexpectedUntil\t%s\n' \
+        "$state" "$owner" "$host" "$pid" "$reason" "$entered_at" "$expected_until"
+}
+
+activation_snapshot() {
+    local file="$1" durable_home="$2" marketplace_id="$3" plugin_id="$4" plugin_root="$5" legacy_root="$6"
+    local schema version mode state context generation namespace_generation install_generation
+    local cell_root current_install_generation
+    [[ "$(json_type_path "$file" "")" == object ]] ||
+        fail "Activation receipt must be a JSON object."
+    [[ "$(json_type_path "$file" schema)" == string ]] ||
+        fail "Activation schema must be a string."
+    [[ "$(json_type_path "$file" version)" == number ]] ||
+        fail "Activation version must be a number."
+    json_optional_string_into schema "$file" schema
+    version="$(json_optional_path "$file" version)"
+    [[ "$schema" == copilot-extensions.installation-activation && "$version" == 1 ]] ||
+        fail "Activation schema or version is unsupported."
+    json_optional_string_into READ_ENV_PLATFORM "$file" marketplaceId
+    [[ "$READ_ENV_PLATFORM" == "$marketplace_id" ]] ||
+        fail "Activation marketplaceId does not match the resolved marketplace."
+    json_optional_string_into READ_ENV_PLATFORM "$file" pluginId
+    [[ "$READ_ENV_PLATFORM" == "$plugin_id" ]] ||
+        fail "Activation pluginId does not match the resolved plugin."
+    [[ "$(json_type_path "$file" mode)" == string ]] || fail "Activation mode must be a string."
+    [[ "$(json_type_path "$file" state)" == string ]] || fail "Activation state must be a string."
+    json_optional_string_into mode "$file" mode
+    json_optional_string_into state "$file" state
+    case "$mode/$state" in
+        namespaced/active | legacy/deactivated) ;;
+        *) fail "Activation mode/state is invalid." ;;
+    esac
+    read_environment_tuple "$file" environment "activation environment"
+    if [[ "$READ_ENV_PLATFORM" != "$CURRENT_PLATFORM" ||
+        "$READ_ENV_HOME_REAL_PATH" != "$CURRENT_PROFILE_HOME" ||
+        "$READ_ENV_WSL_DISTRO_TYPE" != "$CURRENT_WSL_DISTRO_TYPE" ||
+        "$READ_ENV_WSL_DISTRO" != "$CURRENT_WSL_DISTRO" ]]; then
+        printf 'status\tforeign-environment\nmode\t%s\nstate\t%s\ncontextHex\t\nactivationGeneration\t\ninstallGeneration\t\nruntimeRootHex\t%s\n' \
+            "$mode" "$state" \
+            "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
+        return 0
+    fi
+    [[ "$(json_type_path "$file" context)" == string ]] || fail "Activation context must be a string."
+    json_optional_string_into context "$file" context
+    is_absolute "$context" || fail "Activation context must be absolute."
+    cell_root="$(canonical_path "$durable_home/marketplaces/$marketplace_id")"
+    paths_equal "$context" "$plugin_root/install.json" ||
+        fail "Activation context is not the canonical install receipt."
+    [[ "$(json_type_path "$file" namespaceGeneration)" == number ]] ||
+        fail "Activation namespaceGeneration must be a number."
+    [[ "$(json_type_path "$file" installGeneration)" == number ]] ||
+        fail "Activation installGeneration must be a number."
+    [[ "$(json_type_path "$file" generation)" == number ]] ||
+        fail "Activation generation must be a number."
+    namespace_generation="$(json_optional_path "$file" namespaceGeneration)"
+    install_generation="$(json_optional_path "$file" installGeneration)"
+    generation="$(json_optional_path "$file" generation)"
+    assert_receipt_generation "$namespace_generation" "activation namespaceGeneration"
+    assert_receipt_generation "$install_generation" "activation installGeneration"
+    assert_receipt_generation "$generation" "activation generation"
+    [[ "$(json_type_path "$file" legacy)" == object ]] ||
+        fail "Activation legacy evidence must be a JSON object."
+    [[ "$(json_type_path "$file" "$(path_join legacy disposition)")" == string ]] ||
+        fail "Activation legacy disposition must be a string."
+    json_optional_string_into READ_ENV_PLATFORM "$file" "$(path_join legacy disposition)"
+    case "$READ_ENV_PLATFORM" in
+        absent | quiesced | retained-inert | restored) ;;
+        *) fail "Activation legacy disposition is invalid." ;;
+    esac
+    legacy_probe_snapshot "$file" "$(path_join legacy probe)"
+    [[ "$(json_type_path "$file" createdAt)" == string ]] ||
+        fail "Activation createdAt must be a string."
+    [[ "$(json_type_path "$file" updatedAt)" == string ]] ||
+        fail "Activation updatedAt must be a string."
+    json_optional_string_into READ_ENV_PLATFORM "$file" createdAt
+    parse_utc_epoch "$READ_ENV_PLATFORM" >/dev/null ||
+        fail "Activation createdAt must be RFC3339 UTC."
+    json_optional_string_into READ_ENV_HOME_REAL_PATH "$file" updatedAt
+    parse_utc_epoch "$READ_ENV_HOME_REAL_PATH" >/dev/null ||
+        fail "Activation updatedAt must be RFC3339 UTC."
+    [[ "$READ_ENV_HOME_REAL_PATH" < "$READ_ENV_PLATFORM" ]] &&
+        fail "Activation updatedAt precedes createdAt."
+    validate_context_receipt "$context" "$durable_home" "$marketplace_id" "$plugin_id" "" "$cell_root"
+    current_install_generation="$(json_optional_path "$context" generation)"
+    if [[ "$namespace_generation" != "$NS_GENERATION" || "$install_generation" != "$current_install_generation" ]]; then
+        printf 'status\trevalidation-required\nmode\t%s\nstate\t%s\ncontextHex\t%s\nactivationGeneration\t%s\ninstallGeneration\t%s\nruntimeRootHex\t%s\n' \
+            "$mode" "$state" "$(printf '%s' "$context" | snapshot_hex)" \
+            "$generation" "$current_install_generation" \
+            "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
+        return 0
+    fi
+    printf 'status\tvalid\nmode\t%s\nstate\t%s\ncontextHex\t%s\nactivationGeneration\t%s\ninstallGeneration\t%s\nruntimeRootHex\t%s\n' \
+        "$mode" "$state" "$(printf '%s' "$context" | snapshot_hex)" \
+        "$generation" "$current_install_generation" \
+        "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
+}
+
+tombstone_snapshot() {
+    local file="$1" durable_home="$2" current_marketplace_id="$3" current_plugin_id="$4"
+    local schema version owner_marketplace_id owner_plugin_id activation_path activation_generation disposition activation_info activation_status activation_mode activation_state
+    [[ "$(json_type_path "$file" "")" == object ]] ||
+        fail "Tombstone must be a JSON object."
+    [[ "$(json_type_path "$file" schema)" == string ]] || fail "Tombstone schema must be a string."
+    [[ "$(json_type_path "$file" version)" == number ]] || fail "Tombstone version must be a number."
+    json_optional_string_into schema "$file" schema
+    version="$(json_optional_path "$file" version)"
+    [[ "$schema" == copilot-extensions.legacy-installation-ownership && "$version" == 1 ]] ||
+        fail "Tombstone schema or version is unsupported."
+    [[ "$(json_type_path "$file" marketplaceId)" == string ]] ||
+        fail "Tombstone marketplaceId must be a string."
+    [[ "$(json_type_path "$file" pluginId)" == string ]] ||
+        fail "Tombstone pluginId must be a string."
+    json_optional_string_into owner_marketplace_id "$file" marketplaceId
+    json_optional_string_into owner_plugin_id "$file" pluginId
+    [[ "$owner_marketplace_id" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+        fail "Tombstone marketplaceId must be an exact source-derived id."
+    assert_plugin_id "$owner_plugin_id"
+    if [[ -n "$current_plugin_id" && "$owner_plugin_id" != "$current_plugin_id" ]]; then
+        fail "Tombstone pluginId does not match the resolved plugin."
+    fi
+    read_environment_tuple "$file" environment "tombstone environment"
+    if [[ "$READ_ENV_PLATFORM" != "$CURRENT_PLATFORM" ||
+        "$READ_ENV_HOME_REAL_PATH" != "$CURRENT_PROFILE_HOME" ||
+        "$READ_ENV_WSL_DISTRO_TYPE" != "$CURRENT_WSL_DISTRO_TYPE" ||
+        "$READ_ENV_WSL_DISTRO" != "$CURRENT_WSL_DISTRO" ]]; then
+        printf 'status\tforeign-environment\ndisposition\torphaned-transfer\nownerMarketplaceId\t%s\nactivation\t\n' \
+            "$owner_marketplace_id"
+        return 0
+    fi
+    [[ "$(json_type_path "$file" activation)" == object ]] ||
+        fail "Tombstone activation must be a JSON object."
+    [[ "$(json_type_path "$file" "$(path_join activation path)")" == string ]] ||
+        fail "Tombstone activation.path must be a string."
+    [[ "$(json_type_path "$file" "$(path_join activation generation)")" == number ]] ||
+        fail "Tombstone activation.generation must be a number."
+    json_optional_string_into activation_path "$file" "$(path_join activation path)"
+    activation_generation="$(json_optional_path "$file" "$(path_join activation generation)")"
+    is_absolute "$activation_path" || fail "Tombstone activation.path must be absolute."
+    assert_receipt_generation "$activation_generation" "tombstone activation generation"
+    [[ "$(json_type_path "$file" transferredAt)" == string ]] ||
+        fail "Tombstone transferredAt must be a string."
+    json_optional_string_into READ_ENV_PLATFORM "$file" transferredAt
+    parse_utc_epoch "$READ_ENV_PLATFORM" >/dev/null ||
+        fail "Tombstone transferredAt must be RFC3339 UTC."
+    paths_equal "$activation_path" "$durable_home/marketplaces/$owner_marketplace_id/plugins/$owner_plugin_id/installation-activation.json" ||
+        fail "Tombstone activation.path is not canonical for its owner."
+    if [[ ! -f "$activation_path" ]]; then
+        printf 'status\torphaned-transfer\ndisposition\torphaned-transfer\nownerMarketplaceId\t%s\nactivation\t%s\n' \
+            "$owner_marketplace_id" "$activation_path"
+        return 0
+    fi
+    if ! capture_output activation_info activation_snapshot \
+        "$activation_path" "$durable_home" "$owner_marketplace_id" "$owner_plugin_id" \
+        "$(canonical_path "$durable_home/marketplaces/$owner_marketplace_id/plugins/$owner_plugin_id")" \
+        "$(canonical_path "$(dirname -- "$file")")"; then
+        printf 'status\torphaned-transfer\ndisposition\torphaned-transfer\nownerMarketplaceId\t%s\nactivation\t%s\n' \
+            "$owner_marketplace_id" "$activation_path"
+        return 0
+    fi
+    activation_status="$(snapshot_value "$activation_info" status || true)"
+    activation_mode="$(snapshot_value "$activation_info" mode || true)"
+    activation_state="$(snapshot_value "$activation_info" state || true)"
+    if [[ "$activation_status" != valid || "$activation_mode" != namespaced || "$activation_state" != active ]]; then
+        printf 'status\torphaned-transfer\ndisposition\torphaned-transfer\nownerMarketplaceId\t%s\nactivation\t%s\n' \
+            "$owner_marketplace_id" "$activation_path"
+        return 0
+    fi
+    if [[ "$(snapshot_value "$activation_info" activationGeneration || true)" != "$activation_generation" ]]; then
+        printf 'status\torphaned-transfer\ndisposition\torphaned-transfer\nownerMarketplaceId\t%s\nactivation\t%s\n' \
+            "$owner_marketplace_id" "$activation_path"
+        return 0
+    fi
+    if [[ "$owner_marketplace_id" == "$current_marketplace_id" && "$owner_plugin_id" == "$current_plugin_id" ]]; then
+        disposition=owned-by-current-cell
+    else
+        disposition=owned-by-other-cell
+    fi
+    printf 'status\tvalid\ndisposition\t%s\nownerMarketplaceId\t%s\nactivation\t%s\n' \
+        "$disposition" "$owner_marketplace_id" "$activation_path"
+}
+
+status_identity_snapshot() {
+    if [[ -n "$SOURCE_FILE" ]]; then
+        [[ -n "$PLUGIN_ID" ]] || fail "Explicit source resolution requires --plugin-id."
+        normalize_source "$SOURCE_FILE" ""
+        EVIDENCE_PLUGIN_ID="$PLUGIN_ID"
+        EVIDENCE_READABLE_NAME="${MARKETPLACE_KEY:-marketplace}"
+    else
+        resolve_installed_evidence "$PAYLOAD_ROOT" "$COPILOT_HOME" "$PROJECT_ROOT"
+        if [[ "$EVIDENCE_FOUND" != true ]]; then
+            resolve_directory_evidence "$PAYLOAD_ROOT" "$PLUGIN_ID"
+        fi
+        if [[ "$EVIDENCE_FOUND" != true ]]; then
+            fail "Cannot establish marketplace provenance for payload '$PAYLOAD_ROOT'. Supply an explicit source descriptor for management/development mode."
+        fi
+        [[ -z "$PLUGIN_ID" || "$PLUGIN_ID" == "$EVIDENCE_PLUGIN_ID" ]] ||
+            fail "Expected plugin '$PLUGIN_ID', payload evidence identifies '$EVIDENCE_PLUGIN_ID'."
+    fi
+    assert_plugin_id "$EVIDENCE_PLUGIN_ID"
+    derive_identity "$EVIDENCE_READABLE_NAME"
+    find_existing_source "$DURABLE_HOME" "$SOURCE_FINGERPRINT" "$MARKETPLACE_ID"
+    if [[ "$EXISTING_JSON" =~ \"sameId\":false || "$EXISTING_JSON" =~ \"locatorMatch\":false ]]; then
+        fail "Source '$SOURCE_FINGERPRINT' already owns another cell/locator; explicit rebind or new-cell intent is required."
+    fi
+    printf 'marketplaceId\t%s\npluginId\t%s\n' "$MARKETPLACE_ID" "$EVIDENCE_PLUGIN_ID"
+}
+
+POLICY_RESOLVED_PATH=""
+POLICY_AUTHORITATIVE=false
+POLICY_STATE=missing
+POLICY_SCOPE=default
+POLICY_ENABLED=false
+POLICY_REASON=policy-default-false
+
+resolve_policy_result() {
+    local marketplace_id="$1" plugin_id="$2" snapshot policy_entry
+    resolve_current_environment
+    policy_entry="$CURRENT_PROFILE_HOME/.copilot-extensions/installation-mode.json"
+    POLICY_AUTHORITATIVE=true
+    if [[ -n "$POLICY_PATH" ]]; then
+        policy_entry="$POLICY_PATH"
+        POLICY_AUTHORITATIVE=false
+    fi
+    POLICY_RESOLVED_PATH="$(canonical_path "$policy_entry")"
+    POLICY_STATE=missing
+    POLICY_SCOPE=default
+    POLICY_ENABLED=false
+    POLICY_REASON=policy-default-false
+    if [[ ! -e "$policy_entry" && ! -L "$policy_entry" ]]; then
+        if [[ "$POLICY_AUTHORITATIVE" != true ]]; then
+            POLICY_REASON=policy-injected-non-authoritative
+        fi
+        return 0
+    fi
+    if [[ -L "$policy_entry" || ! -f "$policy_entry" ]]; then
+        POLICY_STATE=invalid
+        POLICY_ENABLED=
+        POLICY_REASON=policy-invalid
+        return 0
+    fi
+    if ! capture_output snapshot policy_snapshot "$POLICY_RESOLVED_PATH" "$marketplace_id" "$plugin_id"; then
+        POLICY_STATE=invalid
+        POLICY_SCOPE=default
+        POLICY_ENABLED=
+        POLICY_REASON=policy-invalid
+        return 0
+    fi
+    POLICY_STATE="$(snapshot_value "$snapshot" state || printf valid)"
+    POLICY_SCOPE="$(snapshot_value "$snapshot" scope || printf default)"
+    POLICY_ENABLED="$(snapshot_value "$snapshot" enabled || printf false)"
+    POLICY_REASON="$(snapshot_value "$snapshot" reason || printf policy-default-false)"
+    if [[ "$POLICY_AUTHORITATIVE" != true && "$POLICY_STATE" == valid ]]; then
+        POLICY_REASON=policy-injected-non-authoritative
+    fi
+}
+
+MAINTENANCE_STATE=inactive
+MAINTENANCE_SCOPE=none
+MAINTENANCE_MARKER=""
+MAINTENANCE_SIDECAR=""
+MAINTENANCE_OWNER=""
+MAINTENANCE_HOST=""
+MAINTENANCE_PID=""
+MAINTENANCE_REASON_TEXT=""
+MAINTENANCE_ENTERED_AT=""
+MAINTENANCE_EXPECTED_UNTIL=""
+
+apply_maintenance_marker() {
+    local scope="$1" marker="$2" sidecar="$3" snapshot
+    MAINTENANCE_SCOPE="$scope"
+    MAINTENANCE_MARKER="$marker"
+    MAINTENANCE_SIDECAR="$sidecar"
+    MAINTENANCE_OWNER=""
+    MAINTENANCE_HOST=""
+    MAINTENANCE_PID=""
+    MAINTENANCE_REASON_TEXT=""
+    MAINTENANCE_ENTERED_AT=""
+    MAINTENANCE_EXPECTED_UNTIL=""
+    if [[ -L "$marker" || -L "$sidecar" || ! -f "$sidecar" ]]; then
+        MAINTENANCE_STATE=stale
+        return 0
+    fi
+    if ! capture_output snapshot maintenance_sidecar_snapshot "$sidecar"; then
+        MAINTENANCE_STATE=stale
+        return 0
+    fi
+    MAINTENANCE_STATE="$(snapshot_value "$snapshot" state || printf stale)"
+    MAINTENANCE_OWNER="$(snapshot_value "$snapshot" owner || true)"
+    MAINTENANCE_HOST="$(snapshot_value "$snapshot" host || true)"
+    MAINTENANCE_PID="$(snapshot_value "$snapshot" pid || true)"
+    MAINTENANCE_REASON_TEXT="$(snapshot_value "$snapshot" reason || true)"
+    MAINTENANCE_ENTERED_AT="$(snapshot_value "$snapshot" enteredAt || true)"
+    MAINTENANCE_EXPECTED_UNTIL="$(snapshot_value "$snapshot" expectedUntil || true)"
+}
+
+resolve_maintenance_result() {
+    local plugin_root="${1-}" user_marker user_sidecar plugin_marker plugin_sidecar
+    resolve_current_environment
+    MAINTENANCE_STATE=inactive
+    MAINTENANCE_SCOPE=none
+    MAINTENANCE_MARKER=""
+    MAINTENANCE_SIDECAR=""
+    MAINTENANCE_OWNER=""
+    MAINTENANCE_HOST=""
+    MAINTENANCE_PID=""
+    MAINTENANCE_REASON_TEXT=""
+    MAINTENANCE_ENTERED_AT=""
+    MAINTENANCE_EXPECTED_UNTIL=""
+    user_marker="$CURRENT_PROFILE_HOME/.copilot-extensions/maintenance"
+    user_sidecar="$CURRENT_PROFILE_HOME/.copilot-extensions/maintenance.json"
+    if [[ -e "$user_marker" || -L "$user_marker" ]]; then
+        apply_maintenance_marker user "$user_marker" "$user_sidecar"
+        return 0
+    fi
+    if [[ -n "$plugin_root" ]]; then
+        plugin_marker="$plugin_root/maintenance"
+        plugin_sidecar="$plugin_root/maintenance.json"
+        if [[ -e "$plugin_marker" || -L "$plugin_marker" ]]; then
+            apply_maintenance_marker plugin "$plugin_marker" "$plugin_sidecar"
+        fi
+    fi
+}
+
+ACTIVATION_STATUS=missing
+ACTIVATION_MODE=""
+ACTIVATION_RUNTIME_STATE=""
+ACTIVATION_PATH=""
+ACTIVATION_CONTEXT=""
+ACTIVATION_GENERATION=""
+ACTIVATION_INSTALL_GENERATION=""
+ACTIVATION_RUNTIME_ROOT=""
+
+resolve_activation_result() {
+    local durable_home="$1" marketplace_id="$2" plugin_id="$3" plugin_root="$4" legacy_root="$5" snapshot activation_entry
+    ACTIVATION_STATUS=missing
+    ACTIVATION_MODE=""
+    ACTIVATION_RUNTIME_STATE=""
+    ACTIVATION_PATH=""
+    ACTIVATION_CONTEXT=""
+    ACTIVATION_GENERATION=""
+    ACTIVATION_INSTALL_GENERATION=""
+    ACTIVATION_RUNTIME_ROOT=""
+    [[ -n "$plugin_root" ]] || return 0
+    activation_entry="$plugin_root/installation-activation.json"
+    ACTIVATION_PATH="$(canonical_path "$activation_entry")"
+    if [[ ! -e "$activation_entry" && ! -L "$activation_entry" ]]; then
+        ACTIVATION_PATH=""
+        return 0
+    fi
+    if [[ -L "$activation_entry" || ! -f "$activation_entry" ]]; then
+        ACTIVATION_STATUS=invalid
+        return 0
+    fi
+    if ! capture_output snapshot activation_snapshot "$ACTIVATION_PATH" "$durable_home" "$marketplace_id" "$plugin_id" "$plugin_root" "$legacy_root"; then
+        ACTIVATION_STATUS=invalid
+        return 0
+    fi
+    ACTIVATION_STATUS="$(snapshot_value "$snapshot" status || printf invalid)"
+    ACTIVATION_MODE="$(snapshot_value "$snapshot" mode || true)"
+    ACTIVATION_RUNTIME_STATE="$(snapshot_value "$snapshot" state || true)"
+    snapshot_hex_into ACTIVATION_CONTEXT "$snapshot" context || true
+    ACTIVATION_GENERATION="$(snapshot_value "$snapshot" activationGeneration || true)"
+    ACTIVATION_INSTALL_GENERATION="$(snapshot_value "$snapshot" installGeneration || true)"
+    snapshot_hex_into ACTIVATION_RUNTIME_ROOT "$snapshot" runtimeRoot || true
+}
+
+LEGACY_DISPOSITION=active
+LEGACY_TOMBSTONE_PATH=""
+LEGACY_OWNER_MARKETPLACE_ID=""
+TOMBSTONE_STATUS=missing
+
+resolve_tombstone_result() {
+    local durable_home="$1" current_marketplace_id="$2" current_plugin_id="$3" legacy_root="$4" snapshot tombstone_entry
+    LEGACY_DISPOSITION=active
+    LEGACY_TOMBSTONE_PATH=""
+    LEGACY_OWNER_MARKETPLACE_ID=""
+    TOMBSTONE_STATUS=missing
+    tombstone_entry="$legacy_root/.installation-ownership.json"
+    LEGACY_TOMBSTONE_PATH="$(canonical_path "$tombstone_entry")"
+    if [[ ! -e "$tombstone_entry" && ! -L "$tombstone_entry" ]]; then
+        LEGACY_TOMBSTONE_PATH=""
+        return 0
+    fi
+    if [[ -L "$tombstone_entry" || ! -f "$tombstone_entry" ]]; then
+        TOMBSTONE_STATUS=orphaned-transfer
+        LEGACY_DISPOSITION=orphaned-transfer
+        return 0
+    fi
+    if ! capture_output snapshot tombstone_snapshot "$LEGACY_TOMBSTONE_PATH" "$durable_home" "$current_marketplace_id" "$current_plugin_id"; then
+        TOMBSTONE_STATUS=orphaned-transfer
+        LEGACY_DISPOSITION=orphaned-transfer
+        return 0
+    fi
+    TOMBSTONE_STATUS="$(snapshot_value "$snapshot" status || printf orphaned-transfer)"
+    LEGACY_DISPOSITION="$(snapshot_value "$snapshot" disposition || printf orphaned-transfer)"
+    LEGACY_OWNER_MARKETPLACE_ID="$(snapshot_value "$snapshot" ownerMarketplaceId || true)"
+    if [[ "$TOMBSTONE_STATUS" == foreign-environment ]]; then
+        LEGACY_DISPOSITION=orphaned-transfer
+    fi
+}
+
+PROVENANCE_BLOCKED=false
+INVALID_CONTEXT=false
+RESOLVED_MARKETPLACE_ID=""
+RESOLVED_PLUGIN_ID=""
+RESOLVED_PLUGIN_ROOT=""
+RESOLVED_CELL_ROOT=""
+
+resolve_status_identity() {
+    local snapshot message
+    PROVENANCE_BLOCKED=false
+    INVALID_CONTEXT=false
+    RESOLVED_MARKETPLACE_ID=""
+    RESOLVED_PLUGIN_ID=""
+    RESOLVED_PLUGIN_ROOT=""
+    RESOLVED_CELL_ROOT=""
+    if [[ -n "$CONTEXT" ]]; then
+        is_absolute "$CONTEXT" ||
+            fail "The installation-context receipt pointer must be absolute."
+        CONTEXT="$(canonical_path "$CONTEXT")"
+        if capture_output snapshot validate_context_receipt \
+            "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "${PLUGIN_ID:-$EXPECTED_PLUGIN_ID}" \
+            "${EXPECTED_PAYLOAD_ROOT:-${PAYLOAD_ROOT:-}}" "$EXPECTED_CELL_ROOT"; then
+            RESOLVED_MARKETPLACE_ID="$(json_optional_path "$CONTEXT" marketplaceId)"
+            RESOLVED_PLUGIN_ID="$(json_optional_path "$CONTEXT" pluginId)"
+        else
+            INVALID_CONTEXT=true
+            RESOLVED_PLUGIN_ID="${PLUGIN_ID:-$EXPECTED_PLUGIN_ID}"
+            if [[ "$(basename -- "$CONTEXT")" == install.json &&
+                "$(basename -- "$(dirname -- "$(dirname -- "$CONTEXT")")")" == plugins ]]; then
+                RESOLVED_PLUGIN_ID="$(basename -- "$(dirname -- "$CONTEXT")")"
+                RESOLVED_CELL_ROOT="$(dirname -- "$(dirname -- "$(dirname -- "$CONTEXT")")")"
+                RESOLVED_MARKETPLACE_ID="$(basename -- "$RESOLVED_CELL_ROOT")"
+            fi
+        fi
+    else
+        if ! capture_output snapshot status_identity_snapshot; then
+            message="${snapshot#installation-context: }"
+            if [[ -n "$SOURCE_FILE" ]]; then
+                if [[ "$message" == *"already owns another cell/locator; explicit rebind or new-cell intent is required." ||
+                    "$message" == *"is already occupied by a different full source fingerprint." ]]; then
+                    PROVENANCE_BLOCKED=true
+                    return 0
+                fi
+                fail "$message"
+            fi
+            case "$message" in
+                "Expected plugin '"* ) fail "$message" ;;
+                *)
+                    PROVENANCE_BLOCKED=true
+                    RESOLVED_PLUGIN_ID="${PLUGIN_ID:-$EXPECTED_PLUGIN_ID}"
+                    if [[ -z "$RESOLVED_PLUGIN_ID" && -n "$PAYLOAD_ROOT" ]]; then
+                        RESOLVED_PLUGIN_ID="$(basename -- "$PAYLOAD_ROOT")"
+                    fi
+                    return 0
+                    ;;
+            esac
+        fi
+        RESOLVED_MARKETPLACE_ID="$(snapshot_value "$snapshot" marketplaceId || true)"
+        RESOLVED_PLUGIN_ID="$(snapshot_value "$snapshot" pluginId || true)"
+    fi
+    if [[ -n "$RESOLVED_MARKETPLACE_ID" && -n "$RESOLVED_PLUGIN_ID" ]]; then
+        RESOLVED_CELL_ROOT="$(canonical_path "$DURABLE_HOME/marketplaces/$RESOLVED_MARKETPLACE_ID")"
+        RESOLVED_PLUGIN_ROOT="$(canonical_path "$RESOLVED_CELL_ROOT/plugins/$RESOLVED_PLUGIN_ID")"
+    fi
+}
+
+emit_environment_json() {
+    printf '{"platform":%s,"homeRealPath":%s,"wslDistro":%s}' \
+        "$(json_quote "$CURRENT_PLATFORM")" \
+        "$(json_quote "$CURRENT_PROFILE_HOME")" \
+        "$(json_string_or_null "$CURRENT_WSL_DISTRO")"
+}
+
+emit_maintenance_json() {
+    printf '{'
+    printf '"state":%s,' "$(json_quote "$MAINTENANCE_STATE")"
+    printf '"scope":%s,' "$(json_quote "$MAINTENANCE_SCOPE")"
+    printf '"marker":%s,' "$(json_string_or_null "$MAINTENANCE_MARKER")"
+    printf '"sidecar":%s' "$(json_string_or_null "$MAINTENANCE_SIDECAR")"
+    printf '}'
+}
+
+emit_policy_json() {
+    printf '{'
+    printf '"path":%s,' "$(json_quote "$POLICY_RESOLVED_PATH")"
+    printf '"authoritative":%s,' "$([[ "$POLICY_AUTHORITATIVE" == true ]] && printf true || printf false)"
+    printf '"state":%s,' "$(json_quote "$POLICY_STATE")"
+    printf '"scope":%s,' "$(json_quote "$POLICY_SCOPE")"
+    printf '"enabled":%s,' "$(json_bool_literal_or_null "$POLICY_ENABLED")"
+    printf '"reason":%s' "$(json_quote "$POLICY_REASON")"
+    printf '}'
+}
+
+emit_legacy_json() {
+    printf '{'
+    printf '"root":%s,' "$(json_quote "$LEGACY_ROOT")"
+    printf '"probe":{"declared":%s,"result":%s,"checkedAt":%s},' \
+        "$([[ "$LEGACY_PROBE_DECLARED" == true ]] && printf true || printf false)" \
+        "$(json_quote "$LEGACY_PROBE_RESULT")" \
+        "$(json_string_or_null "$LEGACY_PROBE_CHECKED_AT")"
+    printf '"tombstone":%s,' "$(json_string_or_null "$LEGACY_TOMBSTONE_PATH")"
+    printf '"disposition":%s,' "$(json_quote "$LEGACY_DISPOSITION")"
+    printf '"ownerMarketplaceId":%s' "$(json_string_or_null "$LEGACY_OWNER_MARKETPLACE_ID")"
+    printf '}'
+}
+
+emit_status_result() {
+    local desired_mode="$1" actual_mode="$2" status="$3" runtime_root="$4" context_path="$5" activation_path="$6" activation_generation="$7" install_generation="$8" reason="$9" allow_mutation="${10-}" probe_reason="${11-}"
+    printf '{'
+    printf '"schema":"copilot-extensions.installation-resolution",'
+    printf '"version":1,'
+    printf '"marketplaceId":%s,' "$(json_string_or_null "$RESOLVED_MARKETPLACE_ID")"
+    printf '"pluginId":%s,' "$(json_string_or_null "$RESOLVED_PLUGIN_ID")"
+    printf '"environment":'
+    emit_environment_json
+    printf ','
+    printf '"desiredMode":%s,' "$(json_string_or_null "$desired_mode")"
+    printf '"actualMode":%s,' "$(json_string_or_null "$actual_mode")"
+    printf '"status":%s,' "$(json_quote "$status")"
+    printf '"maintenance":'
+    emit_maintenance_json
+    printf ','
+    printf '"runtimeRoot":%s,' "$(json_string_or_null "$runtime_root")"
+    printf '"context":%s,' "$(json_string_or_null "$context_path")"
+    printf '"activation":%s,' "$(json_string_or_null "$activation_path")"
+    printf '"activationGeneration":%s,' "$(json_number_literal_or_null "$activation_generation")"
+    printf '"installGeneration":%s,' "$(json_number_literal_or_null "$install_generation")"
+    printf '"reason":%s,' "$(json_quote "$reason")"
+    printf '"policy":'
+    emit_policy_json
+    printf ','
+    printf '"legacy":'
+    emit_legacy_json
+    if [[ -n "$allow_mutation" ]]; then
+        printf ',"allowMutation":%s' "$([[ "$allow_mutation" == true ]] && printf true || printf false)"
+        printf ',"probeReason":%s' "$(json_quote "$probe_reason")"
+    fi
+    printf '}'
+}
+
+run_status_action() {
+    local desired_mode actual_mode runtime_root context_path activation_path activation_generation install_generation
+    local status reason base_status base_reason active_namespaced
+    local allow_mutation probe_reason exit_code
+    resolve_current_environment
+    legacy_probe_snapshot "${LEGACY_PROBE_FILE:-@LEGACY_PROBE_JSON}"
+    resolve_status_identity
+    resolve_policy_result "$RESOLVED_MARKETPLACE_ID" "$RESOLVED_PLUGIN_ID"
+    resolve_maintenance_result "$RESOLVED_PLUGIN_ROOT"
+    resolve_activation_result "$DURABLE_HOME" "$RESOLVED_MARKETPLACE_ID" "$RESOLVED_PLUGIN_ID" "$RESOLVED_PLUGIN_ROOT" "$LEGACY_ROOT"
+    resolve_tombstone_result "$DURABLE_HOME" "$RESOLVED_MARKETPLACE_ID" "$RESOLVED_PLUGIN_ID" "$LEGACY_ROOT"
+
+    desired_mode=""
+    actual_mode=legacy
+    runtime_root="$LEGACY_ROOT"
+    context_path=""
+    activation_path="$ACTIVATION_PATH"
+    activation_generation="$ACTIVATION_GENERATION"
+    install_generation="$ACTIVATION_INSTALL_GENERATION"
+    active_namespaced=false
+    if [[ "$ACTIVATION_STATUS" == valid || "$ACTIVATION_STATUS" == revalidation-required ]]; then
+        actual_mode="$ACTIVATION_MODE"
+        runtime_root="$ACTIVATION_RUNTIME_ROOT"
+        context_path="$ACTIVATION_CONTEXT"
+        if [[ "$ACTIVATION_MODE" == namespaced && "$ACTIVATION_RUNTIME_STATE" == active ]]; then
+            active_namespaced=true
+        fi
+    elif [[ "$ACTIVATION_STATUS" == invalid ]]; then
+        actual_mode=""
+        runtime_root=""
+        context_path=""
+    elif [[ "$ACTIVATION_STATUS" == foreign-environment ]]; then
+        actual_mode=""
+        runtime_root=""
+        context_path=""
+    fi
+
+    if [[ "$POLICY_STATE" == valid || "$POLICY_STATE" == missing ]]; then
+        if [[ "$POLICY_AUTHORITATIVE" == true ]]; then
+            if [[ "$POLICY_ENABLED" == true ]]; then
+                desired_mode=namespaced
+            else
+                desired_mode=legacy
+            fi
+            base_reason="$POLICY_REASON"
+        else
+            if [[ "$active_namespaced" == true ]]; then
+                desired_mode=namespaced
+                base_reason=namespaced-active
+            elif [[ "$POLICY_ENABLED" == true ]]; then
+                desired_mode=legacy
+                base_reason=policy-injected-non-authoritative
+            else
+                desired_mode=legacy
+                base_reason="$POLICY_REASON"
+            fi
+        fi
+    fi
+    if [[ "$POLICY_AUTHORITATIVE" != true && "$active_namespaced" == true ]]; then
+        desired_mode=namespaced
+    fi
+
+    if [[ "$active_namespaced" == true ]]; then
+        if [[ "$desired_mode" == legacy && "$POLICY_AUTHORITATIVE" == true ]]; then
+            base_status=deactivation-required
+            base_reason=deactivation-required
+        else
+            base_status=ready
+            base_reason=namespaced-active
+        fi
+    elif [[ "$desired_mode" == namespaced ]]; then
+        if [[ "$ACTIVATION_STATUS" == missing &&
+            "$LEGACY_PROBE_DECLARED" == true && "$LEGACY_PROBE_RESULT" == absent ]]; then
+            base_status=ready
+            base_reason=activation-required
+        else
+            base_status=migration-required
+            base_reason=migration-required
+        fi
+    elif [[ -n "$desired_mode" ]]; then
+        base_status=ready
+        base_reason="$base_reason"
+    else
+        base_status=ready
+        base_reason=policy-default-false
+    fi
+
+    status="$base_status"
+    reason="$base_reason"
+    if [[ "$POLICY_STATE" == invalid ]]; then
+        status=invalid
+        reason=policy-invalid
+    elif [[ "$POLICY_STATE" == unsupported ]]; then
+        status=invalid
+        reason=policy-version-unsupported
+    elif [[ "$INVALID_CONTEXT" == true ]]; then
+        status=invalid
+        reason=context-invalid
+    elif [[ "$ACTIVATION_STATUS" == invalid ]]; then
+        status=invalid
+        reason=activation-invalid
+    elif [[ "$MAINTENANCE_STATE" == active ]]; then
+        status=maintenance-blocked
+        reason=maintenance-active
+    elif [[ "$MAINTENANCE_STATE" == stale ]]; then
+        status=maintenance-blocked
+        reason=maintenance-stale
+    elif [[ "$ACTIVATION_STATUS" == foreign-environment || "$TOMBSTONE_STATUS" == foreign-environment ]]; then
+        status=foreign-environment
+        reason=foreign-environment
+    elif [[ "$TOMBSTONE_STATUS" == orphaned-transfer ]]; then
+        status=orphaned-transfer
+        reason=orphaned-transfer
+    elif [[ "$ACTIVATION_STATUS" == revalidation-required ]]; then
+        status=revalidation-required
+        reason=revalidation-required
+    elif [[ "$PROVENANCE_BLOCKED" == true ]]; then
+        status=provenance-blocked
+        reason=provenance-blocked
+    fi
+    if [[ "$PROVENANCE_BLOCKED" == true || "$INVALID_CONTEXT" == true ]]; then
+        desired_mode=""
+        actual_mode=""
+        runtime_root=""
+        context_path=""
+        activation_path=""
+        activation_generation=""
+        install_generation=""
+    fi
+
+    if [[ "$ACTION" == status ]]; then
+        emit_status_result "$desired_mode" "$actual_mode" "$status" "$runtime_root" \
+            "$context_path" "$activation_path" "$activation_generation" "$install_generation" "$reason"
+        printf '\n'
+        return 0
+    fi
+
+    allow_mutation=false
+    probe_reason="$reason"
+    exit_code=3
+    if [[ "$reason" == namespaced-active ]]; then
+        probe_reason=namespaced-active
+    elif [[ "$LEGACY_DISPOSITION" == owned-by-current-cell || "$LEGACY_DISPOSITION" == owned-by-other-cell ]]; then
+        probe_reason=legacy-owned-by-other-cell
+    elif [[ "$status" == ready && "$reason" == activation-required ]]; then
+        probe_reason=namespaced-requested
+    elif [[ "$status" == migration-required ]]; then
+        allow_mutation=true
+        probe_reason=migration-required
+        exit_code=0
+    elif [[ "$status" == ready && "$actual_mode" == legacy ]]; then
+        allow_mutation=true
+        probe_reason=legacy-active
+        exit_code=0
+    fi
+
+    emit_status_result "$desired_mode" "$actual_mode" "$status" "$runtime_root" \
+        "$context_path" "$activation_path" "$activation_generation" "$install_generation" "$reason" \
+        "$allow_mutation" "$probe_reason"
+    printf '\n'
+    return "$exit_code"
+}
+
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp} [options]"
+[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -1387,6 +2493,12 @@ EXPECTED_NAMESPACE_GENERATION=""
 EXPECTED_INSTALL_GENERATION=""
 NAMESPACE_STATE="active"
 INSTALL_STATE="active"
+LEGACY_ROOT=""
+LEGACY_PROBE_JSON='{"declared":false,"result":"unknown","checkedAt":null}'
+LEGACY_PROBE_FILE=""
+LEGACY_PROBE_JSON_SUPPLIED=false
+LEGACY_PROBE_FILE_SUPPLIED=false
+POLICY_PATH=""
 
 while (($#)); do
     case "$1" in
@@ -1410,16 +2522,31 @@ while (($#)); do
         --expected-install-generation) need_value "$@"; EXPECTED_INSTALL_GENERATION="$2"; shift 2 ;;
         --namespace-state) need_value "$@"; NAMESPACE_STATE="$2"; shift 2 ;;
         --install-state) need_value "$@"; INSTALL_STATE="$2"; shift 2 ;;
+        --legacy-root) need_value "$@"; LEGACY_ROOT="$2"; shift 2 ;;
+        --legacy-probe-json) need_value "$@"; LEGACY_PROBE_JSON="$2"; LEGACY_PROBE_JSON_SUPPLIED=true; shift 2 ;;
+        --legacy-probe-file) need_value "$@"; LEGACY_PROBE_FILE="$2"; LEGACY_PROBE_FILE_SUPPLIED=true; shift 2 ;;
+        --policy-path) need_value "$@"; POLICY_PATH="$2"; shift 2 ;;
         *) fail "Unknown option '$1'." ;;
     esac
 done
 
 [[ -z "$SOURCE_JSON" || -z "$SOURCE_FILE" ]] ||
     fail "Specify only one of --source-json and --source-file."
+[[ "$LEGACY_PROBE_JSON_SUPPLIED" != true || "$LEGACY_PROBE_FILE_SUPPLIED" != true ]] ||
+    fail "Specify only one of --legacy-probe-json and --legacy-probe-file."
 if [[ -n "$SOURCE_JSON" ]]; then
-    SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/installation-context-source.XXXXXX")"
-    TEMP_FILES+=("$SOURCE_FILE")
-    printf '%s' "$SOURCE_JSON" >"$SOURCE_FILE"
+    if [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
+        SOURCE_FILE="@SOURCE_JSON"
+    else
+        SOURCE_FILE="$(mktemp "${TMPDIR:-/tmp}/installation-context-source.XXXXXX")"
+        TEMP_FILES+=("$SOURCE_FILE")
+        printf '%s' "$SOURCE_JSON" >"$SOURCE_FILE"
+    fi
+fi
+if [[ -n "$LEGACY_PROBE_FILE" ]]; then
+    LEGACY_PROBE_FILE="$(canonical_path "$LEGACY_PROBE_FILE" true)"
+elif [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
+    LEGACY_PROBE_FILE="@LEGACY_PROBE_JSON"
 fi
 
 if ! is_absolute "$COPILOT_HOME" || ! is_absolute "$DURABLE_HOME"; then
@@ -1429,6 +2556,10 @@ COPILOT_HOME="$(canonical_path "$COPILOT_HOME")"
 DURABLE_HOME="$(canonical_path "$DURABLE_HOME")"
 if [[ -n "$PROJECT_ROOT" ]]; then
     PROJECT_ROOT="$(canonical_path "$PROJECT_ROOT" true)"
+fi
+if [[ -n "$POLICY_PATH" ]]; then
+    is_absolute "$POLICY_PATH" || fail "--policy-path must be absolute."
+    POLICY_PATH="$(canonical_path "$POLICY_PATH")"
 fi
 
 if [[ "$ACTION" == source-id ]]; then
@@ -1447,6 +2578,26 @@ if [[ "$ACTION" == validate ]]; then
         "${EXPECTED_PAYLOAD_ROOT:-$PAYLOAD_ROOT}" "$EXPECTED_CELL_ROOT"
     printf '%s\n' "$CONTEXT_JSON"
     exit 0
+fi
+
+if [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
+    [[ -n "$LEGACY_ROOT" ]] || fail "$ACTION requires --legacy-root."
+    is_absolute "$LEGACY_ROOT" || fail "--legacy-root must be absolute."
+    LEGACY_ROOT="$(canonical_path "$LEGACY_ROOT")"
+    if [[ -z "$CONTEXT" ]]; then
+        PAYLOAD_ROOT="${PAYLOAD_ROOT:-${COPILOT_PLUGIN_ROOT:-}}"
+        [[ -n "$PAYLOAD_ROOT" ]] || fail "$ACTION requires --payload-root, --context, or COPILOT_PLUGIN_ROOT."
+        is_absolute "$PAYLOAD_ROOT" || fail "The payload root must be absolute."
+        PAYLOAD_ROOT="$(canonical_path "$PAYLOAD_ROOT" true)"
+        [[ -d "$PAYLOAD_ROOT" ]] || fail "The payload root must be an existing directory: $PAYLOAD_ROOT"
+        if [[ -n "${COPILOT_PLUGIN_ROOT:-}" ]]; then
+            is_absolute "$COPILOT_PLUGIN_ROOT" || fail "COPILOT_PLUGIN_ROOT must be absolute."
+            paths_equal "$PAYLOAD_ROOT" "$COPILOT_PLUGIN_ROOT" ||
+                fail "COPILOT_PLUGIN_ROOT conflicts with --payload-root."
+        fi
+    fi
+    run_status_action
+    exit $?
 fi
 
 if [[ "$ACTION" == resolve && -n "$CONTEXT" ]]; then

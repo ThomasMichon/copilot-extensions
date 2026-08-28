@@ -1,6 +1,6 @@
 # Minimal JSON scalar/query reader for the installation-context bootstrap.
 #
-# Query paths are separated by ASCII FS (034). Modes: get, type, len.
+# Query paths are separated by ASCII FS (034). Modes: get, hex, type, len, keys.
 
 function fail(message) {
     parse_failed = 1
@@ -369,6 +369,13 @@ END {
             exit 4
         }
         print value_length[query_path]
+    } else if (mode == "keys") {
+        if (value_type[query_path] != "object") {
+            exit 4
+        }
+        for (index_value = 0; index_value < value_length[query_path]; index_value++) {
+            print object_key[child_path(query_path, index_value)]
+        }
     } else if (mode == "get" || mode == "hex") {
         if (value_type[query_path] != "string" && value_type[query_path] != "number" && value_type[query_path] != "boolean" && value_type[query_path] != "null") {
             exit 4
