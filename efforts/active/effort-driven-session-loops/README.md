@@ -500,7 +500,9 @@ earlier slices.
   shim, received exit 126, and again violated literal mode by continuing.
   Registration now narrowly coalesces agent-worktrees' own payload-local
   command catalog with its binding context; this does not aggregate independent
-  plugin contexts or claim to resolve #1234.
+  plugin contexts or claim to resolve #1234. That follow-up bumped
+  agent-worktrees to `1.5.3-dev659` and marketplace metadata to
+  `1.7.5-dev679`.
 - The next fresh run passed strict literal-mode judging. The successor received
   the payload-local command catalog and worktree binding together, inspected the
   open effort successfully, rejected premature completion and predecessor
