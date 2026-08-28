@@ -415,3 +415,21 @@ def test_provider_only_config_uses_github_origin_with_mixed_source(tmp_path: Pat
     assert routing["status"] == "ready"
     assert routing["source"] == "config+origin"
     assert routing["repo"] == "example/private-knowledge"
+
+
+def test_provider_only_config_without_github_origin_stays_config_sourced(
+    tmp_path: Path,
+):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://example.visualstudio.com/Project/_git/knowledge",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("issues:\n  provider: github\n", encoding="utf-8")
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "routing_required"
+    assert routing["source"] == "config"
+    assert routing["repo"] == ""

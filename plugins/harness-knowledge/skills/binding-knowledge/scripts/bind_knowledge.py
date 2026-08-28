@@ -183,10 +183,10 @@ def inspect_issue_routing(knowledge_path: str) -> dict[str, str]:
     origin_provider, origin_repo = classify_origin(knowledge_origin(knowledge_path))
     provider = (explicit or {}).get("provider", "github").lower()
     repo = (explicit or {}).get("repo", "")
-    explicit_repo = bool(repo)
     valid_repo = bool(re.fullmatch(r"[^/\s]+/[^/\s]+", repo))
 
     if explicit is not None:
+        source = "config"
         if provider != "github":
             status = "unsupported"
             reason = f"configured issue provider is not supported: {provider}"
@@ -196,11 +196,12 @@ def inspect_issue_routing(knowledge_path: str) -> dict[str, str]:
         elif repo or (origin_provider == "github" and origin_repo):
             status = "ready"
             reason = ""
-            repo = repo or origin_repo
+            if not repo:
+                repo = origin_repo
+                source = "config+origin"
         else:
             status = "routing_required"
             reason = "GitHub issue routing requires an explicit owner/repo"
-        source = "config" if explicit_repo else "config+origin"
     elif origin_provider == "github" and origin_repo:
         status = "ready"
         reason = ""
