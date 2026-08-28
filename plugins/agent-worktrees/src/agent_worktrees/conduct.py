@@ -16,6 +16,7 @@ KNOWN_FRAGMENTS = ("account-conduct.md", "worktree-conduct.md")
 UNKNOWN_OMITTED = "[Additional unrecognized conduct fragments omitted.]"
 RELATED_OMITTED = "[Related-repository guidance omitted to fit the conduct budget.]"
 HISTORY_TRUNCATED = "[Older worktree history omitted.]"
+_SEMANTIC_HISTORY_PREFIXES = ("Active effort:", "Worktree succession:")
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 
 
@@ -68,15 +69,13 @@ def _bounded_history(
         return [*prefix, history]
 
     blocks = history.split("\n\n")
-    succession = next(
-        (block.strip() for block in blocks if block.strip().startswith(
-            "Worktree succession:"
-        )),
-        "",
-    )
+    semantic = [
+        block.strip() for block in blocks
+        if block.strip().startswith(_SEMANTIC_HISTORY_PREFIXES)
+    ]
     digest_text = "\n\n".join(
         block for block in blocks
-        if not block.strip().startswith("Worktree succession:")
+        if not block.strip().startswith(_SEMANTIC_HISTORY_PREFIXES)
     ).strip()
     digest_lines = digest_text.splitlines()
     newest_lines = [
@@ -85,12 +84,13 @@ def _bounded_history(
     ]
 
     fixed = HISTORY_TRUNCATED
-    if succession:
-        fixed = f"{fixed}\n\n{succession}"
+    if semantic:
+        fixed = "\n\n".join([fixed, *semantic])
     if not _fits([*prefix, fixed], max_chars):
-        # A succession instruction is semantic and must never be sliced.
-        if succession and _fits([*prefix, succession], max_chars):
-            return [*prefix, succession]
+        # Effort/succession instructions are semantic and must never be sliced.
+        semantic_text = "\n\n".join(semantic)
+        if semantic_text and _fits([*prefix, semantic_text], max_chars):
+            return [*prefix, semantic_text]
         return prefix
 
     selected: list[str] = []
@@ -99,8 +99,8 @@ def _bounded_history(
         candidate = (
             f"{HISTORY_TRUNCATED}\n" + "\n".join(candidate_lines)
         )
-        if succession:
-            candidate += f"\n\n{succession}"
+        if semantic:
+            candidate += "\n\n" + "\n\n".join(semantic)
         if not _fits([*prefix, candidate], max_chars):
             break
         selected = candidate_lines
@@ -108,8 +108,8 @@ def _bounded_history(
     bounded = HISTORY_TRUNCATED
     if selected:
         bounded += "\n" + "\n".join(selected)
-    if succession:
-        bounded += f"\n\n{succession}"
+    if semantic:
+        bounded += "\n\n" + "\n\n".join(semantic)
     return [*prefix, bounded]
 
 

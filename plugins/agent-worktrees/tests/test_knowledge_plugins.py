@@ -1398,9 +1398,7 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     sh_compose = sh.index("_KNOWLEDGE_ARGS+=(knowledge compose-plugins")
     assert sh.index('cd "$WORK_DIR"') < sh_compose
     assert sh_compose < sh.index('if [[ "$NO_MUX" == "1" ]]')
-    sh_refresh = sh.index(
-        '_REFRESHED_PYTHON="$(resolve_current_runtime_python)"'
-    )
+    sh_refresh = sh.index('_REFRESHED_PYTHON="$(resolve_runtime_python)"')
     assert sh.rfind("invoke_update_apply 1 1", 0, sh_refresh) < sh_refresh
     assert sh_refresh < sh_compose
     assert 'PYTHON="$_REFRESHED_PYTHON"' in sh[sh_refresh:sh_compose]
@@ -1412,9 +1410,7 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     ps_compose = ps.index("'knowledge', 'compose-plugins'")
     assert ps.index("Set-Location $plan.work_dir") < ps_compose
     assert ps_compose < ps.index("# Apply environment variables from the launch plan")
-    ps_refresh = ps.index(
-        "$refreshedVenvPython = Resolve-CurrentRuntimePython"
-    )
+    ps_refresh = ps.index("$refreshedVenvPython = Resolve-RuntimePython")
     assert ps.rfind("Invoke-UpdateApply", 0, ps_refresh) < ps_refresh
     assert ps_refresh < ps_compose
     assert "$VenvPython = $refreshedVenvPython" in ps[ps_refresh:ps_compose]

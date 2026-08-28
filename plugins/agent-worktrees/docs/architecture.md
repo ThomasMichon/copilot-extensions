@@ -84,7 +84,8 @@ The per-worktree tracking YAML (`~/.{project}/worktrees/{id}.yaml`) is the
 **ground-layer state** of the agent fabric (see the `agent-fabric` vision in
 this repo's `visions/`). Two invariants keep the layers composable -- *enhancing,
 never overriding* one another -- as new orthogonal fields accrue on the record
-(the `interface`/`origin` marks, the `follow_up`/`summary` disposition, ...):
+(the `interface`/`origin` marks, the `follow_up`/`summary` disposition, the
+optional `active_effort` focus, ...):
 
 1. **Single writer, load-then-save only.** Only **agent-worktrees** writes the
    record, and only via `tracking.load_record()` -> mutate -> `tracking.save_record()`
@@ -135,6 +136,18 @@ vision's *disposition-is-asserted / pulse-is-derived* behavior):
 read-time display signal only (`sessions.SessionContext.live_intent`), so it
 cannot corrupt the durable disposition or the single-writer contract. A stale or
 idle pulse greys and then disappears; only the asserted disposition persists.
+
+`active_effort` is an optional identity input to the durable disposition, not a
+new register. It carries one repository-relative README path plus a declared
+participant/slice. The `effort-focus` CLI is the sole writer: it validates the
+authoritative worktree checkout, containment and reparse safety, effort
+shape/status, declared slice, and cross-worktree uniqueness under locks. An open
+binding persists `follow_up=true`; reads additionally derive the same
+`follow_up`/`summary` surface and contribute one bounded pointer to the existing
+record-first history digest. Bind and completed release verify the authoritative
+Git root, while read paths re-inspect containment under the recorded worktree
+path and stay silent on failure. A closed, stale, or unavailable pointer
+contributes no session orientation.
 
 ## The Picker render flow -- never block on cross-process/IO (invariant)
 

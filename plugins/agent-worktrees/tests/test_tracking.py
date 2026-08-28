@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from agent_worktrees.effort_focus import ActiveEffort
 from agent_worktrees.tracking import (
     ClaimRef,
     ResourceClaim,
@@ -2003,6 +2004,12 @@ class TestForwardCompatContract:
             interface="cli", origin="user",
             parent_session="sess-1", caller_worktree="anomalous-potato-win-caller",
             follow_up=True, summary="work left", status_note_at="2026-07-15T01:00:00",
+            active_effort=ActiveEffort(
+                path="efforts/active/durable-loop/README.md",
+                participant="Driver",
+                slice="Phase 2",
+            ),
+            effort_revision=3,
         )
 
     def _assert_overlays_intact(self, r):
@@ -2013,6 +2020,12 @@ class TestForwardCompatContract:
         assert r.follow_up is True
         assert r.summary == "work left"
         assert r.status_note_at
+        assert r.active_effort == ActiveEffort(
+            path="efforts/active/durable-loop/README.md",
+            participant="Driver",
+            slice="Phase 2",
+        )
+        assert r.effort_revision == 3
 
     def test_naive_load_save_preserves_all_overlays(self, tmp_path: Path):
         p = tmp_path / "wt.yaml"

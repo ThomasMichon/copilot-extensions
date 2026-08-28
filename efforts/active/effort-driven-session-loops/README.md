@@ -166,35 +166,39 @@ Public-safe transcription of the operator request:
 - [x] Document the configuration, staged producer, and fallback contract; bump
       the efforts plugin version; and add focused schema, containment, symlink,
       gating, fail-open, parity, and byte-budget tests. The base kernel remains
-      below 1,024 UTF-8 bytes; the future complete efforts contribution,
-      including dynamic orientation, remains capped below 1,536 bytes.
+      below 1,024 UTF-8 bytes. Dynamic orientation belongs to agent-worktrees'
+      existing bounded digest/conduct path, not a second efforts producer.
 
 ### Phase 2 - Active-effort focus and bounded session orientation
 
-- [ ] Define one optional, structured active-effort pointer on the
+- [x] Define one optional, structured active-effort pointer on the
       agent-worktrees-owned worktree record. The pointer must be
       repository-relative, contained, and independently valid for concurrent
       worktrees; do not create a repository-global current effort. Multiple
       worktrees may bind the same effort only when its coordination section
-      declares distinct participants or slices.
-- [ ] Derive the existing status core from the effort binding rather than
+      declares distinct slices; changing participants does not duplicate a
+      slice safely.
+- [x] Derive the existing status core from the effort binding rather than
       creating a second responsibility signal: binding an open effort asserts
       `follow_up=true` and an effort-derived summary; only an explicitly
       completed or transferred effort can clear that cleanup gate.
-- [ ] Teach the planning flow to bind an effort when it is created or resumed and
+- [x] Teach the planning flow to bind an effort when it is created or resumed and
       clear the binding only when the effort is complete, archived, or explicitly
       replaced.
-- [ ] When the optional worktree capability is present, enrich session-start
+- [x] When the optional worktree capability is present, enrich session-start
       guidance with a bounded pointer to the active effort. Consume #84, #907,
       #910, and #912 for the previous session, record-local recovery digest,
       pending handoff, and rightful-head role rather than reimplementing those
       signals.
-- [ ] Validate every dynamic pointer against the authoritative cwd and repository
-      root. Missing tools, stale records, malformed paths, unavailable services,
-      and non-cwd launch modes must omit the dynamic hint without blocking startup.
-- [ ] Add concurrent-worktree, stale-pointer, no-service, resumed-session,
-      Bash/PowerShell, and context-budget coverage; update and bump each owning
-      plugin touched by the final design.
+- [x] Validate binding and completed release against the authoritative Git root;
+      re-inspect dynamic reads under the recorded worktree path. Missing tools,
+      stale records, malformed paths, and unavailable worktrees omit the hint
+      without blocking startup, while non-cwd resumed sessions may recover it
+      through the existing session/worktree binding.
+- [x] Add concurrent-worktree, stale-pointer, unavailable-worktree,
+      resumed-session, existing Bash/PowerShell conduct-parity, and
+      context-budget coverage; update and bump each owning plugin touched by the
+      final design.
 
 ### Phase 3 - Effort-aware handoff, ramp-up, and completion semantics
 
@@ -354,3 +358,38 @@ earlier slices.
   stdin, timeout behavior, version anchoring, and PowerShell's permissive JSON
   parsing. Both producers now reject nonstandard JSON, array-wrapped objects,
   and duplicate/case-conflicting keys before applying semantic validation.
+
+### 2026-08-28 - Phase 1 merged and active-effort focus implemented
+
+- Merged Phase 1 foundation PR
+  [#1263](https://github.com/ThomasMichon/copilot-extensions/pull/1263) and
+  synchronized the implementation worktree to that reviewed baseline.
+- Added one optional `active_effort` value to the agent-worktrees record:
+  contained repository-relative README path plus declared participant/slice.
+  Bind/show/release operations validate the authoritative worktree checkout,
+  effort shape/status, reparse safety, and duplicate slice ownership under the
+  existing record locks.
+- An open binding now derives the existing `follow_up` cleanup gate and concise
+  summary. Manual resolution cannot hide an open effort; completion and named
+  transfer are explicit release paths.
+- Enriched the existing record-first history/session-conduct path with a bounded
+  effort pointer, preserving the current succession and handoff owners instead
+  of adding another hook or recovery store.
+- Updated `planning-efforts` to bind once the effort's participant/slice
+  declarations are planned (and on resume when needed), and to release only
+  after verified completion or a named transfer, while preserving standalone
+  behavior when agent-worktrees is unavailable.
+- Adversarial review tightened slice ownership to one normalized slice per
+  repository, replaced substring declaration checks with exact declared table
+  cells/headings, constrained flat/by-repo active and archive layouts, made
+  completed release require `Status: Done` plus resolved Plan/Validation Plan
+  task markers, and kept named transfer available when the checkout is gone.
+- Added monotonic effort revisions so stale full-record writers cannot erase a
+  newer bind/release transition, blocked `status --resolved` while any binding
+  remains, and made POSIX reads descriptor-relative with Windows final-handle
+  containment verification.
+- Repaired five stale runtime-resolver tests exposed by the full suite in a
+  separate versioned commit, then validated 3,497 agent-worktrees tests (6
+  skipped), 45 efforts tests, and the repository install/version/docs/payload
+  contract guards. Bumped agent-worktrees to `1.5.3-dev653`, efforts to
+  `0.1.0-dev15`, and marketplace metadata to `1.7.5-dev672`.

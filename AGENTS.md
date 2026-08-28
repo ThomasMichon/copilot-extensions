@@ -127,7 +127,7 @@ coordination tokens; the effort connects those issues to phased implementation,
 participants, validation, and an append-only journal.
 
 <!-- efforts:static-fallback:start -->
-**Fallback policy `[owner: efforts@0.1.0-dev14]`:** This repository requires
+**Fallback policy `[owner: efforts@0.1.0-dev15]`:** This repository requires
 efforts for substantial multi-step work. Create or resume the canonical effort
 with `planning-efforts`; the rightful head must not declare the worktree complete
 until the effort is explicitly Done and every Plan and Validation Plan item is
