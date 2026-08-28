@@ -27,7 +27,54 @@ $cmdArgs = @('-m', 'agent_worktrees', 'register-session', '--stdin', '--emit-con
 if ($wt_id) { $cmdArgs += @('--worktree-id', $wt_id) }
 
 try {
-    $payload | & $python @cmdArgs 2>$null
+    $registrationJson = ($payload | & $python @cmdArgs 2>$null | Out-String).Trim()
 } catch { }
+
+$catalogJson = ''
+$catalogScript = if ($env:COPILOT_PLUGIN_ROOT) {
+    Join-Path $env:COPILOT_PLUGIN_ROOT 'scripts\emit-command-catalog.ps1'
+} else {
+    $null
+}
+if ($catalogScript -and (Test-Path -LiteralPath $catalogScript)) {
+    try { $catalogJson = (& $catalogScript 2>$null | Out-String).Trim() } catch { }
+}
+
+# Keep the payload-local command catalog with the worktree-binding context in
+# one sessionStart result. Copilot CLI currently retains only one non-empty
+# result when hooks race (#1234), so separate valid producers are insufficient.
+$registrationContext = ''
+if ($registrationJson) {
+    try {
+        $registrationValue = $registrationJson | ConvertFrom-Json
+        $registrationContext = ([string]$registrationValue.additionalContext).Trim()
+    } catch { }
+}
+if (-not $registrationContext) {
+    [Console]::Out.Write('{}')
+    exit 0
+}
+
+$contexts = [System.Collections.Generic.List[string]]::new()
+foreach ($raw in @($catalogJson)) {
+    if (-not $raw) { continue }
+    try {
+        $value = $raw | ConvertFrom-Json
+        $context = ([string]$value.additionalContext).Trim()
+        if ($context -and -not $contexts.Contains($context)) {
+            $contexts.Add($context)
+        }
+    } catch { }
+}
+if (-not $contexts.Contains($registrationContext)) {
+    $contexts.Add($registrationContext)
+}
+if ($contexts.Count -gt 0) {
+    [Console]::Out.Write((@{
+        additionalContext = $contexts -join "`n`n"
+    } | ConvertTo-Json -Compress))
+} else {
+    [Console]::Out.Write('{}')
+}
 
 exit 0

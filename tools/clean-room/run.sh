@@ -74,6 +74,7 @@ if [ ! -f "$SCENARIO_DIR/scenario.sh" ] && [ ! -f "$SCENARIO_DIR/setup.sh" ]; th
     echo "scenario '$SCENARIO_NAME' has neither scenario.sh (Tier-P) nor setup.sh (Tier-E)" >&2; exit 2
 fi
 LIB_DIR="$HERE/lib"
+source "$LIB_DIR/acp-command.sh"
 # Optional per-suite shared helpers: if the selected scenario's parent dir holds
 # a `_lib/`, it is mounted read-only at /home/operator/scenario-lib and exposed
 # as $CR_SCENARIO_LIB, so sibling scenarios in a suite can source shared phase
@@ -95,6 +96,7 @@ CONTAINER="cr-$IMAGE$NAME_TAIL"
 AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # legacy label (kept for logs)
 DRIVE_AGENT="cleanroom:$CONTAINER"        # the namespaced agent-bridge address
 ACP_COMMAND='copilot --acp --stdio --allow-all-tools'  # eval may add --plugin-dir
+BRIDGE_CONTAINER_ID=""
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
     RESULTS="$CR_RESULTS_DIR"
@@ -213,7 +215,30 @@ do_shell() {
     echo "   run '$0 --image $IMAGE${NAME_SUFFIX:+ --name-suffix $NAME_SUFFIX} down' to remove it."
     docker exec -it "$CONTAINER" /bin/bash -l
 }
-do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CONTAINER"; }
+do_down() {
+    local container_id="${BRIDGE_CONTAINER_ID:-}"
+    if [ -z "$container_id" ]; then
+        container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER" 2>/dev/null || true)"
+    fi
+    if [ -z "$container_id" ]; then
+        if ! do_bridge_unregister >/dev/null; then
+            echo "warn: no container found and stale registration cleanup failed for $CONTAINER" >&2
+            return 1
+        fi
+        echo "removed $CONTAINER"
+        return 0
+    fi
+    if ! docker rm -f "$container_id" >/dev/null 2>&1; then
+        echo "error: could not remove $CONTAINER ($container_id)" >&2
+        return 1
+    fi
+    BRIDGE_CONTAINER_ID="$container_id"
+    if ! do_bridge_unregister >/dev/null; then
+        echo "warn: removed $CONTAINER but could not unregister it from agent-bridge" >&2
+        return 1
+    fi
+    echo "removed $CONTAINER"
+}
 # Register/unregister the container with agent-bridge (drive the in-container
 # Copilot with `agent-bridge create cleanroom:<container> ...`). Uses the
 # declarative providers.d/ namespace-provider model (agent-bridge >= dev307; the
@@ -222,10 +247,33 @@ do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CO
 _py() { command -v python3 || command -v python; }
 do_bridge_register() {
     ensure_container
-    "$(_py)" "$HERE/bridge_register.py" --acp-command "$ACP_COMMAND" register --container "$CONTAINER" --name "$AGENT_NAME"
+    local bridge_args=(--acp-command "$ACP_COMMAND")
+    local response
+    [ -n "${ACP_CWD:-}" ] && bridge_args+=(--acp-cwd "$ACP_CWD")
+    if ! response="$("$(_py)" "$HERE/bridge_register.py" "${bridge_args[@]}" register --container "$CONTAINER" --name "$AGENT_NAME")"; then
+        return 1
+    fi
+    printf '%s\n' "$response"
+    BRIDGE_CONTAINER_ID="$(printf '%s' "$response" | "$(_py)" -c '
+import json, sys
+print(json.load(sys.stdin).get("container_id", ""))
+')"
+    [ -n "$BRIDGE_CONTAINER_ID" ] || return 1
     echo "drive it:  agent-bridge create $DRIVE_AGENT \"<prompt>\""
 }
-do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME" --container "$CONTAINER"; }
+do_bridge_unregister() {
+    local container_id="${BRIDGE_CONTAINER_ID:-}"
+    if [ -z "$container_id" ]; then
+        container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER" 2>/dev/null || true)"
+    fi
+    local unregister_args=(unregister --name "$AGENT_NAME" --container "$CONTAINER")
+    if [ -n "$container_id" ]; then
+        unregister_args+=(--container-id "$container_id")
+    else
+        unregister_args+=(--stale)
+    fi
+    "$(_py)" "$HERE/bridge_register.py" "${unregister_args[@]}"
+}
 # End any prior agent-bridge session for an agent so a fresh `create` isn't
 # refused with "already has an active session". Idempotent + best-effort.
 end_agent_sessions() {
@@ -328,32 +376,50 @@ open(os.path.join(eval_dir, "literal-mode.txt"), "w", encoding="utf-8").write(li
 open(os.path.join(eval_dir, "prompt.txt"), "w", encoding="utf-8").write(full)
 prompt_hash = hashlib.sha256(full.encode("utf-8")).hexdigest()[:16]
 ev = m.get("eval") or {}
-acp_dirs = " ".join(str(d) for d in (ev.get("acp_plugin_dirs") or []) if d)
+acp_dirs = [str(d) for d in (ev.get("acp_plugin_dirs") or []) if d]
+acp_cwd = str(ev.get("acp_cwd") or "")
+acp_cwd_file = str(ev.get("acp_cwd_file") or "")
+for acp_dir in acp_dirs:
+    if (
+        not acp_dir.startswith("/")
+        or any(character in acp_dir for character in "\0\r\n\t")
+    ):
+        raise ValueError(
+            "eval.acp_plugin_dirs entries must be absolute in-container POSIX paths"
+        )
+if acp_cwd and (
+    not acp_cwd.startswith("/")
+    or any(character in acp_cwd for character in "\0\r\n\t")
+):
+    raise ValueError("eval.acp_cwd must be an absolute in-container POSIX path")
+if acp_cwd_file and (
+    not acp_cwd_file.startswith("/")
+    or any(character in acp_cwd_file for character in "\0\r\n\t")
+):
+    raise ValueError("eval.acp_cwd_file must be an absolute in-container POSIX path")
+if acp_cwd and acp_cwd_file:
+    raise ValueError("eval.acp_cwd and eval.acp_cwd_file are mutually exclusive")
 for k, v in (("tier", m.get("tier", "")), ("setup_rel", setup_rel), ("run_count", run_count),
              ("per_turn", per_turn), ("aggregate", aggregate), ("post_check", post_check),
              ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash),
-             ("acp_dirs", acp_dirs)):
+             ("acp_dirs", json.dumps(acp_dirs, separators=(",", ":"))),
+             ("acp_cwd", acp_cwd),
+             ("acp_cwd_file", acp_cwd_file)):
     print(f"{k}\t{v}")
 PY
 )" || { echo "eval: failed to parse manifest.json" >&2; exit 2; }
 
-    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS=""
+    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS_JSON="[]" ACP_CWD="" ACP_CWD_FILE=""
     local _k _v
     while IFS=$'\t' read -r _k _v; do
         case "$_k" in
             tier) TIER="$_v" ;; setup_rel) SETUP_REL="$_v" ;; run_count) RUN_COUNT="$_v" ;;
             per_turn) PER_TURN="$_v" ;; aggregate) AGG="$_v" ;; post_check) POST_CHECK="$_v" ;;
             tierp) TIERP="$_v" ;; family) FAMILY="$_v" ;; prompt_hash) PROMPT_HASH="$_v" ;;
-            acp_dirs) ACP_DIRS="$_v" ;;
+            acp_dirs) ACP_DIRS_JSON="$_v" ;; acp_cwd) ACP_CWD="$_v" ;;
+            acp_cwd_file) ACP_CWD_FILE="$_v" ;;
         esac
     done <<< "$parsed"
-    # Build the driven-agent ACP command: a scenario may declare eval.acp_plugin_dirs
-    # (in-container paths) so the driven Copilot loads its plugins via --plugin-dir.
-    ACP_COMMAND='copilot --acp --stdio --allow-all-tools'
-    local _d
-    for _d in $ACP_DIRS; do ACP_COMMAND="$ACP_COMMAND --plugin-dir $_d"; done
-    echo "eval: ACP command -> $ACP_COMMAND"
-
     if [ "${RUNS_OVERRIDE:-0}" -gt 0 ] 2>/dev/null; then RUN_COUNT="$RUNS_OVERRIDE"; fi
     [ "$TIER" = E ] || echo "warn: scenario '$SCENARIO_NAME' is tier '$TIER', not 'E' -- eval expects a Tier-E scenario." >&2
     [ -f "$SCENARIO_DIR/$SETUP_REL" ] || { echo "eval: setup driver '$SETUP_REL' not found in scenario dir" >&2; exit 2; }
@@ -365,19 +431,52 @@ PY
         "bash /home/operator/scenario/$SETUP_REL; rc=\$?; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit \$rc" \
         || echo "warn: setup driver exited non-zero -- the starting state may be incomplete (see cr-report.json)."
 
+    # Build the driven-agent ACP command after setup so a scenario whose
+    # authoritative worktree path is generated at runtime can publish it through
+    # acp_cwd_file. The resolved path drives both the shell and ACP session/new.
+    if [ -n "$ACP_CWD_FILE" ]; then
+        ACP_CWD="$(docker exec "$CONTAINER" python3 -c '
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text(encoding="utf-8").splitlines()
+if len(lines) != 1 or not lines[0].startswith("/") or any(c in lines[0] for c in "\0\r\n\t"):
+    raise SystemExit("invalid ACP cwd file")
+cwd = pathlib.Path(lines[0])
+if not cwd.is_dir():
+    raise SystemExit("ACP cwd is not a directory")
+print(cwd)
+' "$ACP_CWD_FILE")" || {
+            echo "eval: could not resolve a valid cwd from '$ACP_CWD_FILE'" >&2
+            exit 2
+        }
+    fi
+    ACP_COMMAND="$("$(_py)" -c '
+import json, sys
+for value in json.loads(sys.argv[1]):
+    print(value)
+' "$ACP_DIRS_JSON" | clean_room_build_acp_command)"
+    if [ -n "$ACP_CWD" ]; then
+        local _quoted_cwd
+        _quoted_cwd="$(clean_room_quote_bash "$ACP_CWD")"
+        ACP_COMMAND="cd -- $_quoted_cwd && $ACP_COMMAND"
+    fi
+    echo "eval: ACP command -> $ACP_COMMAND"
+
     # --- Tier-P precondition: cheap in-box smoke of the plugin CLI ------------
     if [ "${SKIP_TIER_P:-0}" != 1 ] && [ -n "$TIERP" ]; then
         echo "== eval: Tier-P precondition ($TIERP) =="
         if ! docker exec "$CONTAINER" /bin/bash -lc "$TIERP" >/dev/null 2>&1; then
             echo "eval: Tier-P precondition '$TIERP' failed -- refusing to spend an eval on a broken CLI surface. Fix the plugin's *-solo Tier-P scenario first, or pass --skip-tier-p-gate to force." >&2
-            do_bridge_unregister >/dev/null 2>&1 || true
             exit 1
         fi
         echo "   precondition OK"
     fi
 
     # --- 3) register the box as a bridge agent -------------------------------
-    do_bridge_register
+    if ! do_bridge_register; then
+        echo "eval: could not register $CONTAINER with agent-bridge" >&2
+        exit 1
+    fi
 
     # --- reproducibility fingerprints (prompt hash computed above) -----------
     local docs_hash copilot_ver
@@ -411,13 +510,18 @@ PY
     fi
 
     # --- 7) unregister the bridge agent --------------------------------------
-    do_bridge_unregister >/dev/null 2>&1 || true
+    local bridge_cleanup_error=""
+    if ! do_bridge_unregister >/dev/null 2>&1; then
+        bridge_cleanup_error="could not unregister $CONTAINER from agent-bridge"
+        echo "warn: $bridge_cleanup_error" >&2
+    fi
 
     # --- write the eval run-manifest (judge packet index) --------------------
     copilot_ver="$(docker exec "$CONTAINER" /bin/bash -lc 'copilot --version 2>/dev/null' 2>/dev/null | head -1)"
     CR_SCENARIO_NAME="$SCENARIO_NAME" CR_FAMILY="$FAMILY" CR_IMAGE="$IMAGE" CR_RUN_COUNT="$RUN_COUNT" \
     CR_AGG="$AGG" CR_COPILOT_VER="$copilot_ver" CR_PROMPT_HASH="$PROMPT_HASH" CR_DOCS_HASH="$docs_hash" \
     CR_PER_TURN="${PER_TURN:-0}" CR_TIERP="$TIERP" CR_SKIP_TIER_P="${SKIP_TIER_P:-0}" \
+    CR_BRIDGE_CLEANUP_ERROR="$bridge_cleanup_error" \
     "$(_py)" - "$recs" > "$eval_dir/eval-run.json" <<'PY'
 import json, os, sys
 recs_path = sys.argv[1]
@@ -439,6 +543,7 @@ meta = {
     "copilot_version": e["CR_COPILOT_VER"], "prompt_hash": e["CR_PROMPT_HASH"], "docs_hash": e["CR_DOCS_HASH"],
     "per_turn_timeout_s": int(e["CR_PER_TURN"]),
     "tier_p_precondition": tierp_field,
+    "bridge_cleanup_error": e["CR_BRIDGE_CLEANUP_ERROR"],
     "max_credits_note": "runs.max_credits is advisory: the agent-bridge create transport does not expose per-turn credits, so it cannot be hard-enforced from the runner (see TIER-E-EXECUTION.md).",
     "report": "cr-report.json", "cr_logs": "cr-logs/", "judged": False,
     "note": "Run clean-room-judge on this packet, then write cr-eval.json (see TIER-E-EXECUTION.md).",
@@ -455,10 +560,16 @@ PY
     echo "  report + logs    : $RESULTS"
     echo "  run index        : $eval_dir/eval-run.json"
     echo "results dir: $RESULTS"
+    local teardown_error=""
     case "$THEN" in
         shell) do_shell ;;
-        down)  do_down ;;
+        down)
+            if ! do_down; then
+                teardown_error="could not tear down $CONTAINER"
+            fi
+            ;;
     esac
+    [ -z "$bridge_cleanup_error" ] && [ -z "$teardown_error" ] || return 1
 }
 
 case "$MODE" in

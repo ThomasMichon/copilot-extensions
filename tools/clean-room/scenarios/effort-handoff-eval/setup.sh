@@ -127,7 +127,8 @@ pass "active effort and compact handoff seeded"
 phase 3 "create and bind a real managed worktree"
 capture "install-worktree-runtime" -- \
     bash "$INSTALLED_ROOT/agent-worktrees/scripts/install.sh" install || true
-if bash -lc 'command -v agent-worktrees >/dev/null'; then
+_agent_worktrees="$(bash -lc 'command -v agent-worktrees' 2>/dev/null || true)"
+if [ -f "$_agent_worktrees" ] && [ -x "$_agent_worktrees" ]; then
     pass "agent-worktrees runtime installed"
 else
     jam "path-binstub" "agent-worktrees is not callable after runtime install" "inspect install-worktree-runtime.log"
@@ -147,10 +148,11 @@ _worktree_id="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
 _worktree_dir="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["worktree"]["path"])' "$_create_json" 2>/dev/null || true)"
 if [ -n "$_worktree_id" ] && [ -d "$_worktree_dir" ]; then
     printf '%s\n' "$_worktree_id" > "$HOME/effort-handoff-worktree-id"
+    printf '%s\n' "$_worktree_dir" > "$HOME/effort-handoff-worktree-dir"
     ln -s "$_worktree_dir" "$HOME/demo-worktree"
     if (
         cd "$_worktree_dir"
-        agent-worktrees effort-focus bind \
+        "$_agent_worktrees" effort-focus bind \
             efforts/active/review-widget/README.md \
             --participant Driver \
             --slice "Phase 2 - Reviewed implementation" \

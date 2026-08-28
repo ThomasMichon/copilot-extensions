@@ -5,12 +5,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
-
 
 _PLUGIN = Path(__file__).resolve().parents[1]
 
@@ -135,6 +136,133 @@ def test_bash_hook_forwards_runtime_script_output(tmp_path: Path):
     assert result.stdout == expected
 
 
+def test_register_session_bash_coalesces_command_catalog(tmp_path: Path):
+    home = tmp_path / "home"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    plugin_root = tmp_path / "plugin"
+    scripts_dir = plugin_root / "scripts"
+    bin_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        f"if [ \"$1\" = -c ]; then exec {shlex.quote(sys.executable)} \"$@\"; fi\n"
+        "cat >/dev/null\n"
+        "printf '%s' '{\"additionalContext\":\"worktree binding\"}'\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    (bin_dir / "resolve-runtime.sh").write_text(
+        f'AW_PY="{fake_python}"\n',
+        encoding="utf-8",
+    )
+    catalog = scripts_dir / "emit-command-catalog.sh"
+    catalog.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s' '{\"additionalContext\":\"command catalog\"}'\n",
+        encoding="utf-8",
+    )
+    catalog.chmod(0o755)
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
+    result = subprocess.run(
+        [_bash(), str(_PLUGIN / "scripts" / "register-session.sh")],
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "command catalog\n\nworktree binding"
+    }
+
+
+def test_register_session_bash_fails_open_when_merge_python_breaks(tmp_path: Path):
+    home = tmp_path / "home"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    bin_dir.mkdir(parents=True)
+
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"$1\" = -c ]; then exit 23; fi\n"
+        "cat >/dev/null\n"
+        "printf '%s' '{\"additionalContext\":\"worktree binding\"}'\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    (bin_dir / "resolve-runtime.sh").write_text(
+        f'AW_PY="{fake_python}"\n',
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.pop("COPILOT_PLUGIN_ROOT", None)
+    result = subprocess.run(
+        [_bash(), str(_PLUGIN / "scripts" / "register-session.sh")],
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}\n"
+
+
+def test_register_session_bash_omits_catalog_without_binding(tmp_path: Path):
+    home = tmp_path / "home"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    plugin_root = tmp_path / "plugin"
+    scripts_dir = plugin_root / "scripts"
+    bin_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        f"if [ \"$1\" = -c ]; then exec {shlex.quote(sys.executable)} \"$@\"; fi\n"
+        "cat >/dev/null\n"
+        "printf '%s' '{}'\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    (bin_dir / "resolve-runtime.sh").write_text(
+        f'AW_PY="{fake_python}"\n',
+        encoding="utf-8",
+    )
+    catalog = scripts_dir / "emit-command-catalog.sh"
+    catalog.write_text(
+        "#!/usr/bin/env bash\n"
+        "printf '%s' '{\"additionalContext\":\"command catalog\"}'\n",
+        encoding="utf-8",
+    )
+    catalog.chmod(0o755)
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
+    result = subprocess.run(
+        [_bash(), str(_PLUGIN / "scripts" / "register-session.sh")],
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}\n"
+
+
 def test_powershell_hooks_fail_open_when_runtime_scripts_are_absent(tmp_path: Path):
     powershell = _powershell()
     home = tmp_path / "home"
@@ -190,3 +318,137 @@ def test_powershell_hook_forwards_runtime_script_output(tmp_path: Path):
     result = _run(command, powershell, home, cwd)
     assert result.returncode == 0, result.stderr
     assert result.stdout == expected
+
+
+def test_register_session_powershell_coalesces_context_and_fails_open(
+    tmp_path: Path,
+):
+    powershell = _powershell()
+    home = tmp_path / "home"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    plugin_root = tmp_path / "plugin"
+    scripts_dir = plugin_root / "scripts"
+    bin_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+
+    fake_python = tmp_path / "fake-python.ps1"
+    fake_python.write_text(
+        "Write-Output '{\"additionalContext\":\"worktree binding\"}'\n",
+        encoding="utf-8",
+    )
+    escaped_python = str(fake_python).replace("'", "''")
+    (bin_dir / "resolve-runtime.ps1").write_text(
+        f"$AwPy = '{escaped_python}'\n",
+        encoding="utf-8",
+    )
+    catalog = scripts_dir / "emit-command-catalog.ps1"
+    catalog.write_text(
+        "Write-Output '{\"additionalContext\":\"command catalog\"}'\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
+    command = [
+        powershell,
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        str(_PLUGIN / "scripts" / "register-session.ps1"),
+    ]
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "command catalog\n\nworktree binding"
+    }
+
+    catalog.write_text(
+        "Write-Output 'invalid catalog JSON'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "worktree binding"
+    }
+
+    catalog.write_text(
+        "Write-Output '{\"additionalContext\":\"   \"}'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "worktree binding"
+    }
+
+    catalog.write_text(
+        "Write-Output '{\"additionalContext\":\"worktree binding\"}'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "worktree binding"
+    }
+
+    fake_python.write_text(
+        "Write-Output '{}'\n",
+        encoding="utf-8",
+    )
+    catalog.write_text(
+        "Write-Output '{\"additionalContext\":\"command catalog\"}'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}"
+
+
+def test_register_session_scripts_keep_catalog_and_binding_together():
+    for name in ("register-session.sh", "register-session.ps1"):
+        text = (_PLUGIN / "scripts" / name).read_text(encoding="utf-8")
+        assert "emit-command-catalog" in text
+        assert "registrationJson" in text or "registration_json" in text
