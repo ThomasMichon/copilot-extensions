@@ -141,6 +141,7 @@ class LaunchRequest:
     worktree_id: str | None
     mode: str
     title: str | None = None
+    no_mux: bool = False
 
 
 def _state_cell(w: Worktree) -> str:

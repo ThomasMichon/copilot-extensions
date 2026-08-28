@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "copilot-extensions-worktree-manager"
-version = "0.1.0-dev18"
+version = "0.1.0-dev19"
 description = "Standalone, out-of-plugin control plane (installer, configurator & worktree launcher) for the copilot-extensions harness."
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [{ name = "Thomas Michon" }]
 # now so the packaging/venv is validated against the real dependency, even
 # though the Phase 0 skeleton does not yet import it.
 dependencies = [
-    "textual>=0.80",
+    "textual>=8.2.8",
     # Read the installer-owned catalog (data/plugins.toml). tomllib is stdlib on
     # 3.11+; tomli backports it for 3.10.
     "tomli>=2 ; python_version < '3.11'",
@@ -39,3 +39,8 @@ worktree_manager = ["data/*.toml"]
 [tool.ruff]
 target-version = "py310"
 line-length = 99
+
+[tool.ruff.lint.per-file-ignores]
+"src/worktree_manager/production_picker/picker_tui/engine.py" = [
+    "RUF001", "RUF002", "RUF003", "B007", "RUF005", "RUF059",
+]
