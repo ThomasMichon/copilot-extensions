@@ -48,6 +48,7 @@ test("handoff guidance requires a forward-looking successor roster", () => {
   let previous = -1;
   for (const heading of headings) {
     const current = template.indexOf(heading);
+    assert.notEqual(current, -1, `${heading} must be present`);
     assert.ok(current > previous, `${heading} must appear in forward order`);
     previous = current;
   }
