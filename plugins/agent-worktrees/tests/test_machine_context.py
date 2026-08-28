@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from agent_worktrees import __main__ as m
+from agent_worktrees import config as cfg
 
 
 class _Args:
@@ -75,6 +76,45 @@ def test_emits_additional_context_in_project(monkeypatch, capsys):
     assert set(obj.keys()) == {"additionalContext"}
     assert "Machine: Foo" in obj["additionalContext"]
     assert "Project: proj" in obj["additionalContext"]
+
+
+def test_render_includes_normalized_machine_metadata_after_role(monkeypatch):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    entry = cfg.MachineEntry(
+        key="host-a",
+        display_name="Host A",
+        environment="Linux",
+        role="worker",
+        description="General-purpose worker.",
+        capabilities=["builds", "tests"],
+    )
+
+    rendered = cfg.render_copilot_instructions(entry, project="example")
+
+    assert rendered.splitlines() == [
+        "Machine: Host A",
+        "Hostname: host-a",
+        "Environment: Linux",
+        "Platform: linux",
+        "Role: worker",
+        "Description: General-purpose worker.",
+        "Capabilities: builds, tests",
+        "Project: example",
+        "Binstub: example",
+    ]
+
+
+def test_render_omits_empty_machine_metadata(monkeypatch):
+    monkeypatch.setattr(cfg, "detect_platform", lambda: "linux")
+    entry = cfg.MachineEntry(
+        key="host-a", display_name="Host A", environment="Linux", role="worker",
+    )
+
+    rendered = cfg.render_copilot_instructions(entry)
+
+    assert "Role: worker" in rendered
+    assert "Description:" not in rendered
+    assert "Capabilities:" not in rendered
 
 
 def test_deploy_retires_machine_files(tmp_path: Path):

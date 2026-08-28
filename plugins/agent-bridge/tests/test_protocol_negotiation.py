@@ -20,9 +20,15 @@ from agent_bridge.protocol import (
     FAILED_ACP_HANDSHAKE_PROTOCOL_VERSION,
     HTTP_PROTOCOL_MIN_SUPPORTED,
     HTTP_PROTOCOL_VERSION,
+    MACHINE_METADATA_PROTOCOL_VERSION,
     RELAY_INTERRUPT_PROTOCOL_VERSION,
     UNVERSIONED,
 )
+
+
+def test_machine_metadata_capability_is_advertised() -> None:
+    assert MACHINE_METADATA_PROTOCOL_VERSION == 5
+    assert MACHINE_METADATA_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):

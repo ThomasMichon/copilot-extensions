@@ -416,6 +416,8 @@ class MachineEntry:
     # Empty means ``key`` is the hostname (the common case).
     hostname: str = ""
     role: str = ""
+    description: str = ""
+    capabilities: list[str] = field(default_factory=list)
     ssh_environments: list[SSHEnvironment] = field(default_factory=list)
     ssh_ready: bool = False
     copilot: bool = True
@@ -510,8 +512,35 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
     for key, data in raw["machines"].items():
         if not isinstance(data, dict):
             continue
+        description_raw = data.get("description", "")
+        if description_raw is None:
+            description_raw = ""
+        if not isinstance(description_raw, str):
+            raise ValueError(
+                f"machine '{key}' description must be a string"
+            )
+        capabilities_raw = data.get("capabilities", [])
+        if capabilities_raw is None:
+            capabilities_raw = []
+        if not isinstance(capabilities_raw, list):
+            raise ValueError(
+                f"machine '{key}' capabilities must be a list"
+            )
+        capabilities: list[str] = []
+        for capability_raw in capabilities_raw:
+            if not isinstance(capability_raw, str):
+                raise ValueError(
+                    f"machine '{key}' capabilities must contain only strings"
+                )
+            capability = capability_raw.strip()
+            if capability and capability not in capabilities:
+                capabilities.append(capability)
         ssh_envs: list[SSHEnvironment] = []
         ssh_block = data.get("ssh", {})
+        if ssh_block is None:
+            ssh_block = {}
+        if not isinstance(ssh_block, dict):
+            raise ValueError(f"machine '{key}' ssh must be a mapping")
         for env in ssh_block.get("environments", []):
             if isinstance(env, dict) and "name" in env and "alias" in env:
                 ssh_envs.append(SSHEnvironment(
@@ -525,6 +554,8 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
             alias=data.get("alias", ""),
             hostname=data.get("hostname", ""),
             role=data.get("role", ""),
+            description=description_raw.strip(),
+            capabilities=capabilities,
             ssh_environments=ssh_envs,
             ssh_ready=bool(ssh_block.get("ready", False)),
             copilot=bool(data.get("copilot", True)),
@@ -627,6 +658,10 @@ def render_copilot_instructions(
         lines.append(f"Deployment environment: {deploy_env}")
     if entry.role:
         lines.append(f"Role: {entry.role}")
+    if entry.description:
+        lines.append(f"Description: {entry.description}")
+    if entry.capabilities:
+        lines.append(f"Capabilities: {', '.join(entry.capabilities)}")
     if project:
         lines.append(f"Project: {project}")
         lines.append(f"Binstub: {project}")

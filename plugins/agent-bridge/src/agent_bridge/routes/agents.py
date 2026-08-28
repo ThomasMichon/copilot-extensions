@@ -85,6 +85,8 @@ async def list_machines(request: Request):
             "display_name": mc.display_name,
             "environment": mc.environment,
             "role": mc.role,
+            "description": mc.description,
+            "capabilities": list(mc.capabilities),
             "field_terminal": mc.field_terminal,
             "ssh_ready": mc.ssh_ready,
             "ssh_environments": [
@@ -123,6 +125,8 @@ async def get_machine(machine_key: str, request: Request):
         "display_name": mc.display_name,
         "environment": mc.environment,
         "role": mc.role,
+        "description": mc.description,
+        "capabilities": list(mc.capabilities),
         "field_terminal": mc.field_terminal,
         "ssh_ready": mc.ssh_ready,
         "ssh_ip": mc.ssh_ip,

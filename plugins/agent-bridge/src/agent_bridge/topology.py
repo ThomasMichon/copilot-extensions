@@ -66,6 +66,8 @@ class MachineConfig:
     # whose COMPUTERNAME can't be renamed. Empty means ``key`` is the hostname.
     hostname: str = ""
     role: str = ""
+    description: str = ""
+    capabilities: list[str] = field(default_factory=list)
     field_terminal: bool = False
     ssh_environments: list[SshEnvironment] = field(default_factory=list)
     ssh_ip: str | None = None
@@ -121,6 +123,27 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
     raw_machines = data.get("machines", {})
 
     for key, mdata in raw_machines.items():
+        if not isinstance(mdata, dict):
+            continue
+        description_raw = mdata.get("description", "")
+        if description_raw is None:
+            description_raw = ""
+        if not isinstance(description_raw, str):
+            raise ValueError(f"machine '{key}' description must be a string")
+        capabilities_raw = mdata.get("capabilities", [])
+        if capabilities_raw is None:
+            capabilities_raw = []
+        if not isinstance(capabilities_raw, list):
+            raise ValueError(f"machine '{key}' capabilities must be a list")
+        capabilities: list[str] = []
+        for capability_raw in capabilities_raw:
+            if not isinstance(capability_raw, str):
+                raise ValueError(
+                    f"machine '{key}' capabilities must contain only strings"
+                )
+            capability = capability_raw.strip()
+            if capability and capability not in capabilities:
+                capabilities.append(capability)
         ssh_envs: list[SshEnvironment] = []
         ssh_block = mdata.get("ssh", {})
 
@@ -150,6 +173,8 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
             environment=mdata.get("environment", ""),
             hostname=mdata.get("hostname", ""),
             role=mdata.get("role", ""),
+            description=description_raw.strip(),
+            capabilities=capabilities,
             field_terminal=bool(mdata.get("field_terminal", False)),
             ssh_environments=ssh_envs,
             ssh_ip=ssh_block.get("ip"),

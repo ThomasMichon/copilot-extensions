@@ -15,11 +15,19 @@ agent-ssh emit-profile registry.yaml --module transports\direct\module.yaml
 agent-ssh doctor
 agent-ssh verify --timeout 8 my-machine
 agent-ssh explore my-machine --json
+agent-ssh mesh-status
 ```
 
 The CLI manages only SSH aliases. Once `ssh <name>` works, sibling plugins such
 as agent-bridge or agent-codespaces can use that OpenSSH surface, but agent-ssh
 does not import their runtimes or require them to be installed.
+
+`mesh-status [--json]` is a fail-open view of a calling repository's
+`machines.yaml`. In addition to SSH readiness and environments, it shows the
+optional static machine metadata shared with agent-worktrees and agent-bridge:
+`role` is a stable terse classification, `description` explains the machine's
+purpose, and `capabilities` is an ordered list of broad discovery hints. These
+fields describe topology, not live machine state.
 
 ## Minimal setup
 
