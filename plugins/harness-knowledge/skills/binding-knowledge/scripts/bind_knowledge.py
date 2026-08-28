@@ -23,10 +23,210 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
+
+
+def _yaml_scalar(value: str) -> str:
+    value = value.strip()
+    if " #" in value:
+        value = value.split(" #", 1)[0].rstrip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def read_issue_route(config: Path) -> dict[str, str] | None:
+    """Read the supported ``issues`` YAML subset without requiring PyYAML."""
+    if not config.is_file():
+        return None
+    lines = config.read_text(encoding="utf-8").splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(r"^issues\s*:\s*(.*?)\s*$", line)
+        if not match:
+            continue
+        inline = match.group(1)
+        if inline.startswith("#"):
+            inline = ""
+        elif " #" in inline:
+            inline = inline.split(" #", 1)[0].rstrip()
+        if inline:
+            body = inline.strip()
+            if body.startswith("{") and body.endswith("}"):
+                body = body[1:-1]
+            route = {}
+            for item in body.split(","):
+                if ":" not in item:
+                    continue
+                key, value = item.split(":", 1)
+                key = key.strip()
+                if key in {"provider", "repo"}:
+                    route[key] = _yaml_scalar(value)
+            if not route:
+                raise ValueError("issues block has an unrecognized inline shape")
+            return route
+
+        children = []
+        for child in lines[index + 1 :]:
+            if child.strip() == "" or child.lstrip().startswith("#"):
+                continue
+            indent = len(child) - len(child.lstrip())
+            if indent == 0:
+                break
+            children.append((indent, child))
+        direct_indent = min((indent for indent, _ in children), default=0)
+        route = {}
+        for indent, child in children:
+            if indent != direct_indent:
+                continue
+            child_match = re.match(r"^\s+(provider|repo)\s*:\s*(.*?)\s*$", child)
+            if child_match:
+                route[child_match.group(1)] = _yaml_scalar(child_match.group(2))
+        if not route:
+            raise ValueError("issues block has an unrecognized nested shape")
+        return route
+    return None
+
+
+def knowledge_origin(knowledge_path: str) -> str:
+    path = Path(knowledge_path).resolve()
+    if not knowledge_path or not path.is_dir():
+        return ""
+    try:
+        root = subprocess.run(
+            ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if root.returncode != 0 or Path(root.stdout.strip()).resolve() != path:
+            return ""
+        result = subprocess.run(
+            ["git", "-C", str(path), "remote", "get-url", "origin"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def classify_origin(remote: str) -> tuple[str, str]:
+    """Return ``(provider, repo)`` without exposing credentials or raw URLs."""
+    if not remote:
+        return "missing", ""
+
+    host = ""
+    path = ""
+    scp_match = (
+        re.match(r"^[^@]+@([^:]+):(.+)$", remote)
+        if "://" not in remote
+        else None
+    )
+    if scp_match:
+        host, path = scp_match.groups()
+    else:
+        parsed = urlparse(remote)
+        host = parsed.hostname or ""
+        path = parsed.path
+
+    host = host.lower()
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if host == "github.com":
+        parts = path.split("/")
+        repo = "/".join(parts[:2]) if len(parts) >= 2 else ""
+        return "github", repo
+    if (
+        host in {"dev.azure.com", "ssh.dev.azure.com"}
+        or host.endswith(".visualstudio.com")
+        or host.endswith(".vs-ssh.visualstudio.com")
+    ):
+        return "azure-devops", ""
+    return "other", ""
+
+
+def inspect_issue_routing(knowledge_path: str) -> dict[str, str]:
+    if not knowledge_path or not Path(knowledge_path).is_dir():
+        return {
+            "status": "unknown",
+            "source": "",
+            "provider": "",
+            "repo": "",
+            "origin_provider": "missing",
+            "config": "",
+            "reason": "knowledge checkout path is unavailable",
+        }
+    config = (
+        Path(knowledge_path).resolve()
+        / ".agent-worktrees"
+        / "config.yaml"
+    )
+    try:
+        explicit = read_issue_route(config)
+    except (OSError, UnicodeError, ValueError):
+        return {
+            "status": "unknown",
+            "source": "config",
+            "provider": "",
+            "repo": "",
+            "origin_provider": "unknown",
+            "config": str(config),
+            "reason": "knowledge issue-routing config is unreadable or malformed",
+        }
+    origin_provider, origin_repo = classify_origin(knowledge_origin(knowledge_path))
+    provider = (explicit or {}).get("provider", "github").lower()
+    repo = (explicit or {}).get("repo", "")
+    explicit_repo = bool(repo)
+    valid_repo = bool(re.fullmatch(r"[^/\s]+/[^/\s]+", repo))
+
+    if explicit is not None:
+        if provider != "github":
+            status = "unsupported"
+            reason = f"configured issue provider is not supported: {provider}"
+        elif repo and not valid_repo:
+            status = "routing_required"
+            reason = "GitHub issue repo must use owner/name form"
+        elif repo or (origin_provider == "github" and origin_repo):
+            status = "ready"
+            reason = ""
+            repo = repo or origin_repo
+        else:
+            status = "routing_required"
+            reason = "GitHub issue routing requires an explicit owner/repo"
+        source = "config" if explicit_repo else "config+origin"
+    elif origin_provider == "github" and origin_repo:
+        status = "ready"
+        reason = ""
+        provider = "github"
+        repo = origin_repo
+        source = "origin"
+    else:
+        status = "routing_required"
+        if origin_provider == "github":
+            reason = "GitHub origin does not identify owner/repo"
+        elif origin_provider == "missing":
+            reason = "knowledge origin is missing or cannot be resolved"
+        else:
+            reason = "knowledge origin is not GitHub"
+        provider = ""
+        source = "origin"
+
+    return {
+        "status": status,
+        "source": source,
+        "provider": provider,
+        "repo": repo,
+        "origin_provider": origin_provider,
+        "config": str(config),
+        "reason": reason,
+    }
 
 
 def set_top_yaml_key(text: str, key: str, value: str) -> str:
@@ -98,6 +298,7 @@ def bind(
         "knowledge_repo": knowledge,
         "knowledge_path": knowledge_path,
         "config": str(cfg),
+        "issues": inspect_issue_routing(knowledge_path),
     }
 
     # #955: assemble the harness's personal-plugin overlay from the knowledge
@@ -163,6 +364,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  pointer:      {summary['config']}")
         print("Next: register the knowledge repo so state-root can resolve it, e.g.")
         print(f"  agent-worktrees repos add {args.knowledge} \"{args.knowledge_path or '<path>'}\" --class worktree")
+        issues = summary["issues"]
+        if issues["status"] == "ready":
+            print(f"Personal issues: {issues['provider']}:{issues['repo']} ({issues['source']})")
+        else:
+            print(f"Personal issues: {issues['status']} -- {issues['reason']}")
+            if issues["status"] == "routing_required":
+                print(
+                    "  declare issues.provider and issues.repo from a writable "
+                    "knowledge worktree"
+                )
+                print(f"  inspected knowledge config: {issues['config']}")
+            elif issues["status"] == "unsupported":
+                print(
+                    "  configure provider: github with an explicit owner/repo, "
+                    "or file issues manually"
+                )
+            elif issues["status"] == "unknown":
+                print("  re-run with a readable --knowledge-path checkout")
         print("Verify binding: agent-worktrees state-root --json")
         print("Verify writable pair from a harness worktree: agent-worktrees state-root --pair --json")
     return 0

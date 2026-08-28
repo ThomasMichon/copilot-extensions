@@ -154,6 +154,8 @@ def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
     }
 
     def fake_run(command, **_kwargs):
+        if command[0] == "git":
+            return subprocess.CompletedProcess(command, 2, "", "")
         assert command[1:6] == [
             "knowledge",
             "compose-plugins",
@@ -185,3 +187,231 @@ def test_bind_skips_assembly_without_harness_path(tmp_path: Path):
     home = tmp_path / "home"
     summary = bk.bind("h", "k", "C:/k", home=home)  # no harness_path
     assert "plugins" not in summary
+
+
+# --- personal issue routing --------------------------------------------------
+
+def _knowledge_repo(path: Path, remote: str | None = None) -> Path:
+    path.mkdir()
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    if remote:
+        subprocess.run(
+            ["git", "-C", str(path), "remote", "add", "origin", remote],
+            check=True,
+        )
+    return path
+
+
+def test_github_origin_is_a_ready_default_issue_route(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "git@github.com:example/private-knowledge.git",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["source"] == "origin"
+    assert routing["provider"] == "github"
+    assert routing["repo"] == "example/private-knowledge"
+
+
+def test_non_github_origin_requires_explicit_issue_routing(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://example@dev.azure.com/example/Project/_git/knowledge",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "routing_required"
+    assert routing["origin_provider"] == "azure-devops"
+    assert routing["repo"] == ""
+
+
+def test_explicit_github_route_makes_non_github_origin_ready(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://example.visualstudio.com/Project/_git/knowledge",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    original = (
+        "# repository-owned routing\n"
+        "issues:\n"
+        "  provider: github\n"
+        "  repo: example/personal-backlog\n"
+    )
+    config.write_text(original, encoding="utf-8")
+
+    summary = bk.bind(
+        "harness",
+        "knowledge",
+        str(knowledge),
+        home=tmp_path / "home",
+        assemble_plugins=False,
+    )
+
+    assert summary["issues"]["status"] == "ready"
+    assert summary["issues"]["source"] == "config"
+    assert summary["issues"]["repo"] == "example/personal-backlog"
+    assert config.read_text(encoding="utf-8") == original
+
+
+def test_commented_issues_header_keeps_nested_route(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://example@dev.azure.com/example/Project/_git/knowledge",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "issues:  # personal backlog\n"
+        "  provider: github\n"
+        "  repo: example/personal-backlog\n",
+        encoding="utf-8",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["repo"] == "example/personal-backlog"
+
+
+def test_inline_unsupported_issue_provider_is_reported(tmp_path: Path):
+    knowledge = _knowledge_repo(tmp_path / "knowledge")
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "issues: { provider: azure-devops, repo: Project/Backlog }\n",
+        encoding="utf-8",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "unsupported"
+    assert routing["provider"] == "azure-devops"
+
+
+def test_nested_issue_mapping_does_not_override_direct_route(tmp_path: Path):
+    knowledge = _knowledge_repo(tmp_path / "knowledge")
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "issues:\n"
+        "  provider: github\n"
+        "  repo: example/personal-backlog\n"
+        "  templates:\n"
+        "    repo: wrong/nested-value\n",
+        encoding="utf-8",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["repo"] == "example/personal-backlog"
+
+
+def test_invalid_github_repo_shape_requires_routing_fix(tmp_path: Path):
+    knowledge = _knowledge_repo(tmp_path / "knowledge")
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "issues: { provider: github, repo: https://github.com/o/r/issues }\n",
+        encoding="utf-8",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "routing_required"
+    assert routing["reason"] == "GitHub issue repo must use owner/name form"
+
+
+def test_unreadable_issue_config_reports_unknown(tmp_path: Path):
+    knowledge = _knowledge_repo(tmp_path / "knowledge")
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_bytes(b"issues:\n  repo: example/\xff\n")
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "unknown"
+    assert routing["config"] == str(config.resolve())
+
+
+def test_unrecognized_issue_block_reports_unknown(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://github.com/example/private-knowledge.git",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "issues:\n"
+        "  - provider: github\n"
+        "    repo: example/personal-backlog\n",
+        encoding="utf-8",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "unknown"
+    assert "malformed" in routing["reason"]
+
+
+def test_missing_origin_requires_explicit_issue_routing(tmp_path: Path):
+    knowledge = _knowledge_repo(tmp_path / "knowledge")
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "routing_required"
+    assert routing["origin_provider"] == "missing"
+
+
+def test_missing_knowledge_path_is_not_resolved_from_cwd():
+    routing = bk.inspect_issue_routing("")
+
+    assert routing["status"] == "unknown"
+    assert routing["config"] == ""
+
+
+def test_nested_directory_does_not_inherit_parent_repo_origin(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://github.com/example/private-knowledge.git",
+    )
+    nested = knowledge / "nested"
+    nested.mkdir()
+
+    routing = bk.inspect_issue_routing(str(nested))
+
+    assert routing["status"] == "routing_required"
+    assert routing["origin_provider"] == "missing"
+
+
+def test_azure_devops_ssh_origin_is_classified():
+    assert bk.classify_origin(
+        "git@ssh.dev.azure.com:v3/example/Project/knowledge"
+    ) == ("azure-devops", "")
+
+
+def test_scheme_ssh_github_origin_with_port_is_classified():
+    assert bk.classify_origin(
+        "ssh://git@github.com:22/example/private-knowledge.git"
+    ) == ("github", "example/private-knowledge")
+
+
+def test_provider_only_config_uses_github_origin_with_mixed_source(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://github.com/example/private-knowledge.git",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("issues:\n  provider: github\n", encoding="utf-8")
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["source"] == "config+origin"
+    assert routing["repo"] == "example/private-knowledge"
