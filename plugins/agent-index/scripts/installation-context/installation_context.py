@@ -2352,13 +2352,6 @@ def resolve_installation_mode(
     actual_mode = activation["actualMode"]
     runtime_root = activation["runtimeRoot"]
     if (
-        marketplace_id is not None
-        and activation["state"] == "missing"
-        and actual_mode is None
-    ):
-        actual_mode = "legacy"
-        runtime_root = str(resolved_legacy_root)
-    if (
         not policy_authoritative
         and activation["state"] in {"valid", "revalidation"}
         and activation["actualMode"] == "namespaced"
@@ -2378,7 +2371,7 @@ def resolve_installation_mode(
     if invalid_reason is not None:
         status = "invalid"
         reason = invalid_reason
-    elif maintenance["state"] in {"active", "stale", "unknown"}:
+    elif maintenance["state"] in {"active", "stale"}:
         status = "maintenance-blocked"
         reason = f"maintenance-{maintenance['state']}"
     elif activation["state"] == "foreign" or legacy["status"] == "foreign-environment":

@@ -303,7 +303,7 @@ plugin id remains in `pluginId` when its exact filesystem-safe identity is
 trustworthy even though marketplace provenance is not. Paths are absolute
 canonical paths. `reason` is a stable machine-readable code and distinguishes,
 among other cases, explicit false from implicit/default false.
-`maintenance.state` is `inactive`, `active`, `stale`, or `unknown`;
+`maintenance.state` is `inactive`, `active`, or `stale`;
 `maintenance.scope` is `none`, `user`, or `plugin`.
 
 `policy.path` is the selected absolute path. `policy.authoritative` is true only
