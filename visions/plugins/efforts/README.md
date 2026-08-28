@@ -1,4 +1,4 @@
-# Efforts - Vision
+# Efforts — Vision
 
 - **Subject:** The efforts plugin as the durable planning and continuity layer
   for multi-session, multi-wave work.
@@ -168,8 +168,8 @@ gate and effort-discovery rule.
 
 ## See Also
 
-- Parent vision:
-  none. Related cross-cutting vision:
+- Parent vision: none
+- Related cross-cutting vision:
   [`harness-guidance`](../../harness-guidance/README.md) for ownership and
   delivery of concise ambient policy.
 - Child visions: none (leaf)
