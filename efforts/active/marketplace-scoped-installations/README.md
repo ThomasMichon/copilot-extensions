@@ -148,7 +148,7 @@ reachable when their ownership is explicit.
     OS-profile-pinned default legacy policy, exact marketplace/plugin overrides,
     sticky actual mode, the normative read-only resolver/status contract, and
     the non-mutating legacy-entrypoint decision probe.
-  - [ ] Add the tiny shared legacy-entrypoint probe and complete declared
+  - [x] Add the tiny shared legacy-entrypoint probe and complete declared
     path/service/task footprints for each exemplar; no exemplar becomes
     operative until every legacy installer/bootstrap mutation refuses
     namespaced-active, orphaned-transfer, and maintenance.
@@ -443,6 +443,31 @@ See [`design.md`](design.md).
 - Kept the slice non-operative: no activation or tombstone writer, two-lock
   migration, installer/bootstrap caller wiring, declared exemplar footprint,
   payload-invocation change, runtime-root switch, or cutover is implemented.
+
+### 2026-08-27 — Legacy exemplar mutation gating
+
+- Added dependency-light POSIX and PowerShell callers that derive conservative
+  path, systemd-user service, and Windows scheduled-task evidence from each
+  payload's declared legacy footprint before invoking the canonical
+  `probe-legacy` decision.
+- Declared complete legacy footprints for the agent-machines CLI-only exemplar
+  and the agent-index service-bearing exemplar, including compatibility shims,
+  unit files, service identities, and scheduled-task identities.
+- Wired every direct installer, bootstrap reconciler, and agent-index service
+  ensure boundary before its first mutation or background process launch.
+  Self-staged children retain the original payload as provenance, deferred
+  Windows snapshots publish that attributable origin through a serialized,
+  crash-consistent first-use receipt, and POSIX first-use binstubs probe before
+  creating lock or status files.
+- Kept malformed footprint metadata conservative, canonically validated an
+  inherited context before treating it as another plugin's context, and kept
+  agent-index `status` read-only by bypassing its mutating self-stage path.
+- Validated the callers with Windows PowerShell 5.1, including native scheduled
+  task detection and pre-mutation refusal for namespaced-active, maintenance,
+  and orphaned-transfer decisions.
+- Kept namespaced runtimes non-operative: this slice adds refusal coverage only;
+  it does not write activation, tombstone, maintenance, or namespaced runtime
+  state.
 
 ### 2026-08-26 — Runtime plugin hook audit
 

@@ -17,6 +17,14 @@
 
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+legacy_mutation_allowed() {
+  local probe="$ScriptDir/installation-context/legacy-entrypoint-probe.sh"
+  [ -f "$probe" ] || {
+    echo "[agent-machines] legacy mutation probe is unavailable; skipping reconcile." >&2
+    return 1
+  }
+  bash "$probe" --payload-root "$PluginDir" --legacy-root "$HOME/.agent-machines"
+}
 ContextSelected=0
 InstallDir="$HOME/.agent-machines"
 if [ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]; then
@@ -91,6 +99,7 @@ if [ ! -f "$Manifest" ]; then
   fi
   _init="$ScriptDir/init.sh"
   if [ -f "$_init" ] && grep -q 'stamp)' "$_init" 2>/dev/null; then
+    legacy_mutation_allowed || exit 0
     bash "$_init" stamp >/dev/null 2>&1 || true
   fi
   exit 0
@@ -125,6 +134,7 @@ if [ -x "$Binstub" ] && [ "$deployed" = "$current" ]; then exit 0; fi
 init="$pluginDir/scripts/init.sh"
 [ -f "$init" ] || exit 0
 
+legacy_mutation_allowed || exit 0
 echo "[agent-machines] runtime $deployed -> $current; reconciling in background..."
 nohup bash "$init" >/dev/null 2>&1 &
 

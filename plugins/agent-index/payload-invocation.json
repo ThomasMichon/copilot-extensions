@@ -5,5 +5,41 @@
   "module": "agent_index",
   "runtimeRoot": ".agent-index",
   "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION",
-  "purpose": "Search and operate the semantic index"
+  "purpose": "Search and operate the semantic index",
+  "installation": {
+    "legacyFootprint": {
+      "paths": [
+        ".agent-index",
+        ".local/bin/agent-index",
+        ".local/bin/agent-index.cmd",
+        ".local/bin/agent-index.ps1",
+        ".config/systemd/user/agent-index.service",
+        ".config/systemd/user/agent-index-engine.service"
+      ],
+      "services": [
+        {
+          "platform": "posix",
+          "manager": "systemd-user",
+          "name": "agent-index.service"
+        },
+        {
+          "platform": "posix",
+          "manager": "systemd-user",
+          "name": "agent-index-engine.service"
+        }
+      ],
+      "tasks": [
+        {
+          "platform": "windows",
+          "manager": "windows-scheduled-task",
+          "name": "agent-index"
+        },
+        {
+          "platform": "windows",
+          "manager": "windows-scheduled-task",
+          "name": "agent-index-engine"
+        }
+      ]
+    }
+  }
 }

@@ -22,6 +22,41 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ($InstallDir) {
+    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+
+$probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+    [IO.Path]::GetFullPath($env:COPILOT_PLUGIN_STAGED_FROM)
+} else {
+    (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+}
+
+# Refuse every mutating lifecycle action before self-staging touches the legacy
+# runtime. Status remains read-only and does not need mutation authorization.
+if ($Action -ne 'status') {
+    $probeLegacyRoot = if ($InstallDir) {
+        [IO.Path]::GetFullPath($InstallDir)
+    } else {
+        Join-Path $env:USERPROFILE '.agent-index'
+    }
+    $legacyProbe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
+    if (-not (Test-Path -LiteralPath $legacyProbe -PathType Leaf)) {
+        Write-Host '  [FAIL] Legacy mutation probe is unavailable' -ForegroundColor Red
+        exit 1
+    }
+    $probeHost = (Get-Process -Id $PID).Path
+    & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
+        -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+# Status is read-only, so do not enter the self-stage block that creates and
+# reaps legacy staging directories.
+$legacyReadOnlyStatus = $Action -eq 'status' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
+if ($legacyReadOnlyStatus) { $env:COPILOT_PLUGIN_INSTALL_STAGED = 'read-only-status' }
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -143,6 +178,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
     }
 }
 # === end install-contract:v4 self-stage ===
+if ($legacyReadOnlyStatus) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -197,6 +233,7 @@ function Write-Warn    { param([string]$Msg) Write-Host "  [WARN] $Msg" -Foregro
 $PluginDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $PkgSrcDir = Join-Path $PluginDir 'src\agent_index'
 if (-not $InstallDir) { $InstallDir = Join-Path $env:USERPROFILE '.agent-index' }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
@@ -638,6 +675,8 @@ $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-index] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
+try { $_origin = ([IO.File]::ReadAllText((Join-Path $_root 'payload-origin'))).Trim() } catch { $_origin = '' }
+if ($_origin) { $env:COPILOT_PLUGIN_STAGED_FROM = $_origin }
 [Console]::Error.WriteLine('[agent-index] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
 [Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-index eta_seconds=120 reason=first-use')
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
@@ -1406,10 +1445,32 @@ function Invoke-Stamp {
     # NEVER holds the marketplace payload open.
     Write-Host ''; Write-Host '=== agent-index stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    $stampHash = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+        )
+    ).Replace('-', '').Substring(0, 24)
+    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
+        "Local\CopilotExtensions.AgentIndex.Stamp.$stampHash"
+    } else {
+        "CopilotExtensions.AgentIndex.Stamp.$stampHash"
+    }
+    $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
+    $stampLockHeld = $false
+    try {
+        try {
+            $stampLockHeld = $stampMutex.WaitOne([TimeSpan]::FromSeconds(20))
+        } catch [Threading.AbandonedMutexException] {
+            $stampLockHeld = $true
+        }
+        if (-not $stampLockHeld) { throw 'Timed out waiting for the agent-index stamp lock.' }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
+    $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+    $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
+    Remove-Item $payloadDirMarker, $payloadOriginMarker -Force -ErrorAction SilentlyContinue
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
@@ -1420,11 +1481,16 @@ function Invoke-Stamp {
     }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
+    [System.IO.File]::WriteAllText($payloadDirMarker, $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-index binstub on PATH; runtime provisions on first use.'
+    } finally {
+        if ($stampLockHeld) { [void]$stampMutex.ReleaseMutex() }
+        $stampMutex.Dispose()
+    }
 }
 
 function Invoke-Status {

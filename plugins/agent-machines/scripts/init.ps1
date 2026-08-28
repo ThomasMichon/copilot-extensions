@@ -26,6 +26,32 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
+if ($InstallDir) {
+    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+
+# Refuse every legacy mutation before self-staging creates or removes files.
+$probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
+    [IO.Path]::GetFullPath($env:COPILOT_PLUGIN_STAGED_FROM)
+} else {
+    (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+}
+$probeLegacyRoot = if ($InstallDir) {
+    [IO.Path]::GetFullPath($InstallDir)
+} else {
+    Join-Path $env:USERPROFILE '.agent-machines'
+}
+$legacyProbe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
+if (-not (Test-Path -LiteralPath $legacyProbe -PathType Leaf)) {
+    Write-Host '  [FAIL] Legacy mutation probe is unavailable' -ForegroundColor Red
+    exit 1
+}
+$probeHost = (Get-Process -Id $PID).Path
+& $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
+    -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -206,6 +232,7 @@ $PkgSrcDir = Join-Path $PluginDir 'src\agent_machines'
 if (-not $InstallDir) {
     $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $VenvDir  = Join-Path $InstallDir '.venv'
 $LocalBin = Join-Path $env:USERPROFILE '.local\bin'
 
@@ -428,9 +455,13 @@ set "_SNAP="
 if exist "%_ROOT%\payload-dir" set /p _SNAP=<"%_ROOT%\payload-dir"
 set "_INST=%_SNAP%\scripts\init.ps1"
 if not exist "%_INST%" goto _noinst
+set "_ORIGIN="
+if exist "%_ROOT%\payload-origin" set /p _ORIGIN=<"%_ROOT%\payload-origin"
+if defined _ORIGIN set "COPILOT_PLUGIN_STAGED_FROM=%_ORIGIN%"
 echo [agent-machines] runtime not provisioned -- provisioning on first use ^(~30-120s^). Do not kill.>&2
 where pwsh >nul 2>&1
 if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_INST%" provision 1>&2)
+set "COPILOT_PLUGIN_STAGED_FROM="
 call :_resolve
 if not defined _PY goto _failprov
 "%_PY%" -m agent_machines %*
@@ -470,9 +501,31 @@ function Invoke-Stamp {
     Write-Host ''
     Write-Host '=== agent-machines stamp (defer runtime to first use) ===' -ForegroundColor Cyan
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
+    $stampHash = [BitConverter]::ToString(
+        [Security.Cryptography.SHA256]::Create().ComputeHash(
+            [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+        )
+    ).Replace('-', '').Substring(0, 24)
+    $stampMutexName = if ($env:OS -eq 'Windows_NT') {
+        "Local\CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    } else {
+        "CopilotExtensions.AgentMachines.Stamp.$stampHash"
+    }
+    $stampMutex = New-Object Threading.Mutex($false, $stampMutexName)
+    $stampLockHeld = $false
+    try {
+        try {
+            $stampLockHeld = $stampMutex.WaitOne([TimeSpan]::FromSeconds(20))
+        } catch [Threading.AbandonedMutexException] {
+            $stampLockHeld = $true
+        }
+        if (-not $stampLockHeld) { throw 'Timed out waiting for the agent-machines stamp lock.' }
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
+    $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+    $payloadOriginMarker = Join-Path $InstallDir 'payload-origin'
+    Remove-Item $payloadDirMarker, $payloadOriginMarker -Force -ErrorAction SilentlyContinue
     $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
@@ -483,11 +536,16 @@ function Invoke-Stamp {
     }
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    [System.IO.File]::WriteAllText((Join-Path $InstallDir 'payload-dir'), $snapDir, $utf8NoBom)
+    [System.IO.File]::WriteAllText($payloadOriginMarker, $probePayload, $utf8NoBom)
+    [System.IO.File]::WriteAllText($payloadDirMarker, $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
     Deploy-SelfProvisioningBinstub
     Write-Ok 'Stamped: agent-machines binstub on PATH; runtime provisions on first use.'
+    } finally {
+        if ($stampLockHeld) { [void]$stampMutex.ReleaseMutex() }
+        $stampMutex.Dispose()
+    }
 }
 
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
