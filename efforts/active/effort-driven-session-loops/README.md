@@ -423,5 +423,5 @@ earlier slices.
   reject competing predecessor edits, refuse premature effort completion, and
   pause for required approval before implementation.
 - Bumped context-handoff to `0.1.0-dev47`, agent-logger to `0.1.1-dev72`,
-  agent-worktrees to `1.5.3-dev654`, efforts to `0.1.0-dev16`, and marketplace
-  metadata to `1.7.5-dev673`.
+  agent-worktrees to `1.5.3-dev655`, efforts to `0.1.0-dev16`, and marketplace
+  metadata to `1.7.5-dev674`.
