@@ -24,7 +24,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev89",
+      "version": "0.4.0-dev90",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -36,7 +36,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev80",
+      "version": "0.2.0-dev81",
       "source": "plugins/agent-mcp"
     },
     {
@@ -102,7 +102,7 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev91",
+      "version": "0.1.0-dev92",
       "source": "plugins/agent-index"
     },
     {

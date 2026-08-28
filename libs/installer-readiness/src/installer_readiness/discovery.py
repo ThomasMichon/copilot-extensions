@@ -593,7 +593,7 @@ def _discover_installation(
                 remedy="Correct the plugin-owned installer/readiness declaration.",
             )
         )
-        return [], None, findings, True
+        return [], None, findings, is_machine_gated
 
 
 def _validate_graph(modules: Sequence[Module]) -> list[Finding]:

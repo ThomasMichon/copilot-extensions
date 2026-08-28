@@ -435,6 +435,22 @@ def test_issue_1160_adapter_fixture_is_complete_and_attributable(tmp_path):
             assert module.readiness[Platform.MACOS].target.is_relative_to(root)
 
 
+def test_malformed_universal_opt_in_is_not_machine_gated(tmp_path):
+    payload = _payload(tmp_path / "foundation", "foundation")
+    manifest_path = payload / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtimeScope"] = "universal"
+    _write(manifest_path, manifest)
+    declaration = payload / "installer-readiness.json"
+    declaration.write_text("{", encoding="utf-8")
+
+    report = discover_modules([_installation(payload, "foundation")])
+
+    assert not report.valid
+    assert report.machine_gated_owners == ()
+    assert report.findings[0].code == "invalid-module-metadata"
+
+
 def test_fixture_inventory_rejects_silent_omission(tmp_path):
     durable = tmp_path / "home"
     repo = tmp_path / "repo"

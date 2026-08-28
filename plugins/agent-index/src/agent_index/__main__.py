@@ -82,10 +82,9 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 
 def cmd_installer_readiness(_args: argparse.Namespace) -> int:
-    from .config import read_corpus_sources
-    from .installer_readiness import emit, evaluate
+    from .installer_readiness import emit, evaluate, inspect_configuration
 
-    return emit(evaluate(_status_payload(), read_corpus_sources()))
+    return emit(evaluate(_status_payload(), inspect_configuration()))
 
 
 def cmd_version(_args: argparse.Namespace) -> int:

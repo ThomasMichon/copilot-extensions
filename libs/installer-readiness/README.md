@@ -145,8 +145,8 @@ generic completeness rule covers.
 | `agent-machines/runtime` | `scripts/init.* init` | `configuration-empty` when no applicable requirement package exists; malformed packages fail | none | Windows, Linux, WSL, macOS | none |
 | `agent-codespaces/runtime` | `scripts/install.* update` | runtime/auth/config health only; empty config is explicit and no live CodeSpace is required | none | Windows, Linux, WSL | none |
 | `agent-dispatch/runtime` | `scripts/install.* update` | the configured coordinator must answer its existing health endpoint; the probe never starts it | none | Windows, Linux, WSL | none |
-| `agent-mcp/runtime` | `scripts/init.* init` | no bridge config is `configuration-empty`; every present bridge must parse and validate | none | Windows, Linux, WSL, macOS | none |
-| `agent-index/runtime` | `scripts/install.* update` | service failure or unknown corpus state fails; absent sources or a measured zero-chunk corpus is explicit | none | Windows, Linux, WSL | none |
+| `agent-mcp/runtime` | `scripts/init.* init` | no bridge config is `configuration-empty`; duplicate normalized names fail before every candidate is parsed and validated | none | Windows, Linux, WSL, macOS | none |
+| `agent-index/runtime` | `scripts/install.* update` | service failure, malformed/unreadable config, unknown corpus state, or a populated corpus without attributable sources fails; absent sources or a measured zero-chunk corpus is explicit | none | Windows, Linux, WSL | none |
 
 The empty dependency lists are intentional: optional composition is not an
 installation prerequisite. External prerequisites such as authenticated service

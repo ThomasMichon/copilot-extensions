@@ -170,11 +170,13 @@ The adapters preserve these state distinctions:
 - `agent-dispatch` reuses the coordinator health endpoint without autostarting
   it; installer updates own service cutover, while manual `service.env` edits
   still require an explicit service restart.
-- `agent-mcp` treats no configured bridges as configuration-empty and validates
-  present bridge files without starting upstream servers.
-- `agent-index` treats an unavailable service or unknown corpus count as failed,
-  and distinguishes absent source configuration from a measured empty corpus
-  without creating or reindexing either.
+- `agent-mcp` treats no configured bridges as configuration-empty, rejects
+  duplicate normalized bridge names before content validation, and validates
+  every candidate without starting upstream servers.
+- `agent-index` treats an unavailable service, malformed or unreadable source
+  configuration, unknown corpus count, or populated-but-unattributable corpus
+  as failed. It distinguishes absent source configuration from a measured empty
+  corpus without creating or reindexing either.
 
 ## Required tests
 
