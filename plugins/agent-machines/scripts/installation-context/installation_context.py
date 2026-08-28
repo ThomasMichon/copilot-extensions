@@ -10,14 +10,16 @@ import os
 import re
 import secrets
 import socket
+import stat
 import sys
 import time
 import warnings
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 LOCK_SCHEMA = "copilot-extensions.installation-lock"
@@ -31,6 +33,8 @@ POLICY_SCHEMA = "copilot-extensions.installation-mode"
 ACTIVATION_SCHEMA = "copilot-extensions.installation-activation"
 TOMBSTONE_SCHEMA = "copilot-extensions.legacy-installation-ownership"
 RESOLUTION_SCHEMA = "copilot-extensions.installation-resolution"
+SNAPSHOT_PROVENANCE_SCHEMA = "copilot-extensions.snapshot-provenance"
+SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
 RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
@@ -96,12 +100,37 @@ def canonical_path(value: str | os.PathLike[str], *, must_exist: bool = False) -
     return resolved
 
 
+def _path_is_fully_qualified(
+    value: str | os.PathLike[str],
+    *,
+    platform: str | None = None,
+) -> bool:
+    selected_platform = platform or os.name
+    if selected_platform == "nt":
+        path = PureWindowsPath(os.fspath(value))
+        return bool(path.drive and path.root)
+    return PurePosixPath(os.fspath(value)).is_absolute()
+
+
 def _path_key(path: Path) -> str:
     return os.path.normcase(os.fspath(canonical_path(path)))
 
 
 def paths_equal(left: str | os.PathLike[str], right: str | os.PathLike[str]) -> bool:
     return _path_key(Path(left)) == _path_key(Path(right))
+
+
+def _is_link_or_junction(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction and is_junction():
+        return True
+    try:
+        attributes = os.lstat(path).st_file_attributes
+    except (AttributeError, FileNotFoundError, OSError):
+        return False
+    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def path_is_within(child: str | os.PathLike[str], parent: str | os.PathLike[str]) -> bool:
@@ -790,13 +819,37 @@ def validate_namespace_receipt(
     receipt_path: str | os.PathLike[str],
     durable_home: str | os.PathLike[str],
 ) -> dict[str, Any]:
-    actual_receipt = canonical_path(receipt_path, must_exist=True)
-    cell_root = actual_receipt.parent
-    marketplaces_root = canonical_path(Path(durable_home) / "marketplaces")
-    if not path_is_within(cell_root, marketplaces_root):
-        _fail(f"Namespace receipt '{actual_receipt}' is outside the durable marketplaces root.")
+    receipt_pointer = Path(receipt_path)
+    if not _path_is_fully_qualified(receipt_pointer):
+        _fail("The namespace receipt pointer must be absolute.")
+    if not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(durable_home)
+    lexical_marketplaces_root = durable / "marketplaces"
+    if _is_link_or_junction(lexical_marketplaces_root):
+        _fail("The marketplaces root may not be a symbolic link or reparse point.")
+    marketplaces_root = canonical_path(lexical_marketplaces_root)
+    if not paths_equal(marketplaces_root.parent, durable):
+        _fail("The marketplaces root escapes the durable installation home.")
+    lexical_cell_root = receipt_pointer.parent
+    if _is_link_or_junction(lexical_cell_root):
+        _fail("The marketplace cell root may not be a symbolic link or reparse point.")
+    cell_root = canonical_path(lexical_cell_root)
+    if not paths_equal(cell_root.parent, marketplaces_root):
+        _fail(
+            f"Namespace receipt '{receipt_pointer}' is outside the durable "
+            "marketplaces root."
+        )
+    if _is_link_or_junction(receipt_pointer):
+        _fail("namespace.json may not be a symbolic link or reparse point.")
+    actual_receipt = canonical_path(receipt_pointer, must_exist=True)
+    if not paths_equal(actual_receipt.parent, cell_root):
+        _fail("namespace.json escapes its canonical marketplace cell.")
     marketplace_id = cell_root.name
-    canonical_receipt = canonical_path(cell_root / "namespace.json")
+    lexical_canonical_receipt = cell_root / "namespace.json"
+    if _is_link_or_junction(lexical_canonical_receipt):
+        _fail("namespace.json may not be a symbolic link or reparse point.")
+    canonical_receipt = canonical_path(lexical_canonical_receipt)
     if not paths_equal(actual_receipt, canonical_receipt):
         _fail(
             f"namespace.json is not at its exact canonical receipt location "
@@ -865,6 +918,21 @@ def _assert_plugin_id(value: str) -> None:
         _fail(f"Invalid filesystem-safe plugin id '{value}'.")
 
 
+def _assert_snapshot_id(value: str) -> None:
+    if not re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9._+-]*[A-Za-z0-9])?",
+        value,
+    ) or value in {".", ".."}:
+        _fail(f"Invalid filesystem-safe snapshot id '{value}'.")
+    basename = value.split(".", 1)[0].upper()
+    if (
+        basename in {"CON", "PRN", "AUX", "NUL"}
+        or re.fullmatch(r"COM[1-9]", basename)
+        or re.fullmatch(r"LPT[1-9]", basename)
+    ):
+        _fail(f"Invalid filesystem-safe snapshot id '{value}'.")
+
+
 def _resolve_relative_root(plugin_root: Path, relative: str, name: str) -> Path:
     if not relative.strip() or Path(relative).is_absolute():
         _fail(f"roots.{name} must be a non-empty relative path.")
@@ -888,16 +956,18 @@ def validate_context_receipt(
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     environment = environment if environment is not None else os.environ
-    if not Path(durable_home).is_absolute():
+    if not _path_is_fully_qualified(durable_home):
         _fail("--durable-home must be absolute.")
     receipt_pointer = Path(receipt_path)
-    if not receipt_pointer.is_absolute():
+    if not _path_is_fully_qualified(receipt_pointer):
         _fail("The installation-context receipt pointer must be absolute.")
+    if _is_link_or_junction(receipt_pointer):
+        _fail("install.json may not be a symbolic link or reparse point.")
     for name, expectation in (
         ("expected payload root", expected_payload_root),
         ("expected cell root", expected_cell_root),
     ):
-        if expectation is not None and not Path(expectation).is_absolute():
+        if expectation is not None and not _path_is_fully_qualified(expectation):
             _fail(f"{name} must be absolute.")
     actual_receipt = canonical_path(receipt_pointer, must_exist=True)
     install = read_json(actual_receipt)
@@ -918,9 +988,34 @@ def validate_context_receipt(
         _fail(f"Invalid source-derived marketplace id '{marketplace_id}'.")
     _assert_plugin_id(plugin_id)
     durable = canonical_path(durable_home)
-    cell_root = canonical_path(durable / "marketplaces" / marketplace_id)
-    plugin_root = canonical_path(cell_root / "plugins" / plugin_id)
-    canonical_receipt = canonical_path(plugin_root / "install.json")
+    lexical_marketplaces_root = durable / "marketplaces"
+    if _is_link_or_junction(lexical_marketplaces_root):
+        _fail("The marketplaces root may not be a symbolic link or reparse point.")
+    marketplaces_root = canonical_path(lexical_marketplaces_root)
+    if not paths_equal(marketplaces_root.parent, durable):
+        _fail("The marketplaces root escapes the durable installation home.")
+    lexical_cell_root = marketplaces_root / marketplace_id
+    if _is_link_or_junction(lexical_cell_root):
+        _fail("The marketplace cell root may not be a symbolic link or reparse point.")
+    cell_root = canonical_path(lexical_cell_root)
+    if not paths_equal(cell_root.parent, marketplaces_root):
+        _fail("The marketplace cell root escapes the marketplaces root.")
+    lexical_plugins_root = cell_root / "plugins"
+    if _is_link_or_junction(lexical_plugins_root):
+        _fail("The cell plugins root may not be a symbolic link or reparse point.")
+    plugins_root = canonical_path(lexical_plugins_root)
+    if not paths_equal(plugins_root.parent, cell_root):
+        _fail("The cell plugins root escapes the marketplace cell.")
+    lexical_plugin_root = plugins_root / plugin_id
+    if _is_link_or_junction(lexical_plugin_root):
+        _fail("The plugin root may not be a symbolic link or reparse point.")
+    plugin_root = canonical_path(lexical_plugin_root)
+    if not paths_equal(plugin_root.parent, plugins_root):
+        _fail("The plugin root escapes the cell plugins root.")
+    lexical_canonical_receipt = plugin_root / "install.json"
+    if _is_link_or_junction(lexical_canonical_receipt):
+        _fail("install.json may not be a symbolic link or reparse point.")
+    canonical_receipt = canonical_path(lexical_canonical_receipt)
     if not paths_equal(actual_receipt, canonical_receipt):
         _fail(
             f"install.json is not at its exact canonical receipt location "
@@ -940,10 +1035,13 @@ def validate_context_receipt(
     _assert_receipt_generation(_property(install, "generation"), "install.json generation")
     _assert_receipt_state(_property(install, "state"), "install.json state")
 
-    namespace_path = canonical_path(cell_root / "namespace.json")
+    lexical_namespace_path = cell_root / "namespace.json"
+    if _is_link_or_junction(lexical_namespace_path):
+        _fail("namespace.json may not be a symbolic link or reparse point.")
+    namespace_path = canonical_path(lexical_namespace_path)
     if not paths_equal(_string_property(install, "namespaceReceipt"), namespace_path):
         _fail("install.json namespaceReceipt is not the exact namespace receipt in the same cell.")
-    validated_namespace = validate_namespace_receipt(namespace_path, durable)
+    validated_namespace = validate_namespace_receipt(lexical_namespace_path, durable)
     if validated_namespace["marketplaceId"] != marketplace_id:
         _fail("namespace.json marketplaceId does not match install.json.")
     identity = validated_namespace["identity"]
@@ -952,7 +1050,7 @@ def validate_context_receipt(
     if not isinstance(payload_receipt, Mapping):
         _fail("install.json payload is missing.")
     payload_text = _string_property(payload_receipt, "root")
-    if not Path(payload_text).is_absolute():
+    if not _path_is_fully_qualified(payload_text):
         _fail("payload.root must be absolute.")
     if not _string_property(payload_receipt, "version").strip():
         _fail("payload.version must be a non-empty string.")
@@ -967,14 +1065,14 @@ def validate_context_receipt(
     if origin_receipt is not None:
         if not isinstance(origin_receipt, str):
             _fail("payload.originReceipt must be a string.")
-        if not Path(origin_receipt).is_absolute():
+        if not _path_is_fully_qualified(origin_receipt):
             _fail("payload.originReceipt must be absolute.")
     payload_root = canonical_path(payload_text)
     if expected_payload_root and not paths_equal(payload_root, expected_payload_root):
         _fail(f"Expected payload '{expected_payload_root}', receipt names '{payload_root}'.")
     inherited_payload = environment.get("COPILOT_PLUGIN_ROOT")
     if inherited_payload:
-        if not Path(inherited_payload).is_absolute():
+        if not _path_is_fully_qualified(inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT must be absolute.")
         if not paths_equal(payload_root, inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT conflicts with the validated payload root.")
@@ -1023,6 +1121,11 @@ def _assert_expected_generation(
 ) -> None:
     if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
         _fail(f"Expected {receipt_name} generation must be a non-negative integer.")
+    if expected > MAX_RECEIPT_GENERATION:
+        _fail(
+            f"Expected {receipt_name} generation exceeds the portable "
+            "signed 64-bit maximum."
+        )
     if actual != expected:
         _fail(
             f"{receipt_name} generation changed: expected {expected}, found {actual}; "
@@ -1146,7 +1249,7 @@ def _install_receipt_value(
     }
     if payload_origin_receipt is not None:
         origin_receipt = Path(payload_origin_receipt)
-        if not origin_receipt.is_absolute():
+        if not _path_is_fully_qualified(origin_receipt):
             _fail("payload origin receipt must be absolute.")
         payload["originReceipt"] = str(canonical_path(origin_receipt, must_exist=True))
     if existing is not None:
@@ -1341,6 +1444,422 @@ def stamp_context(
     return result
 
 
+def _snapshot_provenance_paths(
+    validated: Mapping[str, Any],
+    snapshot_id: str,
+) -> tuple[Path, Path]:
+    _assert_snapshot_id(snapshot_id)
+    snapshots_root = canonical_path(_string_property(validated, "snapshotsRoot"))
+    lexical_snapshot_root = snapshots_root / snapshot_id
+    if _is_link_or_junction(lexical_snapshot_root):
+        _fail("Snapshot root may not be a symbolic link or reparse point.")
+    if not lexical_snapshot_root.is_dir():
+        _fail("Snapshot root must be an existing materialized directory.")
+    snapshot_root = canonical_path(lexical_snapshot_root, must_exist=True)
+    if not paths_equal(snapshot_root.parent, snapshots_root):
+        _fail("Snapshot root must be one direct child of snapshotsRoot.")
+    if os.path.normcase(snapshot_root.name) != os.path.normcase(snapshot_id):
+        _fail("Snapshot root does not retain the requested snapshot id.")
+    if not any(path.name != SNAPSHOT_PROVENANCE_FILE for path in snapshot_root.iterdir()):
+        _fail("Snapshot root must contain materialized payload content.")
+    lexical_provenance_path = snapshot_root / SNAPSHOT_PROVENANCE_FILE
+    if _is_link_or_junction(lexical_provenance_path):
+        _fail("Snapshot provenance may not be a symbolic link or reparse point.")
+    provenance_path = canonical_path(lexical_provenance_path)
+    if not path_is_within(provenance_path, snapshots_root):
+        _fail("Snapshot provenance path escapes snapshotsRoot.")
+    return snapshot_root, provenance_path
+
+
+def _payload_identity_from_install(
+    install_path: str | os.PathLike[str],
+) -> dict[str, Any]:
+    install = read_json(install_path)
+    if not isinstance(install, Mapping):
+        _fail("install.json must be a JSON object.")
+    payload = _property(install, "payload")
+    if not isinstance(payload, Mapping):
+        _fail("install.json payload is missing.")
+    root = _string_property(payload, "root")
+    if not _path_is_fully_qualified(root):
+        _fail("payload.root must be absolute.")
+    version = _string_property(payload, "version")
+    if not version.strip():
+        _fail("payload.version must be a non-empty string.")
+    origin = _string_property(payload, "origin")
+    if origin not in {"installed", "directory", "staged", "explicit"}:
+        _fail("payload.origin must be installed, directory, staged, or explicit.")
+    origin_receipt = _property(payload, "originReceipt")
+    if origin_receipt is not None:
+        if not isinstance(origin_receipt, str):
+            _fail("payload.originReceipt must be a string.")
+        if not _path_is_fully_qualified(origin_receipt):
+            _fail("payload.originReceipt must be absolute.")
+        origin_receipt = str(canonical_path(origin_receipt))
+    return {
+        "root": str(canonical_path(root)),
+        "version": version,
+        "origin": origin,
+        "originReceipt": origin_receipt,
+    }
+
+
+def validate_snapshot_provenance(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    snapshot_id: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Validate cell-local snapshot provenance against current canonical receipts."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Snapshot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    snapshot_root, provenance_path = _snapshot_provenance_paths(
+        validated,
+        snapshot_id,
+    )
+    actual_provenance = canonical_path(provenance_path, must_exist=True)
+    if not paths_equal(actual_provenance, provenance_path):
+        _fail(
+            "Snapshot provenance is not at its exact canonical location "
+            f"'{provenance_path}'."
+        )
+    provenance = read_json(actual_provenance)
+    if not isinstance(provenance, Mapping):
+        _fail("Snapshot provenance must be a JSON object.")
+    provenance_version = _property(provenance, "version")
+    if (
+        _string_property(provenance, "schema") != SNAPSHOT_PROVENANCE_SCHEMA
+        or isinstance(provenance_version, bool)
+        or not isinstance(provenance_version, int)
+        or provenance_version != 1
+    ):
+        _fail("Snapshot provenance has an unsupported schema or version.")
+    marketplace_id = _string_property(provenance, "marketplaceId")
+    plugin_id = _string_property(provenance, "pluginId")
+    if marketplace_id != expected_marketplace_id:
+        _fail(
+            f"Expected marketplace '{expected_marketplace_id}', snapshot provenance "
+            f"names '{marketplace_id}'."
+        )
+    if plugin_id != expected_plugin_id:
+        _fail(
+            f"Expected plugin '{expected_plugin_id}', snapshot provenance names "
+            f"'{plugin_id}'."
+        )
+
+    source = _property(provenance, "source")
+    if not isinstance(source, Mapping):
+        _fail("Snapshot provenance source is missing.")
+    normalized = normalize_source(
+        {
+            "kind": _string_property(source, "kind"),
+            "canonical": _string_property(source, "canonical"),
+            "ref": _string_property(source, "ref"),
+        },
+        from_receipt=True,
+    )
+    identity = source_identity(normalized, marketplace_id.rsplit("--", 1)[0])
+    fingerprint = _string_property(source, "fingerprint")
+    if identity["marketplaceId"] != marketplace_id:
+        _fail("Snapshot provenance marketplaceId does not match its normalized source.")
+    if identity["fingerprint"] != fingerprint:
+        _fail("Snapshot provenance fingerprint does not match its normalized source.")
+    if (
+        fingerprint != _string_property(validated, "sourceFingerprint")
+        or normalized.kind != _string_property(validated["source"], "kind")
+        or normalized.canonical != _string_property(validated["source"], "canonical")
+        or normalized.ref != _string_property(validated["source"], "ref")
+    ):
+        _fail("Snapshot provenance source does not match the canonical namespace receipt.")
+
+    snapshot = _property(provenance, "snapshot")
+    if not isinstance(snapshot, Mapping):
+        _fail("Snapshot provenance snapshot identity is missing.")
+    if _string_property(snapshot, "id") != snapshot_id:
+        _fail("Snapshot provenance id does not match its canonical snapshot directory.")
+    recorded_snapshot_root = _string_property(snapshot, "root")
+    if not _path_is_fully_qualified(recorded_snapshot_root):
+        _fail("Snapshot provenance snapshot.root must be absolute.")
+    if not paths_equal(recorded_snapshot_root, snapshot_root):
+        _fail("Snapshot provenance snapshot.root is not its exact canonical location.")
+
+    namespace_reference = _property(provenance, "namespaceReceipt")
+    install_reference = _property(provenance, "installReceipt")
+    if not isinstance(namespace_reference, Mapping) or not isinstance(
+        install_reference,
+        Mapping,
+    ):
+        _fail("Snapshot provenance receipt references are missing.")
+    namespace_path = _string_property(namespace_reference, "path")
+    install_path = _string_property(install_reference, "path")
+    if not _path_is_fully_qualified(namespace_path) or not _path_is_fully_qualified(
+        install_path
+    ):
+        _fail("Snapshot provenance receipt paths must be absolute.")
+    if not paths_equal(namespace_path, _string_property(validated, "namespaceReceipt")):
+        _fail("Snapshot provenance namespace receipt does not match the current context.")
+    if not paths_equal(install_path, _string_property(validated, "installReceipt")):
+        _fail("Snapshot provenance install receipt does not match the current context.")
+    namespace_generation = _property(namespace_reference, "generation")
+    install_generation = _property(install_reference, "generation")
+    _assert_receipt_generation(
+        namespace_generation,
+        "snapshot provenance namespace generation",
+    )
+    _assert_receipt_generation(
+        install_generation,
+        "snapshot provenance install generation",
+    )
+    if namespace_generation != _property(validated, "namespaceGeneration"):
+        _fail(
+            "Snapshot provenance namespace generation is stale; "
+            "restart snapshot production."
+        )
+    if install_generation != _property(validated, "generation"):
+        _fail(
+            "Snapshot provenance install generation is stale; "
+            "restart snapshot production."
+        )
+
+    namespace = read_json(namespace_path)
+    if not isinstance(namespace, Mapping):
+        _fail("namespace.json must be a JSON object.")
+    if (
+        _string_property(namespace, "state") != "active"
+        or _string_property(validated, "state") != "active"
+    ):
+        _fail("Snapshot provenance requires active namespace and install receipts.")
+
+    payload = _property(provenance, "payload")
+    if not isinstance(payload, Mapping):
+        _fail("Snapshot provenance payload identity is missing.")
+    if "originReceipt" not in payload:
+        _fail("Snapshot provenance payload.originReceipt must be present.")
+    recorded_payload = {
+        "root": _string_property(payload, "root"),
+        "version": _string_property(payload, "version"),
+        "origin": _string_property(payload, "origin"),
+        "originReceipt": _property(payload, "originReceipt"),
+    }
+    if not _path_is_fully_qualified(recorded_payload["root"]):
+        _fail("Snapshot provenance payload.root must be absolute.")
+    recorded_payload["root"] = str(canonical_path(recorded_payload["root"]))
+    origin_receipt = recorded_payload["originReceipt"]
+    if origin_receipt is not None:
+        if not isinstance(origin_receipt, str):
+            _fail("Snapshot provenance payload.originReceipt must be a string or null.")
+        if not _path_is_fully_qualified(origin_receipt):
+            _fail("Snapshot provenance payload.originReceipt must be absolute.")
+        recorded_payload["originReceipt"] = str(canonical_path(origin_receipt))
+    current_payload = _payload_identity_from_install(validated["installReceipt"])
+    if recorded_payload != current_payload:
+        _fail("Snapshot provenance payload does not match the pinned install receipt.")
+    _parse_rfc3339_utc(
+        _string_property(provenance, "createdAt"),
+        "snapshot provenance createdAt",
+    )
+    return {
+        "action": "snapshot-validate",
+        "status": "ready",
+        "reason": "snapshot-provenance-valid",
+        "provenance": str(actual_provenance),
+        "snapshotRoot": str(snapshot_root),
+        "snapshotId": snapshot_id,
+        "marketplaceId": marketplace_id,
+        "pluginId": plugin_id,
+        "sourceFingerprint": fingerprint,
+        "namespaceReceipt": str(canonical_path(namespace_path)),
+        "installReceipt": str(canonical_path(install_path)),
+        "namespaceGeneration": namespace_generation,
+        "installGeneration": install_generation,
+        "payload": current_payload,
+        "operative": False,
+    }
+
+
+def stamp_snapshot_provenance(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    expected_namespace_generation: int,
+    expected_install_generation: int,
+    snapshot_id: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Atomically publish immutable snapshot provenance under both receipt locks."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    _assert_expected_generation(
+        expected_namespace_generation,
+        expected_namespace_generation,
+        "namespace.json",
+    )
+    _assert_expected_generation(
+        expected_install_generation,
+        expected_install_generation,
+        "install.json",
+    )
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Snapshot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    cell_root = canonical_path(_string_property(validated, "cellRoot"))
+    plugin_root = canonical_path(_string_property(validated, "pluginRoot"))
+    install_path = canonical_path(_string_property(validated, "installReceipt"))
+    genesis_lock = _DirectoryLock(
+        durable
+        / "marketplaces"
+        / ".locks"
+        / f"{expected_marketplace_id}.genesis",
+        kind="genesis",
+        marketplace_id=expected_marketplace_id,
+    )
+    install_lock = _DirectoryLock(
+        cell_root / ".locks" / f"{expected_plugin_id}.install.lock",
+        kind="install",
+        marketplace_id=expected_marketplace_id,
+        plugin_id=expected_plugin_id,
+    )
+    with genesis_lock, install_lock:
+        validated = validate_context_receipt(
+            install_path,
+            durable,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            expected_cell_root=cell_root,
+            environment={},
+        )
+        _assert_expected_generation(
+            int(validated["namespaceGeneration"]),
+            expected_namespace_generation,
+            "namespace.json",
+        )
+        _assert_expected_generation(
+            int(validated["generation"]),
+            expected_install_generation,
+            "install.json",
+        )
+        namespace = read_json(validated["namespaceReceipt"])
+        if not isinstance(namespace, Mapping):
+            _fail("namespace.json must be a JSON object.")
+        if (
+            _string_property(namespace, "state") != "active"
+            or _string_property(validated, "state") != "active"
+        ):
+            _fail("Snapshot provenance requires active namespace and install receipts.")
+        snapshot_root, provenance_path = _snapshot_provenance_paths(
+            validated,
+            snapshot_id,
+        )
+        snapshot_changed = False
+        if os.path.lexists(provenance_path):
+            published = validate_snapshot_provenance(
+                context=install_path,
+                expected_marketplace_id=expected_marketplace_id,
+                expected_plugin_id=expected_plugin_id,
+                snapshot_id=snapshot_id,
+                durable_home=durable,
+                environment={},
+            )
+        else:
+            source = validated["source"]
+            payload = _payload_identity_from_install(install_path)
+            desired = {
+                "schema": SNAPSHOT_PROVENANCE_SCHEMA,
+                "version": 1,
+                "marketplaceId": expected_marketplace_id,
+                "pluginId": expected_plugin_id,
+                "source": {
+                    "kind": _string_property(source, "kind"),
+                    "canonical": _string_property(source, "canonical"),
+                    "ref": _string_property(source, "ref"),
+                    "fingerprint": _string_property(validated, "sourceFingerprint"),
+                },
+                "snapshot": {
+                    "id": snapshot_id,
+                    "root": str(snapshot_root),
+                },
+                "payload": payload,
+                "namespaceReceipt": {
+                    "path": _string_property(validated, "namespaceReceipt"),
+                    "generation": int(validated["namespaceGeneration"]),
+                },
+                "installReceipt": {
+                    "path": _string_property(validated, "installReceipt"),
+                    "generation": int(validated["generation"]),
+                },
+                "createdAt": _utc_now(),
+            }
+            _atomic_write_json(
+                provenance_path,
+                desired,
+                lock=(genesis_lock, install_lock),
+            )
+            snapshot_changed = True
+            published = validate_snapshot_provenance(
+                context=install_path,
+                expected_marketplace_id=expected_marketplace_id,
+                expected_plugin_id=expected_plugin_id,
+                snapshot_id=snapshot_id,
+                durable_home=durable,
+                environment={},
+            )
+        published.update(
+            {
+                "action": "snapshot-stamp",
+                "reason": (
+                    "snapshot-provenance-published"
+                    if snapshot_changed
+                    else "snapshot-provenance-current"
+                ),
+                "snapshotChanged": snapshot_changed,
+                "pluginRoot": str(plugin_root),
+            }
+        )
+        return published
+
+
 def _find_existing_source(
     durable_home: Path,
     fingerprint: str,
@@ -1405,7 +1924,9 @@ def resolve_context(
     home = Path(environment.get("HOME") or Path.home())
     copilot_value = Path(copilot_home or home / ".copilot")
     durable_value = Path(durable_home or home / ".copilot-extensions")
-    if not copilot_value.is_absolute() or not durable_value.is_absolute():
+    if not _path_is_fully_qualified(copilot_value) or not _path_is_fully_qualified(
+        durable_value
+    ):
         _fail("--copilot-home and --durable-home must be absolute.")
     copilot = canonical_path(copilot_value)
     durable = canonical_path(durable_value)
@@ -1447,14 +1968,14 @@ def resolve_context(
     if payload_value is None:
         _fail("resolve requires --payload-root or COPILOT_PLUGIN_ROOT.")
     payload_input = Path(payload_value)
-    if not payload_input.is_absolute():
+    if not _path_is_fully_qualified(payload_input):
         _fail("The payload root must be absolute.")
     payload = canonical_path(payload_input, must_exist=True)
     if not payload.is_dir():
         _fail(f"The payload root must be an existing directory: {payload}")
     inherited_payload = environment.get("COPILOT_PLUGIN_ROOT")
     if inherited_payload:
-        if not Path(inherited_payload).is_absolute():
+        if not _path_is_fully_qualified(inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT must be absolute.")
         if not paths_equal(payload, inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT conflicts with --payload-root.")
@@ -1623,7 +2144,7 @@ def _current_environment(
             profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)
         except (ImportError, KeyError, OSError) as error:
             _fail(f"Cannot determine the passwd-database account home: {error}")
-    if not profile_value.is_absolute():
+    if not _path_is_fully_qualified(profile_value):
         _fail("The canonical operating-system user profile must be absolute.")
     profile = canonical_path(profile_value, must_exist=True)
     selected_wsl = (
@@ -1933,7 +2454,7 @@ def _activation_result(
             activation, "context", "installation activation"
         )
         context_path = Path(context_text)
-        if not context_path.is_absolute():
+        if not _path_is_fully_qualified(context_path):
             _fail("Installation activation context must be absolute.")
         canonical_context = canonical_path(plugin_root / "install.json")
         if not paths_equal(context_path, canonical_context):
@@ -2070,7 +2591,7 @@ def compare_and_swap_activation(
         / ".copilot-extensions"
     )
     context_path = Path(context)
-    if not context_path.is_absolute():
+    if not _path_is_fully_qualified(context_path):
         _fail("Activation context must be absolute.")
     validated = validate_context_receipt(
         context_path,
@@ -2088,7 +2609,7 @@ def compare_and_swap_activation(
     legacy_root_value = legacy_root or (
         Path(current_environment["homeRealPath"]) / f".{plugin_id}"
     )
-    if not Path(legacy_root_value).is_absolute():
+    if not _path_is_fully_qualified(legacy_root_value):
         _fail("Activation legacy root must be absolute.")
     resolved_legacy_root = canonical_path(legacy_root_value)
 
@@ -2302,7 +2823,7 @@ def _tombstone_result(
             activation_reference, "path", "legacy ownership.activation"
         )
         activation_pointer = Path(activation_text)
-        if not activation_pointer.is_absolute():
+        if not _path_is_fully_qualified(activation_pointer):
             _fail("Legacy ownership activation.path must be absolute.")
         pinned_generation = _required_integer(
             activation_reference, "generation", "legacy ownership.activation"
@@ -2485,7 +3006,7 @@ def resolve_installation_mode(
     current_host = host or socket.gethostname()
     liveness = pid_is_live or _pid_is_live
     legacy_value = Path(legacy_root)
-    if not legacy_value.is_absolute():
+    if not _path_is_fully_qualified(legacy_value):
         _fail("legacy_root must be absolute.")
     resolved_legacy_root = canonical_path(legacy_value)
     probe = _validate_legacy_probe(
@@ -2543,7 +3064,7 @@ def resolve_installation_mode(
     canonical_policy = canonical_path(canonical_policy_entry)
     if policy_path is not None:
         policy_value = Path(policy_path)
-        if not policy_value.is_absolute():
+        if not _path_is_fully_qualified(policy_value):
             _fail("policy_path must be absolute.")
         policy_entry_present = os.path.lexists(policy_value)
         policy_entry_is_file = policy_value.is_file() and not policy_value.is_symlink()
@@ -2791,6 +3312,19 @@ def _add_mode_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--policy-path")
 
 
+def _parse_cli_generation(value: str) -> int:
+    if re.fullmatch(r"[0-9]+", value, flags=re.ASCII) is None:
+        raise argparse.ArgumentTypeError(
+            "generation must be an unsigned ASCII decimal integer"
+        )
+    parsed = int(value, 10)
+    if parsed > MAX_RECEIPT_GENERATION:
+        raise argparse.ArgumentTypeError(
+            "generation exceeds the portable signed 64-bit maximum"
+        )
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
@@ -2828,12 +3362,12 @@ def _build_parser() -> argparse.ArgumentParser:
     stamp_parser.add_argument(
         "--expected-namespace-generation",
         required=True,
-        type=int,
+        type=_parse_cli_generation,
     )
     stamp_parser.add_argument(
         "--expected-install-generation",
         required=True,
-        type=int,
+        type=_parse_cli_generation,
     )
     stamp_parser.add_argument(
         "--namespace-state",
@@ -2854,17 +3388,17 @@ def _build_parser() -> argparse.ArgumentParser:
     activation_parser.add_argument(
         "--expected-namespace-generation",
         required=True,
-        type=int,
+        type=_parse_cli_generation,
     )
     activation_parser.add_argument(
         "--expected-install-generation",
         required=True,
-        type=int,
+        type=_parse_cli_generation,
     )
     activation_parser.add_argument(
         "--expected-activation-generation",
         required=True,
-        type=int,
+        type=_parse_cli_generation,
     )
     activation_parser.add_argument(
         "--activation-mode",
@@ -2885,6 +3419,30 @@ def _build_parser() -> argparse.ArgumentParser:
     activation_parser.add_argument("--legacy-probe-file")
     activation_parser.add_argument("--legacy-root")
     activation_parser.add_argument("--durable-home")
+
+    snapshot_stamp_parser = subparsers.add_parser("snapshot-stamp")
+    snapshot_stamp_parser.add_argument("--context", required=True)
+    snapshot_stamp_parser.add_argument("--expected-marketplace-id", required=True)
+    snapshot_stamp_parser.add_argument("--expected-plugin-id", required=True)
+    snapshot_stamp_parser.add_argument(
+        "--expected-namespace-generation",
+        required=True,
+        type=_parse_cli_generation,
+    )
+    snapshot_stamp_parser.add_argument(
+        "--expected-install-generation",
+        required=True,
+        type=_parse_cli_generation,
+    )
+    snapshot_stamp_parser.add_argument("--snapshot-id", required=True)
+    snapshot_stamp_parser.add_argument("--durable-home")
+
+    snapshot_validate_parser = subparsers.add_parser("snapshot-validate")
+    snapshot_validate_parser.add_argument("--context", required=True)
+    snapshot_validate_parser.add_argument("--expected-marketplace-id", required=True)
+    snapshot_validate_parser.add_argument("--expected-plugin-id", required=True)
+    snapshot_validate_parser.add_argument("--snapshot-id", required=True)
+    snapshot_validate_parser.add_argument("--durable-home")
 
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
@@ -2976,6 +3534,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 legacy_probe=legacy_probe,
                 durable_home=arguments.durable_home,
                 legacy_root=arguments.legacy_root,
+            )
+        elif arguments.action == "snapshot-stamp":
+            result = stamp_snapshot_provenance(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                expected_namespace_generation=arguments.expected_namespace_generation,
+                expected_install_generation=arguments.expected_install_generation,
+                snapshot_id=arguments.snapshot_id,
+                durable_home=arguments.durable_home,
+            )
+        elif arguments.action == "snapshot-validate":
+            result = validate_snapshot_provenance(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                snapshot_id=arguments.snapshot_id,
+                durable_home=arguments.durable_home,
             )
         else:
             mode_arguments = {

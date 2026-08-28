@@ -36,6 +36,43 @@ PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        (r"C:\absolute\install.json", True),
+        (r"\\server\share\install.json", True),
+        (r"C:relative\install.json", False),
+        (r"\relative\install.json", False),
+        (r"relative\install.json", False),
+    ),
+)
+def test_python_windows_path_qualification(value: str, expected: bool) -> None:
+    module = _load_python_module()
+    assert module._path_is_fully_qualified(value, platform="nt") is expected
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path semantics are required")
+@pytest.mark.parametrize(
+    "context",
+    (r"C:relative\install.json", r"\relative\install.json"),
+)
+def test_python_validate_rejects_rooted_but_not_fully_qualified_context(
+    tmp_path: Path,
+    context: str,
+) -> None:
+    result = _run(
+        PYTHON_COMMAND,
+        "validate",
+        "--context",
+        context,
+        "--durable-home",
+        tmp_path,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "receipt pointer must be absolute" in result.stderr.lower()
+
+
 def _load_python_module():
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader
@@ -208,6 +245,45 @@ def _stamp_arguments(
         ],
         values,
     )
+
+
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+@pytest.mark.parametrize(
+    ("component", "label"),
+    (
+        ("marketplaces", "marketplaces root"),
+        ("cell", "marketplace cell root"),
+    ),
+)
+def test_stamp_rejects_linked_namespace_ownership_chain(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+    component: str,
+    label: str,
+) -> None:
+    runner_root = tmp_path / runner_name
+    runner_root.mkdir()
+    layout = _receipt_layout(runner_root)
+    paths = {
+        "marketplaces": Path(layout["durable"]) / "marketplaces",
+        "cell": Path(layout["cell"]),
+    }
+    linked_path = paths[component]
+    outside = runner_root / f"outside-{component}"
+    shutil.move(linked_path, outside)
+    try:
+        linked_path.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    arguments, _ = _stamp_arguments(
+        runner_root,
+        expected_namespace_generation=1,
+        expected_install_generation=2,
+    )
+    result = _run(command, *arguments, check=False)
+    assert result.returncode != 0
+    assert label in result.stderr.lower()
 
 
 def test_python_stamp_creates_and_idempotently_validates_receipts(tmp_path: Path) -> None:
@@ -520,17 +596,22 @@ def test_stamp_refuses_generation_overflow_before_replacing_receipt(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+@pytest.mark.parametrize(
+    "generation",
+    (9223372036854775808, 10000000000000000000),
+)
 def test_validate_rejects_generation_above_portable_maximum(
     tmp_path: Path,
     runner_name: str,
     command: tuple[str, ...],
+    generation: int,
 ) -> None:
     runner_root = tmp_path / runner_name
     runner_root.mkdir()
     layout = _receipt_layout(runner_root)
     namespace = Path(layout["namespace"])
     receipt = json.loads(namespace.read_text(encoding="utf-8"))
-    receipt["generation"] = 9223372036854775808
+    receipt["generation"] = generation
     _write_json(namespace, receipt)
     result = _run(
         command,
