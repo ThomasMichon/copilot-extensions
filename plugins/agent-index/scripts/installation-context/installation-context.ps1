@@ -431,8 +431,11 @@ public static class CeAtomicDirectory {
         if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
             return 0;
         }
-        if (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION) {
-            return -1;
+        if (error == ERROR_ACCESS_DENIED) {
+            return -ERROR_ACCESS_DENIED;
+        }
+        if (error == ERROR_SHARING_VIOLATION) {
+            return -ERROR_SHARING_VIOLATION;
         }
         throw new Win32Exception(error);
     }
@@ -578,8 +581,11 @@ function Acquire-Lock(
     $token = [guid]::NewGuid().ToString('N')
     $hostName = [Environment]::MachineName.Split('.')[0].ToLowerInvariant()
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $accessDeniedSince = $null
+    $lastLockResult = $null
     while ($stopwatch.Elapsed -lt [TimeSpan]::FromSeconds(5)) {
         $lockResult = Try-CreateLockDirectory $Path
+        $lastLockResult = $lockResult
         if ($lockResult -eq 1) {
             $script:HeldLocks += [pscustomobject]@{
                 path = $Path
@@ -607,7 +613,22 @@ function Acquire-Lock(
             }
             return
         }
-        if ($lockResult -eq -1) {
+        if ($lockResult -eq -5) {
+            if ($null -eq $accessDeniedSince) {
+                $accessDeniedSince = $stopwatch.Elapsed
+            }
+            elseif (($stopwatch.Elapsed - $accessDeniedSince) -ge
+                [TimeSpan]::FromSeconds(1)) {
+                throw [ComponentModel.Win32Exception]::new(
+                    5,
+                    "Access denied while creating installation lock directory '$Path'."
+                )
+            }
+            Start-Sleep -Milliseconds 10
+            continue
+        }
+        $accessDeniedSince = $null
+        if ($lockResult -eq -32) {
             Start-Sleep -Milliseconds 10
             continue
         }
@@ -654,6 +675,12 @@ function Acquire-Lock(
             continue
         }
         Fail "Installation lock '$Path' is busy (host=$ownerHost, pid=$ownerPid)."
+    }
+    if ($lastLockResult -eq -5) {
+        throw [ComponentModel.Win32Exception]::new(
+            5,
+            "Access denied while creating installation lock directory '$Path'."
+        )
     }
     if (-not (Test-Path -LiteralPath (Join-Path $Path 'owner.json') -PathType Leaf)) {
         $lockDirectory = Get-Item -LiteralPath $Path -ErrorAction SilentlyContinue
