@@ -14223,6 +14223,41 @@ def _related_anchor(rest: list[str]) -> str | None:
         return None
 
 
+def _related_current_machine(anchors: list[str], base_anchor: str) -> str:
+    """Detect the current machine for a ``related`` lookup.
+
+    ``detect_machine`` needs the anchor that actually carries ``machines.yaml``:
+    given one without a registry it silently falls back to the raw hostname, and
+    a raw hostname does not match the registry *key* a locus lists. On a machine
+    keyed ``host`` but named ``host.local`` by the OS, that mismatch makes
+    ``machine_matches`` fail and a locally-checked-out repo report
+    "Not checked out on 'host.local'".
+
+    ``anchors[0]`` is not that anchor. ``_related_config_source_anchors`` puts
+    **installed-plugin** graft anchors *first* (lowest precedence), and a plugin
+    ships ``related.yaml`` without ``machines.yaml`` -- so the registry was
+    missed whenever any plugin contributed a locus. The control-plane fallback
+    can likewise leave the base anchor registry-less.
+
+    Pick the first anchor that actually has a ``machines.yaml``, preferring the
+    base anchor, then fall back to registry-less detection (the raw hostname).
+    Returns ``""`` only if even that raises -- callers treat an empty machine as
+    "unknown", which is the pre-existing behaviour of both call sites.
+    """
+    for candidate in [base_anchor, *anchors]:
+        if not candidate:
+            continue
+        try:
+            if cfg.machines_yaml_path(candidate).exists():
+                return cfg.detect_machine(candidate)
+        except Exception:
+            continue
+    try:
+        return cfg.detect_machine(base_anchor)
+    except Exception:
+        return ""
+
+
 def _related_config_source_anchors(base_anchor: str) -> list[str]:
     """Ordered ``.agent-*`` config-source anchor paths for a related lookup.
 
@@ -14697,10 +14732,7 @@ def _related_doctor(anchor: str, rest: list[str], json_out: bool) -> int:
     anchors = _related_config_source_anchors(anchor)
     rc = related.read_related_grafted(anchors)
 
-    try:
-        current_machine = cfg.detect_machine(anchor)
-    except Exception:
-        current_machine = ""
+    current_machine = _related_current_machine(anchors, anchor)
 
     # Valid-machine predicate from machines.yaml (key / alias / hostname / name).
     machines_known_available = True
@@ -15134,10 +15166,7 @@ def cmd_related_dispatch(argv: list[str]) -> int:
             output.err(f"'{name}' is not a related repo.")
             return 1
         reg = repos.find_repo(name)
-        try:
-            current_machine = cfg.detect_machine(anchors[0])
-        except Exception:
-            current_machine = ""
+        current_machine = _related_current_machine(anchors, anchor)
         try:
             projects = doctor._read_projects()
         except Exception:

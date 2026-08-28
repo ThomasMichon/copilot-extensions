@@ -1387,3 +1387,62 @@ def test_cli_owners_is_global_via_control_plane(tmp_path: Path, monkeypatch):
     assert rc == 0
     assert captured["source"] == "control-plane"
     assert [t["name"] for t in captured["owned"]] == ["mine"]
+
+
+# ---------------------------------------------------------------------------
+# Current-machine detection for `related list` / `related resolve`
+# ---------------------------------------------------------------------------
+
+class TestRelatedCurrentMachine:
+    """`_related_current_machine` must find the anchor holding machines.yaml.
+
+    Given an anchor without a registry, `detect_machine` silently falls back to
+    the raw hostname -- which does not match the registry *key* a locus lists,
+    so a locally-checked-out repo reports "Not checked out on '<host>'".
+    """
+
+    @staticmethod
+    def _write_registry(anchor: Path, key: str, hostname: str) -> None:
+        anchor.mkdir(parents=True, exist_ok=True)
+        (anchor / "machines.yaml").write_text(
+            f"machines:\n  {key}:\n    hostname: {hostname}\n", encoding="utf-8"
+        )
+
+    def test_plugin_graft_anchor_does_not_mask_the_registry(self, tmp_path, monkeypatch):
+        # `_related_config_source_anchors` puts installed-plugin graft anchors
+        # FIRST (lowest precedence). A plugin ships related.yaml but no
+        # machines.yaml, so anchors[0] has no registry.
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import config as cfg
+
+        base = tmp_path / "harness"
+        plugin = tmp_path / "plugin"
+        plugin.mkdir(parents=True)
+        self._write_registry(base, "host", "host.local")
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "host.local")
+
+        assert m._related_current_machine([str(plugin), str(base)], str(base)) == "host"
+
+    def test_falls_back_to_a_later_anchor(self, tmp_path, monkeypatch):
+        # Control-plane fallback: the base anchor has no registry, a later
+        # anchor does.
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import config as cfg
+
+        base = tmp_path / "product"
+        base.mkdir(parents=True)
+        cp = tmp_path / "control-plane"
+        self._write_registry(cp, "host", "host.local")
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "host.local")
+
+        assert m._related_current_machine([str(cp)], str(base)) == "host"
+
+    def test_no_registry_anywhere_falls_back_to_hostname(self, tmp_path, monkeypatch):
+        from agent_worktrees import __main__ as m
+        from agent_worktrees import config as cfg
+
+        base = tmp_path / "bare"
+        base.mkdir(parents=True)
+        monkeypatch.setattr(cfg.socket, "gethostname", lambda: "host.local")
+
+        assert m._related_current_machine([str(base)], str(base)) == "host.local"
