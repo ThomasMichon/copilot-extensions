@@ -120,6 +120,10 @@ reachable when their ownership is explicit.
   [Phase 2 launcher contract inventory](phase-2-launcher-contracts.md) accounts
   for all 86 guard-visible findings, records known guard-invisible callers, and
   maps their Phase 2, Phase 3, Phase 4, and Phase 6 dependencies.
+  - [x] Preserve complete default-legacy fallback coverage while migration is
+    incomplete: every runtime `agent-*` stamp publishes every declared payload
+    command, and agent-logger's multi-command family delegates through durable
+    owning-payload snapshots.
 - [x] Make project binstubs pin their owning payload and reject silent ownership
   transfer.
 
@@ -480,3 +484,33 @@ See [`design.md`](design.md).
 - Reduced the guard-visible global-plugin-binstub baseline from 86 to 80.
   Durable provider, remote, bootstrap, callback, credential, service, and
   wrapper-retirement contracts remain open, so Phase 2 and #1103 remain active.
+
+### 2026-08-27 — Default-legacy command fallback restored
+
+- Merged [#1251](https://github.com/ThomasMichon/copilot-extensions/pull/1251)
+  after reports that agent commands were missing from `PATH`, especially the
+  agent-logger auxiliary command family.
+- Added a roster-wide contract that runs every runtime `agent-*` plugin's cheap
+  stamp under absent/default installation-mode policy and requires a global
+  compatibility fallback for every command declared by
+  `payload-invocation.json`.
+- Agent-logger now publishes all six commands during stamp. Its five auxiliary
+  wrappers resolve an immutable versioned payload snapshot and delegate to that
+  payload's generated command shim, so ambient `PATH` cannot redirect ownership
+  and first-use provisioning remains attributable. Provision/install/update
+  preserve the same wrappers instead of replacing them with direct-runtime
+  links.
+- Snapshot publication is shared across stamp and provision, uses the
+  self-staged payload rather than the replaceable marketplace singleton, reuses
+  complete same-version snapshots without removing a live command source, and
+  was validated after deleting the original payload.
+- The compatibility contract remains deliberately one-way: absent/default
+  policy keeps legacy wrappers; only a validated namespaced-active result from
+  the shared resolver may suppress and ownership-safely retire them. The active
+  #1104 resolver slice remains independent and unmodified.
+- Validation covered 196 agent-logger tests (1 skipped), 48 shared
+  payload-invocation tests (8 skipped), native Windows stamp/provision behavior,
+  all install/version/generated/isolation gates, independent design and code
+  reviews, and green PR CI. The unrelated installation-context concurrent
+  first-stamp diagnostic race recurred once and passed on rerun; it remains
+  tracked by [#1228](https://github.com/ThomasMichon/copilot-extensions/issues/1228).
