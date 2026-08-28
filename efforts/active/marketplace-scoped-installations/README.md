@@ -164,7 +164,7 @@ reachable when their ownership is explicit.
     cutover, rollback, and uninstall.
     - [x] Establish the non-activating Python reference for immutable,
       generation-pinned runtime-slot ownership.
-    - [ ] Add dependency-light Bash and PowerShell parity before installer or
+    - [x] Add dependency-light Bash and PowerShell parity before installer or
       bootstrap adoption.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
   simultaneous marketplace cells before broad rollout.
@@ -628,7 +628,8 @@ See [`design.md`](design.md).
   locks, then atomically reserve one exact cell-local runtime slot with an
   immutable `.runtime-slot-ownership.json` marker.
 - Bound the marker to marketplace, plugin, source fingerprint, runtime version,
-  snapshot root/provenance, canonical receipt paths, and pinned generations.
+  snapshot root/provenance and provenance digest, canonical receipt paths, and
+  pinned generations.
   Existing markerless, malformed, copied, linked, stale, or conflicting slots
   fail without replacement; matching ownership is idempotent.
 - Preserved rollback viability across later receipt generations: new slots
@@ -641,3 +642,31 @@ See [`design.md`](design.md).
   payloads, completion/current/LKG markers, activation receipts, launchers,
   services, state, or tombstones. Bash/PowerShell parity and installer wiring
   remain required before runtime-slot provisioning becomes operative.
+
+### 2026-08-28 — Dependency-light runtime-slot parity
+
+- Added equivalent `slot-provision` and `slot-validate` actions to the Bash and
+  PowerShell runners, including strict portable runtime-version validation,
+  exact immutable ownership validation, nested receipt-defined versions roots,
+  lexical link/reparse rejection, historical owned-slot validation across
+  receipt advances, and generation-regression rejection.
+- Preserved no-clobber publication with runner-appropriate primitives:
+  PowerShell stages outside `versionsRoot` and uses an OS-native atomic
+  no-replace directory move; Bash atomically reserves the final slot with
+  `mkdir` and publishes the completed ownership marker with a no-replace hard
+  link from within that slot, releasing an empty reservation after ordinary
+  in-process failure.
+  Interrupted markerless or hidden staging artifacts remain fail-closed and
+  require later explicit repair/release.
+- Promoted first publication, idempotent reuse, inactive/historical state,
+  malformed and copied ownership, generation types, canonical paths, nested
+  roots, links/reparse points, portable filename attacks, concurrent
+  publication, and non-activation behavior into the Python/POSIX/PowerShell
+  runner matrix.
+- Kept installer and bootstrap adoption out of this slice. The parity-proven
+  primitive still writes no payload, completion/current/LKG marker, activation
+  receipt, launcher, service, state, or tombstone.
+- Review hardening bound historical validation to the exact immutable
+  provenance bytes, aligned the Python slot lock wait with the dependency-light
+  runners, rejected Windows drive-relative ownership paths, and added full
+  producer/consumer interoperability coverage.
