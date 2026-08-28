@@ -42,6 +42,7 @@ from .config import (
     CONFIG_DIR_NAME,
     CONFIG_FILE_IN_DIR,
     CONFIG_FILENAME,
+    NO_SUPPLEMENTAL_CONFIG_ADVISORY,
     RUNTIME_DIR,
     AdoptedRepo,
     load_adopted_repos,
@@ -650,6 +651,10 @@ def main(argv: list[str] | None = None) -> int:
 
     # --- status ---
     sub.add_parser("status", help="Show service status")
+    sub.add_parser(
+        "installer-readiness",
+        help="Emit the plugin-owned installer/readiness contract state as JSON",
+    )
 
     # --- doctor ---
     doctor_parser = sub.add_parser(
@@ -829,6 +834,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_wait(args)
         if args.command == "status":
             return _cmd_status()
+        if args.command == "installer-readiness":
+            return _cmd_installer_readiness()
         if args.command == "doctor":
             return _cmd_doctor(json_output=args.json_output)
         if args.command == "version":
@@ -4181,15 +4188,49 @@ def _cmd_status() -> int:
     return 0
 
 
+def _cmd_installer_readiness() -> int:
+    """Report runtime/config readiness without requiring a live CodeSpace."""
+    from .installer_readiness import emit, evaluate
+
+    auth_findings = _gh_auth_preflight()
+    config_report = scan_config_dropin_registry()
+    merged = load_merged_config()
+    registry_findings = [
+        f"{finding.entry}: {finding.reason}; remedy: {finding.remedy}"
+        for finding in config_report.findings
+    ]
+    configured = bool(
+        load_adopted_repos()
+        or config_report.active_configs
+        or merged.source_paths
+    )
+    config_issues = validate_config(merged)
+    config_issues = [
+        issue
+        for issue in config_issues
+        if issue != NO_SUPPLEMENTAL_CONFIG_ADVISORY
+    ]
+    return emit(
+        evaluate(
+            auth_findings=auth_findings,
+            registry_findings=registry_findings,
+            config_issues=config_issues,
+            configured=configured,
+        )
+    )
+
+
 def _cmd_version() -> int:
     """Show version."""
+    from . import __version__
+
     try:
         from ._build_info import BUILD_INFO
         ver = BUILD_INFO.get("version", "0.0.0")
         commit = BUILD_INFO.get("commit", "unknown")[:8]
         print(f"agent-codespaces {ver} ({commit})")
     except ImportError:
-        print("agent-codespaces 0.1.0-dev2")
+        print(f"agent-codespaces {__version__}")
     return 0
 
 

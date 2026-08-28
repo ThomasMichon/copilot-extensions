@@ -81,6 +81,12 @@ def cmd_status(_args: argparse.Namespace) -> int:
     return _emit(_status_payload())
 
 
+def cmd_installer_readiness(_args: argparse.Namespace) -> int:
+    from .installer_readiness import emit, evaluate, inspect_configuration
+
+    return emit(evaluate(_status_payload(), inspect_configuration()))
+
+
 def cmd_version(_args: argparse.Namespace) -> int:
     payload = _status_payload()
     print(payload.get("version") or __version__)
@@ -628,6 +634,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_serve.set_defaults(func=cmd_start)
     p_status = sub.add_parser("status", help="print service status as JSON")
     p_status.set_defaults(func=cmd_status)
+    p_readiness = sub.add_parser(
+        "installer-readiness",
+        help="emit the plugin-owned installer/readiness contract state as JSON",
+    )
+    p_readiness.set_defaults(func=cmd_installer_readiness)
     p_version = sub.add_parser("version", help="print the running or local version")
     p_version.set_defaults(func=cmd_version)
     p_mcp = sub.add_parser("mcp", help="run the discoverable MCP toolset over stdio")

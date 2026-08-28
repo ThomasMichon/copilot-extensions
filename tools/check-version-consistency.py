@@ -71,6 +71,7 @@ _SOURCE_FALLBACK_EXEMPTIONS: dict[
     ),
 }
 _DYNAMIC_PRIMARY_FALLBACKS = {
+    ("agent-codespaces", "src/agent_codespaces/__init__.py"),
     ("agent-containers", "src/agent_containers/__init__.py"),
     ("agent-index", "src/agent_index/__init__.py"),
     ("agent-machines", "src/agent_machines/__init__.py"),

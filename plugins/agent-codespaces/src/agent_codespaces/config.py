@@ -74,6 +74,11 @@ CANONICAL_CONFIG_REL = f"{CONFIG_DIR_NAME}/{CONFIG_FILE_IN_DIR}"
 # Legacy repo-root config filename, still read as a back-compat fallback.
 # ``agent-codespaces config migrate`` relocates it to CANONICAL_CONFIG_REL.
 CONFIG_FILENAME = "codespaces.yaml"
+NO_SUPPLEMENTAL_CONFIG_ADVISORY = (
+    "No CodeSpace config found (no .agent-codespaces/config.yaml in the "
+    "current repo and no adopted repos). Standard repos need none; add "
+    "one only for supplementary CodeSpace-specific config."
+)
 
 # ── User-level drop-in config providers (config.d) ──────────────────────────
 # A harness plugin can make its shipped CodeSpace *target* config discoverable
@@ -1815,11 +1820,7 @@ def validate_config(config: CodespacesConfig) -> list[str]:
     issues: list[str] = []
 
     if not config.source_paths:
-        issues.append(
-            "No CodeSpace config found (no .agent-codespaces/config.yaml in the "
-            "current repo and no adopted repos). Standard repos need none; add "
-            "one only for supplementary CodeSpace-specific config."
-        )
+        issues.append(NO_SUPPLEMENTAL_CONFIG_ADVISORY)
 
     for source_name, source_cfg in config.credentials.sources.items():
         if (

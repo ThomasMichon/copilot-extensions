@@ -354,6 +354,47 @@ def _find_plugin_bridge(name: str) -> Path | None:
     return uniq[0]
 
 
+def normalize_bridge_name(
+    filename: str,
+    *,
+    case_insensitive: bool | None = None,
+) -> str:
+    """Normalize a bridge filename using platform lookup semantics."""
+    stem = filename
+    lowered = stem.casefold()
+    for extension in (".yaml", ".yml", ".json"):
+        if lowered.endswith(extension):
+            stem = stem[: -len(extension)]
+            break
+    if stem.casefold().endswith(".mcp"):
+        stem = stem[: -len(".mcp")]
+    if case_insensitive is None:
+        case_insensitive = os.name == "nt"
+    return stem.casefold() if case_insensitive else stem
+
+
+def discover_plugin_bridge_candidates() -> list[tuple[str, Path]]:
+    """Return every normalized plugin-shipped bridge candidate.
+
+    Unlike :func:`discover_plugin_bridges`, this lossless inventory preserves
+    duplicate names so diagnostics and readiness checks can reject ambiguity.
+    """
+    candidates: list[tuple[str, Path]] = []
+    seen: set[Path] = set()
+    for root in _plugin_roots():
+        if not root.is_dir():
+            continue
+        for sub in ("agents", "mcp"):
+            for ext in (".yaml", ".yml", ".json"):
+                for path in sorted(root.glob(f"*/*/{sub}/*{ext}")):
+                    resolved = path.resolve()
+                    if resolved in seen:
+                        continue
+                    seen.add(resolved)
+                    candidates.append((normalize_bridge_name(path.name), path))
+    return candidates
+
+
 def discover_plugin_bridges() -> dict[str, Path]:
     """Map every plugin-shipped bridge name to its config path (for ``status``).
 
@@ -362,16 +403,8 @@ def discover_plugin_bridges() -> dict[str, Path]:
     *lookup* raises. Returns ``{}`` when no plugin roots exist.
     """
     found: dict[str, Path] = {}
-    for root in _plugin_roots():
-        if not root.is_dir():
-            continue
-        for sub in ("agents", "mcp"):
-            for ext in (".yaml", ".yml", ".json"):
-                for p in sorted(root.glob(f"*/*/{sub}/*{ext}")):
-                    stem = p.name[: -len(ext)]
-                    if stem.endswith(".mcp"):   # ``ado.mcp.yaml`` -> bridge ``ado``
-                        stem = stem[: -len(".mcp")]
-                    found.setdefault(stem, p)
+    for stem, path in discover_plugin_bridge_candidates():
+        found.setdefault(stem, path)
     return found
 
 

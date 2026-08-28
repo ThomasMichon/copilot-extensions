@@ -40,6 +40,13 @@ uses `copilot-extensions.installer-readiness` version 1 and declares either:
 An enabled machine-gated plugin with neither declaration is invalid. A decline
 is intentional and visible; absence is never interpreted as decline.
 
+A non-machine-gated plugin may opt in when a consumer has an explicit,
+documented reason to include it. Discovery validates and returns such a
+declaration, while completeness enforcement remains limited to enabled
+machine-gated plugins. The issue #1160 acceptance fixture uses this exception
+for `agent-worktrees`: its `runtimeScope` stays `universal`, but its role as the
+named setup foundation makes it part of that fixture.
+
 ### Installation-qualified identity
 
 The plugin-owned document names its owner plugin and module ids as
@@ -141,6 +148,35 @@ those public surfaces when present.
 
 The base contract does not provide plugin-specific adapters, runtime execution,
 machine-gate policy, prompts, or whole-run summaries.
+
+The shipped issue #1160 adapters are owned by `agent-worktrees`,
+`agent-machines`, `agent-codespaces`, `agent-dispatch`, `agent-mcp`, and
+`agent-index`. Each publishes one required `<plugin>/runtime` module for Windows,
+Linux, and WSL; the three non-service POSIX runtimes that document macOS support
+(`agent-worktrees`, `agent-machines`, and `agent-mcp`) also declare macOS. Each
+uses its own idempotent installer and invokes its own payload-local
+`installer-readiness` command. They declare no sibling
+dependencies because none is an actual runtime prerequisite; optional
+cross-plugin composition does not become desired-ordering metadata.
+
+The adapters preserve these state distinctions:
+
+- `agent-worktrees` is ready when its runtime command loads; project
+  registration is outside foundation readiness.
+- `agent-machines` is configuration-empty when no applicable requirement
+  package exists, but malformed package layouts fail.
+- `agent-codespaces` checks runtime prerequisites, authentication, and
+  configuration health without requiring or creating a live CodeSpace.
+- `agent-dispatch` reuses the coordinator health endpoint without autostarting
+  it; installer updates own service cutover, while manual `service.env` edits
+  still require an explicit service restart.
+- `agent-mcp` treats no configured bridges as configuration-empty, rejects
+  duplicate normalized bridge names before content validation, and validates
+  every candidate without starting upstream servers.
+- `agent-index` treats an unavailable service, malformed or unreadable source
+  configuration, unknown corpus count, or populated-but-unattributable corpus
+  as failed. It distinguishes absent source configuration from a measured empty
+  corpus without creating or reindexing either.
 
 ## Required tests
 

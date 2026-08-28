@@ -99,6 +99,16 @@ def _cmd_federation_status(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_installer_readiness(args: argparse.Namespace) -> int:
+    from .installer_readiness import emit, evaluate
+
+    def probe() -> dict:
+        with _client(args, ensure=False) as client:
+            return client.health()
+
+    return emit(evaluate(probe))
+
+
 def _resolve_client_target(args: argparse.Namespace) -> tuple[str, str | None]:
     """Resolve which coordinator (URL + token) a client command targets.
 
@@ -4311,6 +4321,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("health", help="check coordinator health")
     p.set_defaults(func=lambda args: _emit(_client(args, ensure=False).health()))
+
+    p = sub.add_parser(
+        "installer-readiness",
+        help="emit the plugin-owned installer/readiness contract state as JSON",
+    )
+    p.set_defaults(func=_cmd_installer_readiness)
 
     pe = sub.add_parser(
         "print-endpoint",

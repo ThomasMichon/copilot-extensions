@@ -10,7 +10,10 @@ on a central orchestrator.
 ## Ownership and identity
 
 An enabled plugin with `"runtimeScope": "machine-gated"` adds one bounded
-reference to `plugin.json`:
+reference to `plugin.json`. A non-machine-gated plugin may also opt in when a
+consumer has an explicit reason to include it; discovery validates and returns
+that declaration, but still requires declarations only from machine-gated
+plugins:
 
 ```json
 {
@@ -126,6 +129,37 @@ There are two read-only entry points:
 Neither path knows the Copilot installed-plugin cache layout or searches
 `PATH`. The caller supplies settings roots and the source-neutral installation
 home explicitly.
+
+## Shipped adapters
+
+The acceptance fixture for
+[issue #1160](https://github.com/ThomasMichon/copilot-extensions/issues/1160)
+requires six plugin-owned runtime modules. `agent-worktrees` is deliberately in
+that fixture even though its runtime scope remains `universal`: it is the named
+setup foundation, while the other five are the machine-gated inventory that the
+generic completeness rule covers.
+
+| Owner/module | Installer | Readiness meaning | Dependencies | Platforms | Restart |
+|---|---|---|---|---|---|
+| `agent-worktrees/runtime` | `scripts/install.* update` | `ready` once the payload-owned runtime command loads; project registration is not required | none | Windows, Linux, WSL, macOS | none |
+| `agent-machines/runtime` | `scripts/init.* init` | `configuration-empty` when no applicable requirement package exists; malformed packages fail | none | Windows, Linux, WSL, macOS | none |
+| `agent-codespaces/runtime` | `scripts/install.* update` | runtime/auth/config health only; empty config is explicit and no live CodeSpace is required | none | Windows, Linux, WSL | none |
+| `agent-dispatch/runtime` | `scripts/install.* update` | the configured coordinator must answer its existing health endpoint; the probe never starts it | none | Windows, Linux, WSL | none |
+| `agent-mcp/runtime` | `scripts/init.* init` | no bridge config is `configuration-empty`; duplicate normalized names fail before every candidate is parsed and validated | none | Windows, Linux, WSL, macOS | none |
+| `agent-index/runtime` | `scripts/install.* update` | service failure, malformed/unreadable config, unknown corpus state, or a populated corpus without attributable sources fails; absent sources or a measured zero-chunk corpus is explicit | none | Windows, Linux, WSL | none |
+
+The empty dependency lists are intentional: optional composition is not an
+installation prerequisite. External prerequisites such as authenticated service
+CLIs are diagnosed by the owning readiness command, not represented as fake
+plugin dependency ids. Every installer action above is the plugin's existing
+idempotent lifecycle action. All readiness invocations are the owning
+payload-command with `installer-readiness`; they do not use `PATH`, start
+services, create instances/configuration, or populate a corpus.
+
+`restart: none` means the declared installer completes its own runtime/service
+cutover. It does not erase owner-specific operational rules: for example,
+editing agent-dispatch `service.env` outside the installer still requires an
+explicit coordinator service restart.
 
 ## Validation and planning
 
