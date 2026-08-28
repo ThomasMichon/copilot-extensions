@@ -503,7 +503,7 @@ def _config_path() -> Path | None:
     return None
 
 
-def load_config() -> ContainersConfig:
+def load_config(*, strict: bool = False) -> ContainersConfig:
     """Load configuration from containers.yaml, merged over defaults."""
     config = ContainersConfig()
     path = _config_path()
@@ -512,9 +512,18 @@ def load_config() -> ContainersConfig:
         return config
 
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
+        if strict:
+            raise RuntimeError(f"Failed to read {path}: {exc}") from exc
         log.warning("Failed to read %s: %s", path, exc)
+        return config
+    data = {} if parsed is None else parsed
+    if not isinstance(data, dict):
+        message = f"{path}: top-level configuration must be a mapping"
+        if strict:
+            raise RuntimeError(message)
+        log.warning("%s; using built-in defaults", message)
         return config
 
     # Lazy schema migration (in memory, never persists / never raises) so a
@@ -591,9 +600,21 @@ def load_config() -> ContainersConfig:
     )
     config.rescue.validate()
 
-    fleets = data.get("fleets", {}) or {}
+    raw_fleets = data.get("fleets")
+    fleets = {} if raw_fleets is None else raw_fleets
+    if not isinstance(fleets, dict):
+        if strict:
+            raise RuntimeError("fleets config must be a key/value mapping")
+        log.warning("fleets config must be a key/value mapping; ignoring it")
+        return config
     for name, raw in fleets.items():
         raw = raw or {}
+        if not isinstance(raw, dict):
+            message = f"Fleet '{name}' config must be a key/value mapping"
+            if strict:
+                raise RuntimeError(message)
+            log.warning("%s; ignoring it", message)
+            continue
         security_profile = str(raw.get("security_profile", TRUSTED_PROFILE)).lower()
         if security_profile not in SECURITY_PROFILES:
             expected = ", ".join(sorted(SECURITY_PROFILES))

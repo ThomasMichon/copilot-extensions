@@ -132,7 +132,10 @@ def _windows_run_dirs() -> list[Path]:
     return [d for _, d in candidates]
 
 
-def _read_windows_endpoint() -> "rendezvous.Endpoint | None":
+def _read_windows_endpoint(
+    *,
+    strict: bool = False,
+) -> "rendezvous.Endpoint | None":
     """Read the Windows-side rendezvous file from WSL; ``None`` if none found.
 
     The recorded ``pid`` is a *Windows* pid, meaningless to a Linux
@@ -143,13 +146,21 @@ def _read_windows_endpoint() -> "rendezvous.Endpoint | None":
     from dataclasses import replace
 
     for run in _windows_run_dirs():
-        ep = rendezvous.read_endpoint(run)
+        ep = (
+            rendezvous.read_endpoint_strict(run)
+            if strict
+            else rendezvous.read_endpoint(run)
+        )
         if ep is not None:
             return replace(ep, source="windows")
     return None
 
 
-def _discover_endpoint(context: ResolvedVault) -> "rendezvous.Endpoint | None":
+def _discover_endpoint(
+    context: ResolvedVault,
+    *,
+    strict: bool = False,
+) -> "rendezvous.Endpoint | None":
     """Discover the daemon endpoint via the rendezvous ladder, or ``None``.
 
     Ladder: explicit ``AGENT_VAULT_ENDPOINT`` override -> the local rendezvous
@@ -158,20 +169,37 @@ def _discover_endpoint(context: ResolvedVault) -> "rendezvous.Endpoint | None":
     exactly today's legacy dial (UDS->TCP / fixed port).
     """
     override = os.environ.get(config.ENDPOINT_ENV)
-    try:
-        return rendezvous.resolve(
-            config.run_dir(),
-            override=override,
+    if strict:
+        if override is not None:
+            endpoint = rendezvous.Endpoint.parse(override, source="env")
+            rendezvous.validate_endpoint(endpoint)
+            return endpoint
+        endpoint = rendezvous.read_endpoint_strict(config.run_dir())
+        if endpoint is not None and not rendezvous.is_stale(
+            endpoint,
             probe=rendezvous.connect_probe,
-        )
-    except rendezvous.EndpointUnavailable:
-        pass
+        ):
+            return endpoint
+    else:
+        try:
+            return rendezvous.resolve(
+                config.run_dir(),
+                override=override,
+                probe=rendezvous.connect_probe,
+            )
+        except rendezvous.EndpointUnavailable:
+            pass
     if IS_WSL:
-        return _read_windows_endpoint()
+        return _read_windows_endpoint(strict=strict)
     return None
 
 
-def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
+def send_command(
+    request: dict,
+    timeout: float | None = 5.0,
+    *,
+    strict_endpoint: bool = False,
+) -> dict | None:
     """Send a JSON command to the vault service."""
     context = config.resolve_context()
     request = dict(request)
@@ -191,7 +219,7 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
     # socket/port when nothing is advertised. A discovered TCP port also feeds
     # the extension transports (e.g. the WSL->Windows interop relay), so a
     # dynamic/discovered port is honored end to end.
-    discovered = _discover_endpoint(context)
+    discovered = _discover_endpoint(context, strict=strict_endpoint)
     discovered_unix: str | None = None
     discovered_pipe: str | None = None
     if discovered is not None:
@@ -218,6 +246,8 @@ def send_command(request: dict, timeout: float | None = 5.0) -> dict | None:
                 if discovered.source != "windows":
                     host = d_host
             except ValueError:
+                if strict_endpoint:
+                    raise
                 discovered = None
 
     # Inject the caller's vault selection for a LOCAL daemon only. A cross-
@@ -721,6 +751,21 @@ def cmd_ping(args):
         return 0
     print("Vault service not running")
     return 1
+
+
+def cmd_installer_readiness(args):
+    """Report config and service readiness without starting or unlocking."""
+    from .installer_readiness import emit, evaluate
+
+    try:
+        context = config.resolve_context(strict=True)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return emit(evaluate(None, None, [str(exc)]))
+    try:
+        service = send_command({"action": "ping"}, strict_endpoint=True)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return emit(evaluate(context, None, service_errors=[str(exc)]))
+    return emit(evaluate(context, service))
 
 
 def cmd_start(args):
@@ -1411,7 +1456,7 @@ def cmd_vault_remove(args):
     return 0
 
 
-def main():
+def main(argv: list[str] | None = None):
     import argparse
 
     from . import __version__
@@ -1450,6 +1495,12 @@ def main():
 
     p = sub.add_parser("ping", help="Check service status")
     p.set_defaults(func=cmd_ping)
+
+    p = sub.add_parser(
+        "installer-readiness",
+        help="Emit the plugin-owned installer/readiness contract state as JSON",
+    )
+    p.set_defaults(func=cmd_installer_readiness)
 
     p = sub.add_parser("start", help="Start the vault service")
     p.set_defaults(func=cmd_start)
@@ -1601,7 +1652,7 @@ def main():
     from .extensions import get_registry
     get_registry().apply_cli_commands(sub)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
         return 1

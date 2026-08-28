@@ -162,6 +162,10 @@ def main(argv: list[str] | None = None) -> int:
     host_cleanup.add_argument("--remote-env", required=True)
 
     sub.add_parser("version", help="Show version")
+    sub.add_parser(
+        "installer-readiness",
+        help="Emit the plugin-owned installer/readiness contract state as JSON",
+    )
 
     sub.add_parser(
         "config-migrate",
@@ -247,6 +251,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "version":
             print(f"agent-containers {__version__}")
             return 0
+        if args.command == "installer-readiness":
+            return _cmd_installer_readiness()
         if args.command == "config-migrate":
             from . import config_migrations
 
@@ -274,6 +280,27 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     return 0
+
+
+def _cmd_installer_readiness() -> int:
+    """Inspect configuration, toolchain, and Docker without provisioning."""
+    from .installer_readiness import emit, evaluate, inspect_toolchain
+    from .lifecycle import list_containers
+
+    try:
+        config = load_config(strict=True)
+        failures = list(inspect_toolchain(config))
+        containers = []
+        if not failures or all("docker CLI" not in item for item in failures):
+            try:
+                containers = list_containers(config)
+            except (OSError, RuntimeError, ValueError) as exc:
+                failures.append(str(exc))
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        config = None
+        containers = []
+        failures = [str(exc)]
+    return emit(evaluate(config, containers, failures))
 
 
 def _trusted_session_host_context(name: str):

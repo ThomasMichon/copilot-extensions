@@ -77,6 +77,10 @@ class EndpointUnavailable(RuntimeError):
     """No endpoint could be resolved for a service (fail loud, don't mask)."""
 
 
+class EndpointStateError(RuntimeError):
+    """A present rendezvous file is unreadable or malformed."""
+
+
 def utc_now_iso() -> str:
     """Current UTC time as an ISO-8601 ``...Z`` string (second precision)."""
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -230,6 +234,69 @@ class Endpoint:
         )
 
 
+def validate_endpoint(endpoint: Endpoint) -> None:
+    """Validate transport-specific endpoint fields without contacting it."""
+    if endpoint.transport == "tcp":
+        _host, port = endpoint.tcp_host_port
+        if not 1 <= port <= 65535:
+            raise ValueError(f"tcp port {port} is outside 1..65535")
+
+
+def _endpoint_from_record_strict(data: dict) -> Endpoint:
+    transport = data.get("transport")
+    address = data.get("endpoint")
+    if not isinstance(transport, str) or transport not in VALID_TRANSPORTS:
+        raise TypeError(f"transport must be one of {VALID_TRANSPORTS}")
+    if not isinstance(address, str) or not address.strip():
+        raise TypeError("endpoint must be a non-empty string")
+
+    pid = data.get("pid")
+    if pid is not None and (
+        isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+    ):
+        raise TypeError("pid must be a positive integer or null")
+    started_at = data.get("started_at")
+    if started_at is not None and not isinstance(started_at, str):
+        raise TypeError("started_at must be a string or null")
+
+    raw_alt = data.get("alt", [])
+    if not isinstance(raw_alt, list):
+        raise TypeError("alt must be an array")
+    alternatives: list[Endpoint] = []
+    for index, item in enumerate(raw_alt):
+        if not isinstance(item, dict):
+            raise TypeError(f"alt[{index}] must be an object")
+        alt_transport = item.get("transport")
+        alt_address = item.get("endpoint")
+        if (
+            not isinstance(alt_transport, str)
+            or alt_transport not in VALID_TRANSPORTS
+        ):
+            raise TypeError(
+                f"alt[{index}].transport must be one of {VALID_TRANSPORTS}"
+            )
+        if not isinstance(alt_address, str) or not alt_address.strip():
+            raise TypeError(f"alt[{index}].endpoint must be a non-empty string")
+        alternative = Endpoint(
+            transport=alt_transport,
+            address=alt_address,
+            source="file",
+        )
+        validate_endpoint(alternative)
+        alternatives.append(alternative)
+
+    endpoint = Endpoint(
+        transport=transport,
+        address=address,
+        pid=pid,
+        started_at=started_at,
+        source="file",
+        alt=tuple(alternatives),
+    )
+    validate_endpoint(endpoint)
+    return endpoint
+
+
 def default_runtime_dir(app: str) -> Path:
     """The conventional runtime dir for an app, e.g. ``~/.agent-dispatch/run``."""
     return Path.home() / f".{app}" / "run"
@@ -290,16 +357,29 @@ def clear_endpoint(runtime_dir: Path | str) -> None:
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:
     """Read + parse the rendezvous file; ``None`` if absent, unreadable, or malformed."""
     try:
-        raw = endpoint_file(runtime_dir).read_text(encoding="utf-8")
-    except OSError:
+        return read_endpoint_strict(runtime_dir)
+    except EndpointStateError:
         return None
+
+
+def read_endpoint_strict(runtime_dir: Path | str) -> Endpoint | None:
+    """Read endpoint state, distinguishing absence from invalid present state."""
+    path = endpoint_file(runtime_dir)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeError) as exc:
+        raise EndpointStateError(f"{path}: unreadable endpoint state: {exc}") from exc
     try:
         data = json.loads(raw)
+        if not isinstance(data, dict):
+            raise TypeError("top-level endpoint state must be an object")
         if int(data.get("schema", 0)) != SCHEMA:
-            return None
-        return Endpoint.from_record(data)
-    except (ValueError, TypeError, KeyError):
-        return None
+            raise ValueError(f"unsupported endpoint schema {data.get('schema')!r}")
+        return _endpoint_from_record_strict(data)
+    except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
+        raise EndpointStateError(f"{path}: malformed endpoint state: {exc}") from exc
 
 
 def is_stale(ep: Endpoint | None, *, probe: Callable[[Endpoint], bool] | None = None) -> bool:

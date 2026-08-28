@@ -92,16 +92,22 @@ def _global_config_path() -> Path:
     return Path(os.environ.get(CONFIG_ENV) or default_config_path())
 
 
-def load_global_config() -> dict[str, Any]:
+def load_global_config(*, strict: bool = False) -> dict[str, Any]:
     """Load the global JSON settings file."""
     path = _global_config_path()
     if not path.exists():
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        if strict:
+            raise RuntimeError(f"{path}: invalid configuration: {exc}") from exc
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        if strict:
+            raise RuntimeError(f"{path}: top-level configuration must be an object")
+        return {}
+    return data
 
 
 def save_global_config(data: dict[str, Any]) -> None:
@@ -146,6 +152,50 @@ def _vault_registry(data: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {str(name): cfg for name, cfg in raw.items() if isinstance(cfg, dict)}
 
 
+def _validate_config_data(data: dict[str, Any], label: str) -> None:
+    for key in ("kpdb", "group", "vault_group", "vault", "default_vault"):
+        value = data.get(key)
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise RuntimeError(f"{label}: {key} must be a non-empty string")
+    if "port" in data and data["port"] is not None:
+        port = data["port"]
+        if isinstance(port, bool):
+            raise RuntimeError(f"{label}: port must be an integer from 1 to 65535")
+        try:
+            parsed_port = int(port)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError(
+                f"{label}: port must be an integer from 1 to 65535"
+            ) from exc
+        if not 1 <= parsed_port <= 65535:
+            raise RuntimeError(f"{label}: port must be an integer from 1 to 65535")
+
+    raw_vaults = data.get("vaults")
+    if raw_vaults is None:
+        return
+    if not isinstance(raw_vaults, dict):
+        raise RuntimeError(f"{label}: vaults must be an object")
+    for name, value in raw_vaults.items():
+        if not isinstance(name, str) or not name.strip():
+            raise RuntimeError(f"{label}: vault names must be non-empty strings")
+        if not isinstance(value, dict):
+            raise RuntimeError(f"{label}: vault {name!r} must be an object")
+        _validate_config_data(
+            {key: item for key, item in value.items() if key != "vaults"},
+            f"{label}: vault {name!r}",
+        )
+        kpdb = value.get("kpdb")
+        if not isinstance(kpdb, str) or not kpdb.strip():
+            raise RuntimeError(
+                f"{label}: vault {name!r} must configure a non-empty kpdb"
+            )
+    default_vault = data.get("default_vault")
+    if default_vault is not None and default_vault not in raw_vaults:
+        raise RuntimeError(
+            f"{label}: default_vault {default_vault!r} is not a configured vault"
+        )
+
+
 def _legacy_flat_config(data: dict[str, Any]) -> dict[str, Any]:
     legacy: dict[str, Any] = {}
     for key in ("kpdb", "group", "vault_group", "port"):
@@ -154,7 +204,11 @@ def _legacy_flat_config(data: dict[str, Any]) -> dict[str, Any]:
     return legacy
 
 
-def _discover_repo_config(cwd: str | None) -> tuple[Path | None, dict[str, Any]]:
+def _discover_repo_config(
+    cwd: str | None,
+    *,
+    strict: bool = False,
+) -> tuple[Path | None, dict[str, Any]]:
     start = Path(cwd or os.getcwd()).resolve()
     if start.is_file():
         start = start.parent
@@ -163,9 +217,19 @@ def _discover_repo_config(cwd: str | None) -> tuple[Path | None, dict[str, Any]]
         if path.exists():
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                if strict:
+                    raise RuntimeError(
+                        f"{path}: invalid configuration: {exc}"
+                    ) from exc
                 return path, {}
-            return path, data if isinstance(data, dict) else {}
+            if not isinstance(data, dict):
+                if strict:
+                    raise RuntimeError(
+                        f"{path}: top-level configuration must be an object"
+                    )
+                return path, {}
+            return path, data
     return None, {}
 
 
@@ -202,14 +266,35 @@ def _ext_config(cwd: str | None) -> dict[str, Any]:
         return {}
 
 
-def resolve_context(cwd: str | None = None) -> ResolvedVault:
+def resolve_context(
+    cwd: str | None = None,
+    *,
+    strict: bool = False,
+) -> ResolvedVault:
     """Resolve the active vault using env, repo, extension, global, and defaults."""
-    global_data = load_global_config()
+    global_data = load_global_config(strict=True) if strict else load_global_config()
+    if strict:
+        _validate_config_data(global_data, "global vault configuration")
     registry = _vault_registry(global_data)
     legacy = _legacy_flat_config(global_data)
-    repo_path, repo_data = _discover_repo_config(cwd)
+    repo_path, repo_data = (
+        _discover_repo_config(cwd, strict=True)
+        if strict
+        else _discover_repo_config(cwd)
+    )
     repo_base_dir = repo_path.parent if repo_path else None
     ext_data = _ext_config(cwd)
+    if strict and not isinstance(ext_data, dict):
+        raise RuntimeError("extension vault configuration must be an object")
+    if strict:
+        _validate_config_data(repo_data, "repository vault configuration")
+        _validate_config_data(ext_data, "extension vault configuration")
+        env_port = os.environ.get("AGENT_VAULT_PORT")
+        if env_port is not None:
+            _validate_config_data(
+                {"port": env_port},
+                "AGENT_VAULT_PORT environment override",
+            )
 
     vault_name, vault_source = _pick_vault_name(registry, repo_data, global_data, ext_data)
     named_base = registry.get(vault_name or "")

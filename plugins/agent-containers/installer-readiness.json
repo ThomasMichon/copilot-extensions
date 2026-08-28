@@ -1,0 +1,63 @@
+{
+  "schema": "copilot-extensions.installer-readiness",
+  "version": 1,
+  "owner": {
+    "plugin": "agent-containers"
+  },
+  "state": "supported",
+  "modules": [
+    {
+      "id": "agent-containers/runtime",
+      "platforms": [
+        "windows",
+        "linux",
+        "wsl"
+      ],
+      "classification": "required",
+      "installer": {
+        "windows": {
+          "kind": "payload-script",
+          "path": "scripts/init.ps1",
+          "arguments": [
+            "init"
+          ]
+        },
+        "linux": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        },
+        "wsl": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        }
+      },
+      "readiness": {
+        "schema": "copilot-extensions.module-readiness",
+        "version": 1,
+        "configurationEmpty": "satisfied",
+        "invocations": {
+          "windows": {
+            "kind": "payload-script",
+            "path": "scripts/installer-readiness.ps1"
+          },
+          "linux": {
+            "kind": "payload-script",
+            "path": "scripts/installer-readiness.sh"
+          },
+          "wsl": {
+            "kind": "payload-script",
+            "path": "scripts/installer-readiness.sh"
+          }
+        }
+      },
+      "dependsOn": [],
+      "restart": "none"
+    }
+  ]
+}

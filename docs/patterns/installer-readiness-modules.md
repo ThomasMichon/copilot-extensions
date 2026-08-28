@@ -149,13 +149,17 @@ those public surfaces when present.
 The base contract does not provide plugin-specific adapters, runtime execution,
 machine-gate policy, prompts, or whole-run summaries.
 
-The shipped issue #1160 adapters are owned by `agent-worktrees`,
-`agent-machines`, `agent-codespaces`, `agent-dispatch`, `agent-mcp`, and
-`agent-index`. Each publishes one required `<plugin>/runtime` module for Windows,
-Linux, and WSL; the three non-service POSIX runtimes that document macOS support
-(`agent-worktrees`, `agent-machines`, and `agent-mcp`) also declare macOS. Each
-uses its own idempotent installer and invokes its own payload-local
-`installer-readiness` command. They declare no sibling
+The shipped issue #1160 and #1278 adapters are owned by `agent-worktrees`,
+`agent-machines`, `agent-codespaces`, `agent-dispatch`, `agent-mcp`,
+`agent-index`, `agent-bridge`, `agent-containers`, and `agent-vault`. Each
+publishes one required `<plugin>/runtime` module for Windows, Linux, and WSL; the
+three non-service POSIX runtimes that document macOS support (`agent-worktrees`,
+`agent-machines`, and `agent-mcp`) also declare macOS. Each uses its own
+idempotent installer and invokes its own payload-local `installer-readiness`
+command. The three #1278 self-provisioning runtimes use bounded payload scripts
+that disable self-provisioning before delegating to that command, so an absent
+runtime produces a structured failure instead of installing or starting
+anything. They declare no sibling
 dependencies because none is an actual runtime prerequisite; optional
 cross-plugin composition does not become desired-ordering metadata.
 
@@ -177,6 +181,15 @@ The adapters preserve these state distinctions:
   configuration, unknown corpus count, or populated-but-unattributable corpus
   as failed. It distinguishes absent source configuration from a measured empty
   corpus without creating or reindexing either.
+- `agent-bridge` requires its existing service health probe to pass and reports
+  that installer updates perform the service cutover without a separate restart.
+- `agent-containers` validates configuration, Docker service reachability, and
+  only the tools required by configured fleet backends. An absent or
+  unprovisioned fleet is explicit and the probe never creates a container or
+  pulls an image.
+- `agent-vault` validates configuration and pings the existing service without
+  starting or unlocking it. No configured database is explicit, a locked
+  configured vault remains operational, and service/backend failures fail.
 
 ## Required tests
 
