@@ -451,6 +451,34 @@ def test_malformed_universal_opt_in_is_not_machine_gated(tmp_path):
     assert report.findings[0].code == "invalid-module-metadata"
 
 
+@pytest.mark.parametrize("runtime_scope", ["machine-gated", "universal"])
+@pytest.mark.parametrize("name", [None, "different"])
+def test_manifest_name_error_preserves_completeness_scope(
+    tmp_path, runtime_scope, name
+):
+    payload = _payload(tmp_path / "demo", "demo")
+    manifest_path = payload / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["runtimeScope"] = runtime_scope
+    if name is None:
+        del manifest["name"]
+    else:
+        manifest["name"] = name
+    _write(manifest_path, manifest)
+
+    report = discover_modules([_installation(payload, "demo")])
+
+    assert not report.valid
+    expected = (
+        (report.findings[0].owner,)
+        if runtime_scope == "machine-gated"
+        else ()
+    )
+    assert report.machine_gated_owners == expected
+    assert report.findings[0].code == "invalid-module-metadata"
+    assert "plugin manifest name" in report.findings[0].message
+
+
 def test_fixture_inventory_rejects_silent_omission(tmp_path):
     durable = tmp_path / "home"
     repo = tmp_path / "repo"

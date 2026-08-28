@@ -503,12 +503,20 @@ def _discover_installation(
     is_machine_gated = False
     try:
         manifest_path, plugin = _plugin_manifest(installation.payload_root)
+        runtime_scope = plugin.get("runtimeScope")
+        if runtime_scope is not None:
+            runtime_scope = _string(runtime_scope, "plugin manifest runtimeScope")
+            if runtime_scope not in {"machine-gated", "universal", "none"}:
+                raise _ContractProblem(
+                    "plugin manifest runtimeScope must be machine-gated, "
+                    "universal, or none"
+                )
+        is_machine_gated = runtime_scope == "machine-gated"
         plugin_name = _string(plugin.get("name"), "plugin manifest name")
         if plugin_name != installation.plugin_id:
             raise _ContractProblem(
                 f"plugin manifest names '{plugin_name}', expected '{installation.plugin_id}'"
             )
-        is_machine_gated = plugin.get("runtimeScope") == "machine-gated"
         reference = plugin.get("installerReadiness")
         if reference is None:
             if not is_machine_gated:

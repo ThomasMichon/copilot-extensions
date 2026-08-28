@@ -42,6 +42,7 @@ from .config import (
     CONFIG_DIR_NAME,
     CONFIG_FILE_IN_DIR,
     CONFIG_FILENAME,
+    NO_SUPPLEMENTAL_CONFIG_ADVISORY,
     RUNTIME_DIR,
     AdoptedRepo,
     load_adopted_repos,
@@ -4204,12 +4205,11 @@ def _cmd_installer_readiness() -> int:
         or merged.source_paths
     )
     config_issues = validate_config(merged)
-    if not configured:
-        config_issues = [
-            issue
-            for issue in config_issues
-            if not issue.startswith("No CodeSpace config found")
-        ]
+    config_issues = [
+        issue
+        for issue in config_issues
+        if issue != NO_SUPPLEMENTAL_CONFIG_ADVISORY
+    ]
     return emit(
         evaluate(
             auth_findings=auth_findings,
