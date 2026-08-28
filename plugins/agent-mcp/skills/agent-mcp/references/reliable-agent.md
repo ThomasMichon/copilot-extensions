@@ -52,7 +52,7 @@ mcp-servers:
 ```
 
 In the authoring skill's required `## MCP Readiness` section, include these
-agent-mcp-specific transport steps:
+transport-specific steps:
 
 ```markdown
 1. Probe `service_read`.

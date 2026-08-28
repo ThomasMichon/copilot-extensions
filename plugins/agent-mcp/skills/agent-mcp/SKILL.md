@@ -85,7 +85,7 @@ A bridge config can be referenced two ways:
 
 First author the agent with
 **`customizing-copilot:defining-subagents`**. This section covers only the
-agent-mcp-specific bridge and fallback wiring for giving that agent
+bridge-specific transport and fallback wiring for giving that agent
 authenticated MCP tools -- e.g. an `@ado-data` agent backed by the Azure DevOps
 MCP.
 
@@ -163,7 +163,7 @@ re-materialize when the expected stub is absent or
 `manifest.json.generated_by` differs from
 `<agent-mcp catalog argv[0]> --version` (config drift needs a deploy-owned
 digest). Use `--no-serve` for identity-sensitive fallback calls. The
-agent-mcp-specific platform commands, failure matrix, warmth guidance, and
+bridge-specific platform commands, failure matrix, warmth guidance, and
 drift contract live in
 [Reliable agent-mcp transport and fallback](references/reliable-agent.md).
 
