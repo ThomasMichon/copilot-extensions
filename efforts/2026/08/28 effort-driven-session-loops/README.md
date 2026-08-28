@@ -4,12 +4,12 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice pull requests from one managed worktree
 - **Created:** 2026-08-27
-- **Status:** Active
+- **Status:** Done
 - **Vision:** **vision-closing** against
-  [`visions/plugins/efforts`](../../../visions/plugins/efforts/README.md),
+  `visions/plugins/efforts`,
   authored with this effort to state the previously missing standing intent.
   Ambient delivery also advances
-  [`visions/harness-guidance`](../../../visions/harness-guidance/README.md).
+  `visions/harness-guidance`.
 - **Umbrella issue:** [#1255](https://github.com/ThomasMichon/copilot-extensions/issues/1255)
 - **Sub-issues:**
   [#1259](https://github.com/ThomasMichon/copilot-extensions/issues/1259)
@@ -138,11 +138,11 @@ Public-safe transcription of the operator request:
 
 ### Phase 1 - Repository adoption and ambient effort policy
 
-- [ ] Resolve #1234 before enabling another independent marketplace hook: land
-      the shared aggregation fix tracked there, consume an upstream runtime fix,
-      or route the efforts producer through the suite's single deterministic
-      aggregator. Direct producer tests may proceed earlier, but end-to-end
-      coexistence is gated.
+- [x] Deferred to `GitHub issue 1234`: [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234)
+      owns shared session-start aggregation before another independent
+      marketplace hook can be enabled, through the tracked runtime fix or an
+      equivalent deterministic aggregation path. Direct producer tests landed
+      here, while end-to-end coexistence remains owned by that issue.
 - [x] Define `.copilot-extensions/efforts/config.json` using the new committed
       repository-config convention. Version 1 accepts only the exact semantic
       `{"version":1,"enforcement":"required"}`: a valid file declares both
@@ -160,9 +160,11 @@ Public-safe transcription of the operator request:
       execution; execute in waves; treat the active effort as the completion
       gate; let only the rightful head select the next authorized slice; pause
       only at real uncertainty, prerequisite, safety, or administrative gates.
-- [ ] Register the hook only after #1234 or an equivalent deterministic
-      aggregation path is complete; registration is intentionally omitted from
-      the staged foundation so efforts cannot displace another plugin's context.
+- [x] Deferred to `GitHub issue 1234`: [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234)
+      owns registration of the efforts hook after the shared runtime fix or an
+      equivalent deterministic aggregation path is complete. Registration
+      remains intentionally omitted so efforts cannot displace another
+      plugin's context.
 - [x] Document the configuration, staged producer, and fallback contract; bump
       the efforts plugin version; and add focused schema, containment, symlink,
       gating, fail-open, parity, and byte-budget tests. The base kernel remains
@@ -253,7 +255,7 @@ Public-safe transcription of the operator request:
 - [x] Confirm the public docs explain adoption, effort focus, compact handoffs,
       cross-repository ownership, optional capability degradation, and the
       difference between completing a slice and completing an effort.
-- [ ] Mark every plan and validation item complete, record merged pull requests,
+- [x] Mark every plan and validation item complete, record merged pull requests,
       set the effort to Done, and archive it through a final reviewed delta.
 
 ## Validation Plan
@@ -394,6 +396,16 @@ earlier slices.
   contract guards. Bumped agent-worktrees to `1.5.3-dev653`, efforts to
   `0.1.0-dev15`, and marketplace metadata to `1.7.5-dev672`.
 
+### 2026-08-28 - Phase 2 active-effort focus merged
+
+- Merged reviewed Phase 2 PR
+  [#1271](https://github.com/ThomasMichon/copilot-extensions/pull/1271);
+  its `Fixes #1261` linkage closed the active-effort binding issue.
+- The merged slice bound one revisioned, repository-contained effort slice to
+  each managed worktree, derived the existing follow-up disposition and bounded
+  session orientation, and required explicit replacement, verified completion,
+  or named transfer before releasing responsibility.
+
 ### 2026-08-28 - Phase 3 effort-backed continuity implemented
 
 - Merged reviewed Phase 3 PR
@@ -514,3 +526,21 @@ earlier slices.
   script/manifest checks, and the version, install, runtime-resolution,
   payload-generation, process-hygiene, skill, docs, runbook, headless-launch,
   timeout-handler, lint, and suite-discovery guards.
+
+### 2026-08-28 - Phase 5 merged and effort completed
+
+- Merged reviewed Phase 5 PR
+  [#1279](https://github.com/ThomasMichon/copilot-extensions/pull/1279)
+  after strict literal-mode acceptance passed and repeated review rounds closed
+  every reported hook, provider, concurrency, portability, and lifecycle
+  finding.
+- The rebased final head passed 39 focused agent-worktrees session binding/hook
+  tests, 16 clean-room provider/quoting tests, Bash and PowerShell syntax and
+  lint checks, version consistency, public-diff sanitization, and an actual
+  Bash 3.2 parse check. Copilot's final review recommended approval with no
+  findings.
+- The two intentionally gated Phase 1 registration items are explicitly
+  transferred to [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234);
+  every remaining Plan and Validation Plan item is complete. The effort
+  completion gate is satisfied and this record is archived as the final
+  reviewed delta.
