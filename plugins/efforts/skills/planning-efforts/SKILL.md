@@ -121,6 +121,12 @@ An open binding derives the existing worktree `follow_up` gate and concise
 summary. Do not clear it with `status --resolved`; release responsibility
 through the effort lifecycle below.
 
+While bound, use compact context handoffs: effort README pointer,
+participant/current slice, immediate next slice, material blockers or
+decisions, in-flight work, and required confirmations. Do not copy the durable
+Request, Plan, Validation Plan, or Journal into the handoff. Standalone
+objectives with no valid open effort retain the full handoff shape.
+
 ## When to use efforts vs. other constructs
 
 | Use… | When the thing is… |
@@ -299,7 +305,11 @@ change that realizes it.
 
 1. Confirm the effort is done (or abandoned) and the Journal reflects the
    outcome.
-2. Resolve every Plan and Validation Plan item and set **Status: Done**.
+2. Resolve every Plan and Validation Plan item. A transferred item must use one
+   of the machine-checked forms
+   `- [x] Deferred to \`<tracked objective>\`: <original item>` or
+   `- [x] Blocked; transferred to \`<tracked objective>\`: <original item>`.
+   Then set **Status: Done**.
 3. **Move** the active effort folder to the dated archive path (per the
    addendum), using the completion date. Preserve git history with `git mv`.
 4. Write a closing Journal entry.

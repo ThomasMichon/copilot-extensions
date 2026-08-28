@@ -202,8 +202,16 @@ separation is what lets one plugin serve many repos and many executor plugins.
    `<agent-worktrees catalog argv[0]> effort-focus show --json` and binds its
    declared slice if necessary. An open binding derives the existing
    worktree `follow_up` cleanup gate and effort summary; it is not a second
-   responsibility flag.
-5. **Archive and release** — resolve every Plan and Validation Plan item, set
+   responsibility flag. Context handoff while bound links the effort README and
+   carries only the immediate next slice, in-flight work, blockers/decisions,
+   and required confirmations; it does not copy the Request, Plan, Validation
+   Plan, or Journal. A successor reads the effort first and consults predecessor
+   history only when the relay delta is insufficient.
+5. **Archive and release** — resolve every Plan and Validation Plan item. A
+   transferred item uses the machine-checked form
+   `- [x] Deferred to \`<tracked objective>\`: <original item>` or
+   `- [x] Blocked; transferred to \`<tracked objective>\`: <original item>`.
+   Then set
    **Status: Done**, move the active folder to the addendum's standard flat or
    by-repo dated archive path, write a closing Journal entry, update the active
    index, promote durable truth, and land that archive change through the repo's

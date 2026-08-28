@@ -60,6 +60,17 @@ not a request to confirm that the predecessor's latest phase finished, and it is
 not a session-closing recap. Consuming the baton starts the successor's relay
 leg.
 
+- When the worktree has a valid open `active_effort` binding, that effort owns
+  the objective and completion gate. The handoff is only a compact relay delta:
+  effort pointer, bound participant/slice, immediate next slice, material
+  blockers/decisions, and required confirmations.
+- A handoff task, session, phase, commit, or pull request never replaces the
+  active effort as the source of truth.
+- The successfully bound successor is the rightful head of the relay. Once
+  cutover starts, the predecessor may preserve the baton or help diagnose a
+  failed pickup, but must not continue making competing worktree changes.
+  Confirm the role with `<agent-worktrees catalog argv[0]> session-role --json`
+  when that capability is available; a superseded session assists the head.
 - Re-read the **Original Request**, **Continuing Objective**, ordered
   **Successor Work Roster**, and their cited effort/issue/source of truth.
 - Keep driving every actionable next phase the original request permits, as far
@@ -129,19 +140,32 @@ recovery.
 
 ### Steps (default = live cutover)
 
-1. **Call `generate_handoff_prompt`**. It returns structured facts: session ID,
+1. **Inspect active effort focus when agent-worktrees is available.** From the
+   intended worktree, run `<agent-worktrees catalog argv[0]> effort-focus show
+   --json` (or add the known `--worktree-id` when the session cwd is elsewhere).
+   Select the compact effort-backed template only when
+   `active_effort.active` is `true`. A missing command, unavailable worktree,
+   stale/closed binding, or no binding selects the full standalone template;
+   optional enrichment never blocks handoff.
+2. **Reconcile durable effort state at a clean boundary.** Before an
+   effort-backed handoff, update landed Plan/Validation markers and the Journal.
+   Include failed approaches and non-obvious gotchas in the Journal when they
+   will matter after this relay. If context pressure or in-flight work prevents
+   that, list every not-yet-durable fact explicitly in Immediate Session Delta.
+3. **Call `generate_handoff_prompt`**. It returns structured facts: session ID,
    cwd, branch, files modified, git status, turn count, and key tool invocations.
-2. **Compose the full handoff markdown** using the template below — lead with
-   the original request, preserve the continuing parent objective, and provide
-   an ordered successor work roster plus separate handoff/worktree completion
-   gates. Completed progress must not erase later actionable phases.
-3. **Call `save_handoff_prompt`** with that markdown as **`prompt_text`** (plus
+4. **Compose the handoff markdown** using the selected template. For an active
+   effort, link its repository-relative README and include only the next slice
+   plus the immediate session delta; do not duplicate its request, plan, or
+   journal. Otherwise preserve the full parent objective and ordered successor
+   roster. Both modes keep separate handoff and worktree completion gates.
+5. **Call `save_handoff_prompt`** with that markdown as **`prompt_text`** (plus
    an optional short `title`). It stores the handoff and returns both the paste
    prompt and a `HANDOFF_SEED:` line.
-4. **If under mux, call `continue_handoff`** with `seed` exactly equal to the
+6. **If under mux, call `continue_handoff`** with `seed` exactly equal to the
    `HANDOFF_SEED` string. Then end your turn. Do not start new work in the
    predecessor.
-5. **If cutover cannot run**, reply with only the short paste prompt returned by
+7. **If cutover cannot run**, reply with only the short paste prompt returned by
    `save_handoff_prompt`.
 
 > **Two completion models.** A task-backed paste resume uses
@@ -268,6 +292,10 @@ So your job on resume is: **read the injected handoff and keep going.** Do not
 re-claim or re-complete a baton that `/resume-handoff` already consumed. Apply
 the Continuity Contract above: the completed items are history; the continuing
 objective and successor work roster are the authorization to keep driving.
+For an effort-backed baton, load the cited effort README first. Use session
+ramp-up only when the Immediate Session Delta is missing or insufficient, and
+recover only the predecessor's immediate activity rather than reconstructing
+the durable objective from transcript history.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
@@ -280,31 +308,43 @@ most recent session for this repo/worktree and summarize what was worked on.
 
 ## Handoff Template
 
-Compose this markdown and pass it to `save_handoff_prompt` as `prompt_text`
+Compose the appropriate shape and pass it to `save_handoff_prompt` as `prompt_text`
 (it becomes the agent-dispatch **task payload**, or the prompt content inside
 the one-time worktree-state handoff file). Full template:
 [`references/handoff-template.md`](references/handoff-template.md). Its sections:
 
 ```markdown
-## Session Continuation
+Choose exactly one:
+
+## Effort-Backed Session Continuation
+### Active Effort
+### Next Slice
+### Immediate Session Delta
+### Completion Gates
+### Re-Handoff Instructions
+
+## Standalone Session Continuation
 ### Original Request
 ### Continuing Objective
 ### Direction & Motivation
-### Progress           (- [x] done / - [ ] remaining, with file paths)
+### Progress
 ### Successor Work Roster
-### Completion Gates   (handoff leg vs. parent objective/worktree)
+### Completion Gates
 ### Re-Handoff Instructions
-### Gotchas            (failed approaches, workarounds, non-obvious context)
+### Gotchas
 ```
 
 ---
 
 ## Rules
 
-- **The handoff CONTENT can be as long as needed** — whether it lands in the
-  task payload or a file, it's read on demand when the next agent resumes, not
-  injected into any context automatically. Capture direction/motivation, next
-  actions, and target goals in full.
+- **Effort-backed handoffs are compact by construction.** The effort README
+  already carries durable direction, plan, validation, and journal. Link it and
+  carry only the next slice plus immediate blockers, decisions, in-flight work,
+  and required confirmations.
+- **Standalone handoff content can be as long as needed** because it is read on
+  demand. Capture the complete parent objective, direction, progress, and
+  successor roster when no valid effort owns them.
 - **The inline REPLY prompt must be short — one or two sentences.** It is
   addressed to the **next agent** and is whichever form `save_handoff_prompt`
   returned: either the agent-dispatch resume seed with the full
@@ -324,8 +364,12 @@ the one-time worktree-state handoff file). Full template:
   the cited effort, issue, or original request still exposes actionable work.
 - **Separate completion gates.** State both when the current deferred handoff
   task may be completed and when the parent objective/worktree is actually
-  complete. A landed phase, consumed baton, or merged PR is not by itself the
-  latter.
+  complete. For an active effort, responsibility remains open until it is
+  `Done`, every Plan and Validation Plan checkbox is resolved, deferred/blocked
+  work uses the checked form `Deferred to \`<tracked objective>\`: ...` or
+  `Blocked; transferred to \`<tracked objective>\`: ...`, required pull requests
+  are merged, and the effort is archived. A landed phase, consumed baton, or
+  merged PR is not by itself completion.
 - **Plan the next relay.** Re-Handoff Instructions must tell a context-limited
   successor to carry the same parent objective and remaining roster into another
   handoff rather than stopping for operator intervention.

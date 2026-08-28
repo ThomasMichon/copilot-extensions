@@ -64,6 +64,25 @@ def test_agent_capabilities_use_command_specific_catalog_entries() -> None:
     assert "explicit remote-management boundary" in text
 
 
+def test_rampup_guidance_uses_effort_as_durable_intent() -> None:
+    skill = (PLUGIN / "skills" / "ramp-up-session" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    agent = (PLUGIN / "agents" / "session-rampup.agent.md").read_text(
+        encoding="utf-8"
+    )
+    normalized_agent = " ".join(agent.split())
+
+    assert "effort-focus show --json" in skill
+    assert "effort-focus show --json" in agent
+    assert "canonical objective, plan, journal, and completion gate" in skill
+    assert "only to recover immediate facts" in normalized_agent
+    assert "skip deeper transcript reads entirely" in normalized_agent
+    assert "--tail-turns 10" in agent
+    assert "active_effort.active" in agent
+    assert "do not pass the caller's local `effort_argv0` through" in skill
+
+
 @pytest.mark.parametrize(
     ("module", "command"),
     [

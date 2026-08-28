@@ -33,7 +33,8 @@ export const CONTINUATION_DIRECTIVE =
   "completion gate is met, an explicit user scope boundary or required " +
   "confirmation stops you, or a real blocker needs input; if context pressure " +
   "returns first, hand off again with the same parent objective and remaining " +
-  "roster.";
+  "roster. When the handoff cites an active effort, load that effort before " +
+  "reconstructing intent from session history.";
 
 // Build the single-line ASCII CUTOVER seed (the HANDOFF_SEED) for a live
 // cutover successor. Kept as the ONE source of this string so

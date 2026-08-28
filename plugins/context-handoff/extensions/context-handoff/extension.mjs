@@ -768,7 +768,7 @@ function findHandoffFile(cwd, sid) {
 // Compose the prompt injected into the current session on resume.
 function buildResumePrompt(handoffText, source) {
   return [
-    `You are resuming a handoff (${source}). The full continuation context`,
+    `You are resuming a handoff (${source}). The continuation context`,
     `follows -- treat it as the founding brief for this session and carry the`,
     `work forward from where the previous session left off. Do NOT start over`,
     `or spin up a fresh worktree; continue in place.`,
@@ -878,10 +878,10 @@ const session = await joinSession({
       description:
         "Generate structured session facts for creating a continuation " +
         "prompt. Returns session metadata, files modified, git status, " +
-        "and key tool invocations. The agent should compose the final prose " +
-        "handoff using this data plus its own live context, preserving the " +
-        "parent objective and an actionable successor work roster rather than " +
-        "describing only the latest completed phase.",
+        "and key tool invocations. Compose the compact effort-backed shape " +
+        "when a valid open active effort exists; otherwise compose the full " +
+        "standalone shape. In either mode, preserve the parent completion gate " +
+        "rather than treating the latest completed phase as the objective.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -934,14 +934,15 @@ const session = await joinSession({
             "",
             "---",
             "Now follow the context-handoff skill:",
-            "1. Compose the FULL handoff markdown from this data plus your live",
-            "   context. Preserve the original request and parent objective, then",
-            "   give the successor an ordered work roster and separate completion",
-            "   gates for this handoff leg and the worktree's parent objective.",
+            "1. Compose handoff markdown from this data plus your live context.",
+            "   Use the compact effort-backed shape when a valid open active",
+            "   effort exists; otherwise use the full standalone shape. Keep",
+            "   separate completion gates for this handoff leg and the parent",
+            "   objective/worktree.",
             "   A completed phase is progress, not a reason to omit later work.",
             "   If the parent objective truly has no actionable work left, do not",
             "   create a live handoff merely to report that fact; finish instead.",
-            "2. Call save_handoff_prompt with the full markdown as `prompt_text`",
+            "2. Call save_handoff_prompt with the composed markdown as `prompt_text`",
             "   (and an optional short `title`). It stores the handoff — as an",
             "   agent-dispatch task when a coordinator is reachable, else a",
             "   one-time worktree-state file — and returns the short paste prompt",
@@ -959,7 +960,7 @@ const session = await joinSession({
     {
       name: "save_handoff_prompt",
       description:
-        "Store the full handoff markdown and return what short prompt to reply " +
+        "Store the composed handoff markdown and return what short prompt to reply " +
         "with. When an agent-dispatch coordinator is reachable, the handoff is " +
         "stored as a *proposed, handoff-labeled task* pinned to this worktree " +
         "(payload = the markdown, no session file) and resumed next session via " +
@@ -978,7 +979,7 @@ const session = await joinSession({
         properties: {
           prompt_text: {
             type: "string",
-            description: "The full composed handoff markdown text.",
+            description: "The composed effort-backed or standalone handoff markdown.",
           },
           title: {
             type: "string",
@@ -1006,7 +1007,7 @@ const session = await joinSession({
         const text = (args?.prompt_text ?? args?.prompt ?? "").toString().trim();
         if (!text) {
           return (
-            "Cannot save handoff: pass the full handoff markdown as `prompt_text` " +
+            "Cannot save handoff: pass the composed handoff markdown as `prompt_text` " +
             "(the `prompt` alias is also accepted). Nothing was written."
           );
         }
@@ -1388,10 +1389,10 @@ const session = await joinSession({
           prompt:
             "Perform a LIVE-CUTOVER handoff now (the operator invoked " +
             "/handoff-continue). Steps: (1) call generate_handoff_prompt to " +
-            "collect session facts; (2) compose the full continuation markdown " +
-            "per the context-handoff skill (original request, direction & " +
-            "motivation, progress with file paths, next action items, target " +
-            "goals, gotchas); (3) call save_handoff_prompt with that markdown as " +
+            "collect session facts; (2) compose continuation markdown per the " +
+            "context-handoff skill -- use its compact effort-backed shape when " +
+            "a valid open active effort exists, otherwise the full standalone " +
+            "shape; (3) call save_handoff_prompt with that markdown as " +
             "`prompt_text` and a short specific `title` -- it stores the handoff " +
             "and returns a HANDOFF_SEED line; (4) call continue_handoff with " +
             "`seed` set to EXACTLY that HANDOFF_SEED string -- it spawns the " +

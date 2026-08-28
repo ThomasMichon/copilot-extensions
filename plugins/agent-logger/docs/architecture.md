@@ -44,7 +44,11 @@ chunks. Four console scripts:
   `ramp-up-session` skill, which by default delegates the context-expensive
   ramp-in to the neutral **`session-rampup`** agent (a context firewall — it
   absorbs the large transcript and returns a compact takeover briefing, so the
-  dormant session never floods the main session's context).
+  dormant session never floods the main session's context). When a valid open
+  agent-worktrees effort binding is available, the consumer reads that effort
+  first as the durable objective/plan/journal/completion gate and limits
+  transcript recovery to the predecessor's immediate activity. Without a valid
+  binding, the standalone checkpoint-and-digest path remains unchanged.
 
 All machine/path/voice coupling is configuration — there is no
 deployment-specific hostname, shared-folder path, or persona baked in.

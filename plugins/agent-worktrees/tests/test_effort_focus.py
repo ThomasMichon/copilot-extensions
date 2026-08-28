@@ -403,6 +403,84 @@ def test_deferred_and_ordered_unchecked_tasks_block_release(cli_env):
     assert m.cmd_effort_focus(_args("release", completed=True)) == 1
 
 
+def test_checked_deferred_task_requires_named_transfer_target(cli_env):
+    repo, _record, _tracking_dir = cli_env
+    relative = _effort(repo)
+    assert m.cmd_effort_focus(_args(
+        "bind",
+        path=relative,
+        participant="Driver",
+        effort_slice="Phase 2 - Bind active effort",
+    )) == 0
+    path = repo / Path(*relative.split("/"))
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("- **Status:** Active", "- **Status:** Done")
+    text = text.replace(
+        "- [ ] Implement the binding.",
+        "- [x] Deferred: Implement the binding.",
+    ).replace("- [ ] Verify", "- [x] Verify")
+    path.write_text(text, encoding="utf-8")
+
+    assert m.cmd_effort_focus(_args("release", completed=True)) == 1
+
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "Deferred: Implement the binding.",
+            "Deferred to `issue #42`: Implement the binding.",
+        ),
+        encoding="utf-8",
+    )
+    assert m.cmd_effort_focus(_args("release", completed=True)) == 0
+
+
+def test_checked_blocked_task_requires_named_transfer_target(cli_env):
+    repo, _record, _tracking_dir = cli_env
+    relative = _effort(repo)
+    assert m.cmd_effort_focus(_args(
+        "bind",
+        path=relative,
+        participant="Driver",
+        effort_slice="Phase 2 - Bind active effort",
+    )) == 0
+    path = repo / Path(*relative.split("/"))
+    text = path.read_text(encoding="utf-8")
+    text = text.replace("- **Status:** Active", "- **Status:** Done")
+    text = text.replace(
+        "- [ ] Implement the binding.",
+        "- [x] Blocked: Implement the binding.",
+    ).replace("- [ ] Verify", "- [x] Verify")
+    path.write_text(text, encoding="utf-8")
+
+    assert m.cmd_effort_focus(_args("release", completed=True)) == 1
+
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "Blocked: Implement the binding.",
+            "Blocked; transferred to `efforts/active/follow-up/README.md`: "
+            "Implement the binding.",
+        ),
+        encoding="utf-8",
+    )
+    assert m.cmd_effort_focus(_args("release", completed=True)) == 0
+
+
+def test_completed_tasks_starting_with_status_words_are_not_transfers():
+    text = """\
+- **Slug:** status-words
+- **Status:** Done
+
+## Plan
+
+- [x] Blocked requests return 403.
+- [x] Deferred execution preserves ordering.
+
+## Validation Plan
+
+- [x] Verify both behaviors.
+"""
+    assert ef._completion_ready(text) is True
+
+
 def test_archived_effort_can_release_after_original_path_moves(cli_env):
     repo, _record, _tracking_dir = cli_env
     relative = _effort(repo)

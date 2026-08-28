@@ -31,6 +31,9 @@ The caller passes, in its prompt:
 - **session** — an optional specific session UUID (otherwise the most recent
   session for the worktree is used).
 - an optional **focus** — what the operator cares about resuming, if given.
+- **effort_argv0** — the optional exact agent-worktrees session-catalog
+  `argv[0]` for a local worktree. Never search `PATH` for it. Do not use a local
+  path for a remote worktree.
 
 ## Budget — this is the whole point
 
@@ -62,12 +65,39 @@ CLI's pre-compaction **checkpoints** (the strongest signal of accumulated work),
 transcript ephemerally to `$TEMP/session-digest/<id>/` and prints the session
 id. When `--machine` names another host, all of this runs *there* over SSH and
 is relayed back — the digest and the worktree both live on that host, so any
-deeper reads (step 2) and git checks (step 3) must be run there too
+deeper reads (step 3) and git checks (step 4) must be run there too
 (`ssh <machine> read-session-digest ...`, `ssh <machine> git -C <path> ...`).
 Those far-side SSH commands remain an explicit remote-management boundary until
 installation context is carried across remote execution.
 
-### 2. Read deeper — only as needed, within budget
+### 2. Resolve durable effort intent
+
+For a local worktree, if the caller supplied `effort_argv0`, run:
+
+```
+<effort_argv0> effort-focus show --json
+```
+
+from the resolved worktree. Add `--worktree-id <known-id>` when the caller
+supplied an explicit tracked worktree id and the process cannot use that cwd.
+Select effort-backed behavior only when the returned `active_effort.active` is
+`true`. If it reports a valid open binding, read the cited repository-relative
+effort README first. That file owns the durable objective,
+plan, journal, and completion gate. Do not reconstruct or repeat those from the
+transcript.
+
+For an active effort, use the dormant session only to recover immediate facts
+the effort and worktree do not contain: uncommitted edits, an in-flight command
+or review, material decisions not yet journaled, blockers, and required
+confirmations. If the effort plus git state explains the takeover, skip deeper
+transcript reads entirely.
+
+For a remote worktree, do not send the caller's local catalog path over SSH.
+Unless the caller explicitly supplies an exact remote agent-worktrees command,
+continue with standalone reconstruction. The same fallback applies when the
+binding is absent, stale, closed, or unavailable.
+
+### 3. Read deeper — only as needed, within budget
 
 Use the existing digest reader against the session id. Be surgical:
 
@@ -81,7 +111,7 @@ Good greps: the task/goal, `error|fail|blocked`, an effort/issue/PR reference, a
 key filename, "next" / "TODO". Read whole segments sparingly and only when a
 grep hit needs its surrounding context. **Do not loop over every segment.**
 
-### 3. Reconcile intent against reality
+### 4. Reconcile intent against reality
 
 The transcript tells you what the session *intended*; the worktree tells you
 what actually **landed**. Inspect the worktree itself:
@@ -95,7 +125,7 @@ git -C <worktree> diff --stat        # and targeted `git -C <worktree> diff <pat
 Determine: what is committed, what is uncommitted/in-flight, and whether the
 tail's last actions completed or were cut off.
 
-### 4. Return the briefing
+### 5. Return the briefing
 
 Reply with **only** this structure (compact, factual, no persona):
 
@@ -104,16 +134,18 @@ Reply with **only** this structure (compact, factual, no persona):
 
 - **Session:** <id> · **Branch:** <branch> · **Last active:** <ts>
 - **Digest (ephemeral):** $TEMP/session-digest/<id>/
+- **Active effort:** <repository-relative README + participant/slice, or "none">
 
 ### Situation
-<2-4 sentences: what this session was doing and where it stopped.>
+<2-4 sentences: cite the effort as the objective when active; otherwise state
+the reconstructed objective. Say where the predecessor stopped.>
 
 ### What landed
 <committed work — reference commits by short hash + subject.>
 
 ### In flight / uncommitted
-<uncommitted changes, half-done edits, the last actions from the tail, and
-whether they completed.>
+<Only immediate predecessor activity: uncommitted changes, half-done edits,
+in-flight review/commands, and whether they completed.>
 
 ### Next actions
 1. <concrete, ordered steps to resume — specific files/commands.>
