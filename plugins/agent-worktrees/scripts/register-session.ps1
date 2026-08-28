@@ -43,8 +43,20 @@ if ($catalogScript -and (Test-Path -LiteralPath $catalogScript)) {
 # Keep the payload-local command catalog with the worktree-binding context in
 # one sessionStart result. Copilot CLI currently retains only one non-empty
 # result when hooks race (#1234), so separate valid producers are insufficient.
+$registrationContext = ''
+if ($registrationJson) {
+    try {
+        $registrationValue = $registrationJson | ConvertFrom-Json
+        $registrationContext = ([string]$registrationValue.additionalContext).Trim()
+    } catch { }
+}
+if (-not $registrationContext) {
+    [Console]::Out.Write('{}')
+    exit 0
+}
+
 $contexts = [System.Collections.Generic.List[string]]::new()
-foreach ($raw in @($catalogJson, $registrationJson)) {
+foreach ($raw in @($catalogJson)) {
     if (-not $raw) { continue }
     try {
         $value = $raw | ConvertFrom-Json
@@ -54,6 +66,7 @@ foreach ($raw in @($catalogJson, $registrationJson)) {
         }
     } catch { }
 }
+$contexts.Add($registrationContext)
 if ($contexts.Count -gt 0) {
     [Console]::Out.Write((@{
         additionalContext = $contexts -join "`n`n"

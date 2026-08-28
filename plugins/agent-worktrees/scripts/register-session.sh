@@ -56,16 +56,25 @@ if ! merged_json="$(PYTHONPATH="" "$PYTHON" -c '
 import json
 import sys
 
-contexts = []
-for raw in sys.argv[1:]:
+def parse_context(raw):
     if not raw.strip():
-        continue
+        return ""
     try:
         value = json.loads(raw)
     except json.JSONDecodeError:
-        continue
+        return ""
     context = value.get("additionalContext") if isinstance(value, dict) else None
-    if isinstance(context, str) and context.strip() and context not in contexts:
+    return context.strip() if isinstance(context, str) else ""
+
+catalog_context = parse_context(sys.argv[1])
+registration_context = parse_context(sys.argv[2])
+if not registration_context:
+    print("{}")
+    raise SystemExit(0)
+
+contexts = []
+for context in (catalog_context, registration_context):
+    if context and context not in contexts:
         contexts.append(context)
 print(json.dumps({"additionalContext": "\n\n".join(contexts)}) if contexts else "{}")
 ' "$catalog_json" "$registration_json" 2>/dev/null)"; then
