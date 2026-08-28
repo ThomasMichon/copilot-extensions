@@ -38,6 +38,8 @@ _ALLOWED_EFFECTS = {
     "T3": _EFFECTS,
     "T4": _EFFECTS,
 }
+
+
 def _is_within(path: Path, root: Path) -> bool:
     try:
         path.resolve().relative_to(root.resolve())
