@@ -668,64 +668,61 @@ function Write-DeployManifest {
         -InstallPath $InstallDir -PluginPath $PluginDir -VenvPath $LinkDir
 }
 
+function Publish-PayloadSnapshot {
+    <# Publish one immutable payload snapshot and atomically point payload-dir
+       and stamped-version at it. Existing complete same-version snapshots are
+       reused, never removed beneath a running compatibility wrapper. #>
+    foreach ($dir in @($InstallDir, (Join-Path $InstallDir 'snapshots'))) {
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        }
+    }
+    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
+    if (Test-Path $snapDir) {
+        $complete = (Test-Path (Join-Path $snapDir 'plugin.json')) -and
+            (Test-Path (Join-Path $snapDir 'bin\agent-logger.ps1'))
+        if (-not $complete) {
+            throw "Existing agent-logger snapshot is incomplete; refusing replacement: $snapDir"
+        }
+    } else {
+        $snapTmp = "$snapDir.tmp-$PID"
+        if (Test-Path $snapTmp) {
+            Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
+        $exclude = @(
+            '.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist',
+            '.pytest_cache', '.mypy_cache', 'tests'
+        )
+        Get-ChildItem -LiteralPath $PluginDir -Force |
+            Where-Object { $exclude -notcontains $_.Name } |
+            ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName `
+                    -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
+            }
+        Move-Item -LiteralPath $snapTmp -Destination $snapDir
+    }
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($marker in @{
+        'payload-dir'     = $snapDir
+        'stamped-version' = $SrcVersion
+    }.GetEnumerator()) {
+        $path = Join-Path $InstallDir $marker.Key
+        $tmp = "$path.tmp-$PID"
+        [System.IO.File]::WriteAllText($tmp, [string]$marker.Value, $utf8NoBom)
+        Move-Item -LiteralPath $tmp -Destination $path -Force
+    }
+    Write-Ok "Snapshot: $snapDir"
+    return $snapDir
+}
+
 function Write-Binstubs {
-    <# Deploy the agent-logger CLI binstubs into ~/.local/bin as a .ps1 primary
-       plus a .cmd fallback. PowerShell resolves a .ps1 (ExternalScript) ahead of
-       a .cmd (Application) in the same dir; both launch the venv's signed python
-       via `-m`, never the unsigned console-script trampoline .exe that Smart App
-       Control blocks (3077). Covers the service CLI (session-sync) and the
-       segmenter tools the log-session skill and session-log-writer agent call
-       (collate-session, read-session-digest, prepare-session-log,
-       ramp-up-session). The primary `agent-logger` entrypoint is deployed
-       separately as a SELF-PROVISIONING binstub (Deploy-SelfProvisioningBinstub),
-       so it can rebuild the runtime on first use on a stamped-only box. #>
+    <# Compatibility alias retained for the install flow. Every auxiliary
+       command delegates to its owning payload shim, so first-use provisioning
+       and later updates preserve one attributable launch model. #>
     param([Parameter(Mandatory)][string]$PythonExe)
-
-    # Resolve the .venv link's reparse target and launch the slot python DIRECTLY,
-    # never *traversing* the junction (a RedirectionGuard-enforcing process is
-    # blocked from that but may still *read* the target) -- dotfiles #637. The .ps1
-    # reads the current-version marker; the .cmd reads the same marker. Newest slot falls back.
-    $stubVenv = Split-Path (Split-Path $PythonExe)
-    $stubRoot = Split-Path $stubVenv
-    if ((Split-Path -Leaf $stubRoot) -eq 'versions') { $stubRoot = Split-Path $stubRoot }
-
-    $stubs = [ordered]@{
-        'session-sync'        = 'agent_logger.sync.engine'
-        'collate-session'     = 'agent_logger.segmenter.collate'
-        'read-session-digest' = 'agent_logger.segmenter.read_digest'
-        'prepare-session-log' = 'agent_logger.segmenter.prepare_log'
-        'ramp-up-session'     = 'agent_logger.segmenter.ramp_up'
-    }
-    foreach ($name in $stubs.Keys) {
-        $mod = $stubs[$name]
-        $ps1Path = Join-Path $LocalBin "$name.ps1"
-        $cmdPath = Join-Path $LocalBin "$name.cmd"
-        $ps1 = @(
-            "`$env:PYTHONUTF8 = '1'",
-            "`$_venv = '$stubVenv'",
-            "`$_py = Join-Path `$_venv 'Scripts\python.exe'",
-            "`$_root = Split-Path `$_venv
-if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
-`$_ver = ''
-try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
-`$_py = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver + '\Scripts\python.exe') } else { '' }
-if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }",
-            "& `$_py -m $mod @args",
-            "exit `$LASTEXITCODE"
-        ) -join "`r`n"
-        [System.IO.File]::WriteAllText($ps1Path, $ps1, (New-Object System.Text.UTF8Encoding($false)))
-        $cmd = @(
-            "@echo off",
-            "set `"PYTHONUTF8=1`"",
-            "set `"_ROOT=$stubRoot`"",
-            "set `"_VER=`"",
-            "if exist `"%_ROOT%\current-version`" set /p _VER=<`"%_ROOT%\current-version`"",
-            "set `"_PY=%_ROOT%\versions\%_VER%\Scripts\python.exe`"",
-            "`"%_PY%`" -m $mod %*"
-        ) -join "`r`n"
-        [System.IO.File]::WriteAllText($cmdPath, $cmd)
-    }
-    Write-Ok "wrote binstubs to $LocalBin (.ps1 + .cmd)"
+    Deploy-AuxiliaryCompatibilityBinstubs
 }
 
 function Install-Package {
@@ -787,6 +784,7 @@ function Install-Package {
     # Binstubs: .ps1 primary + .cmd fallback that invoke `python -m`
     # (never the SAC-blocked console-script trampolines). Point at the stable
     # `.venv` link ($LinkPython), never a versions/<v> absolute a `gc` could remove.
+    Publish-PayloadSnapshot | Out-Null
     Write-Binstubs -PythonExe $LinkPython
     # The primary `agent-logger` entrypoint is a SELF-PROVISIONING binstub
     # (deployed byte-identically at stamp + here) so it rebuilds the runtime on
@@ -935,6 +933,53 @@ exit /b %ERRORLEVEL%
     Write-Ok "Binstub: $cmdPath (+ .ps1, self-provisioning)"
 }
 
+function Deploy-AuxiliaryCompatibilityBinstubs {
+    <# Publish legacy/global fallbacks for every auxiliary payload command.
+
+       The wrapper does not select the runtime itself. It resolves the durable
+       payload marker written by stamp, then delegates to that payload's
+       generated command shim so command ownership and first-use provisioning
+       remain attributable to the plugin that supplied the capability. #>
+    if (-not (Test-Path $LocalBin)) {
+        New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    foreach ($name in $BinstubNames | Where-Object { $_ -ne 'agent-logger' }) {
+        $ps1Path = Join-Path $LocalBin "$name.ps1"
+        $ps1Content = @'
+$ErrorActionPreference = 'Stop'
+$_command = '__COMMAND__'
+$_root = Join-Path $env:USERPROFILE '.agent-logger'
+$_payload = ''
+try { $_payload = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+$_shim = if ($_payload) { Join-Path $_payload "bin\$($_command).ps1" } else { '' }
+if (-not ($_shim -and (Test-Path -LiteralPath $_shim))) {
+    [Console]::Error.WriteLine("[$_command] owning payload shim not found: $_shim")
+    [Console]::Error.WriteLine("[$_command] re-enable/update agent-logger, then retry.")
+    exit 127
+}
+$env:COPILOT_PLUGIN_ROOT = $_payload
+& $_shim @args
+exit $LASTEXITCODE
+'@.Replace('__COMMAND__', $name)
+        [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
+
+        $cmdPath = Join-Path $LocalBin "$name.cmd"
+        $cmdContent = @'
+@echo off
+setlocal
+set "PYTHONUTF8=1"
+set "_PS1=%USERPROFILE%\.local\bin\__COMMAND__.ps1"
+if not exist "%_PS1%" (echo [__COMMAND__] binstub not found: %_PS1%>&2 & exit /b 127)
+where pwsh >nul 2>&1
+if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) else (powershell -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*)
+exit /b %ERRORLEVEL%
+'@.Replace('__COMMAND__', $name)
+        [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
+    }
+    Write-Ok "Compatibility binstubs: $($BinstubNames.Count) commands on PATH"
+}
+
 function Invoke-Stamp {
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
     # ~/.agent-logger/snapshots/<ver>/, record markers, and deploy ONLY the
@@ -945,31 +990,13 @@ function Invoke-Stamp {
     Write-Host ''
     Write-Host '=== agent-logger stamp (defer runtime to first use) ===' -ForegroundColor Cyan
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
-    $snapDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
-    $snapTmp = "$snapDir.tmp-$PID"
-    if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
-    if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
-    Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
-    $payloadPath = Join-Path $InstallDir 'payload-dir'
-    $stampedPath = Join-Path $InstallDir 'stamped-version'
-    $payloadTmp = "$payloadPath.tmp-$PID"
-    $stampedTmp = "$stampedPath.tmp-$PID"
-    [System.IO.File]::WriteAllText($payloadTmp, $snapDir, $utf8NoBom)
-    [System.IO.File]::WriteAllText($stampedTmp, $SrcVersion, $utf8NoBom)
-    Move-Item -LiteralPath $payloadTmp -Destination $payloadPath -Force
-    Move-Item -LiteralPath $stampedTmp -Destination $stampedPath -Force
-    Write-Ok "Snapshot: $snapDir"
+    Publish-PayloadSnapshot | Out-Null
     Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: agent-logger binstub on PATH; runtime provisions on first use.'
+    Deploy-AuxiliaryCompatibilityBinstubs
+    Write-Ok 'Stamped: agent-logger command family on PATH; runtime provisions on first use.'
 }
 
 switch ($Action) {

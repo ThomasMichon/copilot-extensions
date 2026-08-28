@@ -587,18 +587,83 @@ STUBEOF
     ok "binstub: ${LOCAL_BIN}/agent-logger (self-provisioning)"
 }
 
+deploy_auxiliary_compatibility_binstubs() {
+    mkdir -p "${LOCAL_BIN}"
+    local name
+    for name in session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
+        rm -f "${LOCAL_BIN}/${name}"
+        cat > "${LOCAL_BIN}/${name}" << 'STUBEOF'
+#!/usr/bin/env sh
+# Legacy/global compatibility wrapper. The owning payload shim selects and
+# self-provisions its own runtime; this file never resolves a same-named command
+# through PATH.
+set -eu
+_command="$(basename -- "$0")"
+_root="$HOME/.agent-logger"
+_payload="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_shim="$_payload/bin/$_command"
+if [ -z "$_payload" ] || [ ! -x "$_shim" ]; then
+    printf '[%s] owning payload shim not found: %s\n' "$_command" "$_shim" >&2
+    printf '[%s] re-enable/update agent-logger, then retry.\n' "$_command" >&2
+    exit 127
+fi
+COPILOT_PLUGIN_ROOT="$_payload"
+export COPILOT_PLUGIN_ROOT
+exec "$_shim" "$@"
+STUBEOF
+        chmod +x "${LOCAL_BIN}/${name}"
+    done
+    ok "compatibility binstubs: 6 commands on PATH"
+}
+
+publish_payload_snapshot() {
+    mkdir -p "${INSTALL_DIR}/snapshots"
+    local snapshot_dir="${INSTALL_DIR}/snapshots/${SRC_VERSION}"
+    if [ -d "$snapshot_dir" ]; then
+        if [ ! -f "$snapshot_dir/plugin.json" ] || \
+           [ ! -x "$snapshot_dir/bin/agent-logger" ]; then
+            printf 'ERROR: existing agent-logger snapshot is incomplete; refusing replacement: %s\n' \
+                "$snapshot_dir" >&2
+            return 1
+        fi
+    else
+        local snapshot_tmp="${snapshot_dir}.tmp.$$"
+        rm -rf "$snapshot_tmp"
+        mkdir -p "$snapshot_tmp"
+        # PLUGIN_DIR is the invocation's self-staged copy. The original
+        # marketplace singleton is provenance only and may be replaced while
+        # this installer runs.
+        cp -a "${PLUGIN_DIR}/." "$snapshot_tmp/"
+        rm -rf \
+            "$snapshot_tmp/.git" \
+            "$snapshot_tmp/__pycache__" \
+            "$snapshot_tmp/.venv" \
+            "$snapshot_tmp/node_modules" \
+            "$snapshot_tmp/build" \
+            "$snapshot_tmp/dist" \
+            "$snapshot_tmp/.pytest_cache" \
+            "$snapshot_tmp/.mypy_cache" \
+            "$snapshot_tmp/tests"
+        mv "$snapshot_tmp" "$snapshot_dir"
+    fi
+
+    local payload_tmp="${INSTALL_DIR}/payload-dir.tmp.$$"
+    local version_tmp="${INSTALL_DIR}/stamped-version.tmp.$$"
+    printf '%s\n' "$snapshot_dir" > "$payload_tmp"
+    printf '%s\n' "$SRC_VERSION" > "$version_tmp"
+    mv -f "$payload_tmp" "${INSTALL_DIR}/payload-dir"
+    mv -f "$version_tmp" "${INSTALL_DIR}/stamped-version"
+    ok "snapshot: ${snapshot_dir}"
+}
+
 # Cheap 'stamp': splat the agent-logger binstub + payload marker, defer the venv
 # build to first use (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
     mkdir -p "${INSTALL_DIR}" "${LOCAL_BIN}"
-    local payload_tmp="${INSTALL_DIR}/payload-dir.tmp.$$"
-    local version_tmp="${INSTALL_DIR}/stamped-version.tmp.$$"
-    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$payload_tmp"
-    printf '%s\n' "$SRC_VERSION" > "$version_tmp"
-    mv -f "$payload_tmp" "${INSTALL_DIR}/payload-dir"
-    mv -f "$version_tmp" "${INSTALL_DIR}/stamped-version"
+    publish_payload_snapshot
     deploy_binstub
-    ok "stamped: binstub on PATH; runtime provisions on first use."
+    deploy_auxiliary_compatibility_binstubs
+    ok "stamped: agent-logger command family on PATH; runtime provisions on first use."
 }
 
 install_package() {
@@ -632,18 +697,15 @@ install_package() {
   # Versioned layout (#581): health-gate the slot + swap the `.venv` symlink.
   _versioned_activate || exit 1
 
-  # Binstubs on PATH -> venv console scripts (the sanctioned POSIX launch path).
-  # Both the service CLIs and the segmenter tools the log-session skill and
-  # session-log-writer agent invoke, so they resolve on PATH rather than assuming
-  # a bare command that was never deployed. Point at the stable `.venv` link
-  # ($LINK_DIR), never a versions/<v> absolute a `gc` could remove.
-  for name in session-sync collate-session read-session-digest prepare-session-log ramp-up-session; do
-    ln -sf "${LINK_DIR}/bin/${name}" "${LOCAL_BIN}/${name}"
-  done
+  # Keep auxiliary PATH fallbacks payload-attributed after provisioning. The
+  # scheduled service uses the runtime directly; interactive compatibility
+  # commands continue through their owning payload shims.
+  publish_payload_snapshot
+  deploy_auxiliary_compatibility_binstubs
   # The primary `agent-logger` entrypoint is a self-provisioning binstub (not a
   # plain symlink) so it can rebuild the runtime on first use in a confined host.
   deploy_binstub
-  ok "linked binstubs into ${LOCAL_BIN}"
+  ok "published compatibility binstubs into ${LOCAL_BIN}"
 
   # Machine-local config schema migration (idempotent + atomic). Non-fatal.
   if PYTHONUTF8=1 "${VENV}/bin/agent-logger" config-migrate 2>/dev/null; then
