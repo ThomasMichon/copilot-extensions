@@ -142,6 +142,11 @@ single durable request/plan/journal; the baton does not copy it. Repositories
 without effort adoption, stale/closed bindings, and objectives with no effort
 continue to use the full standalone handoff.
 
+The live `-i` seed reinforces that contract before the successor reads the
+baton: an active effort is the source of truth and completion gate, so the
+successor selects its next authorized Plan or Validation Plan item and drives
+toward `Done` rather than finalizing after a handoff task, phase, or pull request.
+
 **Failed-successor recovery (`retry_handoff_cutover`).** The native `-i`
 transport is receipt-checked by the pane wrapper; a rejected flag or immediately
 exiting successor is reaped without retiring the predecessor. Because the

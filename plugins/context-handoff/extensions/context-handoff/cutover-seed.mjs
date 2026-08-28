@@ -34,7 +34,12 @@ export const CONTINUATION_DIRECTIVE =
   "confirmation stops you, or a real blocker needs input; if context pressure " +
   "returns first, hand off again with the same parent objective and remaining " +
   "roster. When the handoff cites an active effort, load that effort before " +
-  "reconstructing intent from session history.";
+  "reconstructing intent from session history. Treat the effort -- not the " +
+  "handoff task, latest phase, or pull request -- as the source of truth and " +
+  "completion gate. Focus on driving it to `Done`: select and execute the next " +
+  "authorized Plan or Validation Plan item, and do not finalize the worktree " +
+  "while any item remains unresolved unless responsibility is explicitly " +
+  "transferred to a named tracked objective.";
 
 // Build the single-line ASCII CUTOVER seed (the HANDOFF_SEED) for a live
 // cutover successor. Kept as the ONE source of this string so
