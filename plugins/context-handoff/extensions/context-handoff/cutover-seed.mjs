@@ -66,8 +66,8 @@ export function buildCutoverSeed(
       "call, up to 5 attempts, before doing anything else."
     : "";
   if (kind === "task") {
-    // Bash-first path: load the brief + take ownership, bind the new session,
-    // conclude the predecessor, then retire + reap its pane. Reproducing that as
+    // Bash-first path: load the brief + take ownership, bind the new session to
+    // the exact numbered handoff, then retire + reap its pane. Reproducing that as
     // one shell chain keeps extension tools out of the reload-window critical
     // path and makes the successor's intended worktree explicit.
     if (oldPane && worktree && worktreeDir && sessionId) {
@@ -82,8 +82,7 @@ export function buildCutoverSeed(
         `your full brief, durably binds this new session to the worktree, then ` +
         `retires the predecessor now that you are alive: agent-dispatch consume ` +
         `${id} --defer-complete && agent-worktrees bind-session --worktree-id ` +
-        `${worktree} && agent-worktrees conclude-session --worktree ` +
-        `${worktree} --session ${sessionId} --state handed-off && agent-worktrees ` +
+        `${worktree} --handoff-token ${id} && agent-worktrees ` +
         `handoff-cutover --retire-pane ${oldPane} --successor-verified ` +
         `--retire-reason handoff-consume --worktree-id ${worktree} --session-id ` +
         `${sessionId} . The first command prints your full brief; the trailing ` +

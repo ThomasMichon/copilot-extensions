@@ -141,7 +141,7 @@ standalone-behavior changes.
 |------|---------|--------------|
 | `preToolUse` | Tool calls | Runs statelessness, cross-repo, and anchor-write guards from `~/.agent-worktrees/bin/` when deployed |
 | `sessionStart` | Every session | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks. When cwd/env identity is absent, registration recovers the exact binding from the session lock PID -> process ancestry -> owning `wt-<id>` mux pane/session |
-| `sessionEnd` | Session end | Deregisters the session from the worktree record |
+| `sessionEnd` | Session end | Reads the authoritative hook payload, resolves the exact prior association, and closes the latest activation interval without concluding the resumable session |
 
 The bundled live-pulse extension writes `substatus.json` beside Copilot session
 state so the picker can show live intent/rest state. It is passive; durable

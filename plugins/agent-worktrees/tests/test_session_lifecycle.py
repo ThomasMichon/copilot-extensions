@@ -13,6 +13,7 @@ import pytest
 
 from agent_worktrees import tracking
 from agent_worktrees.tracking import (
+    HeadTransition,
     SessionEntry,
     SessionLifecycleError,
     WorktreeRecord,
@@ -93,6 +94,21 @@ class TestBackwardCompat:
         rec = load_record(p)
         assert rec.session_entry("s1").state == "active"
 
+    def test_null_activation_start_is_skipped(self, tmp_tracking_dir: Path):
+        p = tmp_tracking_dir / "wt-1.yaml"
+        p.write_text(
+            "worktree_id: wt-1\nbranch: worktree/wt-1\n"
+            "worktree_path: /tmp/wt-1\nrepo: r\nmachine: m\nplatform: wsl\n"
+            "started_at: 2026-01-01T00:00:00\n"
+            "last_resumed_at: 2026-01-01T00:00:00\nresume_count: 0\n"
+            "title: null\nstatus: active\ncompleted_at: null\n"
+            "sessions:\n- session_id: s1\n  started_at: 2026-01-01T00:00:00\n"
+            "  activations:\n  - ordinal: 1\n    started_at: null\n"
+            "    start_recorded_at: null\n"
+        )
+        entry = load_record(p).session_entry("s1")
+        assert entry.activations == []
+
 
 class TestResolvedHead:
     def test_no_sessions_is_none(self, tmp_tracking_dir: Path):
@@ -137,7 +153,9 @@ class TestTransitions:
         with pytest.raises(SessionLifecycleError):
             set_head_session(rec, "ghost")
 
-    def test_conclude_advances_head(self, tmp_tracking_dir: Path, monkeypatch_config):
+    def test_conclude_clears_head_without_guessing_replacement(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
         rec = _rec(tmp_tracking_dir, sessions=[
             SessionEntry("s1", "t"), SessionEntry("s2", "t"),
         ])
@@ -146,8 +164,8 @@ class TestTransitions:
         conclude_session(rec, "s2")
         r = load_record(rec.yaml_path)
         assert r.session_entry("s2").state == "concluded"
-        # Head advanced off the concluded session to the remaining active one.
-        assert r.resolved_head_session == "s1"
+        assert r.resolved_head_session is None
+        assert r.replayed_head_transition.reason == "concluded"
 
     def test_conclude_last_clears_head(self, tmp_tracking_dir: Path, monkeypatch_config):
         rec = _rec(tmp_tracking_dir, sessions=[SessionEntry("s1", "t")])
@@ -242,91 +260,260 @@ class TestRegisterSessionHeadInit:
         assert rec.session_entry("sess-A").pid == 999
 
 
-class TestRegisterSessionCompletesHandoffLink:
-    """The successor half of the two-way link is stamped when the seeded
-    successor REGISTERS -- the first moment its (fresh) session id exists. A
-    live cutover concludes the predecessor ``handed-off`` (context-handoff
-    shelling ``conclude-session``); the ground layer then auto-adopts the next
-    session as its successor here.
-    """
-
-    def test_next_session_after_handoff_completes_link(
+class TestExactHandoffLedger:
+    def test_exact_handoff_token_completes_link(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
         _rec(tmp_tracking_dir)
         tracking.register_session("wt-1", "old")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
-        # Cutover: the predecessor is concluded ``handed-off`` (successor unknown).
-        conclude_session(rec, "old", state="handed-off")
-        assert load_record(tmp_tracking_dir / "wt-1.yaml").resolved_head_session is None
-        # The seeded successor registers -> the link is completed both ways and
-        # the head moves to it.
-        tracking.register_session("wt-1", "new")
+        conclude_session(
+            rec, "old", state="handed-off", handoff_token="task-123"
+        )
+        tracking.register_session(
+            "wt-1", "new", handoff_token="task-123"
+        )
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         old, new = rec.session_entry("old"), rec.session_entry("new")
         assert old.state == "handed-off" and old.successor == "new"
         assert new.predecessor == "old"
-        assert rec.head_session == "new"
         assert rec.resolved_head_session == "new"
+        assert rec.handoffs[0].ordinal == 1
+        assert rec.handoffs[0].state == "linked"
 
-    def test_concluded_predecessor_gets_no_auto_successor(
+    def test_unclaimed_pending_handoff_does_not_adopt_arbitrary_session(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        # A ``concluded`` (sunset/finished) session expects no successor, so the
-        # next session must NOT auto-link to it -- only ``handed-off`` does.
         _rec(tmp_tracking_dir)
         tracking.register_session("wt-1", "old")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
-        conclude_session(rec, "old", state="concluded")
+        conclude_session(
+            rec, "old", state="handed-off", handoff_token="expected"
+        )
         tracking.register_session("wt-1", "new")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
         assert rec.session_entry("old").successor is None
         assert rec.session_entry("new").predecessor is None
-        # Head still initializes to the fresh session (the concluded one is not
-        # active), just without a lineage link.
-        assert rec.head_session == "new"
+        assert rec.resolved_head_session is None
+        assert rec.handoffs[0].state == "pending"
 
-    def test_active_predecessor_is_not_adopted(
+    def test_handed_off_without_token_does_not_create_unclaimable_handoff(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        # A second session arriving while the incumbent is still ACTIVE is the
-        # contested case (guarded upstream); it must not be linked as a successor.
         _rec(tmp_tracking_dir)
-        tracking.register_session("wt-1", "sess-A")
-        tracking.register_session("wt-1", "sess-B")
+        tracking.register_session("wt-1", "old")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
-        assert rec.session_entry("sess-A").successor is None
-        assert rec.session_entry("sess-B").predecessor is None
-        assert rec.head_session == "sess-A"
-
-    def test_only_most_recent_pending_handoff_is_adopted(
-        self, tmp_tracking_dir: Path, monkeypatch_config
-    ):
-        # Two handed-off predecessors both awaiting a successor -> the newest one
-        # (registration order) adopts the fresh session; the older stays pending.
-        _rec(tmp_tracking_dir, sessions=[
-            SessionEntry("h1", "t", state="handed-off"),
-            SessionEntry("h2", "t", state="handed-off"),
-        ])
+        conclude_session(rec, "old", state="handed-off")
         tracking.register_session("wt-1", "new")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
-        assert rec.session_entry("h2").successor == "new"
-        assert rec.session_entry("new").predecessor == "h2"
-        assert rec.session_entry("h1").successor is None
+        assert rec.handoffs == []
+        assert rec.resolved_head_session == "new"
 
-    def test_already_linked_handoff_not_readopted(
+    def test_explicit_bind_supersedes_stale_pending_handoff(
         self, tmp_tracking_dir: Path, monkeypatch_config
     ):
-        # A handed-off session that ALREADY has a successor is not re-adopted by
-        # a later fresh session (its baton was already picked up).
-        _rec(tmp_tracking_dir, sessions=[
-            SessionEntry("old", "t", state="handed-off", successor="mid"),
-            SessionEntry("mid", "t"),
-        ])
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        conclude_session(
+            rec, "old", state="handed-off", handoff_token="stale"
+        )
+        tracking.register_session("wt-1", "new")
+        tracking.register_session("wt-1", "new", source="bind")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "new"
+        assert rec.handoffs[0].state == "cancelled"
+        assert rec.replayed_head_transition.reason == "rebind"
+
+    def test_existing_active_session_can_rebind_after_head_concludes(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
         tracking.register_session("wt-1", "new")
         rec = load_record(tmp_tracking_dir / "wt-1.yaml")
-        assert rec.session_entry("old").successor == "mid"
-        assert rec.session_entry("new").predecessor is None
+        conclude_session(rec, "old", state="handed-off")
+        tracking.register_session("wt-1", "new")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.resolved_head_session == "new"
+        assert rec.replayed_head_transition.reason == "rebind"
+
+    def test_token_selects_one_of_multiple_pending_handoffs(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("h1", "t"),
+            SessionEntry("h2", "t"),
+        ])
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "h1", "token-1", save=False)
+        tracking.open_handoff(rec, "h2", "token-2")
+        tracking.register_session(
+            "wt-1", "new", handoff_token="token-1"
+        )
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("h1").successor == "new"
+        assert rec.session_entry("new").predecessor == "h1"
+        assert rec.session_entry("h2").successor is None
+        assert [handoff.state for handoff in rec.handoffs] == [
+            "linked", "pending"
+        ]
+
+    def test_linked_token_is_idempotent_for_same_successor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token")
+        tracking.register_session("wt-1", "new", handoff_token="token")
+        tracking.register_session("wt-1", "new", handoff_token="token")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").successor == "new"
+        assert len(rec.head_transitions) == 2
+
+    def test_unknown_token_still_persists_successor_association(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        with pytest.raises(SessionLifecycleError):
+            tracking.register_session(
+                "wt-1", "new", handoff_token="missing"
+            )
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("new") is not None
+        assert rec.resolved_head_session == "old"
+
+    def test_late_token_cannot_overwrite_explicit_conclusion(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        conclude_session(rec, "old", state="concluded")
+        with pytest.raises(SessionLifecycleError):
+            tracking.register_session(
+                "wt-1", "new", handoff_token="token"
+            )
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert rec.session_entry("old").state == "concluded"
+        assert rec.session_entry("old").successor is None
+
+    def test_token_cannot_overwrite_conflicting_successor_predecessor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t", successor="other"),
+            SessionEntry("new", "t", predecessor="different"),
+        ])
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "token")
+        with pytest.raises(SessionLifecycleError):
+            tracking.link_handoff(rec, "token", "new")
+        assert rec.session_entry("old").successor == "other"
+        assert rec.session_entry("new").predecessor == "different"
+
+    def test_new_handoff_cancels_prior_pending_for_same_predecessor(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "first")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(rec, "old", "second")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert [handoff.state for handoff in rec.handoffs] == [
+            "cancelled", "pending"
+        ]
+        assert [handoff.ordinal for handoff in rec.handoffs] == [1, 2]
+
+
+class TestActivationLedger:
+    def test_resume_appends_interval_without_overwriting_first_start(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session(
+            "wt-1", "s", started_at="2026-01-01T10:00:00",
+            recorded_at="2026-01-01T10:00:01",
+        )
+        tracking.deregister_session(
+            "wt-1", "s", ended_at="2026-01-01T11:00:00",
+            recorded_at="2026-01-01T11:00:01",
+        )
+        tracking.register_session(
+            "wt-1", "s", started_at="2026-01-02T10:00:00",
+            recorded_at="2026-01-02T10:00:01", source="hook:resume",
+        )
+        entry = load_record(tmp_tracking_dir / "wt-1.yaml").session_entry("s")
+        assert entry.started_at == "2026-01-01T10:00:00"
+        assert entry.ended_at is None
+        assert [activation.ordinal for activation in entry.activations] == [1, 2]
+        assert entry.activations[0].ended_at == "2026-01-01T11:00:00"
+        assert entry.activations[1].start_source == "hook:resume"
+
+    def test_duplicate_start_and_end_deliveries_are_idempotent(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "s", started_at="start")
+        tracking.register_session("wt-1", "s", started_at="start")
+        tracking.deregister_session("wt-1", "s", ended_at="end")
+        tracking.deregister_session("wt-1", "s", ended_at="duplicate-end")
+        entry = load_record(tmp_tracking_dir / "wt-1.yaml").session_entry("s")
+        assert len(entry.activations) == 1
+        assert entry.activations[0].started_at == "start"
+        assert entry.activations[0].ended_at == "end"
+
+    def test_new_start_after_missed_end_closes_prior_interval(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "s", started_at="first")
+        tracking.register_session("wt-1", "s", started_at="second")
+        entry = load_record(tmp_tracking_dir / "wt-1.yaml").session_entry("s")
+        assert len(entry.activations) == 2
+        assert entry.activations[0].ended_at == "second"
+        assert entry.activations[0].end_source == "inferred:next-start"
+        assert entry.activations[1].started_at == "second"
+
+
+class TestHeadTransitionReplay:
+    def test_transition_ledger_wins_over_stale_cache(self, tmp_tracking_dir: Path):
+        rec = _rec(tmp_tracking_dir, sessions=[
+            SessionEntry("old", "t"), SessionEntry("current", "t"),
+        ])
+        rec.head_session = "old"
+        rec.head_revision = 1
+        rec.lifecycle_revision = 2
+        rec.head_transitions = [
+            HeadTransition(1, "old", "initial", "t"),
+            HeadTransition(2, "current", "adopted", "t"),
+        ]
+        assert rec.resolved_head_session == "current"
+        assert tracking.repair_head_cache(rec) is True
+        assert rec.head_session == "current"
+        assert rec.head_revision == 2
+
+    def test_stale_non_lifecycle_writer_cannot_roll_back_ledger(
+        self, tmp_tracking_dir: Path, monkeypatch_config
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "old")
+        stale = load_record(tmp_tracking_dir / "wt-1.yaml")
+        current = load_record(tmp_tracking_dir / "wt-1.yaml")
+        tracking.open_handoff(current, "old", "token")
+        stale_revision = stale.lifecycle_revision
+        stale.summary = "unrelated status write"
+        save_record(stale)
+        after = load_record(tmp_tracking_dir / "wt-1.yaml")
+        assert after.summary == "unrelated status write"
+        assert after.handoffs[0].token == "token"
+        assert after.lifecycle_revision > stale_revision
 
 
 class TestHeadSessionCommand:
@@ -386,6 +573,21 @@ class TestHeadSessionCommand:
         assert out["head_session"] == "sess-B"
         assert out["active"] is True
         assert out["state"] == "active"
+
+    def test_pending_handoff_is_occupied_but_not_an_active_head(
+        self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch
+    ):
+        _rec(tmp_tracking_dir)
+        tracking.register_session("wt-1", "sess-A")
+        rec = load_record(tmp_tracking_dir / "wt-1.yaml")
+        conclude_session(
+            rec, "sess-A", state="handed-off", handoff_token="token"
+        )
+        out = self._run(monkeypatch, "wt-1")
+        assert out["head_session"] is None
+        assert out["active"] is False
+        assert out["occupied"] is True
+        assert out["pending_handoffs"][0]["token"] == "token"
 
     def test_untracked_worktree_fails_open(
         self, tmp_tracking_dir: Path, monkeypatch_config, monkeypatch

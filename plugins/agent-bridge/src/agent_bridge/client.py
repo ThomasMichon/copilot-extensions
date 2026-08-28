@@ -726,8 +726,9 @@ class BridgeClient:
 
         ``worktree_id`` targets an *existing* worktree (a session roll). When it
         is set, the server enforces the session-lifecycle head guard: a create
-        into a worktree whose ground-layer head is still ``active`` is refused
-        (409 ``reason: worktree_head_active``) unless ``reclaim=true`` -- the
+        into a worktree whose ground-layer head is active or whose numbered
+        handoff is pending is refused (409 ``worktree_head_active`` /
+        ``worktree_head_pending``) unless ``reclaim=true`` -- the
         break-glass take-over (sibling of ``resume_worktree(reclaim=...)``).
 
         ``env`` sets per-session environment overrides merged onto the resolved

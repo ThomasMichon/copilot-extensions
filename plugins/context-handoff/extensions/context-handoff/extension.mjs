@@ -447,6 +447,24 @@ function concludeOldSessionHandedOff(cwd, sid) {
   }
 }
 
+function bindConsumedHandoff(cwd, token, metadata, sid) {
+  if (!token || !sid) return false;
+  try {
+    const argv = [
+      "bind-session",
+      "--session-id", sid,
+      "--handoff-token", token,
+    ];
+    if (metadata?.worktree) {
+      argv.push("--worktree-id", metadata.worktree);
+    }
+    runCli("agent-worktrees", argv, { cwd, timeout: 10000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 // Store a handoff as a proposed, handoff-labeled agent-dispatch task pinned to
 // the current worktree; payload = metadata + handoff markdown. Returns the task
 // id, or null if anything fails (the caller then falls back to a worktree file).
@@ -567,16 +585,16 @@ function runAgentDispatchConsume(cwd, taskId, deferComplete) {
   return runCli("agent-dispatch", argv, { cwd, timeout: 20000 });
 }
 
-function retireAfterConsume(cwd, metadata, sid) {
+function retireAfterConsume(cwd, metadata, sid, handoffToken) {
   const result = {
     retired: false,
     retireResult: null,
     concluded: false,
   };
-  if (metadata?.sessionId) {
+  result.concluded = bindConsumedHandoff(cwd, handoffToken, metadata, sid);
+  if (!result.concluded && metadata?.sessionId) {
+    // Compatibility with a handoff written before the numbered ledger existed.
     result.concluded = concludeOldSessionHandedOff(cwd, metadata.sessionId);
-  } else if (sid) {
-    result.concluded = concludeOldSessionHandedOff(cwd, sid);
   }
   if (metadata?.oldPane) {
     const oldSid = metadata.sessionId || sid || null;
@@ -625,7 +643,7 @@ function consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete = false) {
     const consumed = runAgentDispatchConsume(cwd, taskId, deferComplete);
     const decoded = decodeHandoffPayload(consumed);
     const metadata = decoded.metadata || before.metadata || {};
-    const retire = retireAfterConsume(cwd, metadata, sid);
+    const retire = retireAfterConsume(cwd, metadata, sid, taskId);
     return {
       ok: true,
       id: taskId,
@@ -664,7 +682,7 @@ function consumeFileHandoff(cwd, sid, handoffId, explicitPath = null) {
     };
   }
   const consumed = markFileHandoffConsumed(path, record, sid);
-  const retire = retireAfterConsume(cwd, consumed, sid);
+  const retire = retireAfterConsume(cwd, consumed, sid, consumed.id);
   return {
     ok: true,
     id: consumed.id,

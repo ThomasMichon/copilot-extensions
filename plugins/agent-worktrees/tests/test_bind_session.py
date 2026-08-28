@@ -300,6 +300,11 @@ class TestNoteHandoff:
         assert e["kind"] == "handoff"
         assert e["session"] == "sess-pred"
         assert "task123" in e["summary"] and "Fix the widget" in e["summary"]
+        record = m.tracking.load_record(tmp_tracking_dir / "wt-hd.yaml")
+        assert record.handoff_counter == 1
+        assert record.handoffs[0].token == "task123"
+        assert record.handoffs[0].state == "pending"
+        assert captured["handoff_ordinal"] == 1
 
     def test_untracked_is_silent_noop(
         self, tmp_tracking_dir, monkeypatch_config, monkeypatch

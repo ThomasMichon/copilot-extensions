@@ -105,12 +105,13 @@ window and passes the exact first prompt through Copilot's native `-i` argv
 before the process starts; it never relies on terminal readiness parsing or
 `send-keys`. The prompt begins with the task title (for useful successor title
 inference), names the intended worktree id and cwd, names the dispatch task, and
-gives the exact consume/bind/conclude/retire/complete commands. It does **not**
+gives the exact consume/bind/retire/complete commands. It does **not**
 retire the predecessor on the predecessor's next idle.
 
-The successor's first command loads the brief, durably binds the new session to
-the worktree, records the outgoing session as **`handed-off`** via
-`agent-worktrees conclude-session`, and retires the predecessor pane through
+The successor's first command loads the brief and binds the new session to the
+handoff's exact durable token. That atomic bind links the numbered handoff,
+records the outgoing session as **`handed-off`**, advances the replayable head
+ledger, and then retires the predecessor pane through
 `agent-worktrees handoff-cutover --retire-pane`.
 
 This keeps recovery safe: if the successor never comes up or never consumes the

@@ -235,23 +235,30 @@ legacy setup scripts remain responsible for entering through
 
 ### Current session, conclusion, and succession (the head pointer)
 
-A worktree is a *series of sessions*, not a single one. The tracking record
-names the **current** session with an asserted **head pointer** and records each
-session's lifecycle state, per the agent-fabric vision's
-*single-current-session-per-worktree*:
+A worktree is a *series of sessions*, not a single one. Its record carries an
+append-only lifecycle ledger; timestamps describe observations, while monotonic
+integers allocated under the record lock determine ordering:
 
-- **`head_session`** (worktree record) — the current session. It is an
-  **asserted** pointer (moved only by an explicit conclude / handoff / new
-  session), never inferred from timestamps. Absent (legacy records) → derived by
-  `WorktreeRecord.resolved_head_session` (the newest non-concluded session in the
-  list), preserving the historical "latest is current" behavior with no
-  migration. Emitted to YAML only when set.
+- **`SessionEntry.activations[]`** — every start/resume-to-end association
+  interval, each with an ordinal, event timestamp, owner-recorded timestamp, and
+  source. Duplicate start/end hook delivery is idempotent. The legacy
+  `started_at`/`ended_at` pair remains as a compatibility summary, but a resume
+  never overwrites the original start.
 - **`SessionEntry.state`** — `active` (default; a stopped/ended session is still
   *active* i.e. resumable until concluded), `handed-off` (concluded into a
   successor), or `concluded` (deliberately finished / sunset). **Conclusion is an
   asserted act, never inferred from liveness.**
 - **`SessionEntry.successor` / `predecessor`** — the durable **two-way chain**, so
   the lineage of sessions in a worktree is traversable in both directions.
+- **`handoffs[]` / `handoff_counter`** — an incrementing ledger of handoff
+  intents. Each entry has a stable external token, one predecessor, and an
+  eventual exact successor. A new session can claim only the token it was given;
+  it never adopts "the newest pending handoff."
+- **`head_transitions[]` / `lifecycle_revision`** — the authoritative,
+  replayable changes to the current session. `head_session` and `head_revision`
+  are materialized caches repaired from the highest valid transition revision.
+  Legacy records with no transition ledger retain their historical fallback
+  until the next lifecycle write seeds a `legacy-import` transition.
 
 Ground-layer transition primitives (in `tracking.py`) — higher layers call these
 and **derive** from `resolved_head_session` rather than keeping a rival "current"
@@ -260,22 +267,28 @@ notion (per the vision's *derive-dont-duplicate*):
 - `set_head_session(record, sid)` — assert a tracked session as the head (used
   when a caller adopts / takes over a worktree).
 - `conclude_session(record, sid, state=…)` — mark `concluded`/`handed-off`;
-  advances the head off the concluded session (to the newest survivor, or None).
+  clears the head when that session was current. It never guesses a replacement
+  from session order.
+- `open_handoff(record, old, token)` / `link_handoff(record, token, new)` —
+  number a handoff intent, then atomically link its exact successor and append
+  the new head transition.
 - `link_succession(record, old, new)` — write the two-way link, conclude the
-  predecessor (`handed-off`), and move the head to the successor. The explicit
-  form used when both session ids are already known.
+  predecessor (`handed-off`), and move the head to the successor through the
+  same numbered ledger.
 
 `register_session` (the sessionStart hook) **initializes** the head for a
 worktree that has no current session yet, but **never moves an existing active
 head** — a second session arriving while one is still current is the contested
 case the agent-bridge creation guard prevents upstream; the ground layer only
-records it. It also **completes a pending handoff's two-way link**: when the
-prior current session was concluded via a *handoff* (state `handed-off`,
-successor not yet known — e.g. context-handoff's live cutover), the fresh
-session registering next *is* that handoff's successor, so `register_session`
-stamps `predecessor.successor` / `successor.predecessor` and moves the head to
-it. This is the moment the successor's (fresh) id first exists; a plain
-`concluded`/sunset predecessor expects no successor and is skipped.
+records it. A `bind-session --handoff-token <token>` call claims one exact
+pending handoff and performs the predecessor conclusion, two-way link, handoff
+state change, and head transition atomically.
+
+`deregister_session` (the sessionEnd hook) consumes the hook payload just like
+sessionStart. It resolves by payload cwd, then by exact previously registered
+session id across projects, and closes the latest open activation interval. It
+does **not** conclude the session or move the head: an exited session remains
+resumable until an explicit lifecycle transition says otherwise.
 
 Beyond the head bookkeeping, `register_session` also **re-seeds this session's
 mux status-bar updater** (`_spawn_status_updater` → a detached
@@ -290,27 +303,25 @@ higher layer in its own venv cannot import `tracking.py`, so the two writes a
 handoff needs are exposed as CLIs alongside the `head-session` read:
 
 ```bash
-# Assert a session concluded; advances the head off it (the cutover's durable
-# write -- context-handoff shells this so the retired session is an asserted
-# `handed-off`, not merely a killed pane, closing the spent-baton replay).
+# Assert a session concluded; never guesses a replacement head.
 agent-worktrees conclude-session --worktree <id> --session <sid> \
-    --state handed-off
+    --state handed-off --handoff-token <token>
 # {"worktree_id": "...", "session": "<sid>", "state": "handed-off",
 #  "head_session": "<sid>"|null}
 
 # Write the two-way link explicitly (both ids known); concludes the predecessor
 # and moves the head to the successor.
-agent-worktrees link-succession --worktree <id> \
+agent-worktrees link-succession --worktree <id> --handoff-token <token> \
     --predecessor <sid> --successor <sid>
 ```
 
 Both resolve the worktree across **all** projects (a higher-layer caller's CWD
 is unrelated to the worktree it acts on) and persist to that resolved record.
 Unlike the fail-open `head-session` read, an unknown worktree/session is a real
-error here — a mutation must not silently no-op. The live cutover uses
-`conclude-session` for the predecessor and lets `register_session` stamp the
-successor half once its id exists; `link-succession` is for callers that already
-hold both ids (an explicit, non-cutover handoff or a manual repair).
+error here — a mutation must not silently no-op. The live cutover opens the
+numbered handoff when the brief is stored, then the successor claims that exact
+token through `bind-session`; `link-succession` remains the explicit form for a
+caller that already holds both ids.
 
 **Cross-layer read interface — `agent-worktrees head-session`.** Because a
 higher layer (agent-bridge, context-handoff) runs in its *own* venv and cannot
@@ -320,11 +331,14 @@ read-only CLI:
 ```bash
 agent-worktrees head-session --worktree <id> --json
 # {"worktree_id": "...", "tracked": true, "head_session": "<sid>"|null,
-#  "active": <bool>, "state": "active"|"handed-off"|"concluded"|null}
+#  "head_revision": 7, "pending_handoffs": [...],
+#  "active": <bool>, "occupied": <bool>, ...}
 ```
 
-`active` is `head_session is not None` — the single boolean a consumer's create
-guard keys on. An **unknown/untracked** worktree is not an error (`tracked:
+`active` retains its compatibility meaning: a current session exists.
+`occupied` additionally includes a pending handoff, so newer consumers can
+distinguish an in-flight cutover from a live head. An **unknown/untracked**
+worktree is not an error (`tracked:
 false`, exit 0): a guard that cannot find a record must **fail open** and permit
 the create, never refuse it. This is the sole sanctioned way for another layer
 to learn "which session is current here" — it derives, it does not keep a rival
@@ -338,9 +352,10 @@ second call:
 
 ```bash
 agent-worktrees list-sessions --worktree <id> --json
-# {"head_session": "<sid>"|null,
+# {"head_session": "<sid>"|null, "head_revision": 7, "handoffs": [...],
 #  "sessions": [{"id": "<sid>", "state": "active"|"handed-off"|"concluded",
-#                "is_head": <bool>, "interface": "cli"|"acp",
+#                "is_head": <bool>, "activations": [...],
+#                "interface": "cli"|"acp",
 #                "origin": "user"|"system"|"delegate", ...}, ...]}
 ```
 

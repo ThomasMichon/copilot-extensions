@@ -148,9 +148,9 @@ class StartSessionRequest(BaseModel):
     parity_fault: str | None = None
     # Break-glass override for the session-lifecycle head guard (agent-fabric
     # `single-current-session-per-worktree`). When targeting an *existing*
-    # worktree (``worktree_id`` set) whose ground-layer head session is still
-    # ``active``, create is refused (409) and the caller must reuse / hand off /
-    # sunset the incumbent. ``reclaim=true`` is the deliberate take-over: it
+    # worktree (``worktree_id`` set) whose ground-layer head is active or whose
+    # numbered handoff is pending, create is refused (409). ``reclaim=true`` is
+    # the deliberate take-over: it
     # bypasses the head guard, mirroring the ``reclaim`` break-glass on
     # ``POST /worktrees/{id}/resume``. Distinct from ``force_new`` (which only
     # opts out of caller-affinity reuse, and does NOT bypass the head guard).

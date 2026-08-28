@@ -31,8 +31,10 @@ def test_parse_active_head():
         '{"worktree_id": "wt-a", "tracked": true, "head_session": "sess-A", '
         '"active": true, "state": "active"}'
     )
-    assert hi == HeadInfo(active=True, head_session="sess-A", state="active",
-                          tracked=True)
+    assert hi == HeadInfo(
+        active=True, occupied=True, head_session="sess-A", state="active",
+        tracked=True,
+    )
 
 
 def test_parse_concluded_head_is_inactive():
@@ -68,7 +70,7 @@ def test_parse_malformed_fails_open(bad):
 def test_guard_raises_on_active_head(monkeypatch):
     monkeypatch.setattr(
         worktree_head, "resolve_head",
-        lambda wid: HeadInfo(active=True, head_session="sess-A",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="sess-A",
                              state="active", tracked=True),
     )
     with pytest.raises(HTTPException) as ei:
@@ -93,6 +95,17 @@ def test_guard_permits_when_inactive(monkeypatch):
     )
     # No raise -> create proceeds.
     assert sessions_route._enforce_worktree_head_guard("wt-a") is None
+
+
+def test_guard_raises_on_pending_handoff(monkeypatch):
+    monkeypatch.setattr(
+        worktree_head, "resolve_head",
+        lambda wid: HeadInfo(active=False, occupied=True, tracked=True),
+    )
+    with pytest.raises(HTTPException) as exc:
+        sessions_route._enforce_worktree_head_guard("wt-a")
+    assert exc.value.detail["reason"] == "worktree_head_pending"
+    assert "pending handoff" in exc.value.detail["message"]
 
 
 def test_guard_fails_open_on_untracked(monkeypatch):
@@ -143,7 +156,7 @@ def client(monkeypatch):
 def test_route_refuses_create_into_active_head(client, monkeypatch):
     monkeypatch.setattr(
         worktree_head, "resolve_head",
-        lambda wid: HeadInfo(active=True, head_session="sess-A",
+        lambda wid: HeadInfo(active=True, occupied=True, head_session="sess-A",
                              state="active", tracked=True),
     )
     r = client.post("/api/v1/sessions", json={"worktree_id": "wt-a"})
@@ -160,7 +173,7 @@ def test_route_reclaim_bypasses_guard(client, monkeypatch):
 
     def _resolve(wid):
         called["resolve"] = True
-        return HeadInfo(active=True, head_session="sess-A", state="active",
+        return HeadInfo(active=True, occupied=True, head_session="sess-A", state="active",
                         tracked=True)
 
     monkeypatch.setattr(worktree_head, "resolve_head", _resolve)

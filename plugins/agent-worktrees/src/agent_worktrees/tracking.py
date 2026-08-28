@@ -40,9 +40,10 @@ WorktreeStatus = Literal["active", "complete", "pushed", "finalized", "orphaned"
 # Conclusion is an ASSERTED act, never inferred from liveness. Absent (legacy
 # records) = "active", so no migration is needed.
 SessionState = Literal["active", "handed-off", "concluded"]
+HandoffState = Literal["pending", "linked", "cancelled"]
 
-# States that mean "no longer the current session" -- a head pointing at one of
-# these is stale and the resolved head advances past it.
+# States that mean "no longer the current session" -- a replayed head pointing
+# at one resolves to no current session until an explicit successor/adoption.
 _CONCLUDED_SESSION_STATES: tuple[SessionState, ...] = ("handed-off", "concluded")
 
 # A worktree's owner class. "session" = an interactive agent session (the
@@ -84,6 +85,28 @@ WorktreeOrigin = Literal["user", "system", "delegate"]
 # The operator's own work (origin "user") is shown on *either* interface.
 MANAGED_ORIGINS: tuple[WorktreeOrigin, ...] = ("system", "delegate")
 
+_MAX_SESSION_ACTIVATIONS = 256
+_MAX_HEAD_TRANSITIONS = 512
+_MAX_HANDOFFS = 256
+
+
+@dataclass
+class SessionActivation:
+    """One observed interval in which a session was associated with a worktree.
+
+    Hook delivery is at-least-once and a Copilot session may be resumed many
+    times.  Keeping each interval append-only preserves that history instead of
+    overwriting the session's original ``started_at`` on every resume.
+    """
+
+    ordinal: int
+    started_at: str
+    start_recorded_at: str
+    start_source: str = "hook"
+    ended_at: str | None = None
+    end_recorded_at: str | None = None
+    end_source: str | None = None
+
 
 @dataclass
 class SessionEntry:
@@ -108,6 +131,31 @@ class SessionEntry:
     successor: str | None = None
     predecessor: str | None = None
     pane_id: str | None = None
+    activations: list[SessionActivation] = field(default_factory=list)
+
+
+@dataclass
+class HeadTransition:
+    """A monotonic, replayable change to a worktree's current session."""
+
+    revision: int
+    session_id: str | None
+    reason: str
+    at: str
+    handoff_ordinal: int | None = None
+
+
+@dataclass
+class SessionHandoff:
+    """A numbered handoff intent and its eventual exact successor link."""
+
+    ordinal: int
+    token: str
+    predecessor: str
+    state: HandoffState
+    opened_at: str
+    successor: str | None = None
+    linked_at: str | None = None
 
 
 @dataclass
@@ -364,6 +412,14 @@ class WorktreeRecord:
     # ``resolved_head_session``, so existing YAMLs need no migration. Emitted
     # only when set, keeping the common-case YAML byte-identical.
     head_session: str | None = None
+    # Session lifecycle is an append-only, monotonic ledger. ``head_session`` is
+    # retained as a cheap materialized cache for existing consumers; when
+    # transitions exist, replaying the highest revision is authoritative.
+    lifecycle_revision: int = 0
+    head_revision: int = 0
+    head_transitions: list[HeadTransition] = field(default_factory=list)
+    handoff_counter: int = 0
+    handoffs: list[SessionHandoff] = field(default_factory=list)
     # #2178: for a bridge-spawned worktree, the *caller* worktree that requested
     # it (agent-bridge's caller_id == the caller's WORKTREE_ID). Lets the Picker
     # "Jump to caller" from a bridge worktree back to the worktree that kicked it.
@@ -530,22 +586,52 @@ class WorktreeRecord:
         return None
 
     @property
+    def replayed_head_transition(self) -> HeadTransition | None:
+        """Return the last transition by monotonic revision, if any.
+
+        List position is a deterministic tie-breaker for a manually-corrupted
+        record containing duplicate revisions. Writers allocate revisions under
+        the record lock, so valid records never need the tie-breaker.
+        """
+        if not self.head_transitions:
+            return None
+        return max(
+            enumerate(self.head_transitions),
+            key=lambda item: (item[1].revision, item[0]),
+        )[1]
+
+    @property
+    def replayed_head_session(self) -> str | None:
+        """Replay the authoritative head from the transition ledger."""
+        transition = self.replayed_head_transition
+        if transition is None or transition.session_id is None:
+            return None
+        entry = self.session_entry(transition.session_id)
+        if entry is None or entry.state in _CONCLUDED_SESSION_STATES:
+            return None
+        return transition.session_id
+
+    @property
     def resolved_head_session(self) -> str | None:
-        """The worktree's current session -- stored head, else derived.
+        """The worktree's current session -- replayed ledger, else legacy state.
 
         Resolution (session-lifecycle):
-          1. the stored ``head_session`` when it names a session that still
+          1. when a transition ledger exists, replay its highest monotonic
+             revision; ``head_session`` is only a repairable cache;
+          2. otherwise the stored ``head_session`` when it names a session that still
              exists and is **not** concluded/handed-off (a stale head that was
              concluded without advancing does not win);
-          2. otherwise the **newest non-concluded** session in ``sessions``
+          3. otherwise the **newest non-concluded** session in ``sessions``
              (by list order -- registration order), preserving today's
              "latest is current" behavior for un-annotated records;
-          3. otherwise None (no sessions, or all concluded).
+          4. otherwise None (no sessions, or all concluded).
 
         This is the record-local head. Filesystem-precise "latest by
         workspace.yaml mtime" resolution still lives in ``sessions.py``; this
         derivation is authoritative for the *asserted* lifecycle.
         """
+        if self.head_transitions:
+            return self.replayed_head_session
         if self.head_session:
             entry = self.session_entry(self.head_session)
             if entry is not None and entry.state not in _CONCLUDED_SESSION_STATES:
@@ -554,6 +640,14 @@ class WorktreeRecord:
             if entry.state not in _CONCLUDED_SESSION_STATES:
                 return entry.session_id
         return None
+
+    @property
+    def pending_handoffs(self) -> list[SessionHandoff]:
+        """Pending handoffs in stable ordinal order."""
+        return sorted(
+            (handoff for handoff in self.handoffs if handoff.state == "pending"),
+            key=lambda handoff: handoff.ordinal,
+        )
 
     def active_pr(self) -> PRRecord | None:
         """Return the PR a no-selector command should target.
@@ -891,6 +985,56 @@ def load_record(path: Path) -> WorktreeRecord:
                     succ = entry.get("successor")
                     pred = entry.get("predecessor")
                     pane = entry.get("pane_id")
+                    activations: list[SessionActivation] = []
+                    raw_activations = entry.get("activations")
+                    if isinstance(raw_activations, list):
+                        for raw_activation in raw_activations:
+                            if not isinstance(raw_activation, dict):
+                                continue
+                            act_started = raw_activation.get("started_at", "")
+                            if act_started in (None, "", "null"):
+                                continue
+                            if hasattr(act_started, "isoformat"):
+                                act_started = act_started.isoformat()
+                            act_ended = raw_activation.get("ended_at")
+                            if hasattr(act_ended, "isoformat"):
+                                act_ended = act_ended.isoformat()
+                            elif act_ended in (None, "", "null"):
+                                act_ended = None
+                            start_recorded = raw_activation.get(
+                                "start_recorded_at", act_started
+                            )
+                            if start_recorded in (None, "", "null"):
+                                start_recorded = act_started
+                            if hasattr(start_recorded, "isoformat"):
+                                start_recorded = start_recorded.isoformat()
+                            end_recorded = raw_activation.get("end_recorded_at")
+                            if hasattr(end_recorded, "isoformat"):
+                                end_recorded = end_recorded.isoformat()
+                            elif end_recorded in (None, "", "null"):
+                                end_recorded = None
+                            try:
+                                ordinal = int(raw_activation.get("ordinal", 0))
+                            except (TypeError, ValueError):
+                                ordinal = 0
+                            if ordinal <= 0:
+                                ordinal = len(activations) + 1
+                            activations.append(SessionActivation(
+                                ordinal=ordinal,
+                                started_at=str(act_started),
+                                start_recorded_at=str(start_recorded or act_started),
+                                start_source=str(
+                                    raw_activation.get("start_source") or "hook"
+                                ),
+                                ended_at=str(act_ended) if act_ended else None,
+                                end_recorded_at=(
+                                    str(end_recorded) if end_recorded else None
+                                ),
+                                end_source=(
+                                    str(raw_activation["end_source"])
+                                    if raw_activation.get("end_source") else None
+                                ),
+                            ))
                     sessions_list.append(SessionEntry(
                         session_id=str(entry["session_id"]),
                         started_at=str(sa),
@@ -900,6 +1044,7 @@ def load_record(path: Path) -> WorktreeRecord:
                         successor=str(succ) if succ else None,
                         predecessor=str(pred) if pred else None,
                         pane_id=str(pane) if pane else None,
+                        activations=activations,
                     ))
 
     # Parse PR records -- the multi-PR ``prs:`` list (preferred) or a legacy
@@ -942,6 +1087,75 @@ def load_record(path: Path) -> WorktreeRecord:
             if isinstance(raw, dict) and raw.get("ref"):
                 resources_list.append(_parse_claim_mapping(raw))
 
+    head_transitions: list[HeadTransition] = []
+    raw_transitions = data.get("head_transitions")
+    if isinstance(raw_transitions, list):
+        for raw in raw_transitions:
+            if not isinstance(raw, dict):
+                continue
+            try:
+                revision = int(raw.get("revision", 0))
+            except (TypeError, ValueError):
+                continue
+            if revision <= 0:
+                continue
+            at = raw.get("at", "")
+            if hasattr(at, "isoformat"):
+                at = at.isoformat()
+            handoff_ordinal = raw.get("handoff_ordinal")
+            try:
+                handoff_ordinal = (
+                    int(handoff_ordinal) if handoff_ordinal is not None else None
+                )
+            except (TypeError, ValueError):
+                handoff_ordinal = None
+            session_value = raw.get("session_id")
+            head_transitions.append(HeadTransition(
+                revision=revision,
+                session_id=(
+                    str(session_value) if session_value not in (None, "", "null")
+                    else None
+                ),
+                reason=str(raw.get("reason") or "unknown"),
+                at=str(at),
+                handoff_ordinal=handoff_ordinal,
+            ))
+
+    handoffs: list[SessionHandoff] = []
+    raw_handoffs = data.get("handoffs")
+    if isinstance(raw_handoffs, list):
+        for raw in raw_handoffs:
+            if not isinstance(raw, dict) or not raw.get("token"):
+                continue
+            try:
+                ordinal = int(raw.get("ordinal", 0))
+            except (TypeError, ValueError):
+                continue
+            if ordinal <= 0:
+                continue
+            state = raw.get("state")
+            if state not in ("pending", "linked", "cancelled"):
+                state = "pending"
+            opened_at = raw.get("opened_at", "")
+            linked_at = raw.get("linked_at")
+            if hasattr(opened_at, "isoformat"):
+                opened_at = opened_at.isoformat()
+            if hasattr(linked_at, "isoformat"):
+                linked_at = linked_at.isoformat()
+            elif linked_at in (None, "", "null"):
+                linked_at = None
+            handoffs.append(SessionHandoff(
+                ordinal=ordinal,
+                token=str(raw["token"]),
+                predecessor=str(raw.get("predecessor") or ""),
+                state=state,
+                opened_at=str(opened_at),
+                successor=(
+                    str(raw["successor"]) if raw.get("successor") else None
+                ),
+                linked_at=str(linked_at) if linked_at else None,
+            ))
+
     return WorktreeRecord(
         worktree_id=data["worktree_id"],
         branch=data["branch"],
@@ -965,6 +1179,11 @@ def load_record(path: Path) -> WorktreeRecord:
                         if data.get("parent_session") else None),
         head_session=(str(data["head_session"])
                       if data.get("head_session") else None),
+        lifecycle_revision=int(data.get("lifecycle_revision", 0) or 0),
+        head_revision=int(data.get("head_revision", 0) or 0),
+        head_transitions=head_transitions,
+        handoff_counter=int(data.get("handoff_counter", 0) or 0),
+        handoffs=handoffs,
         caller_worktree=(str(data["caller_worktree"])
                          if data.get("caller_worktree") else None),
         owner_ref=(str(data["owner_ref"])
@@ -1063,6 +1282,18 @@ def _save_record_unlocked(
         path = record.yaml_path
     if preserve_handoff_reservations and path.exists():
         current = load_record(path)
+        # Lifecycle writers advance ``lifecycle_revision`` under the record
+        # lock. An unrelated writer may have loaded an older snapshot before
+        # that transition; never let its later save roll the append-only ledger
+        # or session activation history backward.
+        if current.lifecycle_revision > record.lifecycle_revision:
+            record.sessions = current.sessions
+            record.lifecycle_revision = current.lifecycle_revision
+            record.head_revision = current.head_revision
+            record.head_session = current.head_session
+            record.head_transitions = current.head_transitions
+            record.handoff_counter = current.handoff_counter
+            record.handoffs = current.handoffs
         current_by_ref = {claim.ref: claim for claim in current.resources}
         reserved = {
             claim.ref: claim for claim in current.resources
@@ -1085,6 +1316,14 @@ def _save_record_unlocked(
                 merged.append(claim)
         merged.extend(reserved.values())
         record.resources = merged
+
+    for session in record.sessions or ():
+        if len(session.activations) > _MAX_SESSION_ACTIVATIONS:
+            session.activations = session.activations[-_MAX_SESSION_ACTIVATIONS:]
+    if len(record.head_transitions) > _MAX_HEAD_TRANSITIONS:
+        record.head_transitions = record.head_transitions[-_MAX_HEAD_TRANSITIONS:]
+    if len(record.handoffs) > _MAX_HANDOFFS:
+        record.handoffs = record.handoffs[-_MAX_HANDOFFS:]
 
     title_val = record.title or "null"
     # Quote titles that contain YAML-special characters (colons, etc.)
@@ -1169,6 +1408,53 @@ def _save_record_unlocked(
     # explicitly set (absent = derived), keeping legacy YAMLs byte-identical.
     if record.head_session:
         content += f"head_session: {record.head_session}\n"
+    if record.lifecycle_revision:
+        content += f"lifecycle_revision: {record.lifecycle_revision}\n"
+    if record.head_revision:
+        content += f"head_revision: {record.head_revision}\n"
+    if record.handoff_counter:
+        content += f"handoff_counter: {record.handoff_counter}\n"
+    if record.head_transitions:
+        content += yaml.safe_dump(
+            {"head_transitions": [
+                {
+                    "revision": transition.revision,
+                    "session_id": transition.session_id,
+                    "reason": transition.reason,
+                    "at": transition.at,
+                    **(
+                        {"handoff_ordinal": transition.handoff_ordinal}
+                        if transition.handoff_ordinal is not None else {}
+                    ),
+                }
+                for transition in record.head_transitions
+            ]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    if record.handoffs:
+        content += yaml.safe_dump(
+            {"handoffs": [
+                {
+                    "ordinal": handoff.ordinal,
+                    "token": handoff.token,
+                    "predecessor": handoff.predecessor,
+                    "state": handoff.state,
+                    "opened_at": handoff.opened_at,
+                    **(
+                        {"successor": handoff.successor}
+                        if handoff.successor else {}
+                    ),
+                    **(
+                        {"linked_at": handoff.linked_at}
+                        if handoff.linked_at else {}
+                    ),
+                }
+                for handoff in record.handoffs
+            ]},
+            default_flow_style=False,
+            sort_keys=False,
+        )
     # #2178: bridge caller-worktree pointer. Emitted only when set.
     if record.caller_worktree:
         content += f"caller_worktree: {_yaml_scalar(record.caller_worktree)}\n"
@@ -1227,6 +1513,30 @@ def _save_record_unlocked(
                 **({"successor": s.successor} if s.successor else {}),
                 **({"predecessor": s.predecessor} if s.predecessor else {}),
                 **({"pane_id": s.pane_id} if s.pane_id else {}),
+                **(
+                    {"activations": [
+                        {
+                            "ordinal": activation.ordinal,
+                            "started_at": activation.started_at,
+                            "start_recorded_at": activation.start_recorded_at,
+                            "start_source": activation.start_source,
+                            **(
+                                {"ended_at": activation.ended_at}
+                                if activation.ended_at else {}
+                            ),
+                            **(
+                                {"end_recorded_at": activation.end_recorded_at}
+                                if activation.end_recorded_at else {}
+                            ),
+                            **(
+                                {"end_source": activation.end_source}
+                                if activation.end_source else {}
+                            ),
+                        }
+                        for activation in s.activations
+                    ]}
+                    if s.activations else {}
+                ),
             }
             for s in record.sessions
         ]
@@ -1809,6 +2119,220 @@ class SessionLifecycleError(ValueError):
     """Raised when an asserted session transition names an unknown session."""
 
 
+def _next_lifecycle_revision(record: WorktreeRecord) -> int:
+    highest = max(
+        (transition.revision for transition in record.head_transitions),
+        default=0,
+    )
+    record.lifecycle_revision = max(record.lifecycle_revision, highest) + 1
+    return record.lifecycle_revision
+
+
+def _append_head_transition(
+    record: WorktreeRecord,
+    session_id: str | None,
+    *,
+    reason: str,
+    handoff_ordinal: int | None = None,
+    at: str | None = None,
+) -> HeadTransition:
+    if session_id is not None and record.session_entry(session_id) is None:
+        raise SessionLifecycleError(
+            f"session {session_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    transition = HeadTransition(
+        revision=_next_lifecycle_revision(record),
+        session_id=session_id,
+        reason=reason,
+        at=at or _now_iso(),
+        handoff_ordinal=handoff_ordinal,
+    )
+    record.head_transitions.append(transition)
+    record.head_session = session_id
+    record.head_revision = transition.revision
+    return transition
+
+
+def repair_head_cache(record: WorktreeRecord) -> bool:
+    """Repair the materialized head cache from the authoritative ledger."""
+    transition = record.replayed_head_transition
+    if transition is None:
+        expected = record.resolved_head_session
+        if record.head_session is None or record.head_session == expected:
+            return False
+        _append_head_transition(
+            record, expected, reason="legacy-cache-repair",
+        )
+        return True
+    expected = record.replayed_head_session
+    if (
+        record.head_session == expected
+        and record.head_revision == transition.revision
+    ):
+        return False
+    record.head_session = expected
+    record.head_revision = transition.revision
+    return True
+
+
+def _ensure_head_ledger(record: WorktreeRecord) -> None:
+    """Seed a legacy record's ledger from its current deterministic head."""
+    if record.head_transitions:
+        return
+    legacy_head = record.resolved_head_session
+    if legacy_head is not None:
+        _append_head_transition(
+            record, legacy_head, reason="legacy-import",
+        )
+
+
+def open_handoff(
+    record: WorktreeRecord,
+    predecessor_id: str,
+    token: str,
+    *,
+    opened_at: str | None = None,
+    save: bool = True,
+) -> SessionHandoff:
+    """Open an idempotent, numbered handoff intent for one predecessor."""
+    if not token:
+        raise SessionLifecycleError("handoff token must not be empty")
+    predecessor = record.session_entry(predecessor_id)
+    if predecessor is None:
+        raise SessionLifecycleError(
+            f"predecessor {predecessor_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    for existing in record.handoffs:
+        if existing.token != token:
+            continue
+        if existing.predecessor != predecessor_id:
+            raise SessionLifecycleError(
+                f"handoff token {token} already belongs to predecessor "
+                f"{existing.predecessor}"
+            )
+        return existing
+    _ensure_head_ledger(record)
+    for existing in record.handoffs:
+        if (
+            existing.predecessor == predecessor_id
+            and existing.state == "pending"
+        ):
+            existing.state = "cancelled"
+    record.handoff_counter = max(
+        record.handoff_counter,
+        max((handoff.ordinal for handoff in record.handoffs), default=0),
+    ) + 1
+    handoff = SessionHandoff(
+        ordinal=record.handoff_counter,
+        token=token,
+        predecessor=predecessor_id,
+        state="pending",
+        opened_at=opened_at or _now_iso(),
+    )
+    record.handoffs.append(handoff)
+    _next_lifecycle_revision(record)
+    if save:
+        save_record(record)
+    return handoff
+
+
+def link_handoff(
+    record: WorktreeRecord,
+    token: str,
+    successor_id: str,
+    *,
+    linked_at: str | None = None,
+    save: bool = True,
+) -> SessionHandoff:
+    """Link the exact token's predecessor to ``successor_id`` atomically."""
+    successor = record.session_entry(successor_id)
+    if successor is None:
+        raise SessionLifecycleError(
+            f"successor {successor_id} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    if successor.state in _CONCLUDED_SESSION_STATES:
+        raise SessionLifecycleError(
+            f"successor {successor_id} is already {successor.state}"
+        )
+    handoff = next(
+        (candidate for candidate in record.handoffs
+         if candidate.token == token),
+        None,
+    )
+    if handoff is None:
+        raise SessionLifecycleError(
+            f"handoff token {token} is not tracked on worktree "
+            f"{record.worktree_id}"
+        )
+    if handoff.state == "linked":
+        if handoff.successor != successor_id:
+            raise SessionLifecycleError(
+                f"handoff token {token} is already linked to "
+                f"{handoff.successor}"
+            )
+        return handoff
+    if handoff.state != "pending":
+        raise SessionLifecycleError(
+            f"handoff token {token} is {handoff.state}, not pending"
+        )
+    predecessor = record.session_entry(handoff.predecessor)
+    if predecessor is None:
+        raise SessionLifecycleError(
+            f"handoff predecessor {handoff.predecessor} is not tracked on "
+            f"worktree {record.worktree_id}"
+        )
+    if predecessor.state == "concluded":
+        raise SessionLifecycleError(
+            f"handoff predecessor {predecessor.session_id} was explicitly "
+            "concluded"
+        )
+    if (
+        predecessor.successor is not None
+        and predecessor.successor != successor_id
+    ):
+        raise SessionLifecycleError(
+            f"handoff predecessor {predecessor.session_id} already links to "
+            f"{predecessor.successor}"
+        )
+    if (
+        successor.predecessor is not None
+        and successor.predecessor != predecessor.session_id
+    ):
+        raise SessionLifecycleError(
+            f"handoff successor {successor_id} already follows "
+            f"{successor.predecessor}"
+        )
+    predecessor.state = "handed-off"
+    predecessor.successor = successor_id
+    successor.state = "active"
+    successor.predecessor = predecessor.session_id
+    handoff.state = "linked"
+    handoff.successor = successor_id
+    handoff.linked_at = linked_at or _now_iso()
+    _append_head_transition(
+        record,
+        successor_id,
+        reason="handoff-linked",
+        handoff_ordinal=handoff.ordinal,
+        at=handoff.linked_at,
+    )
+    if save:
+        save_record(record)
+    return handoff
+
+
+def _cancel_pending_handoffs(record: WorktreeRecord) -> bool:
+    changed = False
+    for handoff in record.handoffs:
+        if handoff.state == "pending":
+            handoff.state = "cancelled"
+            changed = True
+    return changed
+
+
 def set_head_session(
     record: WorktreeRecord, session_id: str, *, save: bool = True
 ) -> None:
@@ -1817,12 +2341,9 @@ def set_head_session(
     The session must already be tracked. This is the explicit head move a
     caller makes when it adopts / takes over a worktree.
     """
-    if record.session_entry(session_id) is None:
-        raise SessionLifecycleError(
-            f"session {session_id} is not tracked on worktree "
-            f"{record.worktree_id}"
-        )
-    record.head_session = session_id
+    _ensure_head_ledger(record)
+    if record.resolved_head_session != session_id:
+        _append_head_transition(record, session_id, reason="adopted")
     if save:
         save_record(record)
 
@@ -1832,14 +2353,15 @@ def conclude_session(
     session_id: str,
     *,
     state: SessionState = "concluded",
+    handoff_token: str | None = None,
     save: bool = True,
 ) -> None:
     """Assert a session's conclusion (``concluded`` or ``handed-off``).
 
     Conclusion is a deliberate act, never inferred from liveness. When the
-    concluded session was the head, the head pointer is **advanced** to the
-    newest remaining non-concluded session (or cleared to None when none
-    remains), so a worktree never keeps a concluded session as its current one.
+    concluded session was the head, a transition explicitly clears the head.
+    Another active session is never promoted by list or timestamp order; a
+    successor or adopter must assert the next transition.
     """
     if state not in _CONCLUDED_SESSION_STATES:
         raise SessionLifecycleError(
@@ -1852,12 +2374,35 @@ def conclude_session(
             f"session {session_id} is not tracked on worktree "
             f"{record.worktree_id}"
         )
+    current = record.resolved_head_session
+    prior_state = entry.state
+    _ensure_head_ledger(record)
     entry.state = state
-    # Advance the head off a concluded session. ``head_session=None`` lets
-    # ``resolved_head_session`` derive the newest survivor.
-    if record.head_session == session_id:
-        record.head_session = None
-        record.head_session = record.resolved_head_session
+    if state == "handed-off" and handoff_token and not any(
+        handoff.predecessor == session_id
+        and handoff.state in ("pending", "linked")
+        for handoff in record.handoffs
+    ):
+        open_handoff(record, session_id, handoff_token, save=False)
+    # Ending or handing off the head does not guess a replacement from list
+    # order. A successor/adopter must assert the next transition explicitly.
+    if current == session_id:
+        pending = next(
+            (
+                handoff for handoff in reversed(record.handoffs)
+                if handoff.predecessor == session_id
+                and handoff.state == "pending"
+            ),
+            None,
+        )
+        _append_head_transition(
+            record,
+            None,
+            reason=state,
+            handoff_ordinal=pending.ordinal if pending else None,
+        )
+    elif prior_state != state:
+        _next_lifecycle_revision(record)
     if save:
         save_record(record)
 
@@ -1868,6 +2413,7 @@ def link_succession(
     successor_id: str,
     *,
     predecessor_state: SessionState = "handed-off",
+    handoff_token: str | None = None,
     save: bool = True,
 ) -> None:
     """Record a handoff: chain predecessor -> successor and move the head.
@@ -1890,10 +2436,22 @@ def link_succession(
             f"successor {successor_id} is not tracked on worktree "
             f"{record.worktree_id}"
         )
-    pred.successor = successor_id
-    pred.state = predecessor_state
-    succ.predecessor = predecessor_id
-    record.head_session = successor_id
+    if predecessor_state == "handed-off":
+        token = handoff_token or f"manual-{record.handoff_counter + 1}"
+        handoff = open_handoff(
+            record, predecessor_id, token, save=False,
+        )
+        link_handoff(
+            record, handoff.token, successor_id, save=False,
+        )
+    else:
+        pred.successor = successor_id
+        pred.state = predecessor_state
+        succ.predecessor = predecessor_id
+        _ensure_head_ledger(record)
+        _append_head_transition(
+            record, successor_id, reason="succession-linked",
+        )
     if save:
         save_record(record)
 
@@ -2554,27 +3112,81 @@ class _RecordLock:
         self._release()
 
 
-def _pending_handoff_predecessor(
-    record: WorktreeRecord, *, exclude: str
-) -> SessionEntry | None:
-    """The most-recent ``handed-off`` session still awaiting a successor, if any.
+def _ensure_activation_history(entry: SessionEntry) -> None:
+    """Promote a legacy mutable start/end pair into activation ordinal 1."""
+    if entry.activations or not entry.started_at:
+        return
+    entry.activations.append(SessionActivation(
+        ordinal=1,
+        started_at=entry.started_at,
+        start_recorded_at=entry.started_at,
+        start_source="legacy",
+        ended_at=entry.ended_at,
+        end_recorded_at=entry.ended_at,
+        end_source="legacy" if entry.ended_at else None,
+    ))
 
-    A handoff marks its predecessor ``handed-off`` at cutover but **cannot** know
-    the successor's session id then -- the seeded successor is a fresh Copilot
-    whose id only materializes once it starts and registers. This finds the baton
-    a handoff left for the next session to pick up (newest-first; ``None`` when no
-    handoff is pending), so ``register_session`` can complete the two-way link at
-    the first moment both ids exist.
 
-    Only ``handed-off`` predecessors auto-adopt a successor. A plain
-    ``concluded`` (sunset / finished) session expects none, so it is skipped.
-    """
-    for entry in reversed(record.sessions or ()):
-        if entry.session_id == exclude:
-            continue
-        if entry.state == "handed-off" and entry.successor is None:
-            return entry
-    return None
+def _start_session_activation(
+    entry: SessionEntry,
+    *,
+    event_at: str,
+    recorded_at: str,
+    source: str,
+) -> bool:
+    """Append a resume interval, or dedupe a repeated start delivery."""
+    _ensure_activation_history(entry)
+    latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
+    if latest is not None and latest.ended_at is None:
+        if latest.started_at == event_at or source in (
+            "bind", "handoff", "reconciled"
+        ):
+            entry.ended_at = None
+            return False
+        inferred_end = event_at
+        try:
+            if datetime.fromisoformat(event_at) < datetime.fromisoformat(
+                latest.started_at
+            ):
+                inferred_end = recorded_at
+        except (TypeError, ValueError):
+            pass
+        latest.ended_at = inferred_end
+        latest.end_recorded_at = recorded_at
+        latest.end_source = "inferred:next-start"
+    ordinal = (latest.ordinal if latest is not None else 0) + 1
+    entry.activations.append(SessionActivation(
+        ordinal=ordinal,
+        started_at=event_at,
+        start_recorded_at=recorded_at,
+        start_source=source,
+    ))
+    if not entry.started_at:
+        entry.started_at = event_at
+    entry.ended_at = None
+    return True
+
+
+def _end_session_activation(
+    entry: SessionEntry,
+    *,
+    event_at: str,
+    recorded_at: str,
+    source: str,
+) -> bool:
+    """Close the latest open interval, idempotently."""
+    _ensure_activation_history(entry)
+    latest = max(entry.activations, key=lambda item: item.ordinal, default=None)
+    if latest is None:
+        entry.ended_at = event_at
+        return True
+    if latest.ended_at is not None:
+        return False
+    latest.ended_at = event_at
+    latest.end_recorded_at = recorded_at
+    latest.end_source = source
+    entry.ended_at = event_at
+    return True
 
 
 def seal_worktree_identity(record: WorktreeRecord | None) -> dict:
@@ -2645,6 +3257,11 @@ def register_session(
     session_id: str,
     pid: int | None = None,
     pane_id: str | None = None,
+    *,
+    started_at: str | None = None,
+    source: str = "hook",
+    recorded_at: str | None = None,
+    handoff_token: str | None = None,
 ) -> None:
     """Register a Copilot session against a worktree (called from sessionStart hook)."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -2655,16 +3272,48 @@ def register_session(
         record = load_record(yaml_path)
         if record.sessions is None:
             record.sessions = []
+        event_at = started_at or _now_iso()
+        observed_at = recorded_at or _now_iso()
+        _ensure_head_ledger(record)
 
         # Dedupe -- update existing entry instead of appending
         for entry in record.sessions:
             if entry.session_id == session_id:
-                entry.started_at = _now_iso()
+                activation_added = _start_session_activation(
+                    entry,
+                    event_at=event_at,
+                    recorded_at=observed_at,
+                    source=source,
+                )
                 if pid:
                     entry.pid = pid
                 if pane_id:
                     entry.pane_id = pane_id
-                entry.ended_at = None
+                if handoff_token:
+                    try:
+                        link_handoff(
+                            record, handoff_token, session_id,
+                            linked_at=event_at, save=False,
+                        )
+                    except SessionLifecycleError:
+                        if activation_added:
+                            _next_lifecycle_revision(record)
+                        save_record(record)
+                        raise
+                elif (
+                    record.resolved_head_session is None
+                    and entry.state == "active"
+                    and (
+                        not record.pending_handoffs
+                        or source == "bind"
+                    )
+                ):
+                    _cancel_pending_handoffs(record)
+                    _append_head_transition(
+                        record, session_id, reason="rebind", at=event_at,
+                    )
+                elif activation_added:
+                    _next_lifecycle_revision(record)
                 save_record(record)
                 return
 
@@ -2675,37 +3324,49 @@ def register_session(
         had_active_head = record.resolved_head_session is not None
         new_entry = SessionEntry(
             session_id=session_id,
-            started_at=_now_iso(),
+            started_at=event_at,
             pid=pid,
             pane_id=pane_id,
+            activations=[SessionActivation(
+                ordinal=1,
+                started_at=event_at,
+                start_recorded_at=observed_at,
+                start_source=source,
+            )],
         )
         record.sessions.append(new_entry)
-        # session-lifecycle: complete a pending handoff's two-way link. When the
-        # prior current session was concluded via a HANDOFF (state
-        # ``handed-off``, successor not yet known -- e.g. context-handoff's live
-        # cutover), the fresh session registering next IS that handoff's
-        # successor. Stamp the durable predecessor<->successor link here, the
-        # first point the successor's id exists, so the lineage is traversable
-        # both ways. The ground layer owns this write; context-handoff only
-        # triggers it by concluding the predecessor at cutover (no rival store,
-        # per the vision's derive-dont-duplicate).
-        pending = _pending_handoff_predecessor(record, exclude=session_id)
-        if pending is not None:
-            pending.successor = session_id
-            new_entry.predecessor = pending.session_id
-        # Never moves an existing active head -- a second session arriving while
-        # one is still current is the contested case the agent-bridge creation
-        # guard prevents upstream; here we only record it, leaving the asserted
-        # head untouched. A handed-off predecessor is NOT active, so the head is
-        # (re)initialized to the successor above.
-        if not had_active_head:
-            record.head_session = session_id
+        _next_lifecycle_revision(record)
+        # A successor claims one exact, previously opened handoff token. Merely
+        # starting another session never steals the head.
+        if handoff_token:
+            try:
+                link_handoff(
+                    record, handoff_token, session_id,
+                    linked_at=event_at, save=False,
+                )
+            except SessionLifecycleError:
+                save_record(record)
+                raise
+        elif not had_active_head and (
+            not record.pending_handoffs or source == "bind"
+        ):
+            _cancel_pending_handoffs(record)
+            _append_head_transition(
+                record,
+                session_id,
+                reason="rebind" if source == "bind" else "initial",
+                at=event_at,
+            )
         save_record(record)
 
 
 def deregister_session(
     worktree_id: str,
     session_id: str,
+    *,
+    ended_at: str | None = None,
+    source: str = "hook",
+    recorded_at: str | None = None,
 ) -> None:
     """Mark a session as ended on a worktree (called from sessionEnd hook)."""
     yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
@@ -2719,6 +3380,13 @@ def deregister_session(
 
         for entry in record.sessions:
             if entry.session_id == session_id:
-                entry.ended_at = _now_iso()
-                save_record(record)
+                changed = _end_session_activation(
+                    entry,
+                    event_at=ended_at or _now_iso(),
+                    recorded_at=recorded_at or _now_iso(),
+                    source=source,
+                )
+                if changed:
+                    _next_lifecycle_revision(record)
+                    save_record(record)
                 return
