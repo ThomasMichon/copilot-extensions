@@ -23,6 +23,7 @@ import { join, basename } from "node:path";
 import { execSync, execFileSync } from "node:child_process";
 import { leadFrom, buildCutoverSeed } from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
+import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
 
 export const HANDOFF_META_PREFIX = "<!-- context-handoff:";
 export const HANDOFF_META_SUFFIX = "-->";
@@ -59,11 +60,14 @@ export function agentDispatchAvailable() {
 // Resolve an agent-worktrees identity value (null on miss). A sessionId is
 // passed binding-first so a bare-resumed session (cwd=HOME) still resolves its
 // worktree from the session->worktree binding rather than the HOME cwd.
-export function agentWorktreesGet(key, cwd, sessionId) {
+export function agentWorktreesGet(key, cwd, sessionId, execute = runCli) {
   try {
     const argv = ["get", key];
     if (sessionId) argv.push("--session-id", sessionId);
-    const out = runCli("agent-worktrees", argv, { cwd, timeout: 5000 }).trim();
+    const out = execute("agent-worktrees", argv, {
+      cwd,
+      timeout: AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+    }).trim();
     return out || null;
   } catch {
     return null;
@@ -131,8 +135,8 @@ export function decodeHandoffPayload(raw) {
   }
 }
 
-export function handoffDirFor(cwd, sid) {
-  const { stateDir } = worktreeInfo(cwd, sid);
+export function handoffDirFor(cwd, sid, get = agentWorktreesGet) {
+  const stateDir = get("worktree-state-dir", cwd, sid);
   return stateDir ? join(stateDir, "handoff") : null;
 }
 
@@ -145,7 +149,7 @@ export function writeJsonAtomic(path, value) {
 // --- file-backed store ----------------------------------------------------
 export function saveFileHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
-  const dir = handoffDirFor(cwd, sid);
+  const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${metadata.id}.json`);
@@ -201,7 +205,7 @@ export function abandonSupersededHandoffs(cwd, worktree, keepId) {
 
 export function dispatchHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
-  const dir = handoffDirFor(cwd, sid);
+  const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
   try {

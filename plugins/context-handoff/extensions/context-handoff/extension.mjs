@@ -49,6 +49,7 @@ import {
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import { contextPressure, formatContextUsage } from "./thresholds.mjs";
+import { AGENT_WORKTREES_QUERY_TIMEOUT_MS } from "./cli-timeouts.mjs";
 
 // --- State ---
 const handoffConfig = loadContextHandoffConfig(process.cwd());
@@ -196,7 +197,7 @@ function agentWorktreesGet(key, cwd, sessionId) {
     if (sessionId) argv.push("--session-id", sessionId);
     const out = runCli("agent-worktrees", argv, {
       cwd,
-      timeout: 5000,
+      timeout: AGENT_WORKTREES_QUERY_TIMEOUT_MS,
     }).trim();
     return out || null;
   } catch {
@@ -287,7 +288,7 @@ function decodeHandoffPayload(raw) {
 }
 
 function handoffDirFor(cwd, sid) {
-  const { stateDir } = worktreeInfo(cwd, sid);
+  const stateDir = agentWorktreesGet("worktree-state-dir", cwd, sid);
   return stateDir ? join(stateDir, "handoff") : null;
 }
 
@@ -299,7 +300,7 @@ function writeJsonAtomic(path, value) {
 
 function saveFileHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
-  const dir = handoffDirFor(cwd, sid);
+  const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   mkdirSync(dir, { recursive: true });
   const path = join(dir, `${metadata.id}.json`);
@@ -474,7 +475,7 @@ function bindConsumedHandoff(cwd, token, metadata, sid) {
 // id, or null if anything fails (the caller then falls back to a worktree file).
 function dispatchHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "agent-dispatch" });
-  const dir = handoffDirFor(cwd, sid);
+  const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
   if (!dir) return null;
   const tmp = join(dir, `${metadata.id}-payload-${process.pid}.md`);
   try {

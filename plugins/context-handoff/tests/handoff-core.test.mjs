@@ -12,10 +12,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import {
   encodeHandoffPayload, decodeHandoffPayload, buildSeedForStored,
-  safePathSegment, quoteWinArg, HANDOFF_META_PREFIX,
+  safePathSegment, quoteWinArg, agentWorktreesGet, handoffDirFor,
+  HANDOFF_META_PREFIX,
 } from "../extensions/context-handoff/handoff-core.mjs";
+import {
+  AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+} from "../extensions/context-handoff/cli-timeouts.mjs";
 
 test("encode/decode round-trips metadata + text", () => {
   const meta = { kind: "context-handoff", id: "handoff-sid1", title: "Fix X", oldPane: "%3" };
@@ -95,4 +100,43 @@ test("quoteWinArg quotes only when needed", () => {
   assert.equal(quoteWinArg("plain"), "plain");
   assert.equal(quoteWinArg("has space"), '"has space"');
   assert.equal(quoteWinArg('a"b'), '"a""b"');
+});
+
+test("agentWorktreesGet allows slow startup-time identity queries", () => {
+  let invocation = null;
+  const value = agentWorktreesGet(
+    "worktree-state-dir",
+    "/repo",
+    "session-1",
+    (bin, args, options) => {
+      invocation = { bin, args, options };
+      return "/state/worktree\n";
+    },
+  );
+
+  assert.equal(value, "/state/worktree");
+  assert.deepEqual(invocation, {
+    bin: "agent-worktrees",
+    args: ["get", "worktree-state-dir", "--session-id", "session-1"],
+    options: {
+      cwd: "/repo",
+      timeout: AGENT_WORKTREES_QUERY_TIMEOUT_MS,
+    },
+  });
+  assert.equal(AGENT_WORKTREES_QUERY_TIMEOUT_MS, 15_000);
+});
+
+test("handoffDirFor resolves only the state directory", () => {
+  const keys = [];
+  const dir = handoffDirFor("/repo", "session-1", (key, cwd, sid) => {
+    keys.push({ key, cwd, sid });
+    return "/state/worktree";
+  });
+
+  assert.equal(dir, join("/state/worktree", "handoff"));
+  assert.deepEqual(keys, [{
+    key: "worktree-state-dir",
+    cwd: "/repo",
+    sid: "session-1",
+  }]);
 });
