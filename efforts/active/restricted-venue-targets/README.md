@@ -115,7 +115,85 @@ mount, credential relay, merge authority, or deployment authority.
 - [x] Add provider reconstruction, persistence, and compatibility
       tests; bump agent-bridge.
 
-### Phase 3 — SSH-compatible restricted provider exec
+### Phase 3 — Restricted session-state rescue
+- [ ] Add one provider-owned replacement choke point used by `up --recreate`,
+      remove, and future lifecycle callers. Acquire an exclusive deploy hold
+      before checking liveness so a concurrent borrow/session cannot race the
+      check and destruction.
+- [ ] Determine session/turn state from host-observable provider/bridge evidence,
+      not container cooperation. Require positively confirmed idle/ended state;
+      unknown/unavailable/unparseable liveness defers replacement as active.
+      Leases are one input, never the sole authority. The provider probe reads
+      Copilot `inuse.<pid>.lock` session markers for live-session presence and
+      the append-only `events.jsonl` tail for a completed turn boundary, covering
+      sessions not registered with agent-bridge.
+- [ ] Add a short-TTL, heartbeated session-liveness record distinct from the
+      existing 24-hour advisory effort lease. Dead session holders clear in
+      minutes; an effort lease alone neither authorizes nor indefinitely blocks
+      replacement.
+- [ ] Put a draining container under admission control so no new session/borrow
+      can land. Request drain/end at the next turn boundary and use a bounded
+      drain window rather than passively waiting forever.
+- [ ] Classify drift. Benign image/config drift may remain running until a safe
+      boundary. Security-profile/policy drift blocks new dispatch immediately,
+      requests urgent drain, and surfaces the bounded operator choice to
+      tolerate or terminate if it cannot drain.
+- [ ] Add a host-driven provider operation that streams only
+      `~/.copilot/session-state/` from a restricted container to a caller-owned
+      destination; the container receives no host path or storage credential.
+- [ ] Bind each rescue to provider target/instance, session IDs, timestamps, and
+      source repo/assignment metadata plus a monotonic capture generation. Stream
+      into a host-owned temporary artifact, compute hashes over the received
+      bytes, fsync, then publish atomically; never trust a container-supplied
+      digest.
+- [ ] Integrate rescue into planned destructive lifecycle: ordinary recreate/
+      remove first checks provider + bridge liveness and active leases. A live
+      turn/session/lease blocks replacement. After a turn-boundary drain/end,
+      rescue session-state **while the container is still running** and refuse
+      stop/remove on export or verification failure. An explicit force/abandon
+      flag is required to accept loss.
+- [ ] Before destruction, separately verify repository work preservation: a
+      dirty/ahead workspace must have its intended proposal pushed or be
+      explicitly abandoned. Keep this hard work-preservation gate distinct from
+      session telemetry rescue.
+- [ ] Add an incremental checkpoint operation suitable for periodic and
+      turn-boundary callers, so an unexpected container loss sacrifices only the
+      evidence tail since the latest successful checkpoint. Capture
+      `events.jsonl` by host-held byte offset with whole-line framing; a trailing
+      partial line is re-sent next time. Publish by session UUID plus monotonic
+      sequence/offset compare-and-set so a late writer cannot rewind a longer
+      host copy. Surface the configured evidence-completeness objective and
+      checkpoint staleness/failure; do not imply work or in-memory recovery.
+- [ ] Keep workspace, source roots, worktrees, settings, and credentials
+      ephemeral. A replacement receives a fresh clone/runtime and does not
+      restore the prior Copilot session.
+- [ ] Treat rescued bytes as untrusted evidence. Keep the archive opaque at the
+      provider boundary; downstream analysis uses safe, allowlisted readers and
+      never executes extracted hooks/configuration.
+- [ ] Keep the member manifest deny-by-default. Include the append-only event
+      stream and minimum provenance/checkpoint index; exclude high-growth
+      `files/`, `rewind-file-snapshots/`, research, and unknown members, and
+      report exclusions. Bound those excluded scratch surfaces in-venue so the
+      512 MB home tmpfs cannot be exhausted before rescue.
+- [ ] Bound host archive retention by assignment/generation and total bytes;
+      retain the newest verified capture needed for live analysis, then reclaim
+      superseded captures without touching a live container.
+- [ ] Report last rescue/checkpoint status and session counts in provider posture
+      without exposing host paths or transcript content.
+- [ ] Keep deploy/update non-destructive: it may build the new image, sync policy,
+      and report a drifted running member, but never implicitly recreate it.
+- [ ] Reconcile fleet members independently. Recreate confirmed-idle members,
+      leave active/unknown members running and reported, and return a first-class
+      partial/deferred result rather than failing or half-removing the whole
+      fleet.
+- [ ] Add path-boundary, hash/atomicity, interrupted-export, recreate-block,
+      active-turn/session/lease guard, explicit-abandon, incremental-checkpoint,
+      and fresh-replacement tests; bump agent-containers.
+- [ ] Prove rescue does not weaken the restricted runtime: policy version,
+      container creation argv, no binds/mounts, and the exact tmpfs set remain
+      unchanged. Preserve trusted-fleet lifecycle behavior.
+
+### Phase 4 — SSH-compatible restricted provider exec
 - [ ] Define an agent-ssh provider-exec transport that maps OpenSSH stdio to the
       venue provider boundary without preparing authorized keys or starting
       sshd.
@@ -126,7 +204,7 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add synthetic transport-provider and forbidden-projection tests; bump
       agent-containers and agent-ssh as required.
 
-### Phase 4 — Provider-backed worktree sources and Picker
+### Phase 5 — Provider-backed worktree sources and Picker
 - [ ] Generalize Picker sources from machine-SSH-only to an explicit source kind
       (`machine-ssh` or `provider-exec`) with one canonical source identity.
 - [ ] Route list/session/status and exact-worktree lifecycle verbs to the owning
@@ -139,40 +217,39 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add source, cache-key, rendering, version-skew, lineage, and ownership
       tests; bump agent-worktrees.
 
-### Phase 5 — Brokered session checkpoint and restore
-- [ ] Define an allowlisted checkpoint manifest for the minimum Copilot session
-      artifacts and workspace/origin metadata needed to resume.
-- [ ] Export/import through a host-owned provider operation. The restricted
-      worker receives no host path, archive path, storage credential, or ambient
-      network access.
-- [ ] Fence checkpoints by provider target, workspace owner, session id, and
-      generation; reject path traversal, cross-target restore, partial publish,
-      and stale overwrite.
-- [ ] Checkpoint before release/replacement and restore before resumed
-      embodiment.
-- [ ] Add interrupted-transfer, replacement, safe-extraction, and repo-scope
-      tests; bump agent-logger plus the consuming provider/dispatch plugins.
+### Phase 6 — Session corpus ingestion
+- [ ] Teach agent-logger/session-sync to ingest the provider's rescued
+      session-state under a stable venue/source identity without requiring the
+      container to reach shared storage.
+- [ ] Preserve repo, provider target/instance, model, interface, origin, and
+      assignment provenance for asynchronous analysis.
+- [ ] Keep repo scope fail-closed and treat incomplete/unverified rescues as
+      unavailable rather than valid sessions.
+- [ ] Add incremental ingest, dedup, partial-rescue, and retention tests; bump
+      agent-logger plus the provider consumer contract as needed.
 
-### Phase 6 — Atomic dispatch ownership and recovery
+### Phase 7 — Atomic dispatch ownership and recovery
 - [ ] Add a venue selector/binding to tasks without changing repository-lane
       semantics.
-- [ ] Atomically bind one task owner to one restricted venue lease and workspace
-      identity; heartbeat and completion validate the same generation.
+- [ ] Atomically bind one task owner to one restricted venue lease for the
+      current embodiment; heartbeat and completion validate that ownership.
 - [ ] Add a supervisor venue body that acquires the provider target, restores
-      the latest valid checkpoint, starts the ACP session, records the concrete
-      session id, and releases only after a checkpoint or proposal boundary.
+      no prior container state, starts a fresh ACP session/workspace, records the
+      concrete session id, and checkpoints session evidence at meaningful
+      boundaries.
 - [ ] Requeue only on confirmed-gone liveness; unknown stays owned. Replacement
-      retains task goal, progress log, workspace identity, session lineage, and
-      attempt limits.
+      retains only the durable task goal, progress log, and attempt limits; the
+      new embodiment receives a fresh workspace and session lineage.
 - [ ] Add queue, coordinator, supervisor, liveness, lease-race, checkpoint, and
       replacement tests; bump agent-dispatch and agent-containers.
 
-### Phase 7 — Clean-room acceptance and docs
+### Phase 8 — Clean-room acceptance and docs
 - [ ] Add a disposable restricted-venue scenario that provisions from a fresh
       install, creates one workspace, dispatches one task, connects through the
       named transport, checkpoints the session, replaces the container, and
-      resumes the same task/workspace.
-- [ ] Assert the forbidden surfaces remain absent before and after recovery:
+      starts a fresh workspace/session that resumes the durable task goal from
+      its progress log while the prior session evidence remains analysis-only.
+- [ ] Assert the forbidden surfaces remain absent before and after replacement:
       credentials, relay, host mounts, sshd, ports, second network, host gateway,
       merge, and deploy.
 - [ ] Update architecture, transport, command catalogs, install contracts, and
@@ -182,6 +259,21 @@ mount, credential relay, merge authority, or deployment authority.
 
 - [ ] Provider list/resolve returns one stable target identity and effective
       restricted posture across refresh and container replacement.
+- [ ] Planned replacement atomically rescues and hashes every available
+      session-state directory before **stop or removal**; a failed rescue blocks
+      replacement unless loss is explicitly accepted.
+- [ ] A deploy against an active turn/session leaves that container running and
+      drifted; recreation succeeds only after drain/end, rescue verification, and
+      lease release.
+- [ ] A concurrent borrow cannot enter after the deploy hold; unknown liveness
+      defers; a dead/stale lease alone neither authorizes nor blocks replacement.
+- [ ] Benign and security-relevant drift follow distinct policies, and each fleet
+      member can complete or defer independently.
+- [ ] Incremental checkpoints are idempotent and bound the evidence lost after an
+      unexpected container failure; monotonic byte offsets cannot rewind, partial
+      JSON lines are retried, and checkpoint age/failure is observable.
+- [ ] Workspace, settings, credentials, and prior Copilot session execution state
+      are not restored into the replacement container.
 - [ ] Restricted ACP/provider-exec Docker argv contains no token, relay, SSH,
       host-path, network, or gateway projection.
 - [ ] The named transport reaches only the provider target and fails closed if
@@ -192,10 +284,10 @@ mount, credential relay, merge authority, or deployment authority.
       target-ownership records; no restricted-only ownership store exists.
 - [ ] Concurrent dispatchers cannot acquire the same task, lease, or workspace;
       liveness recovery never reclaims an unknown or merely slow owner.
-- [ ] Checkpoint/restore transfers only allowlisted session members and rejects
-      traversal, cross-target, stale-generation, and partial-state cases.
-- [ ] Container replacement resumes the same task, progress, workspace, and
-      session lineage.
+- [ ] Session rescue transfers only allowlisted evidence members and rejects
+      traversal, cross-target, stale-offset, and partial-publication cases.
+- [ ] Container replacement may resume the durable task goal/progress in a fresh
+      embodiment, but never restores the old workspace or session lineage.
 - [ ] Existing machine SSH sources, trusted container SSH/relay behavior,
       CodeSpace venues, repository lanes, and local session sync remain
       unchanged.
@@ -254,3 +346,9 @@ key and relay projection; restricted venues never enter that path.
   `type=command` with a non-empty string argv is accepted, preventing malformed
   provider data from redirecting a restricted venue into a local or machine-SSH
   host launch.
+- 2026-08-27 operator clarification: preserve evidence, not execution state.
+  Restricted home/workspace remain bounded tmpfs and replacements start fresh.
+  Phase 3 narrows to host-driven, atomic, hashed rescue of
+  `~/.copilot/session-state` before planned destruction plus incremental
+  checkpoints for unexpected loss; Phase 6 ingests those rescues for asynchronous
+  analysis. No mount, worktree restore, or session rehydration is required.
