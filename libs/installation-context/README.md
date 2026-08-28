@@ -23,10 +23,15 @@ read-only `snapshot-validate` provenance actions plus read-only `status` and
 `probe-legacy` actions for installation-mode governance. `stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
 publishes only `installation-activation.json` after pinning the caller-observed
-namespace, install, and activation generations. No action creates a version
-slot, migrates legacy state, launches a runtime, or wires an automatic caller.
-The mutation requires an explicit `--context` / `-Context`; it never adopts an
-ambient `COPILOT_EXTENSIONS_CONTEXT` as authorization.
+namespace, install, and activation generations. The cross-runner actions do not
+create a version slot, migrate legacy state, launch a runtime, or wire an
+automatic caller. The Python reference additionally exposes explicit
+`slot-provision` and `slot-validate` actions. They create or validate only an
+immutable ownership marker in a cell-local version slot and never activate it.
+They are not yet implemented by the dependency-light Bash or PowerShell
+runners, and no installer or bootstrap calls them. Every mutation requires an
+explicit `--context` / `-Context`; it never adopts an ambient
+`COPILOT_EXTENSIONS_CONTEXT` as authorization.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
@@ -163,6 +168,20 @@ writes an actionable error to stderr and exits nonzero.
   --payload-root "$COPILOT_PLUGIN_ROOT" \
   --plugin-id agent-example \
   --legacy-root "$HOME/.agent-example"
+
+python installation_context.py slot-provision \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
+python installation_context.py slot-validate \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
 ```
 
 The Python CLI uses the same lowercase long options as the Bash entry point.
@@ -182,6 +201,36 @@ sidecar. Validation requires non-sidecar snapshot content to remain present.
 The sidecar is immutable, cell-local, and non-operative. It provides same-user
 ownership consistency and stale-generation detection, not cryptographic
 attestation of snapshot contents.
+Python management callers may then use `provision_runtime_slot` or the
+`slot-provision` action to create one empty
+`<versionsRoot>/<runtime-version>/` directory containing only
+`.runtime-slot-ownership.json`. The transaction revalidates the context and
+snapshot provenance while holding the marketplace genesis lock and plugin
+installation lock. Existing slots are reusable only when their immutable marker
+exactly matches the requested marketplace, plugin, source, runtime version,
+snapshot, receipt paths, and pinned generations. Markerless, malformed, copied,
+linked, stale, or conflicting slots fail without replacement. `slot-validate`
+and `validate_runtime_slot_ownership` perform the same read-only validation.
+Creating a new slot requires the snapshot generations and payload to match the
+current active receipts. Once published, an owned slot remains attributable
+when those receipts advance for later updates: its marker must still match its
+immutable snapshot sidecar and stable cell identity, and current generations
+may not regress below the pinned values.
+Python publication prepares a reserved
+`<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>` sibling outside
+`versionsRoot` and uses an atomic no-replace directory rename.
+An interruption that bypasses in-process cleanup can leave such a hidden
+sibling; it is inert, lies outside canonical runtime-slot enumeration, and
+requires explicit later reconciliation rather than automatic deletion.
+Neither action writes completion markers, current/LKG markers, activation
+receipts, launchers, services, state, or tombstones. This Python-only reference
+is deliberately not an adoption surface until Bash and PowerShell parity lands.
+Parity must preserve exclusive no-clobber reservation and fail-closed
+validation, but may use a runner-appropriate primitive. Results expose
+`namespaceState`, `installState`, and `slotEmpty`; `ready` means attributable
+ownership, not an active or complete runtime. Runtime versions cannot be
+reassigned to another snapshot, and this foundation intentionally provides no
+automatic repair, release, or deletion of conflicting slots.
 Read-only callers may import `resolve_installation_mode` and
 `probe_legacy_entrypoint`. Their optional `os_profile`, `platform`,
 `wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit

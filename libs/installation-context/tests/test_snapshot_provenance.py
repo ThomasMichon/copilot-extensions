@@ -8,6 +8,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -267,6 +268,24 @@ def _provenance_path(
     return Path(layout["snapshots"]) / snapshot_id / "snapshot-provenance.json"
 
 
+def _provision_slot_with_python(
+    layout: dict[str, Path | str],
+    *,
+    runtime_version: str = "3.4.5",
+    module: Any | None = None,
+) -> dict[str, object]:
+    module = module or _load_python_module()
+    return module.provision_runtime_slot(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        snapshot_id="1.0.0",
+        runtime_version=runtime_version,
+        durable_home=layout["durable"],
+        environment={},
+    )
+
+
 def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes]]:
     snapshot: dict[str, tuple[str, bytes]] = {}
     if not root.exists():
@@ -334,6 +353,486 @@ def test_importable_python_snapshot_api_matches_cli(tmp_path: Path) -> None:
         environment={},
     )
     assert validated["provenance"] == stamped["provenance"]
+
+
+def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    snapshot = _stamp_with_python(layout)
+    plugin_root = Path(layout["plugin_root"])
+    activation_paths = (
+        plugin_root / "current-version",
+        plugin_root / "last-known-good",
+        plugin_root / "installation-activation.json",
+    )
+
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+
+    assert first["slotChanged"] is True
+    assert first["activated"] is False
+    assert first["operative"] is False
+    assert first["slotEmpty"] is True
+    assert first["namespaceState"] == "active"
+    assert first["installState"] == "active"
+    assert Path(first["slotRoot"]) == plugin_root / "versions" / "3.4.5"
+    assert ownership == {
+        "schema": "copilot-extensions.runtime-slot-ownership",
+        "version": 1,
+        "marketplaceId": layout["marketplace_id"],
+        "pluginId": layout["plugin_id"],
+        "sourceFingerprint": snapshot["sourceFingerprint"],
+        "runtime": {
+            "version": "3.4.5",
+            "root": str(plugin_root / "versions" / "3.4.5"),
+        },
+        "snapshot": {
+            "id": "1.0.0",
+            "root": snapshot["snapshotRoot"],
+            "provenance": snapshot["provenance"],
+        },
+        "namespaceReceipt": {
+            "path": snapshot["namespaceReceipt"],
+            "generation": 1,
+        },
+        "installReceipt": {
+            "path": snapshot["installReceipt"],
+            "generation": 2,
+        },
+        "createdAt": ownership["createdAt"],
+    }
+    assert all(not path.exists() for path in activation_paths)
+    marker_bytes = marker.read_bytes()
+    (Path(first["slotRoot"]) / "payload.txt").write_text(
+        "built later\n",
+        encoding="utf-8",
+    )
+
+    second = _provision_slot_with_python(layout)
+    module = _load_python_module()
+    validated = module.validate_runtime_slot_ownership(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        snapshot_id="1.0.0",
+        runtime_version="3.4.5",
+        durable_home=layout["durable"],
+        environment={},
+    )
+
+    assert second["slotChanged"] is False
+    assert second["slotEmpty"] is False
+    assert second["ownership"] == str(marker)
+    assert validated["reason"] == "runtime-slot-ownership-valid"
+    assert marker.read_bytes() == marker_bytes
+    assert all(not path.exists() for path in activation_paths)
+
+
+def test_python_slot_provision_rejects_stale_snapshot_before_creating_slot(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["generation"] = 3
+    _write_json(install_path, install)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Snapshot provenance install generation is stale",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
+
+
+def test_python_owned_slot_remains_valid_after_receipt_generation_advances(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["generation"] = 3
+    install["state"] = "inactive"
+    install["payload"]["version"] = "2.0.0"
+    _write_json(install_path, install)
+    module = _load_python_module()
+
+    validated = module.validate_runtime_slot_ownership(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        snapshot_id="1.0.0",
+        runtime_version="3.4.5",
+        durable_home=layout["durable"],
+        environment={},
+    )
+    reused = _provision_slot_with_python(layout, module=module)
+
+    assert validated["installGeneration"] == 2
+    assert validated["installState"] == "inactive"
+    assert reused["slotChanged"] is False
+    assert reused["ownership"] == first["ownership"]
+
+
+def test_python_owned_slot_rejects_receipt_generation_regression(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    _provision_slot_with_python(layout)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["generation"] = 1
+    _write_json(install_path, install)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Current receipt generation predates the owned runtime slot",
+    ):
+        module.validate_runtime_slot_ownership(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            snapshot_id="1.0.0",
+            runtime_version="3.4.5",
+            durable_home=layout["durable"],
+            environment={},
+        )
+
+
+def test_python_slot_provision_preserves_conflicting_existing_slot(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+    slot.mkdir(parents=True)
+    payload = slot / "existing.txt"
+    payload.write_text("preserve me\n", encoding="utf-8")
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Runtime slot ownership must exist",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+    assert payload.read_text(encoding="utf-8") == "preserve me\n"
+    assert not (slot / ".runtime-slot-ownership.json").exists()
+
+
+def test_python_slot_provision_preserves_malformed_ownership(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    marker.write_text('{"schema":"other","version":1}\n', encoding="utf-8")
+    before = marker.read_bytes()
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="unsupported schema or version",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+    assert marker.read_bytes() == before
+
+
+@pytest.mark.parametrize("malformed_generation", [True, 1.0, "1"])
+def test_python_slot_validation_rejects_malformed_ownership_generation(
+    tmp_path: Path,
+    malformed_generation: object,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+    ownership["namespaceReceipt"]["generation"] = malformed_generation
+    _write_json(marker, ownership)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="runtime slot ownership namespace generation must be an integer",
+    ):
+        module.validate_runtime_slot_ownership(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            snapshot_id="1.0.0",
+            runtime_version="3.4.5",
+            durable_home=layout["durable"],
+            environment={},
+        )
+
+
+def test_python_slot_validation_uses_canonical_path_equality(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    first = _provision_slot_with_python(layout)
+    marker = Path(first["ownership"])
+    ownership = json.loads(marker.read_text(encoding="utf-8"))
+    slot = Path(first["slotRoot"])
+    ownership["runtime"]["root"] = str(slot.parent / ".." / "versions" / slot.name)
+    _write_json(marker, ownership)
+    module = _load_python_module()
+
+    validated = module.validate_runtime_slot_ownership(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        snapshot_id="1.0.0",
+        runtime_version="3.4.5",
+        durable_home=layout["durable"],
+        environment={},
+    )
+
+    assert validated["reason"] == "runtime-slot-ownership-valid"
+
+
+def test_python_slot_provision_rejects_copied_cross_plugin_ownership(
+    tmp_path: Path,
+) -> None:
+    source_layout = _receipt_layout(tmp_path, plugin_id="agent-source")
+    target_layout = _receipt_layout(tmp_path, plugin_id="agent-target")
+    _stamp_with_python(source_layout)
+    _stamp_with_python(target_layout)
+    source = _provision_slot_with_python(source_layout)
+    target_slot = Path(target_layout["plugin_root"]) / "versions" / "3.4.5"
+    target_slot.mkdir(parents=True)
+    copied_marker = target_slot / ".runtime-slot-ownership.json"
+    shutil.copyfile(source["ownership"], copied_marker)
+    before = copied_marker.read_bytes()
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="does not match the validated snapshot and installation receipts",
+    ):
+        _provision_slot_with_python(target_layout, module=module)
+
+    assert copied_marker.read_bytes() == before
+
+
+def test_python_slot_provision_never_replaces_a_racing_slot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    module = _load_python_module()
+    original_publish = module._rename_directory_no_replace
+
+    def publish_after_competitor(source: Path, destination: Path) -> None:
+        destination.mkdir()
+        (destination / "foreign.txt").write_text("preserve me\n", encoding="utf-8")
+        original_publish(source, destination)
+
+    monkeypatch.setattr(
+        module,
+        "_rename_directory_no_replace",
+        publish_after_competitor,
+    )
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="appeared during publication",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+    slot = Path(layout["plugin_root"]) / "versions" / "3.4.5"
+    assert (slot / "foreign.txt").read_text(encoding="utf-8") == "preserve me\n"
+    assert not (slot / ".runtime-slot-ownership.json").exists()
+    assert not list(slot.parent.parent.glob(".runtime-slot-*"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+def test_python_slot_provision_rejects_linked_slot(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    versions = Path(layout["plugin_root"]) / "versions"
+    target = tmp_path / "outside-slot"
+    target.mkdir()
+    versions.mkdir()
+    (versions / "3.4.5").symlink_to(target, target_is_directory=True)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Runtime slot may not be a symbolic link",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+    assert not (target / ".runtime-slot-ownership.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+def test_python_slot_provision_rejects_linked_versions_root(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["roots"]["versions"] = "linked-versions"
+    _write_json(install_path, install)
+    target = Path(layout["plugin_root"]) / "real-versions"
+    target.mkdir()
+    (Path(layout["plugin_root"]) / "linked-versions").symlink_to(
+        target,
+        target_is_directory=True,
+    )
+    _stamp_with_python(layout)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Versions root may not traverse a symbolic link",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+    assert not (target / "3.4.5").exists()
+
+
+def test_python_slot_provision_supports_nested_versions_root(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["roots"]["versions"] = "runtime/versions"
+    _write_json(install_path, install)
+    _stamp_with_python(layout)
+
+    result = _provision_slot_with_python(layout)
+
+    assert Path(result["slotRoot"]) == (
+        Path(layout["plugin_root"]) / "runtime" / "versions" / "3.4.5"
+    )
+
+
+@pytest.mark.parametrize("file_component", ["versions", "runtime"])
+def test_python_slot_provision_rejects_file_in_versions_root_chain(
+    tmp_path: Path,
+    file_component: str,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    if file_component == "runtime":
+        install["roots"]["versions"] = "runtime/versions"
+        _write_json(install_path, install)
+    (Path(layout["plugin_root"]) / file_component).write_text(
+        "not a directory\n",
+        encoding="utf-8",
+    )
+    _stamp_with_python(layout)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Versions root path components must be ordinary directories",
+    ):
+        _provision_slot_with_python(layout, module=module)
+
+
+@pytest.mark.parametrize(
+    "runtime_version",
+    [
+        "../escape",
+        "/absolute",
+        r"C:\escape",
+        ".",
+        "..",
+        "CON",
+        ".hidden",
+        "trailing.",
+        "a" * 129,
+    ],
+)
+def test_python_slot_provision_rejects_nonportable_runtime_versions(
+    tmp_path: Path,
+    runtime_version: str,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    module = _load_python_module()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match=r"[Rr]untime version",
+    ):
+        _provision_slot_with_python(
+            layout,
+            runtime_version=runtime_version,
+            module=module,
+        )
+
+
+def test_python_slot_provision_serializes_concurrent_publishers(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    module = _load_python_module()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(
+            executor.map(
+                lambda _: _provision_slot_with_python(layout, module=module),
+                range(2),
+            )
+        )
+
+    assert sorted(result["slotChanged"] for result in results) == [False, True]
+    assert len({result["ownership"] for result in results}) == 1
+    assert Path(results[0]["ownership"]).is_file()
+
+
+def test_python_cli_provisions_and_validates_runtime_slot(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    common = [
+        "--context",
+        str(layout["install"]),
+        "--durable-home",
+        str(layout["durable"]),
+        "--expected-marketplace-id",
+        str(layout["marketplace_id"]),
+        "--expected-plugin-id",
+        str(layout["plugin_id"]),
+        "--snapshot-id",
+        "1.0.0",
+        "--runtime-version",
+        "3.4.5",
+    ]
+
+    provision = subprocess.run(
+        [sys.executable, str(PYTHON_SCRIPT), "slot-provision", *common],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    validate = subprocess.run(
+        [sys.executable, str(PYTHON_SCRIPT), "slot-validate", *common],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert provision.returncode == 0, provision.stderr
+    assert validate.returncode == 0, validate.stderr
+    assert json.loads(provision.stdout)["slotChanged"] is True
+    assert json.loads(validate.stdout)["reason"] == "runtime-slot-ownership-valid"
 
 
 @pytest.mark.parametrize(

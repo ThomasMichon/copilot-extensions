@@ -142,6 +142,88 @@ malicious process running as the same user can rewrite receipts and sidecars;
 later provisioning must still enforce the canonical receipt chain and its own
 content-integrity requirements.
 
+### Runtime-slot ownership
+
+A version directory is also a location, not installation identity. Before
+payload files, completion markers, launchers, or services can be attached to a
+runtime slot, a provisioning transaction must revalidate the canonical context
+receipt and snapshot provenance under the marketplace genesis lock and then the
+plugin installation lock. It may create only the exact canonical
+receipt-defined versions-root chain and
+`<versionsRoot>/<runtime-version>/` directory, and must publish this immutable
+marker within the slot:
+
+```json
+{
+  "schema": "copilot-extensions.runtime-slot-ownership",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "sourceFingerprint": "sha256:<full digest>",
+  "runtime": {
+    "version": "1.0.0",
+    "root": "<absolute canonical runtime slot root>"
+  },
+  "snapshot": {
+    "id": "1.0.0",
+    "root": "<absolute canonical snapshot root>",
+    "provenance": "<absolute canonical snapshot-provenance.json>"
+  },
+  "namespaceReceipt": {
+    "path": "<absolute canonical namespace.json>",
+    "generation": 1
+  },
+  "installReceipt": {
+    "path": "<absolute canonical install.json>",
+    "generation": 1
+  },
+  "createdAt": "2026-01-01T00:00:00Z"
+}
+```
+
+The runtime version is one portable filesystem component. The slot, versions
+root, and ownership marker must retain their exact canonical cell-local
+locations and may not be links or reparse points. A matching existing slot is
+idempotently reusable; a markerless, malformed, copied, linked, stale, or
+conflicting slot fails without replacement. The ownership marker cannot
+authorize a different marketplace, plugin, source fingerprint, runtime version,
+snapshot, receipt path, or receipt generation.
+
+Creating a new slot requires the snapshot's pinned generations and payload to
+match the current active receipts. After publication, a slot remains
+attributable across later receipt generations so rollback is not stranded: its
+marker must still match the immutable snapshot sidecar and stable current cell
+identity, while the current namespace and install generations may advance but
+may not regress below the pinned values.
+
+Python publication prepares a hidden
+`<versionsRoot-parent>/.runtime-slot-<slot-digest>-<nonce>/` sibling outside
+`versionsRoot` and atomically renames it into place with no
+replacement. If another slot appears first, publication fails and preserves it.
+An interruption outside normal in-process cleanup may leave the hidden sibling;
+it is inert, lies outside canonical version-slot enumeration, and requires
+explicit reconciliation rather than automatic deletion.
+
+Slot ownership is non-activating. Publication does not write payload content,
+`.install-complete.json`, `current-version`, `last-known-good`,
+`installation-activation.json`, launchers, services, state, or tombstones. It
+therefore proves only that one empty runtime slot is reserved for one validated
+cell/snapshot transaction; later build-completion, cutover, health, rollback,
+repair, and uninstall transactions remain separately gated.
+`status: "ready"` means the ownership record is attributable, not that the
+current installation is active; results expose `namespaceState`, `installState`,
+and `slotEmpty` for later callers. A runtime version is an immutable build
+identity and cannot be reassigned to another snapshot. Markerless or conflicting
+slots require an explicit future repair/release transaction; this foundation
+does not delete or reclaim them.
+
+The initial `slot-provision` / `slot-validate` reference is available only from
+the Python installation-context runner and has no automatic caller. Bootstrap or
+installer adoption requires equivalent dependency-light Bash and PowerShell
+semantics first. Parity must preserve exclusive no-clobber reservation and
+fail-closed validation, but may use a runner-appropriate primitive rather than
+Python's directory-rename API.
+
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
 
