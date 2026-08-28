@@ -222,7 +222,9 @@ do_down() { docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; echo "removed $CO
 _py() { command -v python3 || command -v python; }
 do_bridge_register() {
     ensure_container
-    "$(_py)" "$HERE/bridge_register.py" --acp-command "$ACP_COMMAND" register --container "$CONTAINER" --name "$AGENT_NAME"
+    local bridge_args=(--acp-command "$ACP_COMMAND")
+    [ -n "${ACP_CWD:-}" ] && bridge_args+=(--acp-cwd "$ACP_CWD")
+    "$(_py)" "$HERE/bridge_register.py" "${bridge_args[@]}" register --container "$CONTAINER" --name "$AGENT_NAME"
     echo "drive it:  agent-bridge create $DRIVE_AGENT \"<prompt>\""
 }
 do_bridge_unregister() { "$(_py)" "$HERE/bridge_register.py" unregister --name "$AGENT_NAME" --container "$CONTAINER"; }
@@ -329,30 +331,40 @@ open(os.path.join(eval_dir, "prompt.txt"), "w", encoding="utf-8").write(full)
 prompt_hash = hashlib.sha256(full.encode("utf-8")).hexdigest()[:16]
 ev = m.get("eval") or {}
 acp_dirs = " ".join(str(d) for d in (ev.get("acp_plugin_dirs") or []) if d)
+acp_cwd = str(ev.get("acp_cwd") or "")
+acp_cwd_file = str(ev.get("acp_cwd_file") or "")
+if acp_cwd and (
+    not acp_cwd.startswith("/")
+    or any(character in acp_cwd for character in "\0\r\n\t")
+):
+    raise ValueError("eval.acp_cwd must be an absolute in-container POSIX path")
+if acp_cwd_file and (
+    not acp_cwd_file.startswith("/")
+    or any(character in acp_cwd_file for character in "\0\r\n\t")
+):
+    raise ValueError("eval.acp_cwd_file must be an absolute in-container POSIX path")
+if acp_cwd and acp_cwd_file:
+    raise ValueError("eval.acp_cwd and eval.acp_cwd_file are mutually exclusive")
 for k, v in (("tier", m.get("tier", "")), ("setup_rel", setup_rel), ("run_count", run_count),
              ("per_turn", per_turn), ("aggregate", aggregate), ("post_check", post_check),
              ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash),
-             ("acp_dirs", acp_dirs)):
+             ("acp_dirs", acp_dirs), ("acp_cwd", acp_cwd),
+             ("acp_cwd_file", acp_cwd_file)):
     print(f"{k}\t{v}")
 PY
 )" || { echo "eval: failed to parse manifest.json" >&2; exit 2; }
 
-    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS=""
+    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS="" ACP_CWD="" ACP_CWD_FILE=""
     local _k _v
     while IFS=$'\t' read -r _k _v; do
         case "$_k" in
             tier) TIER="$_v" ;; setup_rel) SETUP_REL="$_v" ;; run_count) RUN_COUNT="$_v" ;;
             per_turn) PER_TURN="$_v" ;; aggregate) AGG="$_v" ;; post_check) POST_CHECK="$_v" ;;
             tierp) TIERP="$_v" ;; family) FAMILY="$_v" ;; prompt_hash) PROMPT_HASH="$_v" ;;
-            acp_dirs) ACP_DIRS="$_v" ;;
+            acp_dirs) ACP_DIRS="$_v" ;; acp_cwd) ACP_CWD="$_v" ;;
+            acp_cwd_file) ACP_CWD_FILE="$_v" ;;
         esac
     done <<< "$parsed"
-    # Build the driven-agent ACP command: a scenario may declare eval.acp_plugin_dirs
-    # (in-container paths) so the driven Copilot loads its plugins via --plugin-dir.
-    ACP_COMMAND='copilot --acp --stdio --allow-all-tools'
-    local _d
-    for _d in $ACP_DIRS; do ACP_COMMAND="$ACP_COMMAND --plugin-dir $_d"; done
-    echo "eval: ACP command -> $ACP_COMMAND"
 
     if [ "${RUNS_OVERRIDE:-0}" -gt 0 ] 2>/dev/null; then RUN_COUNT="$RUNS_OVERRIDE"; fi
     [ "$TIER" = E ] || echo "warn: scenario '$SCENARIO_NAME' is tier '$TIER', not 'E' -- eval expects a Tier-E scenario." >&2
@@ -364,6 +376,35 @@ PY
     docker exec "$CONTAINER" /bin/bash -lc \
         "bash /home/operator/scenario/$SETUP_REL; rc=\$?; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit \$rc" \
         || echo "warn: setup driver exited non-zero -- the starting state may be incomplete (see cr-report.json)."
+
+    # Build the driven-agent ACP command after setup so a scenario whose
+    # authoritative worktree path is generated at runtime can publish it through
+    # acp_cwd_file. The resolved path drives both the shell and ACP session/new.
+    if [ -n "$ACP_CWD_FILE" ]; then
+        ACP_CWD="$(docker exec "$CONTAINER" python3 -c '
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text(encoding="utf-8").splitlines()
+if len(lines) != 1 or not lines[0].startswith("/") or any(c in lines[0] for c in "\0\r\n\t"):
+    raise SystemExit("invalid ACP cwd file")
+cwd = pathlib.Path(lines[0])
+if not cwd.is_dir():
+    raise SystemExit("ACP cwd is not a directory")
+print(cwd)
+' "$ACP_CWD_FILE")" || {
+            echo "eval: could not resolve a valid cwd from '$ACP_CWD_FILE'" >&2
+            exit 2
+        }
+    fi
+    ACP_COMMAND='copilot --acp --stdio --allow-all-tools'
+    local _d
+    for _d in $ACP_DIRS; do ACP_COMMAND="$ACP_COMMAND --plugin-dir $_d"; done
+    if [ -n "$ACP_CWD" ]; then
+        local _quoted_cwd
+        printf -v _quoted_cwd '%q' "$ACP_CWD"
+        ACP_COMMAND="cd -- $_quoted_cwd && $ACP_COMMAND"
+    fi
+    echo "eval: ACP command -> $ACP_COMMAND"
 
     # --- Tier-P precondition: cheap in-box smoke of the plugin CLI ------------
     if [ "${SKIP_TIER_P:-0}" != 1 ] && [ -n "$TIERP" ]; then

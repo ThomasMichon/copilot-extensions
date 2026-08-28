@@ -14,6 +14,10 @@ _LOG="${WORKTREE_SETUP_LOG:-/dev/null}"
 _log() { printf '[%s] [%s] register-session: %s\n' "$(date '+%H:%M:%S')" "$1" "$2" >> "$_LOG" 2>/dev/null || true; }
 
 wt_id="${WORKTREE_ID:-}"
+payload=""
+if [[ ! -t 0 ]]; then
+    payload="$(cat)"
+fi
 
 _awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
 [ -f "$_awresolve" ] && . "$_awresolve"
@@ -26,12 +30,40 @@ fi
 args=(-m agent_worktrees register-session --stdin --emit-context)
 [[ -n "$wt_id" ]] && args+=(--worktree-id "$wt_id")
 
-# Forward the CLI's stdin payload to the Python command. PYTHONPATH is
-# cleared because the package is installed in the venv (no lib/ shadow).
-if PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null; then
+# Capture the registration context so a successful managed-worktree binding can
+# carry the payload-local command catalog in the same sessionStart result. The
+# current CLI keeps only one non-empty result when hooks race (#1234); without
+# this narrow same-plugin merge, agents receive either the binding or the exact
+# argv[0], but not reliably both.
+registration_json=""
+if registration_json="$(printf '%s' "$payload" | PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null)"; then
     _log OK "registered session (wt=${wt_id:-<from-cwd>})"
 else
     _log WARN "register-session failed (exit $?) wt=${wt_id:-<from-cwd>}"
 fi
+
+catalog_json=""
+catalog_script="${COPILOT_PLUGIN_ROOT:-}/scripts/emit-command-catalog.sh"
+if [[ -f "$catalog_script" ]]; then
+    catalog_json="$(bash "$catalog_script" 2>/dev/null || true)"
+fi
+
+PYTHONPATH="" "$PYTHON" -c '
+import json
+import sys
+
+contexts = []
+for raw in sys.argv[1:]:
+    if not raw.strip():
+        continue
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError:
+        continue
+    context = value.get("additionalContext") if isinstance(value, dict) else None
+    if isinstance(context, str) and context.strip() and context not in contexts:
+        contexts.append(context)
+print(json.dumps({"additionalContext": "\n\n".join(contexts)}) if contexts else "{}")
+' "$catalog_json" "$registration_json"
 
 exit 0

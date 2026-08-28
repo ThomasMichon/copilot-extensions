@@ -244,13 +244,13 @@ Public-safe transcription of the operator request:
 
 ### Phase 5 - Integrated validation and release
 
-- [ ] Exercise configured and unconfigured repositories in normal cwd-backed
+- [x] Exercise configured and unconfigured repositories in normal cwd-backed
       launches, resumes, ACP launches with persisted trust, and the documented
       bare-resume/static-fallback case.
-- [ ] Run the relevant plugin suites, hook process-hygiene checks, version
+- [x] Run the relevant plugin suites, hook process-hygiene checks, version
       consistency guards, context-budget inventory, and clean-room harness
       scenarios for every changed plugin combination.
-- [ ] Confirm the public docs explain adoption, effort focus, compact handoffs,
+- [x] Confirm the public docs explain adoption, effort focus, compact handoffs,
       cross-repository ownership, optional capability degradation, and the
       difference between completing a slice and completing an effort.
 - [ ] Mark every plan and validation item complete, record merged pull requests,
@@ -266,18 +266,18 @@ Public-safe transcription of the operator request:
       paths, and symlink escapes fail open and never activate policy.
 - [x] Bash and PowerShell producers emit equivalent guidance bytes and one final
       JSON object across the supported validity, containment, and failure matrix.
-- [ ] The static fallback remains minimal, plugin-attributable, idempotently
+- [x] The static fallback remains minimal, plugin-attributable, idempotently
       reconciled, and sufficient to preserve effort discovery and the completion
       gate when hooks do not run.
-- [ ] Two worktrees in one repository can bind different active efforts without
+- [x] Two worktrees in one repository can bind different active efforts without
       collision; two declared participants can bind distinct slices of the same
       effort; and a stale or archived effort pointer is never presented as active.
-- [ ] An open effort binding keeps the existing `follow_up` cleanup gate asserted,
+- [x] An open effort binding keeps the existing `follow_up` cleanup gate asserted,
       and completing or explicitly transferring the effort clears it without a
       second independent responsibility flag.
-- [ ] Session-start orientation is bounded and contains pointers only: no
+- [x] Session-start orientation is bounded and contains pointers only: no
       transcript, full effort body, private identifier, or unbounded history.
-- [ ] Missing agent-worktrees, session history, handoff state, or ramp-up support
+- [x] Missing agent-worktrees, session history, handoff state, or ramp-up support
       degrades to the base efforts kernel without startup failure.
 - [x] An effort-backed handoff plus the durable effort is sufficient for a fresh
       successor to select the next slice; predecessor ramp-up adds immediate
@@ -289,7 +289,7 @@ Public-safe transcription of the operator request:
 - [x] Cross-repository placement uses validated target capability: host-owned
       when absent, one-way target-owned sub-effort when present, and no cyclic or
       duplicate canonical effort.
-- [ ] All changed plugin versions and marketplace entries remain consistent, and
+- [x] All changed plugin versions and marketplace entries remain consistent, and
       every changed plugin passes its focused test and clean-room matrix.
 
 ## Proposal
@@ -451,3 +451,64 @@ earlier slices.
   special-file handling, exact argument parsing, and ownership wording.
 - Bumped agent-worktrees to `1.5.3-dev657`, efforts to `0.1.0-dev17`, and
   marketplace metadata to `1.7.5-dev677`.
+
+### 2026-08-28 - Phase 4 merged and integrated acceptance began
+
+- Merged reviewed Phase 4 PR
+  [#1275](https://github.com/ThomasMichon/copilot-extensions/pull/1275);
+  its `Closes #1260` linkage closed the cross-repository ownership issue.
+- Re-ran the four continuity surfaces: 3,503 agent-worktrees tests (6 skipped),
+  197 agent-logger tests (1 skipped), 64 efforts tests, 42 context-handoff Node
+  tests, 34 installer-readiness tests, and the headless-launch, install,
+  payload-generation, documentation, skill, and version guards.
+- The Tier-E `effort-handoff-eval` correctly refused to spend credits when its
+  Tier-P starting-state gate failed. A clean source snapshot proved plugin
+  installation and worktree creation, then exposed the fixture defect: the
+  setup driver checked the installed binstub through a login shell but invoked
+  the bind step from its non-login shell. The scenario now resolves that
+  binstub once and uses its exact path for the binding. Its Tier-P manifest
+  precondition also enters the managed worktree before querying the
+  project-scoped effort binding.
+- The first judged Tier-E run produced the four correct continuity decisions
+  but was a literal-mode false pass: published guidance invoked
+  `session-role --json`, while the JSON-only command rejected that conventional
+  flag and the agent improvised past the blocker. Added a compatibility alias
+  with parser coverage so existing guidance remains executable. Bumped
+  agent-worktrees to `1.5.3-dev658` and marketplace metadata to
+  `1.7.5-dev678`.
+- The fresh rerun reached the role check but reported `head-elect` and
+  `registered=false`: the generic clean-room provider launched ACP from the
+  container home rather than the fixture's managed worktree. Added a generic
+  `eval.acp_cwd` manifest field to both runners and set this scenario to launch
+  from its worktree.
+- A third fresh run proved the child process cwd alone was insufficient:
+  tool execution used the worktree, but the ACP `session/new` request still
+  supplied `/`, so the sessionStart registration hook could not resolve the
+  managed worktree and the literal-mode judge again rejected the semantically
+  correct answer. The clean-room namespace provider now exposes `eval.acp_cwd`
+  as its authoritative `workspace_folder`, making agent-bridge send the same
+  path in `session/new` that the launched shell uses.
+- A fourth run delivered the symlink alias in both places, and the exact
+  registration probe confirmed agent-worktrees correctly declines that alias
+  while registering from the generated physical worktree path. Added
+  `eval.acp_cwd_file` so setup-created scenarios can publish one authoritative
+  runtime path after setup; the effort fixture now uses its physical managed
+  worktree path instead of asking registration to trust an indirection.
+- The next physical-cwd run registered the driven session as the rightful head,
+  but Copilot CLI retained the registration context instead of the separate
+  agent-worktrees command catalog. The agent guessed the non-executable source
+  shim, received exit 126, and again violated literal mode by continuing.
+  Registration now narrowly coalesces agent-worktrees' own payload-local
+  command catalog with its binding context; this does not aggregate independent
+  plugin contexts or claim to resolve #1234.
+- The next fresh run passed strict literal-mode judging. The successor received
+  the payload-local command catalog and worktree binding together, inspected the
+  open effort successfully, rejected premature completion and predecessor
+  edits, selected review submission, preserved the approval pause, and left the
+  fixture unchanged.
+- Final implementation validation passed 3,506 agent-worktrees tests (6
+  skipped), 197 agent-logger tests (1 skipped), 64 efforts tests, 42
+  context-handoff Node tests, 34 installer-readiness tests, the clean-room
+  script/manifest checks, and the version, install, runtime-resolution,
+  payload-generation, process-hygiene, skill, docs, runbook, headless-launch,
+  timeout-handler, lint, and suite-discovery guards.

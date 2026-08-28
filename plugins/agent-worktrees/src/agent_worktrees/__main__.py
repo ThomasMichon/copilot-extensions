@@ -16788,6 +16788,11 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Worktree ID (default: resolved from cwd / session id)")
     sp.add_argument("--worktree-dir", dest="worktree_dir", default=None,
                     help="The worktree checkout dir (default: cwd)")
+    sp.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON (the default; accepted for command-family consistency)",
+    )
 
     # note-handoff -- append a session-tagged handoff ref to the history
     sp = sub.add_parser(

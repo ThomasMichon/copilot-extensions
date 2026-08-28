@@ -148,6 +148,17 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
     "notes": "agent-vault installed solo; no worktree base; no .kdbx configured"
   },
 
+  // Optional ACP launch settings. acp_cwd is an absolute in-container POSIX
+  // path known before setup. When setup generates the path, acp_cwd_file names
+  // an absolute in-container file containing exactly that one path. They are
+  // mutually exclusive. The runner uses the resolved cwd for both the launched
+  // shell and ACP session/new so cwd-scoped sessionStart hooks see that path.
+  // acp_plugin_dirs adds headless plugin payloads.
+  "eval": {
+    "acp_cwd_file": "/home/operator/worktree-path",
+    "acp_plugin_dirs": ["/home/operator/.copilot/installed-plugins/example"]
+  },
+
   // WHAT the driven agent is told to do (stated-purpose prose). Inline or prompt.md.
   "prompt": "Using the agent-vault plugin that is installed here, set it up for use and then list the entries in my vault. Do exactly what agent-vault's own documentation tells you.",
 

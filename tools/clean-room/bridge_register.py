@@ -25,10 +25,14 @@ register time) is where the driven agent's plugins are loaded -- the runner
 passes ``--plugin-dir <dir>`` for each of the scenario's declared plugin dirs, so
 the driven reviewer actually has its skills (a bare ``copilot --acp`` would be
 too narrow; enabled-plugins alone are not guaranteed to load headless).
+``--acp-cwd`` is also exposed as the provider's ``workspace_folder`` so
+agent-bridge sends the same path in ACP ``session/new``; changing only the child
+shell cwd leaves the protocol cwd at ``/`` and prevents cwd-scoped sessionStart
+hooks from binding the session.
 
 Usage:
     # register the cleanroom: provider (idempotent) + drive a box:
-    python bridge_register.py --acp-command "<acp>" register --container cr-base --name cleanroom-base
+    python bridge_register.py --acp-command "<acp>" --acp-cwd /workspace register --container cr-base --name cleanroom-base
     agent-bridge create cleanroom:cr-base --prompt-file p.txt --expand all
     python bridge_register.py unregister --name cleanroom-base --container cr-base
 
@@ -141,6 +145,8 @@ def cmd_namespace_resolve(args) -> int:
         "spawn_command": _spawn_command(args.name, args.acp_command),
         "user": None,
     }
+    if args.acp_cwd:
+        spec["workspace_folder"] = args.acp_cwd
     print(json.dumps(spec))
     return 0
 
@@ -170,6 +176,7 @@ def cmd_register(args) -> int:
         "command": [
             sys.executable, str(Path(__file__).resolve()),
             "--acp-command", args.acp_command,
+            "--acp-cwd", args.acp_cwd,
             "--name-filter", args.name_filter,
         ],
         "restricted": True,
@@ -217,6 +224,8 @@ def main() -> int:
     # namespace-* subcommand) so the daemon's `<command...> namespace-list` works.
     ap.add_argument("--acp-command", default=DEFAULT_ACP,
                     help="in-container Copilot ACP command (with --plugin-dir flags)")
+    ap.add_argument("--acp-cwd", default="",
+                    help="in-container ACP session/new cwd exposed as workspace_folder")
     ap.add_argument("--name-filter", default=DEFAULT_NAME_FILTER,
                     help="only containers whose name starts with this are clean-room boxes")
     sub = ap.add_subparsers(dest="cmd", required=True)
