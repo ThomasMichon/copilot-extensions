@@ -29,7 +29,7 @@ from agent_procutil import no_window_flags
 
 from ._invoke import module_argv
 from .config import RESTRICTED_PROFILE, TRUSTED_PROFILE, load_config
-from .lease import get_lease
+from .lease import deploy_hold_status, get_deploy_hold, get_lease
 from .lifecycle import (
     get_container,
     inspect_state,
@@ -220,6 +220,11 @@ class ContainerResolver:
         )
         supported_profile = actual_profile in {TRUSTED_PROFILE, RESTRICTED_PROFILE}
         restricted = fleet.restricted or actual_profile != TRUSTED_PROFILE
+        hold_status = (
+            await asyncio.to_thread(deploy_hold_status, name)
+            if restricted
+            else {"state": "none", "operation": None, "reason": None}
+        )
         effective_profile = RESTRICTED_PROFILE if restricted else actual_profile
         profile_mismatch = (
             not supported_profile or fleet.security_profile != actual_profile
@@ -244,7 +249,11 @@ class ContainerResolver:
             "observed_security_profile": actual_profile,
             "effective_security_profile": effective_profile,
             "state": getattr(info, "state", "unknown"),
-            "ready": bool(getattr(info, "is_running", False)) and not profile_mismatch,
+            "ready": (
+                bool(getattr(info, "is_running", False))
+                and not profile_mismatch
+                and hold_status["state"] == "none"
+            ),
             "posture_verified": False,
             "transport": "docker-exec" if restricted else "ssh",
             "capabilities": {
@@ -254,6 +263,8 @@ class ContainerResolver:
                 "session_host": not restricted,
             },
         }
+        if restricted:
+            spec["venue"]["lifecycle_hold"] = hold_status
         if not restricted:
             ssh_config = await asyncio.to_thread(
                 prepare_ssh_config,
@@ -292,6 +303,13 @@ class ContainerResolver:
         agents = []
         for c in containers:
             lease = await asyncio.to_thread(get_lease, c.name)
+            fleet = config.fleets.get(c.fleet or "")
+            hold_status = (
+                await asyncio.to_thread(deploy_hold_status, c.name)
+                if (fleet and fleet.restricted)
+                or c.security_profile == RESTRICTED_PROFILE
+                else {"state": "none", "operation": None, "reason": None}
+            )
             repo = c.repo or (c.fleet or "")
             display = f"{c.name} ({repo})" if repo else c.name
             description = f"Local dev container: {c.image}"
@@ -300,6 +318,8 @@ class ContainerResolver:
                 description += f" — leased by {lease.effort}"
             # Map docker state to a coarse ready/stopped signal.
             state = "running" if c.is_running else (c.state or "unknown")
+            if hold_status["state"] != "none":
+                state = "draining"
             agents.append({
                 "name": c.name,
                 "display_name": display,
@@ -331,6 +351,13 @@ class ContainerResolver:
                 f"Container '{name}' security profile does not match its fleet "
                 f"(configured={fleet.security_profile!r}, live={actual_profile!r})"
             )
+        if fleet.restricted:
+            deploy_hold = await asyncio.to_thread(get_deploy_hold, name)
+            if deploy_hold:
+                raise RuntimeError(
+                    f"Container '{name}' is unavailable while provider "
+                    f"{deploy_hold.operation} is in progress"
+                )
         if fleet.restricted or info.security_profile == "restricted":
             errors = await asyncio.to_thread(
                 restricted_policy_errors,

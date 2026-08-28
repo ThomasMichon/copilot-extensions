@@ -22,14 +22,22 @@ Make a restricted local-container venue a named, worktree-centered participant
 in the agent fabric without projecting trusted-host authority into it. A caller
 should be able to select the venue, assign one container-local repository
 workspace, dispatch a durable goal, open the same session through an
-SSH-compatible provider transport, and recover its state after venue
-replacement.
+SSH-compatible provider transport, and rescue its evidence before venue
+replacement without restoring the old session or workspace.
 
 The provider remains the source of venue, posture, and lease truth.
 agent-worktrees owns the represented workspace identity. agent-bridge and
 agent-dispatch consume those facts. agent-logger brokers the narrow session
 checkpoint. No layer creates a synthetic physical machine, shared host worktree,
 ambient credential, or parallel lifecycle store.
+
+The restricted worker is treated as fallible, not omnipotently malicious. The
+primary failures are mistaken/destructive commands and prompt-injected tool use.
+Host filesystem and credential boundaries remain hard, rescued bytes remain
+allowlisted analysis evidence, and arbitrary internet is absent; intended egress
+is limited to the repository forge and controlled basic search. Implementation
+complexity should be justified by those concrete blast-radius and lifecycle
+risks rather than a hostile multi-tenant threat model.
 
 ## Participants
 
@@ -40,7 +48,7 @@ ambient credential, or parallel lifecycle store.
 | agent-worktrees / Picker | Represented workspace authority and provider-backed source UX | `plugins/agent-worktrees` |
 | agent-ssh | Named SSH-compatible provider transport contract | `plugins/agent-ssh` |
 | agent-dispatch | Task-to-venue ownership, supervised embodiment, recovery | `plugins/agent-dispatch` |
-| agent-logger | Allowlisted session-state export/restore | `plugins/agent-logger` |
+| agent-logger | Allowlisted rescued-evidence ingestion | `plugins/agent-logger` |
 
 ## Coordination
 
@@ -116,7 +124,7 @@ mount, credential relay, merge authority, or deployment authority.
       tests; bump agent-bridge.
 
 ### Phase 3 — Restricted session-state rescue
-- [ ] Add one provider-owned replacement choke point used by `up --recreate`,
+- [x] Add one provider-owned replacement choke point used by `up --recreate`,
       remove, and future lifecycle callers. Acquire an exclusive deploy hold
       before checking liveness so a concurrent borrow/session cannot race the
       check and destruction.
@@ -127,7 +135,7 @@ mount, credential relay, merge authority, or deployment authority.
       Copilot `inuse.<pid>.lock` session markers for live-session presence and
       the append-only `events.jsonl` tail for a completed turn boundary, covering
       sessions not registered with agent-bridge.
-- [ ] Add a short-TTL, heartbeated session-liveness record distinct from the
+- [x] Add a short-TTL, heartbeated session-liveness record distinct from the
       existing 24-hour advisory effort lease. Dead session holders clear in
       minutes; an effort lease alone neither authorizes nor indefinitely blocks
       replacement.
@@ -164,13 +172,13 @@ mount, credential relay, merge authority, or deployment authority.
       sequence/offset compare-and-set so a late writer cannot rewind a longer
       host copy. Surface the configured evidence-completeness objective and
       checkpoint staleness/failure; do not imply work or in-memory recovery.
-- [ ] Keep workspace, source roots, worktrees, settings, and credentials
+- [x] Keep workspace, source roots, worktrees, settings, and credentials
       ephemeral. A replacement receives a fresh clone/runtime and does not
       restore the prior Copilot session.
 - [ ] Treat rescued bytes as untrusted evidence. Keep the archive opaque at the
       provider boundary; downstream analysis uses safe, allowlisted readers and
       never executes extracted hooks/configuration.
-- [ ] Keep the member manifest deny-by-default. Include the append-only event
+- [x] Keep the member manifest deny-by-default. Include the append-only event
       stream and minimum provenance/checkpoint index; exclude high-growth
       `files/`, `rewind-file-snapshots/`, research, and unknown members, and
       report exclusions. Bound those excluded scratch surfaces in-venue so the
@@ -182,14 +190,14 @@ mount, credential relay, merge authority, or deployment authority.
       without exposing host paths or transcript content.
 - [ ] Keep deploy/update non-destructive: it may build the new image, sync policy,
       and report a drifted running member, but never implicitly recreate it.
-- [ ] Reconcile fleet members independently. Recreate confirmed-idle members,
+- [x] Reconcile fleet members independently. Recreate confirmed-idle members,
       leave active/unknown members running and reported, and return a first-class
       partial/deferred result rather than failing or half-removing the whole
       fleet.
 - [ ] Add path-boundary, hash/atomicity, interrupted-export, recreate-block,
       active-turn/session/lease guard, explicit-abandon, incremental-checkpoint,
       and fresh-replacement tests; bump agent-containers.
-- [ ] Prove rescue does not weaken the restricted runtime: policy version,
+- [x] Prove rescue does not weaken the restricted runtime: policy version,
       container creation argv, no binds/mounts, and the exact tmpfs set remain
       unchanged. Preserve trusted-fleet lifecycle behavior.
 
@@ -352,3 +360,120 @@ key and relay projection; restricted venues never enter that path.
   `~/.copilot/session-state` before planned destruction plus incremental
   checkpoints for unexpected loss; Phase 6 ingests those rescues for asynchronous
   analysis. No mount, worktree restore, or session rehydration is required.
+- Phase 3 first code slice adds a provider lifecycle hold under the lease-lock
+  discipline, restricted launch admission, non-cooperative `inuse.<pid>.lock`
+  probing, per-member recreate/remove deferral, and verified one-way rescue.
+  Captures accept only UUID session directories and the event/provenance
+  allowlist, hash host-received bytes, fsync and atomically publish under
+  provider state, enforce per-member/capture/total retention bounds, and expose
+  path-free latest status through fleet JSON. Rescue failure leaves the old
+  member running unless `--force-abandon` explicitly accepts evidence loss;
+  active or unknown liveness is never overridden. The restricted Docker policy
+  version, run argv, empty binds/mounts, and exact tmpfs set remain unchanged,
+  and replacements restore nothing.
+- Remaining Phase 3 work is intentionally not claimed by this slice: event-tail
+  turn-boundary interpretation, active drain/end requests, richer drift classes,
+  repository proposal preservation, monotonic incremental checkpoints, and
+  downstream corpus ingestion.
+- Phase 3 review hardening made destructive admission cross-platform and
+  race-closed. Host PID checks now use the Windows-safe ssh-manager primitive;
+  in-container markers use permission-independent `/proc/<pid>` presence.
+  Provider holds and session admissions heartbeat with bounded expiry, preserve
+  fresh Windows/WSL peer records fail-closed, expose corrupt state as
+  unknown/not-ready, and have a stale-only clear escape. Paused members unpause
+  for inspection or defer; already-stopped members require an explicit evidence
+  loss record. Restricted `down` now uses the same hold, double-liveness probe,
+  rescue, and per-member deferral as remove/recreate.
+- Rescue now opens every allowlisted member no-follow beneath descriptor-anchored
+  home/session directories, fstats and streams that same descriptor, and uses
+  NUL-framed inventory only for exclusion reporting. Irregular or oversize
+  allowlisted evidence produces a verified partial capture rather than wedging
+  the venue. Publication and retention are separately locked; retention failure
+  cannot invalidate a verified capture, and failed/abandoned latest status keeps
+  the newest verified capture as fallback. Deployment remains report/prepare
+  only: replacement is explicit, active/unknown members defer independently,
+  and every replacement starts without workspace or session restore.
+- 2026-08-27 threat-model clarification: the restricted posture chiefly
+  contains mistakes by a weaker/fallible worker, including destructive commands
+  induced by prompt injection. Prompt-injection defense is primarily the narrow
+  information boundary—repository access plus controlled basic search, not
+  arbitrary internet. Keep host credential/filesystem isolation and the rescue
+  allowlist, but do not add machinery justified only by an omnipotent malicious
+  in-container adversary.
+- Final correction pass bounded the complete rescue and each member stream by a
+  wall-clock deadline, and gave deploy holds a non-extendable maximum lifetime
+  despite heartbeat. Embedded JavaScript now uses synchronous control writes,
+  natural exit, a validated immutable-rootfs Node path, `node --check`, and
+  synthetic execution coverage for normal/missing/symlink/FIFO/oversize inputs.
+  High-growth roots are summarized without recursion.
+- Retention now repairs status/fallback references after deletion and never
+  converts an already-published verified capture into failure. Lock files carry
+  ownership tokens so an old holder cannot unlink its successor. Missing
+  session-state is distinct from complete-empty; a process/cmdline backstop
+  makes marker-layout drift unknown/deferred.
+- Restricted `down` now classifies every Docker state, and a later `rm` reuses a
+  verified capture for the same stopped container instance. Lifecycle
+  operations expose full JSON results and return busy (`75`) when any member
+  defers; restricted exec uses the same busy contract. The two final
+  hold/identity proofs are intentionally retained on either side of the last
+  liveness probe to close its check/action window.
+- Release review hardened helper launch and hold completion. Restricted
+  liveness probes and rescue now select fixed absolute Bash/Node candidates,
+  reject candidates beneath the actual Docker tmpfs/mount/home surfaces, clear
+  shell/loader/Node startup variables, and use no shell startup files. The
+  rescue deadline is separate from reserved bounded Docker action,
+  confirmation, and hold-cleanup time; final hold ownership is proved after
+  confirmation. A real deploy-hold/session-admission contention test now proves
+  restricted exec returns the shared busy exit `75`.
+- Ship review narrowed already-stopped handling to explicit terminal Docker
+  states; restarting/removing/unknown/other states defer even under abandonment.
+  Destructive lifecycle now runs the full restricted-policy validator and
+  tolerates only expected image/policy drift, never boundary drift. Helper
+  resolution requires `ReadonlyRootfs`, canonicalizes candidate symlink targets,
+  and rejects targets under actual writable surfaces. Inventory byte limits are
+  enforced during streaming with immediate child termination rather than after
+  unbounded capture.
+- Final blocking review made the requested fleet configuration authoritative:
+  an explicit foreign label occupying its deterministic slot is drift and
+  defers, never a route around restricted destruction. Verified captures are
+  retention-pinned for the complete liveness/action/confirmation window and
+  re-verified immediately before destruction, so concurrent quota cleanup
+  cannot invalidate the safety proof. Docker lifecycle timeouts now normalize
+  to per-member deferred/unknown outcomes; up/down/remove continue reconciling
+  unaffected siblings while an unconfirmed action keeps its hold fail-closed.
+- Generation review bound every verified capture, status record, retention pin,
+  and stopped-instance reuse decision to both Docker container ID and the
+  authoritative `State.StartedAt` execution generation. A restart that preserves
+  the container ID therefore invalidates the prior run's rescue; final
+  pre-destruction verification defers until the new generation is freshly
+  rescued or explicitly abandoned.
+- PR advisory review aligned idempotent re-borrow contention with the standard
+  `ProviderAdmissionError` busy contract and made inventory helper stderr a
+  concurrently drained, bounded diagnostic channel. Pipe-filling diagnostics
+  can no longer deadlock stdout rescue; deadline or diagnostic overflow
+  terminates the helper with bounded useful context.
+- Updated advisory review closed owner-permission gaps: mutable provider state
+  repairs existing directory mode to owner-only, coordination/rescue/relay
+  secret JSON is created through owner-only atomic temporaries, and final modes
+  are enforced and verified where POSIX permissions are meaningful.
+- Permission follow-up made enforcement backing-filesystem-aware: native POSIX
+  filesystems still require exact `0700`/`0600`, while detected DrvFS/9p/FUSE/
+  ACL-backed shared state applies chmod best-effort and relies on the platform
+  ACL rather than failing every operation. The shared atomic JSON primitive now
+  fsyncs the containing directory after replace for crash-durable lease,
+  admission, hold, rescue, and relay-token publication.
+- Crash/permission review extended the same backing-aware mode repair to legacy
+  and relocated relay-token stores before read/reuse, removed direct rescue
+  chmod calls, and made lifecycle-pin publication complete-before-visible with
+  atomic no-clobber semantics. Malformed/truncated pin remnants remain
+  fail-closed briefly, then expire so retention cannot be wedged permanently.
+- Latest review made context-manager cleanup non-interfering: corrupt hold or
+  admission state during `finally` is logged and left fail-closed for
+  TTL/stale-clear rather than masking the protected return value or exception.
+  Fleet sibling loops now explicitly classify rescue/generation/pin exceptions
+  as per-member deferrals across up/down/remove.
+- Newest review made rescue member files owner-only at the initial `os.open`
+  rather than after creation, eliminating an open-umask visibility window.
+  Docker timeout diagnostics now report only a parsed verb plus safe
+  container/target identity (for example `docker exec <member>`), never option,
+  environment, or command payload prefixes.

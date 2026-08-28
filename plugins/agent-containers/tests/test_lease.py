@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import json
+import os
+import stat
+import time
+
 import pytest
 
 from agent_containers import lease as lease_mod
+from agent_containers import private_state
 from agent_containers.config import ContainersConfig
 from agent_containers.lifecycle import DockerContainerInfo
 
@@ -13,8 +19,19 @@ from agent_containers.lifecycle import DockerContainerInfo
 def fleet(monkeypatch, tmp_path):
     """Redirect lease state to tmp and stub docker discovery."""
     monkeypatch.setattr(lease_mod, "LEASE_FILE", tmp_path / "leases.json")
-    monkeypatch.setattr(lease_mod, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(lease_mod, "STATE_DIR", tmp_path)
+    monkeypatch.setattr(lease_mod, "ensure_state_dir", lambda: None)
     monkeypatch.setattr(lease_mod, "_LOCK_FILE", tmp_path / "leases.lock")
+    monkeypatch.setattr(
+        lease_mod,
+        "_DEPLOY_HOLDS_FILE",
+        tmp_path / "deploy-holds.json",
+    )
+    monkeypatch.setattr(
+        lease_mod,
+        "_SESSION_ADMISSIONS_FILE",
+        tmp_path / "session-admissions.json",
+    )
 
     containers = [
         DockerContainerInfo("myrepo-1", "i1", "img", "running", "", fleet="myrepo"),
@@ -98,3 +115,306 @@ def test_lease_survives_within_ttl(fleet):
     leases = lease_mod.list_leases()
     assert len(leases) == 1
     assert leases[0].effort == "effort-a"
+
+
+def test_concurrent_borrow_is_blocked_by_provider_deploy_hold(fleet):
+    with lease_mod.deploy_hold("myrepo-1", "recreate"):
+        with pytest.raises(RuntimeError, match="provider recreate is in progress"):
+            lease_mod.borrow(
+                fleet,
+                "effort-a",
+                container="myrepo-1",
+            )
+
+
+def test_idempotent_reborrow_is_also_blocked_by_provider_hold(fleet):
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+
+    with lease_mod.deploy_hold("myrepo-1", "recreate"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider recreate is in progress",
+        ):
+            lease_mod.borrow(fleet, "effort-a")
+
+
+def test_existing_session_is_visible_after_hold_and_new_session_is_blocked(fleet):
+    with lease_mod.session_admission("myrepo-1"):
+        admissions = lease_mod.active_session_admissions("myrepo-1")
+        assert len(admissions) == 1
+        with lease_mod.deploy_hold("myrepo-1", "remove"):
+            assert len(lease_mod.active_session_admissions("myrepo-1")) == 1
+
+    with lease_mod.deploy_hold("myrepo-1", "recreate"):
+        with pytest.raises(RuntimeError, match="provider recreate is in progress"):
+            with lease_mod.session_admission("myrepo-1"):
+                pass
+
+
+def test_unreadable_deploy_hold_state_fails_admission_closed(fleet):
+    lease_mod._DEPLOY_HOLDS_FILE.write_text("{not-json", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="refusing provider admission"):
+        lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+
+
+def test_process_liveness_reuses_windows_safe_ssh_manager_probe(
+    fleet,
+    monkeypatch,
+):
+    called = []
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda pid: called.append(pid) or True,
+    )
+    record = lease_mod.DeployHold(
+        container="myrepo-1",
+        operation="recreate",
+        token="record-id",  # noqa: S106
+        pid=123,
+        host=lease_mod._this_host(),
+        environment=lease_mod._this_environment(),
+        acquired_at=time.time(),
+        heartbeat_at=time.time(),
+        expires_at=time.time() + lease_mod.DEPLOY_HOLD_TTL,
+    )
+
+    assert lease_mod._record_live(record, lease_mod.DEPLOY_HOLD_TTL) is True
+    assert called == [123]
+
+
+def test_cross_environment_hold_is_preserved_fail_closed(fleet, monkeypatch):
+    monkeypatch.setattr(lease_mod, "_this_environment", lambda: "wsl")
+    monkeypatch.setattr(
+        lease_mod,
+        "pid_alive",
+        lambda _pid: (_ for _ in ()).throw(
+            AssertionError("must not inspect a Windows PID from WSL")
+        ),
+    )
+    hold = lease_mod.DeployHold(
+        container="myrepo-1",
+        operation="recreate",
+        token="record-id",  # noqa: S106
+        pid=123,
+        host=lease_mod._this_host(),
+        environment="windows",
+        acquired_at=time.time(),
+        heartbeat_at=time.time(),
+        expires_at=time.time() + lease_mod.DEPLOY_HOLD_TTL,
+    )
+    lease_mod._write_records(
+        lease_mod._DEPLOY_HOLDS_FILE,
+        {"myrepo-1": hold},
+    )
+
+    observed = lease_mod.get_deploy_hold("myrepo-1")
+
+    assert observed is not None
+    assert observed.environment == "windows"
+    assert lease_mod._DEPLOY_HOLDS_FILE.exists()
+
+
+def test_expired_cross_environment_hold_can_be_cleared_safely(
+    fleet,
+    monkeypatch,
+):
+    monkeypatch.setattr(lease_mod, "_this_environment", lambda: "wsl")
+    hold = lease_mod.DeployHold(
+        container="myrepo-1",
+        operation="recreate",
+        token="record-id",  # noqa: S106
+        pid=123,
+        host=lease_mod._this_host(),
+        environment="windows",
+        acquired_at=time.time() - 1000,
+        heartbeat_at=time.time() - lease_mod.DEPLOY_HOLD_TTL - 1,
+        expires_at=time.time() - 1,
+    )
+    lease_mod._write_records(
+        lease_mod._DEPLOY_HOLDS_FILE,
+        {"myrepo-1": hold},
+    )
+
+    cleared = lease_mod.clear_stale_provider_records("myrepo-1")
+
+    assert cleared["deploy_holds"] == 1
+    assert lease_mod.get_deploy_hold("myrepo-1") is None
+
+
+def test_deploy_hold_heartbeats_and_verifies_token(fleet, monkeypatch):
+    monkeypatch.setattr(lease_mod, "_RECORD_HEARTBEAT_INTERVAL", 0.01)
+    with lease_mod.deploy_hold("myrepo-1", "recreate") as hold:
+        initial_heartbeat = hold.heartbeat_at
+        time.sleep(0.04)
+        current = lease_mod.verify_deploy_hold("myrepo-1", hold.token)
+        assert current.heartbeat_at > initial_heartbeat
+        with pytest.raises(lease_mod.ProviderAdmissionError):
+            lease_mod.verify_deploy_hold("myrepo-1", "wrong-token")
+
+
+def test_deploy_hold_max_lifetime_expires_despite_heartbeat(fleet, monkeypatch):
+    monkeypatch.setattr(lease_mod, "_RECORD_HEARTBEAT_INTERVAL", 0.005)
+    with lease_mod.deploy_hold(
+        "myrepo-1",
+        "recreate",
+        max_lifetime=0.02,
+    ) as hold:
+        time.sleep(0.04)
+        with pytest.raises(lease_mod.ProviderAdmissionError):
+            lease_mod.verify_deploy_hold("myrepo-1", hold.token)
+
+
+def test_unconfirmed_action_hold_survives_owner_exit_until_expiry(fleet):
+    with lease_mod.deploy_hold(
+        "myrepo-1",
+        "remove",
+        max_lifetime=0.05,
+    ) as hold:
+        lease_mod.mark_deploy_hold_uncertain("myrepo-1", hold.token)
+
+    assert lease_mod.get_deploy_hold("myrepo-1") is not None
+    time.sleep(0.06)
+    assert lease_mod.get_deploy_hold("myrepo-1") is None
+
+
+def test_lease_lock_cleanup_never_unlinks_new_owner(fleet):
+    with lease_mod._lease_lock():
+        lease_mod._LOCK_FILE.write_text("replacement-owner", encoding="ascii")
+
+    assert lease_mod._LOCK_FILE.read_text(encoding="ascii") == "replacement-owner"
+
+
+def test_corrupt_hold_is_observable_but_admission_stays_closed(fleet):
+    lease_mod._DEPLOY_HOLDS_FILE.write_text("{not-json", encoding="utf-8")
+
+    status = lease_mod.deploy_hold_status("myrepo-1")
+
+    assert status["state"] == "unknown"
+    with pytest.raises(lease_mod.ProviderAdmissionError):
+        lease_mod.get_deploy_hold("myrepo-1")
+
+
+def test_malformed_hold_values_are_observable_unknown(fleet):
+    lease_mod._DEPLOY_HOLDS_FILE.write_text(
+        json.dumps(
+            {
+                "myrepo-1": {
+                    "container": "myrepo-1",
+                    "operation": "recreate",
+                    "token": "record-id",
+                    "pid": 123,
+                    "host": lease_mod._this_host(),
+                    "environment": lease_mod._this_environment(),
+                    "acquired_at": time.time(),
+                    "heartbeat_at": "not-a-number",
+                    "expires_at": time.time() + lease_mod.DEPLOY_HOLD_TTL,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert lease_mod.deploy_hold_status("myrepo-1")["state"] == "unknown"
+
+
+def test_safe_clear_refuses_fresh_corruption_then_clears_expired_file(fleet):
+    lease_mod._DEPLOY_HOLDS_FILE.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(lease_mod.ProviderAdmissionError):
+        lease_mod.clear_stale_provider_records()
+
+    old = time.time() - lease_mod.DEPLOY_HOLD_TTL - 1
+    os.utime(lease_mod._DEPLOY_HOLDS_FILE, (old, old))
+    cleared = lease_mod.clear_stale_provider_records()
+
+    assert cleared["deploy_holds"] == 1
+    assert not lease_mod._DEPLOY_HOLDS_FILE.exists()
+
+
+def test_coordination_json_writes_are_owner_only_under_open_umask(
+    fleet,
+    monkeypatch,
+):
+    now = time.time()
+    fsync_calls = []
+    monkeypatch.setattr(
+        private_state,
+        "fsync_directory",
+        lambda path: fsync_calls.append(path),
+    )
+    hold = lease_mod.DeployHold(
+        container="myrepo-1",
+        operation="recreate",
+        token="record-id",  # noqa: S106
+        pid=123,
+        host=lease_mod._this_host(),
+        environment=lease_mod._this_environment(),
+        acquired_at=now,
+        heartbeat_at=now,
+        expires_at=now + 60,
+    )
+    previous = os.umask(0)
+    try:
+        lease_mod._write_records(
+            lease_mod._DEPLOY_HOLDS_FILE,
+            {"myrepo-1": hold},
+        )
+        lease_mod._write_leases(
+            {
+                "myrepo-1": lease_mod.Lease(
+                    container="myrepo-1",
+                    effort="example",
+                    pid=123,
+                    host=lease_mod._this_host(),
+                    acquired_at=now,
+                    heartbeat_at=now,
+                )
+            }
+        )
+    finally:
+        os.umask(previous)
+
+    if os.name != "nt":
+        assert stat.S_IMODE(
+            lease_mod._DEPLOY_HOLDS_FILE.stat().st_mode
+        ) == 0o600
+        assert stat.S_IMODE(lease_mod.LEASE_FILE.stat().st_mode) == 0o600
+    assert fsync_calls == [
+        lease_mod._DEPLOY_HOLDS_FILE.parent,
+        lease_mod.LEASE_FILE.parent,
+    ]
+    assert not list(lease_mod._DEPLOY_HOLDS_FILE.parent.glob(".*.tmp"))
+
+
+def test_deploy_hold_cleanup_corruption_preserves_original_exception(
+    fleet,
+    caplog,
+):
+    with pytest.raises(ValueError, match="original failure"):
+        with lease_mod.deploy_hold("myrepo-1", "remove"):
+            lease_mod._DEPLOY_HOLDS_FILE.write_text(
+                "{corrupt",
+                encoding="utf-8",
+            )
+            raise ValueError("original failure")
+
+    assert "leaving it fail-closed" in caplog.text
+    assert lease_mod._DEPLOY_HOLDS_FILE.exists()
+
+
+def test_session_admission_cleanup_corruption_preserves_return_value(
+    fleet,
+    caplog,
+):
+    def operation():
+        with lease_mod.session_admission("myrepo-1"):
+            lease_mod._SESSION_ADMISSIONS_FILE.write_text(
+                "{corrupt",
+                encoding="utf-8",
+            )
+            return "completed"
+
+    assert operation() == "completed"
+    assert "leaving it fail-closed" in caplog.text
+    assert lease_mod._SESSION_ADMISSIONS_FILE.exists()

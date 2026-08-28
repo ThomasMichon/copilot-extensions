@@ -36,7 +36,9 @@ addressing (`container:<name>`) is unavailable.
   container for the duration of its work, then releases it. Leases persist
   across CLI invocations and agent dispatches; they expire only on explicit
   `release` or after a TTL (default 24h). Enforcement is **advisory** — the
-  resolver logs but does not block cross-effort dispatch.
+  resolver logs but does not block cross-effort dispatch. Restricted destructive
+  lifecycle adds a separate provider-owned hold: while a member is being checked
+  for recreate/remove, new borrows and provider launches are refused.
 - **`container:` resolver** — `agent-bridge send container:<name> "..."`
   is served through agent-bridge's declarative provider registry. The
   `agent-containers` binstub implements `namespace-list`,
@@ -85,14 +87,19 @@ addressing (`container:<name>`) is unavailable.
 
 ```
 agent-containers fleet [--json]      # list fleet containers + lease status
-agent-containers up <fleet>          # provision/top-up a fleet to its size
-agent-containers down <fleet>        # stop (keep warm)
+agent-containers up <fleet> [--recreate] [--force-abandon] [--json]
+                                      # provision/top-up; safely replace idle drift
+agent-containers down <fleet> [--force-abandon] [--json]
+                                      # rescue, then stop confirmed-idle members
 agent-containers start <fleet>       # start stopped containers
-agent-containers rm <fleet> [--force] # remove (destructive)
+agent-containers rm <fleet> [--force] [--force-abandon] [--json]
+                                      # remove; restricted members rescue first
 agent-containers borrow <effort> [--fleet <fleet>] [--container <name>]
                                       # lease a free/specific container -> prints name
 agent-containers release <target>    # release by container or effort name
 agent-containers leases              # show active leases
+agent-containers lifecycle-clear [name]
+                                      # clear only expired/dead admission records
 agent-containers exec <name>         # run the ACP launch command (testing)
 agent-containers config-migrate      # stamp/migrate machine-local containers.yaml
 agent-containers version             # show version
@@ -111,6 +118,14 @@ container (`exec_user: vscode`, `workspace_folder: /workspace`,
 `image_prefixes: ["vsc-"]`); point them at a real repo in your own
 `containers.yaml`. The overlay lookup is additive and fail-open; agent-worktrees
 is not required for standalone use.
+
+`AGENT_CONTAINERS_STATE_DIR` may relocate mutable lease/admission/rescue state
+without relocating either platform's runtime installation. When Windows and
+WSL intentionally operate the same Docker provider, both installations must set
+it to the same filesystem-visible directory (or designate only one environment
+as the restricted lifecycle owner). Separate state roots cannot make host-side
+admission atomic across environments. Shared records from the peer environment
+are therefore preserved fail-closed until their bounded heartbeat expires.
 
 ```yaml
 exec_user: vscode
@@ -145,6 +160,15 @@ surfaces, drop all Linux capabilities, disable privilege escalation, apply
 CPU/memory/PID ceilings, and default to `network: none`. They must provide an
 explicit per-fleet `acp_command`; there is no implicit
 `--allow-all-tools` fallback.
+
+The primary threat is a fallible worker issuing a mistaken/destructive command,
+including one suggested by prompt injection—not an omnipotent hostile tenant.
+Containment therefore prioritizes disposable local state, no host filesystem or
+credential projection, active-session-safe lifecycle, and narrow egress. A
+typical online restricted fleet reaches only its model endpoint, repository
+forge, and a controlled basic-search interceptor; arbitrary internet remains
+absent. Rescue still treats received bytes as untrusted so command mistakes,
+special files, and path races cannot escape the evidence allowlist.
 
 Workspace and home are explicitly executable because agent runtimes and build
 tools load native helpers there; `/tmp` and `/run` remain noexec. Execution is
@@ -211,6 +235,116 @@ writable state is intentionally ephemeral: stopping or removing the container
 clears it, so the higher-level workflow must extract or push the work before
 release.
 
+### Restricted replacement and session evidence
+
+`up --recreate`, `down`, and `rm` reconcile restricted members independently.
+Before stopping or destroying one member, the provider records an exclusive,
+heartbeated lifecycle hold, checks the advisory lease and provider launch
+admission, and probes Copilot's own `inuse.<pid>.lock` markers inside the
+still-running container. Marker PIDs are checked through `/proc/<pid>` rather
+than signal permissions, with a process/cmdline backstop so an unexpected marker
+layout becomes unknown instead of idle. A live marker or an
+unavailable/unparseable probe defers that member. Recreate/remove may unpause a
+member for inspection; `down` defers paused, restarting, removing, and unknown
+states. Already-stopped members are reported unchanged with explicit evidence
+loss status. Other confirmed-idle members may continue through rescue and
+replacement.
+
+The fleet named on the command is the safety authority. A deterministic-name
+member carrying an explicit foreign fleet label is reported as drift and
+deferred; its foreign/trusted configuration can never downgrade a requested
+restricted remove into the trusted direct-removal path.
+
+The rescue is one-way evidence capture, not persistence or restore. The
+provider streams only these members from UUID-named Copilot session-state
+directories into host-owned state:
+
+- `events.jsonl`
+- `workspace.yaml`, `origin.json`, and `context.json` when present
+- `checkpoints/index.md` when present
+
+`files/`, rewind snapshots, research, unknown session members, workspaces,
+source roots, settings, databases, credentials, and arbitrary home files are
+never copied. Each allowlisted member is opened by a host-supplied helper executed with the
+image's Node interpreter. The interpreter is resolved to an absolute path
+whose canonical target is outside the actual inspected tmpfs/mount/home
+surfaces; helper launch fails unless Docker reports `ReadonlyRootfs: true`.
+Bash liveness probes use the same
+absolute-candidate rule plus `--noprofile --norc`; both helper paths override
+startup/preload/runtime option variables with a sanitized environment rather
+than inheriting `BASH_ENV`, `ENV`, `LD_PRELOAD`, `NODE_OPTIONS`, or container
+`PATH`. The helper uses no-follow directory
+descriptors anchored beneath the restricted home, fstats and streams that same
+descriptor, and is syntax/execution tested. FIFO, device, socket, symlink, and
+oversize members are excluded as explicit partial evidence instead of blocking
+all valid members. Inventory is NUL-framed and never descends into `files/`,
+rewind snapshots, or research; its byte ceiling is enforced while streaming,
+terminating the helper immediately on overflow. Helper diagnostics are drained
+concurrently into a separate bounded buffer so stderr cannot deadlock the
+stream; diagnostic overflow likewise terminates the helper. Host-received bytes
+are SHA-256 hashed,
+re-verified, fsynced, and published as part of one atomic capture with path-free
+status metadata. A missing session-state root is recorded as verified-partial,
+distinct from a present but empty root.
+The replacement starts with the same bounded tmpfs/no-bind/no-mount policy and
+receives no rescued bytes.
+
+An ordinary rescue failure defers stop/removal and leaves the old container
+running. A member that is already stopped has already lost its tmpfs evidence,
+so remove/recreate likewise defers unless `--force-abandon` records that loss.
+The flag never overrides active or unknown liveness. Immediately before the
+lifecycle action, the provider proves it still owns the hold and probes
+liveness again. Current and failed-attempt-with-verified-fallback status is
+available in `fleet --json` under `lifecycle_hold` and `rescue`.
+The complete rescue operation has a wall-clock deadline; a hung member stream
+is terminated and replacement defers. Deploy holds also carry a non-extendable
+maximum lifetime, reserving bounded time for Docker stop/remove, state
+confirmation, and hold cleanup after the rescue deadline. Heartbeat cannot keep
+a wedged operation alive forever, and the hold is re-verified after action
+confirmation before release.
+After a successful `down`, `rm` accepts the verified capture for that same
+container instance rather than demanding telemetry abandonment again. A
+capture being consumed by an active lifecycle operation is pinned against
+global retention until stop/remove is confirmed or the operation safely
+aborts, and its archive/pin are verified immediately before destruction.
+Captures, status, pins, and stopped-instance reuse bind to both the immutable
+Docker container ID and its authoritative `State.StartedAt` execution
+generation; restarting the same container ID creates a new generation that
+cannot reuse evidence from the prior run.
+
+`up`, `down`, and `rm` accept `--json`; their result includes created/stopped/
+removed, unchanged, rescued, abandoned, and deferred members. Any deferred
+member returns the established busy exit code `75`. Restricted `exec` blocked by
+a lifecycle hold uses the same exit code.
+Docker command timeouts are normalized into per-member deferred results:
+liveness timeouts become unknown, while stop/remove/confirmation timeouts leave
+the hold fail-closed and do not abort reconciliation of sibling members.
+Typed rescue/generation/pin failures follow the same per-member rule across
+`up`, `down`, and `rm`.
+
+Deploy holds expire after 15 minutes without heartbeat; session admissions
+expire after 5 minutes without heartbeat. This bounds PID-reuse failures.
+Windows and WSL cannot inspect each other's PIDs, so a fresh record written by
+the other environment stays fail-closed until its heartbeat expires.
+`lifecycle-clear` removes only records proven dead/expired (or corrupt files
+older than the bound); it never clears a fresh unknown owner.
+Cleanup is deliberately fail-silent: if the hold/admission record becomes
+unreadable while an operation exits, cleanup leaves it fail-closed for
+TTL/`lifecycle-clear`, logs the condition, and preserves the operation's
+original result or exception.
+
+Host capture limits are optional top-level `containers.yaml` settings, expressed
+as byte counts:
+
+```yaml
+rescue:
+  max_member_bytes: 67108864
+  max_capture_bytes: 268435456
+  max_total_bytes: 1073741824
+  retain_per_container: 3
+  operation_timeout_seconds: 600
+```
+
 An explicit restricted network must be a user-defined Docker network created
 with `--internal`; `host`, the default `bridge`, and `container:<name>` sharing
 are rejected. This lets a higher-level workflow attach a narrow proxy (for
@@ -249,6 +383,12 @@ not for stamping the binstub.
 
 - `~/.agent-containers/leases.json` — lease records, guarded by an exclusive
   lock file; corrupt/unreadable state is treated as empty.
+- `~/.agent-containers/deploy-holds.json` and `session-admissions.json` —
+  short-lived, heartbeated provider admission records sharing the lease lock
+  discipline across Windows/WSL access to the same Docker provider.
+- `~/.agent-containers/rescues/` — bounded, host-owned, atomically published
+  restricted session-evidence captures. Captured bytes are untrusted evidence
+  and are never restored or executed by the provider.
 - `~/.agent-containers/relay-tokens.json` — per-container credential-relay
   secrets used by the bridge-owned relay.
 - `~/.agent-containers/ssh/` — machine-local trusted-fleet SSH key, generated
@@ -258,6 +398,22 @@ not for stamping the binstub.
 - `~/.agent-containers/deploy-manifest.json`, `current-version`, `versions/` —
   runtime deployment metadata and versioned venv slots.
 
+Mutable coordination state is owner-only: the state directory is enforced as
+`0700` and leases, admissions, holds, pins, rescue status/metadata, and relay
+token files are atomically published from owner-only temporary files as `0600`
+on POSIX. Windows applies the corresponding mode operations best-effort while
+relying on the user's filesystem ACL. WSL DrvFS/9p and other detected
+ACL-backed shared filesystems use the same best-effort model when POSIX mode
+bits are not authoritative; native POSIX filesystems continue to enforce and
+verify exact modes. Atomic JSON replacement fsyncs the containing directory
+best-effort so coordination and relay-token publication is crash-durable where
+the backing filesystem supports it. A relocated state directory becomes the
+relay-token home; an existing legacy token store is repaired and reused without
+rewriting its contents. Lifecycle pin files are published complete via
+owner-private temporary files and atomic no-clobber linking/rename; malformed
+crash remnants fail closed only for a bounded interval before retention reclaims
+them.
+
 ## Troubleshooting
 
 There is no `agent-containers doctor` subcommand today. Use the narrow checks the
@@ -265,9 +421,13 @@ CLI exposes:
 
 - `agent-containers version` — proves the binstub and runtime import.
 - `agent-containers fleet --json` — proves Docker is reachable and discovery
-  works; Docker errors come from `docker version` / `docker ps`.
+  works, and reports restricted lifecycle holds plus the latest rescue attempt
+  without exposing host paths or transcript content; Docker errors come from
+  `docker version` / `docker ps`.
 - `agent-containers leases` then `agent-containers release <container-or-effort>`
   — inspect and clear advisory leases. Forgotten leases expire after the 24h TTL.
+- `agent-containers lifecycle-clear [name]` — safely clear only expired/dead
+  lifecycle records; fresh or cross-environment-unknown records remain blocked.
 - `agent-containers namespace-list` — checks the bridge-facing provider CLI; if
   `agent-bridge send container:<name>` cannot see containers, verify
   `~/.agent-bridge/providers.d/agent-containers.json` exists and points at the

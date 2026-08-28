@@ -122,6 +122,33 @@ def test_restricted_exec_skips_ssh_lock(monkeypatch):
     assert cli._cmd_exec(_args()) == 0
 
 
+def test_restricted_exec_real_deploy_hold_uses_busy_exit(
+    monkeypatch,
+    capsys,
+    tmp_path,
+):
+    import agent_containers.lease as lease
+
+    _patch_cmd_context(monkeypatch, profile="restricted")
+    monkeypatch.setattr(lease, "LEASE_FILE", tmp_path / "leases.json")
+    monkeypatch.setattr(lease, "_LOCK_FILE", tmp_path / "leases.lock")
+    monkeypatch.setattr(
+        lease,
+        "_DEPLOY_HOLDS_FILE",
+        tmp_path / "deploy-holds.json",
+    )
+    monkeypatch.setattr(
+        lease,
+        "_SESSION_ADMISSIONS_FILE",
+        tmp_path / "session-admissions.json",
+    )
+    monkeypatch.setattr(lease, "ensure_state_dir", lambda: None)
+
+    with lease.deploy_hold("repo-1", "recreate"):
+        assert cli._cmd_exec(_args()) == 75
+    assert "provider recreate is in progress" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("live_profile", [None, "unexpected"])
 def test_exec_rejects_unknown_live_profile_before_launch(monkeypatch, live_profile):
     import agent_containers.lifecycle as lifecycle

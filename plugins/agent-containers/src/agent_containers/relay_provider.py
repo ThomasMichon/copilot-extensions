@@ -21,12 +21,16 @@ from pathlib import Path
 
 from credential_relay import TokenRegistry
 
+from .config import RUNTIME_DIR, STATE_DIR
+from .private_state import atomic_write_json, enforce_mode, ensure_private_dir
+
 log = logging.getLogger("agent-containers.relay")
 
 # Per-container relay tokens live in a host file so the in-bridge relay validator
 # and the (separate-process) ``agent-containers exec`` transport wrapper agree on
 # which secrets are valid. Mirrors the lease-file pattern.
-_TOKENS_FILE = Path.home() / ".agent-containers" / "relay-tokens.json"
+_TOKENS_FILE = STATE_DIR / "relay-tokens.json"
+_LEGACY_TOKENS_FILE = RUNTIME_DIR / "relay-tokens.json"
 
 # Azure scopes the relay may mint tokens for, when config is unavailable.
 # "*" = any scope, gated behind the per-container secret (mirrors
@@ -44,17 +48,32 @@ _lock = threading.Lock()
 
 
 def _read_tokens() -> dict[str, str]:
+    path = _prepare_token_file()
     try:
-        return json.loads(_TOKENS_FILE.read_text(encoding="utf-8")) or {}
+        return json.loads(path.read_text(encoding="utf-8")) or {}
     except (OSError, json.JSONDecodeError):
         return {}
 
 
 def _write_tokens(data: dict[str, str]) -> None:
-    _TOKENS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = _TOKENS_FILE.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(data), encoding="utf-8")
-    tmp.replace(_TOKENS_FILE)
+    atomic_write_json(_prepare_token_file(), data)
+
+
+def _token_file() -> Path:
+    """Use relocated state, while preserving an existing legacy token store."""
+    if _TOKENS_FILE.exists() or _TOKENS_FILE == _LEGACY_TOKENS_FILE:
+        return _TOKENS_FILE
+    if _LEGACY_TOKENS_FILE.exists():
+        return _LEGACY_TOKENS_FILE
+    return _TOKENS_FILE
+
+
+def _prepare_token_file() -> Path:
+    path = _token_file()
+    ensure_private_dir(path.parent)
+    if path.exists():
+        enforce_mode(path, 0o600)
+    return path
 
 
 def _validate(token: str) -> bool:
@@ -90,7 +109,7 @@ def relay_profile() -> dict:
         "ado_host": None,
         "azure_resources": list(resources),
         "gated_actions": list(_GATED_ACTIONS),
-        "token_store": str(_TOKENS_FILE),
+        "token_store": str(_prepare_token_file()),
     }
 
 
