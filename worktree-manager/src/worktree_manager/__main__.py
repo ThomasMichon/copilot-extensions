@@ -467,8 +467,6 @@ def _cmd_picker(rest: list[str]) -> int:
     (no live agent-worktrees needed); ``--screenshot <file>`` writes an SVG and
     exits instead of launching the TUI. A positional arg selects the project.
     """
-    from . import picker_app
-
     demo_mode = "--demo" in rest
     screenshot = None
     if "--screenshot" in rest:
@@ -481,6 +479,7 @@ def _cmd_picker(rest: list[str]) -> int:
                    and a != screenshot]
 
     if demo_mode:
+        from . import picker_app
         from .demo import DEMO_PROJECT
         project = DEMO_PROJECT
         source = picker_app.demo_source()
@@ -505,6 +504,9 @@ def _cmd_picker(rest: list[str]) -> int:
             print(f"error: unknown project {project!r}. "
                   f"Known: {', '.join(p.name for p in projects)}")
             return 2
+        if not screenshot:
+            return _run_production_picker(project)
+        from . import picker_app
         source = picker_app.engine_source(project)
         subtitle = project
         on_launch = _run_launch
@@ -534,6 +536,53 @@ def _cmd_picker(rest: list[str]) -> int:
     )
 
 
+def _run_production_picker(project: str) -> int:
+    """Run the transplanted production UX and act on its launch decision."""
+    from . import picker_app
+    from .production_picker import runner
+
+    try:
+        decision = runner.run(project)
+    except Exception as error:
+        print(f"error: production Picker failed: {error}")
+        return 1
+    if not decision:
+        return 0
+
+    action = str(decision.get("action") or "")
+    options = decision.get("options")
+    opts = dict(options) if isinstance(options, dict) else {}
+    if not bool(decision.get("is_local", True)):
+        print("error: remote Picker launch is not migrated yet; no action was taken.")
+        return 1
+    if action == "resume":
+        worktree_id = decision.get("worktree_id")
+        if not worktree_id:
+            print("error: Picker returned a resume decision with no worktree id.")
+            return 1
+        return _run_launch(picker_app.LaunchRequest(
+            project=project,
+            worktree_id=str(worktree_id),
+            mode="bare-resume" if opts.get("bare_resume") else "resume",
+            title=str(decision.get("title") or "") or None,
+            no_mux=bool(opts.get("no_mux")),
+        ))
+    if action == "new":
+        if opts.get("anchor"):
+            print("error: base-repo launch is not migrated yet; no action was taken.")
+            return 1
+        return _run_launch(picker_app.LaunchRequest(
+            project=project,
+            worktree_id=None,
+            mode="new",
+            no_mux=bool(opts.get("no_mux")),
+        ))
+    if action == "refresh":
+        return _cmd_update([])
+    print(f"error: Picker returned an unsupported decision: {action!r}")
+    return 1
+
+
 def _resolve_for(req) -> "tuple[object | None, int]":
     """Resolve a picker :class:`LaunchRequest` to a launch plan (shared).
 
@@ -561,7 +610,7 @@ def _run_launch(req) -> int:
         return code
     if plan.action != "exec":
         return plan.exit_code
-    return launcher.launch(plan)
+    return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
 
 def _demo_launch_preview(req) -> int:
