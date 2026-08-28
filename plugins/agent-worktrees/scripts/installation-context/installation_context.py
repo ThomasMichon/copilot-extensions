@@ -1516,6 +1516,8 @@ def _exact_property(value: Mapping[str, Any], name: str) -> Any:
     if not isinstance(value, Mapping):
         _fail(f"{name} belongs to a JSON object.")
     for candidate in value:
+        if not isinstance(candidate, str):
+            _fail("JSON object property names must be strings.")
         if candidate != name and candidate.casefold() == name.casefold():
             _fail(f"JSON property '{candidate}' conflicts with exact case '{name}'.")
     return value[name] if name in value else _MISSING

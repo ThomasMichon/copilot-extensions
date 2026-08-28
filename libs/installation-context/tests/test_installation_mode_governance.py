@@ -542,6 +542,35 @@ def test_tombstone_validation_blocks_mutation_and_orphans_fail_closed(
     assert orphaned["reason"] == "orphaned-transfer"
 
 
+def test_python_api_rejects_non_string_mapping_keys_with_domain_error(
+    tmp_path: Path,
+) -> None:
+    module = _load_module()
+    layout = _cell_layout(tmp_path)
+    profile = tmp_path / "profile"
+    legacy = tmp_path / "legacy"
+    profile.mkdir()
+    legacy.mkdir()
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="JSON object property names must be strings",
+    ):
+        module.resolve_installation_mode(
+            **_api_arguments(
+                layout,
+                profile,
+                legacy,
+                legacy_probe={
+                    1: "invalid",
+                    "declared": False,
+                    "result": "unknown",
+                    "checkedAt": None,
+                },
+            )
+        )
+
+
 @pytest.mark.parametrize(
     "runner",
     [
