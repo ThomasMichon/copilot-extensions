@@ -5,7 +5,6 @@ import hashlib
 import importlib.util
 import json
 import os
-import pwd
 import shutil
 import subprocess
 import sys
@@ -41,10 +40,22 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def _environment() -> dict[str, object]:
+    if os.name == "nt":
+        profile = Path(os.environ["USERPROFILE"]).resolve()
+        platform = "windows"
+    else:
+        import pwd
+
+        profile = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+        platform = "posix"
     return {
-        "platform": "posix",
-        "homeRealPath": str(Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()),
-        "wslDistro": os.environ.get("WSL_DISTRO_NAME") or None,
+        "platform": platform,
+        "homeRealPath": str(profile),
+        "wslDistro": (
+            None
+            if platform == "windows"
+            else os.environ.get("WSL_DISTRO_NAME") or None
+        ),
     }
 
 
