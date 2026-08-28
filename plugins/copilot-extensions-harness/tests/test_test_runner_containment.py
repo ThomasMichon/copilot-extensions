@@ -203,7 +203,7 @@ def test_environment_validation_fails_closed_on_escaped_tmpdir(tmp_path, monkeyp
         validate_contained_environment()
 
 
-def test_injected_pytest_policy_rejects_invalid_effect(tmp_path):
+def test_injected_pytest_policy_loads_and_enforces_declarations(tmp_path, capfd):
     test_file = tmp_path / "test_invalid.py"
     test_file.write_text(
         "import pytest\n"
@@ -213,7 +213,8 @@ def test_injected_pytest_policy_rejects_invalid_effect(tmp_path):
         encoding="utf-8",
     )
     env = isolated_environment(os.environ, tmp_path)
-    env["PYTHONPATH"] = str(Path(__file__).resolve().parent)
+    pytest_root = Path(pytest.__file__).resolve().parents[1]
+    env["PYTHONPATH"] = os.pathsep.join((str(REPO / "tools"), str(pytest_root)))
     rc = run_contained(
         [sys.executable, "-m", "pytest", "-q", "-p", "pytest_portfolio_guard"],
         cwd=tmp_path,
@@ -227,7 +228,29 @@ def test_injected_pytest_policy_rejects_invalid_effect(tmp_path):
         ),
     )
 
-    assert rc != 0
+    assert rc == pytest.ExitCode.USAGE_ERROR
+    assert "invalid test portfolio declarations" in capfd.readouterr().err
+
+    test_file.write_text(
+        "import pytest\n"
+        "@pytest.mark.portfolio_tier('T0')\n"
+        "def test_valid(): pass\n",
+        encoding="utf-8",
+    )
+    rc = run_contained(
+        [sys.executable, "-m", "pytest", "-q", "-p", "pytest_portfolio_guard"],
+        cwd=tmp_path,
+        env=env,
+        sandbox=tmp_path,
+        limits=Limits(
+            wall_seconds=10,
+            max_processes=8,
+            max_memory_mb=512,
+            max_temp_mb=32,
+        ),
+    )
+
+    assert rc == pytest.ExitCode.OK
 
 
 def test_effect_declarations_enforce_tier_boundaries():
