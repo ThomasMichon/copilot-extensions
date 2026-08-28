@@ -627,7 +627,10 @@ heavy MCP toolsets into the primary session.
 MCP and injects **host credentials** (Entra/`az`, `gh`, git-credential, env) —
 so no PATs are baked into config. It is **standalone**: invoked directly from an
 agent's `mcp-servers` config, one bridge file per server. Prefer an **in-repo**
-`--config` bridge for repo-scoped servers. (Skill: **`agent-mcp:agent-mcp`**.)
+`--config` bridge for repo-scoped servers. It owns transport/auth/catalog
+mechanics; the agent contract remains in
+**`customizing-copilot:defining-subagents`**. (Skill:
+**`agent-mcp:agent-mcp`**.)
 
 ### Delegate MCP to sub-agents
 

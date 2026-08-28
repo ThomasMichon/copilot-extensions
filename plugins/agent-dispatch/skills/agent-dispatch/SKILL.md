@@ -68,28 +68,24 @@ through an eight-state lifecycle.
 
 Not for: cross-machine *conversation* (that's agent-bridge `send`), or spawning
 a local sub-agent in *this* session (that's the Task tool). agent-dispatch is
-the **queue**; agent-bridge is an optional producer/subscriber alongside it.
+the **durable task loop**; agent-bridge is an optional producer/subscriber
+alongside it. It is also not a generic process or service lifecycle manager:
+service installers and process supervisors remain with their owning system.
 
-### Which coordination system? (sub-agent vs agent-bridge vs agent-dispatch)
+### Responsibility boundary
 
-There are **three** ways to coordinate agent work on top of agent-worktrees (the
-durable worktree/session substrate), and the choice is easy to get wrong. Pick
-by **what you're doing**:
+- Use a native Task sub-agent for bounded work inside the current session.
+- Use **`agent-bridge:agent-bridge`** when the caller must converse with,
+  steer, wait on, or take over a live agent across a boundary.
+- Use agent-dispatch when durable task state is required: a queued handoff,
+  deduplicated claim, capability/affinity routing, reactive or scheduled
+  production, retry, supervision, or terminal task record.
 
-| Scenario | Use |
-|----------|-----|
-| **In-worktree sub-task** — exploration, safely-parallel writes, MCP round-trips | **native sub-agent** (Task tool) |
-| **Cross-repo / cross-machine sub-task you drive or converse with** — enforce the target repo's conventions, interactive back-and-forth | **agent-bridge** |
-| **Fleet-wide chat / broadcast / status / negotiation** — reserve a resource or deploy slot, coordinate over a bug | **agent-bridge** |
-| **Task claims / dedup of concurrent work** — claim an effort/item so two agents don't collide; release/complete when done | **agent-dispatch** |
-| **Spin-off work you don't wait on** — optional follow-up, a tangential bug found mid-task; the outcome isn't essential | **agent-dispatch** |
-| **Context handoff** — same worktree, next session | **agent-dispatch** task (complete-on-pickup) |
-
-**The distinguishing axis** (the one agents get wrong): **agent-bridge = drive or
-converse with a live agent you own or steer** (you wait on it, answer it, take it
-over); **agent-dispatch = fire-and-forget queued/claimed work you don't own** —
-you may poll its status or send steering messages, but it is *not* a controlled
-sub-agent. Both cross machines; the axis is **ownership, not location**.
+A dispatched task may launch an agent-bridge-backed worker, but that composition
+does not transfer ownership: agent-dispatch owns the task loop; agent-bridge
+owns the live session transport. For generic task decomposition and the
+decision to delegate at all, use
+**`delegation-guidance:delegating-work`**.
 
 **agent-dispatch's four canonical use cases** (they line up with the *Producers*
 below): (1) **handoff-prompt storage** for an in-place cutover (same worktree,

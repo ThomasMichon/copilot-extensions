@@ -7,6 +7,17 @@ container venues.
 
 Supports **Windows** and **Linux/WSL** (macOS planned).
 
+## Responsibility boundary
+
+agent-bridge owns **live cross-boundary agent communication**: starting or
+resuming a persistent session, sending a turn, streaming its response, and
+steering or taking over that live agent across repository, worktree, machine,
+or venue boundaries. It does not own generic delegation policy or durable task
+state. Use native Task sub-agents for bounded work inside the current session,
+`delegation-guidance:delegating-work` for task decomposition, and
+`agent-dispatch:agent-dispatch` for queued tasks, atomic claims, retries, and
+supervision.
+
 Agent-facing sessions receive an exact payload-local command through the
 session command catalog. That command resolves and, when necessary, provisions
 the runtime from its own payload without searching `PATH` for another
