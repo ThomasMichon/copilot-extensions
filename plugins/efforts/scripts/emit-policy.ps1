@@ -301,8 +301,18 @@ function ConvertFrom-StrictJsonObject([string] $Text) {
     return $Value
 }
 
+function Test-WindowsPlatform {
+    $PlatformVariable = Get-Variable `
+        -Name IsWindows `
+        -ErrorAction SilentlyContinue
+    if ($null -ne $PlatformVariable) {
+        return [bool]$PlatformVariable.Value
+    }
+    return $env:OS -eq 'Windows_NT'
+}
+
 function Test-AbsolutePath([string] $Value) {
-    if ($env:OS -eq 'Windows_NT') {
+    if (Test-WindowsPlatform) {
         return $Value -cmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)'
     }
     return $Value.StartsWith('/')
@@ -346,7 +356,7 @@ function Test-PathContainsReparsePoint([string] $Path) {
 }
 
 function Test-NativeRegularFile([string] $Path) {
-    if ($env:OS -eq 'Windows_NT') {
+    if (Test-WindowsPlatform) {
         return $true
     }
     $Stat = '/usr/bin/stat'
@@ -536,7 +546,7 @@ try {
     if (-not $RawRoot) { Emit-Empty }
     $RepoRoot = [EffortsCanonicalPath]::Resolve($RawRoot)
     $CwdRoot = [EffortsCanonicalPath]::Resolve($Cwd)
-    $Comparison = if ($env:OS -eq 'Windows_NT') {
+    $Comparison = if (Test-WindowsPlatform) {
         [StringComparison]::OrdinalIgnoreCase
     } else {
         [StringComparison]::Ordinal

@@ -318,6 +318,24 @@ def test_read_only_probe_requires_authoritative_local_checkout(
             assert abbreviated.stdout == b"{}"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission fixture")
+def test_read_only_probe_fails_closed_for_inaccessible_target(
+    tmp_path: Path,
+) -> None:
+    restricted = tmp_path / "restricted"
+    repo = _repo(
+        restricted / "repo",
+        {"version": 1, "enforcement": "required"},
+    )
+    _commit(repo)
+    restricted.chmod(0)
+    try:
+        for producer in _producers():
+            assert _check_adoption(producer, repo).stdout == b"{}"
+    finally:
+        restricted.chmod(0o700)
+
+
 def test_read_only_probe_does_not_execute_target_content(tmp_path: Path) -> None:
     repo = _repo(
         tmp_path / "repo",
@@ -404,7 +422,12 @@ def test_read_only_probe_rejects_fifo_without_blocking(tmp_path: Path) -> None:
     config.unlink()
     os.mkfifo(config)
     for producer in _producers():
-        assert _check_adoption(producer, repo).stdout == b"{}"
+        environment = {"OS": "Windows_NT"} if producer.suffix == ".ps1" else None
+        assert _check_adoption(
+            producer,
+            repo,
+            env_overrides=environment,
+        ).stdout == b"{}"
 
 
 def test_read_only_probe_ignores_replacement_commits(tmp_path: Path) -> None:

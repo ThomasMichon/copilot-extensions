@@ -94,7 +94,7 @@ def _has_symlink(root: Path, relative: Path) -> bool:
         try:
             if stat.S_ISLNK(current.lstat().st_mode):
                 return True
-        except FileNotFoundError:
+        except OSError:
             return False
     return False
 
