@@ -184,6 +184,41 @@ def test_register_session_bash_coalesces_command_catalog(tmp_path: Path):
     }
 
 
+def test_register_session_bash_fails_open_when_merge_python_breaks(tmp_path: Path):
+    home = tmp_path / "home"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    bin_dir.mkdir(parents=True)
+
+    fake_python = tmp_path / "fake-python"
+    fake_python.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [ \"$1\" = -c ]; then exit 23; fi\n"
+        "cat >/dev/null\n"
+        "printf '%s' '{\"additionalContext\":\"worktree binding\"}'\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    (bin_dir / "resolve-runtime.sh").write_text(
+        f'AW_PY="{fake_python}"\n',
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env.pop("COPILOT_PLUGIN_ROOT", None)
+    result = subprocess.run(
+        [_bash(), str(_PLUGIN / "scripts" / "register-session.sh")],
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "{}\n"
+
+
 def test_powershell_hooks_fail_open_when_runtime_scripts_are_absent(tmp_path: Path):
     powershell = _powershell()
     home = tmp_path / "home"

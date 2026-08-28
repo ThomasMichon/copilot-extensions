@@ -43,12 +43,16 @@ else
 fi
 
 catalog_json=""
-catalog_script="${COPILOT_PLUGIN_ROOT:-}/scripts/emit-command-catalog.sh"
-if [[ -f "$catalog_script" ]]; then
+catalog_script=""
+if [[ -n "${COPILOT_PLUGIN_ROOT:-}" ]]; then
+    catalog_script="$COPILOT_PLUGIN_ROOT/scripts/emit-command-catalog.sh"
+fi
+if [[ -n "$catalog_script" && -f "$catalog_script" ]]; then
     catalog_json="$(bash "$catalog_script" 2>/dev/null || true)"
 fi
 
-PYTHONPATH="" "$PYTHON" -c '
+merged_json=""
+if ! merged_json="$(PYTHONPATH="" "$PYTHON" -c '
 import json
 import sys
 
@@ -64,6 +68,9 @@ for raw in sys.argv[1:]:
     if isinstance(context, str) and context.strip() and context not in contexts:
         contexts.append(context)
 print(json.dumps({"additionalContext": "\n\n".join(contexts)}) if contexts else "{}")
-' "$catalog_json" "$registration_json"
+' "$catalog_json" "$registration_json" 2>/dev/null)"; then
+    merged_json="{}"
+fi
+printf '%s\n' "$merged_json"
 
 exit 0
