@@ -4893,6 +4893,8 @@ def _cmd_status_write(
                 "Complete, transfer, or replace it with 'effort-focus'."
             )
             return 1
+        if follow_up is True and record.status == "finalized":
+            tracking.update_status(record, "active", save=False)
         tracking.set_disposition(
             record, summary=summary, title=title, follow_up=follow_up,
             session_id=(os.environ.get("COPILOT_AGENT_SESSION_ID") or None),

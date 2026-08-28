@@ -1715,7 +1715,9 @@ def update_status(
     a single :class:`_RecordLock` (load -> update_status(save=False) -> save),
     keeping the cross-process lock scoped to the RMW window (#4547)."""
     record.status = new_status
-    if new_status in ("finalized", "orphaned", "complete", "pushed"):
+    if new_status == "active":
+        record.completed_at = None
+    elif new_status in ("finalized", "orphaned", "complete", "pushed"):
         if record.completed_at is None:
             record.completed_at = _now_iso()
     if save:
