@@ -1268,6 +1268,8 @@ TOPO_MACHINES_DATA = {
     "machines": {
         "host-dev6": {
             "display_name": "dev6",
+            "description": "Primary development host.",
+            "capabilities": ["builds", "tests"],
             "ssh": {
                 "ready": True,
                 "environments": [
@@ -1278,6 +1280,8 @@ TOPO_MACHINES_DATA = {
         },
         "host-cloud1": {
             "display_name": "cloud1",
+            "description": "Remote development host.",
+            "capabilities": ["large builds"],
             "ssh": {
                 "ready": True,
                 "environments": [
@@ -1344,6 +1348,15 @@ class TestControlPlaneMachineAgents:
         # No ssh environments -> no control-plane agent.
         agents = derive_topology_agents(_topo_machines(), "dotfiles", [], None)
         assert not any(a.host == "host-book2" for a in agents.values())
+
+    def test_descriptions_include_static_machine_metadata(self):
+        agents = derive_topology_agents(_topo_machines(), "dotfiles", [], None)
+        assert (
+            agents["dev6"].description
+            == "Control-plane 'dotfiles' on dev6 (windows) — "
+            "Primary development host.; capabilities: builds, tests "
+            "[derived from topology]"
+        )
 
     def test_no_project_no_control_plane_agents(self):
         agents = derive_topology_agents(_topo_machines(), None, [], None)
@@ -1499,6 +1512,9 @@ class TestRelatedRemoteAgents:
         assert agents["example-web@cloud1"].project == "example-web"
         assert agents["example-web@cloud1"].host == "host-cloud1"
         assert agents["example-web@cloud1"].derived is True
+        assert "'example-web' on cloud1" in agents["example-web@cloud1"].description
+        assert "Remote development host." in agents["example-web@cloud1"].description
+        assert "capabilities: large builds" in agents["example-web@cloud1"].description
         # Local related repo -> skipped (covered by projects.yaml discovery).
         assert "SPO.Core@dev6" not in agents
         # Non-agent-bridge delegate -> skipped.
@@ -1653,6 +1669,9 @@ class TestReposRegistryAgents:
         assert agents["web-app@dev6"].host == "host-dev6"
         assert agents["web-app@dev6"].ssh_environment == "windows"
         assert agents["web-app@dev6"].derived is True
+        assert "'web-app' on dev6" in agents["web-app@dev6"].description
+        assert "Primary development host." in agents["web-app@dev6"].description
+        assert "capabilities: builds, tests" in agents["web-app@dev6"].description
         assert "api-svc@dev6" in agents
         # agent: false repo -> not emitted.
         assert not any(n.startswith("docs-only") for n in agents)

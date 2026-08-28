@@ -6,10 +6,13 @@ guidance for public artifacts.
 
 from __future__ import annotations
 
+import argparse
+import json
 from pathlib import Path
 
 import pytest
 
+from agent_ssh import __main__ as cli
 from agent_ssh import mesh as mesh_mod
 
 SAMPLE = """
@@ -21,6 +24,8 @@ machines:
     display_name: host-a
     environment: Linux x64
     role: primary
+    description: "  General-purpose development host.  "
+    capabilities: [" builds ", "", builds, tests, " tests "]
     ssh:
       ready: true
       environments:
@@ -61,6 +66,8 @@ def test_load_mesh_projects_machines(machines_file: Path) -> None:
 
     host_a = mesh.machines[0]
     assert host_a.role == "primary"
+    assert host_a.description == "General-purpose development host."
+    assert host_a.capabilities == ["builds", "tests"]
     assert host_a.ssh_ready is True
     assert [e.name for e in host_a.environments] == ["native", "wsl"]
     assert host_a.environments[1].user == "dev"
@@ -71,6 +78,40 @@ def test_load_mesh_projects_machines(machines_file: Path) -> None:
     assert host_b.ssh_ready is False
     assert host_b.hostname == "raw-hostname"
     assert host_b.dtssh_best_effort is True
+    assert host_b.description == ""
+    assert host_b.capabilities == []
+
+
+def test_json_projection_includes_machine_metadata(machines_file: Path) -> None:
+    data = mesh_mod.load_mesh(machines_file).to_dict()
+    host_a = data["machines"][0]
+    host_b = data["machines"][1]
+    assert host_a["description"] == "General-purpose development host."
+    assert host_a["capabilities"] == ["builds", "tests"]
+    assert host_b["description"] == ""
+    assert host_b["capabilities"] == []
+
+
+def test_mesh_status_json_includes_machine_metadata(
+    machines_file: Path, tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    monkeypatch.setattr(
+        cli.fragment_registry.FragmentRegistry,
+        "refresh",
+        lambda _self: None,
+    )
+    args = argparse.Namespace(
+        config_d=tmp_path,
+        path=machines_file,
+        json=True,
+        summary=False,
+    )
+
+    assert cli._cmd_mesh_status(args) == 0
+
+    machine = json.loads(capsys.readouterr().out)["machines"][0]
+    assert machine["description"] == "General-purpose development host."
+    assert machine["capabilities"] == ["builds", "tests"]
 
 
 def test_summary_line(machines_file: Path) -> None:
@@ -83,6 +124,8 @@ def test_format_report_mentions_hosts_and_dtssh(machines_file: Path) -> None:
     report = mesh_mod.format_report(mesh_mod.load_mesh(machines_file))
     assert "host-a" in report
     assert "role=primary" in report
+    assert "description: General-purpose development host." in report
+    assert "capabilities: builds, tests" in report
     assert "ssh native: host-a (bash)" in report
     assert "best-effort" in report  # host-b dtssh note
 
@@ -99,6 +142,21 @@ def test_empty_on_malformed_yaml(tmp_path: Path) -> None:
     p.write_text("control_plane: [unterminated\n  : :\n", encoding="utf-8")
     mesh = mesh_mod.load_mesh(p)  # must not raise
     assert mesh.machines == []
+
+
+def test_malformed_metadata_fails_open(tmp_path: Path) -> None:
+    p = tmp_path / "machines.yaml"
+    p.write_text(
+        """machines:
+  host-a:
+    description: [not, a, string]
+    capabilities: builds
+""",
+        encoding="utf-8",
+    )
+    machine = mesh_mod.load_mesh(p).machines[0]
+    assert machine.description == ""
+    assert machine.capabilities == []
 
 
 def test_find_machines_file_walks_parents(tmp_path: Path) -> None:

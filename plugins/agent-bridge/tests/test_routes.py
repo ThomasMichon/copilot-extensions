@@ -13,6 +13,7 @@ from agent_bridge.agent_registry import AgentConfig, AgentResolver
 from agent_bridge.models import ServiceConfig, SessionStatus
 from agent_bridge.protocol import FAILED_ACP_HANDSHAKE_FAULT
 from agent_bridge.session_manager import Session, SessionManager
+from agent_bridge.topology import MachineConfig
 from agent_bridge.transport import SpawnTarget
 
 
@@ -812,6 +813,38 @@ class TestAgentRoutes:
         assert resp.json()["agents"] == []
         assert resp.json()["topology_errors"] == []
         assert resp.json()["topology_warnings"] == []
+
+    def test_machine_routes_include_static_metadata(self, client, app) -> None:
+        machine = MachineConfig(
+            key="host-a",
+            display_name="Host A",
+            role="worker",
+            description="General-purpose worker.",
+            capabilities=["builds", "tests"],
+        )
+        app.state.resolver = AgentResolver({}, {"host-a": machine})
+
+        listing = client.get("/api/v1/machines")
+        detail = client.get("/api/v1/machines/host-a")
+
+        assert listing.status_code == 200
+        assert listing.json()["machines"][0]["description"] == (
+            "General-purpose worker."
+        )
+        assert listing.json()["machines"][0]["capabilities"] == ["builds", "tests"]
+        assert detail.status_code == 200
+        assert detail.json()["description"] == "General-purpose worker."
+        assert detail.json()["capabilities"] == ["builds", "tests"]
+
+    def test_machine_routes_include_metadata_defaults(self, client, app) -> None:
+        machine = MachineConfig(key="host-a", display_name="Host A")
+        app.state.resolver = AgentResolver({}, {"host-a": machine})
+
+        detail = client.get("/api/v1/machines/host-a")
+
+        assert detail.status_code == 200
+        assert detail.json()["description"] == ""
+        assert detail.json()["capabilities"] == []
 
     def test_session_alias_reuses_canonical_identity(
         self, client, app,

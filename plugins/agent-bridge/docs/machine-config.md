@@ -20,7 +20,7 @@ an explicit `agents_config` file:
 
 | File | Purpose |
 |------|---------|
-| `machines.yaml` | Machine inventory (SSH environments, readiness, roles) **plus** `control_plane.project`. agent-bridge derives one control-plane agent per (machine, SSH environment), and `<repo>@<machine>` agents from each repo's `.agent-worktrees/related.yaml`. |
+| `machines.yaml` | Machine inventory (SSH environments, readiness, roles, descriptions, and capabilities) **plus** `control_plane.project`. agent-bridge derives one control-plane agent per (machine, SSH environment), and `<repo>@<machine>` agents from each repo's `.agent-worktrees/related.yaml`. |
 | `acp-agents.json` | **Deprecated.** Hand-authored agent list. Still honored if a profile sets `agents_config` (explicit entries win over derived ones), but no longer required — the roster is derived from topology. |
 
 ## Quick Setup
@@ -74,7 +74,11 @@ machines:
   my-workstation:
     display_name: My Workstation
     environment: "Windows 11 Pro"
-    role: "Development, compilation"
+    role: development
+    description: General-purpose interactive development host.
+    capabilities:
+      - local builds
+      - integration tests
     ssh:
       ready: true
       ip: "192.168.1.100"           # optional, for reference only
@@ -93,7 +97,9 @@ machines:
   build-server:
     display_name: Build Server
     environment: "Ubuntu 24.04"
-    role: "CI/CD, builds"
+    role: build
+    description: Dedicated host for unattended build workloads.
+    capabilities: [large builds, package creation]
     ssh:
       ready: true
       environments:
@@ -110,11 +116,20 @@ machines:
 |-------|----------|-------------|
 | `display_name` | No | Human-readable name (defaults to machine key) |
 | `environment` | No | OS/platform description (e.g., "Windows 11 Pro") |
-| `role` | No | Machine role description |
+| `role` | No | Stable, terse classification token used by automation and compact displays |
+| `description` | No | Human-readable purpose. Whitespace-only or missing values normalize to an empty string. |
+| `capabilities` | No | Ordered list of broad capability labels. Values are trimmed; empty and exact duplicate values are removed. |
 | `field_terminal` | No | Boolean -- marks roaming/field machines |
 | `ssh.ready` | **Yes** | Whether SSH is configured and reachable |
 | `ssh.ip` | No | IP address (reference only, not used for connections) |
 | `ssh.environments` | **Yes** | List of SSH environments (see below) |
+
+`role`, `description`, and `capabilities` are intentionally distinct. Keep
+`role` short and stable (for example, `development` or `build`), use
+`description` to explain what the machine is for, and use `capabilities` for
+coarse discovery hints that distinguish otherwise similar machines. These are
+static topology breadcrumbs, not snapshots of current load, reachability, or
+installed software.
 
 ### SSH Environment Fields
 
@@ -216,7 +231,8 @@ no hand-authored agent list. Two sources:
 
 1. **`machines.yaml` `control_plane.project`** → one **control-plane agent per
    (machine, SSH environment)**, named by the machine's short `display_name`
-   (windows → `dev6`, wsl → `dev6-wsl`, a second box → `cloud1`), all backed by
+   (`windows`/`linux` → `primary`, `wsl` → `primary-wsl`, a second host →
+   `secondary`), all backed by
    the control-plane project's binstub. Local envs resolve to loopback; remote
    to SSH.
 
@@ -225,12 +241,16 @@ no hand-authored agent list. Two sources:
    control_plane:
      project: dotfiles
    machines:
-     host-dev6:
-       display_name: dev6
+     host-primary:
+       display_name: primary
+       role: development
+       description: General-purpose development host.
+       capabilities: [local builds, integration tests]
        ssh:
+         ready: true
          environments:
-           - { name: windows, alias: host-dev6, shell: pwsh }
-           - { name: wsl, alias: host-dev6-wsl, shell: bash }
+           - { name: windows, alias: host-primary, shell: pwsh }
+           - { name: wsl, alias: host-primary-wsl, shell: bash }
    ```
 
 2. **Each repo's `.agent-worktrees/related.yaml`** → a `<repo>@<machine>` agent
@@ -462,7 +482,8 @@ Both plugins consume `machines.yaml` but for different purposes:
 | **Extra fields** | -- | `ssh.ip` (optional, reference only) |
 
 The schema is identical -- both read the same `machines:` structure with
-`display_name`, `environment`, `role`, `ssh.ready`, and
+`display_name`, `environment`, `role`, `description`, `capabilities`,
+`ssh.ready`, and
 `ssh.environments[].{name, alias, port, user, shell}`. The only
 differences are strictness (agent-worktrees errors on missing `machines:`
 key; agent-bridge tolerates it) and one optional field (`ssh.ip`).
@@ -498,7 +519,9 @@ machines:
   dev-workstation:
     display_name: Dev Workstation
     environment: "Windows 11"
-    role: "Development"
+    role: development
+    description: Interactive host for day-to-day development.
+    capabilities: [local builds, integration tests]
     ssh:
       ready: true
       environments:
