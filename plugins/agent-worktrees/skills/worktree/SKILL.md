@@ -72,6 +72,29 @@ This system uses **git worktrees** to isolate concurrent Copilot CLI
 sessions. Each session creates or resumes a worktree — a lightweight copy
 of the repo with its own branch, working directory, and index.
 
+## The Worktree Owns the Objective; Sessions Are Relay Legs
+
+A worktree's active objective can span many Copilot sessions, context windows,
+phases, commits, and pull requests. Session succession is not worktree
+completion.
+
+- Consuming a handoff starts a new relay leg; it is not evidence that the
+  worktree is done. Re-read the founding request, continuing objective,
+  successor work roster, and any cited effort or issue.
+- Keep driving every actionable next phase already permitted by that objective,
+  as far as the current context and available work allow. Do not wait for the
+  user to restate or reauthorize known work merely because a phase or PR landed.
+- A single session may consume a handoff, drive many additional slices or
+  phases, and hand off again when context pressure returns. Carry the same
+  objective and remaining roster forward.
+- Explicit user scope boundaries, approval gates, and safety confirmations
+  still apply. Relentless continuation means pursuing authorized work, not
+  bypassing decisions that belong to the user.
+
+Before finalizing, re-check the parent objective rather than the most recent
+milestone. A consumed or completed handoff task, a completed phase, a clean git
+status, or a merged PR is not proof that the worktree has no remaining work.
+
 ## Am I in a Worktree?
 
 Check the branch name:
@@ -164,6 +187,11 @@ finalization, stop and ask for confirmation instead of proceeding.
 Worktree completion is a **two-step process**. Pushing and cleanup are
 deliberately separated so each step is explicit and safe.
 
+Run this sign-off only after the **parent objective's completion gate** is met
+or the user explicitly directs finalization. If a handoff's successor work
+roster, governing effort, or original request still contains actionable work,
+keep working; do not use sign-off to close only the latest session or phase.
+
 ### Step 1: Push your changes
 
 ```
@@ -219,6 +247,7 @@ ready yet."
 | Situation | Command |
 |-----------|---------|
 | **Done with this worktree** -- normal sign-off | `<agent-worktrees catalog argv[0]> push-changes --title "..."` then `<agent-worktrees catalog argv[0]> finalize` |
+| **Handoff consumed or phase/PR landed, but the parent objective has actionable work** | Keep driving the next roster item; do **not** finalize |
 | **Set/update title only** -- keep working | `<agent-worktrees catalog argv[0]> push-changes --title "..." --title-only` |
 | **Work was already pushed** (by a previous session or push-changes) | `<agent-worktrees catalog argv[0]> finalize` (succeeds immediately) |
 | **Previous push-changes failed** (network, rebase conflict) | Fix the issue, then retry `<agent-worktrees catalog argv[0]> push-changes` |

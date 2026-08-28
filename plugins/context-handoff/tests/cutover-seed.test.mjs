@@ -12,7 +12,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { leadFrom, buildCutoverSeed } from "../extensions/context-handoff/cutover-seed.mjs";
+import {
+  CONTINUATION_DIRECTIVE,
+  leadFrom,
+  buildCutoverSeed,
+} from "../extensions/context-handoff/cutover-seed.mjs";
 
 const TASK = "abc123def456";
 const WT = "lambda-core-wsl-20260101-000000-0000";
@@ -75,6 +79,8 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
 
   // Completion is explicit + deferred (autopilot successor).
   assert.match(seed, new RegExp(`agent-dispatch complete ${TASK}`));
+  assert.ok(seed.includes(CONTINUATION_DIRECTIVE));
+  assert.match(seed, /completion of the predecessor's latest phase is not enough/);
 
   // Rides `copilot -i`: single line, ASCII only.
   assert.ok(!seed.includes("\n"), "seed must be a single line");
@@ -120,6 +126,7 @@ test("file-backed handoff -> tool-based seed (never bash-first)", () => {
   assert.match(seed, /consume_handoff tool/);
   assert.match(seed, /"handoff_id":"handoff-xyz"/);
   assert.ok(!seed.includes("agent-dispatch consume"));
+  assert.ok(seed.includes(CONTINUATION_DIRECTIVE));
 });
 
 test("retry:false drops the retry-on-not-ready clause (human paste prompt)", () => {
