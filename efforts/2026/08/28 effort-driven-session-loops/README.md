@@ -6,10 +6,10 @@
 - **Created:** 2026-08-27
 - **Status:** Done
 - **Vision:** **vision-closing** against
-  [`visions/plugins/efforts`](https://github.com/ThomasMichon/copilot-extensions/blob/main/visions/plugins/efforts/README.md),
+  `visions/plugins/efforts`,
   authored with this effort to state the previously missing standing intent.
   Ambient delivery also advances
-  [`visions/harness-guidance`](https://github.com/ThomasMichon/copilot-extensions/blob/main/visions/harness-guidance/README.md).
+  `visions/harness-guidance`.
 - **Umbrella issue:** [#1255](https://github.com/ThomasMichon/copilot-extensions/issues/1255)
 - **Sub-issues:**
   [#1259](https://github.com/ThomasMichon/copilot-extensions/issues/1259)
