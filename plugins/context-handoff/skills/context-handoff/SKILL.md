@@ -148,9 +148,9 @@ recovery.
 > `agent-dispatch consume <id>` and completes the baton on pickup. <!-- marketplace-isolation: allow handoff-seed-startup -->
 > A task-backed
 > live cutover uses `consume_handoff` with `defer_complete: true`; the successor
-> later runs `agent-dispatch complete <id>` only when it reaches the handoff
+> later runs `agent-dispatch complete <id>` only when it reaches the handoff <!-- marketplace-isolation: allow handoff-seed-startup -->
 > completion gate. Finishing the predecessor's latest phase is not sufficient
-> when the continuing objective still has actionable work. <!-- marketplace-isolation: allow handoff-seed-startup -->
+> when the continuing objective still has actionable work.
 
 ### Fallback when the extension's tools are unavailable — the CLI
 
