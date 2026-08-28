@@ -59,8 +59,8 @@
     },
     {
       "name": "efforts",
-      "description": "Efforts planning system - comprehensive planning folders that represent a stretch of work (premise + plan + validation plan + journal + participant coordination), with a README-as-shared-contract; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev13",
+      "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
+      "version": "0.1.0-dev14",
       "source": "plugins/efforts"
     },
     {
