@@ -214,6 +214,22 @@ _versioned_activate() {
 }
 # === end install-contract:v3 versioned-venv ===
 
+_rt_python() {
+    # The versioned-slot interpreter, resolved as the binstubs do (deployed
+    # bin/resolve-runtime.sh: current-version -> last-known-good -> newest slot).
+    # `_versioned_activate` runs with `--no-link`, so there is no `.venv` link to
+    # resolve a console script through (#765 uniform-runtime-resolution).
+    local resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
+    local py=""
+    if [[ -f "$resolver" ]]; then
+        py="$(AGENT_RT_ROOT="$INSTALL_DIR"; . "$resolver" >/dev/null 2>&1; printf '%s' "${AGENT_RT_PY:-}")"
+    fi
+    # No mid-install fallback: `status` is the only caller and always runs
+    # after bin/ is deployed. Empty -> the caller reports "not installed".
+    [[ -n "$py" && -x "$py" ]] || return 1
+    printf '%s' "$py"
+}
+
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
     # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
@@ -786,9 +802,9 @@ case "${ACTION}" in
     chg "binstubs removed from ${LOCAL_BIN}"
     ;;
   status)
-    if [ -x "${LINK_DIR}/bin/session-sync" ]; then
-      ok "installed: $("${LINK_DIR}/bin/agent-logger" version 2>/dev/null || echo unknown)"
-      "${LINK_DIR}/bin/session-sync" status || true
+    if _rt_py="$(_rt_python)"; then
+      ok "installed: $("$_rt_py" -m agent_logger version 2>/dev/null || echo unknown)"
+      "$_rt_py" -m agent_logger.sync.engine status || true
     else
       warn "not installed (run: bash scripts/install.sh install)"
     fi
