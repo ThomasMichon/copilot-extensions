@@ -869,15 +869,14 @@ def test_bound_state_definition_routes_exact_content_categories():
         True, True, True,
     ))
     assert (
-        "generic, reusable, name-free configuration, skills, agents, "
-        "`AGENTS.md`, and docs"
+        "harness instructions/configuration, skills, agents, plugins, and docs"
     ) in text
-    assert "belong in the shared harness repo" in text
+    assert "-> harness worktree" in text
     assert (
-        "Personal preferences, personal skills/config, private/reference data, "
-        "and ambiguous or rootless writes"
+        "personal preferences, efforts, logs, notes, private data/plugins, and "
+        "ambiguous writes"
     ) in text
-    assert "belong in the state repo above" in text
+    assert "-> knowledge worktree" in text
 def test_anchor_pair_rejects_rebound_knowledge_before_resolving(
     tmp_path, monkeypatch
 ):
@@ -1193,7 +1192,8 @@ def test_state_repo_definition_stateless_names_knowledge_repo():
     res = sr.StateRoot("/repos/knowledge", "knowledge_repo", "kn", True, True, True)
     text = sr.state_repo_definition(res)
     assert "`/repos/knowledge`" in text
-    assert "bound knowledge repo" in text
+    assert "Knowledge: `kn`" in text
+    assert "no writable paired knowledge worktree" in text
 
 
 def test_state_repo_definition_explicit_names_repo():
@@ -1207,9 +1207,11 @@ def test_state_repo_definition_unbound_has_no_path_and_warns():
     res = sr.StateRoot(None, "knowledge_repo", "", True, True, False,
                        error="unbound")
     text = sr.state_repo_definition(res)
-    assert "not bound on this machine" in text
-    assert "`" not in text  # no backtick-quoted path when unresolved
+    assert "not configured on this machine" in text
     assert "**The user's state repo**" in text
+    assert "Stateful workflows are blocked" in text
+    assert "attach an existing checkout, clone a remote, or create a private repo" in text
+    assert "declining leaves state writes blocked" in text
 
 
 def test_state_repo_definition_bound_knowledge_carries_write_routing():
@@ -1217,26 +1219,111 @@ def test_state_repo_definition_bound_knowledge_carries_write_routing():
     # definition adds the "where changes go" routing clause.
     res = sr.StateRoot("/repos/knowledge", "knowledge_repo", "kn", True, True, True)
     text = sr.state_repo_definition(res)
-    assert "Where changes go" in text
-    assert "shared harness" in text
-    assert "harness repo (your current checkout)" in text
+    assert "**Routing:**" in text
     for shared_category in (
-        "generic, reusable, name-free configuration",
+        "harness instructions/configuration",
         "skills",
         "agents",
-        "`AGENTS.md`",
-        "docs",
+        "plugins",
     ):
         assert shared_category in text
     for state_category in (
         "Personal preferences",
-        "personal skills/config",
-        "private/reference data",
-        "ambiguous or rootless writes",
+        "efforts",
+        "logs",
+        "notes",
+        "private data/plugins",
+        "ambiguous writes",
     ):
-        assert state_category in text
-    assert "belong in the state repo above" in text
-    assert len(text) <= 700
+        assert state_category.lower() in text.lower()
+    assert "-> knowledge worktree" in text
+    assert "related resolve <name>" in text
+    assert "worktree lifecycle" in text
+    assert len(text) <= 1_200
+
+
+def test_state_repo_definition_uses_paired_knowledge_worktree():
+    res = sr.StateRoot(
+        "/repos/knowledge",
+        "knowledge_repo",
+        "knowledge",
+        True,
+        True,
+        True,
+    )
+    pair = sr.StatePair(
+        paired=True,
+        pair_id="pair-1",
+        current=sr.PairCheckout(
+            role="harness",
+            path="/worktrees/harness-task",
+            repo="harness",
+            worktree_id="wt-h",
+        ),
+        sibling=sr.PairCheckout(
+            role="knowledge",
+            path="/worktrees/knowledge-task",
+            repo="knowledge",
+            worktree_id="wt-k",
+        ),
+    )
+
+    text = sr.state_repo_definition(
+        res,
+        pair=pair,
+        launch_path="/worktrees/harness-task",
+        launch_anchor="/repos/harness",
+    )
+
+    assert "managed harness worktree `/worktrees/harness-task`" in text
+    assert "registered anchor `/repos/knowledge`" in text
+    assert "writable paired worktree `/worktrees/knowledge-task`" in text
+    assert "Use the pair, never the anchor" in text
+
+
+def test_state_repo_definition_anchor_requires_worktrees():
+    res = sr.StateRoot(
+        "/repos/knowledge",
+        "knowledge_repo",
+        "knowledge",
+        True,
+        True,
+        True,
+    )
+    pair = sr.StatePair(
+        paired=False,
+        error="current directory is not a tracked worktree",
+    )
+
+    text = sr.state_repo_definition(
+        res,
+        pair=pair,
+        launch_path="/repos/harness",
+        launch_anchor="/repos/harness",
+    )
+
+    assert "harness anchor `/repos/harness`" in text
+    assert "(read-only)" in text
+    assert "`agent-worktrees -p knowledge create --json`" in text
+    assert "current directory is not a tracked worktree" in text
+
+
+def test_state_repo_definition_configured_but_unresolved_is_distinct():
+    res = sr.StateRoot(
+        None,
+        "knowledge_repo",
+        "knowledge",
+        True,
+        True,
+        False,
+        error="repo is not registered",
+    )
+
+    text = sr.state_repo_definition(res)
+
+    assert "configured as `knowledge` but cannot be resolved" in text
+    assert "Repair/register `knowledge` as worktree-class" in text
+    assert "repo is not registered" in text
 
 
 def test_state_repo_definition_self_hosted_has_no_write_routing():
