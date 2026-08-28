@@ -15,6 +15,7 @@ that pattern to this repository.
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
 | [Restricted Venue Targets](active/restricted-venue-targets/README.md) | Draft | #1188 |
+| [Test Portfolio Rationalization](active/test-portfolio-rationalization/README.md) | Draft | #1303 |
 | [Venue Parity](active/venue-parity/README.md) | Active | #954 |
 | [Windows Launch Hardening](active/windows-launch-hardening/README.md) | Active | #786 |
 | [Worktree Manager Control Plane](active/worktree-manager-control-plane/README.md) | Active | #352 |
