@@ -55,6 +55,22 @@ try {
 
     $inst = Join-Path $PSScriptRoot 'install.ps1'
     if (-not (Test-Path $inst)) { exit 0 }
+    $probe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
+    if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
+        Write-Host '[agent-index] legacy mutation probe is unavailable; skipping service ensure.' -ForegroundColor DarkGray
+        exit 0
+    }
+    $probeHost = (Get-Process -Id $PID).Path
+    if (-not $probeHost) { exit 0 }
+    $global:LASTEXITCODE = 1
+    try {
+        & $probeHost -NoProfile -ExecutionPolicy Bypass -File $probe `
+            -PayloadRoot (Split-Path -Parent $PSScriptRoot) -LegacyRoot $InstallDir |
+            Out-Null
+    } catch {
+        exit 0
+    }
+    if ($LASTEXITCODE -ne 0) { exit 0 }
     Write-Host '[agent-index] daemon not healthy -- ensuring (user-mode) in background...' -ForegroundColor DarkGray
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }

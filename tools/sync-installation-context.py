@@ -23,7 +23,12 @@ FILES = (
     "installation-context.ps1",
     "json-query.awk",
 )
+LEGACY_ENTRYPOINT_FILES = (
+    "legacy-entrypoint-probe.sh",
+    "legacy-entrypoint-probe.ps1",
+)
 ADOPTERS = ("agent-machines", "agent-index", "agent-worktrees")
+LEGACY_ENTRYPOINT_ADOPTERS = ("agent-machines", "agent-index")
 
 
 def vendor_pairs() -> list[tuple[Path, Path]]:
@@ -34,6 +39,13 @@ def vendor_pairs() -> list[tuple[Path, Path]]:
         )
         for plugin in ADOPTERS
         for name in FILES
+    ] + [
+        (
+            CANONICAL_DIR / name,
+            REPO / "plugins" / plugin / "scripts" / "installation-context" / name,
+        )
+        for plugin in LEGACY_ENTRYPOINT_ADOPTERS
+        for name in LEGACY_ENTRYPOINT_FILES
     ]
 
 

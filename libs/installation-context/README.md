@@ -10,6 +10,10 @@ installation cells:
   plus `awk`, a SHA-256 command (`sha256sum`, `shasum`, or `openssl`), and a
   physical-path command (`realpath -m` or `readlink -f`).
 - `installation-context.ps1` provides the PowerShell 5.1+/pwsh bootstrap.
+- `legacy-entrypoint-probe.sh` and `legacy-entrypoint-probe.ps1` derive
+  conservative legacy-footprint evidence from `payload-invocation.json` and
+  gate installer/bootstrap mutation through the read-only `probe-legacy`
+  decision.
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
@@ -170,10 +174,11 @@ UTF-8 without BOM, and length prefixes every value, including `version:1:1`.
 The test suite runs the same vectors and behavioral cases through PowerShell,
 Python, and the no-Python POSIX bootstrap.
 
-`python tools/sync-installation-context.py` vendors byte-identical inert copies
-into the Phase 3 exemplar payloads. The sync does not make them operative.
+`python tools/sync-installation-context.py` vendors byte-identical resolver
+copies into the Phase 3 adopters and the legacy-entrypoint callers into the two
+exemplar payloads. The resolver remains non-operative; the caller only protects
+legacy mutation and does not activate a namespaced root.
 
 Later slices still own snapshot provenance, activation and tombstone writers,
 migration, runtime-root activation, payload-invocation schema changes,
-installer/bootstrap caller wiring, declared exemplar footprints,
 reconciliation, and dual-cell exemplars.

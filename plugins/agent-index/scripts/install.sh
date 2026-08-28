@@ -18,6 +18,49 @@ _step() { printf '  ...    %s\n' "$1"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# Refuse every mutating lifecycle action before self-staging touches the legacy
+# runtime. Parse only the action and install-dir override here; the canonical
+# parser below still owns full argument validation.
+__legacy_action="${1:-status}"
+__legacy_install_dir=""
+__legacy_args=("$@")
+for ((__legacy_i = 1; __legacy_i < ${#__legacy_args[@]}; __legacy_i++)); do
+    if [[ "${__legacy_args[$__legacy_i]}" == --install-dir ]]; then
+        ((__legacy_i + 1 < ${#__legacy_args[@]})) || {
+            _fail '--install-dir requires a value'
+            exit 1
+        }
+        __legacy_install_dir="${__legacy_args[$((__legacy_i + 1))]}"
+    fi
+done
+if [[ "$__legacy_action" != status ]]; then
+    LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
+    if [[ ! -f "$LEGACY_PROBE" ]]; then
+        _fail 'Legacy mutation probe is unavailable'
+        exit 1
+    fi
+    __legacy_root="${__legacy_install_dir:-$HOME/.agent-index}"
+    if [[ "$__legacy_root" != /* ]]; then
+        __legacy_root="$PWD/$__legacy_root"
+    fi
+    set +e
+    bash "$LEGACY_PROBE" --payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        --legacy-root "$__legacy_root"
+    LEGACY_PROBE_STATUS=$?
+    set -e
+    if [[ "$LEGACY_PROBE_STATUS" -ne 0 ]]; then
+        exit "$LEGACY_PROBE_STATUS"
+    fi
+fi
+
+# Status is read-only, so do not enter the self-stage block that creates and
+# reaps legacy staging directories.
+__legacy_read_only_status=0
+if [[ "$__legacy_action" == status && -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+    export COPILOT_PLUGIN_INSTALL_STAGED=read-only-status
+    __legacy_read_only_status=1
+fi
+
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
 # pyproject.toml) to build the venv, so while it runs -- especially if it wedges
@@ -114,6 +157,9 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
     esac
 fi
 # === end install-contract:v4 self-stage ===
+if [[ "$__legacy_read_only_status" -eq 1 ]]; then
+    unset COPILOT_PLUGIN_INSTALL_STAGED
+fi
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -173,6 +219,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-index}"
+if [[ "$INSTALL_DIR" != /* ]]; then
+    INSTALL_DIR="$PWD/$INSTALL_DIR"
+fi
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
@@ -546,16 +595,20 @@ _resolve() {
 }
 _resolve
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_index "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
 _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
 [ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
 if [ ! -f "$_install" ]; then
     printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
     exit 127
 fi
+_payload="${_install%/scripts/install.sh}"
+_probe="$_payload/scripts/installation-context/legacy-entrypoint-probe.sh"
+[ -f "$_probe" ] || { printf '%s\n' "[$_name] legacy mutation probe is unavailable." >&2; exit 1; }
+bash "$_probe" --payload-root "$_payload" --legacy-root "$_root" || exit $?
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null

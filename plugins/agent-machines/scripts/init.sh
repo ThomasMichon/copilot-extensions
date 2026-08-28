@@ -19,6 +19,7 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 FORCE=0
 INSTALL_DIR=""
+ORIGINAL_ARGS=("$@")
 # Honor an inherited action: the install-contract:v4 self-stage below re-execs
 # this script with an already-shifted (empty) "$@", so a positional action would
 # be lost across the staging boundary. Carry it through the exec via the env.
@@ -35,6 +36,26 @@ export AGENT_MACHINES_ACTION="$ACTION"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Refuse every legacy mutation before self-staging creates or removes files.
+LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
+if [[ ! -f "$LEGACY_PROBE" ]]; then
+    _fail 'Legacy mutation probe is unavailable'
+    exit 1
+fi
+set +e
+LEGACY_ROOT="${INSTALL_DIR:-$HOME/.agent-machines}"
+if [[ "$LEGACY_ROOT" != /* ]]; then
+    LEGACY_ROOT="$PWD/$LEGACY_ROOT"
+fi
+bash "$LEGACY_PROBE" --payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+    --legacy-root "$LEGACY_ROOT"
+LEGACY_PROBE_STATUS=$?
+set -e
+if [[ "$LEGACY_PROBE_STATUS" -ne 0 ]]; then
+    exit "$LEGACY_PROBE_STATUS"
+fi
+set -- "${ORIGINAL_ARGS[@]}"
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -173,6 +194,9 @@ if [[ -z "${UV_HTTP_TIMEOUT:-}" ]]; then export UV_HTTP_TIMEOUT=60; fi
 PKG_SRC_DIR="$PLUGIN_DIR/src/agent_machines"
 
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.agent-machines}"
+if [[ "$INSTALL_DIR" != /* ]]; then
+    INSTALL_DIR="$PWD/$INSTALL_DIR"
+fi
 VENV_DIR="$INSTALL_DIR/.venv"
 LOCAL_BIN="$HOME/.local/bin"
 VENV_PYTHON="$VENV_DIR/bin/python"
@@ -339,16 +363,20 @@ _resolve() {
 }
 _resolve
 [ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_machines "$@"
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
 _install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/init.sh"
 [ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/init.sh 2>/dev/null | head -n1)"
 if [ ! -f "$_install" ]; then
     printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
     exit 127
 fi
+_payload="${_install%/scripts/init.sh}"
+_probe="$_payload/scripts/installation-context/legacy-entrypoint-probe.sh"
+[ -f "$_probe" ] || { printf '%s\n' "[$_name] legacy mutation probe is unavailable." >&2; exit 1; }
+bash "$_probe" --payload-root "$_payload" --legacy-root "$_root" || exit $?
+mkdir -p "$_root"
+_status="$_root/.provision-status"
+printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
+printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
 _lock="$_root/.provision.lock"
 exec 9>"$_lock"
 command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null

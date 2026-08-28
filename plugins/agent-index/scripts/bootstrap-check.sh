@@ -12,6 +12,14 @@
 #      writes remain blocked until context-aware installers become operative.
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
+legacy_mutation_allowed() {
+  local probe="$ScriptDir/installation-context/legacy-entrypoint-probe.sh"
+  [ -f "$probe" ] || {
+    echo "[$name] legacy mutation probe is unavailable; skipping reconcile." >&2
+    return 1
+  }
+  bash "$probe" --payload-root "$PluginDir" --legacy-root "$HOME/.$name"
+}
 py="$(command -v python3 || command -v python || true)"; [ -n "$py" ] || exit 0
 name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || exit 0
@@ -88,6 +96,7 @@ if [ ! -f "$Manifest" ]; then
     if [ -f "$candidate" ] && grep -qE '^[[:space:]]*([[:alnum:]_-]+\|)*stamp(\|[[:alnum:]_-]+)*\)' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
   done
   if [ -n "$installer" ]; then
+    legacy_mutation_allowed || exit 0
     bash "$installer" stamp >/dev/null 2>&1 || true
   fi
   exit 0
@@ -124,6 +133,7 @@ elif [ -f "$PluginDir/scripts/install.sh" ]; then
 else
   exit 0
 fi
+legacy_mutation_allowed || exit 0
 echo "[$name] runtime $deployed -> $current; reconciling in background..."
 nohup bash "${target[@]}" >/dev/null 2>&1 &
 exit 0

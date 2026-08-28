@@ -18,6 +18,24 @@
 $ErrorActionPreference = 'SilentlyContinue'
 
 $PluginDir = Split-Path -Parent $PSScriptRoot
+function Test-LegacyMutationAllowed {
+    $probe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
+    if (-not (Test-Path -LiteralPath $probe -PathType Leaf)) {
+        Write-Host '[agent-machines] legacy mutation probe is unavailable; skipping reconcile.' -ForegroundColor DarkGray
+        return $false
+    }
+    $hostExe = (Get-Process -Id $PID).Path
+    if (-not $hostExe) { return $false }
+    $global:LASTEXITCODE = 1
+    try {
+        & $hostExe -NoProfile -ExecutionPolicy Bypass -File $probe `
+            -PayloadRoot $PluginDir -LegacyRoot (Join-Path $env:USERPROFILE '.agent-machines') |
+            Out-Null
+    } catch {
+        return $false
+    }
+    return $LASTEXITCODE -eq 0
+}
 $contextSelected = $false
 $InstallDir = Join-Path $env:USERPROFILE '.agent-machines'
 if ($env:COPILOT_EXTENSIONS_CONTEXT) {
@@ -75,6 +93,7 @@ if (-not (Test-Path $Manifest)) {
     }
     $payloadInit = Join-Path $PSScriptRoot 'init.ps1'
     if ((Test-Path $payloadInit) -and (Select-String -Path $payloadInit -Pattern "'stamp'" -Quiet)) {
+        if (-not (Test-LegacyMutationAllowed)) { exit 0 }
         $pw = Get-Command pwsh -ErrorAction SilentlyContinue
         $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
         & $exe -NoProfile -ExecutionPolicy Bypass -File $payloadInit stamp *> $null
@@ -108,6 +127,7 @@ try {
     $init = Join-Path $pluginDir 'scripts\init.ps1'
     if (-not (Test-Path $init)) { exit 0 }
 
+    if (-not (Test-LegacyMutationAllowed)) { exit 0 }
     Write-Host "[agent-machines] runtime $deployed -> $current; reconciling in background..." -ForegroundColor DarkGray
     $pw = Get-Command pwsh -ErrorAction SilentlyContinue
     $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }

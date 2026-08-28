@@ -56,6 +56,13 @@ fi
 
 inst="$(cd "$(dirname "$0")" && pwd)/install.sh"
 [ -f "$inst" ] || exit 0
+probe="$(cd "$(dirname "$0")" && pwd)/installation-context/legacy-entrypoint-probe.sh"
+if [ ! -f "$probe" ]; then
+    printf '%s\n' '[agent-index] legacy mutation probe is unavailable; skipping service ensure.' >&2
+    exit 0
+fi
+bash "$probe" --payload-root "$(cd "$(dirname "$0")/.." && pwd)" \
+    --legacy-root "$INSTALL_DIR" || exit 0
 printf '%s\n' "[agent-index] daemon not healthy -- ensuring (user-mode) in background..." >&2
 nohup bash "$inst" ensure >/dev/null 2>&1 &
 exit 0

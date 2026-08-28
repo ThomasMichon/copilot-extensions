@@ -27,7 +27,7 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     canonical = tmp_path / "libs" / "installation-context"
     plugins = tmp_path / "plugins"
     canonical.mkdir(parents=True)
-    for name in module.FILES:
+    for name in (*module.FILES, *module.LEGACY_ENTRYPOINT_FILES):
         (canonical / name).write_text(f"{name}\n", encoding="utf-8")
     drifted = plugins / "plugin-a" / "scripts" / "installation-context"
     drifted.mkdir(parents=True)
@@ -36,9 +36,10 @@ def test_sync_repairs_missing_and_drifted_copies(tmp_path: Path) -> None:
     module.REPO = tmp_path
     module.CANONICAL_DIR = canonical
     module.ADOPTERS = ("plugin-a", "plugin-b")
+    module.LEGACY_ENTRYPOINT_ADOPTERS = ("plugin-a",)
     assert module.verify()
     written = module.sync()
-    assert len(written) == len(module.FILES) * 2
+    assert len(written) == len(module.FILES) * 2 + len(module.LEGACY_ENTRYPOINT_FILES)
     assert module.verify() == []
     if os.name != "nt":
         destination = plugins / "plugin-a" / "scripts" / "installation-context" / module.FILES[0]
