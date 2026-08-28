@@ -16,8 +16,8 @@ import warnings
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any, Mapping, Sequence
+from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import quote, urlsplit, urlunsplit
 
 LOCK_SCHEMA = "copilot-extensions.installation-lock"
@@ -27,6 +27,11 @@ LOCK_POLL_SECONDS = 0.01
 MAX_NAMESPACE_LOCATORS = 16
 MAX_RECEIPT_GENERATION = (1 << 63) - 1
 ROOT_NAMES = ("versions", "snapshots", "state", "run", "logs", "cache", "launchers")
+POLICY_SCHEMA = "copilot-extensions.installation-mode"
+ACTIVATION_SCHEMA = "copilot-extensions.installation-activation"
+TOMBSTONE_SCHEMA = "copilot-extensions.legacy-installation-ownership"
+RESOLUTION_SCHEMA = "copilot-extensions.installation-resolution"
+RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
 class InstallationContextError(ValueError):
@@ -1504,6 +1509,966 @@ def resolve_context(
     }
 
 
+_MISSING = object()
+
+
+def _exact_property(value: Mapping[str, Any], name: str) -> Any:
+    if not isinstance(value, Mapping):
+        _fail(f"{name} belongs to a JSON object.")
+    for candidate in value:
+        if candidate != name and candidate.casefold() == name.casefold():
+            _fail(f"JSON property '{candidate}' conflicts with exact case '{name}'.")
+    return value[name] if name in value else _MISSING
+
+
+def _required_string(value: Mapping[str, Any], name: str, label: str) -> str:
+    result = _exact_property(value, name)
+    if result is _MISSING or not isinstance(result, str) or not result:
+        _fail(f"{label}.{name} must be a non-empty string.")
+    if "\0" in result:
+        _fail(f"{label}.{name} may not contain NUL.")
+    return result
+
+
+def _required_integer(value: Mapping[str, Any], name: str, label: str) -> int:
+    result = _exact_property(value, name)
+    if isinstance(result, bool) or not isinstance(result, int):
+        _fail(f"{label}.{name} must be an integer.")
+    if result < 1 or result > MAX_RECEIPT_GENERATION:
+        _fail(
+            f"{label}.{name} must be a positive signed 64-bit integer."
+        )
+    return result
+
+
+def _parse_rfc3339_utc(value: Any, label: str) -> datetime:
+    if not isinstance(value, str) or RFC3339_UTC.fullmatch(value) is None:
+        _fail(f"{label} must be an RFC3339 UTC timestamp with second precision.")
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=timezone.utc
+        )
+    except ValueError as error:
+        _fail(f"{label} is not a valid RFC3339 UTC timestamp: {error}")
+
+
+def _coerce_current_time(value: datetime | str | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, str):
+        return _parse_rfc3339_utc(value, "current time")
+    if not isinstance(value, datetime):
+        _fail("current_time must be a datetime or RFC3339 UTC string.")
+    if value.tzinfo is None:
+        _fail("current_time must include a UTC offset.")
+    return value.astimezone(timezone.utc)
+
+
+def _normalize_short_host(value: str) -> str:
+    return value.split(".", 1)[0].casefold()
+
+
+def _current_environment(
+    *,
+    environment: Mapping[str, str],
+    os_profile: str | os.PathLike[str] | None,
+    platform: str | None,
+    wsl_distro: str | None,
+) -> tuple[dict[str, Any], Path]:
+    selected_platform = platform or ("windows" if os.name == "nt" else "posix")
+    if selected_platform not in {"windows", "posix"}:
+        _fail("platform must be exactly 'windows' or 'posix'.")
+    if os_profile is not None:
+        profile_value = Path(os_profile)
+    elif selected_platform == "windows":
+        user_profile = environment.get("USERPROFILE")
+        if not user_profile:
+            _fail("Cannot determine the canonical Windows user profile.")
+        profile_value = Path(user_profile)
+    else:
+        try:
+            import pwd
+
+            profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except (ImportError, KeyError, OSError) as error:
+            _fail(f"Cannot determine the passwd-database account home: {error}")
+    if not profile_value.is_absolute():
+        _fail("The canonical operating-system user profile must be absolute.")
+    profile = canonical_path(profile_value, must_exist=True)
+    selected_wsl = (
+        None
+        if selected_platform == "windows"
+        else (
+            wsl_distro
+            if wsl_distro is not None
+            else environment.get("WSL_DISTRO_NAME") or None
+        )
+    )
+    if selected_wsl is not None and not isinstance(selected_wsl, str):
+        _fail("wslDistro must be a string or null.")
+    return (
+        {
+            "platform": selected_platform,
+            "homeRealPath": str(profile),
+            "wslDistro": selected_wsl,
+        },
+        profile,
+    )
+
+
+def _validate_environment_record(
+    value: Any,
+    current: Mapping[str, Any],
+    label: str,
+) -> tuple[dict[str, Any], bool]:
+    if not isinstance(value, Mapping):
+        _fail(f"{label} must be a JSON object.")
+    platform = _required_string(value, "platform", label)
+    if platform not in {"windows", "posix"}:
+        _fail(f"{label}.platform must be exactly 'windows' or 'posix'.")
+    home = _required_string(value, "homeRealPath", label)
+    pure_path = PureWindowsPath(home) if platform == "windows" else PurePosixPath(home)
+    if not pure_path.is_absolute():
+        _fail(f"{label}.homeRealPath must be absolute.")
+    distro_value = _exact_property(value, "wslDistro")
+    if distro_value is _MISSING:
+        _fail(f"{label}.wslDistro is required.")
+    if distro_value is not None and not isinstance(distro_value, str):
+        _fail(f"{label}.wslDistro must be a string or null.")
+    if platform == "windows" and distro_value is not None:
+        _fail(f"{label}.wslDistro must be null on Windows.")
+    normalized = {
+        "platform": platform,
+        "homeRealPath": home,
+        "wslDistro": distro_value,
+    }
+    return normalized, normalized != dict(current)
+
+
+def _validate_legacy_probe(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        _fail(f"{label} must be a JSON object.")
+    declared = _exact_property(value, "declared")
+    if not isinstance(declared, bool):
+        _fail(f"{label}.declared must be a JSON boolean.")
+    result = _exact_property(value, "result")
+    if result not in {"absent", "present", "unknown"}:
+        _fail(f"{label}.result must be absent, present, or unknown.")
+    if not declared and result != "unknown":
+        _fail(f"{label}.result must be unknown when declared is false.")
+    checked_at = _exact_property(value, "checkedAt")
+    if checked_at is _MISSING:
+        _fail(f"{label}.checkedAt is required.")
+    if checked_at is not None:
+        _parse_rfc3339_utc(checked_at, f"{label}.checkedAt")
+    return {
+        "declared": declared,
+        "result": result,
+        "checkedAt": checked_at,
+    }
+
+
+def _validate_marketplace_id(value: str) -> None:
+    if re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{16}", value) is None:
+        _fail(f"Invalid source-derived marketplace id '{value}'.")
+
+
+def _policy_result(
+    path: Path,
+    *,
+    authoritative: bool,
+    marketplace_id: str | None,
+    plugin_id: str | None,
+    entry_present: bool | None = None,
+    entry_is_file: bool | None = None,
+) -> tuple[dict[str, Any], bool | None]:
+    evidence: dict[str, Any] = {
+        "path": str(path),
+        "authoritative": authoritative,
+        "state": "missing",
+        "scope": "default",
+        "enabled": False,
+        "reason": "policy-default-false",
+    }
+    present = os.path.lexists(path) if entry_present is None else entry_present
+    is_file = path.is_file() if entry_is_file is None else entry_is_file
+    if not present:
+        if not authoritative:
+            evidence["reason"] = "policy-injected-non-authoritative"
+        return evidence, False
+    if not is_file:
+        evidence.update(
+            state="invalid",
+            enabled=None,
+            reason="policy-invalid",
+        )
+        return evidence, None
+    try:
+        policy = read_json(path)
+        if not isinstance(policy, Mapping):
+            _fail("Installation-mode policy must be a JSON object.")
+        schema = _exact_property(policy, "schema")
+        version = _exact_property(policy, "version")
+        if schema != POLICY_SCHEMA:
+            _fail(f"Installation-mode policy schema must be '{POLICY_SCHEMA}'.")
+        if isinstance(version, bool) or not isinstance(version, int):
+            _fail("Installation-mode policy version must be an integer.")
+        if version > 1:
+            evidence.update(
+                state="unsupported",
+                enabled=None,
+                reason="policy-version-unsupported",
+            )
+            return evidence, None
+        if version != 1:
+            _fail("Installation-mode policy version must be 1.")
+        installation_mode = _exact_property(policy, "installationMode")
+        if installation_mode is _MISSING:
+            installation_mode = {}
+        if not isinstance(installation_mode, Mapping):
+            _fail("installationMode must be a JSON object.")
+
+        global_enabled = _exact_property(installation_mode, "enabled")
+        if global_enabled is not _MISSING and not isinstance(global_enabled, bool):
+            _fail("installationMode.enabled must be a JSON boolean.")
+        marketplaces = _exact_property(installation_mode, "marketplaces")
+        if marketplaces is _MISSING:
+            marketplaces = {}
+        if not isinstance(marketplaces, Mapping):
+            _fail("installationMode.marketplaces must be a JSON object.")
+
+        for candidate_marketplace, marketplace_value in marketplaces.items():
+            _validate_marketplace_id(candidate_marketplace)
+            if not isinstance(marketplace_value, Mapping):
+                _fail(
+                    f"Marketplace policy '{candidate_marketplace}' must be a JSON object."
+                )
+            marketplace_enabled = _exact_property(marketplace_value, "enabled")
+            if marketplace_enabled is not _MISSING and not isinstance(
+                marketplace_enabled, bool
+            ):
+                _fail(
+                    f"Marketplace policy '{candidate_marketplace}'.enabled must be "
+                    "a JSON boolean."
+                )
+            plugins = _exact_property(marketplace_value, "plugins")
+            if plugins is _MISSING:
+                plugins = {}
+            if not isinstance(plugins, Mapping):
+                _fail(
+                    f"Marketplace policy '{candidate_marketplace}'.plugins must be "
+                    "a JSON object."
+                )
+            for candidate_plugin, plugin_value in plugins.items():
+                _assert_plugin_id(candidate_plugin)
+                if not isinstance(plugin_value, Mapping):
+                    _fail(
+                        f"Plugin policy '{candidate_plugin}' must be a JSON object."
+                    )
+                plugin_enabled = _exact_property(plugin_value, "enabled")
+                if plugin_enabled is not _MISSING and not isinstance(
+                    plugin_enabled, bool
+                ):
+                    _fail(
+                        f"Plugin policy '{candidate_plugin}'.enabled must be a "
+                        "JSON boolean."
+                    )
+
+        scope = "default"
+        enabled = False
+        reason = "policy-default-false"
+        if global_enabled is not _MISSING:
+            scope = "global"
+            enabled = global_enabled
+            reason = f"policy-global-{'true' if enabled else 'false'}"
+        if marketplace_id is not None and marketplace_id in marketplaces:
+            selected_marketplace = marketplaces[marketplace_id]
+            selected_marketplace_enabled = _exact_property(
+                selected_marketplace, "enabled"
+            )
+            if selected_marketplace_enabled is not _MISSING:
+                scope = "marketplace"
+                enabled = selected_marketplace_enabled
+                reason = f"policy-marketplace-{'true' if enabled else 'false'}"
+            selected_plugins = _exact_property(selected_marketplace, "plugins")
+            if selected_plugins is _MISSING:
+                selected_plugins = {}
+            if plugin_id is not None and plugin_id in selected_plugins:
+                selected_plugin_enabled = _exact_property(
+                    selected_plugins[plugin_id], "enabled"
+                )
+                if selected_plugin_enabled is not _MISSING:
+                    scope = "plugin"
+                    enabled = selected_plugin_enabled
+                    reason = f"policy-plugin-{'true' if enabled else 'false'}"
+
+        evidence.update(
+            state="valid",
+            scope=scope,
+            enabled=enabled,
+            reason=(
+                reason if authoritative else "policy-injected-non-authoritative"
+            ),
+        )
+        return evidence, enabled if authoritative else False
+    except InstallationContextError:
+        evidence.update(
+            state="invalid",
+            enabled=None,
+            reason="policy-invalid",
+        )
+        return evidence, None
+
+
+def _activation_result(
+    *,
+    plugin_root: Path,
+    durable_home: Path,
+    marketplace_id: str,
+    plugin_id: str,
+    current_environment: Mapping[str, Any],
+    legacy_root: Path,
+) -> dict[str, Any]:
+    activation_entry = plugin_root / "installation-activation.json"
+    activation_present = os.path.lexists(activation_entry)
+    activation_is_file = activation_entry.is_file() and not activation_entry.is_symlink()
+    activation_path = canonical_path(activation_entry)
+    missing = {
+        "state": "missing",
+        "path": None,
+        "actualMode": "legacy",
+        "runtimeRoot": str(legacy_root),
+        "context": None,
+        "activationGeneration": None,
+        "installGeneration": None,
+        "reason": None,
+    }
+    if not activation_present:
+        return missing
+    result = dict(missing)
+    result["path"] = str(activation_path)
+    if not activation_is_file:
+        result.update(
+            state="invalid",
+            actualMode=None,
+            runtimeRoot=None,
+            reason="activation-invalid",
+        )
+        return result
+    try:
+        activation = read_json(activation_path)
+        if not isinstance(activation, Mapping):
+            _fail("Installation activation must be a JSON object.")
+        if _exact_property(activation, "schema") != ACTIVATION_SCHEMA:
+            _fail(f"Installation activation schema must be '{ACTIVATION_SCHEMA}'.")
+        version = _exact_property(activation, "version")
+        if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+            _fail("Installation activation version must be 1.")
+        if _required_string(
+            activation, "marketplaceId", "installation activation"
+        ) != marketplace_id:
+            _fail("Installation activation marketplaceId does not match its cell.")
+        if _required_string(
+            activation, "pluginId", "installation activation"
+        ) != plugin_id:
+            _fail("Installation activation pluginId does not match its plugin root.")
+        mode = _required_string(activation, "mode", "installation activation")
+        state = _required_string(activation, "state", "installation activation")
+        if (mode, state) not in {
+            ("namespaced", "active"),
+            ("legacy", "deactivated"),
+        }:
+            _fail("Installation activation mode/state pair is invalid.")
+        _, foreign = _validate_environment_record(
+            _exact_property(activation, "environment"),
+            current_environment,
+            "installation activation.environment",
+        )
+        if foreign:
+            result.update(
+                state="foreign",
+                actualMode=None,
+                runtimeRoot=None,
+                reason="foreign-environment",
+            )
+            return result
+        context_text = _required_string(
+            activation, "context", "installation activation"
+        )
+        context_path = Path(context_text)
+        if not context_path.is_absolute():
+            _fail("Installation activation context must be absolute.")
+        canonical_context = canonical_path(plugin_root / "install.json")
+        if not paths_equal(context_path, canonical_context):
+            _fail("Installation activation context is not the canonical install.json.")
+        namespace_generation = _required_integer(
+            activation, "namespaceGeneration", "installation activation"
+        )
+        pinned_install_generation = _required_integer(
+            activation, "installGeneration", "installation activation"
+        )
+        activation_generation = _required_integer(
+            activation, "generation", "installation activation"
+        )
+        legacy = _exact_property(activation, "legacy")
+        if not isinstance(legacy, Mapping):
+            _fail("Installation activation legacy evidence must be a JSON object.")
+        disposition = _required_string(
+            legacy, "disposition", "installation activation.legacy"
+        )
+        if disposition not in {"absent", "quiesced", "retained-inert", "restored"}:
+            _fail("Installation activation legacy disposition is invalid.")
+        _validate_legacy_probe(
+            _exact_property(legacy, "probe"),
+            "installation activation.legacy.probe",
+        )
+        created_at = _parse_rfc3339_utc(
+            _exact_property(activation, "createdAt"),
+            "installation activation.createdAt",
+        )
+        updated_at = _parse_rfc3339_utc(
+            _exact_property(activation, "updatedAt"),
+            "installation activation.updatedAt",
+        )
+        if updated_at < created_at:
+            _fail("Installation activation updatedAt precedes createdAt.")
+        validated = validate_context_receipt(
+            canonical_context,
+            durable_home,
+            expected_marketplace_id=marketplace_id,
+            expected_plugin_id=plugin_id,
+            expected_cell_root=plugin_root.parent.parent,
+            environment={},
+        )
+        current_namespace_generation = int(validated["namespaceGeneration"])
+        current_install_generation = int(validated["generation"])
+        actual_mode = "namespaced" if mode == "namespaced" else "legacy"
+        runtime_root = plugin_root if actual_mode == "namespaced" else legacy_root
+        result.update(
+            actualMode=actual_mode,
+            runtimeRoot=str(runtime_root),
+            context=str(canonical_context),
+            activationGeneration=activation_generation,
+            installGeneration=current_install_generation,
+        )
+        if (
+            namespace_generation != current_namespace_generation
+            or pinned_install_generation != current_install_generation
+        ):
+            result.update(state="revalidation", reason="revalidation-required")
+            return result
+        result.update(state="valid", reason=None)
+        return result
+    except InstallationContextError:
+        result.update(
+            state="invalid",
+            actualMode=None,
+            runtimeRoot=None,
+            context=None,
+            activationGeneration=None,
+            installGeneration=None,
+            reason="activation-invalid",
+        )
+        return result
+
+
+def _tombstone_result(
+    *,
+    legacy_root: Path,
+    durable_home: Path,
+    plugin_id: str | None,
+    current_marketplace_id: str | None,
+    current_environment: Mapping[str, Any],
+) -> dict[str, Any]:
+    tombstone_entry = legacy_root / ".installation-ownership.json"
+    tombstone_present = os.path.lexists(tombstone_entry)
+    tombstone_is_file = tombstone_entry.is_file() and not tombstone_entry.is_symlink()
+    tombstone_path = canonical_path(tombstone_entry)
+    result: dict[str, Any] = {
+        "root": str(legacy_root),
+        "tombstone": None,
+        "disposition": "active",
+        "ownerMarketplaceId": None,
+        "status": None,
+        "reason": None,
+    }
+    if not tombstone_present:
+        return result
+    result["tombstone"] = str(tombstone_path)
+    if not tombstone_is_file:
+        result.update(
+            disposition="orphaned-transfer",
+            status="orphaned-transfer",
+            reason="orphaned-transfer",
+        )
+        return result
+    try:
+        tombstone = read_json(tombstone_path)
+        if not isinstance(tombstone, Mapping):
+            _fail("Legacy ownership tombstone must be a JSON object.")
+        if _exact_property(tombstone, "schema") != TOMBSTONE_SCHEMA:
+            _fail(f"Legacy ownership schema must be '{TOMBSTONE_SCHEMA}'.")
+        version = _exact_property(tombstone, "version")
+        if isinstance(version, bool) or not isinstance(version, int) or version != 1:
+            _fail("Legacy ownership version must be 1.")
+        owner_marketplace_id = _required_string(
+            tombstone, "marketplaceId", "legacy ownership"
+        )
+        _validate_marketplace_id(owner_marketplace_id)
+        owner_plugin_id = _required_string(
+            tombstone, "pluginId", "legacy ownership"
+        )
+        _assert_plugin_id(owner_plugin_id)
+        if plugin_id is None or owner_plugin_id != plugin_id:
+            _fail("Legacy ownership pluginId does not match the requested plugin.")
+        _, foreign = _validate_environment_record(
+            _exact_property(tombstone, "environment"),
+            current_environment,
+            "legacy ownership.environment",
+        )
+        if foreign:
+            result.update(
+                disposition="orphaned-transfer",
+                ownerMarketplaceId=owner_marketplace_id,
+                status="foreign-environment",
+                reason="foreign-environment",
+            )
+            return result
+        activation_reference = _exact_property(tombstone, "activation")
+        if not isinstance(activation_reference, Mapping):
+            _fail("Legacy ownership activation must be a JSON object.")
+        activation_text = _required_string(
+            activation_reference, "path", "legacy ownership.activation"
+        )
+        activation_pointer = Path(activation_text)
+        if not activation_pointer.is_absolute():
+            _fail("Legacy ownership activation.path must be absolute.")
+        pinned_generation = _required_integer(
+            activation_reference, "generation", "legacy ownership.activation"
+        )
+        _parse_rfc3339_utc(
+            _exact_property(tombstone, "transferredAt"),
+            "legacy ownership.transferredAt",
+        )
+        destination_plugin_root = canonical_path(
+            durable_home
+            / "marketplaces"
+            / owner_marketplace_id
+            / "plugins"
+            / owner_plugin_id
+        )
+        canonical_activation = canonical_path(
+            destination_plugin_root / "installation-activation.json"
+        )
+        if not paths_equal(activation_pointer, canonical_activation):
+            _fail("Legacy ownership activation.path is not canonical.")
+        destination = _activation_result(
+            plugin_root=destination_plugin_root,
+            durable_home=durable_home,
+            marketplace_id=owner_marketplace_id,
+            plugin_id=owner_plugin_id,
+            current_environment=current_environment,
+            legacy_root=legacy_root,
+        )
+        if (
+            destination["state"] != "valid"
+            or destination["actualMode"] != "namespaced"
+            or destination["activationGeneration"] != pinned_generation
+        ):
+            _fail("Legacy ownership destination activation is not current and active.")
+        disposition = (
+            "owned-by-current-cell"
+            if owner_marketplace_id == current_marketplace_id
+            else "owned-by-other-cell"
+        )
+        result.update(
+            disposition=disposition,
+            ownerMarketplaceId=owner_marketplace_id,
+        )
+        return result
+    except InstallationContextError:
+        result.update(
+            disposition="orphaned-transfer",
+            status="orphaned-transfer",
+            reason="orphaned-transfer",
+        )
+        return result
+
+
+def _maintenance_result(
+    *,
+    profile: Path,
+    plugin_root: Path | None,
+    current_time: datetime,
+    host: str,
+    pid_is_live: Callable[[int], bool],
+) -> dict[str, Any]:
+    candidates = [
+        ("user", profile / ".copilot-extensions" / "maintenance")
+    ]
+    if plugin_root is not None:
+        candidates.append(("plugin", plugin_root / "maintenance"))
+    for scope, marker_entry in candidates:
+        if not os.path.lexists(marker_entry):
+            continue
+        marker = marker_entry.absolute()
+        sidecar_entry = marker_entry.with_name(f"{marker_entry.name}.json")
+        sidecar = sidecar_entry.absolute()
+        state = "stale"
+        if (
+            not marker_entry.is_symlink()
+            and sidecar_entry.is_file()
+            and not sidecar_entry.is_symlink()
+        ):
+            try:
+                value = read_json(sidecar_entry)
+                if not isinstance(value, Mapping):
+                    _fail("Maintenance sidecar must be a JSON object.")
+                owner = _required_string(value, "owner", "maintenance")
+                sidecar_host = _required_string(value, "host", "maintenance")
+                pid = _required_integer(value, "pid", "maintenance")
+                reason = _required_string(value, "reason", "maintenance")
+                entered_at = _parse_rfc3339_utc(
+                    _exact_property(value, "enteredAt"), "maintenance.enteredAt"
+                )
+                expected_until = _parse_rfc3339_utc(
+                    _exact_property(value, "expectedUntil"),
+                    "maintenance.expectedUntil",
+                )
+                if (
+                    owner
+                    and reason
+                    and _normalize_short_host(sidecar_host) == _normalize_short_host(host)
+                    and entered_at <= current_time <= expected_until
+                    and pid_is_live(pid)
+                ):
+                    state = "active"
+            except (InstallationContextError, OSError):
+                state = "stale"
+        return {
+            "state": state,
+            "scope": scope,
+            "marker": str(marker),
+            "sidecar": str(sidecar),
+        }
+    return {
+        "state": "inactive",
+        "scope": "none",
+        "marker": None,
+        "sidecar": None,
+    }
+
+
+def _trusted_plugin_id(
+    *,
+    plugin_id: str | None,
+    expected_plugin_id: str | None,
+    payload_root: str | os.PathLike[str] | None,
+    context: str | os.PathLike[str] | None,
+) -> str | None:
+    candidates: list[str] = []
+    if plugin_id:
+        candidates.append(plugin_id)
+    if expected_plugin_id:
+        candidates.append(expected_plugin_id)
+    if payload_root:
+        candidates.append(Path(payload_root).name)
+    if context:
+        pointer = Path(context)
+        if pointer.name == "install.json" and pointer.parent.parent.name == "plugins":
+            candidates.append(pointer.parent.name)
+    for candidate in candidates:
+        try:
+            _assert_plugin_id(candidate)
+            return candidate
+        except InstallationContextError:
+            continue
+    return None
+
+
+def resolve_installation_mode(
+    *,
+    legacy_root: str | os.PathLike[str],
+    legacy_probe: Mapping[str, Any] | None = None,
+    policy_path: str | os.PathLike[str] | None = None,
+    payload_root: str | os.PathLike[str] | None = None,
+    plugin_id: str | None = None,
+    copilot_home: str | os.PathLike[str] | None = None,
+    project_root: str | os.PathLike[str] | None = None,
+    durable_home: str | os.PathLike[str] | None = None,
+    context: str | os.PathLike[str] | None = None,
+    expected_marketplace_id: str | None = None,
+    expected_plugin_id: str | None = None,
+    expected_payload_root: str | os.PathLike[str] | None = None,
+    expected_cell_root: str | os.PathLike[str] | None = None,
+    source_descriptor: Mapping[str, Any] | None = None,
+    marketplace_key: str | None = None,
+    environment: Mapping[str, str] | None = None,
+    os_profile: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    wsl_distro: str | None = None,
+    current_time: datetime | str | None = None,
+    host: str | None = None,
+    pid_is_live: Callable[[int], bool] | None = None,
+) -> dict[str, Any]:
+    """Resolve desired and actual installation mode without mutating state."""
+
+    environment = environment if environment is not None else os.environ
+    current_environment, profile = _current_environment(
+        environment=environment,
+        os_profile=os_profile,
+        platform=platform,
+        wsl_distro=wsl_distro,
+    )
+    now = _coerce_current_time(current_time)
+    current_host = host or socket.gethostname()
+    liveness = pid_is_live or _pid_is_live
+    legacy_value = Path(legacy_root)
+    if not legacy_value.is_absolute():
+        _fail("legacy_root must be absolute.")
+    resolved_legacy_root = canonical_path(legacy_value)
+    probe = _validate_legacy_probe(
+        legacy_probe
+        if legacy_probe is not None
+        else {"declared": False, "result": "unknown", "checkedAt": None},
+        "legacy probe",
+    )
+    resolved_durable_home = canonical_path(
+        durable_home or profile / ".copilot-extensions"
+    )
+    trusted_plugin_id = _trusted_plugin_id(
+        plugin_id=plugin_id,
+        expected_plugin_id=expected_plugin_id,
+        payload_root=payload_root,
+        context=context,
+    )
+    resolved_context: dict[str, Any] | None = None
+    identity_reason: str | None = None
+    try:
+        resolved_context = resolve_context(
+            payload_root=payload_root,
+            plugin_id=plugin_id,
+            copilot_home=copilot_home,
+            project_root=project_root,
+            durable_home=resolved_durable_home,
+            context=context,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            expected_payload_root=expected_payload_root,
+            expected_cell_root=expected_cell_root,
+            source_descriptor=source_descriptor,
+            marketplace_key=marketplace_key,
+            environment=environment,
+        )
+        trusted_plugin_id = str(resolved_context["pluginId"])
+    except InstallationContextError:
+        identity_reason = (
+            "context-invalid"
+            if context or environment.get("COPILOT_EXTENSIONS_CONTEXT")
+            else "provenance-blocked"
+        )
+
+    marketplace_id = (
+        str(resolved_context["marketplaceId"]) if resolved_context is not None else None
+    )
+    plugin_root = (
+        canonical_path(resolved_context["pluginRoot"])
+        if resolved_context is not None
+        else None
+    )
+    canonical_policy_entry = (
+        profile / ".copilot-extensions" / "installation-mode.json"
+    )
+    canonical_policy = canonical_path(canonical_policy_entry)
+    if policy_path is not None:
+        policy_value = Path(policy_path)
+        if not policy_value.is_absolute():
+            _fail("policy_path must be absolute.")
+        policy_entry_present = os.path.lexists(policy_value)
+        policy_entry_is_file = policy_value.is_file() and not policy_value.is_symlink()
+        selected_policy = canonical_path(policy_value)
+        policy_authoritative = False
+    else:
+        policy_entry_present = os.path.lexists(canonical_policy_entry)
+        policy_entry_is_file = (
+            canonical_policy_entry.is_file()
+            and not canonical_policy_entry.is_symlink()
+        )
+        selected_policy = canonical_policy
+        policy_authoritative = True
+    policy, policy_enabled = _policy_result(
+        selected_policy,
+        authoritative=policy_authoritative,
+        marketplace_id=marketplace_id,
+        plugin_id=trusted_plugin_id,
+        entry_present=policy_entry_present,
+        entry_is_file=policy_entry_is_file,
+    )
+
+    activation = (
+        _activation_result(
+            plugin_root=plugin_root,
+            durable_home=resolved_durable_home,
+            marketplace_id=marketplace_id,
+            plugin_id=trusted_plugin_id,
+            current_environment=current_environment,
+            legacy_root=resolved_legacy_root,
+        )
+        if plugin_root is not None
+        and marketplace_id is not None
+        and trusted_plugin_id is not None
+        else {
+            "state": "missing",
+            "path": None,
+            "actualMode": None,
+            "runtimeRoot": None,
+            "context": None,
+            "activationGeneration": None,
+            "installGeneration": None,
+            "reason": None,
+        }
+    )
+    legacy = _tombstone_result(
+        legacy_root=resolved_legacy_root,
+        durable_home=resolved_durable_home,
+        plugin_id=trusted_plugin_id,
+        current_marketplace_id=marketplace_id,
+        current_environment=current_environment,
+    )
+    legacy["probe"] = probe
+    maintenance = _maintenance_result(
+        profile=profile,
+        plugin_root=plugin_root,
+        current_time=now,
+        host=current_host,
+        pid_is_live=liveness,
+    )
+
+    desired_mode: str | None
+    if marketplace_id is None or policy_enabled is None:
+        desired_mode = None
+    else:
+        desired_mode = "namespaced" if policy_enabled else "legacy"
+    actual_mode = activation["actualMode"]
+    runtime_root = activation["runtimeRoot"]
+    if (
+        marketplace_id is not None
+        and activation["state"] == "missing"
+        and actual_mode is None
+    ):
+        actual_mode = "legacy"
+        runtime_root = str(resolved_legacy_root)
+    if (
+        not policy_authoritative
+        and activation["state"] in {"valid", "revalidation"}
+        and activation["actualMode"] == "namespaced"
+    ):
+        desired_mode = "namespaced"
+
+    invalid_reason: str | None = None
+    if policy["state"] in {"invalid", "unsupported"}:
+        invalid_reason = str(policy["reason"])
+    elif identity_reason == "context-invalid":
+        invalid_reason = identity_reason
+    elif activation["state"] == "invalid":
+        invalid_reason = str(activation["reason"])
+
+    status = "ready"
+    reason = str(policy["reason"])
+    if invalid_reason is not None:
+        status = "invalid"
+        reason = invalid_reason
+    elif maintenance["state"] in {"active", "stale", "unknown"}:
+        status = "maintenance-blocked"
+        reason = f"maintenance-{maintenance['state']}"
+    elif activation["state"] == "foreign" or legacy["status"] == "foreign-environment":
+        status = "foreign-environment"
+        reason = "foreign-environment"
+    elif legacy["status"] == "orphaned-transfer":
+        status = "orphaned-transfer"
+        reason = "orphaned-transfer"
+    elif activation["state"] == "revalidation":
+        status = "revalidation-required"
+        reason = "revalidation-required"
+    elif identity_reason == "provenance-blocked":
+        status = "provenance-blocked"
+        reason = "provenance-blocked"
+        desired_mode = None
+        actual_mode = None
+        runtime_root = None
+    elif desired_mode == "legacy" and actual_mode == "namespaced":
+        status = "deactivation-required"
+        reason = "deactivation-required"
+    elif desired_mode == "namespaced" and actual_mode == "legacy":
+        if (
+            activation["state"] == "missing"
+            and probe["declared"]
+            and probe["result"] == "absent"
+        ):
+            reason = "activation-required"
+        else:
+            status = "migration-required"
+            reason = "migration-required"
+    elif actual_mode == "namespaced":
+        reason = "namespaced-active"
+
+    return {
+        "schema": RESOLUTION_SCHEMA,
+        "version": 1,
+        "marketplaceId": marketplace_id,
+        "pluginId": trusted_plugin_id,
+        "environment": current_environment,
+        "desiredMode": desired_mode,
+        "actualMode": actual_mode,
+        "status": status,
+        "maintenance": maintenance,
+        "runtimeRoot": runtime_root,
+        "context": activation["context"],
+        "activation": activation["path"],
+        "activationGeneration": activation["activationGeneration"],
+        "installGeneration": activation["installGeneration"],
+        "reason": reason,
+        "policy": policy,
+        "legacy": {
+            "root": legacy["root"],
+            "probe": probe,
+            "tombstone": legacy["tombstone"],
+            "disposition": legacy["disposition"],
+            "ownerMarketplaceId": legacy["ownerMarketplaceId"],
+        },
+    }
+
+
+def probe_legacy_entrypoint(**arguments: Any) -> dict[str, Any]:
+    """Resolve installation mode and decide whether legacy mutation is allowed."""
+
+    result = resolve_installation_mode(**arguments)
+    allow_mutation = False
+    probe_reason = str(result["reason"])
+    legacy = result["legacy"]
+    if result["status"] == "migration-required":
+        allow_mutation = legacy["tombstone"] is None
+        probe_reason = (
+            "migration-required"
+            if allow_mutation
+            else "legacy-owned-by-other-cell"
+        )
+    elif result["status"] == "ready" and result["actualMode"] == "legacy":
+        if legacy["tombstone"] is not None:
+            probe_reason = "legacy-owned-by-other-cell"
+        elif result["desiredMode"] == "namespaced":
+            probe_reason = "namespaced-requested"
+        else:
+            allow_mutation = True
+            probe_reason = "legacy-active"
+    elif result["actualMode"] == "namespaced":
+        probe_reason = "namespaced-active"
+    decision = dict(result)
+    decision["allowMutation"] = allow_mutation
+    decision["probeReason"] = probe_reason
+    return decision
+
+
 def _source_descriptor(arguments: argparse.Namespace) -> Mapping[str, Any] | None:
     if arguments.source_json and arguments.source_file:
         _fail("Specify only one of --source-json and --source-file.")
@@ -1524,10 +2489,52 @@ def _source_descriptor(arguments: argparse.Namespace) -> Mapping[str, Any] | Non
     return value
 
 
+def _legacy_probe_argument(arguments: argparse.Namespace) -> Mapping[str, Any] | None:
+    if arguments.legacy_probe_json and arguments.legacy_probe_file:
+        _fail("Specify only one of --legacy-probe-json and --legacy-probe-file.")
+    if arguments.legacy_probe_file:
+        value = read_json(arguments.legacy_probe_file)
+    elif arguments.legacy_probe_json:
+        try:
+            value = json.loads(
+                arguments.legacy_probe_json,
+                object_pairs_hook=_reject_duplicate_keys,
+            )
+        except json.JSONDecodeError as error:
+            _fail(f"Invalid --legacy-probe-json: {error}")
+    else:
+        return None
+    if not isinstance(value, Mapping):
+        _fail("Legacy probe evidence must be a JSON object.")
+    return value
+
+
 def _add_common_paths(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--copilot-home")
     parser.add_argument("--durable-home")
     parser.add_argument("--project-root")
+
+
+def _add_resolution_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source-json")
+    parser.add_argument("--source-file")
+    parser.add_argument("--marketplace-key")
+    parser.add_argument("--plugin-id")
+    parser.add_argument("--payload-root")
+    parser.add_argument("--context")
+    parser.add_argument("--expected-marketplace-id")
+    parser.add_argument("--expected-plugin-id")
+    parser.add_argument("--expected-payload-root")
+    parser.add_argument("--expected-cell-root")
+    _add_common_paths(parser)
+
+
+def _add_mode_arguments(parser: argparse.ArgumentParser) -> None:
+    _add_resolution_arguments(parser)
+    parser.add_argument("--legacy-root", required=True)
+    parser.add_argument("--legacy-probe-json")
+    parser.add_argument("--legacy-probe-file")
+    parser.add_argument("--policy-path")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1540,17 +2547,7 @@ def _build_parser() -> argparse.ArgumentParser:
     source_parser.add_argument("--marketplace-key")
 
     resolve_parser = subparsers.add_parser("resolve")
-    resolve_parser.add_argument("--source-json")
-    resolve_parser.add_argument("--source-file")
-    resolve_parser.add_argument("--marketplace-key")
-    resolve_parser.add_argument("--plugin-id")
-    resolve_parser.add_argument("--payload-root")
-    resolve_parser.add_argument("--context")
-    resolve_parser.add_argument("--expected-marketplace-id")
-    resolve_parser.add_argument("--expected-plugin-id")
-    resolve_parser.add_argument("--expected-payload-root")
-    resolve_parser.add_argument("--expected-cell-root")
-    _add_common_paths(resolve_parser)
+    _add_resolution_arguments(resolve_parser)
 
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--context")
@@ -1595,6 +2592,12 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=("active", "inactive", "orphaned", "removing"),
     )
     _add_common_paths(stamp_parser)
+
+    status_parser = subparsers.add_parser("status")
+    _add_mode_arguments(status_parser)
+
+    probe_parser = subparsers.add_parser("probe-legacy")
+    _add_mode_arguments(probe_parser)
     return parser
 
 
@@ -1603,6 +2606,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     arguments = parser.parse_args(argv)
     try:
         descriptor = _source_descriptor(arguments) if hasattr(arguments, "source_json") else None
+        legacy_probe = (
+            _legacy_probe_argument(arguments)
+            if hasattr(arguments, "legacy_probe_json")
+            else None
+        )
         if arguments.action == "source-id":
             if descriptor is None:
                 _fail("source-id requires --source-json or --source-file.")
@@ -1639,7 +2647,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 source_descriptor=descriptor,
                 marketplace_key=arguments.marketplace_key,
             )
-        else:
+        elif arguments.action == "stamp":
             result = stamp_context(
                 payload_version=arguments.payload_version,
                 payload_origin=arguments.payload_origin,
@@ -1656,8 +2664,32 @@ def main(argv: Sequence[str] | None = None) -> int:
                 namespace_state=arguments.namespace_state,
                 install_state=arguments.install_state,
             )
+        else:
+            mode_arguments = {
+                "legacy_root": arguments.legacy_root,
+                "legacy_probe": legacy_probe,
+                "policy_path": arguments.policy_path,
+                "payload_root": arguments.payload_root,
+                "plugin_id": arguments.plugin_id,
+                "copilot_home": arguments.copilot_home,
+                "project_root": arguments.project_root,
+                "durable_home": arguments.durable_home,
+                "context": arguments.context,
+                "expected_marketplace_id": arguments.expected_marketplace_id,
+                "expected_plugin_id": arguments.expected_plugin_id,
+                "expected_payload_root": arguments.expected_payload_root,
+                "expected_cell_root": arguments.expected_cell_root,
+                "source_descriptor": descriptor,
+                "marketplace_key": arguments.marketplace_key,
+            }
+            if arguments.action == "status":
+                result = resolve_installation_mode(**mode_arguments)
+            else:
+                result = probe_legacy_entrypoint(**mode_arguments)
         json.dump(result, sys.stdout, ensure_ascii=False, separators=(",", ":"))
         sys.stdout.write("\n")
+        if arguments.action == "probe-legacy" and not result["allowMutation"]:
+            return 3
         return 0
     except InstallationContextError as error:
         print(f"installation-context: {error}", file=sys.stderr)

@@ -273,16 +273,45 @@ uninstall, and cleanup caller consumes this result shape:
   "activation": null,
   "activationGeneration": null,
   "installGeneration": null,
-  "reason": "policy-default-false"
+  "reason": "policy-default-false",
+  "policy": {
+    "path": "<absolute-policy-path>",
+    "authoritative": true,
+    "state": "missing",
+    "scope": "default",
+    "enabled": false,
+    "reason": "policy-default-false"
+  },
+  "legacy": {
+    "root": "<absolute-legacy-root>",
+    "probe": {
+      "declared": false,
+      "result": "unknown",
+      "checkedAt": null
+    },
+    "tombstone": null,
+    "disposition": "active",
+    "ownerMarketplaceId": null
+  }
 }
 ```
 
-All fields are present. `desiredMode`, `actualMode`, and `runtimeRoot` may be
-`null` only when no safe value can be established. Paths are absolute canonical
-paths. `reason` is a stable machine-readable code and distinguishes, among
-other cases, explicit false from implicit/default false.
+All fields are present. For `provenance-blocked`, `marketplaceId`, `context`,
+`activation`, `desiredMode`, `actualMode`, and `runtimeRoot` may be `null` when
+no safe value can be established. An explicitly supplied or payload-derived
+plugin id remains in `pluginId` when its exact filesystem-safe identity is
+trustworthy even though marketplace provenance is not. Paths are absolute
+canonical paths. `reason` is a stable machine-readable code and distinguishes,
+among other cases, explicit false from implicit/default false.
 `maintenance.state` is `inactive`, `active`, `stale`, or `unknown`;
 `maintenance.scope` is `none`, `user`, or `plugin`.
+
+`policy.path` is the selected absolute path. `policy.authoritative` is true only
+for the canonical operating-system-profile path; an explicitly injected path is
+reported as non-authoritative even when it has the same spelling. `policy.state`
+is `missing`, `valid`, `invalid`, or `unsupported`; `scope` is `default`,
+`global`, `marketplace`, or `plugin`. `legacy.disposition` is `active`,
+`owned-by-current-cell`, `owned-by-other-cell`, or `orphaned-transfer`.
 
 When more than one condition applies, status precedence is:
 
@@ -300,15 +329,55 @@ Callers authorize behavior by status and reason rather than reinterpreting
 evidence. Long-lived callers pin activation and install generations and
 revalidate them at each iteration boundary and immediately before mutation.
 
+Syntactically valid `status` and `probe-legacy` invocations return a complete
+resolution object and exit normally even when expected on-disk evidence is
+corrupt. Malformed policy or activation is `invalid`; an exact environment
+mismatch is `foreign-environment`; an invalid legacy ownership chain is
+`orphaned-transfer`; changed pinned generations are `revalidation-required`;
+and unresolved source identity is `provenance-blocked`. Exit 1 is reserved for
+malformed invocation arguments, including invalid invocation-supplied JSON, or
+for a failure so early that even the diagnostic environment/result cannot be
+constructed.
+
+#### Stable resolver reasons
+
+The following reason codes are stable for version 1:
+
+| Reason | Meaning |
+|---|---|
+| `policy-default-false` | No explicit winning policy value exists. |
+| `policy-global-false`, `policy-global-true` | The exact global boolean wins. |
+| `policy-marketplace-false`, `policy-marketplace-true` | The exact source-derived marketplace override wins. |
+| `policy-plugin-false`, `policy-plugin-true` | The exact plugin override wins. |
+| `policy-invalid` | Supported-version policy has malformed known fields, schema, identity, or JSON. |
+| `policy-version-unsupported` | Policy uses a higher unsupported version. |
+| `policy-injected-non-authoritative` | An injected policy was evaluated for diagnostics but cannot authorize activation. |
+| `activation-required` | Authoritative policy requests namespaced mode, no activation exists, and a declared probe proves the legacy footprint absent. |
+| `namespaced-active` | A valid active namespaced activation pins the actual runtime. |
+| `migration-required` | Namespaced mode is desired while legacy remains authoritative and its absence is not proven. |
+| `deactivation-required` | Legacy mode is desired while a valid active namespaced activation remains authoritative. |
+| `provenance-blocked` | Marketplace provenance cannot be established safely. |
+| `foreign-environment` | Receipt environment differs from the exact current platform/profile/WSL tuple. |
+| `orphaned-transfer` | A legacy tombstone cannot validate its active destination ownership chain. |
+| `revalidation-required` | A pinned namespace, install, or activation generation is no longer current. |
+| `maintenance-active` | A marker has a valid, live, unexpired same-host owner. |
+| `maintenance-stale` | A marker exists but its sidecar is missing, malformed, foreign-host, dead-owner, not-yet-active, or expired. |
+| `legacy-owned-by-other-cell` | The legacy footprint has a valid ownership tombstone and cannot be mutated by this probe. |
+| `legacy-active` | Legacy is the authoritative ready runtime and mutation is permitted. |
+| `namespaced-requested` | A clean namespaced request must be activated explicitly; the legacy probe refuses mutation. |
+
+Implementations may add a more specific stable invalid-evidence reason, such as
+`activation-invalid` or `context-invalid`, without changing status precedence.
+
 #### Effective-mode and status table
 
 | Policy/evidence | Activation and legacy state | Effective result |
 |---|---|---|
 | File or `enabled` absent | No namespaced activation | desired/actual `legacy`, `ready`, reason `policy-default-false` |
 | Winning value explicitly `false` | No namespaced activation | desired/actual `legacy`, `ready`, reason identifies the explicit global/marketplace/plugin false |
-| Winning value `true` | No legacy footprint | create the cell under the activation transaction; then namespaced `ready` |
-| Winning value `true` | Unattributed legacy footprint, or undeclared/incomplete probe | legacy root remains actual; `migration-required`; no parallel cell runtime |
-| Winning value `true` | Legacy footprint has a valid tombstone for another cell | the distinct cell may activate namespaced; it does not claim or mutate that legacy footprint |
+| Winning value `true` | No activation and a declared probe reports `absent` | desired `namespaced`, actual `legacy`, legacy root diagnostic-only; `ready`, reason `activation-required`. `probe-legacy` refuses mutation with `namespaced-requested`; only the explicit activation transaction may publish namespaced ownership. |
+| Winning value `true` | No activation and the probe is present, unknown, or undeclared/incomplete | desired `namespaced`, actual `legacy`; `migration-required`. Legacy mutation remains allowed until the explicit two-lock migration publishes the matching tombstone and activation. |
+| Winning value `true` | Legacy footprint has a valid tombstone for another cell | the distinct cell does not claim or mutate that legacy footprint. With its own declared `absent` probe it may report `activation-required`; the valid tombstone still makes `probe-legacy` refuse mutation. |
 | Winning value `true` | Valid active namespaced activation for this cell | desired/actual `namespaced`, `ready` |
 | Winning value becomes false or disappears | Valid active namespaced activation | actual stays `namespaced`; `deactivation-required` until explicit rollback |
 | Any | Tombstone exists but its activation is missing, unreadable, mismatched, or foreign | `orphaned-transfer`; no legacy or namespaced mutation and never resume legacy |
@@ -342,6 +411,24 @@ legacy installer and bootstrap entrypoint for that plugin must call the shared,
 dependency-light activation probe before mutation. The probe refuses mutation
 on `namespaced-active`, `orphaned-transfer`, or applicable maintenance. This is
 a rollout gate, not optional compatibility hardening.
+
+The primitive exposes two read-only actions:
+
+- `status` emits the resolution object and exits 0 for every constructed
+  diagnostic result, including blocked and invalid statuses.
+- `probe-legacy` emits the same object plus `allowMutation` and `probeReason`.
+  It exits 0 only when legacy mutation is allowed, 3 for a deterministic
+  governance refusal, and 1 only for malformed invocation or an unconstructable
+  diagnostic result.
+
+`probe-legacy` refuses valid namespaced activation, every valid legacy
+tombstone, clean namespaced pre-activation, maintenance, invalid or foreign
+evidence, orphaned transfer, generation revalidation, unresolved provenance,
+deactivation-required state, and any other unsafe state. It permits a ready
+authoritative legacy runtime and `migration-required`, because legacy remains
+authoritative until the explicit two-lock migration transaction publishes
+activation and tombstone ownership. Neither action creates, modifies, or clears
+any file or directory.
 
 #### Maintenance contract
 
