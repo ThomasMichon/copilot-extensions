@@ -158,8 +158,9 @@ such as `issue:owner/repo#42:reopen:<event-id>`.
 
 - The **`agent-dispatch`** skill — the full CLI, the eight-state lifecycle, worker
   identity, capability/affinity routing, and selector (`--require`/`--exclude`)
-  matching. Its **"Which coordination system?"** matrix disambiguates
-  native sub-agent vs. agent-bridge vs. agent-dispatch when you're unsure which
-  tool a task wants.
+  matching. Its responsibility boundary distinguishes durable task-loop state
+  from live agent-bridge conversation. For generic task decomposition and the
+  decision to delegate at all, use
+  **`delegation-guidance:delegating-work`**.
 - `<agent-dispatch catalog argv[0]> create --help` — the `--claim`, `--dedup-key`, `--require`, and
   `--exclude` flags.

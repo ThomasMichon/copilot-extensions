@@ -50,16 +50,16 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | Plugin | Type | What it gives you |
 |--------|------|-------------------|
 | [agent-worktrees](plugins/agent-worktrees/) | Session tool | Each Copilot CLI session runs in its own git worktree — no branch conflicts, no stale state. Install this first. |
-| [agent-bridge](plugins/agent-bridge/) | Persistent service | Send prompts to agents on other machines (or other worktrees) over an always-on local service + SSH mesh. |
+| [agent-bridge](plugins/agent-bridge/) | Persistent service | Converse with and steer live agents across worktree, repository, machine, CodeSpace, and container boundaries. |
 | [agent-codespaces](plugins/agent-codespaces/) | CLI + relay | Create/manage GitHub Codespaces, address them as bridge agents (`codespace:<name>`), and forward git/GitHub/Azure credentials into them. |
 | [agent-containers](plugins/agent-containers/) | CLI + resolver | Manage a fleet of local Docker dev containers, borrow/release them per effort, and address them as bridge agents (`container:<name>`). |
-| [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP and inject host credentials (Entra/`az`, `gh`, git-credential, env). Dual-era: speaks modern MCP 2.x (`2026-07-28`) and the legacy handshake. Standalone — used directly from an agent's `mcp-servers` config. |
+| [agent-mcp](plugins/agent-mcp/) | MCP bridge | Wrap an upstream MCP server (HTTP or stdio), inject host credentials, reshape its catalog, and materialize a bridge-equivalent fallback. Agent authoring policy remains in `customizing-copilot`. |
 | [agent-ssh](plugins/agent-ssh/) | SSH connectivity CLI | Emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for direct or tunnel transports. |
 | [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
 | [visions](plugins/visions/) | Planning skills | Keep a persistent **vision** — a north-star statement of what a system should ultimately be — and derive efforts from the delta between vision and reality. Payload-only — no runtime to install. |
 | [agent-logger](plugins/agent-logger/) | Session logging | Turn raw Copilot sessions into structured Markdown logs — a segmenter, a voice-neutral log-writer agent, and a `session-sync` step that pushes session data to a configurable target (local / OneDrive / SSH / ingest). Personality is injected by the host, never built in. |
 | [context-handoff](plugins/context-handoff/) | Extension + skill | Watch the context window via a session extension and, before it fills, compose a continuation prompt so a fresh session can resume the work. Payload-only — no runtime to install. |
-| [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Coordinate multiple agents through a single-writer leased task queue (atomic claim, capability routing, lease recovery) instead of racing through `origin/master` pushes. Per-host coordinator, CLI, and MCP tools. |
+| [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Manage durable queued task loops with deduplication, atomic claims, routing, retries, supervision, and terminal task state. |
 | [agent-index](plugins/agent-index/) | Index/search service | Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem. Phase 1 ships the service shell; indexing and retrieval arrive in later slices. |
 | [agent-machines](plugins/agent-machines/) | Machine-state reconciler | Portable restore-machinestate — converge a machine to desired state declared in in-repo requirement packages (Copilot settings first). Machine-scoped union restore, a seven-disposition model, and a detect-not-arbitrate conflict validator. The engine is generic; sensitive OS-mutating modules stay repo-local. |
 | [agent-vault](plugins/agent-vault/) | CLI + service | Local KeePassXC-backed secret store — a machine-local service caches the master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and credentials on demand without hardcoding, committing, or env-exporting them. Ships a SUDO_ASKPASS helper for `sudo -A`. |
@@ -407,7 +407,7 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | Description |
 |----------|-------------|
-| [README](plugins/agent-bridge/README.md) | Plugin overview |
+| [README](plugins/agent-bridge/README.md) | Live cross-boundary agent communication and session transport |
 | [Getting Started](plugins/agent-bridge/docs/getting-started.md) | Install, configure, start the service |
 | [Architecture](plugins/agent-bridge/docs/architecture.md) | Service design, API reference, deployment |
 | [Machine Configuration](plugins/agent-bridge/docs/machine-config.md) | Topology — `machines.yaml`, `acp-agents.json` |
@@ -431,8 +431,8 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | Description |
 |----------|-------------|
-| [README](plugins/agent-mcp/README.md) | Plugin overview, bridge config format, auth kinds, CLI |
-| [agent-mcp](plugins/agent-mcp/skills/agent-mcp/SKILL.md) | Defining a bridge, wiring it into an agent's `mcp-servers` |
+| [README](plugins/agent-mcp/README.md) | MCP transport boundary, bridge config, auth kinds, materialization, CLI |
+| [agent-mcp](plugins/agent-mcp/skills/agent-mcp/SKILL.md) | Defining a bridge and wiring it into an existing agent's `mcp-servers` |
 
 ### Efforts
 
@@ -485,7 +485,7 @@ Your source repos and their `.worktrees` content are never touched.
 
 | Document | Description |
 |----------|-------------|
-| [README](plugins/agent-dispatch/README.md) | Plugin overview, the leased queue engine, coordinator, CLI, MCP tools |
+| [README](plugins/agent-dispatch/README.md) | Durable task-loop boundary, queue engine, coordinator, CLI, MCP tools |
 
 ### Agent Vault
 

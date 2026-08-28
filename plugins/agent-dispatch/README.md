@@ -6,6 +6,13 @@ producers) coordinate work through a single, low-latency authority -- instead of
 racing each other through `origin/master` pushes or needing a dedicated user
 account per agent.
 
+agent-dispatch owns the **durable task loop**: queued intent, deduplication,
+atomic claims, routing, retries, supervision, and terminal task state. It does
+not own generic process/service lifecycle management, live conversational
+control of an agent, or the decision to delegate a bounded subtask. Use
+agent-bridge for live cross-boundary conversation and steering, and
+`delegation-guidance:delegating-work` for runtime task decomposition.
+
 > **Status: installable runtime.** This ships the queue **engine**
 > (`agent_dispatch.queue`), the per-host **coordinator daemon**
 > (`agent-dispatch serve`), the **`agent-dispatch` CLI**, **local MCP tools**

@@ -2,12 +2,13 @@
 name: agent-mcp
 description: >-
   Bridge an upstream MCP server (HTTP or stdio) as a local stdio MCP server and
-  inject host credentials, and set up repo-scoped Copilot sub-agents backed by
-  it. Use when asked to "wrap an MCP", "bridge an MCP", "add auth to an MCP
+  inject host credentials, then wire an existing Copilot agent to that bridge.
+  Use when asked to "wrap an MCP", "bridge an MCP", "add auth to an MCP
   server", "proxy an MCP", "use an MCP that needs az/gh login", "set up a
-  sub-agent for <service>", "reliable MCP agent", "materialized fallback",
-  "troubleshoot an agent-mcp bridge", or to expose a remote/authenticated MCP to
-  Copilot.
+  bridge for <service>", "wire an agent to agent-mcp", "materialized fallback",
+  "troubleshoot an agent-mcp bridge", or to expose a remote/authenticated MCP
+  to Copilot. For creating or reviewing the agent definition itself, use
+  `customizing-copilot:defining-subagents`.
 ---
 
 # agent-mcp
@@ -38,6 +39,15 @@ entry; there is no agent-bridge integration, repo resolver, or required daemon.
 It replaces single-purpose, hardcoded MCP wrapper scripts with a config-driven,
 multi-transport, multi-auth bridge.
 
+## Responsibility boundary
+
+This skill owns bridge transport, authentication, filtering, catalog
+reshaping, materialization, and bridge-equivalent fallback. The normative
+custom-agent contract -- whether a domain MCP belongs in a sub-agent, bounded
+execution, top-level tools, `## MCP Readiness`, and anti-self-delegation -- is
+owned by **`customizing-copilot:defining-subagents`**. Runtime task decomposition
+is owned by **`delegation-guidance:delegating-work`**.
+
 ## When to use
 
 - An MCP server requires an OAuth/broker login flow (Entra/`az`, `gh`) that
@@ -47,8 +57,8 @@ multi-transport, multi-auth bridge.
 - You want to **reshape a large or partner MCP**: shrink a 100+ tool catalog
   behind a tool-finder, namespace/rename tools, expose a typed `run_code` tool,
   or relay big payloads through a stream buffer — see [Decorator stack](#decorator-stack).
-- You want a **repo-scoped sub-agent** (e.g. `@ado-data`) whose MCP tools come
-  from an authenticated upstream -- see the setup flow below.
+- You want to wire an existing repo-scoped agent (e.g. `@ado-data`) to MCP
+  tools from an authenticated upstream -- see the setup flow below.
 
 ## Config location -- in-repo vs. user-global
 
@@ -71,10 +81,13 @@ A bridge config can be referenced two ways:
 > **`customizing-bridges`** skill: it writes a deep-merged overlay at
 > `~/.agent-mcp/overrides/<id>.yaml`.
 
-## Set up a repo-scoped sub-agent (the common case)
+## Wire an existing repo-scoped agent (the common case)
 
-This is the end-to-end flow for giving a Copilot sub-agent authenticated MCP
-tools -- e.g. an `@ado-data` agent backed by the Azure DevOps MCP.
+First author the agent with
+**`customizing-copilot:defining-subagents`**. This section covers only the
+agent-mcp-specific bridge and fallback wiring for giving that agent
+authenticated MCP tools -- e.g. an `@ado-data` agent backed by the Azure DevOps
+MCP.
 
 **1. Write the bridge config in the repo**, next to the agent
 (`.github/agents/<name>.mcp.yaml`). It holds the upstream `server` launch info
@@ -112,21 +125,17 @@ Validate before wiring:
 > (`bunx` → `npx -y`). `npm` mode stays package-manager-neutral (always works via
 > `npx`; uses `bunx` only where present). See the plugin README for details.
 
-**2. Point the sub-agent at it** in `.github/agents/<name>.agent.md`
-front-matter. The MCP server is `agent-mcp` running the bridge over stdio:
+**2. Point the existing agent at it** in the `mcp-servers` field that
+`customizing-copilot:defining-subagents` owns. The transport stanza is
+`agent-mcp` running the bridge over stdio:
 
 ```yaml
----
-name: ado-data
-description: "Azure DevOps data access ... Use when ADO information is needed."
-tools: ["*"]
 mcp-servers:
   ado-remote-mcp:
     type: stdio
     command: agent-mcp              # marketplace-isolation: allow mcp-server-startup
     args: ['bridge', '--config', '.github/agents/ado.mcp.yaml']
     tools: ['*']
----
 ```
 
 The `--config` path is resolved relative to the process cwd, which is the repo
@@ -144,19 +153,19 @@ plugin-root-capable MCP launcher contract.
 tool (e.g. fetch a repo). A clean way to prove the bridge -- not a stale runtime
 -- is in use is to exercise a real query and confirm a live result.
 
-**4. Add the equivalent CLI fallback.** Every reliable agent-mcp-backed
-sub-agent should name a materialized fleet over the same bridge config, probe a
-read-only stub after catalog failure, preserve identity and top-level `tools:`
-filtering, and stop only after both surfaces fail. Decorator-only restrictions
-are not applied by the CLI path, and frontmatter-only env is not inherited.
-Use an existing fleet first; re-materialize when the expected stub is absent or
+**4. Add the equivalent CLI fallback mechanics.** In the readiness section
+owned by `customizing-copilot:defining-subagents`, name a materialized fleet
+over the same bridge config, probe a read-only stub after catalog failure,
+preserve identity and top-level `tools:` filtering, and stop only after both
+surfaces fail. Decorator-only restrictions are not applied by the CLI path, and
+frontmatter-only env is not inherited. Use an existing fleet first;
+re-materialize when the expected stub is absent or
 `manifest.json.generated_by` differs from
 `<agent-mcp catalog argv[0]> --version` (config drift needs a deploy-owned
-digest). Use `--no-serve` for identity-sensitive fallback calls. The complete
-reusable agent
-template, Windows/POSIX commands, failure matrix, warmth guidance, and drift
-contract live in
-[Reliable MCP-backed sub-agent](references/reliable-agent.md).
+digest). Use `--no-serve` for identity-sensitive fallback calls. The
+agent-mcp-specific platform commands, failure matrix, warmth guidance, and
+drift contract live in
+[Reliable agent-mcp transport and fallback](references/reliable-agent.md).
 
 > **`command: agent-mcp` is cross-platform.** The Windows binstub is a single
 > `.cmd` (no competing `.ps1`), so a bare `agent-mcp` resolves to it under
@@ -427,7 +436,7 @@ captured by bridge auth + top-level `tools:`; decorator stacks are not applied
 on the one-shot CLI path. Preserve the primary error, verify identity/capability
 through a read-only stub, and report both errors if the upstream also fails.
 See
-[Reliable MCP-backed sub-agent](references/reliable-agent.md).
+[Reliable agent-mcp transport and fallback](references/reliable-agent.md).
 
 ## CLI -> MCP: the `cli` server type
 
