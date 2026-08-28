@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import ipaddress
 import json
@@ -35,6 +36,8 @@ TOMBSTONE_SCHEMA = "copilot-extensions.legacy-installation-ownership"
 RESOLUTION_SCHEMA = "copilot-extensions.installation-resolution"
 SNAPSHOT_PROVENANCE_SCHEMA = "copilot-extensions.snapshot-provenance"
 SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
+RUNTIME_SLOT_OWNERSHIP_SCHEMA = "copilot-extensions.runtime-slot-ownership"
+RUNTIME_SLOT_OWNERSHIP_FILE = ".runtime-slot-ownership.json"
 RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
@@ -142,6 +145,71 @@ def path_is_within(child: str | os.PathLike[str], parent: str | os.PathLike[str]
         )
     except ValueError:
         return False
+
+
+def _rename_directory_no_replace(source: Path, destination: Path) -> None:
+    if os.name == "nt":
+        try:
+            os.rename(source, destination)
+        except OSError as error:
+            if destination.exists() or _is_link_or_junction(destination):
+                _fail("Runtime slot appeared during publication; refusing replacement.")
+            _fail(f"Cannot publish runtime slot '{destination}': {error}")
+        return
+
+    import ctypes
+
+    source_bytes = os.fsencode(source)
+    destination_bytes = os.fsencode(destination)
+    library = ctypes.CDLL(None, use_errno=True)
+    if sys.platform.startswith("linux"):
+        rename_no_replace = getattr(library, "renameat2", None)
+        if rename_no_replace is None:
+            _fail("Atomic no-replace directory publication is unavailable.")
+        rename_no_replace.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename_no_replace.restype = ctypes.c_int
+        result = rename_no_replace(
+            -100,
+            source_bytes,
+            -100,
+            destination_bytes,
+            1,
+        )
+    elif sys.platform == "darwin":
+        rename_no_replace = getattr(library, "renamex_np", None)
+        if rename_no_replace is None:
+            _fail("Atomic no-replace directory publication is unavailable.")
+        rename_no_replace.argtypes = (
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename_no_replace.restype = ctypes.c_int
+        result = rename_no_replace(source_bytes, destination_bytes, 0x00000004)
+    else:
+        _fail("Atomic no-replace directory publication is unavailable.")
+    if result == 0:
+        return
+    error_number = ctypes.get_errno()
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        _fail("Runtime slot appeared during publication; refusing replacement.")
+    if error_number in {
+        errno.EINVAL,
+        errno.ENOSYS,
+        errno.ENOTSUP,
+        getattr(errno, "EOPNOTSUPP", errno.ENOTSUP),
+    }:
+        _fail("Atomic no-replace directory publication is unavailable.")
+    _fail(
+        f"Cannot publish runtime slot '{destination}': "
+        f"{os.strerror(error_number)}"
+    )
 
 
 def read_json(path: str | os.PathLike[str]) -> Any:
@@ -933,6 +1001,23 @@ def _assert_snapshot_id(value: str) -> None:
         _fail(f"Invalid filesystem-safe snapshot id '{value}'.")
 
 
+def _assert_runtime_version(value: str) -> None:
+    if len(value) > 128:
+        _fail("Runtime version exceeds the portable 128-character limit.")
+    if not re.fullmatch(
+        r"[A-Za-z0-9](?:[A-Za-z0-9._+-]*[A-Za-z0-9])?",
+        value,
+    ) or value in {".", ".."}:
+        _fail(f"Invalid filesystem-safe runtime version '{value}'.")
+    basename = value.split(".", 1)[0].upper()
+    if (
+        basename in {"CON", "PRN", "AUX", "NUL"}
+        or re.fullmatch(r"COM[1-9]", basename)
+        or re.fullmatch(r"LPT[1-9]", basename)
+    ):
+        _fail(f"Invalid filesystem-safe runtime version '{value}'.")
+
+
 def _resolve_relative_root(plugin_root: Path, relative: str, name: str) -> Path:
     if not relative.strip() or Path(relative).is_absolute():
         _fail(f"roots.{name} must be a non-empty relative path.")
@@ -1504,12 +1589,13 @@ def _payload_identity_from_install(
     }
 
 
-def validate_snapshot_provenance(
+def _validate_snapshot_provenance(
     *,
     context: str | os.PathLike[str],
     expected_marketplace_id: str,
     expected_plugin_id: str,
     snapshot_id: str,
+    require_current_receipts: bool,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -1633,21 +1719,29 @@ def validate_snapshot_provenance(
         install_generation,
         "snapshot provenance install generation",
     )
-    if namespace_generation != _property(validated, "namespaceGeneration"):
-        _fail(
-            "Snapshot provenance namespace generation is stale; "
-            "restart snapshot production."
-        )
-    if install_generation != _property(validated, "generation"):
-        _fail(
-            "Snapshot provenance install generation is stale; "
-            "restart snapshot production."
-        )
+    current_namespace_generation = _property(validated, "namespaceGeneration")
+    current_install_generation = _property(validated, "generation")
+    if require_current_receipts:
+        if namespace_generation != current_namespace_generation:
+            _fail(
+                "Snapshot provenance namespace generation is stale; "
+                "restart snapshot production."
+            )
+        if install_generation != current_install_generation:
+            _fail(
+                "Snapshot provenance install generation is stale; "
+                "restart snapshot production."
+            )
+    elif (
+        current_namespace_generation < namespace_generation
+        or current_install_generation < install_generation
+    ):
+        _fail("Current receipt generation predates the owned runtime slot.")
 
     namespace = read_json(namespace_path)
     if not isinstance(namespace, Mapping):
         _fail("namespace.json must be a JSON object.")
-    if (
+    if require_current_receipts and (
         _string_property(namespace, "state") != "active"
         or _string_property(validated, "state") != "active"
     ):
@@ -1675,7 +1769,7 @@ def validate_snapshot_provenance(
             _fail("Snapshot provenance payload.originReceipt must be absolute.")
         recorded_payload["originReceipt"] = str(canonical_path(origin_receipt))
     current_payload = _payload_identity_from_install(validated["installReceipt"])
-    if recorded_payload != current_payload:
+    if require_current_receipts and recorded_payload != current_payload:
         _fail("Snapshot provenance payload does not match the pinned install receipt.")
     _parse_rfc3339_utc(
         _string_property(provenance, "createdAt"),
@@ -1695,9 +1789,31 @@ def validate_snapshot_provenance(
         "installReceipt": str(canonical_path(install_path)),
         "namespaceGeneration": namespace_generation,
         "installGeneration": install_generation,
-        "payload": current_payload,
+        "payload": current_payload if require_current_receipts else recorded_payload,
         "operative": False,
     }
+
+
+def validate_snapshot_provenance(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    snapshot_id: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Validate snapshot provenance against the current canonical receipts."""
+
+    return _validate_snapshot_provenance(
+        context=context,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        snapshot_id=snapshot_id,
+        durable_home=durable_home,
+        environment=environment,
+        require_current_receipts=True,
+    )
 
 
 def stamp_snapshot_provenance(
@@ -1858,6 +1974,427 @@ def stamp_snapshot_provenance(
             }
         )
         return published
+
+
+def _runtime_slot_paths(
+    validated: Mapping[str, Any],
+    runtime_version: str,
+    *,
+    require_existing: bool,
+) -> tuple[Path, Path, Path]:
+    _assert_runtime_version(runtime_version)
+    plugin_root = canonical_path(_string_property(validated, "pluginRoot"))
+    install = read_json(_string_property(validated, "installReceipt"))
+    roots = _property(install, "roots") if isinstance(install, Mapping) else None
+    if not isinstance(roots, Mapping):
+        _fail("install.json roots is missing.")
+    versions_relative = _string_property(roots, "versions")
+    lexical_versions_root = plugin_root / versions_relative
+    cursor = plugin_root
+    for part in Path(versions_relative).parts:
+        cursor /= part
+        if _is_link_or_junction(cursor):
+            _fail("Versions root may not traverse a symbolic link or reparse point.")
+        if cursor.exists() and not cursor.is_dir():
+            _fail("Versions root path components must be ordinary directories.")
+    if require_existing and not lexical_versions_root.is_dir():
+        _fail("Versions root must be an existing directory.")
+    resolved_versions_root = canonical_path(lexical_versions_root)
+    if not paths_equal(
+        resolved_versions_root,
+        _string_property(validated, "versionsRoot"),
+    ):
+        _fail("Versions root does not match the validated install receipt.")
+    if paths_equal(resolved_versions_root, plugin_root) or not path_is_within(
+        resolved_versions_root,
+        plugin_root,
+    ):
+        _fail("Versions root must remain beneath the canonical plugin root.")
+    lexical_slot_root = resolved_versions_root / runtime_version
+    if _is_link_or_junction(lexical_slot_root):
+        _fail("Runtime slot may not be a symbolic link or reparse point.")
+    if require_existing and not lexical_slot_root.is_dir():
+        _fail("Runtime slot must be an existing directory.")
+    slot_root = canonical_path(lexical_slot_root)
+    if not paths_equal(slot_root.parent, resolved_versions_root):
+        _fail("Runtime slot must be one direct child of versionsRoot.")
+    if os.path.normcase(slot_root.name) != os.path.normcase(runtime_version):
+        _fail("Runtime slot does not retain the requested runtime version.")
+    ownership_path = slot_root / RUNTIME_SLOT_OWNERSHIP_FILE
+    if _is_link_or_junction(ownership_path):
+        _fail("Runtime slot ownership may not be a symbolic link or reparse point.")
+    return resolved_versions_root, slot_root, ownership_path
+
+
+def _runtime_slot_ownership_value(
+    validated: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    runtime_version: str,
+    slot_root: Path,
+    *,
+    created_at: str,
+) -> dict[str, Any]:
+    return {
+        "schema": RUNTIME_SLOT_OWNERSHIP_SCHEMA,
+        "version": 1,
+        "marketplaceId": _string_property(validated, "marketplaceId"),
+        "pluginId": _string_property(validated, "pluginId"),
+        "sourceFingerprint": _string_property(validated, "sourceFingerprint"),
+        "runtime": {
+            "version": runtime_version,
+            "root": str(slot_root),
+        },
+        "snapshot": {
+            "id": _string_property(snapshot, "snapshotId"),
+            "root": _string_property(snapshot, "snapshotRoot"),
+            "provenance": _string_property(snapshot, "provenance"),
+        },
+        "namespaceReceipt": {
+            "path": _string_property(snapshot, "namespaceReceipt"),
+            "generation": _property(snapshot, "namespaceGeneration"),
+        },
+        "installReceipt": {
+            "path": _string_property(snapshot, "installReceipt"),
+            "generation": _property(snapshot, "installGeneration"),
+        },
+        "createdAt": created_at,
+    }
+
+
+def _validated_runtime_slot_ownership(
+    validated: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    runtime_version: str,
+) -> dict[str, Any]:
+    _, slot_root, ownership_path = _runtime_slot_paths(
+        validated,
+        runtime_version,
+        require_existing=True,
+    )
+    if not ownership_path.exists():
+        _fail("Runtime slot ownership must exist.")
+    actual_ownership = canonical_path(ownership_path, must_exist=True)
+    if not paths_equal(actual_ownership, ownership_path):
+        _fail(
+            "Runtime slot ownership is not at its exact canonical location "
+            f"'{ownership_path}'."
+        )
+    if not actual_ownership.is_file():
+        _fail("Runtime slot ownership must be an ordinary file.")
+    ownership = read_json(actual_ownership)
+    if not isinstance(ownership, Mapping):
+        _fail("Runtime slot ownership must be a JSON object.")
+    ownership_version = _property(ownership, "version")
+    if (
+        _string_property(ownership, "schema") != RUNTIME_SLOT_OWNERSHIP_SCHEMA
+        or isinstance(ownership_version, bool)
+        or not isinstance(ownership_version, int)
+        or ownership_version != 1
+    ):
+        _fail("Runtime slot ownership has an unsupported schema or version.")
+    created_at = _string_property(ownership, "createdAt")
+    _parse_rfc3339_utc(created_at, "runtime slot ownership createdAt")
+    expected = _runtime_slot_ownership_value(
+        validated,
+        snapshot,
+        runtime_version,
+        slot_root,
+        created_at=created_at,
+    )
+    runtime = _property(ownership, "runtime")
+    recorded_snapshot = _property(ownership, "snapshot")
+    namespace_reference = _property(ownership, "namespaceReceipt")
+    install_reference = _property(ownership, "installReceipt")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (
+            runtime,
+            recorded_snapshot,
+            namespace_reference,
+            install_reference,
+        )
+    ):
+        _fail("Runtime slot ownership identity objects are missing.")
+    path_fields = (
+        (runtime, expected["runtime"], "root", "runtime.root"),
+        (
+            recorded_snapshot,
+            expected["snapshot"],
+            "root",
+            "snapshot.root",
+        ),
+        (
+            recorded_snapshot,
+            expected["snapshot"],
+            "provenance",
+            "snapshot.provenance",
+        ),
+        (
+            namespace_reference,
+            expected["namespaceReceipt"],
+            "path",
+            "namespaceReceipt.path",
+        ),
+        (
+            install_reference,
+            expected["installReceipt"],
+            "path",
+            "installReceipt.path",
+        ),
+    )
+    for recorded, expected_container, key, label in path_fields:
+        recorded_path = _string_property(recorded, key)
+        if not _path_is_fully_qualified(recorded_path):
+            _fail(f"Runtime slot ownership {label} must be absolute.")
+        if not paths_equal(recorded_path, _string_property(expected_container, key)):
+            _fail(
+                "Runtime slot ownership does not match the validated snapshot "
+                "and installation receipts."
+            )
+        expected_container[key] = recorded_path
+    _assert_receipt_generation(
+        _property(namespace_reference, "generation"),
+        "runtime slot ownership namespace generation",
+    )
+    _assert_receipt_generation(
+        _property(install_reference, "generation"),
+        "runtime slot ownership install generation",
+    )
+    if dict(ownership) != expected:
+        _fail(
+            "Runtime slot ownership does not match the validated snapshot "
+            "and installation receipts."
+        )
+    namespace = read_json(_string_property(validated, "namespaceReceipt"))
+    if not isinstance(namespace, Mapping):
+        _fail("namespace.json must be a JSON object.")
+    return {
+        "action": "slot-validate",
+        "status": "ready",
+        "reason": "runtime-slot-ownership-valid",
+        "slotRoot": str(slot_root),
+        "runtimeVersion": runtime_version,
+        "ownership": str(actual_ownership),
+        "snapshotId": _string_property(snapshot, "snapshotId"),
+        "snapshotProvenance": _string_property(snapshot, "provenance"),
+        "marketplaceId": _string_property(validated, "marketplaceId"),
+        "pluginId": _string_property(validated, "pluginId"),
+        "sourceFingerprint": _string_property(validated, "sourceFingerprint"),
+        "namespaceReceipt": _string_property(snapshot, "namespaceReceipt"),
+        "installReceipt": _string_property(snapshot, "installReceipt"),
+        "namespaceGeneration": _property(snapshot, "namespaceGeneration"),
+        "installGeneration": _property(snapshot, "installGeneration"),
+        "namespaceState": _string_property(namespace, "state"),
+        "installState": _string_property(validated, "state"),
+        "slotEmpty": not any(
+            child.name != RUNTIME_SLOT_OWNERSHIP_FILE
+            for child in slot_root.iterdir()
+        ),
+        "activated": False,
+        "operative": False,
+    }
+
+
+def validate_runtime_slot_ownership(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    snapshot_id: str,
+    runtime_version: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Validate one cell-local runtime slot against snapshot and receipt identity."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    _assert_runtime_version(runtime_version)
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Runtime slot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    snapshot = _validate_snapshot_provenance(
+        context=context_path,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        snapshot_id=snapshot_id,
+        durable_home=durable,
+        environment={},
+        require_current_receipts=False,
+    )
+    return _validated_runtime_slot_ownership(
+        validated,
+        snapshot,
+        runtime_version,
+    )
+
+
+def provision_runtime_slot(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    snapshot_id: str,
+    runtime_version: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Create or validate an owned runtime slot without activating it."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    _assert_runtime_version(runtime_version)
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Runtime slot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    cell_root = canonical_path(_string_property(validated, "cellRoot"))
+    genesis_lock = _DirectoryLock(
+        durable
+        / "marketplaces"
+        / ".locks"
+        / f"{expected_marketplace_id}.genesis",
+        kind="genesis",
+        marketplace_id=expected_marketplace_id,
+    )
+    install_lock = _DirectoryLock(
+        cell_root / ".locks" / f"{expected_plugin_id}.install.lock",
+        kind="install",
+        marketplace_id=expected_marketplace_id,
+        plugin_id=expected_plugin_id,
+    )
+    with genesis_lock, install_lock:
+        validated = validate_context_receipt(
+            context_path,
+            durable,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            environment={},
+        )
+        versions_root, slot_root, _ = _runtime_slot_paths(
+            validated,
+            runtime_version,
+            require_existing=False,
+        )
+        if slot_root.exists():
+            snapshot = _validate_snapshot_provenance(
+                context=context_path,
+                expected_marketplace_id=expected_marketplace_id,
+                expected_plugin_id=expected_plugin_id,
+                snapshot_id=snapshot_id,
+                durable_home=durable,
+                environment={},
+                require_current_receipts=False,
+            )
+            result = _validated_runtime_slot_ownership(
+                validated,
+                snapshot,
+                runtime_version,
+            )
+            result["action"] = "slot-provision"
+            result["reason"] = "runtime-slot-ownership-current"
+            result["slotChanged"] = False
+            return result
+        snapshot = validate_snapshot_provenance(
+            context=context_path,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            snapshot_id=snapshot_id,
+            durable_home=durable,
+            environment={},
+        )
+        try:
+            versions_root.mkdir(parents=True, exist_ok=True)
+        except OSError as error:
+            _fail(f"Cannot create versions root '{versions_root}': {error}")
+        verified_versions_root, slot_root, _ = _runtime_slot_paths(
+            validated,
+            runtime_version,
+            require_existing=False,
+        )
+        if not paths_equal(verified_versions_root, versions_root):
+            _fail("Versions root changed during runtime slot provisioning.")
+        if not versions_root.is_dir():
+            _fail("Versions root must be an ordinary directory.")
+        slot_digest = hashlib.sha256(os.fsencode(slot_root)).hexdigest()[:16]
+        temporary_slot = versions_root.parent / (
+            f".runtime-slot-{slot_digest}-{secrets.token_hex(16)}"
+        )
+        temporary_ownership = temporary_slot / RUNTIME_SLOT_OWNERSHIP_FILE
+        try:
+            temporary_slot.mkdir(mode=0o700)
+            ownership = _runtime_slot_ownership_value(
+                validated,
+                snapshot,
+                runtime_version,
+                slot_root,
+                created_at=_utc_now(),
+            )
+            _atomic_write_json(
+                temporary_ownership,
+                ownership,
+                lock=(genesis_lock, install_lock),
+            )
+            genesis_lock.assert_owned()
+            install_lock.assert_owned()
+            _rename_directory_no_replace(temporary_slot, slot_root)
+            if os.name != "nt":
+                for parent in (versions_root.parent, versions_root):
+                    directory = os.open(parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+        except BaseException:
+            try:
+                temporary_ownership.unlink()
+            except OSError:
+                pass
+            try:
+                temporary_slot.rmdir()
+            except OSError:
+                pass
+            raise
+        result = _validated_runtime_slot_ownership(
+            validated,
+            snapshot,
+            runtime_version,
+        )
+        result["action"] = "slot-provision"
+        result["reason"] = "runtime-slot-ownership-published"
+        result["slotChanged"] = True
+        return result
 
 
 def _find_existing_source(
@@ -3444,6 +3981,22 @@ def _build_parser() -> argparse.ArgumentParser:
     snapshot_validate_parser.add_argument("--snapshot-id", required=True)
     snapshot_validate_parser.add_argument("--durable-home")
 
+    slot_provision_parser = subparsers.add_parser("slot-provision")
+    slot_provision_parser.add_argument("--context", required=True)
+    slot_provision_parser.add_argument("--expected-marketplace-id", required=True)
+    slot_provision_parser.add_argument("--expected-plugin-id", required=True)
+    slot_provision_parser.add_argument("--snapshot-id", required=True)
+    slot_provision_parser.add_argument("--runtime-version", required=True)
+    slot_provision_parser.add_argument("--durable-home")
+
+    slot_validate_parser = subparsers.add_parser("slot-validate")
+    slot_validate_parser.add_argument("--context", required=True)
+    slot_validate_parser.add_argument("--expected-marketplace-id", required=True)
+    slot_validate_parser.add_argument("--expected-plugin-id", required=True)
+    slot_validate_parser.add_argument("--snapshot-id", required=True)
+    slot_validate_parser.add_argument("--runtime-version", required=True)
+    slot_validate_parser.add_argument("--durable-home")
+
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
 
@@ -3551,6 +4104,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_marketplace_id=arguments.expected_marketplace_id,
                 expected_plugin_id=arguments.expected_plugin_id,
                 snapshot_id=arguments.snapshot_id,
+                durable_home=arguments.durable_home,
+            )
+        elif arguments.action == "slot-provision":
+            result = provision_runtime_slot(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                snapshot_id=arguments.snapshot_id,
+                runtime_version=arguments.runtime_version,
+                durable_home=arguments.durable_home,
+            )
+        elif arguments.action == "slot-validate":
+            result = validate_runtime_slot_ownership(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                snapshot_id=arguments.snapshot_id,
+                runtime_version=arguments.runtime_version,
                 durable_home=arguments.durable_home,
             )
         else:
