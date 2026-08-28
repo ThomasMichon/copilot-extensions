@@ -22,6 +22,8 @@ SAMPLE_MACHINES_YAML = {
             "display_name": "Workstation",
             "environment": "Windows 11 Pro",
             "role": "Dev workloads, compilation",
+            "description": "  Primary development host.  ",
+            "capabilities": [" builds ", "", "builds", "tests", " tests "],
             "ssh": {
                 "environments": [
                     {"name": "windows", "alias": "workstation", "port": 2222, "user": "dev", "shell": "pwsh"},
@@ -35,6 +37,8 @@ SAMPLE_MACHINES_YAML = {
             "display_name": "Server A",
             "environment": "Debian 13",
             "role": "Services",
+            "description": None,
+            "capabilities": None,
             "ssh": {
                 "environments": [
                     {"name": "linux", "alias": "server-a", "port": 22, "user": "deploy", "shell": "bash"},
@@ -74,6 +78,8 @@ class TestParseMachinesYaml:
         assert ws.display_name == "Workstation"
         assert ws.environment == "Windows 11 Pro"
         assert ws.role == "Dev workloads, compilation"
+        assert ws.description == "Primary development host."
+        assert ws.capabilities == ["builds", "tests"]
         assert ws.ssh_ready is True
         assert ws.ssh_ip == "10.0.0.20"
         assert ws.field_terminal is False
@@ -81,6 +87,23 @@ class TestParseMachinesYaml:
     def test_field_terminal_flag(self):
         machines = parse_machines_yaml(SAMPLE_MACHINES_YAML)
         assert machines["laptop"].field_terminal is True
+
+    def test_machine_metadata_defaults_empty(self):
+        machines = parse_machines_yaml(SAMPLE_MACHINES_YAML)
+        assert machines["server-a"].description == ""
+        assert machines["server-a"].capabilities == []
+
+    def test_non_list_capabilities_rejected(self):
+        with pytest.raises(ValueError, match="capabilities must be a list"):
+            parse_machines_yaml({
+                "machines": {"host-a": {"capabilities": "builds"}},
+            })
+
+    def test_non_string_description_rejected(self):
+        with pytest.raises(ValueError, match="description must be a string"):
+            parse_machines_yaml({
+                "machines": {"host-a": {"description": ["not", "a", "string"]}},
+            })
 
     def test_ssh_environments(self):
         machines = parse_machines_yaml(SAMPLE_MACHINES_YAML)
@@ -179,4 +202,16 @@ class TestLoadMachinesYaml:
         yaml_path = tmp_path / "machines.yaml"
         yaml_path.write_text(": : invalid yaml {{{")
         with pytest.raises(TopologyLoadError, match="failed to parse"):
+            load_machines_yaml(yaml_path, strict=True)
+
+    def test_malformed_capabilities_fail_open_or_raise_when_strict(
+        self, tmp_path: Path,
+    ):
+        yaml_path = tmp_path / "machines.yaml"
+        yaml_path.write_text(
+            "machines:\n  host-a:\n    capabilities: builds\n",
+            encoding="utf-8",
+        )
+        assert load_machines_yaml(yaml_path) == {}
+        with pytest.raises(TopologyLoadError, match="capabilities must be a list"):
             load_machines_yaml(yaml_path, strict=True)

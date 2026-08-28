@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from agent_worktrees import config as cfg
 
 _MIN = "machines:\n  m1:\n    display_name: M1\n"
@@ -43,8 +45,52 @@ def test_load_reads_legacy_root(tmp_path: Path):
 
 
 def test_load_missing_raises(tmp_path: Path):
-    import pytest
     with pytest.raises(FileNotFoundError):
+        cfg.load_machines_yaml(tmp_path)
+
+
+def test_load_normalizes_machine_metadata(tmp_path: Path):
+    _write(
+        tmp_path / "machines.yaml",
+        """machines:
+  m1:
+    display_name: M1
+    role: worker
+    description: "  General-purpose worker.  "
+    capabilities: [" builds ", "", builds, tests, " tests "]
+""",
+    )
+    entry = cfg.load_machines_yaml(tmp_path)["m1"]
+    assert entry.description == "General-purpose worker."
+    assert entry.capabilities == ["builds", "tests"]
+
+
+def test_load_machine_metadata_defaults_empty(tmp_path: Path):
+    _write(
+        tmp_path / "machines.yaml",
+        "machines:\n  m1:\n    description:\n    capabilities:\n",
+    )
+    entry = cfg.load_machines_yaml(tmp_path)["m1"]
+    assert entry.description == ""
+    assert entry.capabilities == []
+
+
+@pytest.mark.parametrize("value", ["builds", "{name: builds}", "123"])
+def test_load_rejects_non_list_capabilities(tmp_path: Path, value: str):
+    _write(
+        tmp_path / "machines.yaml",
+        f"machines:\n  m1:\n    capabilities: {value}\n",
+    )
+    with pytest.raises(ValueError, match="capabilities must be a list"):
+        cfg.load_machines_yaml(tmp_path)
+
+
+def test_load_rejects_non_string_description(tmp_path: Path):
+    _write(
+        tmp_path / "machines.yaml",
+        "machines:\n  m1:\n    description: [not, a, string]\n",
+    )
+    with pytest.raises(ValueError, match="description must be a string"):
         cfg.load_machines_yaml(tmp_path)
 
 
@@ -131,4 +177,3 @@ def test_overlay_noop_when_not_stateless(tmp_path: Path, monkeypatch):
     assert cfg.machines_yaml_path(harness) == (
         harness / ".agent-worktrees" / "machines.yaml"
     )
-

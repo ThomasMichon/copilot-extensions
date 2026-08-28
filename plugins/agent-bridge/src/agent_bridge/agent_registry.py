@@ -1205,6 +1205,12 @@ def derive_topology_agents(
     """
     out: dict[str, AgentConfig] = {}
 
+    def _machine_metadata(machine: MachineConfig) -> str:
+        parts = [machine.description] if machine.description else []
+        if machine.capabilities:
+            parts.append(f"capabilities: {', '.join(machine.capabilities)}")
+        return f" — {'; '.join(parts)}" if parts else ""
+
     def _is_loopback(machine: MachineConfig, env: SshEnvironment) -> bool:
         return bool(
             local_machine
@@ -1234,7 +1240,8 @@ def derive_topology_agents(
                     ),
                     description=(
                         f"Control-plane '{control_plane_project}' on "
-                        f"{machine.display_name} ({env.name}) [derived from topology]"
+                        f"{machine.display_name} ({env.name})"
+                        f"{_machine_metadata(machine)} [derived from topology]"
                     ),
                 )
 
@@ -1266,7 +1273,8 @@ def derive_topology_agents(
                 display_name=name,
                 aliases=[stable_name] if stable_name != name else [],
                 description=(
-                    f"'{repo}' on {machine.display_name} [derived from related.yaml]"
+                    f"'{repo}' on {machine.display_name}"
+                    f"{_machine_metadata(machine)} [derived from related.yaml]"
                 ),
             )
 
@@ -1319,7 +1327,8 @@ def derive_topology_agents(
                     # the elevated sub-daemon just like the bare project agent.
                     requires_admin=repo in elevated_projects,
                     description=(
-                        f"'{repo}' on {local_machine.display_name} "
+                        f"'{repo}' on {local_machine.display_name}"
+                        f"{_machine_metadata(local_machine)} "
                         "[derived from repos.yaml agent-backing checkout]"
                     ),
                 )

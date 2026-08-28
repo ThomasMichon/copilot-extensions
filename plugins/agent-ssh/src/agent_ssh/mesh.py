@@ -2,8 +2,9 @@
 
 ``mesh-status`` reads the **calling repo's** ``machines.yaml`` (the repo-scoped
 mesh registry: ``machines: <key>: {display_name, role, environment, ssh.ready,
-ssh.environments[], dtssh}``) and reports, per machine, its role, environment,
-reachability (``ssh.ready``), the per-environment SSH aliases, and dtssh notes.
+description, capabilities, ssh.environments[], dtssh}``) and reports, per
+machine, its role, purpose, broad capabilities, environment, reachability
+(``ssh.ready``), per-environment SSH aliases, and dtssh notes.
 
 This is the on-demand renderer behind the succinct ``sessionStart`` pointer
 (``scripts/emit-mesh-pointer.*``): the pointer tells an agent the mesh exists and
@@ -51,6 +52,8 @@ class MeshMachine:
     key: str
     display_name: str = ""
     role: str = ""
+    description: str = ""
+    capabilities: list[str] = field(default_factory=list)
     environment: str = ""
     hostname: str = ""
     ssh_ready: bool = False
@@ -154,11 +157,28 @@ def load_mesh(path: Path) -> Mesh:
                             user=str(env.get("user", "") or ""),
                         )
                     )
+            description_raw = entry.get("description", "")
+            description = (
+                description_raw.strip()
+                if isinstance(description_raw, str)
+                else ""
+            )
+            capabilities: list[str] = []
+            capabilities_raw = entry.get("capabilities", [])
+            if isinstance(capabilities_raw, list):
+                for capability_raw in capabilities_raw:
+                    if not isinstance(capability_raw, str):
+                        continue
+                    capability = capability_raw.strip()
+                    if capability and capability not in capabilities:
+                        capabilities.append(capability)
             machines.append(
                 MeshMachine(
                     key=str(key),
                     display_name=str(entry.get("display_name", "") or ""),
                     role=str(entry.get("role", "") or ""),
+                    description=description,
+                    capabilities=capabilities,
                     environment=str(entry.get("environment", "") or ""),
                     hostname=str(entry.get("hostname", "") or ""),
                     ssh_ready=bool(ssh.get("ready", False)),
@@ -195,6 +215,10 @@ def format_report(mesh: Mesh) -> str:
         lines.append(f"    - {name}{host}  role={m.role or '?'}  ssh={reach}")
         if m.environment:
             lines.append(f"        env: {m.environment}")
+        if m.description:
+            lines.append(f"        description: {m.description}")
+        if m.capabilities:
+            lines.append(f"        capabilities: {', '.join(m.capabilities)}")
         for env in m.environments:
             u = f" user={env.user}" if env.user else ""
             sh = f" ({env.shell})" if env.shell else ""
