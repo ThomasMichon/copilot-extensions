@@ -21,6 +21,37 @@ python tools/run-plugin-tests.py agent-bridge --guards  # just the fast @pytest.
 python tools/run-plugin-tests.py agent-bridge -k picker # pass-through pytest -k filter
 ```
 
+Every invocation is contained by default. The runner redirects user, Copilot,
+plugin, XDG, and temporary state beneath a per-run sandbox; owns the pytest
+process job/group and its ordinary descendants; and enforces budgets at three
+time scales: 30 seconds per test, 300 seconds per sequential 25-file sub-suite,
+and 900 seconds across the plugin. Each sub-suite also defaults to 128
+processes, 4096 MiB of process-tree memory, and 2048 MiB of temporary storage:
+
+```bash
+python tools/run-plugin-tests.py agent-dispatch \
+  --test-timeout 20 --subsuite-timeout 180 --plugin-timeout 600 \
+  --max-files-per-sub-suite 15 \
+  --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
+```
+
+Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
+`@pytest.mark.effect(...)` markers. The injected policy rejects effects that do
+not belong in the declared tier. T3 clean-room and T4 end-to-end families are
+skipped unless the caller passes `--allow-explicit-tiers`; target-specific
+environment gates still apply.
+
+Deliberate daemon detachment (`CREATE_BREAKAWAY_FROM_JOB` on Windows or a new
+session/process group on POSIX) remains blocked from broad measurement until the
+shared spawn helper's contained-test policy lands and its adversarial proof
+passes.
+
+Large test modules should be split by behavioral contract, not by arbitrary
+line count. Within each contract family, prefer one parameterized or
+scenario-style test that validates several related observable features over
+many process-launching micro-tests that repeat the same setup and failure
+boundary.
+
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are
 marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest

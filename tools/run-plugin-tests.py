@@ -26,6 +26,9 @@ Design notes:
 * **Windows-safe temp.** Passes a randomized ``--basetemp`` so pytest's tmp
   cleanup does not trip the ``pytest-current`` junction ``PermissionError`` on
   Windows (teardown noise that would otherwise mask a green run).
+* **Time-bounded at every level.** Individual tests use ``pytest-timeout``;
+  large suites run as sequential file groups with their own wall limit; and a
+  plugin-wide deadline bounds the aggregate.
 * **Fail-closed on test failures**, but in ``--pre-push`` mode it degrades
   gracefully (warn + skip, exit 0) only when the *tooling* (uv) is genuinely
   absent -- never blocking a push just because a dev box lacks uv, while still
@@ -37,16 +40,27 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 import tomllib
 from pathlib import Path
+
+from plugin_test_containment import (
+    ContainmentError,
+    Limits,
+    isolated_environment,
+    partition,
+    run_contained,
+)
 
 REPO = Path(__file__).resolve().parents[1]
 PLUGINS = REPO / "plugins"
 VENV_ROOT = REPO / ".test-venvs"
+PORTFOLIO_PLUGIN = "pytest_portfolio_guard"
+RUNNER_DEPENDENCIES = ("pytest-timeout>=2.3,<3",)
 
 
 def _plugin_dir(name: str) -> Path:
@@ -129,6 +143,8 @@ def _dep_fingerprint(name: str) -> str:
     if libs.is_dir():
         parts += sorted(libs.glob("*/pyproject.toml"))
     h = hashlib.sha256()
+    for dependency in RUNNER_DEPENDENCIES:
+        h.update(f"runner:{dependency}\n".encode())
     for p in parts:
         try:
             h.update(p.read_bytes())
@@ -170,6 +186,7 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             cmd = [uv, "pip", "install", "--python", str(py), "-e", spec]
             if spec == ".":
                 cmd.append("pytest")   # no dev extra -> ensure a runner is present
+            cmd.extend(RUNNER_DEPENDENCIES)
             subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=True)
         else:
             # A pyproject-less plugin (e.g. a skill-script plugin like
@@ -177,38 +194,124 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
             # tests import the scripts directly (importlib). Just ensure a
             # pytest runner is present in the venv.
             subprocess.run(
-                [uv, "pip", "install", "--python", str(py), "pytest"],
+                [
+                    uv,
+                    "pip",
+                    "install",
+                    "--python",
+                    str(py),
+                    "pytest",
+                    *RUNNER_DEPENDENCIES,
+                ],
                 cwd=str(_plugin_dir(name)), check=True,
             )
         stamp.write_text(fingerprint, encoding="utf-8")
     return py
 
 
-def run_plugin(name: str, uv: str, *, reinstall: bool, kexpr: str | None,
-               guards: bool = False, collect_only: bool = False) -> int:
+def _test_file_groups(name: str, max_files: int) -> list[list[Path]]:
+    tests = _plugin_dir(name) / "tests"
+    files = sorted(tests.rglob("test_*.py"))
+    return partition(files, max_files) or [[]]
+
+
+def run_plugin(
+    name: str,
+    uv: str,
+    *,
+    reinstall: bool,
+    kexpr: str | None,
+    limits: Limits,
+    plugin_timeout: float,
+    test_timeout: float,
+    max_files_per_subsuite: int,
+    guards: bool = False,
+    collect_only: bool = False,
+    allow_explicit_tiers: bool = False,
+) -> int:
     if not _has_suite(name):
         print(f"[SKIP] {name}: no test suite")
         return 0
     label = "collect-only" if collect_only else ("guard tests" if guards else "pytest")
     print(f"[RUN ] {name}: preparing venv + {label} ...")
     py = _ensure_venv(name, uv, reinstall=reinstall)
-    basetemp = Path(os.environ.get("TEMP", "/tmp")) / f"ce-bt-{name}-{random.randint(0, 1_000_000)}"
-    cmd = [str(py), "-m", "pytest", "-q", f"--basetemp={basetemp}"]
-    if collect_only:
-        cmd.append("--collect-only")
-    if guards:
-        cmd += ["-m", "guard"]
-    if kexpr:
-        cmd += ["-k", kexpr]
-    proc = subprocess.run(cmd, cwd=str(_plugin_dir(name)), check=False)
+    sandbox_parent = Path(os.environ.get("TEMP", tempfile.gettempdir()))
+    sandbox_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f"ce-{name[:12]}-",
+        dir=sandbox_parent,
+        ignore_cleanup_errors=True,
+    ) as raw_sandbox:
+        sandbox = Path(raw_sandbox)
+        basetemp = sandbox / "pytest"
+        env = isolated_environment(
+            os.environ,
+            sandbox,
+            allow_explicit_tiers=allow_explicit_tiers,
+        )
+        tools_path = str(REPO / "tools")
+        env["PYTHONPATH"] = tools_path
+        groups = _test_file_groups(name, max_files_per_subsuite)
+        plugin_started = time.monotonic()
+        for index, group in enumerate(groups, start=1):
+            remaining = plugin_timeout - (time.monotonic() - plugin_started)
+            if remaining <= 0:
+                print(
+                    f"[LIMIT] {name}: plugin aggregate timeout exceeded "
+                    f"({plugin_timeout:g}s)",
+                    file=sys.stderr,
+                )
+                return 124
+            group_limits = Limits(
+                wall_seconds=min(limits.wall_seconds, remaining),
+                max_processes=limits.max_processes,
+                max_memory_mb=limits.max_memory_mb,
+                max_temp_mb=limits.max_temp_mb,
+                poll_seconds=limits.poll_seconds,
+            )
+            group_temp = basetemp / f"group-{index}"
+            group_temp.parent.mkdir(parents=True, exist_ok=True)
+            cmd = [
+                str(py),
+                "-m",
+                "pytest",
+                "-q",
+                f"--basetemp={group_temp}",
+                "-p",
+                PORTFOLIO_PLUGIN,
+                f"--timeout={test_timeout:g}",
+            ]
+            if collect_only:
+                cmd.append("--collect-only")
+            if guards:
+                cmd += ["-m", "guard"]
+            if kexpr:
+                cmd += ["-k", kexpr]
+            cmd.extend(str(path.relative_to(_plugin_dir(name))) for path in group)
+            if len(groups) > 1:
+                print(
+                    f"[RUN ] {name}: sub-suite {index}/{len(groups)} "
+                    f"({len(group)} files)"
+                )
+            returncode = run_contained(
+                cmd,
+                cwd=_plugin_dir(name),
+                env=env,
+                sandbox=sandbox,
+                limits=group_limits,
+            )
+            if returncode == 5 and (guards or kexpr):
+                continue
+            if returncode != 0:
+                break
     # pytest exit code 5 == "no tests collected"; in --guards mode that just
     # means the plugin declares no guard-marked tests -- not a failure.
-    if guards and proc.returncode == 5:
+    if guards and returncode == 5:
         print(f"[SKIP] {name}: no guard-marked tests")
         return 0
-    status = "PASS" if proc.returncode == 0 else "FAIL"
-    print(f"[{status}] {name} (exit {proc.returncode})")
-    return proc.returncode
+    status = "PASS" if returncode == 0 else "FAIL"
+    print(f"[{status}] {name} (exit {returncode})")
+    return returncode
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,7 +334,41 @@ def main(argv: list[str] | None = None) -> int:
                          "(feeds a CI matrix); honors --all/--changed/names and --exclude")
     ap.add_argument("--pre-push", action="store_true",
                     help="hook mode: skip (exit 0) if uv is absent instead of failing")
+    ap.add_argument("--timeout", "--subsuite-timeout", dest="subsuite_timeout",
+                    type=float, default=300.0, metavar="SECONDS",
+                    help="wall-clock budget per file-group sub-suite (default: 300)")
+    ap.add_argument("--plugin-timeout", type=float, default=900.0, metavar="SECONDS",
+                    help="aggregate wall-clock budget per plugin (default: 900)")
+    ap.add_argument("--test-timeout", type=float, default=30.0, metavar="SECONDS",
+                    help="timeout for each individual pytest item (default: 30)")
+    ap.add_argument("--max-files-per-sub-suite", type=int, default=25,
+                    metavar="COUNT",
+                    help="maximum test files per sequential sub-suite (default: 25)")
+    ap.add_argument("--max-processes", type=int, default=128, metavar="COUNT",
+                    help="maximum contained processes per suite (default: 128)")
+    ap.add_argument("--max-memory-mb", type=int, default=4096, metavar="MIB",
+                    help="maximum process-tree memory per suite (default: 4096)")
+    ap.add_argument("--max-temp-mb", type=int, default=2048, metavar="MIB",
+                    help="maximum runner-owned temporary storage per suite (default: 2048)")
+    ap.add_argument("--allow-explicit-tiers", action="store_true",
+                    help="allow T3/T4 tests that are otherwise skipped by default")
     args = ap.parse_args(argv)
+    limits = Limits(
+        wall_seconds=args.subsuite_timeout,
+        max_processes=args.max_processes,
+        max_memory_mb=args.max_memory_mb,
+        max_temp_mb=args.max_temp_mb,
+    )
+    try:
+        limits.validate()
+        if args.plugin_timeout <= 0:
+            raise ValueError("plugin_timeout must be positive")
+        if args.test_timeout <= 0:
+            raise ValueError("test_timeout must be positive")
+        if args.max_files_per_sub_suite <= 0:
+            raise ValueError("max_files_per_sub_suite must be positive")
+    except ValueError as exc:
+        ap.error(str(exc))
 
     if args.all:
         targets = all_plugins_with_suites()
@@ -266,9 +403,14 @@ def main(argv: list[str] | None = None) -> int:
     for name in targets:
         try:
             rc = run_plugin(name, uv, reinstall=args.reinstall, kexpr=args.kexpr,
-                            guards=args.guards, collect_only=args.collect_only)
-        except subprocess.CalledProcessError as exc:
-            print(f"[FAIL] {name}: venv/install failed ({exc})", file=sys.stderr)
+                            limits=limits, guards=args.guards,
+                            plugin_timeout=args.plugin_timeout,
+                            test_timeout=args.test_timeout,
+                            max_files_per_subsuite=args.max_files_per_sub_suite,
+                            collect_only=args.collect_only,
+                            allow_explicit_tiers=args.allow_explicit_tiers)
+        except (ContainmentError, subprocess.CalledProcessError) as exc:
+            print(f"[FAIL] {name}: runner setup failed ({exc})", file=sys.stderr)
             rc = 1
         if rc != 0:
             failed.append(name)

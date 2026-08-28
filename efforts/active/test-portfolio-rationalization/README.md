@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed plan PR, then serial per-phase and per-plugin PRs
 - **Created:** 2026-08-28
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** realizes [`visions/test-portfolio`](../../../visions/test-portfolio/README.md);
   complements [`visions/clean-room-validation`](../../../visions/clean-room-validation/README.md)
 - **Umbrella issue:** #1303
@@ -101,12 +101,15 @@ suites first.
 - [x] File the public coordination issue (#1303).
 - [x] Establish the repository-wide test-portfolio vision.
 - [x] Author the initial triage framework and source-level baseline.
-- [ ] Submit this plan for repository review and merge it before implementation.
+- [x] Submit this plan for repository review and merge it before implementation.
 
 ### Phase 1 — Containment before measurement
 
 - [ ] Make the test runner own the complete descendant process tree on Windows
   and POSIX, including cleanup after interruption and timeout.
+- [ ] Enforce individual-test, sequential sub-suite, and plugin-aggregate
+  wall-clock limits so one hung case or oversized file group cannot monopolize
+  a run.
 - [ ] Add a test-mode spawn policy to the shared process helper so production
   breakaway behavior is disabled under containment without changing production
   semantics; prove that attempted breakaway descendants remain runner-owned.
@@ -135,6 +138,8 @@ suites first.
   critical-module selection rule, and record a bounded baseline procedure.
 - [ ] Map existing guards, unit suites, clean-room scenarios, and end-to-end
   modules into one tiered portfolio view.
+- [ ] Flag oversized test files and low-assurance-density process families for
+  contract-based splitting and consolidation.
 - [ ] File focused sub-issues for the runner, inventory tooling, governance, and
   each plugin wave.
 
@@ -162,6 +167,9 @@ suites first.
 - [ ] For every wave, consolidate equivalent cases, rewrite brittle
   implementation assertions, move hazardous validation to the right tier, and
   delete only when the removal gate in `triage-framework.md` is satisfied.
+- [ ] Split oversized files along contract boundaries, while consolidating
+  repeated setup into scenario/parameterized tests that cover multiple related
+  observable features per process launch.
 - [ ] Keep each plugin's contract map, inventory, and TESTING coverage summary
   current as its wave lands.
 
@@ -230,3 +238,20 @@ the inventory and evidence gates are available.
 - Chose repository-wide scope with the largest `agent-*` suites first.
 - Next gate: merge this reviewed plan, then implement Phase 1 containment before
   running broad measurements.
+
+### 2026-08-28 — Phase 1 started
+
+- The reviewed plan is merged and the effort is active.
+- Began the repository-owned containment supervisor: isolated mutable state,
+  runner-owned process trees, configurable wall/process/memory/temp budgets, and
+  collection-time tier/effect validation.
+- Broad suite execution remains prohibited until adversarial containment tests
+  pass and production breakaway requests are suppressed in test mode.
+
+### 2026-08-28 — Time and assurance density direction
+
+- Added operator direction to bound individual tests, sequential file-group
+  sub-suites, and aggregate plugin runs.
+- Portfolio waves will split large files by contract and aggressively
+  consolidate process-heavy micro-tests into evidence-dense scenario families
+  that validate multiple related features per launch.
