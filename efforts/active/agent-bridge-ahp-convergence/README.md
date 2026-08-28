@@ -18,7 +18,9 @@
   [#1138](https://github.com/ThomasMichon/copilot-extensions/issues/1138)
   (immutable event identity) ·
   [#1454](https://github.com/ThomasMichon/copilot-extensions/issues/1454)
-  (delegation attention/result projection)
+  (delegation attention/result projection) ·
+  [#1308](https://github.com/ThomasMichon/copilot-extensions/issues/1308)
+  (AHP 0.8 contract lock)
 
 ## Guiding Intent
 
@@ -78,10 +80,11 @@ resources, tools, confirmations, and durable elicitation.
 
 The released baseline for this effort is
 [AHP 0.8.0](https://github.com/microsoft/agent-host-protocol/tree/v0.8.0).
-The specification remains a working draft and the repository is developing an
-unreleased 1.0 line. The implementation therefore targets 0.8 first, negotiates
-versions explicitly, and isolates version-specific codecs rather than allowing
-draft behavior to leak through one mutable schema.
+The specification remains a working draft. AHP 0.9.0 was released after this
+target was reviewed; the implementation deliberately remains on 0.8.0 for the
+first slice. Adopting 0.9.0 or a later line requires a separately pinned and
+reviewed codec rather than allowing behavior from another version to leak
+through one mutable schema.
 
 The detailed current-state comparison and ownership decisions are in
 [compatibility-baseline.md](compatibility-baseline.md).
@@ -113,13 +116,13 @@ rather than binding to private implementation details.
       and state-prerequisite rules authoritative. If the registry has not landed
       yet, pin them locally here and register them before the first AHP writer is
       enabled.
-- [ ] Pin the released AHP 0.8 tag, generated JSON schemas, exported method
+- [x] Pin the released AHP 0.8 tag, generated JSON schemas, exported method
       maps, and reducer fixtures as test inputs; record an explicit precedence
       rule for disagreements among tagged prose, types, SDKs, and fixtures.
-- [ ] Record every baseline, named-capability-gated, state-prerequisite-gated,
+- [x] Record every baseline, named-capability-gated, state-prerequisite-gated,
       `x-` extension, version-sensitive, and explicitly out-of-scope surface.
       Do not invent a generic capability advertisement mechanism.
-- [ ] Define the compatibility policy for unreleased 1.0 changes: isolated
+- [x] Define the compatibility policy for later protocol changes: isolated
       codecs, no silent semantic drift, and no named capability or optional
       state surface without its complete state machine.
 - [ ] Establish bidirectional conformance probes using an independent AHP
@@ -303,6 +306,10 @@ The initial architecture and compatibility matrix are captured in
 baseline as AHP versions evolve, but implementation must not begin from an
 uncited or version-neutral interpretation of the protocol.
 
+The pinned 0.8.0 corpus, source hashes, method classification, capability
+policy, version decision, and exception ledger live in
+[`plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/`](../../../plugins/agent-bridge/tests/fixtures/ahp/v0.8.0/).
+
 ## Journal
 
 ### 2026-08-31 — Compatibility-foundation reconciliation
@@ -325,3 +332,21 @@ uncited or version-neutral interpretation of the protocol.
 - Pinned released AHP 0.8 as the first compatibility target while keeping
   version-specific codecs ready for the unreleased 1.0 line.
 - No implementation begins until this plan clears review.
+
+### 2026-08-28 — Phase 0 contract lock
+
+- Started implementation under #1308 after the architecture plan cleared
+  review.
+- Pinned AHP 0.8.0 at commit
+  `7153143f1c6993fa886d7d59870811cdad479d83`, including schemas, specification
+  documents, SDK release metadata, and the reducer and round-trip corpora.
+- Recorded AHP 0.9.0 as a later release and deliberately retained 0.8.0 as the
+  only accepted first-slice version; another version requires an isolated,
+  reviewed codec.
+- Classified every exported command and notification and recorded all named
+  capabilities separately from optional state and runtime prerequisites.
+- Adjudicated the tagged `disposeChat` contradiction as recognized wire
+  vocabulary with no handler, `MethodNotFound`, and no `multipleChats`
+  advertisement until lifecycle semantics are reviewed again.
+- Kept runtime endpoint registration, ordering, replay, and live conformance
+  probes out of this contract-only slice.
