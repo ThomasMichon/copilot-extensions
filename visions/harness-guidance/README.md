@@ -71,8 +71,8 @@ implementation remain direct when splitting them would cost more than it saves.
 
 ### bounded-delegate-contracts
 
-A delegated scope should have explicit ownership, bounded inputs and output,
-non-overlapping responsibility, an integration plan when it edits files, and a
+A delegated scope should have explicit ownership, bounded inputs and outputs,
+non-overlapping responsibility, an integration plan if it edits files, and a
 result shape suitable for integration.
 Domain-specific service catalogs and verbose tool payloads should remain with
 the delegate that owns that domain; compact shared research and orchestration
