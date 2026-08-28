@@ -64,6 +64,28 @@ def test_posix_binstub_resolves_only_active_or_complete_slots() -> None:
     assert '_aw_exec_resolved "$@"' in sh
 
 
+def test_direct_posix_payload_entrypoints_are_tracked_executable() -> None:
+    repo = PLUGIN.parents[1]
+    paths = (
+        "plugins/agent-worktrees/bin/agent-worktrees",
+        "plugins/agent-worktrees/bin/launch-session.sh",
+        "plugins/agent-worktrees/bin/pane-wrapper.sh",
+        "plugins/agent-worktrees/bin/payload/agent-worktrees",
+    )
+    result = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "--stage", "--", *paths],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.skip("Git index metadata is unavailable")
+    modes = {
+        line.split(maxsplit=1)[1].split("\t", maxsplit=1)[1]: line.split()[0]
+        for line in result.stdout.splitlines()
+    }
+    assert modes == {path: "100755" for path in paths}
+
+
 def test_lean_provision_deploys_runtime_resolvers() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     sh_provision = sh.split("    provision)", 1)[1].split("    install)", 1)[0]
