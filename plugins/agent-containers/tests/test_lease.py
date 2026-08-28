@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import time
 
 import pytest
 
 from agent_containers import lease as lease_mod
+from agent_containers import private_state
 from agent_containers.config import ContainersConfig
 from agent_containers.lifecycle import DockerContainerInfo
 
@@ -328,3 +330,58 @@ def test_safe_clear_refuses_fresh_corruption_then_clears_expired_file(fleet):
 
     assert cleared["deploy_holds"] == 1
     assert not lease_mod._DEPLOY_HOLDS_FILE.exists()
+
+
+def test_coordination_json_writes_are_owner_only_under_open_umask(
+    fleet,
+    monkeypatch,
+):
+    now = time.time()
+    fsync_calls = []
+    monkeypatch.setattr(
+        private_state,
+        "fsync_directory",
+        lambda path: fsync_calls.append(path),
+    )
+    hold = lease_mod.DeployHold(
+        container="myrepo-1",
+        operation="recreate",
+        token="record-id",  # noqa: S106
+        pid=123,
+        host=lease_mod._this_host(),
+        environment=lease_mod._this_environment(),
+        acquired_at=now,
+        heartbeat_at=now,
+        expires_at=now + 60,
+    )
+    previous = os.umask(0)
+    try:
+        lease_mod._write_records(
+            lease_mod._DEPLOY_HOLDS_FILE,
+            {"myrepo-1": hold},
+        )
+        lease_mod._write_leases(
+            {
+                "myrepo-1": lease_mod.Lease(
+                    container="myrepo-1",
+                    effort="example",
+                    pid=123,
+                    host=lease_mod._this_host(),
+                    acquired_at=now,
+                    heartbeat_at=now,
+                )
+            }
+        )
+    finally:
+        os.umask(previous)
+
+    if os.name != "nt":
+        assert stat.S_IMODE(
+            lease_mod._DEPLOY_HOLDS_FILE.stat().st_mode
+        ) == 0o600
+        assert stat.S_IMODE(lease_mod.LEASE_FILE.stat().st_mode) == 0o600
+    assert fsync_calls == [
+        lease_mod._DEPLOY_HOLDS_FILE.parent,
+        lease_mod.LEASE_FILE.parent,
+    ]
+    assert not list(lease_mod._DEPLOY_HOLDS_FILE.parent.glob(".*.tmp"))

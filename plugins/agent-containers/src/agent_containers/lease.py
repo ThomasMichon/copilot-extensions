@@ -23,11 +23,13 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from ssh_manager.locks import pid_alive
 
 from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
 from .lifecycle import list_containers
+from .private_state import atomic_write_json
 
 log = logging.getLogger("agent-containers")
 
@@ -118,7 +120,15 @@ def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
     owner_token = uuid.uuid4().hex
     while True:
         try:
-            fd = os.open(str(_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(
+                str(_LOCK_FILE),
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+            try:
+                os.fchmod(fd, 0o600)
+            except (AttributeError, OSError):
+                pass
             os.write(fd, owner_token.encode("ascii"))
             os.fsync(fd)
             break
@@ -168,11 +178,8 @@ def _read_leases() -> dict[str, Lease]:
 
 def _write_leases(leases: dict[str, Lease]) -> None:
     """Atomically write leases.json."""
-    ensure_state_dir()
-    tmp = LEASE_FILE.with_suffix(".json.tmp")
     payload = {c: asdict(lease) for c, lease in leases.items()}
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    os.replace(tmp, LEASE_FILE)
+    _write_private_json(LEASE_FILE, payload)
 
 
 def _read_records(path, record_type, *, fail_closed: bool = False):
@@ -207,13 +214,15 @@ def _read_records(path, record_type, *, fail_closed: bool = False):
 
 
 def _write_records(path, records) -> None:
-    ensure_state_dir()
-    tmp = path.with_suffix(f"{path.suffix}.tmp")
-    tmp.write_text(
-        json.dumps({key: asdict(value) for key, value in records.items()}, indent=2),
-        encoding="utf-8",
+    _write_private_json(
+        path,
+        {key: asdict(value) for key, value in records.items()},
     )
-    os.replace(tmp, path)
+
+
+def _write_private_json(path: Path, payload: dict) -> None:
+    """Atomically publish owner-only coordination JSON."""
+    atomic_write_json(path, payload, indent=2)
 
 
 def _record_live(record, ttl: float) -> bool:

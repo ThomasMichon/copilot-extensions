@@ -14,6 +14,7 @@ from pathlib import Path
 
 from agent_procutil import no_window_flags
 
+from .private_state import enforce_mode
 from .restricted_exec import sanitized_exec_prefix
 
 _INVENTORY_LIMIT = 4 * 1024**2
@@ -466,7 +467,7 @@ def _stream_member(
     reader.start()
     try:
         with destination.open("xb") as target:
-            os.chmod(destination, 0o600)
+            enforce_mode(destination, 0o600)
             while True:
                 try:
                     item = chunks.get(timeout=_remaining(deadline, 30.0))

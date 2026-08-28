@@ -392,6 +392,22 @@ not for stamping the binstub.
 - `~/.agent-containers/deploy-manifest.json`, `current-version`, `versions/` —
   runtime deployment metadata and versioned venv slots.
 
+Mutable coordination state is owner-only: the state directory is enforced as
+`0700` and leases, admissions, holds, pins, rescue status/metadata, and relay
+token files are atomically published from owner-only temporary files as `0600`
+on POSIX. Windows applies the corresponding mode operations best-effort while
+relying on the user's filesystem ACL. WSL DrvFS/9p and other detected
+ACL-backed shared filesystems use the same best-effort model when POSIX mode
+bits are not authoritative; native POSIX filesystems continue to enforce and
+verify exact modes. Atomic JSON replacement fsyncs the containing directory
+best-effort so coordination and relay-token publication is crash-durable where
+the backing filesystem supports it. A relocated state directory becomes the
+relay-token home; an existing legacy token store is repaired and reused without
+rewriting its contents. Lifecycle pin files are published complete via
+owner-private temporary files and atomic no-clobber linking/rename; malformed
+crash remnants fail closed only for a bounded interval before retention reclaims
+them.
+
 ## Troubleshooting
 
 There is no `agent-containers doctor` subcommand today. Use the narrow checks the

@@ -7,14 +7,16 @@ import io
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
-from agent_containers import rescue, rescue_protocol, restricted_exec
+from agent_containers import private_state, rescue, rescue_protocol, restricted_exec
 from agent_containers.config import ContainersConfig, FleetConfig, RescueConfig
 
 SESSION_ID = "11111111-1111-4111-8111-111111111111"
@@ -971,6 +973,52 @@ def test_active_lifecycle_pin_survives_concurrent_quota_retention(
     assert second_path.exists()
 
 
+def test_malformed_pin_is_fail_closed_then_expires_for_retention(
+    monkeypatch,
+    tmp_path,
+):
+    config, fleet = _configured()
+    config.rescue.retain_per_container = 2
+    _patch_capture_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        rescue,
+        "_inventory_root",
+        lambda *_args, **_kwargs: rescue_protocol.RootInventory("present", []),
+    )
+    ticks = iter([100, 200])
+    monkeypatch.setattr(rescue.time, "time_ns", lambda: next(ticks))
+    first = rescue.capture_restricted_sessions(
+        config,
+        fleet,
+        container="sandbox-1",
+        container_instance="instance-a",
+        user="agent",
+    )
+    second = rescue.capture_restricted_sessions(
+        config,
+        fleet,
+        container="sandbox-1",
+        container_instance="instance-b",
+        user="agent",
+    )
+    base = rescue.RESCUE_ROOT / "sandbox-1"
+    first_path = base / first["capture_id"]
+    second_path = base / second["capture_id"]
+    malformed = first_path / ".pin-crashed.json"
+    malformed.write_text("{truncated", encoding="utf-8")
+    config.rescue.retain_per_container = 1
+
+    rescue._enforce_retention(config, second_path)
+    assert first_path.exists()
+
+    old = time.time() - rescue._MALFORMED_PIN_MAX_AGE - 1
+    os.utime(malformed, (old, old))
+    rescue._enforce_retention(config, second_path)
+
+    assert not first_path.exists()
+    assert second_path.exists()
+
+
 def test_nul_inventory_framing_preserves_newlines_and_rejects_partial():
     assert rescue_protocol._decode_nul_records(b"name\nwith-newline\0f\0", 2) == [
         ("name\nwith-newline", "f")
@@ -993,6 +1041,104 @@ def test_rescue_lock_cleanup_never_unlinks_new_owner(tmp_path):
         lock.write_text("replacement-owner", encoding="ascii")
 
     assert lock.read_text(encoding="ascii") == "replacement-owner"
+
+
+def test_rescue_metadata_write_is_owner_only_under_open_umask(
+    monkeypatch,
+    tmp_path,
+):
+    path = tmp_path / "status.json"
+    fsync_calls = []
+    monkeypatch.setattr(
+        private_state,
+        "fsync_directory",
+        lambda directory: fsync_calls.append(directory),
+    )
+    previous = os.umask(0)
+    try:
+        rescue._write_json_fsynced(path, {"status": "verified"})
+    finally:
+        os.umask(previous)
+
+    assert json.loads(path.read_text(encoding="utf-8"))["status"] == "verified"
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert fsync_calls == [path.parent]
+
+
+def test_rescue_paths_tolerate_acl_backed_chmod_limitations(
+    monkeypatch,
+    tmp_path,
+):
+    config, fleet = _configured()
+    _patch_capture_root(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        rescue,
+        "_inventory_root",
+        lambda *_args, **_kwargs: rescue_protocol.RootInventory("present", []),
+    )
+    monkeypatch.setattr(
+        private_state,
+        "filesystem_type",
+        lambda _path: "9p",
+    )
+    monkeypatch.setattr(
+        Path,
+        "chmod",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            PermissionError("DrvFS ACL")
+        ),
+    )
+
+    metadata = rescue.capture_restricted_sessions(
+        config,
+        fleet,
+        container="sandbox-1",
+        container_instance="instance-a",
+        user="agent",
+    )
+
+    assert metadata["status"] == "verified"
+
+
+def test_member_stream_tolerates_acl_backed_chmod_limitations(
+    monkeypatch,
+    tmp_path,
+):
+    payload = b"event\n"
+    monkeypatch.setattr(
+        rescue_protocol.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: _FakeProcess(payload, b"OK\t6\n"),
+    )
+    monkeypatch.setattr(
+        private_state,
+        "filesystem_type",
+        lambda _path: "cifs",
+    )
+    monkeypatch.setattr(
+        Path,
+        "chmod",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            PermissionError("ACL-backed")
+        ),
+    )
+    destination = tmp_path / "member"
+
+    result = rescue_protocol._stream_member(
+        "instance",
+        "agent",
+        "/usr/local/bin/node",
+        "/home/agent",
+        SESSION_ID,
+        "events.jsonl",
+        destination,
+        max_bytes=64,
+        deadline=None,
+    )
+
+    assert result.status == "captured"
+    assert destination.read_bytes() == payload
 
 
 def test_publication_and_cross_container_retention_use_distinct_locks(

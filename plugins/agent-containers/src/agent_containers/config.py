@@ -26,6 +26,8 @@ from pathlib import Path
 
 import yaml
 
+from .private_state import ensure_private_dir
+
 log = logging.getLogger("agent-containers")
 
 # Canonical runtime paths.
@@ -654,5 +656,5 @@ def ensure_runtime_dir() -> None:
 
 
 def ensure_state_dir() -> None:
-    """Create the mutable coordination-state directory if needed."""
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    """Create mutable coordination state with owner-only permissions."""
+    ensure_private_dir(STATE_DIR)

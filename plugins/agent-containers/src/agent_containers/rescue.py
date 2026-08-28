@@ -18,6 +18,11 @@ from pathlib import Path
 
 from .config import STATE_DIR, ContainersConfig, FleetConfig, ensure_state_dir
 from .lifecycle import inspect_container
+from .private_state import (
+    ensure_private_dir,
+    fsync_directory,
+    write_json_exclusive,
+)
 from .rescue_protocol import (
     RescueError,
     _inventory_root,
@@ -44,6 +49,7 @@ _SESSION_RE = re.compile(
     re.IGNORECASE,
 )
 _SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+_MALFORMED_PIN_MAX_AGE = 3600.0
 
 
 @dataclass
@@ -79,25 +85,11 @@ def container_generation(inspected: dict) -> str:
 
 
 def _fsync_dir(path: Path) -> None:
-    try:
-        fd = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(fd)
-    except OSError:
-        pass
-    finally:
-        os.close(fd)
+    fsync_directory(path)
 
 
 def _write_json_fsynced(path: Path, payload: dict) -> None:
-    with path.open("x", encoding="utf-8", newline="\n") as stream:
-        json.dump(payload, stream, indent=2, sort_keys=True)
-        stream.write("\n")
-        stream.flush()
-        os.fsync(stream.fileno())
-    os.chmod(path, 0o600)
+    write_json_exclusive(path, payload, indent=2, sort_keys=True)
 
 
 @contextmanager
@@ -208,12 +200,29 @@ def _publish_status(base: Path, payload: dict) -> None:
 
 def _capture_pinned(capture: Path) -> bool:
     pinned = False
+    for temp_pin in capture.glob("..pin-*.tmp"):
+        try:
+            expired = time.time() - temp_pin.stat().st_mtime > _MALFORMED_PIN_MAX_AGE
+        except OSError:
+            expired = False
+        if expired:
+            temp_pin.unlink(missing_ok=True)
     for pin_path in capture.glob(".pin-*.json"):
         try:
             payload = json.loads(pin_path.read_text(encoding="utf-8"))
             expires_at = float(payload["expires_at"])
             token = str(payload["token"])
         except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+            try:
+                expired = (
+                    time.time() - pin_path.stat().st_mtime
+                    > _MALFORMED_PIN_MAX_AGE
+                )
+            except OSError:
+                expired = False
+            if expired:
+                pin_path.unlink(missing_ok=True)
+                continue
             return True
         if not token or expires_at > time.time():
             pinned = True
@@ -383,11 +392,9 @@ def capture_restricted_sessions(
         raise RescueError("session evidence rescue is restricted-fleet only")
     config.rescue.validate()
     ensure_state_dir()
-    RESCUE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(RESCUE_ROOT, 0o700)
+    ensure_private_dir(RESCUE_ROOT)
     base = _capture_base(container)
-    base.mkdir(parents=True, exist_ok=True, mode=0o700)
-    os.chmod(base, 0o700)
+    ensure_private_dir(base)
     if deadline is None:
         deadline = time.monotonic() + config.rescue.operation_timeout_seconds
     capture_lock = RESCUE_ROOT / f".capture-{_safe_component(container)}.lock"
@@ -445,7 +452,7 @@ def _capture_locked(
     capture_id = f"{time.time_ns()}-{_safe_component(container_instance)[:16]}"
     staging = base / f".staging-{uuid.uuid4().hex}"
     final = base / capture_id
-    staging.mkdir(mode=0o700)
+    ensure_private_dir(staging)
     total_bytes = 0
     sessions: dict[str, dict] = {}
     excluded = {
@@ -474,7 +481,7 @@ def _capture_locked(
             excluded["unknown_session_entries"] += 1
 
         sessions_root = staging / "sessions"
-        sessions_root.mkdir(mode=0o700)
+        ensure_private_dir(sessions_root)
         for session_id in sorted(set(session_ids)):
             inventory = _inventory_session(
                 container_instance,
@@ -503,11 +510,11 @@ def _capture_locked(
                 and path != "checkpoints"
             )
             session_dir = sessions_root / session_id
-            session_dir.mkdir(mode=0o700)
+            ensure_private_dir(session_dir)
             member_metadata = {}
             for relative in ALLOWLISTED_MEMBERS:
                 destination = session_dir / relative
-                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                ensure_private_dir(destination.parent)
                 result = _stream_member(
                     container_instance,
                     user,
@@ -715,9 +722,9 @@ def record_telemetry_loss(
 ) -> dict:
     """Record explicit acceptance that tmpfs evidence is unavailable."""
     ensure_state_dir()
-    RESCUE_ROOT.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_private_dir(RESCUE_ROOT)
     base = _capture_base(container)
-    base.mkdir(parents=True, exist_ok=True, mode=0o700)
+    ensure_private_dir(base)
     capture_lock = RESCUE_ROOT / f".capture-{_safe_component(container)}.lock"
     with _exclusive_lock(capture_lock):
         with _exclusive_lock(RESCUE_ROOT / ".retention.lock"):

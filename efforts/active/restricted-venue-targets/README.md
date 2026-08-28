@@ -452,3 +452,18 @@ key and relay projection; restricted venues never enter that path.
   concurrently drained, bounded diagnostic channel. Pipe-filling diagnostics
   can no longer deadlock stdout rescue; deadline or diagnostic overflow
   terminates the helper with bounded useful context.
+- Updated advisory review closed owner-permission gaps: mutable provider state
+  repairs existing directory mode to owner-only, coordination/rescue/relay
+  secret JSON is created through owner-only atomic temporaries, and final modes
+  are enforced and verified where POSIX permissions are meaningful.
+- Permission follow-up made enforcement backing-filesystem-aware: native POSIX
+  filesystems still require exact `0700`/`0600`, while detected DrvFS/9p/FUSE/
+  ACL-backed shared state applies chmod best-effort and relies on the platform
+  ACL rather than failing every operation. The shared atomic JSON primitive now
+  fsyncs the containing directory after replace for crash-durable lease,
+  admission, hold, rescue, and relay-token publication.
+- Crash/permission review extended the same backing-aware mode repair to legacy
+  and relocated relay-token stores before read/reuse, removed direct rescue
+  chmod calls, and made lifecycle-pin publication complete-before-visible with
+  atomic no-clobber semantics. Malformed/truncated pin remnants remain
+  fail-closed briefly, then expire so retention cannot be wedged permanently.
