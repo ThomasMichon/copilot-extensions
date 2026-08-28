@@ -1606,6 +1606,8 @@ def _validate_snapshot_provenance(
     expected_plugin_id: str,
     snapshot_id: str,
     require_current_receipts: bool,
+    expected_payload_root: str | os.PathLike[str] | None = None,
+    expected_payload_version: str | None = None,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -1614,6 +1616,15 @@ def _validate_snapshot_provenance(
     _validate_marketplace_id(expected_marketplace_id)
     _assert_plugin_id(expected_plugin_id)
     _assert_snapshot_id(snapshot_id)
+    if expected_payload_root is not None and not _path_is_fully_qualified(
+        expected_payload_root
+    ):
+        _fail("Expected snapshot payload root must be absolute.")
+    if expected_payload_version is not None and (
+        not isinstance(expected_payload_version, str)
+        or not expected_payload_version.strip()
+    ):
+        _fail("Expected snapshot payload version must be a non-empty string.")
     caller_environment = environment if environment is not None else os.environ
     if durable_home is not None and not _path_is_fully_qualified(durable_home):
         _fail("--durable-home must be absolute.")
@@ -1778,6 +1789,22 @@ def _validate_snapshot_provenance(
         if not _path_is_fully_qualified(origin_receipt):
             _fail("Snapshot provenance payload.originReceipt must be absolute.")
         recorded_payload["originReceipt"] = str(canonical_path(origin_receipt))
+    if expected_payload_root is not None and not paths_equal(
+        recorded_payload["root"],
+        expected_payload_root,
+    ):
+        _fail(
+            f"Expected snapshot payload root '{expected_payload_root}', provenance "
+            f"names '{recorded_payload['root']}'."
+        )
+    if (
+        expected_payload_version is not None
+        and recorded_payload["version"] != expected_payload_version
+    ):
+        _fail(
+            f"Expected snapshot payload version '{expected_payload_version}', "
+            f"provenance names '{recorded_payload['version']}'."
+        )
     current_payload = _payload_identity_from_install(validated["installReceipt"])
     if require_current_receipts and recorded_payload != current_payload:
         _fail("Snapshot provenance payload does not match the pinned install receipt.")
@@ -1810,6 +1837,8 @@ def validate_snapshot_provenance(
     expected_marketplace_id: str,
     expected_plugin_id: str,
     snapshot_id: str,
+    expected_payload_root: str | os.PathLike[str] | None = None,
+    expected_payload_version: str | None = None,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -1820,6 +1849,8 @@ def validate_snapshot_provenance(
         expected_marketplace_id=expected_marketplace_id,
         expected_plugin_id=expected_plugin_id,
         snapshot_id=snapshot_id,
+        expected_payload_root=expected_payload_root,
+        expected_payload_version=expected_payload_version,
         durable_home=durable_home,
         environment=environment,
         require_current_receipts=True,
@@ -2215,6 +2246,8 @@ def validate_runtime_slot_ownership(
     expected_plugin_id: str,
     snapshot_id: str,
     runtime_version: str,
+    expected_payload_root: str | os.PathLike[str] | None = None,
+    expected_payload_version: str | None = None,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -2247,6 +2280,8 @@ def validate_runtime_slot_ownership(
         expected_marketplace_id=expected_marketplace_id,
         expected_plugin_id=expected_plugin_id,
         snapshot_id=snapshot_id,
+        expected_payload_root=expected_payload_root,
+        expected_payload_version=expected_payload_version,
         durable_home=durable,
         environment={},
         require_current_receipts=False,
@@ -2265,6 +2300,8 @@ def provision_runtime_slot(
     expected_plugin_id: str,
     snapshot_id: str,
     runtime_version: str,
+    expected_payload_root: str | os.PathLike[str] | None = None,
+    expected_payload_version: str | None = None,
     durable_home: str | os.PathLike[str] | None = None,
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -2328,6 +2365,8 @@ def provision_runtime_slot(
                 expected_marketplace_id=expected_marketplace_id,
                 expected_plugin_id=expected_plugin_id,
                 snapshot_id=snapshot_id,
+                expected_payload_root=expected_payload_root,
+                expected_payload_version=expected_payload_version,
                 durable_home=durable,
                 environment={},
                 require_current_receipts=False,
@@ -2341,13 +2380,16 @@ def provision_runtime_slot(
             result["reason"] = "runtime-slot-ownership-current"
             result["slotChanged"] = False
             return result
-        snapshot = validate_snapshot_provenance(
+        snapshot = _validate_snapshot_provenance(
             context=context_path,
             expected_marketplace_id=expected_marketplace_id,
             expected_plugin_id=expected_plugin_id,
             snapshot_id=snapshot_id,
+            expected_payload_root=expected_payload_root,
+            expected_payload_version=expected_payload_version,
             durable_home=durable,
             environment={},
+            require_current_receipts=True,
         )
         try:
             versions_root.mkdir(parents=True, exist_ok=True)
@@ -4002,6 +4044,8 @@ def _build_parser() -> argparse.ArgumentParser:
     slot_provision_parser.add_argument("--expected-plugin-id", required=True)
     slot_provision_parser.add_argument("--snapshot-id", required=True)
     slot_provision_parser.add_argument("--runtime-version", required=True)
+    slot_provision_parser.add_argument("--expected-payload-root")
+    slot_provision_parser.add_argument("--expected-payload-version")
     slot_provision_parser.add_argument("--durable-home")
 
     slot_validate_parser = subparsers.add_parser("slot-validate")
@@ -4010,6 +4054,8 @@ def _build_parser() -> argparse.ArgumentParser:
     slot_validate_parser.add_argument("--expected-plugin-id", required=True)
     slot_validate_parser.add_argument("--snapshot-id", required=True)
     slot_validate_parser.add_argument("--runtime-version", required=True)
+    slot_validate_parser.add_argument("--expected-payload-root")
+    slot_validate_parser.add_argument("--expected-payload-version")
     slot_validate_parser.add_argument("--durable-home")
 
     status_parser = subparsers.add_parser("status")
@@ -4128,6 +4174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_plugin_id=arguments.expected_plugin_id,
                 snapshot_id=arguments.snapshot_id,
                 runtime_version=arguments.runtime_version,
+                expected_payload_root=arguments.expected_payload_root,
+                expected_payload_version=arguments.expected_payload_version,
                 durable_home=arguments.durable_home,
             )
         elif arguments.action == "slot-validate":
@@ -4137,6 +4185,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_plugin_id=arguments.expected_plugin_id,
                 snapshot_id=arguments.snapshot_id,
                 runtime_version=arguments.runtime_version,
+                expected_payload_root=arguments.expected_payload_root,
+                expected_payload_version=arguments.expected_payload_version,
                 durable_home=arguments.durable_home,
             )
         else:

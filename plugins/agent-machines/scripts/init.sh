@@ -19,6 +19,9 @@ _step() { printf '  ...    %s\n' "$1"; }
 
 FORCE=0
 INSTALL_DIR=""
+CONTEXT=""
+EXPECTED_MARKETPLACE_ID=""
+DURABLE_HOME=""
 ORIGINAL_ARGS=("$@")
 # Honor an inherited action: the install-contract:v4 self-stage below re-execs
 # this script with an already-shifted (empty) "$@", so a positional action would
@@ -28,7 +31,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --force) FORCE=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
-        stamp|provision|init) ACTION="$1"; shift ;;
+        --context) CONTEXT="${2:-}"; shift 2 ;;
+        --expected-marketplace-id) EXPECTED_MARKETPLACE_ID="${2:-}"; shift 2 ;;
+        --durable-home) DURABLE_HOME="${2:-}"; shift 2 ;;
+        stamp|provision|init|slot-provision|slot-validate) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -37,25 +43,39 @@ export AGENT_MACHINES_ACTION="$ACTION"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Refuse every legacy mutation before self-staging creates or removes files.
-LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
-if [[ ! -f "$LEGACY_PROBE" ]]; then
-    _fail 'Legacy mutation probe is unavailable'
-    exit 1
-fi
-set +e
-LEGACY_ROOT="${INSTALL_DIR:-$HOME/.agent-machines}"
-if [[ "$LEGACY_ROOT" != /* ]]; then
-    LEGACY_ROOT="$PWD/$LEGACY_ROOT"
-fi
-bash "$LEGACY_PROBE" --payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
-    --legacy-root "$LEGACY_ROOT"
-LEGACY_PROBE_STATUS=$?
-set -e
-if [[ "$LEGACY_PROBE_STATUS" -ne 0 ]]; then
-    exit "$LEGACY_PROBE_STATUS"
+# Cell-local slot actions authorize themselves from the explicit context
+# transaction below. Every legacy mutation still requires the legacy probe.
+if [[ "$ACTION" != "slot-provision" && "$ACTION" != "slot-validate" ]]; then
+    LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
+    if [[ ! -f "$LEGACY_PROBE" ]]; then
+        _fail 'Legacy mutation probe is unavailable'
+        exit 1
+    fi
+    set +e
+    LEGACY_ROOT="${INSTALL_DIR:-$HOME/.agent-machines}"
+    if [[ "$LEGACY_ROOT" != /* ]]; then
+        LEGACY_ROOT="$PWD/$LEGACY_ROOT"
+    fi
+    bash "$LEGACY_PROBE" --payload-root "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" \
+        --legacy-root "$LEGACY_ROOT"
+    LEGACY_PROBE_STATUS=$?
+    set -e
+    if [[ "$LEGACY_PROBE_STATUS" -ne 0 ]]; then
+        exit "$LEGACY_PROBE_STATUS"
+    fi
 fi
 set -- "${ORIGINAL_ARGS[@]}"
+
+# The dependency-light cell-slot runner does not need the legacy installer's
+# payload self-stage, whose staging root is itself legacy state.
+__cell_slot_direct=0
+if [[ "$ACTION" == "slot-provision" || "$ACTION" == "slot-validate" ]]; then
+    cd "$HOME"
+    if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+        export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
+        __cell_slot_direct=1
+    fi
+fi
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -153,6 +173,9 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
     esac
 fi
 # === end install-contract:v4 self-stage ===
+if [[ "$__cell_slot_direct" -eq 1 ]]; then
+    unset COPILOT_PLUGIN_INSTALL_STAGED
+fi
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -222,6 +245,36 @@ fi
 VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
+
+if [[ "$ACTION" == "slot-provision" || "$ACTION" == "slot-validate" ]]; then
+    [[ -n "$CONTEXT" ]] || {
+        _fail "$ACTION requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+        _fail "$ACTION requires --expected-marketplace-id"
+        exit 2
+    }
+    SLOT_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
+    [[ -f "$SLOT_RUNNER" ]] || {
+        _fail 'Installation-context runner is unavailable'
+        exit 1
+    }
+    SLOT_ARGS=(
+        "$ACTION"
+        --context "$CONTEXT"
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
+        --expected-plugin-id agent-machines
+        --expected-payload-root "$PLUGIN_DIR"
+        --expected-payload-version "$SRC_VERSION"
+        --snapshot-id "$SRC_VERSION"
+        --runtime-version "$SRC_VERSION"
+    )
+    if [[ -n "$DURABLE_HOME" ]]; then
+        SLOT_ARGS+=(--durable-home "$DURABLE_HOME")
+    fi
+    exec bash "$SLOT_RUNNER" "${SLOT_ARGS[@]}"
+fi
 
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot

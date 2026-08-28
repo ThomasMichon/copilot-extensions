@@ -55,6 +55,23 @@ scripts/init.sh stamp       # Linux / WSL / macOS: install binstub only
 scripts/init.sh             # Linux / WSL / macOS: build/update the runtime now
 ```
 
+The installer also exposes an explicit, non-activating adapter for a
+pre-stamped installation-context snapshot:
+
+```powershell
+scripts\init.ps1 -Action slot-provision -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id>
+scripts\init.ps1 -Action slot-validate -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id>
+```
+
+```bash
+scripts/init.sh slot-provision --context /path/to/install.json --expected-marketplace-id <marketplace-id>
+scripts/init.sh slot-validate --context /path/to/install.json --expected-marketplace-id <marketplace-id>
+```
+
+These actions only reserve or validate the current plugin version's empty,
+owned cell-local slot. They do not build it, switch the normal legacy install
+path, migrate legacy state, or write current/LKG/activation state.
+
 Verify:
 
 ```bash

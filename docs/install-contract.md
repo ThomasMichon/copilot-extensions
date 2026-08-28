@@ -231,10 +231,17 @@ seconds.
 
 The `slot-provision` / `slot-validate` primitive is available from the Python,
 dependency-light Bash, and PowerShell installation-context runners with
-cross-runner fixture coverage. It still has no automatic caller: bootstrap or
-installer adoption is a separate explicit lifecycle slice. Every runner
-preserves exclusive no-clobber reservation and fail-closed validation while
-using the platform-appropriate publication primitive described above.
+cross-runner fixture coverage. Agent Machines and Agent Index expose explicit
+installer adapter actions that supply their own plugin id, exact payload root,
+and payload version; the caller must still provide the context receipt and
+expected marketplace id. The slot transaction validates those expectations
+against immutable snapshot provenance under the same receipt locks before
+publication or reuse. The adapters derive the payload root from their executing
+plugin payload and do not accept ambient self-stage metadata as an identity
+override. These actions bypass the legacy mutation path and do not
+make normal install or bootstrap context-aware. Every runner preserves
+exclusive no-clobber reservation and fail-closed validation while using the
+platform-appropriate publication primitive described above.
 
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.

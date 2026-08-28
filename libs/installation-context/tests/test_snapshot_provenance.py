@@ -68,6 +68,9 @@ def _receipt_layout(
     *,
     vector_index: int = 0,
     plugin_id: str = "agent-example",
+    payload_version: str = "1.0.0",
+    snapshot_id: str = "1.0.0",
+    payload_root: Path | None = None,
 ) -> dict[str, Path | str]:
     vector = _vectors()[vector_index]
     normalized = vector["normalized"]
@@ -76,9 +79,10 @@ def _receipt_layout(
     durable = tmp_path / "durable"
     cell = durable / "marketplaces" / marketplace_id
     plugin_root = cell / "plugins" / plugin_id
-    payload = tmp_path / f"payload-{vector_index}-{plugin_id}"
-    payload.mkdir(parents=True)
-    (payload / "content.txt").write_text("original\n", encoding="utf-8")
+    payload = payload_root or tmp_path / f"payload-{vector_index}-{plugin_id}"
+    if payload_root is None:
+        payload.mkdir(parents=True)
+        (payload / "content.txt").write_text("original\n", encoding="utf-8")
     plugin_root.mkdir(parents=True)
     namespace = cell / "namespace.json"
     install = plugin_root / "install.json"
@@ -111,7 +115,7 @@ def _receipt_layout(
             "namespaceReceipt": str(namespace.resolve()),
             "payload": {
                 "root": str(payload.resolve()),
-                "version": "1.0.0",
+                "version": payload_version,
                 "origin": "explicit",
             },
             "roots": {
@@ -127,7 +131,7 @@ def _receipt_layout(
             "state": "active",
         },
     )
-    snapshot_root = plugin_root / "snapshots" / "1.0.0"
+    snapshot_root = plugin_root / "snapshots" / snapshot_id
     snapshot_root.mkdir(parents=True)
     (snapshot_root / "payload-content.txt").write_text(
         "materialized snapshot\n",
@@ -162,6 +166,8 @@ def _command(
     runtime_version: str = "3.4.5",
     expected_namespace_generation: int | str = 1,
     expected_install_generation: int | str = 2,
+    expected_payload_root: Path | None = None,
+    expected_payload_version: str | None = None,
 ) -> list[str]:
     _, prefix, style = runner
     command = [
@@ -194,6 +200,20 @@ def _command(
                 runtime_version,
             ]
         )
+        if expected_payload_root is not None:
+            command.extend(
+                [
+                    _flag(style, "expected-payload-root"),
+                    str(expected_payload_root),
+                ]
+            )
+        if expected_payload_version is not None:
+            command.extend(
+                [
+                    _flag(style, "expected-payload-version"),
+                    expected_payload_version,
+                ]
+            )
     return command
 
 
@@ -206,6 +226,8 @@ def _run(
     runtime_version: str = "3.4.5",
     expected_namespace_generation: int | str = 1,
     expected_install_generation: int | str = 2,
+    expected_payload_root: Path | None = None,
+    expected_payload_version: str | None = None,
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
@@ -223,6 +245,8 @@ def _run(
             runtime_version=runtime_version,
             expected_namespace_generation=expected_namespace_generation,
             expected_install_generation=expected_install_generation,
+            expected_payload_root=expected_payload_root,
+            expected_payload_version=expected_payload_version,
         ),
         capture_output=True,
         text=True,
@@ -244,6 +268,8 @@ def _run_slot(
     layout: dict[str, Path | str],
     *,
     runtime_version: str = "3.4.5",
+    expected_payload_root: Path | None = None,
+    expected_payload_version: str | None = None,
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
@@ -252,6 +278,8 @@ def _run_slot(
         action,
         layout,
         runtime_version=runtime_version,
+        expected_payload_root=expected_payload_root,
+        expected_payload_version=expected_payload_version,
         environment_overrides=environment_overrides,
         check=check,
     )
@@ -332,6 +360,395 @@ def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes]]:
         else:
             snapshot[relative] = ("other", b"")
     return snapshot
+
+
+def _legacy_footprint_snapshot(
+    plugin_root: Path,
+    home: Path,
+) -> dict[str, tuple[str, object]]:
+    manifest = json.loads(
+        (plugin_root / "payload-invocation.json").read_text(encoding="utf-8")
+    )
+    snapshot: dict[str, tuple[str, object]] = {}
+    for relative in manifest["installation"]["legacyFootprint"]["paths"]:
+        path = home / relative
+        if path.is_dir():
+            snapshot[relative] = ("directory", _tree_snapshot(path))
+        elif path.is_file():
+            snapshot[relative] = ("file", path.read_bytes())
+        elif path.exists() or path.is_symlink():
+            snapshot[relative] = ("other", b"")
+        else:
+            snapshot[relative] = ("missing", b"")
+    return snapshot
+
+
+EXEMPLAR_INSTALLERS = (
+    (
+        "agent-machines",
+        (
+            "bash",
+            str(LIB.parents[1] / "plugins" / "agent-machines" / "scripts" / "init.sh"),
+        ),
+        "long",
+    ),
+    (
+        "agent-index",
+        (
+            "bash",
+            str(LIB.parents[1] / "plugins" / "agent-index" / "scripts" / "install.sh"),
+        ),
+        "long",
+    ),
+    *(
+        (
+            (
+                "agent-machines",
+                (
+                    str(POWERSHELL),
+                    "-NoProfile",
+                    "-File",
+                    str(LIB.parents[1] / "plugins" / "agent-machines" / "scripts" / "init.ps1"),
+                ),
+                "powershell",
+            ),
+            (
+                "agent-index",
+                (
+                    str(POWERSHELL),
+                    "-NoProfile",
+                    "-File",
+                    str(LIB.parents[1] / "plugins" / "agent-index" / "scripts" / "install.ps1"),
+                ),
+                "powershell",
+            ),
+        )
+        if POWERSHELL is not None
+        else ()
+    ),
+)
+
+
+def _run_exemplar_slot_action(
+    exemplar: tuple[str, tuple[str, ...], str],
+    action: str,
+    layout: dict[str, Path | str],
+    tmp_path: Path,
+    *,
+    include_context: bool = True,
+    environment_overrides: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    _, prefix, style = exemplar
+    command_prefix, installed_plugin, home = _installed_exemplar(exemplar, tmp_path)
+    environment = os.environ.copy()
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    if environment_overrides:
+        environment.update(environment_overrides)
+    command = [*command_prefix]
+    if style == "powershell":
+        command.extend(["-Action", action])
+    else:
+        command.append(action)
+    if include_context:
+        command.extend(
+            [
+                _flag(style, "context"),
+                str(layout["install"]),
+            ]
+        )
+    command.extend(
+        [
+            _flag(style, "expected-marketplace-id"),
+            str(layout["marketplace_id"]),
+            _flag(style, "durable-home"),
+            str(layout["durable"]),
+        ]
+    )
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        cwd=installed_plugin,
+        check=False,
+    )
+
+
+def _installed_exemplar(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> tuple[tuple[str, ...], Path, Path]:
+    _, prefix, _ = exemplar
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    source_script = Path(prefix[-1])
+    source_plugin = source_script.parents[1]
+    installed_plugin = (
+        home / ".copilot" / "installed-plugins" / "example--0123456789abcdef" / source_plugin.name
+    )
+    if not installed_plugin.exists():
+        shutil.copytree(source_plugin, installed_plugin)
+    installed_script = installed_plugin / source_script.relative_to(source_plugin)
+    return (*prefix[:-1], str(installed_script)), installed_plugin, home
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+def test_exemplar_slot_actions_delegate_without_legacy_or_activation_mutation(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, _ = exemplar
+    plugin_root = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (plugin_root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    _stamp_with_python(layout, snapshot_id=version)
+    legacy_before = _legacy_footprint_snapshot(
+        installed_plugin,
+        tmp_path / "home",
+    )
+
+    provisioned = _run_exemplar_slot_action(
+        exemplar,
+        "slot-provision",
+        layout,
+        tmp_path,
+    )
+    assert provisioned.returncode == 0, provisioned.stderr
+    result = json.loads(provisioned.stdout)
+    plugin_root = Path(layout["plugin_root"])
+    assert result["action"] == "slot-provision"
+    assert Path(result["slotRoot"]) == plugin_root / "versions" / version
+    assert result["activated"] is False
+    assert result["operative"] is False
+    assert not (tmp_path / "home" / f".{plugin_id}").exists()
+    assert not (plugin_root / "current-version").exists()
+    assert not (plugin_root / "last-known-good").exists()
+    assert not (plugin_root / "installation-activation.json").exists()
+
+    validated = _run_exemplar_slot_action(
+        exemplar,
+        "slot-validate",
+        layout,
+        tmp_path,
+    )
+    assert validated.returncode == 0, validated.stderr
+    assert json.loads(validated.stdout)["reason"] == "runtime-slot-ownership-valid"
+    assert (
+        _legacy_footprint_snapshot(installed_plugin, tmp_path / "home")
+        == legacy_before
+    )
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    _, _, style = exemplar
+    _, installed_plugin, home = _installed_exemplar(exemplar, tmp_path)
+    runner = installed_plugin / "scripts" / "installation-context"
+    if style == "powershell":
+        probe = runner / "installation-context.ps1"
+        probe.write_text(
+            """param(
+    [Parameter(Mandatory = $true, Position = 0)][string]$Action,
+    [string]$Context,
+    [string]$ExpectedMarketplaceId,
+    [string]$ExpectedPluginId,
+    [string]$ExpectedPayloadRoot,
+    [string]$ExpectedPayloadVersion,
+    [string]$SnapshotId,
+    [string]$RuntimeVersion,
+    [string]$DurableHome
+)
+@{
+    provider = (Get-Location).Path
+    process = [IO.Directory]::GetCurrentDirectory()
+} | ConvertTo-Json -Compress
+""",
+            encoding="utf-8",
+        )
+    else:
+        probe = runner / "installation-context.sh"
+        probe.write_text(
+            '#!/usr/bin/env bash\nprintf \'{"cwd":"%s"}\\n\' "$PWD"\n',
+            encoding="utf-8",
+        )
+        probe.chmod(0o755)
+    layout = _receipt_layout(tmp_path)
+
+    result = _run_exemplar_slot_action(
+        exemplar,
+        "slot-provision",
+        layout,
+        tmp_path,
+        environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    cwd = json.loads(result.stdout)
+    if style == "powershell":
+        assert Path(cwd["provider"]) == home
+        assert Path(cwd["process"]) == home
+    else:
+        assert Path(cwd["cwd"]) == home
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+def test_exemplar_slot_actions_do_not_adopt_ambient_context(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, _ = exemplar
+    plugin_root = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (plugin_root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    _stamp_with_python(layout, snapshot_id=version)
+
+    result = _run_exemplar_slot_action(
+        exemplar,
+        "slot-provision",
+        layout,
+        tmp_path,
+        include_context=False,
+        environment_overrides={
+            "COPILOT_EXTENSIONS_CONTEXT": str(layout["install"]),
+        },
+    )
+
+    assert result.returncode == 2
+    assert "ambient COPILOT_EXTENSIONS_CONTEXT is not authorization" in (
+        result.stdout + result.stderr
+    )
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+@pytest.mark.parametrize("mismatch", ("root", "version"))
+def test_exemplar_slot_actions_reject_foreign_snapshot_payload(
+    exemplar: tuple[str, tuple[str, ...], str],
+    mismatch: str,
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, _ = exemplar
+    source_plugin = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (source_plugin / "pyproject.toml")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    foreign_payload = tmp_path / "foreign-payload"
+    foreign_payload.mkdir()
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version="9.9.9" if mismatch == "version" else version,
+        snapshot_id=version,
+        payload_root=foreign_payload if mismatch == "root" else installed_plugin,
+    )
+    _stamp_with_python(layout, snapshot_id=version)
+
+    result = _run_exemplar_slot_action(
+        exemplar,
+        "slot-provision",
+        layout,
+        tmp_path,
+    )
+
+    assert result.returncode != 0
+    assert f"Expected snapshot payload {mismatch}" in result.stderr
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+def test_exemplar_slot_actions_reject_spoofed_staging_payload_identity(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, _ = exemplar
+    source_plugin = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (source_plugin / "pyproject.toml")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.startswith("version = ")
+    )
+    _, _, _ = _installed_exemplar(exemplar, tmp_path)
+    foreign_payload = tmp_path / "foreign-payload"
+    foreign_payload.mkdir()
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=foreign_payload,
+    )
+    _stamp_with_python(layout, snapshot_id=version)
+
+    result = _run_exemplar_slot_action(
+        exemplar,
+        "slot-provision",
+        layout,
+        tmp_path,
+        environment_overrides={
+            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+            "COPILOT_PLUGIN_STAGED_FROM": str(foreign_payload),
+        },
+    )
+
+    assert result.returncode != 0
+    assert "Expected snapshot payload root" in result.stderr
+    assert not (Path(layout["plugin_root"]) / "versions").exists()
 
 
 @pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
@@ -951,6 +1368,133 @@ def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
     assert validated["reason"] == "runtime-slot-ownership-valid"
     assert marker.read_bytes() == marker_bytes
     assert all(not path.exists() for path in activation_paths)
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_actions_bind_expected_snapshot_payload_identity(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    expected_root = Path(layout["payload"])
+
+    result = json.loads(
+        _run_slot(
+            runner,
+            "slot-provision",
+            layout,
+            expected_payload_root=expected_root,
+            expected_payload_version="1.0.0",
+        ).stdout
+    )
+    assert result["slotChanged"] is True
+    reused = json.loads(
+        _run_slot(
+            runner,
+            "slot-provision",
+            layout,
+            expected_payload_root=expected_root,
+            expected_payload_version="1.0.0",
+        ).stdout
+    )
+    assert reused["slotChanged"] is False
+
+    foreign_root = tmp_path / "foreign-payload"
+    foreign_root.mkdir()
+    wrong_root = _run_slot(
+        runner,
+        "slot-provision",
+        layout,
+        expected_payload_root=foreign_root,
+        expected_payload_version="1.0.0",
+        check=False,
+    )
+    assert wrong_root.returncode != 0
+    assert "Expected snapshot payload root" in wrong_root.stderr
+
+    wrong_version = _run_slot(
+        runner,
+        "slot-validate",
+        layout,
+        expected_payload_root=expected_root,
+        expected_payload_version="9.9.9",
+        check=False,
+    )
+    assert wrong_version.returncode != 0
+    assert "Expected snapshot payload version" in wrong_version.stderr
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    ("flag_name", "message"),
+    (
+        ("expected-payload-root", "Expected snapshot payload root must be absolute"),
+        (
+            "expected-payload-version",
+            "Expected snapshot payload version must be a non-empty string",
+        ),
+    ),
+)
+@pytest.mark.parametrize("empty_value", ("", "   "), ids=("empty", "whitespace"))
+def test_slot_actions_reject_explicit_empty_payload_expectations(
+    runner: Runner,
+    flag_name: str,
+    message: str,
+    empty_value: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    _, prefix, style = runner
+    command = _command(runner, "slot-provision", layout)
+    command.extend([_flag(style, flag_name), empty_value])
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    "flag_name",
+    ("expected-payload-root", "expected-payload-version"),
+)
+def test_non_slot_actions_reject_payload_expectation(
+    runner: Runner,
+    flag_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    _, _, style = runner
+    command = _command(runner, "snapshot-validate", layout)
+    command.extend([_flag(style, flag_name), "1.0.0"])
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        check=False,
+    )
+
+    assert result.returncode != 0
 
 
 def test_python_slot_provision_rejects_stale_snapshot_before_creating_slot(
@@ -1961,10 +2505,7 @@ def test_concurrent_snapshot_publication_has_one_atomic_winner_and_retry(
         )
         for _ in range(2)
     ]
-    results = [
-        (*process.communicate(timeout=30), process.returncode)
-        for process in processes
-    ]
+    results = [(*process.communicate(timeout=30), process.returncode) for process in processes]
     payloads: list[dict[str, object]] = []
     for stdout, stderr, returncode in results:
         if returncode == 0:

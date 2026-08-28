@@ -166,6 +166,11 @@ reachable when their ownership is explicit.
       generation-pinned runtime-slot ownership.
     - [x] Add dependency-light Bash and PowerShell parity before installer or
       bootstrap adoption.
+    - [x] Add explicit non-activating Agent Machines and Agent Index installer
+      adapters that require a caller-supplied context and marketplace id,
+      bind snapshot provenance to the exact installer payload root/version,
+      bypass legacy mutation, and reserve or validate only the payload version's
+      empty owned slot.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
   simultaneous marketplace cells before broad rollout.
 
@@ -670,3 +675,22 @@ See [`design.md`](design.md).
   provenance bytes, aligned the Python slot lock wait with the dependency-light
   runners, rejected Windows drive-relative ownership paths, and added full
   producer/consumer interoperability coverage.
+
+### 2026-08-28 — Explicit exemplar slot adapters
+
+- Added matching POSIX and PowerShell `slot-provision` / `slot-validate`
+  installer actions to Agent Machines and Agent Index.
+- Each adapter requires an explicit context receipt and expected marketplace
+  id, supplies its fixed plugin id plus exact payload root and version, and
+  delegates to the vendored parity-proven installation-context runner. The
+  shared transaction rejects a foreign snapshot payload under the same receipt
+  locks. Ambient context and self-stage metadata cannot authorize the action or
+  override the executing payload identity.
+- The actions bypass both the legacy mutation probe and legacy-root self-stage;
+  executable tests invoke them from installed-plugin-shaped paths and prove
+  they release the installed-payload CWD even when a staging sentinel is
+  inherited and create no legacy root, current/LKG marker, activation receipt,
+  payload, or service state.
+- Normal stamp, provision, install, bootstrap, and service behavior remains
+  legacy and unchanged. Build completion, operative cutover, rollback,
+  repair/release, uninstall, and dual-cell proof remain separate slices.

@@ -33,7 +33,9 @@ for ((__legacy_i = 1; __legacy_i < ${#__legacy_args[@]}; __legacy_i++)); do
         __legacy_install_dir="${__legacy_args[$((__legacy_i + 1))]}"
     fi
 done
-if [[ "$__legacy_action" != status ]]; then
+if [[ "$__legacy_action" != status &&
+      "$__legacy_action" != slot-provision &&
+      "$__legacy_action" != slot-validate ]]; then
     LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
     if [[ ! -f "$LEGACY_PROBE" ]]; then
         _fail 'Legacy mutation probe is unavailable'
@@ -53,12 +55,23 @@ if [[ "$__legacy_action" != status ]]; then
     fi
 fi
 
-# Status is read-only, so do not enter the self-stage block that creates and
-# reaps legacy staging directories.
-__legacy_read_only_status=0
-if [[ "$__legacy_action" == status && -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
-    export COPILOT_PLUGIN_INSTALL_STAGED=read-only-status
-    __legacy_read_only_status=1
+# Status and dependency-light cell-slot actions do not enter the self-stage
+# block that creates and reaps legacy staging directories.
+__skip_self_stage=0
+if [[ "$__legacy_action" == slot-provision ||
+      "$__legacy_action" == slot-validate ]]; then
+    cd "$HOME"
+fi
+if [[ ("$__legacy_action" == status ||
+       "$__legacy_action" == slot-provision ||
+       "$__legacy_action" == slot-validate) &&
+      -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
+    if [[ "$__legacy_action" == status ]]; then
+        export COPILOT_PLUGIN_INSTALL_STAGED=read-only-status
+    else
+        export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
+    fi
+    __skip_self_stage=1
 fi
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
@@ -157,7 +170,7 @@ if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
     esac
 fi
 # === end install-contract:v4 self-stage ===
-if [[ "$__legacy_read_only_status" -eq 1 ]]; then
+if [[ "$__skip_self_stage" -eq 1 ]]; then
     unset COPILOT_PLUGIN_INSTALL_STAGED
 fi
 
@@ -206,6 +219,9 @@ shift || true
 NO_SERVICE=0
 PURGE=0
 INSTALL_DIR=""
+CONTEXT=""
+EXPECTED_MARKETPLACE_ID=""
+DURABLE_HOME=""
 FORCE="${AGENT_INDEX_ALLOW_DOWNGRADE:-0}"
 [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
 while [[ $# -gt 0 ]]; do
@@ -214,6 +230,9 @@ while [[ $# -gt 0 ]]; do
         --purge) PURGE=1; shift ;;
         --force) FORCE=1; shift ;;
         --install-dir) INSTALL_DIR="$2"; shift 2 ;;
+        --context) CONTEXT="${2:-}"; shift 2 ;;
+        --expected-marketplace-id) EXPECTED_MARKETPLACE_ID="${2:-}"; shift 2 ;;
+        --durable-home) DURABLE_HOME="${2:-}"; shift 2 ;;
         *) shift ;;
     esac
 done
@@ -268,6 +287,36 @@ VENV_PYTHON="$VENV_DIR/bin/python"
 # created). LINK_DIR is kept ONLY to derive `--link-name` so activate/gc can still
 # find and REMOVE any pre-existing `.venv` link.
 LINK_PYTHON="$VENV_PYTHON"
+
+if [[ "$ACTION" == "slot-provision" || "$ACTION" == "slot-validate" ]]; then
+    [[ -n "$CONTEXT" ]] || {
+        _fail "$ACTION requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] || {
+        _fail "$ACTION requires --expected-marketplace-id"
+        exit 2
+    }
+    SLOT_RUNNER="$SCRIPT_DIR/installation-context/installation-context.sh"
+    [[ -f "$SLOT_RUNNER" ]] || {
+        _fail 'Installation-context runner is unavailable'
+        exit 1
+    }
+    SLOT_ARGS=(
+        "$ACTION"
+        --context "$CONTEXT"
+        --expected-marketplace-id "$EXPECTED_MARKETPLACE_ID"
+        --expected-plugin-id agent-index
+        --expected-payload-root "$PLUGIN_DIR"
+        --expected-payload-version "$SRC_VERSION"
+        --snapshot-id "$SRC_VERSION"
+        --runtime-version "$SRC_VERSION"
+    )
+    if [[ -n "$DURABLE_HOME" ]]; then
+        SLOT_ARGS+=(--durable-home "$DURABLE_HOME")
+    fi
+    exec bash "$SLOT_RUNNER" "${SLOT_ARGS[@]}"
+fi
 
 _versioned_activate() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
