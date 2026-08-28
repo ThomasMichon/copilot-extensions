@@ -402,15 +402,14 @@ function Test-NativeRegularFile([string] $Path) {
 
 function Read-BoundedUtf8(
     [string] $Path,
-    [int] $Limit,
-    [bool] $RejectSpecial = $false
+    [int] $Limit
 ) {
     $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
         $Item.PSIsContainer -or $Item.Length -gt $Limit) {
         throw 'not a bounded regular file'
     }
-    if ($RejectSpecial -and -not (Test-NativeRegularFile $Path)) {
+    if (-not (Test-NativeRegularFile $Path)) {
         throw 'not a regular file'
     }
     $Stream = [IO.File]::Open(
@@ -573,8 +572,7 @@ try {
     try {
         $ConfigText = Read-BoundedUtf8 `
             $ConfigPath `
-            $MaxConfigBytes `
-            $ProbeMode
+            $MaxConfigBytes
         $Config = ConvertFrom-StrictJsonObject $ConfigText
         $Properties = @($Config.PSObject.Properties.Name)
         if ($Properties.Count -ne 2 -or

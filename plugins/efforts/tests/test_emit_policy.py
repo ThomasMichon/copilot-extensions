@@ -108,6 +108,7 @@ def _run(
         input=payload.encode() if isinstance(payload, str) else payload,
         capture_output=True,
         check=True,
+        timeout=10,
     )
 
 
@@ -431,6 +432,21 @@ def test_read_only_probe_rejects_fifo_without_blocking(tmp_path: Path) -> None:
             repo,
             env_overrides=environment,
         ).stdout == b"{}"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX FIFO fixture")
+def test_session_policy_rejects_fifo_without_blocking(tmp_path: Path) -> None:
+    repo = _repo(
+        tmp_path / "repo",
+        {"version": 1, "enforcement": "required"},
+    )
+    config = repo / CONFIG
+    config.unlink()
+    os.mkfifo(config)
+    for producer in _producers():
+        result = _run(producer, repo)
+        assert result.stdout == b"{}"
+        assert result.stderr.count(b"\n") <= 1
 
 
 def test_read_only_probe_ignores_replacement_commits(tmp_path: Path) -> None:
