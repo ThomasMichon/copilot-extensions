@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import platform as platform_module
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -35,6 +38,9 @@ ADAPTER_FIXTURE = (
     "agent-dispatch",
     "agent-mcp",
     "agent-index",
+    "agent-bridge",
+    "agent-containers",
+    "agent-vault",
 )
 INSTALL_ACTIONS = {
     "agent-worktrees": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
@@ -43,8 +49,16 @@ INSTALL_ACTIONS = {
     "agent-dispatch": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
     "agent-mcp": ("scripts/init.ps1", "scripts/init.sh", ("init",)),
     "agent-index": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
+    "agent-bridge": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
+    "agent-containers": ("scripts/init.ps1", "scripts/init.sh", ("init",)),
+    "agent-vault": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
 }
 MACOS_ADAPTERS = {"agent-worktrees", "agent-machines", "agent-mcp"}
+SCRIPT_READINESS_ADAPTERS = {
+    "agent-bridge",
+    "agent-containers",
+    "agent-vault",
+}
 _SPEC = importlib.util.spec_from_file_location(
     "installer_readiness_payload_generator",
     PAYLOAD_GENERATOR,
@@ -367,7 +381,7 @@ def test_fixture_inventory_covers_every_enabled_machine_gated_plugin(tmp_path):
     assert [decline.owner.plugin_id for decline in report.declines] == ["declined"]
 
 
-def test_issue_1160_adapter_fixture_is_complete_and_attributable(tmp_path):
+def test_adapter_fixture_is_complete_and_attributable(tmp_path):
     """The setup foundation is fixture-required despite its universal scope."""
     installations = []
     for plugin in ADAPTER_FIXTURE:
@@ -386,6 +400,11 @@ def test_issue_1160_adapter_fixture_is_complete_and_attributable(tmp_path):
             target = payload / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source / relative, target)
+        if plugin in SCRIPT_READINESS_ADAPTERS:
+            for suffix in ("ps1", "sh"):
+                relative = f"scripts/installer-readiness.{suffix}"
+                target = payload / relative
+                shutil.copy2(source / relative, target)
         installations.append(_installation(payload, plugin))
 
     report = discover_modules(installations)
@@ -421,8 +440,16 @@ def test_issue_1160_adapter_fixture_is_complete_and_attributable(tmp_path):
             readiness = module.readiness[platform]
             assert installer.target == (root / expected_script).resolve()
             assert installer.arguments == arguments
-            assert readiness.command_id == plugin
-            assert readiness.arguments == ("installer-readiness",)
+            if plugin in SCRIPT_READINESS_ADAPTERS:
+                suffix = "ps1" if platform is Platform.WINDOWS else "sh"
+                assert readiness.kind == "payload-script"
+                assert readiness.target == (
+                    root / f"scripts/installer-readiness.{suffix}"
+                ).resolve()
+                assert readiness.arguments == ()
+            else:
+                assert readiness.command_id == plugin
+                assert readiness.arguments == ("installer-readiness",)
             assert readiness.target.is_relative_to(root)
         if plugin in MACOS_ADAPTERS:
             assert module.installer[Platform.MACOS].target == (
@@ -433,6 +460,73 @@ def test_issue_1160_adapter_fixture_is_complete_and_attributable(tmp_path):
                 "installer-readiness",
             )
             assert module.readiness[Platform.MACOS].target.is_relative_to(root)
+
+
+@pytest.mark.parametrize("plugin", tuple(sorted(SCRIPT_READINESS_ADAPTERS)))
+def test_self_provisioning_adapter_wrapper_is_read_only_when_runtime_absent(
+    tmp_path, plugin
+):
+    source = REPO_ROOT / "plugins" / plugin
+    environment = dict(os.environ)
+    environment["HOME"] = str(tmp_path)
+    environment["USERPROFILE"] = str(tmp_path)
+    if platform_module.system() == "Windows":
+        host = shutil.which("pwsh") or shutil.which("powershell")
+        if host is None:
+            pytest.skip("PowerShell is not installed")
+        command = [
+            host,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(source / "scripts" / "installer-readiness.ps1"),
+        ]
+    else:
+        command = [
+            "bash",
+            str(source / "scripts" / "installer-readiness.sh"),
+        ]
+
+    result = subprocess.run(
+        command,
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["state"] == "failed"
+    assert not (tmp_path / f".{plugin}").exists()
+
+
+@pytest.mark.parametrize(
+    "missing",
+    tuple(plugin for plugin in ADAPTER_FIXTURE if plugin != "agent-worktrees"),
+)
+def test_enabled_adapter_fixture_fails_when_metadata_is_missing(tmp_path, missing):
+    installations = []
+    for plugin in ADAPTER_FIXTURE:
+        source = REPO_ROOT / "plugins" / plugin
+        payload = tmp_path / plugin
+        payload.mkdir()
+        manifest = json.loads((source / "plugin.json").read_text(encoding="utf-8"))
+        if plugin == missing:
+            manifest.pop("installerReadiness")
+        _write(payload / "plugin.json", manifest)
+        installations.append(_installation(payload, plugin))
+
+    report = discover_modules(installations)
+
+    assert not report.valid
+    assert any(
+        finding.code == "missing-module-metadata"
+        and finding.owner
+        and finding.owner.endswith(f"::{missing}")
+        for finding in report.findings
+    )
 
 
 def test_malformed_universal_opt_in_is_not_machine_gated(tmp_path):
