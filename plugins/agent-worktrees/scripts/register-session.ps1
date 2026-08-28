@@ -48,7 +48,7 @@ foreach ($raw in @($catalogJson, $registrationJson)) {
     if (-not $raw) { continue }
     try {
         $value = $raw | ConvertFrom-Json
-        $context = [string]$value.additionalContext
+        $context = ([string]$value.additionalContext).Trim()
         if ($context -and -not $contexts.Contains($context)) {
             $contexts.Add($context)
         }

@@ -346,6 +346,24 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
         "additionalContext": "worktree binding"
     }
 
+    catalog.write_text(
+        "Write-Output '{\"additionalContext\":\"   \"}'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "worktree binding"
+    }
+
 
 def test_register_session_scripts_keep_catalog_and_binding_together():
     for name in ("register-session.sh", "register-session.ps1"):

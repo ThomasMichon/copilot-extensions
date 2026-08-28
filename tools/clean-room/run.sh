@@ -74,6 +74,7 @@ if [ ! -f "$SCENARIO_DIR/scenario.sh" ] && [ ! -f "$SCENARIO_DIR/setup.sh" ]; th
     echo "scenario '$SCENARIO_NAME' has neither scenario.sh (Tier-P) nor setup.sh (Tier-E)" >&2; exit 2
 fi
 LIB_DIR="$HERE/lib"
+source "$LIB_DIR/acp-command.sh"
 # Optional per-suite shared helpers: if the selected scenario's parent dir holds
 # a `_lib/`, it is mounted read-only at /home/operator/scenario-lib and exposed
 # as $CR_SCENARIO_LIB, so sibling scenarios in a suite can source shared phase
@@ -330,9 +331,17 @@ open(os.path.join(eval_dir, "literal-mode.txt"), "w", encoding="utf-8").write(li
 open(os.path.join(eval_dir, "prompt.txt"), "w", encoding="utf-8").write(full)
 prompt_hash = hashlib.sha256(full.encode("utf-8")).hexdigest()[:16]
 ev = m.get("eval") or {}
-acp_dirs = " ".join(str(d) for d in (ev.get("acp_plugin_dirs") or []) if d)
+acp_dirs = [str(d) for d in (ev.get("acp_plugin_dirs") or []) if d]
 acp_cwd = str(ev.get("acp_cwd") or "")
 acp_cwd_file = str(ev.get("acp_cwd_file") or "")
+for acp_dir in acp_dirs:
+    if (
+        not acp_dir.startswith("/")
+        or any(character in acp_dir for character in "\0\r\n\t")
+    ):
+        raise ValueError(
+            "eval.acp_plugin_dirs entries must be absolute in-container POSIX paths"
+        )
 if acp_cwd and (
     not acp_cwd.startswith("/")
     or any(character in acp_cwd for character in "\0\r\n\t")
@@ -348,23 +357,30 @@ if acp_cwd and acp_cwd_file:
 for k, v in (("tier", m.get("tier", "")), ("setup_rel", setup_rel), ("run_count", run_count),
              ("per_turn", per_turn), ("aggregate", aggregate), ("post_check", post_check),
              ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash),
-             ("acp_dirs", acp_dirs), ("acp_cwd", acp_cwd),
+             ("acp_dirs", json.dumps(acp_dirs, separators=(",", ":"))),
+             ("acp_cwd", acp_cwd),
              ("acp_cwd_file", acp_cwd_file)):
     print(f"{k}\t{v}")
 PY
 )" || { echo "eval: failed to parse manifest.json" >&2; exit 2; }
 
-    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS="" ACP_CWD="" ACP_CWD_FILE=""
+    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS_JSON="[]" ACP_CWD="" ACP_CWD_FILE=""
     local _k _v
     while IFS=$'\t' read -r _k _v; do
         case "$_k" in
             tier) TIER="$_v" ;; setup_rel) SETUP_REL="$_v" ;; run_count) RUN_COUNT="$_v" ;;
             per_turn) PER_TURN="$_v" ;; aggregate) AGG="$_v" ;; post_check) POST_CHECK="$_v" ;;
             tierp) TIERP="$_v" ;; family) FAMILY="$_v" ;; prompt_hash) PROMPT_HASH="$_v" ;;
-            acp_dirs) ACP_DIRS="$_v" ;; acp_cwd) ACP_CWD="$_v" ;;
+            acp_dirs) ACP_DIRS_JSON="$_v" ;; acp_cwd) ACP_CWD="$_v" ;;
             acp_cwd_file) ACP_CWD_FILE="$_v" ;;
         esac
     done <<< "$parsed"
+    local -a ACP_PLUGIN_DIRS=()
+    mapfile -t ACP_PLUGIN_DIRS < <("$(_py)" -c '
+import json, sys
+for value in json.loads(sys.argv[1]):
+    print(value)
+' "$ACP_DIRS_JSON")
 
     if [ "${RUNS_OVERRIDE:-0}" -gt 0 ] 2>/dev/null; then RUN_COUNT="$RUNS_OVERRIDE"; fi
     [ "$TIER" = E ] || echo "warn: scenario '$SCENARIO_NAME' is tier '$TIER', not 'E' -- eval expects a Tier-E scenario." >&2
@@ -396,12 +412,10 @@ print(cwd)
             exit 2
         }
     fi
-    ACP_COMMAND='copilot --acp --stdio --allow-all-tools'
-    local _d
-    for _d in $ACP_DIRS; do ACP_COMMAND="$ACP_COMMAND --plugin-dir $_d"; done
+    ACP_COMMAND="$(clean_room_build_acp_command "${ACP_PLUGIN_DIRS[@]}")"
     if [ -n "$ACP_CWD" ]; then
         local _quoted_cwd
-        printf -v _quoted_cwd '%q' "$ACP_CWD"
+        _quoted_cwd="$(clean_room_quote_bash "$ACP_CWD")"
         ACP_COMMAND="cd -- $_quoted_cwd && $ACP_COMMAND"
     fi
     echo "eval: ACP command -> $ACP_COMMAND"

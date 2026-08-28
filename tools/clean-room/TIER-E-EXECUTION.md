@@ -153,7 +153,8 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
   // an absolute in-container file containing exactly that one path. They are
   // mutually exclusive. The runner uses the resolved cwd for both the launched
   // shell and ACP session/new so cwd-scoped sessionStart hooks see that path.
-  // acp_plugin_dirs adds headless plugin payloads.
+  // acp_plugin_dirs adds headless plugin payloads; each entry must be an
+  // absolute in-container POSIX path and is shell-quoted by the runner.
   "eval": {
     "acp_cwd_file": "/home/operator/worktree-path",
     "acp_plugin_dirs": ["/home/operator/.copilot/installed-plugins/example"]

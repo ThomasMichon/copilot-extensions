@@ -250,6 +250,7 @@ if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh')) -and
     throw "scenario '$ScenarioName' has neither scenario.sh (Tier-P) nor setup.sh (Tier-E)"
 }
 $LibDir = Join-Path $Here 'lib'
+. (Join-Path $LibDir 'acp-command.ps1')
 # Optional per-suite shared helpers: if the selected scenario's parent dir holds
 # a `_lib/`, mount it read-only at /home/operator/scenario-lib and expose it as
 # $CR_SCENARIO_LIB, so sibling scenarios in a suite can source shared phase
@@ -561,6 +562,12 @@ function Invoke-Eval {
     $acpPluginDirs = @()
     if ($manifest.eval -and $manifest.eval.acp_plugin_dirs) {
         $acpPluginDirs = @($manifest.eval.acp_plugin_dirs) | Where-Object { $_ }
+        foreach ($acpPluginDir in $acpPluginDirs) {
+            $acpPluginDir = [string]$acpPluginDir
+            if (-not $acpPluginDir.StartsWith('/') -or $acpPluginDir -match "[`0`r`n`t]") {
+                throw 'eval.acp_plugin_dirs entries must be absolute in-container POSIX paths'
+            }
+        }
     }
     if ($manifest.eval -and $manifest.eval.acp_cwd) {
         $acpCwd = [string]$manifest.eval.acp_cwd
@@ -619,12 +626,10 @@ print(cwd)
             throw "eval: could not resolve a valid cwd from '$acpCwdFile'"
         }
     }
-    $acp = 'copilot --acp --stdio --allow-all-tools'
-    foreach ($d in $acpPluginDirs) { $acp += " --plugin-dir $d" }
+    $acp = New-CleanRoomAcpCommand -PluginDirs $acpPluginDirs
     $script:AcpCwd = $acpCwd
     if ($acpCwd) {
-        $singleQuoteEscape = "'" + '"' + "'" + '"' + "'"
-        $quotedCwd = "'" + $acpCwd.Replace("'", $singleQuoteEscape) + "'"
+        $quotedCwd = ConvertTo-CleanRoomBashLiteral $acpCwd
         $acp = "cd -- $quotedCwd && $acp"
     }
     $script:AcpCommand = $acp
