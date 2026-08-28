@@ -23,7 +23,12 @@ For day-to-day work (start/plan/resume/archive an effort), see the
 `planning-efforts` skill. The canonical pattern lives in that skill and its
 [reference guide](../planning-efforts/references/efforts.md); this skill wires a
 repo into it. The plugin itself has no runtime setup; this skill only scaffolds
-repo-local effort state.
+repo-local effort state, adoption policy, and the minimal always-on fallback.
+The payload also ships cross-platform policy producers, but issue #1234
+currently prevents Copilot CLI from deterministically joining multiple plugins'
+`sessionStart` context. Until that runtime defect is fixed, the marked fallback
+below is the authoritative ambient delivery and the producers remain
+direct-testable but unregistered.
 
 ## The model: skill governs, repo adds an addendum
 
@@ -35,7 +40,37 @@ core pattern.
 
 ## Adoption workflow
 
-### 1. Scaffold the `efforts/` tree
+### 1. Declare repository adoption
+
+Create this exact committed file in the repository:
+
+```text
+.copilot-extensions/efforts/config.json
+```
+
+```json
+{
+  "version": 1,
+  "enforcement": "required"
+}
+```
+
+The version 1 semantic is exactly
+`{"version": 1, "enforcement": "required"}`:
+
+- a valid file declares that the repository supports efforts and requires the
+  effort lifecycle for substantial multi-step work;
+- an absent or malformed file means the repository has not adopted efforts;
+- unknown keys, alternate types, other versions, and other enforcement values
+  are invalid rather than silently treated as advisory;
+- the config path and every parent below the repository root must be regular,
+  contained, and free of symlink/reparse indirection.
+
+Directory presence is not adoption. An `efforts/` tree may be historical,
+vendored, or incomplete; agents and cross-repository callers rely on the exact
+config above.
+
+### 2. Scaffold the `efforts/` tree
 
 Create, in the repo root:
 
@@ -53,7 +88,7 @@ efforts/
   description, the active-effort index table, and the **Local conventions**
   addendum (below).
 
-### 2. Write the addendum
+### 3. Write the addendum
 
 Add a `## Local conventions` section to `efforts/README.md` (or a dedicated
 binding doc that it links, e.g. `docs/efforts.md`). Specialize only these:
@@ -72,7 +107,7 @@ Choose **flat** grouping when the repo is itself the primary unit of work;
 choose **by-repo** when the repo coordinates work across many target repos
 (then archive as `efforts/<YYYY>/<repo>/MM/DD <slug>/`).
 
-### 3. Bind the participants seam
+### 4. Bind the participants seam
 
 Name the executor the repo dispatches to, and how the effort reaches it:
 
@@ -86,7 +121,7 @@ Name the executor the repo dispatches to, and how the effort reaches it:
 Record the chosen binding (and the section name, e.g. `## Machines`) in the
 addendum so `planning-efforts` uses it.
 
-### 4. Point the repo's conventions at efforts
+### 5. Point the repo's conventions at efforts
 
 So efforts are actually used, add to the repo's agent instructions
 (`AGENTS.md` / `.github/copilot-instructions.md`) and doc/skill routing:
@@ -96,6 +131,29 @@ So efforts are actually used, add to the repo's agent instructions
   the effort under `efforts/active/<slug>/`.*
 - If the repo had a legacy `plans/` (or similar), mark it superseded and treat
   existing plans as a backlog of efforts-in-waiting.
+- **Install the minimal completion-gate fallback.** Reconcile this exact owner
+  region into the repository's existing always-on agent instructions. Replace
+  the one existing region in place, append it once when absent, and stop if only
+  one marker exists; never duplicate it or edit neighboring repository-owned
+  prose.
+
+  ```markdown
+  <!-- efforts:static-fallback:start -->
+  **Fallback policy `[owner: efforts@0.1.0-dev14]`:** This repository requires
+  efforts for substantial multi-step work. Create or resume the canonical effort
+  with `planning-efforts`; the rightful head must not declare the worktree complete
+  until the effort is explicitly Done and every Plan and Validation Plan item is
+  resolved or transferred to a named tracked objective. A completed phase, PR,
+  handoff, or session is not completion.
+  <!-- efforts:static-fallback:end -->
+  ```
+
+  This is deliberately smaller than the full policy producer. It preserves only
+  effort discovery and the false-completion guard on launch paths where hooks do
+  not run, and while issue #1234 causes valid hook outputs to be discarded.
+  After the runtime joins multiple `additionalContext` results reliably, the
+  plugin may register `scripts/emit-policy.sh` / `emit-policy.ps1`; the fallback
+  still remains for genuinely hook-less paths.
 - **A persistent cross-repo sequencing rule — keep the compatibility/fallback
   rule until plugin injection exists.** This plugin currently ships only
   on-demand skills, so setup must still add a concise rule to the adopting
@@ -129,17 +187,29 @@ So efforts are actually used, add to the repo's agent instructions
   use the owner marker to update, shrink, or remove the compatibility text
   without appending duplicates or editing neighboring repo-owned prose.
 
-### 5. Validate
+### 6. Validate
 
+- `.copilot-extensions/efforts/config.json` has exactly version 1 and
+  `enforcement: required`.
 - `efforts/README.md` has a `## Local conventions` addendum.
 - `efforts/TEMPLATE.md` matches the addendum's section set.
 - `efforts/active/` exists and is tracked.
 - The repo's agent instructions route planning to efforts.
+- The repo's agent instructions contain exactly one complete
+  `efforts:static-fallback` region whose owner version matches the enabled
+  efforts plugin.
 - The repo's **compatibility/fallback always-on** instructions carry the
   cross-repo sequencing rule in the stable `efforts` owner region
   (effort-update PR before an unreviewed direct push; only completion markers
   after) — or equivalent standing guidance already covers it. (Skip only when the
   repo is not review-gated or never pushes directly to a related repo.)
+- Direct-probe the native policy producer with a `sessionStart` payload whose
+  `cwd` is inside the repository and confirm the context is owner-marked and
+  below 1,024 UTF-8 bytes. Do not register another independent context hook
+  while issue #1234 remains unresolved; doing so can displace a sibling's
+  command catalog. The POSIX wrapper requires a usable system `python3` or
+  `python` and fails open with one diagnostic when neither is available; the
+  PowerShell producer is native.
 
 ## Migrating from a legacy plans directory
 
