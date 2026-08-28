@@ -303,7 +303,9 @@ def test_typical_session_conduct_stays_within_context_budget(
     assembled = json.loads(payload)["additionalContext"]
     assert len(payload) <= 4_000
     assert related_text in assembled
-    assert history_text in assembled
+    assert "history-7-" in assembled
+    if history_text not in assembled:
+        assert "[Older worktree history omitted.]" in assembled
 
 
 def test_session_conduct_forwards_discovered_project():

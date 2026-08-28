@@ -14048,7 +14048,20 @@ def cmd_state_root_dispatch(argv: list[str]) -> int:
     res = state_root_mod.resolve_state_root(config, repo_override=args.repo)
 
     if args.conduct:
-        print(state_root_mod.state_repo_definition(res))
+        launch_path = state_root_mod._git_toplevel(os.getcwd())
+        try:
+            launch_anchor = config.default_repo.anchor
+        except KeyError:
+            launch_anchor = None
+        pair = state_root_mod.resolve_pair(config, cwd=os.getcwd())
+        print(
+            state_root_mod.state_repo_definition(
+                res,
+                pair=pair,
+                launch_path=launch_path,
+                launch_anchor=launch_anchor,
+            )
+        )
         return 0
 
     if args.json:

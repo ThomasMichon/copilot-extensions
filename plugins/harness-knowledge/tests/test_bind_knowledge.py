@@ -44,35 +44,20 @@ def test_replace_preserves_comments():
     assert "old" not in out
 
 
-# --- render_instructions ------------------------------------------------------
-
-def test_render_labels_paths_and_marker():
-    md = bk.render_instructions("citadel-harness", "C:/h", "citadel-knowledge", "C:/k",
-                                [("example-web", "C:/o")])
-    assert bk.MANAGED_MARKER in md
-    assert "citadel-harness" in md and "C:/h" in md
-    assert "citadel-knowledge" in md and "C:/k" in md
-    assert "example-web" in md and "C:/o" in md
-    assert "state-root" in md  # routing pointer present
-
-
 # --- bind (end to end, machine-local) -----------------------------------------
 
-def test_bind_writes_pointer_and_fragment(tmp_path: Path):
+def test_bind_writes_pointer_without_instruction_fragment(tmp_path: Path):
     home = tmp_path / "home"
     summary = bk.bind("citadel-harness", "citadel-knowledge", "C:/k",
                       home=home, harness_path="C:/h")
     cfg = home / ".citadel-harness" / "config.yaml"
-    # Migrated (dotfiles#1057): the fragment is now plugin-internal data at
-    # ~/.<harness>/knowledge-binding.md (NOT the auto-loaded .github/instructions/),
-    # emitted at session start by the harness-knowledge hook.
     frag = home / ".citadel-harness" / "knowledge-binding.md"
     old_frag = home / ".citadel-harness" / ".github" / "instructions" / "knowledge-binding.instructions.md"
-    assert cfg.exists() and frag.exists()
+    assert cfg.exists()
+    assert not frag.exists(), "agent-worktrees owns live state context"
     assert not old_frag.exists(), "the fragment must not land in the auto-loaded instructions dir"
     assert "knowledge_repo: citadel-knowledge" in cfg.read_text()
     assert "repo_name: citadel-harness" in cfg.read_text()  # seeded
-    assert bk.MANAGED_MARKER in frag.read_text()
     assert summary["knowledge_repo"] == "citadel-knowledge"
 
 
@@ -87,7 +72,19 @@ def test_bind_retires_stale_auto_loaded_fragment(tmp_path: Path):
     bk.bind("citadel-harness", "kn", "C:/k", home=home, harness_path="C:/h")
 
     assert not old_frag.exists(), "stale auto-loaded fragment must be retired on re-bind"
-    assert (home / ".citadel-harness" / "knowledge-binding.md").exists()
+    assert not (home / ".citadel-harness" / "knowledge-binding.md").exists()
+
+
+def test_bind_retires_stale_hook_fragment(tmp_path: Path):
+    home = tmp_path / "home"
+    base = home / ".citadel-harness"
+    base.mkdir(parents=True)
+    fragment = base / "knowledge-binding.md"
+    fragment.write_text(f"{bk.MANAGED_MARKER}\n# stale binding\n", encoding="utf-8")
+
+    bk.bind("citadel-harness", "kn", "C:/k", home=home, harness_path="C:/h")
+
+    assert not fragment.exists()
 
 
 def test_bind_leaves_unmarked_user_instructions(tmp_path: Path):
