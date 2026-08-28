@@ -20,6 +20,7 @@ import yaml
 
 from . import config as cfg
 from . import disposition_history, obligations
+from .effort_focus import ActiveEffort, active_effort_from_mapping
 
 #: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
 #: status bar (120-col default) and the Worktree Picker's table rows; longer prose
@@ -445,6 +446,12 @@ class WorktreeRecord:
     follow_up: bool = False
     summary: str = ""
     status_note_at: str | None = None
+    # One worktree-local pointer to the canonical effort and declared slice.
+    # It is identity, not a second responsibility flag: an open binding derives
+    # the existing follow_up/summary status core. Absent keeps legacy YAML
+    # byte-identical.
+    active_effort: ActiveEffort | None = None
+    effort_revision: int = 0
     # worktree-status-core: True when the title was AGENT-ASSERTED via
     # `agent-worktrees status --title` (vs. auto-derived from a session summary).
     # An asserted title is authoritative: the status-updater's per-tick
@@ -1191,6 +1198,8 @@ def load_record(path: Path) -> WorktreeRecord:
         resources=resources_list,
         follow_up=bool(data.get("follow_up", False)),
         summary=str(data.get("summary", "") or ""),
+        active_effort=active_effort_from_mapping(data.get("active_effort")),
+        effort_revision=int(data.get("effort_revision", 0) or 0),
         title_asserted=bool(data.get("title_asserted", False)),
         status_note_at=(str(data["status_note_at"])
                         if data.get("status_note_at") else None),
@@ -1282,6 +1291,12 @@ def _save_record_unlocked(
         path = record.yaml_path
     if preserve_handoff_reservations and path.exists():
         current = load_record(path)
+        if current.effort_revision > record.effort_revision:
+            record.active_effort = current.active_effort
+            record.effort_revision = current.effort_revision
+            record.follow_up = current.follow_up
+            record.summary = current.summary
+            record.status_note_at = current.status_note_at
         # Lifecycle writers advance ``lifecycle_revision`` under the record
         # lock. An unrelated writer may have loaded an older snapshot before
         # that transition; never let its later save roll the append-only ledger
@@ -1374,6 +1389,14 @@ def _save_record_unlocked(
         content += "title_asserted: true\n"
     if record.status_note_at:
         content += f"status_note_at: {record.status_note_at}\n"
+    if record.active_effort is not None:
+        content += yaml.safe_dump(
+            {"active_effort": record.active_effort.to_dict()},
+            default_flow_style=False,
+            sort_keys=False,
+        )
+    if record.effort_revision:
+        content += f"effort_revision: {record.effort_revision}\n"
     # #4057 cached liveness -- emitted only when stamped (None absent), so a
     # never-verified worktree's YAML stays byte-identical.
     if record.mux_live is not None:
@@ -1749,6 +1772,7 @@ def set_disposition(
     title: str | None = None,
     follow_up: bool | None = None,
     session_id: str | None = None,
+    kind: str = "status",
     save: bool = True,
 ) -> None:
     """Set the agent-asserted disposition overlay (summary / title / follow-up)
@@ -1787,7 +1811,7 @@ def set_disposition(
             title=record.title,
             follow_up=record.follow_up,
             changed=changed,
-            kind="status",
+            kind=kind,
             session_id=session_id,
         )
     if save:

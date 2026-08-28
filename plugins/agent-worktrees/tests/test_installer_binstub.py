@@ -79,7 +79,8 @@ def test_posix_stubs_never_self_reference(monkeypatch, tmp_path: Path):
     gcontent = (lb / "agent-worktrees").read_text()
     assert ".local/bin/agent-worktrees" not in gcontent, "global stub self-references"
     assert "-m agent_worktrees" in gcontent
-    assert "current-version" in gcontent and "versions/" in gcontent
+    assert "bin/resolve-runtime.sh" in gcontent
+    assert "_aw_exec_resolved" in gcontent
 
     # Per-project stub: resolves the versioned runtime with its OWN --project,
     # never delegating to (and thus recursing through) the global stub.

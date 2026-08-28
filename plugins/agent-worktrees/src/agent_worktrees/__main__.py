@@ -63,7 +63,7 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 from agent_procutil import detached_kwargs, no_window_flags, windowless_python
@@ -72,6 +72,7 @@ from . import (
     activity,
     claim_handoffs,
     disposition_history,
+    effort_focus,
     git_ops,
     list_cache,
     locks,
@@ -660,9 +661,20 @@ def _worktree_to_dict(
     # can render a follow-up glyph + summary and feed the prune verdict. Absent
     # summary/status_note_at stay off the dict to keep it lean for un-annotated
     # worktrees; follow_up is always present (a plain bool the picker reads).
-    d["follow_up"] = rec.follow_up
-    if rec.summary:
-        d["summary"] = rec.summary
+    effort_state = None
+    if rec.active_effort is not None:
+        effort_state = effort_focus.inspect_effort(
+            Path(rec.worktree_path), rec.active_effort
+        )
+        d["active_effort"] = effort_state.to_dict()
+    d["follow_up"] = rec.follow_up or bool(effort_state and effort_state.active)
+    effective_summary = (
+        effort_state.summary
+        if effort_state is not None and effort_state.active
+        else rec.summary
+    )
+    if effective_summary:
+        d["summary"] = effective_summary
     if rec.status_note_at:
         d["status_note_at"] = rec.status_note_at
     # #2178: expose the bridge caller-worktree pointer so the Picker can offer
@@ -4875,6 +4887,12 @@ def _cmd_status_write(
     # best-effort sweep skips rather than clobbering the disposition overlay.
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
+        if follow_up is False and record.active_effort is not None:
+            output.err(
+                "Cannot resolve this worktree while an effort remains bound. "
+                "Complete, transfer, or replace it with 'effort-focus'."
+            )
+            return 1
         tracking.set_disposition(
             record, summary=summary, title=title, follow_up=follow_up,
             session_id=(os.environ.get("COPILOT_AGENT_SESSION_ID") or None),
@@ -5052,6 +5070,14 @@ def _succession_header(record) -> str:
         return ""
 
 
+def _effort_orientation(record) -> str:
+    """Return the bounded active-effort pointer for the existing conduct hook."""
+    try:
+        return effort_focus.orientation(Path(record.worktree_path), record.active_effort)
+    except Exception:
+        return ""
+
+
 def cmd_session_role(args: argparse.Namespace) -> int:
     """Report THIS session's role relative to its worktree's head (JSON out).
 
@@ -5117,23 +5143,272 @@ def cmd_history_digest(args: argparse.Namespace) -> int:
     # Prepend the succession/role header so an arriving session learns not just
     # what the worktree was doing, but whether it should drive or defer.
     header = ""
+    effort = ""
     try:
         record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
         header = _succession_header(record)
+        effort = _effort_orientation(record)
     except Exception:
         header = ""
+        effort = ""
     limit = getattr(args, "limit", None) or 8
-    separator = 2 if header else 0
+    semantic = [part for part in (effort, header) if part]
+    separator = 2 * len(semantic)
     digest_budget = max(
-        0, disposition_history.DIGEST_MAX_CHARS - len(header) - separator
+        0,
+        disposition_history.DIGEST_MAX_CHARS
+        - sum(len(part) for part in semantic)
+        - separator,
     )
     text = disposition_history.digest(
         worktree_id, limit=limit, max_chars=digest_budget
     )
-    combined = "\n\n".join([p for p in (text, header) if p])
+    combined = "\n\n".join([p for p in (text, *semantic) if p])
     if combined:
         print(combined)
     return 0
+
+
+def _effort_focus_output(
+    record: tracking.WorktreeRecord,
+    inspection: effort_focus.EffortInspection | None,
+) -> dict[str, object]:
+    return {
+        "worktree_id": record.worktree_id,
+        "active_effort": inspection.to_dict() if inspection is not None else None,
+        "follow_up": record.follow_up or bool(inspection and inspection.active),
+        "summary": (
+            inspection.summary
+            if inspection is not None and inspection.active
+            else record.summary
+        ),
+    }
+
+
+def cmd_effort_focus(args: argparse.Namespace) -> int:
+    """Bind, show, replace, or release a worktree's canonical effort slice."""
+    config = cfg.load_config()
+    worktree_id = _infer_worktree_id(getattr(args, "worktree_id", None), config)
+    if not worktree_id:
+        message = (
+            "Could not determine worktree ID. Run inside a worktree or pass "
+            "--worktree-id."
+        )
+        if args.json:
+            return _json_error(message)
+        output.err(message)
+        return 1
+    worktree_id = _resolve_worktree_id(worktree_id)
+    yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
+    if not yaml_path.exists():
+        message = f"Tracking file not found at {yaml_path}."
+        if args.json:
+            return _json_error(message)
+        output.err(message)
+        return 1
+
+    action = args.action
+    record = tracking.load_record(yaml_path)
+    repo_root = None
+    repo_error = None
+    if action in {"bind", "show"} or (action == "release" and args.completed):
+        try:
+            repo_root = effort_focus.repository_root(record.worktree_path)
+        except effort_focus.EffortFocusError as exc:
+            repo_error = str(exc)
+            if action != "show":
+                if args.json:
+                    return _json_error(repo_error)
+                output.err(repo_error)
+                return 1
+
+    if action == "show":
+        inspection = (
+            (
+                effort_focus.inspect_effort(repo_root, record.active_effort)
+                if repo_root is not None
+                else effort_focus.EffortInspection(
+                    ref=record.active_effort,
+                    state="stale",
+                    reason=repo_error or "tracked worktree is unavailable",
+                )
+            )
+            if record.active_effort is not None
+            else None
+        )
+        payload = _effort_focus_output(record, inspection)
+        if args.json:
+            _json_output(payload)
+        elif inspection is None:
+            print(f"No active effort is bound to {record.worktree_id}.")
+        else:
+            print(
+                f"{inspection.state}: {inspection.ref.path} "
+                f"[{inspection.ref.participant} / {inspection.ref.slice}]"
+            )
+            if inspection.reason:
+                print(f"Reason: {inspection.reason}")
+        return 0
+
+    if action == "bind":
+        if repo_root is None:
+            raise RuntimeError("repository root validation was not attempted")
+        if not args.path:
+            message = "bind requires a repository-relative effort README path"
+            if args.json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+        try:
+            ref = effort_focus.make_active_effort(
+                args.path, args.participant or "", args.effort_slice or ""
+            )
+            inspection = effort_focus.validate_binding(repo_root, ref)
+        except effort_focus.EffortFocusError as exc:
+            if args.json:
+                return _json_error(str(exc))
+            output.err(str(exc))
+            return 1
+
+        global_lock = cfg.tracking_dir() / ".effort-bindings.yaml"
+        with tracking._RecordLock(global_lock, require_sidecar=True):
+            records = tracking.list_records(cfg.tracking_dir())
+            conflict = effort_focus.duplicate_binding(
+                records, worktree_id, record.repo, ref
+            )
+            if conflict:
+                message = (
+                    "that effort participant/slice is already bound to worktree "
+                    f"{conflict}"
+                )
+                if args.json:
+                    return _json_error(message)
+                output.err(message)
+                return 1
+            with tracking._RecordLock(yaml_path):
+                record = tracking.load_record(yaml_path)
+                inspection = effort_focus.validate_binding(repo_root, ref)
+                if record.active_effort == ref:
+                    payload = _effort_focus_output(record, inspection)
+                    if args.json:
+                        _json_output(payload)
+                    else:
+                        print(f"[OK] Effort focus already bound: {ref.path}")
+                    return 0
+                if record.active_effort is not None and not args.replace:
+                    message = (
+                        "an effort is already bound; pass --replace to record an "
+                        "explicit replacement"
+                    )
+                    if args.json:
+                        return _json_error(message)
+                    output.err(message)
+                    return 1
+                replacing = record.active_effort is not None
+                record.active_effort = ref
+                record.effort_revision += 1
+                tracking.set_disposition(
+                    record,
+                    summary=inspection.summary,
+                    follow_up=True,
+                    session_id=os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
+                    kind="effort-replace" if replacing else "effort-bind",
+                    save=False,
+                )
+                tracking.save_record(record)
+        payload = _effort_focus_output(record, inspection)
+        if args.json:
+            _json_output(payload)
+        else:
+            verb = "replaced" if replacing else "bound"
+            print(f"[OK] Effort focus {verb}: {ref.path}")
+        return 0
+
+    if action == "release":
+        if record.active_effort is None:
+            if args.json:
+                _json_output(_effort_focus_output(record, None))
+            else:
+                print(f"No active effort is bound to {record.worktree_id}.")
+            return 0
+        completed = bool(args.completed)
+        transfer = (args.transfer or "").strip()
+        if completed == bool(transfer):
+            message = "release requires exactly one of --completed or --transfer TARGET"
+            if args.json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+        bound_ref = record.active_effort
+        if completed and (
+            repo_root is None
+            or not effort_focus.completed_or_archived(repo_root, bound_ref)
+        ):
+            message = (
+                "the bound effort is still open or cannot be verified as Done/"
+                "archived; use --transfer for a named responsibility transfer"
+            )
+            if args.json:
+                return _json_error(message)
+            output.err(message)
+            return 1
+        if transfer:
+            try:
+                transfer = effort_focus.normalize_label(transfer, "transfer target")
+            except effort_focus.EffortFocusError as exc:
+                if args.json:
+                    return _json_error(str(exc))
+                output.err(str(exc))
+                return 1
+
+        with tracking._RecordLock(yaml_path):
+            record = tracking.load_record(yaml_path)
+            if record.active_effort != bound_ref:
+                message = "effort focus changed while release was being prepared; retry"
+                if args.json:
+                    return _json_error(message)
+                output.err(message)
+                return 1
+            if completed and (
+                repo_root is None
+                or not effort_focus.completed_or_archived(repo_root, bound_ref)
+            ):
+                message = (
+                    "the bound effort changed or no longer satisfies the "
+                    "completion gate; retry after resolving it"
+                )
+                if args.json:
+                    return _json_error(message)
+                output.err(message)
+                return 1
+            record.active_effort = None
+            record.effort_revision += 1
+            slug = PurePosixPath(bound_ref.path).parent.name
+            summary = (
+                f"Completed effort {slug}"
+                if completed else f"Transferred effort {slug} to {transfer}"
+            )
+            tracking.set_disposition(
+                record,
+                summary=summary,
+                follow_up=False,
+                session_id=os.environ.get("COPILOT_AGENT_SESSION_ID") or None,
+                kind="effort-release",
+                save=False,
+            )
+            tracking.save_record(record)
+        payload = _effort_focus_output(record, None)
+        if args.json:
+            _json_output(payload)
+        else:
+            print(f"[OK] Effort focus released: {summary}")
+        return 0
+
+    message = f"unknown effort-focus action: {action}"
+    if args.json:
+        return _json_error(message)
+    output.err(message)
+    return 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -15593,6 +15868,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=None,
                    help="With --history, show only the most recent N entries")
 
+    # effort-focus -- one canonical effort/slice bound to this worktree.
+    p = sub.add_parser(
+        "effort-focus",
+        help="Bind, inspect, replace, or release this worktree's active effort",
+    )
+    p.add_argument("action", choices=("bind", "show", "release"))
+    p.add_argument("path", nargs="?", default=None,
+                   help="Repository-relative effort README path (bind)")
+    p.add_argument("--participant", default=None,
+                   help="Declared participant identity (bind)")
+    p.add_argument("--slice", dest="effort_slice", default=None,
+                   help="Declared Plan/Coordination slice (bind)")
+    p.add_argument("--replace", action="store_true",
+                   help="Explicitly replace an existing binding (bind)")
+    p.add_argument("--completed", action="store_true",
+                   help="Release only after the effort is verified Done/archived")
+    p.add_argument("--transfer", default=None, metavar="TARGET",
+                   help="Release by naming the tracked objective receiving responsibility")
+    p.add_argument("--worktree-id", default=None,
+                   help="Target worktree id (default: inferred from cwd)")
+    p.add_argument("--json", action="store_true")
+
     # status-segment (one styled line for a tmux/psmux status bar)
     p = sub.add_parser(
         "status-segment",
@@ -18398,6 +18695,7 @@ COMMAND_MAP = {
     "pr-complete": cmd_pr_complete,
     "mark-complete": cmd_mark_complete,
     "status": cmd_status,
+    "effort-focus": cmd_effort_focus,
     "status-segment": cmd_status_segment,
     "status-context": cmd_status_context,
     "status-updater": cmd_status_updater,

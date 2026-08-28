@@ -23,7 +23,7 @@ fallback, and cross-platform policy producers:
 
 | Skill | Role |
 |-------|------|
-| **planning-efforts** | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam). Ships the reference guide and the effort README template as skill assets. |
+| **planning-efforts** | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam) and optionally binds a managed worktree to its declared active effort slice. Ships the reference guide and the effort README template as skill assets. |
 | **efforts-setup** | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
 
 An adopting repository commits
@@ -88,6 +88,14 @@ The efforts plugin owns the planning document and lifecycle; executor plugins
 own only their provider-specific borrow/dispatch/claim mechanics. Keep the
 schema and lifecycle executor-neutral — anything provider-specific belongs in
 the participants binding, not the core.
+
+When agent-worktrees is present, `planning-efforts` uses its `effort-focus`
+command as optional enrichment. The worktree record owns one
+repository-relative pointer plus declared participant/slice identity; an open
+binding derives the existing follow-up cleanup gate and contributes a bounded
+pointer through agent-worktrees' existing session-conduct hook. The efforts
+plugin still owns no worktree state file and registers no session-start hook;
+its Phase 1 policy producers remain staged and unregistered.
 
 ## Enable
 

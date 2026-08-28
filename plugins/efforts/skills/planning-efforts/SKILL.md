@@ -46,7 +46,7 @@ effort home is simply the current repo root; the repo does **not** need to be
 registered as an agent-worktrees harness. If `agent-worktrees` is installed,
 ask it whether this repo redirects personal state to a bound knowledge repo:
 
-```
+```bash
 <agent-worktrees catalog argv[0]> state-root        # optional; prints the effort home when available
 ```
 
@@ -77,6 +77,49 @@ defaults below for this repo. Look in `<effort-home>/efforts/README.md` (a
 
 If no addendum exists, the effort home has not adopted efforts yet — use the
 `efforts-setup` skill there first.
+
+## Bind the active worktree when agent-worktrees is available
+
+The efforts plugin remains standalone, but an agent-worktrees-managed worktree
+can durably bind its current objective to one canonical effort. Use the exact
+`argv[0]` from the agent-worktrees session command catalog for every
+`effort-focus` operation below. Replace
+`<agent-worktrees catalog argv[0]>` with that raw path and quote it at the shell
+call site on POSIX; in PowerShell invoke it as
+`& "<agent-worktrees catalog argv[0]>" <args>`.
+
+After the effort's Participants/Coordination and Plan/Validation Plan are filled
+in, use the participant exactly as its table label and the slice exactly as its
+Plan heading:
+
+```
+<agent-worktrees catalog argv[0]> effort-focus bind efforts/active/<slug>/README.md \
+  --participant "<declared participant>" \
+  --slice "<declared phase or slice>"
+```
+
+- **Command unavailable or worktree untracked** → continue with the standalone
+  effort lifecycle; optional integration must not block planning.
+- **Validation refused** → correct the effort's real declaration or continue
+  unbound. Never invent a participant/slice merely to satisfy the command, and
+  never hand-edit the worktree record.
+- **A binding already exists** → inspect it with
+  `<agent-worktrees catalog argv[0]> effort-focus show --json`. Reuse it when it
+  names this objective; pass
+  `--replace` only when the effort records an explicit replacement or slice
+  transition.
+- **Several worktrees share one effort** → each binds a distinct declared slice;
+  participants identify the actors, but changing participants does not permit
+  two worktrees to own the same slice.
+- **The canonical effort is outside this worktree's repository** → do not bind
+  the external path. Continue the standalone lifecycle, or bind a declared local
+  sub-effort when the adopting repo's addendum defines one.
+- The binding is repository-relative and record-local. Never create a
+  repository-global "current effort" file.
+
+An open binding derives the existing worktree `follow_up` gate and concise
+summary. Do not clear it with `status --resolved`; release responsibility
+through the effort lifecycle below.
 
 ## When to use efforts vs. other constructs
 
@@ -242,24 +285,37 @@ change that realizes it.
 
 1. Pull latest so the Journal is current, then **read the README** — Status,
    Plan checklists, Blockers, and the latest Journal entries.
-2. Pick up from the last incomplete checklist item / Journal entry. The README
+2. When agent-worktrees is available, inspect
+   `<agent-worktrees catalog argv[0]> effort-focus show --json` and bind this
+   effort/slice if it is not already the worktree's active focus.
+3. Pick up from the last incomplete checklist item / Journal entry. The README
    is self-contained by design — a fresh agent session resumes from the file.
-3. For multi-participant work, dispatch via the bound executor (the addendum
+4. For multi-participant work, dispatch via the bound executor (the addendum
    says how) and **journal the dispatch** so the coordination record stays in
    the file.
-4. Keep the Journal ahead of the conversation as you work.
+5. Keep the Journal ahead of the conversation as you work.
 
 ## Archive an effort
 
 1. Confirm the effort is done (or abandoned) and the Journal reflects the
    outcome.
-2. **Move** the active effort folder to the dated archive path (per the
+2. Resolve every Plan and Validation Plan item and set **Status: Done**.
+3. **Move** the active effort folder to the dated archive path (per the
    addendum), using the completion date. Preserve git history with `git mv`.
-3. Set the header **Status** and write a closing Journal entry.
-4. Update the active index in `efforts/README.md`.
-5. **Promote durable truth:** if the effort established how something now
+4. Write a closing Journal entry.
+5. Update the active index in `efforts/README.md`.
+6. **Promote durable truth:** if the effort established how something now
    *works*, capture that in the repo's docs. The archived effort is a record of
    *what happened*, not living documentation.
+7. Land the archive change through the repo's normal review and merge gate.
+8. From the still-bound managed worktree, release with
+   `<agent-worktrees catalog argv[0]> effort-focus release --completed`, then
+   finalize the worktree. The command verifies `Status: Done` and every resolved
+   Plan/Validation Plan checkbox on the effort README, whether it is still at the
+   active path or already at the standard flat or by-repo dated archive path. If
+   responsibility moves instead, name the receiving tracked objective with
+   `<agent-worktrees catalog argv[0]> effort-focus release --transfer
+   "<issue/effort>"`.
 
 ## Anti-patterns
 
@@ -269,6 +325,8 @@ change that realizes it.
   effort.
 - ❌ Paraphrasing the premise instead of capturing the **Request** verbatim.
 - ❌ Letting the conversation, not the README, hold effort state.
+- ❌ Clearing `follow_up` manually while an open effort remains bound, or
+  dropping the binding without verified completion or a named transfer.
 - ❌ Cross-repo issues linking this repo's effort paths.
 - ❌ Duplicating the *same* effort in two repos with no canonical source — in a
   hybrid split, the **public generalized** effort is canonical and the private,

@@ -85,6 +85,19 @@ parts:
   stream (or a bounded event-tail fallback for coarse busy/idle). It is
   presentation only and **never** sets `follow_up`.
 
+An optional **active-effort focus** is identity on the same worktree record, not
+a third status register. `effort-focus bind` stores one contained,
+repository-relative effort README plus its declared participant/slice. While
+that effort remains open, reads derive `follow_up=true` and an effort summary
+through the existing status core; `status --resolved` refuses to bypass any
+binding. `effort-focus release --completed` verifies `Status: Done` and resolved
+Plan/Validation Plan checkboxes at the active or standard dated archive path,
+while `--transfer "<tracked objective>"` records an explicit transfer. Missing
+or stale pointers are never presented as active.
+Bind writes `follow_up=true` and an effort summary; release clears that flag and
+replaces the summary. Re-assert any follow-up unrelated to the effort after
+release.
+
 The crucial rule: **`follow_up` is orthogonal to state, and it gates cleanup.** A
 worktree can be `finalized`/`completed` (git says "done, prune me") yet still
 carry `follow_up=true` — its cleanup bucket is then downgraded from the auto-prune
@@ -96,6 +109,9 @@ it alone. Two common cases:
 - **Stale flag** — the work is actually done but the agent finalized *without*
   running `status --resolved`. The worktree looks done but won't reap. The fix is
   a "landing pass": confirm nothing remains, then clear the flag.
+
+For an effort-bound worktree, use `effort-focus release` rather than treating
+the derived flag as stale.
 
 **Title sigils.** The picker prefixes scannable glyphs onto a worktree's title,
 independent of the state column:
