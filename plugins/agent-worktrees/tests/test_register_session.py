@@ -405,6 +405,7 @@ class TestDeregisterSessionStdin:
         m.tracking.register_session(
             "wt-end", "session-end", started_at="2026-08-27T10:00:00"
         )
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "wrong-session")
         monkeypatch.setattr(
             m.sys,
             "stdin",
@@ -429,6 +430,9 @@ class TestDeregisterSessionStdin:
             tmp_tracking_dir / "wt-end.yaml"
         ).session_entry("session-end")
         assert entry.ended_at == "2026-08-27T11:00:00"
+        assert load_record(
+            tmp_tracking_dir / "wt-end.yaml"
+        ).session_entry("wrong-session") is None
         assert entry.activations[-1].end_source == "hook:exit"
         assert entry.activations[-1].end_recorded_at
 

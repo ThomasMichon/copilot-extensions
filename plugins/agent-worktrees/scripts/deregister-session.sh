@@ -10,7 +10,6 @@ _log() { printf '[%s] [%s] deregister-session: %s\n' "$(date '+%H:%M:%S')" "$1" 
 # The stdin payload is authoritative for session id/cwd. Environment values are
 # compatibility hints when the hook exports them.
 wt_id="${WORKTREE_ID:-}"
-session_id="${COPILOT_AGENT_SESSION_ID:-}"
 
 _awresolve="$HOME/.agent-worktrees/bin/resolve-runtime.sh"
 [ -f "$_awresolve" ] && . "$_awresolve"
@@ -21,14 +20,13 @@ if [[ ! -x "$PYTHON" ]]; then
 fi
 
 args=(-m agent_worktrees deregister-session --stdin)
-[[ -n "$session_id" ]] && args+=(--session-id "$session_id")
 [[ -n "$wt_id" ]] && args+=(--worktree-id "$wt_id")
 
 export PYTHONPATH=""  # package is installed in the venv (no lib/ shadow)
 if PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null; then
-    _log OK "deregistered session=${session_id:-<from-payload>} on wt=${wt_id:-<resolved>}"
+    _log OK "deregistered payload session on wt=${wt_id:-<resolved>}"
 else
-    _log WARN "deregister-session failed (exit $?) for session=${session_id:-<from-payload>} wt=${wt_id:-<resolved>}"
+    _log WARN "deregister-session failed (exit $?) for payload session wt=${wt_id:-<resolved>}"
 fi
 
 exit 0
