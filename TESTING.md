@@ -66,6 +66,10 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   injection-shaped data, complete JSON control escaping, missing-script
   fallback, setup-skill structure, exact JSON and context size, and live
   Bash/PowerShell parity when `pwsh` is available.
+- **delegation-guidance:** payload-only hook tests covering owner/version
+  attribution, the 2 KB context budget, direct script fallback, missing-root
+  failure-open behavior, skill trigger boundaries, README inventory, and live
+  Bash/PowerShell parity when both shells are available.
 - **efforts:** payload-only policy-producer tests covering exact repository
   adoption, authoritative payload cwd, Git/config containment, malformed input,
   symlink/reparse rejection, contaminated Git environments, manifest-derived

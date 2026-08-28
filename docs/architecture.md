@@ -1,17 +1,18 @@
 # Architecture Overview
 
-How the nineteen copilot-extensions plugins fit together — install topology,
+How the twenty copilot-extensions plugins fit together — install topology,
 runtimes, ports, and the credential relay. **Eleven ship a runtime** (currently
 a `uv`-built venv under legacy `~/.agent-*`, deployed by the plugin's own
 installer) plus generated payload-local agent commands and session command
 glossaries; compatibility management wrappers remain in `~/.local/bin` during
-the installation-cell migration. **Eight are payload-only** — `efforts` (skills), `visions`
+the installation-cell migration. **Nine are payload-only** — `efforts` (skills), `visions`
 (skills), `context-handoff` (a session extension), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
 `wsl-setup` (skills), and
-`harness-knowledge` (skills), and `ai-attribution` (hook + skill) deploy
-entirely from the marketplace payload with no installer. For per-plugin
-internals, follow the links in each section.
+`harness-knowledge` (skills), `ai-attribution` (hook + skill), and
+`delegation-guidance` (hook + skill) deploy entirely from the marketplace
+payload with no installer. For per-plugin internals, follow the links in each
+section.
 
 ## The plugins
 
@@ -43,6 +44,7 @@ internals, follow the links in each section.
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
+| [delegation-guidance](../plugins/delegation-guidance/) | Ambient coordinator-first routing hook + `delegating-work` skill | Marketplace payload (hook + scripts + skill) | The hook emits a concise owner-marked kernel at session start; detailed routing loads on demand; no runtime to install |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -93,7 +95,7 @@ flowchart TB
       AV["agent-vault/<br/>scripts • src"]
       AI["agent-index/<br/>scripts • src"]
       AK["agent-machines/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -149,7 +151,7 @@ flowchart TB
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 > `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-> `ai-attribution` — deploys entirely from the
+> `ai-attribution`, and `delegation-guidance` — deploy entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 ### Agent-facing invocation and command glossaries
@@ -517,3 +519,4 @@ closed; umbrella dotfiles#1081.)*
 - context-handoff [README](../plugins/context-handoff/README.md) · [context-handoff skill](../plugins/context-handoff/skills/context-handoff/SKILL.md)
 - customizing-copilot [README](../plugins/customizing-copilot/README.md) · [authoring-skills](../plugins/customizing-copilot/skills/authoring-skills/SKILL.md) · [defining-subagents](../plugins/customizing-copilot/skills/defining-subagents/SKILL.md) · [registering-mcp-servers](../plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) · [installing-plugins](../plugins/customizing-copilot/skills/installing-plugins/SKILL.md)
 - ai-attribution [README](../plugins/ai-attribution/README.md) · [configuration](../plugins/ai-attribution/docs/configuration.md) · [setup](../plugins/ai-attribution/skills/ai-attribution-setup/SKILL.md) · [publication workflow](../plugins/ai-attribution/skills/ai-attribution/SKILL.md)
+- delegation-guidance [README](../plugins/delegation-guidance/README.md) · [delegating-work skill](../plugins/delegation-guidance/skills/delegating-work/SKILL.md)

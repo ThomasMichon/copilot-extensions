@@ -5,8 +5,8 @@
     "email": "thomas@thomasmichon.com"
   },
   "metadata": {
-    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev675"
+    "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
+    "version": "1.7.5-dev676"
   },
   "plugins": [
     {
@@ -122,6 +122,12 @@
       "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
       "version": "0.1.0-dev2",
       "source": "plugins/ai-attribution"
+    },
+    {
+      "name": "delegation-guidance",
+      "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
+      "version": "0.1.0-dev1",
+      "source": "plugins/delegation-guidance"
     }
   ]
 }
