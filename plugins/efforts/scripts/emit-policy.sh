@@ -14,8 +14,10 @@ if [[ -z "$python" || ! -f "$script_dir/emit-policy.py" ]]; then
     exit 0
 fi
 
-if output="$("$python" "$script_dir/emit-policy.py")" &&
-    [[ "$output" == "{}" || "$output" == '{"additionalContext":'*'}' ]]; then
+if output="$("$python" "$script_dir/emit-policy.py" "$@")" &&
+    [[ "$output" == "{}" ||
+       "$output" == '{"additionalContext":'*'}' ||
+       "$output" == '{"version":1,"capability":"efforts","adopted":true}' ]]; then
     printf '%s' "$output"
 else
     printf '[efforts] Python policy producer failed; no policy context emitted\n' >&2

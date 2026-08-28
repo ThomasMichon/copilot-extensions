@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev676"
+    "version": "1.7.5-dev677"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev656",
+      "version": "1.5.3-dev657",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -59,8 +59,8 @@
     },
     {
       "name": "efforts",
-      "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev16",
+      "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
+      "version": "0.1.0-dev17",
       "source": "plugins/efforts"
     },
     {
