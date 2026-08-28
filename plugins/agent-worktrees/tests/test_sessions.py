@@ -18,6 +18,9 @@ from agent_worktrees.sessions import (
     mux_binding_for_session,
     mux_copilot_pane,
     mux_seed_pane,
+    mux_session_index,
+    mux_session_name,
+    worktree_id_from_mux_session,
     recent_worktree_messages,
     scan_sessions_fast,
     validate_session_id,
@@ -1282,3 +1285,95 @@ def test_session_state_sweep_confined_to_backfill():
 
     catalog_src = Path(catalog_mod.__file__).read_text(encoding="utf-8")
     assert catalog_src.count("os.scandir(session_dir)") == 1
+
+
+class TestMuxSessionName:
+    """`.` is the window/pane separator in a tmux/psmux target spec.
+
+    A dotted worktree id produced a session that could be created but never
+    addressed again, so the launcher failed every has-session/attach after
+    creating it.
+    """
+
+    def test_dots_are_replaced(self):
+        assert (
+            mux_session_name("host.local-linux-20260828-113232-c3c7")
+            == "wt-host_local-linux-20260828-113232-c3c7"
+        )
+
+    def test_every_dot_is_replaced(self):
+        assert mux_session_name("a.b.c") == "wt-a_b_c"
+
+    def test_dot_free_ids_are_untouched(self):
+        # Must stay a no-op or it orphans already-running sessions.
+        assert (
+            mux_session_name("host-linux-20260828-113232-c3c7")
+            == "wt-host-linux-20260828-113232-c3c7"
+        )
+
+    def test_empty_id_falls_back_to_base(self):
+        assert mux_session_name("") == "wt-base"
+
+    def test_result_is_addressable_as_a_target(self):
+        # tmux splits a target on ':' (window) then '.' (pane); the session
+        # portion must survive that split intact.
+        name = mux_session_name("host.local-linux-20260828-113232-c3c7")
+        assert name.split(":")[0].split(".")[0] == name
+
+
+class TestWorktreeIdFromMuxSession:
+    """The `.` -> `_` mapping is lossy, so the inverse needs the known ids.
+
+    A miss here is not cosmetic: `reap-sessions` treats an unresolved id as
+    "untracked", which makes a live tracked session eligible for reaping.
+    """
+
+    def test_recovers_a_dotted_id_from_known_ids(self):
+        wt_id = "host.local-linux-20260828-113232-c3c7"
+        assert (
+            worktree_id_from_mux_session(mux_session_name(wt_id), [wt_id]) == wt_id
+        )
+
+    def test_dot_free_id_round_trips_without_known_ids(self):
+        wt_id = "host-linux-20260828-113232-c3c7"
+        assert worktree_id_from_mux_session(mux_session_name(wt_id)) == wt_id
+
+    def test_unknown_session_falls_back_to_the_stripped_name(self):
+        assert worktree_id_from_mux_session("wt-someone-else") == "someone-else"
+
+    def test_non_wt_session_is_rejected(self):
+        assert worktree_id_from_mux_session("scratch") == ""
+
+    def test_round_trip_holds_for_every_known_id(self):
+        ids = [
+            "host.local-linux-1-a",
+            "host-linux-2-b",
+            "a.b.c-linux-3-c",
+        ]
+        for wt_id in ids:
+            assert (
+                worktree_id_from_mux_session(mux_session_name(wt_id), ids) == wt_id
+            )
+
+
+class TestMuxSessionIndex:
+    """The reap sweep resolves many sessions, so it builds the map once."""
+
+    def test_index_maps_session_name_to_id(self):
+        ids = ["host.local-linux-1-a", "host-linux-2-b"]
+        assert mux_session_index(ids) == {
+            "wt-host_local-linux-1-a": "host.local-linux-1-a",
+            "wt-host-linux-2-b": "host-linux-2-b",
+        }
+
+    def test_index_and_known_ids_agree(self):
+        ids = ["host.local-linux-1-a", "host-linux-2-b"]
+        index = mux_session_index(ids)
+        for wt_id in ids:
+            name = mux_session_name(wt_id)
+            assert worktree_id_from_mux_session(name, index=index) == wt_id
+            assert worktree_id_from_mux_session(name, ids) == wt_id
+
+    def test_index_miss_still_falls_back(self):
+        index = mux_session_index(["host-linux-1-a"])
+        assert worktree_id_from_mux_session("wt-other", index=index) == "other"

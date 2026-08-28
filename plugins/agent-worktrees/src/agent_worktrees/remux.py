@@ -250,7 +250,7 @@ def remux_bare_copilot(
     # pane_wrapper path makes the shared builder run the command directly (no
     # setup-script wrapper) while keeping the identity-clean `env -u` prefix.
     no_wrapper = "/nonexistent-remux-no-wrapper"
-    session_name = f"wt-{wt_id}"
+    session_name = sessions.mux_session_name(wt_id)
     if sessions.has_mux_session(wt_id):
         argv = sessions.build_mux_new_window_argv(
             wt_id, work_dir, pane_cmd, pane_env or None,
