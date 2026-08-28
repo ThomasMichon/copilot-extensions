@@ -411,6 +411,25 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
 | `machine-context` | sessionStart hook entrypoint: emit machine identity as `additionalContext` (cwd-gated) |
 | `get` | Query config values (e.g., `agent-worktrees get repo-dir`) |
 
+## Effort Focus
+
+| Command | Description |
+|---------|-------------|
+| `effort-focus bind <README> --participant <name> --slice <slice>` | Bind this worktree to one open, repository-relative effort slice after validating containment, effort shape/status, and the declared participant/slice |
+| `effort-focus show [--json]` | Inspect the raw binding and its current `open` / `closed` / `stale` state |
+| `effort-focus bind ... --replace` | Explicitly replace the current effort/slice; silent replacement is refused |
+| `effort-focus release --completed` | Release only when the effort is verified `Done`, every Plan and Validation Plan checkbox is resolved, and the active or standard dated archive path is verifiable |
+| `effort-focus release --transfer "<tracked objective>"` | Release by recording the named objective that receives responsibility |
+
+An open focus derives the existing `follow_up` and summary surfaces; it does not
+create another cleanup flag. `status --resolved` is rejected while any effort
+remains bound. Bind and completed release verify the authoritative Git
+root; the existing session-conduct/history-digest read path re-inspects the
+contained pointer under the recorded worktree path and stays silent on failure.
+Bind also persists `follow_up=true` and replaces the durable summary; release
+clears `follow_up` and replaces the summary. Re-assert any follow-up unrelated
+to the effort after release.
+
 ## Services, Repos & Validation
 
 | Subcommand | Description |

@@ -290,9 +290,12 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
     import subprocess
 
     runtime = tmp_path / ".agent-worktrees"
+    runtime_bin = runtime / "bin"
+    runtime_bin.mkdir(parents=True)
+    shutil.copy2(_SCRIPTS / "resolve-runtime.sh", runtime_bin / "resolve-runtime.sh")
     for version in ("1.5.3-dev9", "1.5.3-dev10"):
         slot = runtime / "versions" / version
-        command = slot / "bin" / "agent-worktrees"
+        command = slot / "bin" / "python"
         command.parent.mkdir(parents=True)
         command.write_text(
             f"#!/bin/sh\nprintf '%s' '{version}'\n", encoding="utf-8"
@@ -310,7 +313,7 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
     env["HOME"] = str(tmp_path)
 
     result = subprocess.run(
-        [str(_BIN / "agent-worktrees"), "status"],
+        ["sh", str(_BIN / "agent-worktrees"), "status"],
         env=env,
         text=True,
         capture_output=True,
@@ -321,7 +324,7 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
     assert result.stdout == "1.5.3-dev10"
 
     slot = runtime / "versions" / "1.5.3"
-    command = slot / "bin" / "agent-worktrees"
+    command = slot / "bin" / "python"
     command.parent.mkdir(parents=True)
     command.write_text("#!/bin/sh\nprintf '%s' '1.5.3'\n", encoding="utf-8")
     command.chmod(0o755)
@@ -334,7 +337,7 @@ def test_global_binstub_tier3_prefers_dev10_over_dev9(tmp_path):
         encoding="utf-8",
     )
     result = subprocess.run(
-        [str(_BIN / "agent-worktrees"), "status"],
+        ["sh", str(_BIN / "agent-worktrees"), "status"],
         env=env,
         text=True,
         capture_output=True,

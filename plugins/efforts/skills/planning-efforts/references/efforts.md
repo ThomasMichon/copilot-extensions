@@ -172,7 +172,13 @@ separation is what lets one plugin serve many repos and many executor plugins.
    **Request** verbatim plus the **Guiding Intent**. Open an umbrella issue if
    the work warrants tracking, and cross-link it.
 2. **Plan** — fill in Context, Plan, and Validation Plan. File sub-issues for
-   discrete tracked work and link them.
+   discrete tracked work and link them. Once the README declares the exact
+   participant table label and Plan heading, a managed worktree may bind with
+   `<agent-worktrees catalog argv[0]> effort-focus bind <repo-relative README>
+   --participant <declared> --slice <declared>`. A missing command/untracked
+   worktree degrades to the standalone lifecycle. A validation refusal means the
+   declaration is absent or mismatched: correct the real plan or remain unbound;
+   never invent a declaration or hand-edit the record.
 3. **Review gate** — before executing, route the *plan* through review. After the
    operator's own review rounds, **if the control repo offers automated PR
    review**, submit the effort as a PR (with auto-merge), let it be approved +
@@ -192,10 +198,39 @@ separation is what lets one plugin serve many repos and many executor plugins.
    one the current commit is opening). For **cross-repo / tracking-only** efforts,
    propose-before-you-do: PR the not-yet-done plan first, make the external
    changes after it clears, then report completion as a separate delta.
-5. **Archive** — when the effort is done (or abandoned), move
-   `efforts/active/<slug>/` to the dated archive path, set the header
-   **Status**, and write a closing Journal entry. Update the active index in
-   `efforts/README.md`. Promote any durable "what is" truth into docs.
+   A resumed managed worktree first inspects
+   `<agent-worktrees catalog argv[0]> effort-focus show --json` and binds its
+   declared slice if necessary. An open binding derives the existing
+   worktree `follow_up` cleanup gate and effort summary; it is not a second
+   responsibility flag.
+5. **Archive and release** — resolve every Plan and Validation Plan item, set
+   **Status: Done**, move the active folder to the addendum's standard flat or
+   by-repo dated archive path, write a closing Journal entry, update the active
+   index, promote durable truth, and land that archive change through the repo's
+   review/merge gate. Then release the still-bound managed worktree with
+   `<agent-worktrees catalog argv[0]> effort-focus release --completed`; silent
+   release is refused and the command verifies `Status: Done` plus every
+   resolved Plan/Validation Plan checkbox at either the active or standard dated
+   archive path. If responsibility moves instead, use
+   `<agent-worktrees catalog argv[0]> effort-focus release --transfer "<tracked
+   objective>"`.
+
+### Worktree-local active focus
+
+`active_effort` is an optional structured value owned by the worktree record:
+repository-relative README path, declared participant, and declared slice. It
+is independently validated against the authoritative worktree checkout, so two
+worktrees in one repository can bind different efforts without collision.
+Several worktrees may bind one effort only through distinct declared slices;
+participants identify actors but do not make duplicate slice ownership safe.
+A canonical effort outside the current repository remains standalone unless a
+declared local sub-effort exists. A missing runtime, malformed/stale pointer, completed
+effort, or unavailable checkout simply omits dynamic orientation; it never
+blocks session startup.
+
+The existing agent-worktrees session-conduct owner adds only a bounded pointer
+to its record-first history digest. It does not embed the effort, duplicate
+handoff state, or create another `sessionStart` producer.
 
 ## Cross-repo placement
 

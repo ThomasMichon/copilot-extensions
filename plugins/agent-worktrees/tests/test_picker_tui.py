@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+from pathlib import Path
 import sys
 import threading
 import time
@@ -5730,7 +5731,7 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
             await pilot.pause()
 
             assert rt.resolved == [
-                sys.executable, "steer", "submit", "t1",
+                str(Path(sys.executable).resolve()), "steer", "submit", "t1",
                 "--field", "feedback=ship it",
                 "--field", "decision=revise",
             ]
@@ -5812,7 +5813,7 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
                 if rt.resolved is not None:
                     break
             assert rt.resolved == [
-                sys.executable, "steer", "submit", "t1",
+                str(Path(sys.executable).resolve()), "steer", "submit", "t1",
                 "--field", "feedback=ship it",
                 "--field", "decision=revise",
             ]

@@ -290,6 +290,33 @@ def test_history_truncation_keeps_complete_succession_and_newest_lines(
     )
 
 
+def test_history_truncation_keeps_complete_effort_and_succession_orientation(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(c, "_installed_package_version", lambda: "1.2.3")
+    history = (
+        "This worktree's recent history (most recent last):\n"
+        + "\n".join(f"- history-{i}-" + ("x" * 100) for i in range(12))
+        + "\n\nActive effort: `efforts/active/example/README.md`; participant "
+        "`Driver`; slice `Phase 2`. Load that effort first."
+        + "\n\nWorktree succession: this complete instruction must survive."
+    )
+    payload = c.assemble_payload(
+        tmp_path / "missing-conduct",
+        "mandatory",
+        "",
+        history,
+        max_chars=540,
+    )
+    context = json.loads(payload)["additionalContext"]
+
+    assert c.runtime_units(payload) <= 540
+    assert "Active effort: `efforts/active/example/README.md`" in context
+    assert "Worktree succession: this complete instruction must survive." in context
+    assert "history-11-" in context
+    assert "history-0-" not in context
+
+
 def test_custom_omission_marker_wins_over_related_marker(tmp_path):
     conduct_dir = tmp_path / "conduct"
     conduct_dir.mkdir()
