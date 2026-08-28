@@ -133,10 +133,11 @@ home explicitly.
 ## Shipped adapters
 
 The acceptance fixture for
-[issue #1160](https://github.com/ThomasMichon/copilot-extensions/issues/1160)
-requires six plugin-owned runtime modules. `agent-worktrees` is deliberately in
+[issues #1160](https://github.com/ThomasMichon/copilot-extensions/issues/1160)
+and [#1278](https://github.com/ThomasMichon/copilot-extensions/issues/1278)
+requires nine plugin-owned runtime modules. `agent-worktrees` is deliberately in
 that fixture even though its runtime scope remains `universal`: it is the named
-setup foundation, while the other five are the machine-gated inventory that the
+setup foundation, while the other eight are the machine-gated inventory that the
 generic completeness rule covers.
 
 | Owner/module | Installer | Readiness meaning | Dependencies | Platforms | Restart |
@@ -147,14 +148,20 @@ generic completeness rule covers.
 | `agent-dispatch/runtime` | `scripts/install.* update` | the configured coordinator must answer its existing health endpoint; the probe never starts it | none | Windows, Linux, WSL | none |
 | `agent-mcp/runtime` | `scripts/init.* init` | no bridge config is `configuration-empty`; duplicate normalized names fail before every candidate is parsed and validated | none | Windows, Linux, WSL, macOS | none |
 | `agent-index/runtime` | `scripts/install.* update` | service failure, malformed/unreadable config, unknown corpus state, or a populated corpus without attributable sources fails; absent sources or a measured zero-chunk corpus is explicit | none | Windows, Linux, WSL | none |
+| `agent-bridge/runtime` | `scripts/install.* update` | the existing service health probe must pass; installer update owns cutover, so no separate restart is required | none | Windows, Linux, WSL | none |
+| `agent-containers/runtime` | `scripts/init.* init` | validates config, Docker/service health, and configured-backend tools; absent or unprovisioned fleets are explicit without creating containers or pulling images | none | Windows, Linux, WSL | none |
+| `agent-vault/runtime` | `scripts/install.* update` | validates config and service/backend health without starting or unlocking; no configured database is explicit and a locked configured vault remains operational | none | Windows, Linux, WSL | none |
 
 The empty dependency lists are intentional: optional composition is not an
-installation prerequisite. External prerequisites such as authenticated service
-CLIs are diagnosed by the owning readiness command, not represented as fake
-plugin dependency ids. Every installer action above is the plugin's existing
-idempotent lifecycle action. All readiness invocations are the owning
-payload-command with `installer-readiness`; they do not use `PATH`, start
-services, create instances/configuration, or populate a corpus.
+installation prerequisite. The three #1278 adapters use payload-local readiness
+scripts that disable their generated commands' self-provisioning path before
+delegation, so an absent runtime fails as structured readiness instead of
+installing anything. External prerequisites such as authenticated service CLIs
+are diagnosed by the owning readiness command, not represented as fake plugin
+dependency ids. Every installer action above is the plugin's existing idempotent
+lifecycle action. Readiness invocations are attributable payload commands or
+scripts; they do not use `PATH`, start services, create instances/configuration,
+or populate a corpus.
 
 `restart: none` means the declared installer completes its own runtime/service
 cutover. It does not erase owner-specific operational rules: for example,

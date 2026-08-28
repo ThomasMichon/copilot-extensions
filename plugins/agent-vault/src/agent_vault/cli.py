@@ -723,6 +723,21 @@ def cmd_ping(args):
     return 1
 
 
+def cmd_installer_readiness(args):
+    """Report config and service readiness without starting or unlocking."""
+    from .installer_readiness import emit, evaluate
+
+    try:
+        context = config.resolve_context(strict=True)
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return emit(evaluate(None, None, [str(exc)]))
+    try:
+        service = send_command({"action": "ping"})
+    except (OSError, RuntimeError, TypeError, ValueError) as exc:
+        return emit(evaluate(context, None, [str(exc)]))
+    return emit(evaluate(context, service))
+
+
 def cmd_start(args):
     resp = send_command({"action": "ping"})
     if resp and resp.get("ok"):
@@ -1411,7 +1426,7 @@ def cmd_vault_remove(args):
     return 0
 
 
-def main():
+def main(argv: list[str] | None = None):
     import argparse
 
     from . import __version__
@@ -1450,6 +1465,12 @@ def main():
 
     p = sub.add_parser("ping", help="Check service status")
     p.set_defaults(func=cmd_ping)
+
+    p = sub.add_parser(
+        "installer-readiness",
+        help="Emit the plugin-owned installer/readiness contract state as JSON",
+    )
+    p.set_defaults(func=cmd_installer_readiness)
 
     p = sub.add_parser("start", help="Start the vault service")
     p.set_defaults(func=cmd_start)
@@ -1601,7 +1622,7 @@ def main():
     from .extensions import get_registry
     get_registry().apply_cli_commands(sub)
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if not args.command:
         parser.print_help()
         return 1

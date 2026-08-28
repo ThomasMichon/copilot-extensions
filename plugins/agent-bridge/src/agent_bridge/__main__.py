@@ -511,6 +511,15 @@ def _cmd_status(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def _cmd_installer_readiness(_args: argparse.Namespace | None) -> None:
+    """Emit read-only service readiness without starting or restarting it."""
+    from .installer_readiness import emit, evaluate
+
+    exit_code = emit(evaluate(_service_is_running()))
+    if exit_code:
+        sys.exit(exit_code)
+
+
 def _cmd_session_status(args: argparse.Namespace) -> None:
     """Render a single session's compact, low-context dispatch status."""
     from .client import BridgeClientError
@@ -4252,6 +4261,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_stream_args(status_p)
     status_p.set_defaults(func=_cmd_status)
+
+    readiness_p = sub.add_parser(
+        "installer-readiness",
+        help="Emit the plugin-owned installer/readiness contract state as JSON",
+    )
+    readiness_p.set_defaults(func=_cmd_installer_readiness)
 
     doctor_p = sub.add_parser(
         "doctor",

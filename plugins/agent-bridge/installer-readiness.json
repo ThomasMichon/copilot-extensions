@@ -1,0 +1,63 @@
+{
+  "schema": "copilot-extensions.installer-readiness",
+  "version": 1,
+  "owner": {
+    "plugin": "agent-bridge"
+  },
+  "state": "supported",
+  "modules": [
+    {
+      "id": "agent-bridge/runtime",
+      "platforms": [
+        "windows",
+        "linux",
+        "wsl"
+      ],
+      "classification": "required",
+      "installer": {
+        "windows": {
+          "kind": "payload-script",
+          "path": "scripts/install.ps1",
+          "arguments": [
+            "update"
+          ]
+        },
+        "linux": {
+          "kind": "payload-script",
+          "path": "scripts/install.sh",
+          "arguments": [
+            "update"
+          ]
+        },
+        "wsl": {
+          "kind": "payload-script",
+          "path": "scripts/install.sh",
+          "arguments": [
+            "update"
+          ]
+        }
+      },
+      "readiness": {
+        "schema": "copilot-extensions.module-readiness",
+        "version": 1,
+        "configurationEmpty": "unsatisfied",
+        "invocations": {
+          "windows": {
+            "kind": "payload-script",
+            "path": "scripts/installer-readiness.ps1"
+          },
+          "linux": {
+            "kind": "payload-script",
+            "path": "scripts/installer-readiness.sh"
+          },
+          "wsl": {
+            "kind": "payload-script",
+            "path": "scripts/installer-readiness.sh"
+          }
+        }
+      },
+      "dependsOn": [],
+      "restart": "none"
+    }
+  ]
+}
