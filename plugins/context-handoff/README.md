@@ -117,6 +117,23 @@ ledger, and then retires the predecessor pane through
 This keeps recovery safe: if the successor never comes up or never consumes the
 handoff, the predecessor pane remains available and the terminal is not closed.
 
+### Continuity is objective-driven, not phase-driven
+
+The successor seed and `/resume-handoff` prompt treat the handoff as active
+responsibility for the original objective. A completed predecessor phase is
+history, not evidence that the broader work is done. After loading the brief,
+the successor continues every actionable phase already permitted by the
+original request without waiting for another user nudge. One session may consume
+a handoff, drive many additional slices, and hand off again when its own context
+fills.
+
+The handoff template therefore separates the continuing parent objective and
+successor work roster from completed progress, and distinguishes the current
+handoff task's completion gate from the worktree's true completion gate. If no
+actionable work remains and the parent objective is genuinely complete, the
+session should finish instead of creating a live successor only to report
+closure.
+
 **Failed-successor recovery (`retry_handoff_cutover`).** The native `-i`
 transport is receipt-checked by the pane wrapper; a rejected flag or immediately
 exiting successor is reaped without retiring the predecessor. Because the

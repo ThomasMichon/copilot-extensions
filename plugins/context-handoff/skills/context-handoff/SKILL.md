@@ -53,6 +53,34 @@ Handoff is a relay baton — it carries structured state from one session
 to the next on the same worktree. Recap is a rearview mirror. Backlog
 is a task list.
 
+## Continuity Contract
+
+A handoff transfers **active responsibility for the original objective**. It is
+not a request to confirm that the predecessor's latest phase finished, and it is
+not a session-closing recap. Consuming the baton starts the successor's relay
+leg.
+
+- Re-read the **Original Request**, **Continuing Objective**, ordered
+  **Successor Work Roster**, and their cited effort/issue/source of truth.
+- Keep driving every actionable next phase the original request permits, as far
+  as the current context and available work allow. Do not wait for another user
+  prompt merely because one phase, PR, or checklist slice completed.
+- A single session may consume one handoff, implement and land many additional
+  slices or phases, and produce another handoff when context pressure returns.
+  Session boundaries do not define effort boundaries.
+- Stop only when the parent objective's completion gate is met, an explicit user
+  scope boundary or required safety confirmation stops progress, or a real
+  blocker needs input. A handoff never waives those boundaries or confirmations.
+- If context pressure returns before the parent objective is done, preserve the
+  same objective and the newly remaining roster in the next handoff. Complete
+  the current deferred handoff task only after that successor baton is durably
+  stored, or after the parent objective itself is complete.
+
+A handoff with no actionable successor work is usually malformed. If the
+original objective is genuinely complete, finish the session and worktree
+lifecycle instead of spawning a successor merely to announce completion, unless
+the user explicitly requested an archival continuation prompt.
+
 ---
 
 ## When to Generate a Handoff
@@ -104,8 +132,9 @@ recovery.
 1. **Call `generate_handoff_prompt`**. It returns structured facts: session ID,
    cwd, branch, files modified, git status, turn count, and key tool invocations.
 2. **Compose the full handoff markdown** using the template below — lead with
-   the original request, then direction/motivation, next steps, target goals,
-   and gotchas.
+   the original request, preserve the continuing parent objective, and provide
+   an ordered successor work roster plus separate handoff/worktree completion
+   gates. Completed progress must not erase later actionable phases.
 3. **Call `save_handoff_prompt`** with that markdown as **`prompt_text`** (plus
    an optional short `title`). It stores the handoff and returns both the paste
    prompt and a `HANDOFF_SEED:` line.
@@ -119,7 +148,9 @@ recovery.
 > `agent-dispatch consume <id>` and completes the baton on pickup. <!-- marketplace-isolation: allow handoff-seed-startup -->
 > A task-backed
 > live cutover uses `consume_handoff` with `defer_complete: true`; the successor
-> later runs `agent-dispatch complete <id>` only when it reaches the handoff goal. <!-- marketplace-isolation: allow handoff-seed-startup -->
+> later runs `agent-dispatch complete <id>` only when it reaches the handoff <!-- marketplace-isolation: allow handoff-seed-startup -->
+> completion gate. Finishing the predecessor's latest phase is not sufficient
+> when the continuing objective still has actionable work.
 
 ### Fallback when the extension's tools are unavailable — the CLI
 
@@ -234,7 +265,9 @@ When the operator runs `/resume-handoff` in the target worktree, the extension:
    pending handoff was found.
 
 So your job on resume is: **read the injected handoff and keep going.** Do not
-re-claim or re-complete a baton that `/resume-handoff` already consumed.
+re-claim or re-complete a baton that `/resume-handoff` already consumed. Apply
+the Continuity Contract above: the completed items are history; the continuing
+objective and successor work roster are the authorization to keep driving.
 
 ### If the user says "pick up from last session" with no pasted prompt
 
@@ -255,10 +288,12 @@ the one-time worktree-state handoff file). Full template:
 ```markdown
 ## Session Continuation
 ### Original Request
+### Continuing Objective
 ### Direction & Motivation
 ### Progress           (- [x] done / - [ ] remaining, with file paths)
-### Next Action Items  (1. immediate next, 2. follow-ups)
-### Target Goals       (done-ness criteria)
+### Successor Work Roster
+### Completion Gates   (handoff leg vs. parent objective/worktree)
+### Re-Handoff Instructions
 ### Gotchas            (failed approaches, workarounds, non-obvious context)
 ```
 
@@ -280,6 +315,20 @@ the one-time worktree-state handoff file). Full template:
   **not** repeat the handoff contents.
 - **Lead with the original topic.** The "Original Request" must reference the
   session's founding purpose, not just recent activity.
+- **Preserve the parent objective.** A phase-complete milestone belongs under
+  Progress. It must not replace the broader objective or become the handoff
+  title when more of the original request remains.
+- **Open forward, not backward.** The Successor Work Roster must contain the
+  immediate next action and every already-known later slice the successor can
+  pursue without another user decision. Do not write "no action remains" while
+  the cited effort, issue, or original request still exposes actionable work.
+- **Separate completion gates.** State both when the current deferred handoff
+  task may be completed and when the parent objective/worktree is actually
+  complete. A landed phase, consumed baton, or merged PR is not by itself the
+  latter.
+- **Plan the next relay.** Re-Handoff Instructions must tell a context-limited
+  successor to carry the same parent objective and remaining roster into another
+  handoff rather than stopping for operator intervention.
 - **Be specific.** "Fix the auth bug" is useless. "JWT refresh in
   `src/auth/token.ts:142` has a race — mutex added but error handler uses old
   non-awaited path" is useful. Include file paths, what failed, and the why.

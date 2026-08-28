@@ -349,6 +349,25 @@ def test_related_skill_distinguishes_conduct_count_from_list_enumeration():
     assert "list shows" not in normalized
 
 
+def test_worktree_skill_distinguishes_session_relay_from_objective_completion():
+    skill = (
+        _PLUGIN / "skills" / "worktree" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    normalized = " ".join(skill.split())
+
+    assert "The Worktree Owns the Objective; Sessions Are Relay Legs" in skill
+    assert "Consuming a handoff starts a new relay leg" in normalized
+    assert "A single session may consume a handoff" in normalized
+    assert (
+        "A consumed or completed handoff task, a completed phase, a clean git "
+        "status, or a merged PR is not proof" in normalized
+    )
+    assert (
+        "Handoff consumed or phase/PR landed, but the parent objective has "
+        "actionable work" in normalized
+    )
+
+
 def test_assembler_forces_utf8_stdout(tmp_path):
     env = os.environ.copy()
     env.update({
