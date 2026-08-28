@@ -324,6 +324,24 @@ def test_task_disabled_agent_is_exempt_from_self_guard(tmp_path: Path):
     assert not any(f.check == "anti-recursion" for f in report.findings)
 
 
+def test_scoped_wildcard_does_not_grant_task(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "reader.agent.md").write_text(
+        "---\n"
+        "description: Reader.\n"
+        "tools: ['read', 'service/*']\n"
+        "---\n\n"
+        "# Reader\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(f.check == "anti-recursion" for f in report.findings)
+
+
 def test_nested_mcp_tools_do_not_imply_task_is_disabled(tmp_path: Path):
     repo = tmp_path / "repo"
     agents = repo / ".github" / "agents"

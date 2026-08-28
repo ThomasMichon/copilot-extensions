@@ -146,7 +146,9 @@ def frontmatter_tool_names(frontmatter: str) -> set[str] | None:
     without_comments = "\n".join(line.split("#", 1)[0] for line in raw.splitlines())
     return {
         token.lower()
-        for token in re.findall(r"\*|[A-Za-z][A-Za-z0-9_.:/-]*", without_comments)
+        for token in re.findall(
+            r"[A-Za-z*][A-Za-z0-9_.*:/-]*", without_comments
+        )
     }
 
 
