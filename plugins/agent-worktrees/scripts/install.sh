@@ -700,6 +700,27 @@ deploy_tool_binstub() {
     done
 }
 
+deploy_runtime_resolvers() {
+    # Payload-local shims resolve only through these runtime-owned helpers.
+    # Install them in the lean provision path as well as the full wrapper path,
+    # using create-as-caller + atomic rename so ownership and mode are correct
+    # even when replacing a stale helper.
+    mkdir -p "$BIN_DIR"
+    local resolver src tmp
+    for resolver in resolve-runtime.ps1 resolve-runtime.sh; do
+        src="$SCRIPT_DIR/$resolver"
+        if [[ ! -f "$src" ]]; then
+            err "Runtime resolver source not found: $src"
+            return 1
+        fi
+        tmp="$(mktemp "$BIN_DIR/$resolver.XXXXXX")"
+        cp "$src" "$tmp"
+        chmod +x "$tmp"
+        mv -f "$tmp" "$BIN_DIR/$resolver"
+        ok "Runtime resolver: $resolver"
+    done
+}
+
 deploy_wrappers() {
     mkdir -p "$BIN_DIR"
     local src="$PLUGIN_DIR/bin/launch-session.sh"
@@ -726,8 +747,10 @@ deploy_wrappers() {
         ok "Wrapper: pane-wrapper.sh"
     fi
 
+    deploy_runtime_resolvers || return 1
+
     # Deploy hook scripts: sessionStart (session-conduct + session-machine + bootstrap-check + project-hooks + register-nudge + register-session + anchor-hygiene-check + marketplace-overrides + provision-check) + preToolUse guards (statelessness_guard + cross_repo_guard + anchor_write_guard) + postToolUse nudges (nudge_status + bind-nudge)
-    for script in resolve-runtime.ps1 resolve-runtime.sh session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh marketplace-overrides.ps1 marketplace-overrides.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py nudge_status.py bind-nudge.sh bind-nudge.ps1; do
+    for script in session-conduct.ps1 session-conduct.sh session-machine.ps1 session-machine.sh bootstrap-check.ps1 bootstrap-check.sh project-hooks.ps1 project-hooks.sh register-nudge.ps1 register-nudge.sh register-session.ps1 register-session.sh deregister-session.ps1 deregister-session.sh anchor-hygiene-check.ps1 anchor-hygiene-check.sh marketplace-overrides.ps1 marketplace-overrides.sh provision-check.ps1 provision-check.sh statelessness_guard.py cross_repo_guard.py anchor_write_guard.py nudge_status.py bind-nudge.sh bind-nudge.ps1; do
         local script_src="$SCRIPT_DIR/$script"
         if [[ -f "$script_src" ]]; then
             tmp="$(mktemp "$BIN_DIR/$script.XXXXXX")"
@@ -1522,7 +1545,8 @@ case "$ACTION" in
         command -v git >/dev/null 2>&1 || { err "Missing prerequisite: git"; exit 1; }
         _ensure_uv || exit 1
         _ensure_uv_index
-        mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
+        mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$LOCAL_BIN"
+        deploy_runtime_resolvers || exit 1
         deploy_venv || exit 1
         deploy_package || exit 1
         _versioned_activate || exit 1
