@@ -36,6 +36,43 @@ PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
 
 
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    (
+        (r"C:\absolute\install.json", True),
+        (r"\\server\share\install.json", True),
+        (r"C:relative\install.json", False),
+        (r"\relative\install.json", False),
+        (r"relative\install.json", False),
+    ),
+)
+def test_python_windows_path_qualification(value: str, expected: bool) -> None:
+    module = _load_python_module()
+    assert module._path_is_fully_qualified(value, platform="nt") is expected
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows path semantics are required")
+@pytest.mark.parametrize(
+    "context",
+    (r"C:relative\install.json", r"\relative\install.json"),
+)
+def test_python_validate_rejects_rooted_but_not_fully_qualified_context(
+    tmp_path: Path,
+    context: str,
+) -> None:
+    result = _run(
+        PYTHON_COMMAND,
+        "validate",
+        "--context",
+        context,
+        "--durable-home",
+        tmp_path,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "receipt pointer must be absolute" in result.stderr.lower()
+
+
 def _load_python_module():
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader

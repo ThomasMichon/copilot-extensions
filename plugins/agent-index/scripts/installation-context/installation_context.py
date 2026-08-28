@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -98,6 +98,18 @@ def canonical_path(value: str | os.PathLike[str], *, must_exist: bool = False) -
     if must_exist and not resolved.exists():
         _fail(f"Path does not exist: {value}")
     return resolved
+
+
+def _path_is_fully_qualified(
+    value: str | os.PathLike[str],
+    *,
+    platform: str | None = None,
+) -> bool:
+    selected_platform = platform or os.name
+    if selected_platform == "nt":
+        path = PureWindowsPath(os.fspath(value))
+        return bool(path.drive and path.root)
+    return PurePosixPath(os.fspath(value)).is_absolute()
 
 
 def _path_key(path: Path) -> str:
@@ -808,8 +820,10 @@ def validate_namespace_receipt(
     durable_home: str | os.PathLike[str],
 ) -> dict[str, Any]:
     receipt_pointer = Path(receipt_path)
-    if not receipt_pointer.is_absolute():
+    if not _path_is_fully_qualified(receipt_pointer):
         _fail("The namespace receipt pointer must be absolute.")
+    if not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
     durable = canonical_path(durable_home)
     lexical_marketplaces_root = durable / "marketplaces"
     if _is_link_or_junction(lexical_marketplaces_root):
@@ -942,10 +956,10 @@ def validate_context_receipt(
     environment: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     environment = environment if environment is not None else os.environ
-    if not Path(durable_home).is_absolute():
+    if not _path_is_fully_qualified(durable_home):
         _fail("--durable-home must be absolute.")
     receipt_pointer = Path(receipt_path)
-    if not receipt_pointer.is_absolute():
+    if not _path_is_fully_qualified(receipt_pointer):
         _fail("The installation-context receipt pointer must be absolute.")
     if _is_link_or_junction(receipt_pointer):
         _fail("install.json may not be a symbolic link or reparse point.")
@@ -953,7 +967,7 @@ def validate_context_receipt(
         ("expected payload root", expected_payload_root),
         ("expected cell root", expected_cell_root),
     ):
-        if expectation is not None and not Path(expectation).is_absolute():
+        if expectation is not None and not _path_is_fully_qualified(expectation):
             _fail(f"{name} must be absolute.")
     actual_receipt = canonical_path(receipt_pointer, must_exist=True)
     install = read_json(actual_receipt)
@@ -1036,7 +1050,7 @@ def validate_context_receipt(
     if not isinstance(payload_receipt, Mapping):
         _fail("install.json payload is missing.")
     payload_text = _string_property(payload_receipt, "root")
-    if not Path(payload_text).is_absolute():
+    if not _path_is_fully_qualified(payload_text):
         _fail("payload.root must be absolute.")
     if not _string_property(payload_receipt, "version").strip():
         _fail("payload.version must be a non-empty string.")
@@ -1051,14 +1065,14 @@ def validate_context_receipt(
     if origin_receipt is not None:
         if not isinstance(origin_receipt, str):
             _fail("payload.originReceipt must be a string.")
-        if not Path(origin_receipt).is_absolute():
+        if not _path_is_fully_qualified(origin_receipt):
             _fail("payload.originReceipt must be absolute.")
     payload_root = canonical_path(payload_text)
     if expected_payload_root and not paths_equal(payload_root, expected_payload_root):
         _fail(f"Expected payload '{expected_payload_root}', receipt names '{payload_root}'.")
     inherited_payload = environment.get("COPILOT_PLUGIN_ROOT")
     if inherited_payload:
-        if not Path(inherited_payload).is_absolute():
+        if not _path_is_fully_qualified(inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT must be absolute.")
         if not paths_equal(payload_root, inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT conflicts with the validated payload root.")
@@ -1235,7 +1249,7 @@ def _install_receipt_value(
     }
     if payload_origin_receipt is not None:
         origin_receipt = Path(payload_origin_receipt)
-        if not origin_receipt.is_absolute():
+        if not _path_is_fully_qualified(origin_receipt):
             _fail("payload origin receipt must be absolute.")
         payload["originReceipt"] = str(canonical_path(origin_receipt, must_exist=True))
     if existing is not None:
@@ -1467,7 +1481,7 @@ def _payload_identity_from_install(
     if not isinstance(payload, Mapping):
         _fail("install.json payload is missing.")
     root = _string_property(payload, "root")
-    if not Path(root).is_absolute():
+    if not _path_is_fully_qualified(root):
         _fail("payload.root must be absolute.")
     version = _string_property(payload, "version")
     if not version.strip():
@@ -1479,7 +1493,7 @@ def _payload_identity_from_install(
     if origin_receipt is not None:
         if not isinstance(origin_receipt, str):
             _fail("payload.originReceipt must be a string.")
-        if not Path(origin_receipt).is_absolute():
+        if not _path_is_fully_qualified(origin_receipt):
             _fail("payload.originReceipt must be absolute.")
         origin_receipt = str(canonical_path(origin_receipt))
     return {
@@ -1505,13 +1519,15 @@ def validate_snapshot_provenance(
     _assert_plugin_id(expected_plugin_id)
     _assert_snapshot_id(snapshot_id)
     caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
     durable = canonical_path(
         durable_home
         or Path(caller_environment.get("HOME") or Path.home())
         / ".copilot-extensions"
     )
     context_path = Path(context)
-    if not context_path.is_absolute():
+    if not _path_is_fully_qualified(context_path):
         _fail("Snapshot context must be absolute.")
     validated = validate_context_receipt(
         context_path,
@@ -1585,7 +1601,7 @@ def validate_snapshot_provenance(
     if _string_property(snapshot, "id") != snapshot_id:
         _fail("Snapshot provenance id does not match its canonical snapshot directory.")
     recorded_snapshot_root = _string_property(snapshot, "root")
-    if not Path(recorded_snapshot_root).is_absolute():
+    if not _path_is_fully_qualified(recorded_snapshot_root):
         _fail("Snapshot provenance snapshot.root must be absolute.")
     if not paths_equal(recorded_snapshot_root, snapshot_root):
         _fail("Snapshot provenance snapshot.root is not its exact canonical location.")
@@ -1599,7 +1615,9 @@ def validate_snapshot_provenance(
         _fail("Snapshot provenance receipt references are missing.")
     namespace_path = _string_property(namespace_reference, "path")
     install_path = _string_property(install_reference, "path")
-    if not Path(namespace_path).is_absolute() or not Path(install_path).is_absolute():
+    if not _path_is_fully_qualified(namespace_path) or not _path_is_fully_qualified(
+        install_path
+    ):
         _fail("Snapshot provenance receipt paths must be absolute.")
     if not paths_equal(namespace_path, _string_property(validated, "namespaceReceipt")):
         _fail("Snapshot provenance namespace receipt does not match the current context.")
@@ -1646,14 +1664,14 @@ def validate_snapshot_provenance(
         "origin": _string_property(payload, "origin"),
         "originReceipt": _property(payload, "originReceipt"),
     }
-    if not Path(recorded_payload["root"]).is_absolute():
+    if not _path_is_fully_qualified(recorded_payload["root"]):
         _fail("Snapshot provenance payload.root must be absolute.")
     recorded_payload["root"] = str(canonical_path(recorded_payload["root"]))
     origin_receipt = recorded_payload["originReceipt"]
     if origin_receipt is not None:
         if not isinstance(origin_receipt, str):
             _fail("Snapshot provenance payload.originReceipt must be a string or null.")
-        if not Path(origin_receipt).is_absolute():
+        if not _path_is_fully_qualified(origin_receipt):
             _fail("Snapshot provenance payload.originReceipt must be absolute.")
         recorded_payload["originReceipt"] = str(canonical_path(origin_receipt))
     current_payload = _payload_identity_from_install(validated["installReceipt"])
@@ -1709,13 +1727,15 @@ def stamp_snapshot_provenance(
         "install.json",
     )
     caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
     durable = canonical_path(
         durable_home
         or Path(caller_environment.get("HOME") or Path.home())
         / ".copilot-extensions"
     )
     context_path = Path(context)
-    if not context_path.is_absolute():
+    if not _path_is_fully_qualified(context_path):
         _fail("Snapshot context must be absolute.")
     validated = validate_context_receipt(
         context_path,
@@ -1904,7 +1924,9 @@ def resolve_context(
     home = Path(environment.get("HOME") or Path.home())
     copilot_value = Path(copilot_home or home / ".copilot")
     durable_value = Path(durable_home or home / ".copilot-extensions")
-    if not copilot_value.is_absolute() or not durable_value.is_absolute():
+    if not _path_is_fully_qualified(copilot_value) or not _path_is_fully_qualified(
+        durable_value
+    ):
         _fail("--copilot-home and --durable-home must be absolute.")
     copilot = canonical_path(copilot_value)
     durable = canonical_path(durable_value)
@@ -1946,14 +1968,14 @@ def resolve_context(
     if payload_value is None:
         _fail("resolve requires --payload-root or COPILOT_PLUGIN_ROOT.")
     payload_input = Path(payload_value)
-    if not payload_input.is_absolute():
+    if not _path_is_fully_qualified(payload_input):
         _fail("The payload root must be absolute.")
     payload = canonical_path(payload_input, must_exist=True)
     if not payload.is_dir():
         _fail(f"The payload root must be an existing directory: {payload}")
     inherited_payload = environment.get("COPILOT_PLUGIN_ROOT")
     if inherited_payload:
-        if not Path(inherited_payload).is_absolute():
+        if not _path_is_fully_qualified(inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT must be absolute.")
         if not paths_equal(payload, inherited_payload):
             _fail("COPILOT_PLUGIN_ROOT conflicts with --payload-root.")
@@ -2122,7 +2144,7 @@ def _current_environment(
             profile_value = Path(pwd.getpwuid(os.getuid()).pw_dir)
         except (ImportError, KeyError, OSError) as error:
             _fail(f"Cannot determine the passwd-database account home: {error}")
-    if not profile_value.is_absolute():
+    if not _path_is_fully_qualified(profile_value):
         _fail("The canonical operating-system user profile must be absolute.")
     profile = canonical_path(profile_value, must_exist=True)
     selected_wsl = (
@@ -2432,7 +2454,7 @@ def _activation_result(
             activation, "context", "installation activation"
         )
         context_path = Path(context_text)
-        if not context_path.is_absolute():
+        if not _path_is_fully_qualified(context_path):
             _fail("Installation activation context must be absolute.")
         canonical_context = canonical_path(plugin_root / "install.json")
         if not paths_equal(context_path, canonical_context):
@@ -2569,7 +2591,7 @@ def compare_and_swap_activation(
         / ".copilot-extensions"
     )
     context_path = Path(context)
-    if not context_path.is_absolute():
+    if not _path_is_fully_qualified(context_path):
         _fail("Activation context must be absolute.")
     validated = validate_context_receipt(
         context_path,
@@ -2587,7 +2609,7 @@ def compare_and_swap_activation(
     legacy_root_value = legacy_root or (
         Path(current_environment["homeRealPath"]) / f".{plugin_id}"
     )
-    if not Path(legacy_root_value).is_absolute():
+    if not _path_is_fully_qualified(legacy_root_value):
         _fail("Activation legacy root must be absolute.")
     resolved_legacy_root = canonical_path(legacy_root_value)
 
@@ -2801,7 +2823,7 @@ def _tombstone_result(
             activation_reference, "path", "legacy ownership.activation"
         )
         activation_pointer = Path(activation_text)
-        if not activation_pointer.is_absolute():
+        if not _path_is_fully_qualified(activation_pointer):
             _fail("Legacy ownership activation.path must be absolute.")
         pinned_generation = _required_integer(
             activation_reference, "generation", "legacy ownership.activation"
@@ -2984,7 +3006,7 @@ def resolve_installation_mode(
     current_host = host or socket.gethostname()
     liveness = pid_is_live or _pid_is_live
     legacy_value = Path(legacy_root)
-    if not legacy_value.is_absolute():
+    if not _path_is_fully_qualified(legacy_value):
         _fail("legacy_root must be absolute.")
     resolved_legacy_root = canonical_path(legacy_value)
     probe = _validate_legacy_probe(
@@ -3042,7 +3064,7 @@ def resolve_installation_mode(
     canonical_policy = canonical_path(canonical_policy_entry)
     if policy_path is not None:
         policy_value = Path(policy_path)
-        if not policy_value.is_absolute():
+        if not _path_is_fully_qualified(policy_value):
             _fail("policy_path must be absolute.")
         policy_entry_present = os.path.lexists(policy_value)
         policy_entry_is_file = policy_value.is_file() and not policy_value.is_symlink()

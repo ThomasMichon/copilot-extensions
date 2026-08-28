@@ -241,7 +241,8 @@ receipts fail closed and are not overwritten.
 settings from the current directory. `COPILOT_EXTENSIONS_CONTEXT` is only a
 pointer to `install.json`, not proof. `COPILOT_PLUGIN_ROOT`, when present, is
 validated and never rewritten. Context, payload, Copilot-home, durable-home, and
-expected-root arguments are absolute; a caller may make only its explicit
+expected-root arguments are absolute (fully qualified on Windows; drive-relative
+and root-relative spellings are rejected); a caller may make only its explicit
 project root relative to its launch directory.
 
 Installed-payload resolution reads user settings plus every recognized native
