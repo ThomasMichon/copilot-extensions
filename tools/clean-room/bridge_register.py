@@ -106,6 +106,8 @@ def _registrations_dir() -> Path:
 
 
 def _registration_path(container: str) -> Path:
+    if not _CONTAINER_NAME.fullmatch(container):
+        raise ValueError("invalid Docker container name")
     return _registrations_dir() / f"{container}.json"
 
 
@@ -500,7 +502,7 @@ def main() -> int:
     sub.add_parser("namespace-list", help="[provider seam] JSON list of live boxes")
 
     nr = sub.add_parser("namespace-resolve", help="[provider seam] JSON spawn spec (exit 3 if absent)")
-    nr.add_argument("name", help="container name")
+    nr.add_argument("name", type=_container_name, help="container name")
     # agent-bridge may pass these on the full-capability path; clean-room boxes
     # ignore them (plugins come via the baked --acp-command --plugin-dir).
     nr.add_argument("--repo", default=None)
@@ -508,10 +510,10 @@ def main() -> int:
     nr.add_argument("--stage-plugin", action="append", default=[])
 
     nt = sub.add_parser("namespace-target-repo", help="[provider seam] always empty")
-    nt.add_argument("name", help="container name")
+    nt.add_argument("name", type=_container_name, help="container name")
 
     ne = sub.add_parser("namespace-ensure-ready", help="[provider seam] exit 0 if running")
-    ne.add_argument("name", help="container name")
+    ne.add_argument("name", type=_container_name, help="container name")
 
     args = ap.parse_args()
     dispatch = {

@@ -347,3 +347,20 @@ def test_stale_unregister_fails_closed_when_docker_is_unavailable(tmp_path: Path
 
     assert result.returncode == 2
     assert registration_path.is_file()
+
+
+@pytest.mark.parametrize(
+    "subcommand",
+    ["namespace-resolve", "namespace-target-repo", "namespace-ensure-ready"],
+)
+def test_namespace_commands_reject_container_name_traversal(
+    tmp_path: Path,
+    subcommand: str,
+):
+    outside = tmp_path / "escape.json"
+    outside.write_text('{"sentinel": true}\n', encoding="utf-8")
+
+    result = _run(tmp_path, subcommand, "../escape")
+
+    assert result.returncode == 2
+    assert outside.read_text(encoding="utf-8") == '{"sentinel": true}\n'
