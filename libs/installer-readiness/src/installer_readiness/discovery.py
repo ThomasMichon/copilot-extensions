@@ -500,6 +500,7 @@ def _discover_installation(
     installation: PluginInstallation,
 ) -> tuple[list[Module], Decline | None, list[Finding], bool]:
     findings: list[Finding] = []
+    is_machine_gated = False
     try:
         manifest_path, plugin = _plugin_manifest(installation.payload_root)
         plugin_name = _string(plugin.get("name"), "plugin manifest name")
@@ -507,10 +508,11 @@ def _discover_installation(
             raise _ContractProblem(
                 f"plugin manifest names '{plugin_name}', expected '{installation.plugin_id}'"
             )
-        if plugin.get("runtimeScope") != "machine-gated":
-            return [], None, findings, False
+        is_machine_gated = plugin.get("runtimeScope") == "machine-gated"
         reference = plugin.get("installerReadiness")
         if reference is None:
+            if not is_machine_gated:
+                return [], None, findings, False
             findings.append(
                 _finding(
                     "missing-module-metadata",
@@ -523,7 +525,7 @@ def _discover_installation(
                     ),
                 )
             )
-            return [], None, findings, True
+            return [], None, findings, is_machine_gated
         contract_path = _payload_path(
             installation.payload_root,
             reference,
@@ -552,7 +554,12 @@ def _discover_installation(
             if "modules" in contract:
                 raise _ContractProblem("declined declarations cannot contain modules")
             reason = _string(contract.get("reason"), "declined reason")
-            return [], Decline(installation, reason, contract_path), findings, True
+            return (
+                [],
+                Decline(installation, reason, contract_path),
+                findings,
+                is_machine_gated,
+            )
         if "reason" in contract:
             raise _ContractProblem("supported declarations cannot contain a decline reason")
         raw_modules = contract.get("modules")
@@ -575,7 +582,7 @@ def _discover_installation(
             )
             for value in raw_modules
         ]
-        return modules, None, findings, True
+        return modules, None, findings, is_machine_gated
     except (InstallationContextError, _ContractProblem) as error:
         findings.append(
             _finding(

@@ -1,0 +1,72 @@
+{
+  "schema": "copilot-extensions.installer-readiness",
+  "version": 1,
+  "owner": {
+    "plugin": "agent-codespaces"
+  },
+  "state": "supported",
+  "modules": [
+    {
+      "id": "agent-codespaces/runtime",
+      "platforms": [
+        "windows",
+        "linux",
+        "wsl"
+      ],
+      "classification": "required",
+      "installer": {
+        "windows": {
+          "kind": "payload-script",
+          "path": "scripts/install.ps1",
+          "arguments": [
+            "update"
+          ]
+        },
+        "linux": {
+          "kind": "payload-script",
+          "path": "scripts/install.sh",
+          "arguments": [
+            "update"
+          ]
+        },
+        "wsl": {
+          "kind": "payload-script",
+          "path": "scripts/install.sh",
+          "arguments": [
+            "update"
+          ]
+        }
+      },
+      "readiness": {
+        "schema": "copilot-extensions.module-readiness",
+        "version": 1,
+        "configurationEmpty": "satisfied",
+        "invocations": {
+          "windows": {
+            "kind": "payload-command",
+            "command": "agent-codespaces",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "linux": {
+            "kind": "payload-command",
+            "command": "agent-codespaces",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "wsl": {
+            "kind": "payload-command",
+            "command": "agent-codespaces",
+            "arguments": [
+              "installer-readiness"
+            ]
+          }
+        }
+      },
+      "dependsOn": [],
+      "restart": "none"
+    }
+  ]
+}

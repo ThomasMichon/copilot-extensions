@@ -132,6 +132,13 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     return 1 if _validator.has_errors(findings) else 0
 
 
+def _cmd_installer_readiness(args: argparse.Namespace) -> int:
+    from .installer_readiness import emit, evaluate
+
+    machine = args.machine or _discover.current_machine()
+    return emit(evaluate(_layout.inspect_layouts(machine)))
+
+
 def _fmt_val(v: object) -> str:
     s = json.dumps(v) if not isinstance(v, str) else v
     return s if len(s) <= 80 else s[:77] + "..."
@@ -259,6 +266,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add("plan", _cmd_plan)
     add("validate", _cmd_validate)
+    add("installer-readiness", _cmd_installer_readiness)
     restore = add("restore", _cmd_restore)
     restore.add_argument("--apply", action="store_true",
                          help="make changes (default is a dry-run preview)")

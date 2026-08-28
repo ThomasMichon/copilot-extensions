@@ -111,6 +111,21 @@ def _cmd_status(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_installer_readiness(_args: argparse.Namespace) -> int:
+    from .config import BRIDGES_DIR, discover_plugin_bridges
+    from .installer_readiness import emit, evaluate
+
+    local_paths = []
+    if BRIDGES_DIR.is_dir():
+        local_paths = sorted(
+            path
+            for path in BRIDGES_DIR.iterdir()
+            if path.suffix.lower() in (".yaml", ".yml", ".json")
+        )
+    plugin_paths = sorted(discover_plugin_bridges().values())
+    return emit(evaluate([*local_paths, *plugin_paths]))
+
+
 # ---------------------------------------------------------------------------
 # call -- one-shot invoke a single upstream tool
 # ---------------------------------------------------------------------------
@@ -384,6 +399,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser("status", help="show prerequisites and bridges")
     p_status.set_defaults(func=_cmd_status)
+
+    p_readiness = sub.add_parser(
+        "installer-readiness",
+        help="emit the plugin-owned installer/readiness contract state as JSON",
+    )
+    p_readiness.set_defaults(func=_cmd_installer_readiness)
 
     p_call = sub.add_parser(
         "call", help="one-shot: invoke a single upstream tool and print its result")

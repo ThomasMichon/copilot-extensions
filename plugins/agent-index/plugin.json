@@ -4,6 +4,7 @@
   "version": "0.1.0-dev90",
   "hooks": "hooks.json",
   "runtimeScope": "machine-gated",
+  "installerReadiness": "installer-readiness.json",
   "zeroDowntimeUpdate": true,
   "author": {
     "name": "Thomas Michon"

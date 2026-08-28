@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,24 @@ from installer_readiness import (
 PAYLOAD_GENERATOR = (
     Path(__file__).resolve().parents[2] / "payload-invocation" / "generate.py"
 )
+REPO_ROOT = Path(__file__).resolve().parents[3]
+ADAPTER_FIXTURE = (
+    "agent-worktrees",
+    "agent-machines",
+    "agent-codespaces",
+    "agent-dispatch",
+    "agent-mcp",
+    "agent-index",
+)
+INSTALL_ACTIONS = {
+    "agent-worktrees": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
+    "agent-machines": ("scripts/init.ps1", "scripts/init.sh", ("init",)),
+    "agent-codespaces": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
+    "agent-dispatch": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
+    "agent-mcp": ("scripts/init.ps1", "scripts/init.sh", ("init",)),
+    "agent-index": ("scripts/install.ps1", "scripts/install.sh", ("update",)),
+}
+MACOS_ADAPTERS = {"agent-worktrees", "agent-machines", "agent-mcp"}
 _SPEC = importlib.util.spec_from_file_location(
     "installer_readiness_payload_generator",
     PAYLOAD_GENERATOR,
@@ -346,6 +365,74 @@ def test_fixture_inventory_covers_every_enabled_machine_gated_plugin(tmp_path):
     assert report.machine_gated_owners == tuple(sorted(report.covered_owners))
     assert [module.module_id for module in report.modules] == ["supported/runtime"]
     assert [decline.owner.plugin_id for decline in report.declines] == ["declined"]
+
+
+def test_issue_1160_adapter_fixture_is_complete_and_attributable(tmp_path):
+    """The setup foundation is fixture-required despite its universal scope."""
+    installations = []
+    for plugin in ADAPTER_FIXTURE:
+        source = REPO_ROOT / "plugins" / plugin
+        payload = tmp_path / plugin
+        payload.mkdir()
+        for name in (
+            "plugin.json",
+            "installer-readiness.json",
+            "payload-invocation.json",
+        ):
+            shutil.copy2(source / name, payload / name)
+        shutil.copytree(source / "bin", payload / "bin")
+        windows_script, posix_script, _arguments = INSTALL_ACTIONS[plugin]
+        for relative in {windows_script, posix_script}:
+            target = payload / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source / relative, target)
+        installations.append(_installation(payload, plugin))
+
+    report = discover_modules(installations)
+    repeated = discover_modules(installations)
+
+    assert report.valid, [finding.to_dict() for finding in report.findings]
+    assert repeated == report
+    assert {module.owner.plugin_id for module in report.modules} == set(ADAPTER_FIXTURE)
+    assert {
+        owner.rsplit("::", 1)[-1] for owner in report.machine_gated_owners
+    } == set(ADAPTER_FIXTURE) - {"agent-worktrees"}
+    for module in report.modules:
+        plugin = module.owner.plugin_id
+        root = module.owner.payload_root.resolve()
+        windows_script, posix_script, arguments = INSTALL_ACTIONS[plugin]
+        assert module.module_id == f"{plugin}/runtime"
+        assert module.dependencies == ()
+        assert module.restart.value == "none"
+        expected_platforms = {
+            Platform.WINDOWS,
+            Platform.LINUX,
+            Platform.WSL,
+        }
+        if plugin in MACOS_ADAPTERS:
+            expected_platforms.add(Platform.MACOS)
+        assert set(module.platforms) == expected_platforms
+        for platform, expected_script in (
+            (Platform.WINDOWS, windows_script),
+            (Platform.LINUX, posix_script),
+            (Platform.WSL, posix_script),
+        ):
+            installer = module.installer[platform]
+            readiness = module.readiness[platform]
+            assert installer.target == (root / expected_script).resolve()
+            assert installer.arguments == arguments
+            assert readiness.command_id == plugin
+            assert readiness.arguments == ("installer-readiness",)
+            assert readiness.target.is_relative_to(root)
+        if plugin in MACOS_ADAPTERS:
+            assert module.installer[Platform.MACOS].target == (
+                root / posix_script
+            ).resolve()
+            assert module.readiness[Platform.MACOS].command_id == plugin
+            assert module.readiness[Platform.MACOS].arguments == (
+                "installer-readiness",
+            )
+            assert module.readiness[Platform.MACOS].target.is_relative_to(root)
 
 
 def test_fixture_inventory_rejects_silent_omission(tmp_path):

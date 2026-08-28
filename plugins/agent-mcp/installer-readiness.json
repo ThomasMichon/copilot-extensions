@@ -1,0 +1,87 @@
+{
+  "schema": "copilot-extensions.installer-readiness",
+  "version": 1,
+  "owner": {
+    "plugin": "agent-mcp"
+  },
+  "state": "supported",
+  "modules": [
+    {
+      "id": "agent-mcp/runtime",
+      "platforms": [
+        "windows",
+        "linux",
+        "wsl",
+        "macos"
+      ],
+      "classification": "required",
+      "installer": {
+        "windows": {
+          "kind": "payload-script",
+          "path": "scripts/init.ps1",
+          "arguments": [
+            "init"
+          ]
+        },
+        "linux": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        },
+        "wsl": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        },
+        "macos": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        }
+      },
+      "readiness": {
+        "schema": "copilot-extensions.module-readiness",
+        "version": 1,
+        "configurationEmpty": "satisfied",
+        "invocations": {
+          "windows": {
+            "kind": "payload-command",
+            "command": "agent-mcp",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "linux": {
+            "kind": "payload-command",
+            "command": "agent-mcp",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "wsl": {
+            "kind": "payload-command",
+            "command": "agent-mcp",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "macos": {
+            "kind": "payload-command",
+            "command": "agent-mcp",
+            "arguments": [
+              "installer-readiness"
+            ]
+          }
+        }
+      },
+      "dependsOn": [],
+      "restart": "none"
+    }
+  ]
+}

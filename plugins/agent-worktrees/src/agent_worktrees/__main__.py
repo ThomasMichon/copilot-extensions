@@ -12827,6 +12827,12 @@ def cmd_install_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_installer_readiness(args: argparse.Namespace) -> int:
+    from .installer_readiness import emit, evaluate
+
+    return emit(evaluate())
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # services -- discovery, staleness, and update
 # ═══════════════════════════════════════════════════════════════════════════
@@ -16520,6 +16526,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     # install-status
     sub.add_parser("install-status", help="Show installation status")
+    sub.add_parser(
+        "installer-readiness",
+        help="Emit the plugin-owned installer/readiness contract state as JSON",
+    )
 
     # deploy-instructions
     p = sub.add_parser("deploy-instructions",
@@ -18729,6 +18739,7 @@ COMMAND_MAP = {
     "uninstall": cmd_uninstall,
     "update": cmd_update,
     "install-status": cmd_install_status,
+    "installer-readiness": cmd_installer_readiness,
     "deploy-instructions": cmd_deploy_instructions,
     "machine-context": cmd_machine_context,
     "get": cmd_get,
@@ -19086,6 +19097,7 @@ _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
     "register", "hook", "knowledge", "reconcile-marketplaces",
     "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session", "deregister-session",
+    "installer-readiness",
     "bind-session",
     "bind-nudge",
     "history-digest",
