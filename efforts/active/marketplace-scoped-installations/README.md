@@ -152,7 +152,7 @@ reachable when their ownership is explicit.
     path/service/task footprints for each exemplar; no exemplar becomes
     operative until every legacy installer/bootstrap mutation refuses
     namespaced-active, orphaned-transfer, and maintenance.
-  - [ ] Prove activation CAS pins namespace, install, and activation generations
+  - [x] Prove activation CAS pins namespace, install, and activation generations
     and that Windows/WSL/POSIX receipts fail closed outside their exact
     environment.
 - [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
@@ -486,6 +486,27 @@ See [`design.md`](design.md).
   failures, zero jams, and phases 0–6 were represented. The retrieved report's
   SHA-256 was
   `4573A0180814CDF5FB87E1CA2B9A6B8D03A195F3DF53388CBF2BEFD5F75BC4AA`.
+
+### 2026-08-27 — Explicit activation CAS proof
+
+- Added one explicit `activation-cas` transaction across stdlib Python,
+  no-Python Bash, and PowerShell 5.1+/pwsh. It acquires the marketplace genesis
+  lock before the plugin installation lock, revalidates both context receipts,
+  and publishes only when the caller-observed namespace, install, and
+  activation generations still match.
+- Made stale generations return `revalidation-required` without replacement,
+  refused malformed or foreign-environment activation receipts without
+  overwriting them, and kept the generation within the portable signed 64-bit
+  range.
+- Proved exact Windows, native POSIX, and per-distribution WSL environment
+  binding, atomic contention winners, byte-for-byte mismatch preservation, and
+  post-publication resolver readiness across all three entry points. Tightened
+  lock acquisition and just-released-owner handling under contention while
+  preserving fail-closed genuine stale-owner diagnostics.
+- Kept activation non-automatic: no exemplar installer, bootstrap, payload
+  invocation, migration, or runtime launcher calls the primitive. Tombstone
+  writing, runtime-root cutover, and dual-cell exemplar operation remain later
+  slices.
 
 ### 2026-08-26 — Runtime plugin hook audit
 

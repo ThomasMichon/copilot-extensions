@@ -11,19 +11,23 @@ SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 JSON_QUERY="$SCRIPT_DIR/json-query.awk"
 SEP=$'\034'
 TEMP_FILES=()
-HELD_LOCK_DIR=""
-HELD_LOCK_TOKEN=""
+HELD_LOCK_DIRS=()
+HELD_LOCK_TOKENS=()
 
 cleanup() {
-    local path
-    if [[ -n "$HELD_LOCK_DIR" && -d "$HELD_LOCK_DIR" ]]; then
-        if [[ ! -e "$HELD_LOCK_DIR/owner.json" ]]; then
-            rmdir -- "$HELD_LOCK_DIR" 2>/dev/null || true
-        elif (lock_owner_matches "$HELD_LOCK_DIR/owner.json" 2>/dev/null); then
-            rm -f -- "$HELD_LOCK_DIR/owner.json" 2>/dev/null || true
-            rmdir -- "$HELD_LOCK_DIR" 2>/dev/null || true
+    local index path token
+    for ((index = ${#HELD_LOCK_DIRS[@]} - 1; index >= 0; index--)); do
+        path="${HELD_LOCK_DIRS[index]}"
+        token="${HELD_LOCK_TOKENS[index]}"
+        if [[ -d "$path" ]]; then
+            if [[ ! -e "$path/owner.json" ]]; then
+                rmdir -- "$path" 2>/dev/null || true
+            elif (lock_owner_matches "$path/owner.json" "$token" 2>/dev/null); then
+                rm -f -- "$path/owner.json" 2>/dev/null || true
+                rmdir -- "$path" 2>/dev/null || true
+            fi
         fi
-    fi
+    done
     for path in "${TEMP_FILES[@]}"; do
         rm -f -- "$path" 2>/dev/null || true
     done
@@ -257,24 +261,42 @@ atomic_write_json() {
     temporary="$(mktemp "$directory/.$(basename -- "$path").tmp.XXXXXX")"
     TEMP_FILES+=("$temporary")
     printf '%s\n' "$content" >"$temporary"
-    if [[ -n "$HELD_LOCK_DIR" && "$skip_lock" != true ]]; then
-        assert_lock_owned
+    if ((${#HELD_LOCK_DIRS[@]} > 0)) && [[ "$skip_lock" != true ]]; then
+        assert_all_locks_owned
     fi
     mv -f -- "$temporary" "$path"
 }
 
 lock_owner_matches() {
-    local owner="$1" token
+    local owner="$1" expected_token="$2" token
     [[ -f "$owner" ]] || return 1
     json_optional_string_into token "$owner" token
-    [[ "$token" == "$HELD_LOCK_TOKEN" ]]
+    [[ "$token" == "$expected_token" ]]
 }
 
 assert_lock_owned() {
-    [[ -n "$HELD_LOCK_DIR" && -d "$HELD_LOCK_DIR" ]] ||
+    local index path token
+    index=$((${#HELD_LOCK_DIRS[@]} - 1))
+    ((index >= 0)) || fail "Installation lock is not held."
+    path="${HELD_LOCK_DIRS[index]}"
+    token="${HELD_LOCK_TOKENS[index]}"
+    [[ -d "$path" ]] ||
         fail "Installation lock is not held."
-    lock_owner_matches "$HELD_LOCK_DIR/owner.json" ||
-        fail "Installation lock '$HELD_LOCK_DIR' ownership changed during mutation."
+    lock_owner_matches "$path/owner.json" "$token" ||
+        fail "Installation lock '$path' ownership changed during mutation."
+}
+
+assert_all_locks_owned() {
+    local index path token
+    ((${#HELD_LOCK_DIRS[@]} > 0)) || fail "Installation lock is not held."
+    for ((index = 0; index < ${#HELD_LOCK_DIRS[@]}; index++)); do
+        path="${HELD_LOCK_DIRS[index]}"
+        token="${HELD_LOCK_TOKENS[index]}"
+        [[ -d "$path" ]] ||
+            fail "Installation lock '$path' is not held."
+        lock_owner_matches "$path/owner.json" "$token" ||
+            fail "Installation lock '$path' ownership changed during mutation."
+    done
 }
 
 acquire_lock() {
@@ -289,8 +311,8 @@ acquire_lock() {
     deadline=$((SECONDS + 5))
     while ((SECONDS < deadline)); do
         if mkdir -- "$path" 2>/dev/null; then
-            HELD_LOCK_DIR="$path"
-            HELD_LOCK_TOKEN="$token"
+            HELD_LOCK_DIRS+=("$path")
+            HELD_LOCK_TOKENS+=("$token")
             owner="$path/owner.json"
             atomic_write_json "$owner" "{
   \"schema\":\"copilot-extensions.installation-lock\",
@@ -337,6 +359,11 @@ acquire_lock() {
             fail "Installation lock owner receipt '$owner' is invalid."
         if [[ "$owner_host" == "$host" ]]; then
             if ! kill -0 "$owner_pid" 2>/dev/null && [[ ! -d "/proc/$owner_pid" ]]; then
+                sleep 0.01
+                if [[ ! -d "$path" ]] ||
+                    ! lock_owner_matches "$owner" "$owner_token"; then
+                    continue
+                fi
                 fail "Installation lock '$path' has a stale owner (host=$owner_host, pid=$owner_pid); explicit repair is required."
             fi
             sleep 0.01
@@ -358,12 +385,17 @@ acquire_lock() {
 }
 
 release_lock() {
+    local index path
     assert_lock_owned
-    rm -f -- "$HELD_LOCK_DIR/owner.json"
-    rmdir -- "$HELD_LOCK_DIR" ||
-        fail "Cannot release installation lock '$HELD_LOCK_DIR'."
-    HELD_LOCK_DIR=""
-    HELD_LOCK_TOKEN=""
+    index=$((${#HELD_LOCK_DIRS[@]} - 1))
+    path="${HELD_LOCK_DIRS[index]}"
+    rm -f -- "$path/owner.json"
+    rmdir -- "$path" ||
+        fail "Cannot release installation lock '$path'."
+    unset 'HELD_LOCK_DIRS[index]'
+    unset 'HELD_LOCK_TOKENS[index]'
+    HELD_LOCK_DIRS=("${HELD_LOCK_DIRS[@]}")
+    HELD_LOCK_TOKENS=("${HELD_LOCK_TOKENS[@]}")
 }
 
 is_absolute() {
@@ -743,6 +775,11 @@ assert_plugin_id() {
             fail "Invalid filesystem-safe plugin id '$1'."
             ;;
     esac
+}
+
+assert_marketplace_id() {
+    [[ "$1" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
+        fail "Invalid source-derived marketplace id '$1'."
 }
 
 assert_positive_integer() {
@@ -1562,7 +1599,7 @@ read_environment_tuple() {
     [[ -n "$READ_ENV_HOME_REAL_PATH" ]] ||
         fail "$label.homeRealPath must be a non-empty string."
     if [[ "$READ_ENV_PLATFORM" == windows ]]; then
-        [[ "$READ_ENV_HOME_REAL_PATH" =~ ^[A-Za-z]:[\\/]|^\\\\ ]] ||
+        [[ "$READ_ENV_HOME_REAL_PATH" =~ ^[A-Za-z]:[\\/]|^\\\\[^\\/]+[\\/][^\\/]+([\\/]|$) ]] ||
             fail "$label.homeRealPath must be absolute."
     else
         is_absolute "$READ_ENV_HOME_REAL_PATH" ||
@@ -1859,6 +1896,171 @@ activation_snapshot() {
         "$mode" "$state" "$(printf '%s' "$context" | snapshot_hex)" \
         "$generation" "$current_install_generation" \
         "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
+}
+
+activation_cas() {
+    local context="$CONTEXT" cell_root plugin_root activation genesis_lock install_lock
+    local actual_namespace_generation actual_install_generation actual_activation_generation=0
+    local activation_info="" activation_status created_at now next_generation
+    local checked_at_json wsl_distro_json activation_json
+
+    [[ "$CONTEXT_SUPPLIED" == true && -n "$context" ]] ||
+        fail "activation-cas requires --context."
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] ||
+        fail "activation-cas requires --expected-marketplace-id."
+    [[ -n "$EXPECTED_PLUGIN_ID" ]] ||
+        fail "activation-cas requires --expected-plugin-id."
+    assert_marketplace_id "$EXPECTED_MARKETPLACE_ID"
+    assert_plugin_id "$EXPECTED_PLUGIN_ID"
+    [[ "$EXPECTED_NAMESPACE_GENERATION" =~ ^[0-9]+$ ]] ||
+        fail "Expected namespace generation must be a non-negative integer."
+    [[ "$EXPECTED_INSTALL_GENERATION" =~ ^[0-9]+$ ]] ||
+        fail "Expected install generation must be a non-negative integer."
+    [[ "$EXPECTED_ACTIVATION_GENERATION" =~ ^[0-9]+$ ]] ||
+        fail "Expected activation generation must be a non-negative integer."
+    case "$ACTIVATION_MODE/$ACTIVATION_STATE" in
+        namespaced/active | legacy/deactivated) ;;
+        *) fail "Activation mode/state pair is invalid." ;;
+    esac
+    case "$LEGACY_DISPOSITION" in
+        absent | quiesced | retained-inert | restored) ;;
+        *) fail "Activation legacy disposition is invalid." ;;
+    esac
+    [[ "$LEGACY_PROBE_JSON_SUPPLIED" == true || "$LEGACY_PROBE_FILE_SUPPLIED" == true ]] ||
+        fail "activation-cas requires --legacy-probe-json or --legacy-probe-file."
+    legacy_probe_snapshot "$LEGACY_PROBE_FILE"
+    resolve_current_environment
+
+    is_absolute "$context" || fail "Activation context must be absolute."
+    context="$(canonical_path "$context" true)"
+    cell_root="$(canonical_path "$DURABLE_HOME/marketplaces/$EXPECTED_MARKETPLACE_ID")"
+    plugin_root="$(canonical_path "$cell_root/plugins/$EXPECTED_PLUGIN_ID")"
+    paths_equal "$context" "$plugin_root/install.json" ||
+        fail "Activation context is not the canonical install receipt."
+    if [[ -n "$LEGACY_ROOT" ]]; then
+        is_absolute "$LEGACY_ROOT" || fail "--legacy-root must be absolute."
+        LEGACY_ROOT="$(canonical_path "$LEGACY_ROOT")"
+    else
+        LEGACY_ROOT="$(canonical_path "$CURRENT_PROFILE_HOME/.$EXPECTED_PLUGIN_ID")"
+    fi
+    activation="$plugin_root/installation-activation.json"
+    genesis_lock="$DURABLE_HOME/marketplaces/.locks/$EXPECTED_MARKETPLACE_ID.genesis"
+    install_lock="$cell_root/.locks/$EXPECTED_PLUGIN_ID.install.lock"
+
+    acquire_lock "$genesis_lock" genesis "$EXPECTED_MARKETPLACE_ID"
+    acquire_lock "$install_lock" install "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$context" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" "$cell_root"
+    actual_namespace_generation="$NS_GENERATION"
+    actual_install_generation="$(json_optional_path "$context" generation)"
+    if [[ -e "$activation" || -L "$activation" ]]; then
+        [[ -f "$activation" && ! -L "$activation" ]] ||
+            fail "Existing activation receipt is invalid."
+        activation_info="$(activation_snapshot \
+            "$activation" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$plugin_root" "$LEGACY_ROOT")"
+        activation_status="$(snapshot_value "$activation_info" status)"
+        case "$activation_status" in
+            valid | revalidation-required)
+                actual_activation_generation="$(snapshot_value "$activation_info" activationGeneration)"
+                ;;
+            foreign-environment)
+                fail "Existing activation receipt belongs to a foreign environment."
+                ;;
+            *)
+                fail "Existing activation receipt is invalid."
+                ;;
+        esac
+    fi
+
+    if [[ "$actual_namespace_generation" != "$EXPECTED_NAMESPACE_GENERATION" ||
+        "$actual_install_generation" != "$EXPECTED_INSTALL_GENERATION" ||
+        "$actual_activation_generation" != "$EXPECTED_ACTIVATION_GENERATION" ]]; then
+        release_lock
+        release_lock
+        printf '{'
+        printf '"action":"activation-cas","status":"revalidation-required","reason":"generation-changed",'
+        printf '"activation":%s,' "$(json_string_or_null "$([[ -e "$activation" ]] && printf '%s' "$(canonical_path "$activation")")")"
+        printf '"activationChanged":false,'
+        printf '"activationGeneration":%s,' "$actual_activation_generation"
+        printf '"namespaceGeneration":%s,' "$actual_namespace_generation"
+        printf '"installGeneration":%s,' "$actual_install_generation"
+        printf '"expectedActivationGeneration":%s,' "$EXPECTED_ACTIVATION_GENERATION"
+        printf '"expectedNamespaceGeneration":%s,' "$EXPECTED_NAMESPACE_GENERATION"
+        printf '"expectedInstallGeneration":%s,' "$EXPECTED_INSTALL_GENERATION"
+        printf '"operative":false}\n'
+        return 0
+    fi
+
+    local namespace_state install_state
+    json_optional_string_into namespace_state "$cell_root/namespace.json" state
+    json_optional_string_into install_state "$context" state
+    [[ "$namespace_state" == active && "$install_state" == active ]] ||
+        fail "Activation requires active namespace and install receipts."
+
+    [[ "$actual_activation_generation" != 9223372036854775807 ]] ||
+        fail "installation-activation.json generation cannot be incremented; explicit repair is required."
+    next_generation=$((actual_activation_generation + 1))
+    now="$(utc_now)"
+    created_at="$now"
+    if [[ -f "$activation" ]]; then
+        json_optional_string_into created_at "$activation" createdAt "$now"
+    fi
+    if [[ -n "$LEGACY_PROBE_CHECKED_AT" ]]; then
+        checked_at_json="$(json_quote "$LEGACY_PROBE_CHECKED_AT")"
+    else
+        checked_at_json=null
+    fi
+    if [[ "$CURRENT_WSL_DISTRO_TYPE" == string ]]; then
+        wsl_distro_json="$(json_quote "$CURRENT_WSL_DISTRO")"
+    else
+        wsl_distro_json=null
+    fi
+    activation_json="{
+  \"schema\":\"copilot-extensions.installation-activation\",
+  \"version\":1,
+  \"marketplaceId\":$(json_quote "$EXPECTED_MARKETPLACE_ID"),
+  \"pluginId\":$(json_quote "$EXPECTED_PLUGIN_ID"),
+  \"mode\":$(json_quote "$ACTIVATION_MODE"),
+  \"state\":$(json_quote "$ACTIVATION_STATE"),
+  \"environment\":{
+    \"platform\":$(json_quote "$CURRENT_PLATFORM"),
+    \"homeRealPath\":$(json_quote "$CURRENT_PROFILE_HOME"),
+    \"wslDistro\":$wsl_distro_json
+  },
+  \"context\":$(json_quote "$context"),
+  \"namespaceGeneration\":$actual_namespace_generation,
+  \"installGeneration\":$actual_install_generation,
+  \"generation\":$next_generation,
+  \"legacy\":{
+    \"disposition\":$(json_quote "$LEGACY_DISPOSITION"),
+    \"probe\":{
+      \"declared\":$LEGACY_PROBE_DECLARED,
+      \"result\":$(json_quote "$LEGACY_PROBE_RESULT"),
+      \"checkedAt\":$checked_at_json
+    }
+  },
+  \"createdAt\":$(json_quote "$created_at"),
+  \"updatedAt\":$(json_quote "$now")
+}"
+    atomic_write_json "$activation" "$activation_json"
+    activation_info="$(activation_snapshot \
+        "$activation" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+        "$EXPECTED_PLUGIN_ID" "$plugin_root" "$LEGACY_ROOT")"
+    [[ "$(snapshot_value "$activation_info" status)" == valid ]] ||
+        fail "Published activation receipt did not validate as current."
+    release_lock
+    release_lock
+    printf '{'
+    printf '"action":"activation-cas","status":"ready","reason":"activation-published",'
+    printf '"activation":%s,"activationChanged":true,' "$(json_quote "$(canonical_path "$activation")")"
+    printf '"activationGeneration":%s,' "$next_generation"
+    printf '"namespaceGeneration":%s,' "$actual_namespace_generation"
+    printf '"installGeneration":%s,' "$actual_install_generation"
+    printf '"environment":{"platform":%s,"homeRealPath":%s,"wslDistro":%s},' \
+        "$(json_quote "$CURRENT_PLATFORM")" "$(json_quote "$CURRENT_PROFILE_HOME")" "$wsl_distro_json"
+    printf '"mode":%s,"state":%s,"context":%s,"operative":false}\n' \
+        "$(json_quote "$ACTIVATION_MODE")" "$(json_quote "$ACTIVATION_STATE")" "$(json_quote "$context")"
 }
 
 tombstone_snapshot() {
@@ -2469,8 +2671,8 @@ run_status_action() {
 }
 
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|status|probe-legacy} [options]"
+[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -2482,6 +2684,7 @@ COPILOT_HOME="${HOME}/.copilot"
 PROJECT_ROOT=""
 DURABLE_HOME="${HOME}/.copilot-extensions"
 CONTEXT=""
+CONTEXT_SUPPLIED=false
 EXPECTED_MARKETPLACE_ID=""
 EXPECTED_PLUGIN_ID=""
 EXPECTED_PAYLOAD_ROOT=""
@@ -2491,8 +2694,12 @@ PAYLOAD_ORIGIN=""
 PAYLOAD_ORIGIN_RECEIPT=""
 EXPECTED_NAMESPACE_GENERATION=""
 EXPECTED_INSTALL_GENERATION=""
+EXPECTED_ACTIVATION_GENERATION=""
 NAMESPACE_STATE="active"
 INSTALL_STATE="active"
+ACTIVATION_MODE=""
+ACTIVATION_STATE=""
+LEGACY_DISPOSITION=""
 LEGACY_ROOT=""
 LEGACY_PROBE_JSON='{"declared":false,"result":"unknown","checkedAt":null}'
 LEGACY_PROBE_FILE=""
@@ -2510,7 +2717,7 @@ while (($#)); do
         --copilot-home) need_value "$@"; COPILOT_HOME="$2"; shift 2 ;;
         --project-root) need_value "$@"; PROJECT_ROOT="$2"; shift 2 ;;
         --durable-home) need_value "$@"; DURABLE_HOME="$2"; shift 2 ;;
-        --context) need_value "$@"; CONTEXT="$2"; shift 2 ;;
+        --context) need_value "$@"; CONTEXT="$2"; CONTEXT_SUPPLIED=true; shift 2 ;;
         --expected-marketplace-id) need_value "$@"; EXPECTED_MARKETPLACE_ID="$2"; shift 2 ;;
         --expected-plugin-id) need_value "$@"; EXPECTED_PLUGIN_ID="$2"; shift 2 ;;
         --expected-payload-root) need_value "$@"; EXPECTED_PAYLOAD_ROOT="$2"; shift 2 ;;
@@ -2520,8 +2727,12 @@ while (($#)); do
         --payload-origin-receipt) need_value "$@"; PAYLOAD_ORIGIN_RECEIPT="$2"; shift 2 ;;
         --expected-namespace-generation) need_value "$@"; EXPECTED_NAMESPACE_GENERATION="$2"; shift 2 ;;
         --expected-install-generation) need_value "$@"; EXPECTED_INSTALL_GENERATION="$2"; shift 2 ;;
+        --expected-activation-generation) need_value "$@"; EXPECTED_ACTIVATION_GENERATION="$2"; shift 2 ;;
         --namespace-state) need_value "$@"; NAMESPACE_STATE="$2"; shift 2 ;;
         --install-state) need_value "$@"; INSTALL_STATE="$2"; shift 2 ;;
+        --activation-mode) need_value "$@"; ACTIVATION_MODE="$2"; shift 2 ;;
+        --activation-state) need_value "$@"; ACTIVATION_STATE="$2"; shift 2 ;;
+        --legacy-disposition) need_value "$@"; LEGACY_DISPOSITION="$2"; shift 2 ;;
         --legacy-root) need_value "$@"; LEGACY_ROOT="$2"; shift 2 ;;
         --legacy-probe-json) need_value "$@"; LEGACY_PROBE_JSON="$2"; LEGACY_PROBE_JSON_SUPPLIED=true; shift 2 ;;
         --legacy-probe-file) need_value "$@"; LEGACY_PROBE_FILE="$2"; LEGACY_PROBE_FILE_SUPPLIED=true; shift 2 ;;
@@ -2545,7 +2756,7 @@ if [[ -n "$SOURCE_JSON" ]]; then
 fi
 if [[ -n "$LEGACY_PROBE_FILE" ]]; then
     LEGACY_PROBE_FILE="$(canonical_path "$LEGACY_PROBE_FILE" true)"
-elif [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
+elif [[ "$ACTION" == status || "$ACTION" == probe-legacy || "$ACTION" == activation-cas ]]; then
     LEGACY_PROBE_FILE="@LEGACY_PROBE_JSON"
 fi
 
@@ -2570,7 +2781,9 @@ if [[ "$ACTION" == source-id ]]; then
     exit 0
 fi
 
-CONTEXT="${CONTEXT:-${COPILOT_EXTENSIONS_CONTEXT:-}}"
+if [[ "$ACTION" != activation-cas ]]; then
+    CONTEXT="${CONTEXT:-${COPILOT_EXTENSIONS_CONTEXT:-}}"
+fi
 if [[ "$ACTION" == validate ]]; then
     [[ -n "$CONTEXT" ]] || fail "validate requires --context or COPILOT_EXTENSIONS_CONTEXT."
     validate_context_receipt \
@@ -2598,6 +2811,11 @@ if [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
     fi
     run_status_action
     exit $?
+fi
+
+if [[ "$ACTION" == activation-cas ]]; then
+    activation_cas
+    exit 0
 fi
 
 if [[ "$ACTION" == resolve && -n "$CONTEXT" ]]; then

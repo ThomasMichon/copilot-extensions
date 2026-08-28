@@ -270,6 +270,70 @@ def _cli_arguments(
     return arguments
 
 
+def _activation_cas_arguments(
+    layout: dict[str, object],
+    legacy: Path,
+    *,
+    expected_marketplace_id: str | None = None,
+    expected_plugin_id: str = PLUGIN_ID,
+    expected_namespace_generation: int | None = None,
+    expected_install_generation: int | None = None,
+    expected_activation_generation: int = 0,
+    mode: str = "namespaced",
+    state: str = "active",
+    disposition: str = "absent",
+    probe: dict[str, object] | None = None,
+    legacy_root: str | Path | None = None,
+) -> list[str]:
+    return [
+        "activation-cas",
+        "--context",
+        str(layout["install"]),
+        "--durable-home",
+        str(layout["durable"]),
+        "--expected-marketplace-id",
+        (
+            str(layout["marketplace_id"])
+            if expected_marketplace_id is None
+            else expected_marketplace_id
+        ),
+        "--expected-plugin-id",
+        expected_plugin_id,
+        "--expected-namespace-generation",
+        str(
+            layout["namespace_generation"]
+            if expected_namespace_generation is None
+            else expected_namespace_generation
+        ),
+        "--expected-install-generation",
+        str(
+            layout["install_generation"]
+            if expected_install_generation is None
+            else expected_install_generation
+        ),
+        "--expected-activation-generation",
+        str(expected_activation_generation),
+        "--activation-mode",
+        mode,
+        "--activation-state",
+        state,
+        "--legacy-disposition",
+        disposition,
+        "--legacy-root",
+        str(legacy if legacy_root is None else legacy_root),
+        "--legacy-probe-json",
+        json.dumps(
+            probe
+            or {
+                "declared": True,
+                "result": "absent",
+                "checkedAt": "2026-01-01T00:00:00Z",
+            },
+            separators=(",", ":"),
+        ),
+    ]
+
+
 def _runner_command(name: str, arguments: list[str]) -> list[str]:
     if name == "python":
         return [sys.executable, str(PYTHON_SCRIPT), *arguments]
@@ -291,6 +355,12 @@ def _runner_command(name: str, arguments: list[str]) -> list[str]:
         "--expected-plugin-id": "-ExpectedPluginId",
         "--expected-payload-root": "-ExpectedPayloadRoot",
         "--expected-cell-root": "-ExpectedCellRoot",
+        "--expected-namespace-generation": "-ExpectedNamespaceGeneration",
+        "--expected-install-generation": "-ExpectedInstallGeneration",
+        "--expected-activation-generation": "-ExpectedActivationGeneration",
+        "--activation-mode": "-ActivationMode",
+        "--activation-state": "-ActivationState",
+        "--legacy-disposition": "-LegacyDisposition",
     }
     converted = [arguments[0]]
     converted.extend(mapping.get(value, value) for value in arguments[1:])
@@ -1436,6 +1506,581 @@ def test_invalid_context_is_structured_not_invocation_failure(
     assert value["pluginId"] == PLUGIN_ID
     assert value["actualMode"] is None
     assert value["runtimeRoot"] is None
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_activation_cas_publishes_exact_environment_receipt(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    result = _run(runner, _activation_cas_arguments(layout, legacy))
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["status"] == "ready"
+    assert value["activationChanged"] is True
+    assert value["activationGeneration"] == 1
+    assert value["namespaceGeneration"] == layout["namespace_generation"]
+    assert value["installGeneration"] == layout["install_generation"]
+    assert value["environment"] == _environment()
+    assert value["operative"] is False
+
+    activation = Path(value["activation"])
+    receipt = json.loads(activation.read_text(encoding="utf-8"))
+    assert receipt["environment"] == _environment()
+    assert receipt["namespaceGeneration"] == layout["namespace_generation"]
+    assert receipt["installGeneration"] == layout["install_generation"]
+    assert receipt["generation"] == 1
+    assert activation.read_bytes().endswith(b"\n")
+    assert not activation.read_bytes().startswith(b"\xef\xbb\xbf")
+    status = _run(
+        runner,
+        _cli_arguments(
+            layout,
+            legacy,
+            action="status",
+            policy_path=tmp_path / "missing-policy.json",
+        ),
+    )
+    assert status.returncode == 0, status.stderr
+    status_value = json.loads(status.stdout)
+    assert status_value["status"] == "ready"
+    assert status_value["actualMode"] == "namespaced"
+    assert status_value["activationGeneration"] == 1
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("expected_marketplace_id", "expected_plugin_id"),
+    [
+        ("", PLUGIN_ID),
+        ("../escape", PLUGIN_ID),
+        (None, ""),
+        (None, "../escape"),
+    ],
+)
+def test_activation_cas_rejects_invalid_expected_identity_before_locking(
+    tmp_path: Path,
+    runner: str,
+    expected_marketplace_id: str | None,
+    expected_plugin_id: str,
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    durable = Path(layout["durable"])
+    before = sorted(
+        path.relative_to(durable).as_posix() for path in durable.rglob("*")
+    )
+    result = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+        ),
+    )
+    assert result.returncode != 0
+    after = sorted(
+        path.relative_to(durable).as_posix() for path in durable.rglob("*")
+    )
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_activation_cas_requires_absolute_legacy_root(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    result = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            legacy_root="relative-legacy",
+        ),
+    )
+    assert result.returncode != 0
+    assert "absolute" in result.stderr
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("context_value", [None, ""])
+def test_activation_cas_requires_explicit_context_argument(
+    tmp_path: Path, runner: str, context_value: str | None
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    arguments = _activation_cas_arguments(layout, legacy)
+    context_index = arguments.index("--context")
+    if context_value is None:
+        del arguments[context_index : context_index + 2]
+    else:
+        arguments[context_index + 1] = context_value
+    environment = os.environ.copy()
+    environment["COPILOT_EXTENSIONS_CONTEXT"] = str(layout["install"])
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    result = subprocess.run(
+        _runner_command(runner, arguments),
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+    )
+    assert result.returncode != 0
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_activation_cas_rejects_each_stale_generation_without_publication(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    first = _run(runner, _activation_cas_arguments(layout, legacy))
+    assert first.returncode == 0, first.stderr
+    activation = Path(json.loads(first.stdout)["activation"])
+    original = activation.read_bytes()
+
+    stale_activation = _run(runner, _activation_cas_arguments(layout, legacy))
+    assert stale_activation.returncode == 0, stale_activation.stderr
+    stale_activation_value = json.loads(stale_activation.stdout)
+    assert stale_activation_value["status"] == "revalidation-required"
+    assert stale_activation_value["activationGeneration"] == 1
+    assert activation.read_bytes() == original
+
+    namespace = Path(layout["namespace"])
+    namespace_receipt = json.loads(namespace.read_text(encoding="utf-8"))
+    namespace_receipt["generation"] = int(layout["namespace_generation"]) + 1
+    _write_json(namespace, namespace_receipt)
+    stale_namespace = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_activation_generation=1,
+        ),
+    )
+    assert stale_namespace.returncode == 0, stale_namespace.stderr
+    stale_namespace_value = json.loads(stale_namespace.stdout)
+    assert stale_namespace_value["status"] == "revalidation-required"
+    assert stale_namespace_value["namespaceGeneration"] == (
+        int(layout["namespace_generation"]) + 1
+    )
+    assert activation.read_bytes() == original
+
+    namespace_receipt["generation"] = int(layout["namespace_generation"])
+    _write_json(namespace, namespace_receipt)
+    install = Path(layout["install"])
+    install_receipt = json.loads(install.read_text(encoding="utf-8"))
+    install_receipt["generation"] = int(layout["install_generation"]) + 1
+    _write_json(install, install_receipt)
+    stale_install = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_activation_generation=1,
+        ),
+    )
+    assert stale_install.returncode == 0, stale_install.stderr
+    stale_install_value = json.loads(stale_install.stdout)
+    assert stale_install_value["status"] == "revalidation-required"
+    assert stale_install_value["installGeneration"] == (
+        int(layout["install_generation"]) + 1
+    )
+    assert activation.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_concurrent_activation_cas_has_one_atomic_winner(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    command = _runner_command(
+        runner,
+        _activation_cas_arguments(layout, legacy),
+    )
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
+    processes = [
+        subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+        )
+        for _ in range(2)
+    ]
+    results = [process.communicate(timeout=30) for process in processes]
+    successful = [
+        json.loads(stdout)
+        for process, (stdout, _) in zip(processes, results, strict=True)
+        if process.returncode == 0
+    ]
+    assert any(value["status"] == "ready" for value in successful), results
+    for process, (_, stderr) in zip(processes, results, strict=True):
+        if process.returncode:
+            assert "remained busy" in stderr, results
+    if len(successful) == 2:
+        assert sorted(value["status"] for value in successful) == [
+            "ready",
+            "revalidation-required",
+        ]
+    activation = (
+        Path(layout["plugin_root"]) / "installation-activation.json"
+    )
+    receipt = json.loads(activation.read_text(encoding="utf-8"))
+    assert receipt["generation"] == 1
+    assert not list(Path(layout["durable"]).rglob("*.tmp-*"))
+    assert not list(Path(layout["durable"]).rglob("*.claim-*"))
+    assert not (
+        Path(layout["durable"])
+        / "marketplaces"
+        / ".locks"
+        / f"{layout['marketplace_id']}.genesis"
+    ).exists()
+    assert not (
+        Path(layout["cell"]) / ".locks" / f"{PLUGIN_ID}.install.lock"
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_foreign_windows_wsl_and_posix_activation_receipts_fail_closed(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    current = _environment()
+    foreign_environments = [
+        {
+            "platform": "windows",
+            "homeRealPath": r"C:\Users\example",
+            "wslDistro": None,
+        },
+        {
+            "platform": "posix",
+            "homeRealPath": "/home/example",
+            "wslDistro": None,
+        },
+        {
+            "platform": "posix",
+            "homeRealPath": "/home/example",
+            "wslDistro": "ExampleDistro",
+        },
+    ]
+    foreign_environments = [
+        environment
+        for environment in foreign_environments
+        if environment != current
+    ]
+    for environment in foreign_environments:
+        _activation(layout, environment=environment)
+        result = _run(
+            runner,
+            _cli_arguments(
+                layout,
+                legacy,
+                action="status",
+                policy_path=tmp_path / "missing-policy.json",
+            ),
+        )
+        assert result.returncode == 0, result.stderr
+        value = json.loads(result.stdout)
+        assert value["status"] == "foreign-environment"
+        assert value["actualMode"] is None
+        assert value["runtimeRoot"] is None
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_activation_cas_never_overwrites_foreign_environment_receipt(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    foreign = {
+        "platform": "windows",
+        "homeRealPath": r"C:\Users\example",
+        "wslDistro": None,
+    }
+    if foreign == _environment():
+        foreign = {
+            "platform": "posix",
+            "homeRealPath": "/home/example",
+            "wslDistro": "ExampleDistro",
+        }
+    activation = _activation(layout, environment=foreign)
+    original = activation.read_bytes()
+    result = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_activation_generation=3,
+        ),
+    )
+    assert result.returncode != 0
+    assert "foreign environment" in result.stderr
+    assert activation.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "home_real_path",
+    [r"\\", r"\\server", "//server/share"],
+)
+def test_activation_cas_never_overwrites_invalid_windows_network_path_receipt(
+    tmp_path: Path, runner: str, home_real_path: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    activation = _activation(
+        layout,
+        environment={
+            "platform": "windows",
+            "homeRealPath": home_real_path,
+            "wslDistro": None,
+        },
+    )
+    original = activation.read_bytes()
+    result = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_activation_generation=3,
+        ),
+    )
+    assert result.returncode != 0
+    assert activation.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_activation_cas_never_overwrites_malformed_receipt(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    activation = _activation(layout)
+    receipt = json.loads(activation.read_text(encoding="utf-8"))
+    receipt["schema"] = "example.invalid"
+    _write_json(activation, receipt)
+    original = activation.read_bytes()
+    result = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_activation_generation=3,
+        ),
+    )
+    assert result.returncode != 0
+    assert activation.read_bytes() == original
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+@pytest.mark.parametrize("receipt_name", ["namespace", "install"])
+def test_activation_cas_requires_active_context_receipts(
+    tmp_path: Path, runner: str, receipt_name: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    receipt_path = Path(layout[receipt_name])
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["state"] = "removing"
+    _write_json(receipt_path, receipt)
+    result = _run(runner, _activation_cas_arguments(layout, legacy))
+    assert result.returncode != 0
+    assert "requires active namespace and install receipts" in result.stderr
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_activation_cas_refuses_generation_overflow_without_replacement(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    maximum = 9223372036854775807
+    activation = _activation(layout, generation=maximum)
+    original = activation.read_bytes()
+    result = _run(
+        runner,
+        _activation_cas_arguments(
+            layout,
+            legacy,
+            expected_activation_generation=maximum,
+            mode="legacy",
+            state="deactivated",
+            disposition="restored",
+        ),
+    )
+    assert result.returncode != 0
+    assert "cannot be incremented" in result.stderr
+    assert activation.read_bytes() == original
 
 
 @pytest.mark.parametrize(

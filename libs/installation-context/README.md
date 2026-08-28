@@ -1,7 +1,7 @@
 # Installation Context
 
-Canonical, dependency-light **non-operative** foundation for marketplace
-installation cells:
+Canonical, dependency-light management foundation for marketplace installation
+cells. Mutation remains explicit and non-automatic:
 
 - `installation_context.py` provides the stdlib-only management/runtime API and
   CLI.
@@ -17,12 +17,15 @@ installation cells:
 
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
-layout, strictly validate receipts, and expose the same bounded `stamp`
-mutation. They also expose read-only `status` and `probe-legacy` actions for
-installation-mode governance. `stamp` creates or updates only `namespace.json`
-and `install.json`; the new actions never write. None of these actions selects a
-runtime, creates version slots, migrates legacy state, publishes activation, or
-wires a caller.
+layout, strictly validate receipts, and expose the same bounded `stamp` and
+`activation-cas` mutations. They also expose read-only `status` and
+`probe-legacy` actions for installation-mode governance. `stamp` creates or
+updates only `namespace.json` and `install.json`. `activation-cas` explicitly
+publishes only `installation-activation.json` after pinning the caller-observed
+namespace, install, and activation generations. No action creates a version
+slot, migrates legacy state, launches a runtime, or wires an automatic caller.
+The mutation requires an explicit `--context` / `-Context`; it never adopts an
+ambient `COPILOT_EXTENSIONS_CONTEXT` as authorization.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
@@ -58,6 +61,18 @@ writes an actionable error to stderr and exits nonzero.
   -PayloadOrigin installed `
   -ExpectedNamespaceGeneration 0 `
   -ExpectedInstallGeneration 0
+
+.\installation-context.ps1 activation-cas `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -ExpectedNamespaceGeneration 1 `
+  -ExpectedInstallGeneration 1 `
+  -ExpectedActivationGeneration 0 `
+  -ActivationMode namespaced `
+  -ActivationState active `
+  -LegacyDisposition absent `
+  -LegacyProbeJson '{"declared":true,"result":"absent","checkedAt":null}'
 
 .\installation-context.ps1 status `
   -PayloadRoot $env:COPILOT_PLUGIN_ROOT `
@@ -95,6 +110,19 @@ writes an actionable error to stderr and exits nonzero.
   --expected-namespace-generation 0 \
   --expected-install-generation 0
 
+./installation-context.sh activation-cas \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --expected-namespace-generation 1 \
+  --expected-install-generation 1 \
+  --expected-activation-generation 0 \
+  --activation-mode namespaced \
+  --activation-state active \
+  --legacy-disposition absent \
+  --legacy-probe-json \
+  '{"declared":true,"result":"absent","checkedAt":null}'
+
 ./installation-context.sh status \
   --payload-root "$COPILOT_PLUGIN_ROOT" \
   --plugin-id agent-example \
@@ -112,7 +140,10 @@ The Python CLI uses the same lowercase long options as the Bash entry point.
 Callers that already have a private Python toolchain may import
 `normalize_source`, `source_identity`, `resolve_context`, and
 `validate_context_receipt` directly. Management callers may use
-`stamp_context`; its two expected-generation arguments are mandatory.
+`stamp_context`; its two expected-generation arguments are mandatory. An
+explicit management transaction may call `compare_and_swap_activation`; all
+three expected-generation arguments and validated legacy probe evidence are
+mandatory.
 Read-only callers may import `resolve_installation_mode` and
 `probe_legacy_entrypoint`. Their optional `os_profile`, `platform`,
 `wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit
@@ -135,12 +166,12 @@ operating-system-profile path remains the sole policy authority, so an injected
 true value cannot authorize namespaced activation and cannot strand an already
 valid active namespaced runtime.
 
-The governance boundary is intentionally non-operative. A clean authoritative
+The governance boundary is intentionally non-automatic. A clean authoritative
 namespaced request reports `activation-required`, while `probe-legacy` refuses
-with `namespaced-requested`; only a later explicit activation transaction may
-publish ownership. Present, unknown, or undeclared legacy evidence reports
-`migration-required`, and legacy remains authoritative until the later
-two-lock migration publishes activation and its matching tombstone.
+with `namespaced-requested`; only an explicit `activation-cas` transaction may
+publish actual mode. Present, unknown, or undeclared legacy evidence reports
+`migration-required`, and legacy remains authoritative until a later migration
+transaction publishes both activation and its matching tombstone.
 
 Cell genesis and plugin installation mutations use the same directory-lock
 protocol on every platform. Each lock contains a strict `owner.json` naming the
@@ -155,6 +186,16 @@ the caller-observed namespace and install generations while holding their
 respective locks; stale writers must resolve again. Generations are positive
 signed 64-bit integers on every implementation, and mutation fails before
 replacement when the next generation cannot be represented portably.
+
+Activation CAS acquires the marketplace genesis lock and then the plugin
+installation lock, revalidates both context receipts while both are held, and
+replaces the activation receipt only when all three observed generations still
+match. The stable lock order avoids inverse-order deadlocks. A generation
+mismatch returns `revalidation-required` with exit 0 and no replacement, so
+callers must inspect `status` and `activationChanged` rather than treating a
+zero exit as proof of publication. Publication also requires active namespace
+and install receipts. Malformed, overflowed, or foreign-environment activation
+receipts fail closed and are not overwritten.
 
 `ProjectRoot` / `--project-root` is explicit; resolution never guesses project
 settings from the current directory. `COPILOT_EXTENSIONS_CONTEXT` is only a
@@ -176,9 +217,10 @@ Python, and the no-Python POSIX bootstrap.
 
 `python tools/sync-installation-context.py` vendors byte-identical resolver
 copies into the Phase 3 adopters and the legacy-entrypoint callers into the two
-exemplar payloads. The resolver remains non-operative; the caller only protects
-legacy mutation and does not activate a namespaced root.
+exemplar payloads. No exemplar installer or bootstrap calls `activation-cas`;
+the existing callers only protect legacy mutation and do not activate a
+namespaced root.
 
-Later slices still own snapshot provenance, activation and tombstone writers,
-migration, runtime-root activation, payload-invocation schema changes,
-reconciliation, and dual-cell exemplars.
+Later slices still own snapshot provenance, tombstone writing, migration,
+runtime-root activation, payload-invocation schema changes, reconciliation,
+and dual-cell exemplars.
