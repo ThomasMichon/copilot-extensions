@@ -732,6 +732,40 @@ def test_revalidation_preserves_namespaced_desired_mode_across_runners(
     assert value["desiredMode"] == "namespaced"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows paths cannot contain newlines")
+@pytest.mark.parametrize(
+    "runner",
+    [
+        "python",
+        "posix",
+        pytest.param(
+            "powershell",
+            marks=pytest.mark.skipif(
+                POWERSHELL is None, reason="PowerShell is not installed"
+            ),
+        ),
+    ],
+)
+def test_namespaced_paths_with_newlines_round_trip_across_runners(
+    tmp_path: Path, runner: str
+) -> None:
+    layout = _cell_layout(tmp_path / "line\nbreak")
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    _activation(layout)
+
+    result = _run(
+        runner,
+        _cli_arguments(layout, legacy, action="status"),
+    )
+
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["status"] == "deactivation-required"
+    assert value["context"] == str(Path(layout["install"]).resolve())
+    assert value["runtimeRoot"] == str(Path(layout["plugin_root"]).resolve())
+
+
 @pytest.mark.parametrize(
     "runner",
     [

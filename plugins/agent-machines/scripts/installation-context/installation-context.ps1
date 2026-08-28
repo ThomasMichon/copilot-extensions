@@ -2512,7 +2512,8 @@ function Resolve-InstallationStatus(
         $reason = 'provenance-blocked'
     }
     elseif ($desiredMode -ceq 'namespaced' -and -not ($activation.classification -ceq 'valid' -and $activation.mode -ceq 'namespaced')) {
-        if ($legacyProbe.declared -and $legacyProbe.result -ceq 'absent') {
+        if ($activation.classification -ceq 'absent' -and
+            $legacyProbe.declared -and $legacyProbe.result -ceq 'absent') {
             $status = 'ready'
             $reason = 'activation-required'
         }

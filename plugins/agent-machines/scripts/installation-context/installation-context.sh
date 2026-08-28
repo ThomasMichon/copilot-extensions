@@ -1448,6 +1448,23 @@ snapshot_value() {
     return 1
 }
 
+snapshot_hex() {
+    LC_ALL=C od -An -v -tx1 | tr -d ' \n'
+}
+
+snapshot_hex_into() {
+    local target="$1" snapshot="$2" key="$3" encoded escapes="" decoded=""
+    encoded="$(snapshot_value "$snapshot" "${key}Hex")" || return 1
+    [[ "$encoded" =~ ^([0-9a-f]{2})*$ ]] ||
+        fail "Invalid encoded snapshot value for '$key'."
+    while [[ -n "$encoded" ]]; do
+        escapes+="\\x${encoded:0:2}"
+        encoded="${encoded:2}"
+    done
+    printf -v decoded '%b' "$escapes"
+    printf -v "$target" '%s' "$decoded"
+}
+
 normalized_short_host() {
     local host
     host="$(hostname 2>/dev/null || uname -n 2>/dev/null || printf '')"
@@ -1784,8 +1801,9 @@ activation_snapshot() {
         "$READ_ENV_HOME_REAL_PATH" != "$CURRENT_PROFILE_HOME" ||
         "$READ_ENV_WSL_DISTRO_TYPE" != "$CURRENT_WSL_DISTRO_TYPE" ||
         "$READ_ENV_WSL_DISTRO" != "$CURRENT_WSL_DISTRO" ]]; then
-        printf 'status\tforeign-environment\nmode\t%s\nstate\t%s\ncontext\t\nactivationGeneration\t\ninstallGeneration\t\nruntimeRoot\t%s\n' \
-            "$mode" "$state" "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")"
+        printf 'status\tforeign-environment\nmode\t%s\nstate\t%s\ncontextHex\t\nactivationGeneration\t\ninstallGeneration\t\nruntimeRootHex\t%s\n' \
+            "$mode" "$state" \
+            "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
         return 0
     fi
     [[ "$(json_type_path "$file" context)" == string ]] || fail "Activation context must be a string."
@@ -1831,14 +1849,16 @@ activation_snapshot() {
     validate_context_receipt "$context" "$durable_home" "$marketplace_id" "$plugin_id" "" "$cell_root"
     current_install_generation="$(json_optional_path "$context" generation)"
     if [[ "$namespace_generation" != "$NS_GENERATION" || "$install_generation" != "$current_install_generation" ]]; then
-        printf 'status\trevalidation-required\nmode\t%s\nstate\t%s\ncontext\t%s\nactivationGeneration\t%s\ninstallGeneration\t%s\nruntimeRoot\t%s\n' \
-            "$mode" "$state" "$context" "$generation" "$current_install_generation" \
-            "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")"
+        printf 'status\trevalidation-required\nmode\t%s\nstate\t%s\ncontextHex\t%s\nactivationGeneration\t%s\ninstallGeneration\t%s\nruntimeRootHex\t%s\n' \
+            "$mode" "$state" "$(printf '%s' "$context" | snapshot_hex)" \
+            "$generation" "$current_install_generation" \
+            "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
         return 0
     fi
-    printf 'status\tvalid\nmode\t%s\nstate\t%s\ncontext\t%s\nactivationGeneration\t%s\ninstallGeneration\t%s\nruntimeRoot\t%s\n' \
-        "$mode" "$state" "$context" "$generation" "$current_install_generation" \
-        "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")"
+    printf 'status\tvalid\nmode\t%s\nstate\t%s\ncontextHex\t%s\nactivationGeneration\t%s\ninstallGeneration\t%s\nruntimeRootHex\t%s\n' \
+        "$mode" "$state" "$(printf '%s' "$context" | snapshot_hex)" \
+        "$generation" "$current_install_generation" \
+        "$(printf '%s' "$([[ "$mode" == namespaced ]] && printf '%s' "$plugin_root" || printf '%s' "$legacy_root")" | snapshot_hex)"
 }
 
 tombstone_snapshot() {
@@ -2104,10 +2124,10 @@ resolve_activation_result() {
     ACTIVATION_STATUS="$(snapshot_value "$snapshot" status || printf invalid)"
     ACTIVATION_MODE="$(snapshot_value "$snapshot" mode || true)"
     ACTIVATION_RUNTIME_STATE="$(snapshot_value "$snapshot" state || true)"
-    ACTIVATION_CONTEXT="$(snapshot_value "$snapshot" context || true)"
+    snapshot_hex_into ACTIVATION_CONTEXT "$snapshot" context || true
     ACTIVATION_GENERATION="$(snapshot_value "$snapshot" activationGeneration || true)"
     ACTIVATION_INSTALL_GENERATION="$(snapshot_value "$snapshot" installGeneration || true)"
-    ACTIVATION_RUNTIME_ROOT="$(snapshot_value "$snapshot" runtimeRoot || true)"
+    snapshot_hex_into ACTIVATION_RUNTIME_ROOT "$snapshot" runtimeRoot || true
 }
 
 LEGACY_DISPOSITION=active
@@ -2356,7 +2376,8 @@ run_status_action() {
             base_reason=namespaced-active
         fi
     elif [[ "$desired_mode" == namespaced ]]; then
-        if [[ "$LEGACY_PROBE_DECLARED" == true && "$LEGACY_PROBE_RESULT" == absent ]]; then
+        if [[ "$ACTIVATION_STATUS" == missing &&
+            "$LEGACY_PROBE_DECLARED" == true && "$LEGACY_PROBE_RESULT" == absent ]]; then
             base_status=ready
             base_reason=activation-required
         else
