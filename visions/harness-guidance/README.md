@@ -3,7 +3,7 @@
 - **Subject:** Ambient guidance across repositories, plugins, skills, and operator policy
 - **Scope:** leaf
 - **Status:** Active
-- **Last revised:** 2026-08-20
+- **Last revised:** 2026-08-28
 - **Reality docs:** `docs/patterns/context-injection.md`, `docs/harness-runbook.md`
 
 ## Purpose & Intent
@@ -22,6 +22,11 @@ portable, attributable, and intentionally budgeted.
   enabled.
 - **Skills** provide detailed procedures at task time rather than occupying
   always-on context.
+- **Coordinators and delegates** divide work by context cost and separability:
+  the coordinating agent owns decomposition, integration, synthesis, and
+  completion, while bounded delegates isolate independent evidence gathering,
+  domain-tool interaction, explicitly disjoint implementation, and independent
+  review roles.
 - **Operator policy** is personal ambient guidance that can follow an agent
   across target repositories. A plugin may explicitly delegate narrow
   configuration keys to a repository, but safety, publication, attribution,
@@ -55,6 +60,24 @@ Always-on context should be measurable by source and category so repositories,
 plugins, and operators can make deliberate tradeoffs within a shared budget.
 Injected kernels should carry a stable plugin owner marker.
 
+### coordinator-first-task-routing
+
+Harnesses should provide model-neutral guidance that helps a coordinating agent
+route work by expected context consumption and separability. Broad independent
+research, comparisons, evaluations, bulk analysis, and disjoint bulk edits
+should move into bounded delegate contexts before their source material floods
+the coordinator, while small lookups, genuinely continuous traces, and cohesive
+implementation remain direct when splitting them would cost more than it saves.
+
+### bounded-delegate-contracts
+
+A delegated scope should have explicit ownership, bounded inputs and outputs,
+non-overlapping responsibility, an integration plan if it edits files, and a
+result shape suitable for integration.
+Domain-specific service catalogs and verbose tool payloads should remain with
+the delegate that owns that domain; compact shared research and orchestration
+signals may remain with the coordinator.
+
 ## Behaviors
 
 ### lean-repository-waypoint
@@ -85,9 +108,34 @@ idempotently reconciled marker or dedicated rule file.
 Context reporting should distinguish known static and metadata costs from
 dynamic contributions whose emitted size cannot be known without execution.
 
+### delegate-before-broad-ingestion
+
+When work contains separable evidence tracks whose direct ingestion would
+materially consume the coordinator's context, delegation should happen before
+the coordinator opens the broad source bodies. A coordinator should not repeat
+a delegated investigation without a concrete verification reason.
+
+### coordinator-retains-the-goal
+
+Delegation should not turn the coordinating agent into a passive dispatcher.
+The coordinator remains responsible for the prompt's goal, chooses and adjusts
+the decomposition, integrates evidence, directly drives cohesive implementation
+by default, and produces the final synthesis and completion judgment.
+
+### proportional-independent-review
+
+Independent review should preserve distinct required roles without becoming an
+unbounded loop. An unchanged artifact should not receive repeated same-role
+review unless a concrete defect or materially changed evidence justifies it.
+
 ## Non-Goals / Boundaries
 
 - This vision does not prescribe one configuration schema or hook script.
+- It does not maximize sub-agent count or require delegation for every lookup.
+- It does not delegate final synthesis, goal ownership, or completion judgment.
+- It does not prescribe one model, task API, agent runtime, or orchestration
+  transport.
+- It does not authorize recursive self-delegation or overlapping edit ownership.
 - It does not move repository-specific identity or invariants into plugins.
 - It does not make skills an always-on policy channel.
 - It does not require executing dynamic guidance producers to estimate their
