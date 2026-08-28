@@ -202,23 +202,23 @@ Public-safe transcription of the operator request:
 
 ### Phase 3 - Effort-aware handoff, ramp-up, and completion semantics
 
-- [ ] Make `planning-efforts`, `context-handoff`, and worktree lifecycle guidance
+- [x] Make `planning-efforts`, `context-handoff`, and worktree lifecycle guidance
       agree that the active effort - not a session, handoff task, phase, or pull
       request - owns the objective and completion gate.
-- [ ] Define the release rule used by both humans and agent-eval: responsibility
+- [x] Define the release rule used by both humans and agent-eval: responsibility
       remains open until the effort is explicitly `Done`, every Plan and
       Validation Plan checkbox is resolved, and any deferred or blocked item is
       transferred to a named tracked objective.
-- [ ] Define a compact effort-backed handoff shape containing the canonical
+- [x] Define a compact effort-backed handoff shape containing the canonical
       effort, next slice, material blockers or decisions, and any required
       confirmations. It should link durable state rather than duplicating the
       plan and journal.
-- [ ] Make the ramp-up path consume that pointer and recover only the predecessor
+- [x] Make the ramp-up path consume that pointer and recover only the predecessor
       session's immediate activity when needed, preserving a bounded takeover
       briefing.
-- [ ] Preserve a full standalone handoff for repositories that have not adopted
+- [x] Preserve a full standalone handoff for repositories that have not adopted
       efforts or for objectives that legitimately lack an active effort.
-- [ ] Add agent-eval or equivalent harness cases proving that an effort-backed
+- [x] Add agent-eval or equivalent harness cases proving that an effort-backed
       rightful head continues after a completed slice, a superseded session
       assists rather than racing, no session declares completion while the
       release rule remains unsatisfied, and the head still stops at required
@@ -279,10 +279,10 @@ Public-safe transcription of the operator request:
       transcript, full effort body, private identifier, or unbounded history.
 - [ ] Missing agent-worktrees, session history, handoff state, or ramp-up support
       degrades to the base efforts kernel without startup failure.
-- [ ] An effort-backed handoff plus the durable effort is sufficient for a fresh
+- [x] An effort-backed handoff plus the durable effort is sufficient for a fresh
       successor to select the next slice; predecessor ramp-up adds immediate
       context without replacing the effort.
-- [ ] Acceptance cases prove that agents continue across phase and session
+- [x] Acceptance cases prove that agents continue across phase and session
       boundaries until the explicit release rule is met; only the rightful head
       drives, and required review, genuine uncertainty, and destructive or
       administrative confirmation remain legitimate pause gates.
@@ -393,3 +393,35 @@ earlier slices.
   skipped), 45 efforts tests, and the repository install/version/docs/payload
   contract guards. Bumped agent-worktrees to `1.5.3-dev653`, efforts to
   `0.1.0-dev15`, and marketplace metadata to `1.7.5-dev672`.
+
+### 2026-08-28 - Phase 3 effort-backed continuity implemented
+
+- Added a compact context-handoff shape for worktrees whose
+  `active_effort.active` value is true. The baton links the canonical effort,
+  bound participant/current slice, next slice, immediate session delta, and
+  required confirmations instead of copying the durable Request, Plan,
+  Validation Plan, or Journal.
+- Preserved the full standalone handoff for repositories without effort
+  adoption, stale/closed/unavailable bindings, and objectives that legitimately
+  have no active effort. Updated the runtime handoff prompts so the compact
+  shape is not overridden by older full-template instructions.
+- Made ramp-up effort-first for local worktrees: read the effort as the durable
+  objective/completion gate, then inspect only immediate predecessor activity
+  that the effort journal and git state do not explain. Remote worktrees fail
+  back to standalone reconstruction unless an exact remote catalog command is
+  explicitly supplied.
+- Aligned context-handoff, planning-efforts, and worktree guidance on rightful
+  succession and release. A superseded predecessor assists rather than edits;
+  deferred/blocked tasks use machine-checked transfer syntax naming the tracked
+  objective receiving them; `effort-focus release --completed` rejects a
+  checked transfer without that target. Review, approval, administrative, and
+  safety gates remain legitimate stops.
+- Added focused guidance tests and the generic Tier-E
+  `effort-handoff-eval` clean-room scenario. Its fixture creates a real managed
+  worktree and active effort binding, then requires a fresh successor to
+  continue after a completed phase, select review submission as the next slice,
+  reject competing predecessor edits, refuse premature effort completion, and
+  pause for required approval before implementation.
+- Bumped context-handoff to `0.1.0-dev47`, agent-logger to `0.1.1-dev72`,
+  agent-worktrees to `1.5.3-dev654`, efforts to `0.1.0-dev16`, and marketplace
+  metadata to `1.7.5-dev673`.

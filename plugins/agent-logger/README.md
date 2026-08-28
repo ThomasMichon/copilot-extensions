@@ -71,6 +71,12 @@ optional background-chronicling core with its session-source + log-sink seams.
 4. For takeover, use `ramp-up-session`; it delegates the transcript-heavy read
    to the neutral `session-rampup` agent by default.
 
+When agent-worktrees exposes a valid open effort binding, takeover is
+effort-first: the effort README supplies the durable objective, plan, journal,
+and completion gate. Session history is read only as needed to recover the
+predecessor's immediate delta. Standalone worktrees retain the bounded
+checkpoint-and-digest reconstruction path.
+
 ## Documentation
 
 - [`docs/architecture.md`](docs/architecture.md) — components + data flow

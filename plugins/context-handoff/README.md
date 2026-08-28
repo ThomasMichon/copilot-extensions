@@ -134,6 +134,14 @@ actionable work remains and the parent objective is genuinely complete, the
 session should finish instead of creating a live successor only to report
 closure.
 
+When agent-worktrees reports a valid open `active_effort`, the skill uses a
+smaller effort-backed shape: repository-relative effort pointer, participant,
+current/next slice, and only the predecessor's immediate blockers, decisions,
+in-flight work, and required confirmations. The effort README remains the
+single durable request/plan/journal; the baton does not copy it. Repositories
+without effort adoption, stale/closed bindings, and objectives with no effort
+continue to use the full standalone handoff.
+
 **Failed-successor recovery (`retry_handoff_cutover`).** The native `-i`
 transport is receipt-checked by the pane wrapper; a rejected flag or immediately
 exiting successor is reaped without retiring the predecessor. Because the
