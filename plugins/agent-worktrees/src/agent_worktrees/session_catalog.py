@@ -339,6 +339,7 @@ class ResidentSessionReconciler:
                         )],
                     )
                     self._insert_session(record.sessions, entry)
+                    tracking._next_lifecycle_revision(record)
                     result["registered"] = 1
                     changed = True
                 else:
@@ -347,7 +348,7 @@ class ResidentSessionReconciler:
                         entry.pid != live_pid or entry.ended_at is not None
                     ):
                         entry.pid = live_pid
-                        tracking._start_session_activation(
+                        activation_added = tracking._start_session_activation(
                             entry,
                             event_at=observation["started_at"] or _canonical_timestamp(
                                 datetime.now()
@@ -355,6 +356,8 @@ class ResidentSessionReconciler:
                             recorded_at=_canonical_timestamp(datetime.now()),
                             source="reconciled",
                         )
+                        if activation_added:
+                            tracking._next_lifecycle_revision(record)
                         result["pids"] = 1
                         changed = True
                 if (protected_head is not None
