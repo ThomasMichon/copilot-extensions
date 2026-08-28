@@ -18,7 +18,7 @@
     "CR_PARTNER_PATH": "mounted copilot-extensions source tree; the Windows runner mounts -PartnerPath at C:\\partner"
   },
   "expected_artifacts": [
-    "$HOME\\cr-report.json (phases + jams; ok iff failed==0)"
+    "$HOME/cr-report.json (phases + jams; ok iff failed==0)"
   ],
   "stages": [
     {"n": 0, "title": "source and evaluator present"},

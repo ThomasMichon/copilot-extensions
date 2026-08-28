@@ -478,9 +478,9 @@ See [`design.md`](design.md).
   pre-activation legacy pinning, migration-required legacy state, sticky active
   namespaced state, orphaned ownership transfer, stale maintenance, and the
   read-only filesystem invariant.
-- The formal Windows-container arm runs on the mesh's declared
-  `windows-containers` + `clean-room-validation` host; host-side execution
-  remains a fast compatibility probe rather than the acceptance proof.
+- The formal Windows-container arm runs on a dedicated Windows-container host;
+  host-side execution remains a fast compatibility probe rather than the
+  acceptance proof.
 - The formal Hyper-V-isolated Windows-container run passed against commit
   `05235922940fa10eb2ee86ce357db61077680fb1`: 16 assertions passed, zero
   failures, zero jams, and phases 0–6 were represented. The retrieved report's
