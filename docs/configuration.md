@@ -49,6 +49,7 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 | `containers.yaml` | Container fleet defaults (control repo) | `containers-fleet` |
 | `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `<repo>/.context-handoff/config.yaml` | Optional repository-owned soft/hard context utilization percentages | you / adopt |
+| `<repo>/.copilot-extensions/efforts/config.json` | Exact repository adoption marker for required effort-backed planning (`version: 1`, `enforcement: required`) | `efforts:efforts-setup` / adopt |
 | `tools/setup/setup.{ps1,sh}` | The session setup script run before Copilot launches | `create-setup-script` |
 
 ### Machine-local / user-global (never committed)

@@ -4,14 +4,24 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** serial per-slice pull requests from one managed worktree
 - **Created:** 2026-08-27
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** **vision-closing** against
   [`visions/plugins/efforts`](../../../visions/plugins/efforts/README.md),
   authored with this effort to state the previously missing standing intent.
   Ambient delivery also advances
   [`visions/harness-guidance`](../../../visions/harness-guidance/README.md).
 - **Umbrella issue:** [#1255](https://github.com/ThomasMichon/copilot-extensions/issues/1255)
-- **Sub-issues:** pending plan review
+- **Sub-issues:**
+  [#1259](https://github.com/ThomasMichon/copilot-extensions/issues/1259)
+  (repository enforcement and ambient policy),
+  [#1261](https://github.com/ThomasMichon/copilot-extensions/issues/1261)
+  (active effort binding),
+  [#1258](https://github.com/ThomasMichon/copilot-extensions/issues/1258)
+  (compact handoffs),
+  [#1260](https://github.com/ThomasMichon/copilot-extensions/issues/1260)
+  (cross-repository ownership), and
+  [#1262](https://github.com/ThomasMichon/copilot-extensions/issues/1262)
+  (integrated acceptance)
 
 ## Guiding Intent
 
@@ -119,11 +129,11 @@ Public-safe transcription of the operator request:
 
 ### Phase 0 - Reviewed intent and campaign
 
-- [ ] Land the new `visions/plugins/efforts` vision, this effort, and their index
+- [x] Land the new `visions/plugins/efforts` vision, this effort, and their index
       entries through the repository's review-gated pull-request flow.
-- [ ] Reconcile review feedback, merge the plan, and sync this worktree forward
+- [x] Reconcile review feedback, merge the plan, and sync this worktree forward
       before beginning implementation.
-- [ ] Carve accepted implementation phases into GitHub sub-issues that cite the
+- [x] Carve accepted implementation phases into GitHub sub-issues that cite the
       exact vision features and behaviors they close.
 
 ### Phase 1 - Repository adoption and ambient effort policy
@@ -133,29 +143,31 @@ Public-safe transcription of the operator request:
       or route the efforts producer through the suite's single deterministic
       aggregator. Direct producer tests may proceed earlier, but end-to-end
       coexistence is gated.
-- [ ] Define `.copilot-extensions/efforts/config.json` using the new committed
+- [x] Define `.copilot-extensions/efforts/config.json` using the new committed
       repository-config convention. Version 1 accepts only the exact semantic
       `{"version":1,"enforcement":"required"}`: a valid file declares both
       support and required use; absent or malformed configuration means the
       repository has not adopted efforts. Advisory adoption is out of scope for
       version 1 rather than being implied by softer wording.
-- [ ] Extend `efforts-setup` to scaffold and reconcile the adoption marker plus a
-      minimal, stable, plugin-owned static fallback for launch paths that do not
-      execute extension hooks. The fallback carries only the irreducible
-      false-completion guard and effort-discovery pointer, not the full ambient
-      kernel.
-- [ ] Add equivalent Bash and PowerShell `sessionStart` producers. When cwd is
+- [x] Extend `efforts-setup` to scaffold the adoption marker and direct
+      idempotent reconciliation of a minimal, stable, plugin-owned static
+      fallback for launch paths that do not execute extension hooks. The
+      fallback carries only the irreducible false-completion guard and
+      effort-discovery pointer, not the full ambient kernel.
+- [x] Add equivalent Bash and PowerShell `sessionStart` producers. When cwd is
       inside an adopting repository, emit a concise owner-marked kernel covering:
       use efforts instead of new plan docs for substantial work; review before
       execution; execute in waves; treat the active effort as the completion
       gate; let only the rightful head select the next authorized slice; pause
-      only at real
-      uncertainty, prerequisite, safety, or administrative gates.
-- [ ] Register the hook, document the configuration and fallback contract, bump
-      the efforts plugin version, and add focused schema, containment, symlink,
-      gating, fail-open, parity, and byte-budget tests. The base kernel must
-      remain below 1,024 UTF-8 bytes and the complete efforts contribution,
-      including dynamic orientation, below 1,536 bytes.
+      only at real uncertainty, prerequisite, safety, or administrative gates.
+- [ ] Register the hook only after #1234 or an equivalent deterministic
+      aggregation path is complete; registration is intentionally omitted from
+      the staged foundation so efforts cannot displace another plugin's context.
+- [x] Document the configuration, staged producer, and fallback contract; bump
+      the efforts plugin version; and add focused schema, containment, symlink,
+      gating, fail-open, parity, and byte-budget tests. The base kernel remains
+      below 1,024 UTF-8 bytes; the future complete efforts contribution,
+      including dynamic orientation, remains capped below 1,536 bytes.
 
 ### Phase 2 - Active-effort focus and bounded session orientation
 
@@ -242,14 +254,14 @@ Public-safe transcription of the operator request:
 
 ## Validation Plan
 
-- [ ] A repository with valid enforcement configuration receives the exact
+- [x] A repository with valid enforcement configuration receives the exact
       concise efforts producer output; an unconfigured repository receives `{}`.
       End-to-end coexistence with other plugin contexts is not considered proven
       until #1234 or its equivalent aggregation path is resolved.
-- [ ] Unknown keys, wrong versions/types, malformed JSON, out-of-repository
+- [x] Unknown keys, wrong versions/types, malformed JSON, out-of-repository
       paths, and symlink escapes fail open and never activate policy.
-- [ ] Bash and PowerShell producers emit equivalent guidance bytes and one final
-      JSON object for every input class.
+- [x] Bash and PowerShell producers emit equivalent guidance bytes and one final
+      JSON object across the supported validity, containment, and failure matrix.
 - [ ] The static fallback remains minimal, plugin-attributable, idempotently
       reconciled, and sufficient to preserve effort discovery and the completion
       gate when hooks do not run.
@@ -278,13 +290,13 @@ Public-safe transcription of the operator request:
 
 ## Proposal
 
-The first implementation work after this plan merges should resolve the shared
-`sessionStart` aggregation precondition in #1234 if it remains open, then keep
-the efforts change itself plugin-only: establish the repository adoption marker,
-setup reconciliation, concise ambient kernel, cross-platform producer parity,
-tests, docs, and version bump. Hook registration becomes a shippable capability
-only through a deterministic aggregation path. This slice provides immediate
-value without inventing dynamic worktree state.
+The first implementation slice stages everything the efforts plugin can own
+safely while #1234 remains open: establish the repository adoption marker,
+setup reconciliation, static fallback, concise ambient kernel, cross-platform
+producer parity, tests, docs, and version bump. The producer stays unregistered
+until the runtime or a suite-owned path deterministically joins context from
+independently enabled plugins. This preserves immediate fallback value and a
+reviewable implementation without creating another timing-dependent competitor.
 
 The second slice should add active-effort identity through the existing
 worktree-record owner, consuming #910's record-local handoff pointer rather than
@@ -306,5 +318,39 @@ earlier slices.
 - Confirmed that copilot-extensions has adopted in-repository efforts, so this
   public effort is canonical and no duplicate downstream effort is required.
 - Authored the `visions/plugins/efforts` standing intent and this five-slice
-  campaign. No implementation has started; the vision and plan must clear review
-  and merge before Phase 1 begins.
+  campaign.
+
+### 2026-08-27 - Plan merged and implementation trackers carved
+
+- Merged reviewed plan PR
+  [#1256](https://github.com/ThomasMichon/copilot-extensions/pull/1256) after
+  reconciling Copilot review feedback, then synchronized the implementation
+  worktree to the merged baseline.
+- Filed phase issues #1259, #1261, #1258, #1260, and #1262 so each implementation
+  slice remains traceable to the accepted vision and effort.
+
+### 2026-08-27 - Phase 1 foundation staged behind the aggregation gate
+
+- Diagnosed #1234 against live Copilot CLI sessions: every configured hook ran
+  and emitted valid JSON, but only one non-empty `additionalContext` result
+  reached the model. The surviving producer varied with completion timing, and
+  the combined emitted context was below the documented cap. Recorded the
+  sanitized evidence on
+  [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234#issuecomment-5448456690).
+- Rejected a plugin-suite aggregator as an interim remedy because independently
+  installable plugins and repository-local hooks would still race unless every
+  producer moved in one synchronized flag day. The primary fix remains runtime
+  aggregation.
+- Added strict version 1 adoption config, an owner-marked static completion
+  fallback, and Bash/Python plus native PowerShell policy producers without
+  registering another `sessionStart` hook.
+- Added focused direct-producer coverage for valid and invalid adoption,
+  containment, symlink/reparse rejection, bounded input, contaminated Git
+  environments, manifest-owned attribution, byte limits, stdout hygiene, and
+  cross-platform guidance parity. The policy kernel remains below 1,024 UTF-8
+  bytes.
+- Two adversarial review passes exposed and closed cross-platform gaps in Git
+  environment cleanup, canonical path handling, interpreter failure, bounded
+  stdin, timeout behavior, version anchoring, and PowerShell's permissive JSON
+  parsing. Both producers now reject nonstandard JSON, array-wrapped objects,
+  and duplicate/case-conflicting keys before applying semantic validation.

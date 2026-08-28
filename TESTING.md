@@ -66,6 +66,12 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   injection-shaped data, complete JSON control escaping, missing-script
   fallback, setup-skill structure, exact JSON and context size, and live
   Bash/PowerShell parity when `pwsh` is available.
+- **efforts:** payload-only policy-producer tests covering exact repository
+  adoption, authoritative payload cwd, Git/config containment, malformed input,
+  symlink/reparse rejection, contaminated Git environments, manifest-derived
+  ownership, the 1 KB context budget, setup-fallback structure, and live
+  Bash/PowerShell parity when `pwsh` is available. Hook registration remains
+  deferred while #1234 prevents deterministic multi-plugin context aggregation.
 
 ---
 

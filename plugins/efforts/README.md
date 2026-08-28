@@ -16,14 +16,46 @@ outlives any single one.
 
 ## What this plugin ships
 
-This is a **payload-only skill plugin** — no runtime, virtualenv, service,
-installer, or binstub. Enabling the plugin is the whole install. It delivers two
-skills via the Copilot CLI plugin marketplace:
+This is a **payload-only plugin** — no runtime, virtualenv, service, installer,
+or binstub. Enabling the plugin is the whole install. It delivers two skills, an
+explicit repository-adoption contract, a minimal static completion-gate
+fallback, and cross-platform policy producers:
 
 | Skill | Role |
 |-------|------|
 | **planning-efforts** | The workflow: start, plan, resume, and archive efforts. Governs the canonical effort pattern (folder layout, README schema, lifecycle, journal, the participants seam). Ships the reference guide and the effort README template as skill assets. |
 | **efforts-setup** | Adoption: how a repo takes on the efforts system — create the `efforts/` tree and write a short repo **addendum** that specializes the bindings. |
+
+An adopting repository commits
+`.copilot-extensions/efforts/config.json` with the exact version 1 policy:
+
+```json
+{
+  "version": 1,
+  "enforcement": "required"
+}
+```
+
+That file, not directory presence or a repository name, declares support and
+required use. `efforts-setup` also reconciles a small owner-marked fallback into
+the repository's existing agent instructions so the active effort remains the
+completion gate when extension hooks are unavailable.
+
+`scripts/emit-policy.sh` and `scripts/emit-policy.ps1` implement the richer,
+cwd/config-gated policy kernel and are covered by live parity tests. They are
+not yet registered in `plugin.json`: Copilot CLI issue
+[#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234) currently
+discards all but one enabled plugin's valid `sessionStart` `additionalContext`
+result. Registering another producer before deterministic aggregation is fixed
+could displace a sibling's command catalog. The static fallback is therefore the
+primary ambient path until #1234 closes; the producer is staged for immediate
+registration afterward.
+
+The POSIX wrapper uses a system `python3` (falling back to `python`) for strict
+JSON and path handling; the plugin does not provision or own a Python runtime.
+If no usable interpreter is available, the wrapper emits one diagnostic and
+fails open to `{}`. The PowerShell producer is native and has no Python
+dependency.
 
 ## The skill governs the pattern; each repo adds an addendum
 
@@ -61,9 +93,10 @@ the participants binding, not the core.
 
 There is no plugin-local setup command. Enable `efforts@copilot-extensions` in
 the normal Copilot CLI plugin configuration/marketplace flow for your harness;
-because this is payload-only, that simply makes the skills available.
+because this is payload-only, that makes the skills and policy assets available.
 
-Then run the **efforts-setup** skill in a repo to adopt the system.
+Then run the **efforts-setup** skill in a repo to create the exact adoption
+config, effort tree/addendum, and static completion-gate fallback.
 
 ## See also
 
