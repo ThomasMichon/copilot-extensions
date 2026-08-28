@@ -1091,6 +1091,11 @@ def _assert_expected_generation(
 ) -> None:
     if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
         _fail(f"Expected {receipt_name} generation must be a non-negative integer.")
+    if expected > MAX_RECEIPT_GENERATION:
+        _fail(
+            f"Expected {receipt_name} generation exceeds the portable "
+            "signed 64-bit maximum."
+        )
     if actual != expected:
         _fail(
             f"{receipt_name} generation changed: expected {expected}, found {actual}; "

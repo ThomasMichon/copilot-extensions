@@ -336,6 +336,37 @@ def test_importable_python_snapshot_api_matches_cli(tmp_path: Path) -> None:
     assert validated["provenance"] == stamped["provenance"]
 
 
+@pytest.mark.parametrize(
+    "argument",
+    ("expected_namespace_generation", "expected_install_generation"),
+)
+def test_importable_python_snapshot_api_rejects_generation_overflow(
+    argument: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    module = _load_python_module()
+    generations = {
+        "expected_namespace_generation": 1,
+        "expected_install_generation": 2,
+    }
+    generations[argument] = 9223372036854775808
+    with pytest.raises(
+        module.InstallationContextError,
+        match="portable signed 64-bit maximum",
+    ):
+        module.stamp_snapshot_provenance(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            snapshot_id="1.0.0",
+            durable_home=layout["durable"],
+            environment={},
+            **generations,
+        )
+    assert not _provenance_path(layout).exists()
+
+
 def test_python_reparse_detection_supports_pre_312_pathlib(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
