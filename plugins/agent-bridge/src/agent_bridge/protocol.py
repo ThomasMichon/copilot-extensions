@@ -28,7 +28,7 @@ The daemon advertises both on ``/health``; ``BridgeClient`` reads them (see
 from __future__ import annotations
 
 # Current HTTP wire-contract version this build speaks.
-HTTP_PROTOCOL_VERSION = 4
+HTTP_PROTOCOL_VERSION = 5
 
 # First version that exposes the harness-owned relay interruption capability.
 RELAY_INTERRUPT_PROTOCOL_VERSION = 2
@@ -40,6 +40,10 @@ FAILED_ACP_HANDSHAKE_FAULT = "failed-acp-handshake"
 # First version that exposes target-scoped container recreation for parity.
 CONTAINER_RECREATE_PROTOCOL_VERSION = 4
 CONTAINER_RECREATE_FAULT = "container-recreate"
+
+# First version whose machine list/detail responses expose static topology
+# descriptions and capability breadcrumbs.
+MACHINE_METADATA_PROTOCOL_VERSION = 5
 
 # Oldest client HTTP-contract version this daemon still serves (the low end of
 # the supported range). Only ever raised after a deprecation window.
