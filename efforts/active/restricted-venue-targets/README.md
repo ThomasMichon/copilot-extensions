@@ -231,15 +231,15 @@ mount, credential relay, merge authority, or deployment authority.
 ### Phase 7 — Atomic dispatch ownership and recovery
 - [ ] Add a venue selector/binding to tasks without changing repository-lane
       semantics.
-- [ ] Atomically bind one task owner to one restricted venue lease and workspace
-      identity; heartbeat and completion validate the same generation.
+- [ ] Atomically bind one task owner to one restricted venue lease for the
+      current embodiment; heartbeat and completion validate that ownership.
 - [ ] Add a supervisor venue body that acquires the provider target, restores
       no prior container state, starts a fresh ACP session/workspace, records the
       concrete session id, and checkpoints session evidence at meaningful
       boundaries.
 - [ ] Requeue only on confirmed-gone liveness; unknown stays owned. Replacement
-      retains task goal, progress log, workspace identity, session lineage, and
-      attempt limits.
+      retains only the durable task goal, progress log, and attempt limits; the
+      new embodiment receives a fresh workspace and session lineage.
 - [ ] Add queue, coordinator, supervisor, liveness, lease-race, checkpoint, and
       replacement tests; bump agent-dispatch and agent-containers.
 
@@ -247,8 +247,9 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Add a disposable restricted-venue scenario that provisions from a fresh
       install, creates one workspace, dispatches one task, connects through the
       named transport, checkpoints the session, replaces the container, and
-      resumes the same task/workspace.
-- [ ] Assert the forbidden surfaces remain absent before and after recovery:
+      starts a fresh workspace/session that resumes the durable task goal from
+      its progress log while the prior session evidence remains analysis-only.
+- [ ] Assert the forbidden surfaces remain absent before and after replacement:
       credentials, relay, host mounts, sshd, ports, second network, host gateway,
       merge, and deploy.
 - [ ] Update architecture, transport, command catalogs, install contracts, and
@@ -283,10 +284,10 @@ mount, credential relay, merge authority, or deployment authority.
       target-ownership records; no restricted-only ownership store exists.
 - [ ] Concurrent dispatchers cannot acquire the same task, lease, or workspace;
       liveness recovery never reclaims an unknown or merely slow owner.
-- [ ] Checkpoint/restore transfers only allowlisted session members and rejects
-      traversal, cross-target, stale-generation, and partial-state cases.
-- [ ] Container replacement resumes the same task, progress, workspace, and
-      session lineage.
+- [ ] Session rescue transfers only allowlisted evidence members and rejects
+      traversal, cross-target, stale-offset, and partial-publication cases.
+- [ ] Container replacement may resume the durable task goal/progress in a fresh
+      embodiment, but never restores the old workspace or session lineage.
 - [ ] Existing machine SSH sources, trusted container SSH/relay behavior,
       CodeSpace venues, repository lanes, and local session sync remain
       unchanged.
