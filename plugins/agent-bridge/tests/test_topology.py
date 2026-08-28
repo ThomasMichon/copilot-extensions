@@ -128,6 +128,17 @@ class TestParseMachinesYaml:
         machines = parse_machines_yaml({"machines": {}})
         assert machines == {}
 
+    def test_malformed_machine_entry_is_skipped(self):
+        machines = parse_machines_yaml(
+            {
+                "machines": {
+                    "bad": "not-a-mapping",
+                    "good": {"display_name": "Good"},
+                }
+            }
+        )
+        assert list(machines) == ["good"]
+
 
 class TestMachineConfigSshEnv:
 

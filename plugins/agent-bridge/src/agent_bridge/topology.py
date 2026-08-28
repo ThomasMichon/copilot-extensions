@@ -123,6 +123,8 @@ def parse_machines_yaml(data: dict[str, Any]) -> dict[str, MachineConfig]:
     raw_machines = data.get("machines", {})
 
     for key, mdata in raw_machines.items():
+        if not isinstance(mdata, dict):
+            continue
         description_raw = mdata.get("description", "")
         if description_raw is None:
             description_raw = ""
