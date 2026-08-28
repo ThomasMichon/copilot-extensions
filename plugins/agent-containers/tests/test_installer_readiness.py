@@ -141,10 +141,22 @@ def test_strict_config_rejects_every_falsy_non_mapping(
         cli.load_config(strict=True)
 
 
-def test_strict_config_accepts_empty_yaml_document(tmp_path, monkeypatch):
+@pytest.mark.parametrize("content", ("", "null\n"))
+def test_strict_config_treats_empty_or_null_document_as_absent(
+    content, tmp_path, monkeypatch
+):
     path = tmp_path / "containers.yaml"
-    path.write_text("", encoding="utf-8")
+    path.write_text(content, encoding="utf-8")
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config(strict=True).fleets == {}
+
+
+def test_strict_config_treats_missing_document_as_absent(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "AGENT_CONTAINERS_CONFIG",
+        str(tmp_path / "missing-containers.yaml"),
+    )
 
     assert cli.load_config(strict=True).fleets == {}
 
@@ -178,3 +190,54 @@ def test_strict_config_treats_missing_or_null_fleets_as_empty(
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
 
     assert cli.load_config(strict=True).fleets == {}
+
+
+@pytest.mark.parametrize("value", ("null", "false", "0", '""', "[]"))
+def test_strict_config_rejects_malformed_per_fleet_values(
+    value, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(f"fleets:\n  example: {value}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    with pytest.raises(
+        RuntimeError,
+        match="Fleet 'example' config must be a key/value mapping",
+    ):
+        cli.load_config(strict=True)
+
+
+@pytest.mark.parametrize("content", ("false\n", "0\n", '""\n', "[]\n"))
+def test_normal_config_preserves_tolerant_top_level_fallback(
+    content, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config().fleets == {}
+
+
+@pytest.mark.parametrize(
+    "content",
+    ("fleets: false\n", "fleets: 0\n", 'fleets: ""\n', "fleets: []\n"),
+)
+def test_normal_config_preserves_tolerant_fleets_fallback(
+    content, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config().fleets == {}
+
+
+@pytest.mark.parametrize("value", ("null", "false", "0", '""', "[]"))
+def test_normal_config_preserves_falsy_per_fleet_normalization(
+    value, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(f"fleets:\n  example: {value}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config().fleets == {"example": FleetConfig()}

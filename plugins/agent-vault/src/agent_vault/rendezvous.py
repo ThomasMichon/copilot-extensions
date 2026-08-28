@@ -48,6 +48,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA = 1
+# Endpoint records can originate on Windows and be read from WSL, so the wire
+# format admits the full Win32 DWORD PID range. Local liveness probes still use
+# the host platform's process-id range.
+MAX_PID = 2**32 - 1
+_MAX_LOCAL_PID = MAX_PID if sys.platform == "win32" else 2**31 - 1
 
 # Windows GetExitCodeProcess sentinel for a process that is still running.
 _STILL_ACTIVE = 259
@@ -92,7 +97,11 @@ def pid_alive(pid: int | None) -> bool:
     Cross-platform and side-effect free. On Windows, ``os.kill(pid, 0)`` would
     *terminate* the process, so query the process handle via the Win32 API.
     """
-    if not pid or pid <= 0:
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or not 1 <= pid <= _MAX_LOCAL_PID
+    ):
         return False
     if sys.platform == "win32":
         import ctypes
@@ -219,6 +228,7 @@ class Endpoint:
         alt = tuple(
             cls(transport=t, address=a, source=source)
             for entry in (data.get("alt") or [])
+            if isinstance(entry, dict)
             for t, a in [
                 (str(entry.get("transport", "")).strip(), str(entry.get("endpoint", "")).strip())
             ]
@@ -252,9 +262,13 @@ def _endpoint_from_record_strict(data: dict) -> Endpoint:
 
     pid = data.get("pid")
     if pid is not None and (
-        isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or not 1 <= pid <= MAX_PID
     ):
-        raise TypeError("pid must be a positive integer or null")
+        raise TypeError(
+            f"pid must be a positive integer no greater than {MAX_PID}, or null"
+        )
     started_at = data.get("started_at")
     if started_at is not None and not isinstance(started_at, str):
         raise TypeError("started_at must be a string or null")
@@ -357,8 +371,27 @@ def clear_endpoint(runtime_dir: Path | str) -> None:
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:
     """Read + parse the rendezvous file; ``None`` if absent, unreadable, or malformed."""
     try:
-        return read_endpoint_strict(runtime_dir)
-    except EndpointStateError:
+        raw = endpoint_file(runtime_dir).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return None
+        schema = data.get("schema")
+        if isinstance(schema, bool) or not isinstance(schema, int):
+            return None
+        if schema != SCHEMA:
+            return None
+        pid = data.get("pid")
+        if pid is not None and (
+            isinstance(pid, bool)
+            or not isinstance(pid, int)
+            or not 1 <= pid <= MAX_PID
+        ):
+            return None
+        return Endpoint.from_record(data)
+    except (ValueError, TypeError, KeyError):
         return None
 
 
@@ -375,8 +408,11 @@ def read_endpoint_strict(runtime_dir: Path | str) -> Endpoint | None:
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise TypeError("top-level endpoint state must be an object")
-        if int(data.get("schema", 0)) != SCHEMA:
-            raise ValueError(f"unsupported endpoint schema {data.get('schema')!r}")
+        schema = data.get("schema")
+        if isinstance(schema, bool) or not isinstance(schema, int):
+            raise TypeError("endpoint schema must be an integer")
+        if schema != SCHEMA:
+            raise ValueError(f"unsupported endpoint schema {schema!r}")
         return _endpoint_from_record_strict(data)
     except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
         raise EndpointStateError(f"{path}: malformed endpoint state: {exc}") from exc
