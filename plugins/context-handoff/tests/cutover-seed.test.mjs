@@ -45,6 +45,26 @@ test("leadFrom: replaces inherited handoff prefixes", () => {
   assert.equal(leadFrom("task: fix"), "Task: fix");
 });
 
+test("continuation directive makes an active effort the completion gate", () => {
+  assert.match(
+    CONTINUATION_DIRECTIVE,
+    /effort -- not the handoff task, latest phase, or pull request -- as the source of truth and completion gate/,
+  );
+  assert.match(CONTINUATION_DIRECTIVE, /Focus on driving it to `Done`/);
+  assert.match(
+    CONTINUATION_DIRECTIVE,
+    /select and execute the next authorized Plan or Validation Plan item/,
+  );
+  assert.match(
+    CONTINUATION_DIRECTIVE,
+    /do not finalize the worktree while any item remains unresolved/,
+  );
+  assert.match(
+    CONTINUATION_DIRECTIVE,
+    /explicitly transferred to a named tracked objective/,
+  );
+});
+
 test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () => {
   const seed = buildCutoverSeed("task", TASK, leadFrom("Fix the widget"), known);
 
@@ -81,6 +101,7 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
   assert.match(seed, new RegExp(`agent-dispatch complete ${TASK}`));
   assert.ok(seed.includes(CONTINUATION_DIRECTIVE));
   assert.match(seed, /completion of the predecessor's latest phase is not enough/);
+  assert.match(seed, /Focus on driving it to `Done`/);
 
   // Rides `copilot -i`: single line, ASCII only.
   assert.ok(!seed.includes("\n"), "seed must be a single line");
