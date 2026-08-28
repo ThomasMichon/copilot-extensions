@@ -14,9 +14,11 @@ installation cells:
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
 layout, strictly validate receipts, and expose the same bounded `stamp`
-mutation. `stamp` creates or updates only `namespace.json` and `install.json`;
-it does not select a runtime, create version slots, migrate legacy state, or
-activate the cell.
+mutation. They also expose read-only `status` and `probe-legacy` actions for
+installation-mode governance. `stamp` creates or updates only `namespace.json`
+and `install.json`; the new actions never write. None of these actions selects a
+runtime, creates version slots, migrates legacy state, publishes activation, or
+wires a caller.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
@@ -52,6 +54,17 @@ writes an actionable error to stderr and exits nonzero.
   -PayloadOrigin installed `
   -ExpectedNamespaceGeneration 0 `
   -ExpectedInstallGeneration 0
+
+.\installation-context.ps1 status `
+  -PayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -PluginId agent-example `
+  -LegacyRoot C:\Users\example\.agent-example `
+  -LegacyProbeJson '{"declared":true,"result":"absent","checkedAt":null}'
+
+.\installation-context.ps1 probe-legacy `
+  -PayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -PluginId agent-example `
+  -LegacyRoot C:\Users\example\.agent-example
 ```
 
 ```bash
@@ -77,6 +90,18 @@ writes an actionable error to stderr and exits nonzero.
   --payload-origin installed \
   --expected-namespace-generation 0 \
   --expected-install-generation 0
+
+./installation-context.sh status \
+  --payload-root "$COPILOT_PLUGIN_ROOT" \
+  --plugin-id agent-example \
+  --legacy-root "$HOME/.agent-example" \
+  --legacy-probe-json \
+  '{"declared":true,"result":"absent","checkedAt":null}'
+
+./installation-context.sh probe-legacy \
+  --payload-root "$COPILOT_PLUGIN_ROOT" \
+  --plugin-id agent-example \
+  --legacy-root "$HOME/.agent-example"
 ```
 
 The Python CLI uses the same lowercase long options as the Bash entry point.
@@ -84,6 +109,34 @@ Callers that already have a private Python toolchain may import
 `normalize_source`, `source_identity`, `resolve_context`, and
 `validate_context_receipt` directly. Management callers may use
 `stamp_context`; its two expected-generation arguments are mandatory.
+Read-only callers may import `resolve_installation_mode` and
+`probe_legacy_entrypoint`. Their optional `os_profile`, `platform`,
+`wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit
+test/diagnostic seams; they are not ambient authorization.
+
+`status` emits a complete
+`copilot-extensions.installation-resolution` object and exits 0 whenever a
+diagnostic result can be constructed, including invalid or blocked on-disk
+state. `probe-legacy` emits the same object plus `allowMutation` and
+`probeReason`; it exits 0 when legacy mutation is allowed, 3 when governance
+refuses it, and 1 for malformed invocation input or failure to construct the
+diagnostic result. Invalid invocation-supplied legacy probe JSON is exit 1.
+
+Both actions require an absolute legacy root. Legacy probe evidence has the
+shape
+`{"declared":bool,"result":"absent|present|unknown","checkedAt":string|null}`;
+missing evidence defaults to undeclared/unknown. `--policy-path` /
+`-PolicyPath` evaluates an alternate file for diagnostics only. The canonical
+operating-system-profile path remains the sole policy authority, so an injected
+true value cannot authorize namespaced activation and cannot strand an already
+valid active namespaced runtime.
+
+The governance boundary is intentionally non-operative. A clean authoritative
+namespaced request reports `activation-required`, while `probe-legacy` refuses
+with `namespaced-requested`; only a later explicit activation transaction may
+publish ownership. Present, unknown, or undeclared legacy evidence reports
+`migration-required`, and legacy remains authoritative until the later
+two-lock migration publishes activation and its matching tombstone.
 
 Cell genesis and plugin installation mutations use the same directory-lock
 protocol on every platform. Each lock contains a strict `owner.json` naming the
@@ -120,5 +173,7 @@ Python, and the no-Python POSIX bootstrap.
 `python tools/sync-installation-context.py` vendors byte-identical inert copies
 into the Phase 3 exemplar payloads. The sync does not make them operative.
 
-Later slices still own snapshot provenance, migration, runtime-root activation,
-payload-invocation schema changes, reconciliation, and dual-cell exemplars.
+Later slices still own snapshot provenance, activation and tombstone writers,
+migration, runtime-root activation, payload-invocation schema changes,
+installer/bootstrap caller wiring, declared exemplar footprints,
+reconciliation, and dual-cell exemplars.
