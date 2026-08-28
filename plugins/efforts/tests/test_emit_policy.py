@@ -331,7 +331,10 @@ def test_read_only_probe_fails_closed_for_inaccessible_target(
     restricted.chmod(0)
     try:
         for producer in _producers():
-            assert _check_adoption(producer, repo).stdout == b"{}"
+            result = _check_adoption(producer, repo)
+            assert result.stdout == b"{}"
+            assert b"Traceback" not in result.stderr
+            assert result.stderr.count(b"\n") <= 1
     finally:
         restricted.chmod(0o700)
 
