@@ -146,6 +146,7 @@ def test_payload_command_rejects_invalid_endpoint_and_port(
     result = json.loads(capsys.readouterr().out)
     assert result["state"] == "failed"
     assert "malformed endpoint" in result["detail"]
+    assert "service probe failed" in result["detail"]
 
 
 def test_strict_context_rejects_invalid_environment_port(monkeypatch):

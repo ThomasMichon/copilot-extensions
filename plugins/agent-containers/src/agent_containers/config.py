@@ -519,7 +519,11 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         log.warning("Failed to read %s: %s", path, exc)
         return config
     if not isinstance(data, dict):
-        raise RuntimeError(f"{path}: top-level configuration must be a mapping")
+        message = f"{path}: top-level configuration must be a mapping"
+        if strict:
+            raise RuntimeError(message)
+        log.warning("%s; using built-in defaults", message)
+        return config
 
     # Lazy schema migration (in memory, never persists / never raises) so a
     # still-old config reads at the current shape before install/update rewrites
@@ -597,11 +601,18 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
 
     fleets = data.get("fleets", {}) or {}
     if not isinstance(fleets, dict):
-        raise RuntimeError("fleets config must be a key/value mapping")
+        if strict:
+            raise RuntimeError("fleets config must be a key/value mapping")
+        log.warning("fleets config must be a key/value mapping; ignoring it")
+        return config
     for name, raw in fleets.items():
         raw = raw or {}
         if not isinstance(raw, dict):
-            raise RuntimeError(f"Fleet '{name}' config must be a key/value mapping")
+            message = f"Fleet '{name}' config must be a key/value mapping"
+            if strict:
+                raise RuntimeError(message)
+            log.warning("%s; ignoring it", message)
+            continue
         security_profile = str(raw.get("security_profile", TRUSTED_PROFILE)).lower()
         if security_profile not in SECURITY_PROFILES:
             expected = ", ".join(sorted(SECURITY_PROFILES))

@@ -734,7 +734,7 @@ def cmd_installer_readiness(args):
     try:
         service = send_command({"action": "ping"})
     except (OSError, RuntimeError, TypeError, ValueError) as exc:
-        return emit(evaluate(context, None, [str(exc)]))
+        return emit(evaluate(context, None, service_errors=[str(exc)]))
     return emit(evaluate(context, service))
 
 

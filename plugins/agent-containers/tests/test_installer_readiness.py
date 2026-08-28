@@ -115,3 +115,13 @@ def test_payload_command_rejects_malformed_config_before_docker_probe(
     result = json.loads(capsys.readouterr().out)
     assert result["state"] == "failed"
     assert "Failed to read" in result["detail"]
+
+
+def test_strict_shape_validation_does_not_change_normal_config_fallback(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text("fleets: []\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config().fleets == {}

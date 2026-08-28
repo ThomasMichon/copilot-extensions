@@ -26,6 +26,7 @@ def evaluate(
     context: ResolvedVault | None,
     service: Mapping[str, Any] | None,
     config_errors: Sequence[str] = (),
+    service_errors: Sequence[str] = (),
 ) -> dict[str, Any]:
     """Map strict config and the existing ping response without unlocking."""
     if config_errors or context is None:
@@ -34,6 +35,14 @@ def evaluate(
             "failed",
             "The agent-vault configuration is invalid: "
             f"{detail}. Fix the owning configuration before starting or unlocking.",
+        )
+    if service_errors:
+        return _result(
+            "failed",
+            "The agent-vault service probe failed: "
+            + "; ".join(service_errors)
+            + ". Fix the endpoint or runtime configuration; readiness did not "
+            "start or restart the service.",
         )
     if not service or service.get("ok") is not True:
         return _result(
