@@ -24,7 +24,7 @@ args=(-m agent_worktrees deregister-session --stdin)
 
 export PYTHONPATH=""  # package is installed in the venv (no lib/ shadow)
 if PYTHONPATH="" "$PYTHON" "${args[@]}" 2>/dev/null; then
-    _log OK "deregistered payload session on wt=${wt_id:-<resolved>}"
+    _log OK "recorded payload session end on wt=${wt_id:-<resolved>}"
 else
     _log WARN "deregister-session failed (exit $?) for payload session wt=${wt_id:-<resolved>}"
 fi
