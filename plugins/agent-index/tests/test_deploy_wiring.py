@@ -29,6 +29,7 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
             return FakeResult()
 
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
     monkeypatch.setattr(
         "zdd.breadcrumb.recover_stale_cutover",
         lambda *a, **k: {"recovered": False},

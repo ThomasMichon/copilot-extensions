@@ -102,7 +102,8 @@
     {
       "name": "agent-index",
       "description": "Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem, with good-citizen ingestion.",
-      "version": "0.1.0-dev100",
+      "version": "0.1.0-dev101",
+
       "source": "plugins/agent-index"
     },
     {

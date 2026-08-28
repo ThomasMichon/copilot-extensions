@@ -22,6 +22,7 @@ _ENV = re.compile(r"^[A-Z][A-Z0-9_]+$")
 _PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
 _OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
 _INSTALLER = re.compile(r"^[a-z][a-z0-9-]*$")
+_DISPATCHER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
 _WINDOWS_CATALOG_SHIMS = {"powershell", "cmd"}
 _PROVISION_MODES = {"snapshot", "direct"}
 
@@ -110,11 +111,38 @@ def load_manifest(path: Path) -> dict[str, object]:
         payload_root_env and not _ENV.fullmatch(payload_root_env)
     ):
         raise ValueError(f"{path}: invalid payloadRootEnv: {payload_root_env!r}")
+    payload_dispatcher = data.get("payloadDispatcher", {})
+    if not isinstance(payload_dispatcher, dict):
+        raise ValueError(
+            f"{path}: invalid payloadDispatcher: {payload_dispatcher!r}"
+        )
+    normalized_dispatcher: dict[str, str] = {}
+    for platform in ("posix", "windows"):
+        value = payload_dispatcher.get(platform, "")
+        if not isinstance(value, str) or (
+            value
+            and (
+                not _DISPATCHER.fullmatch(value)
+                or ".." in Path(value).parts
+                or not (path.parent / value).is_file()
+            )
+        ):
+            raise ValueError(
+                f"{path}: invalid payloadDispatcher.{platform}: {value!r}"
+            )
+        normalized_dispatcher[platform] = value
+    if bool(normalized_dispatcher["posix"]) != bool(
+        normalized_dispatcher["windows"]
+    ):
+        raise ValueError(
+            f"{path}: payloadDispatcher must declare both posix and windows"
+        )
     data["outputDir"] = output_dir
     data["installer"] = installer
     data["windowsCatalogShim"] = windows_catalog_shim
     data["provisionMode"] = provision_mode
     data["payloadRootEnv"] = payload_root_env
+    data["payloadDispatcher"] = normalized_dispatcher
     data["plugin"] = plugin
     data["commands"] = commands
     data["multiCommandManifest"] = raw_commands is not None
@@ -235,6 +263,29 @@ def render(
         "WINDOWS_CMD_HOST_BLOCK": windows_cmd_host_block,
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,
+        "PAYLOAD_DISPATCH_POSIX": (
+            (
+                f'export {data["payloadRootEnv"]}="$_payload_root"\n'
+                if data["payloadRootEnv"]
+                else ""
+            )
+            + f'exec "$_payload_root/{data["payloadDispatcher"]["posix"]}" "$@"'
+            if data["payloadDispatcher"]["posix"]
+            else ""
+        ),
+        "PAYLOAD_DISPATCH_POWERSHELL": (
+            (
+                f"$env:{data['payloadRootEnv']} = $_payloadRoot\n"
+                if data["payloadRootEnv"]
+                else ""
+            )
+            + "$_payloadDispatcher = Join-Path $_payloadRoot "
+            f"'{str(data['payloadDispatcher']['windows']).replace('/', chr(92))}'\n"
+            "& $_payloadDispatcher @args\n"
+            "exit $LASTEXITCODE"
+            if data["payloadDispatcher"]["windows"]
+            else ""
+        ),
         "PAYLOAD_ROOT_ENV_POSIX": (
             f'export {data["payloadRootEnv"]}="$_payload_root"\n'
             if data["payloadRootEnv"]
@@ -298,9 +349,19 @@ def expected_files(manifest: Path) -> dict[Path, str]:
     for command in commands:
         assert isinstance(command, dict)
         command_id = str(command["command"])
+        dispatcher = data["payloadDispatcher"]
+        assert isinstance(dispatcher, dict)
         for path, template in (
-            (output / command_id, "posix-shim.tmpl"),
-            (output / f"{command_id}.ps1", "powershell-shim.tmpl"),
+            (
+                output / command_id,
+                "dispatcher-posix.tmpl" if dispatcher["posix"] else "posix-shim.tmpl",
+            ),
+            (
+                output / f"{command_id}.ps1",
+                "dispatcher-powershell.tmpl"
+                if dispatcher["windows"]
+                else "powershell-shim.tmpl",
+            ),
             (output / f"{command_id}.cmd", "cmd-shim.tmpl"),
         ):
             if path in protected_paths:

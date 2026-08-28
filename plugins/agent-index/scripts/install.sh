@@ -335,7 +335,18 @@ _versioned_activate() {
     fi
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$VENV_DIR/bin/python"
-    [[ -x "$py" ]] || py="$LINK_DIR/bin/python"
+    [[ -x "$py" ]] || {
+        _fail "Refusing to activate runtime slot without its target interpreter: $py"
+        return 1
+    }
+    if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
+        _fail "Refusing to activate incomplete runtime slot versions/$SRC_VERSION"
+        return 1
+    fi
+    if ! "$py" -c 'import agent_index' >/dev/null 2>&1; then
+        _fail "Refusing to activate runtime slot versions/$SRC_VERSION because agent_index is not importable"
+        return 1
+    fi
     if ! "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" activate "$SRC_VERSION" --replace-nonlink --no-link; then
         _fail "Failed to activate versioned runtime slot (versions/$SRC_VERSION; marker-only, no .venv link)"
         return 1
@@ -613,85 +624,39 @@ _ensure_uv_index() {
     if [[ -n "$idx" ]]; then export UV_DEFAULT_INDEX="$idx"; _step "uv index derived from pip config (governed-feed bridge)"; fi
 }
 
-# Deploy the self-provisioning binstub (install-on-first-use). Fast path execs the
-# venv's `python -m agent_index`; otherwise it provisions on first use --
-# announcing (a human line + a machine-readable ::agent-provisioning:: signal so a
-# caller can extend its timeout), lock-serialized, fail-fast.
+# Deploy a stable machine-global redirector to the payload-owned lifecycle gate.
+# The gate owns setup consent, runtime readiness, and provisioning.
 deploy_binstub() {
     mkdir -p "$LOCAL_BIN" "$INSTALL_DIR/bin"
     # Co-deploy the canonical marker-only resolver (uniform-runtime-resolution, #765).
     for r in resolve-runtime.sh resolve-runtime.ps1; do
         [ -f "$SCRIPT_DIR/$r" ] && cp -f "$SCRIPT_DIR/$r" "$INSTALL_DIR/bin/$r"
     done
+    printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     cat > "$STUB" << 'STUBEOF'
 #!/usr/bin/env bash
-# agent-index binstub -- self-provisioning (install-on-first-use).
-# Resolves the interpreter SOLELY via the junction-free versioned-runtime marker
-# (the deployed resolve-runtime.sh; uniform-runtime-resolution, #765): current-
-# version -> last-known-good -> newest complete slot. NEVER a `.venv` link, NEVER
-# a PATH python -- when no slot is installed AGENT_RT_PY is empty and we self-
-# provision on first use rather than silently binding the system interpreter.
-export PYTHONUTF8=1
 _name="agent-index"
 _root="$HOME/.$_name"
-_resolver="$_root/bin/resolve-runtime.sh"
-_resolve() {
-    AGENT_RT_PY=""
-    if [ -f "$_resolver" ]; then
-        AGENT_RT_ROOT="$_root"
-        . "$_resolver"
-    fi
-}
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_index "$@"
-_install="$(cat "$_root/payload-dir" 2>/dev/null)/scripts/install.sh"
-[ -f "$_install" ] || _install="$(ls "$HOME"/.copilot/installed-plugins/*/"$_name"/scripts/install.sh 2>/dev/null | head -n1)"
-if [ ! -f "$_install" ]; then
-    printf '%s\n' "[$_name] cannot self-provision: installer not found in plugin payload. Ensure the plugin is enabled, then retry." >&2
+_payload="$(cat "$_root/payload-dir" 2>/dev/null || true)"
+_gate="$_payload/scripts/runtime-gate.sh"
+if [ ! -f "$_gate" ]; then
+    printf '%s\n' "[$_name] payload lifecycle gate not found. Re-enable the plugin, then retry." >&2
     exit 127
 fi
-_payload="${_install%/scripts/install.sh}"
-_probe="$_payload/scripts/installation-context/legacy-entrypoint-probe.sh"
-[ -f "$_probe" ] || { printf '%s\n' "[$_name] legacy mutation probe is unavailable." >&2; exit 1; }
-bash "$_probe" --payload-root "$_payload" --legacy-root "$_root" || exit $?
-mkdir -p "$_root"
-_status="$_root/.provision-status"
-printf '%s\n' "[$_name] runtime not provisioned -- provisioning on first use (may take ~30-120s: acquires uv + builds a venv). Do not kill; extend your timeout." >&2
-printf '::agent-provisioning:: plugin=%s eta_seconds=120 reason=first-use status=%s\n' "$_name" "$_status" >&2
-_lock="$_root/.provision.lock"
-exec 9>"$_lock"
-command -v flock >/dev/null 2>&1 && flock 9 2>/dev/null
-_resolve
-[ -n "$AGENT_RT_PY" ] && exec "$AGENT_RT_PY" -m agent_index "$@"
-printf 'provisioning %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-bash "$_install" provision >&2
-_rc=$?
-_resolve
-if [ "$_rc" -eq 0 ] && [ -n "$AGENT_RT_PY" ]; then
-    printf 'ready %s\n' "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-    exec "$AGENT_RT_PY" -m agent_index "$@"
-fi
-printf 'failed rc=%s %s\n' "$_rc" "$(date -u +%FT%TZ 2>/dev/null)" > "$_status" 2>/dev/null || true
-if [ "$_rc" -eq 0 ]; then
-    printf '%s\n' "[$_name] provisioning reported success but no runtime slot resolved." >&2
-    _rc=1
-else
-    printf '%s\n' "[$_name] provisioning FAILED (rc=$_rc). See the log above; retry, or run: bash \"$_install\" provision" >&2
-fi
-exit "$_rc"
+exec "$_gate" "$@"
 STUBEOF
     chmod +x "$STUB"
-    _ok "Binstub: $STUB (self-provisioning)"
+    _ok "Binstub: $STUB (setup-gated)"
 }
 
-# Cheap 'stamp': splat the binstub + payload marker, defer the venv build to first
-# use (fits a sessionStart hook's grace window). No venv, no uv.
+# Cheap 'stamp': splat the binstub + payload marker, defer the venv build until
+# explicit setup (fits a sessionStart hook's grace window). No venv, no uv.
 do_stamp() {
-    echo ''; echo '=== agent-index stamp (defer runtime to first use) ==='; echo ''
+    echo ''; echo '=== agent-index stamp (defer runtime to explicit setup) ==='; echo ''
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     printf '%s\n' "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" > "$INSTALL_DIR/payload-dir"
     deploy_binstub
-    _ok "Stamped: binstub on PATH; runtime provisions on first use."
+    _ok "Stamped: binstub on PATH; runtime provisions after explicit setup."
 }
 
 _ensure_runtime() {
@@ -711,6 +676,56 @@ _ensure_runtime() {
 
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN"
     _ok "Directories: $INSTALL_DIR"
+
+    # Detach an invalid active marker before any rebuild. If provisioning fails
+    # later, no success-shaped current-version pointer remains.
+    local active_version="" active_ready=0 active_python=""
+    [[ -f "$INSTALL_DIR/current-version" ]] && active_version="$(tr -d ' \t\r\n' < "$INSTALL_DIR/current-version")"
+    if [[ "$VERSIONED_RUNTIME" == 1 && -n "$active_version" ]]; then
+        active_python="$INSTALL_DIR/versions/$active_version/bin/python"
+        [[ -x "$active_python" ]] || active_python="$INSTALL_DIR/versions/$active_version/Scripts/python.exe"
+        if [[ -x "$active_python" ]] \
+            && "$active_python" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$active_version" >/dev/null 2>&1 \
+            && "$active_python" -c 'import agent_index' >/dev/null 2>&1; then
+            active_ready=1
+        fi
+        if [[ "$active_ready" == 0 ]]; then
+            _stop >/dev/null 2>&1 || true
+            rm -f "$INSTALL_DIR/current-version"
+            if [[ -f "$INSTALL_DIR/last-known-good" ]] \
+                && [[ "$(tr -d ' \t\r\n' < "$INSTALL_DIR/last-known-good")" == "$active_version" ]]; then
+                rm -f "$INSTALL_DIR/last-known-good"
+            fi
+            _warn "Detached invalid active runtime marker for versions/$active_version"
+        fi
+    fi
+
+    # A failed prior build may have left an interpreter-shaped target slot or,
+    # on older installers, even an active marker. Reuse requires both a valid
+    # completion marker and an importable agent_index package.
+    if [[ "$VERSIONED_RUNTIME" == 1 && -d "$VENV_DIR" ]]; then
+        local slot_ready=0 vr="$SCRIPT_DIR/versioned_runtime.py"
+        if [[ -x "$VENV_PYTHON" ]] \
+            && "$VENV_PYTHON" "$vr" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1 \
+            && "$VENV_PYTHON" -c 'import agent_index' >/dev/null 2>&1; then
+            slot_ready=1
+        fi
+        if [[ "$slot_ready" == 0 || "${AGENT_INDEX_REBUILD_CURRENT:-0}" == 1 ]]; then
+            local target_was_active=0
+            local marker_name marker_version
+            for marker_name in current-version last-known-good; do
+                marker_version=""
+                [[ -f "$INSTALL_DIR/$marker_name" ]] && marker_version="$(tr -d ' \t\r\n' < "$INSTALL_DIR/$marker_name")"
+                if [[ "$marker_version" == "$SRC_VERSION" ]]; then
+                    [[ "$marker_name" == current-version ]] && target_was_active=1
+                    rm -f "$INSTALL_DIR/$marker_name"
+                fi
+            done
+            [[ "$target_was_active" == 1 ]] && { _stop >/dev/null 2>&1 || true; }
+            rm -rf "$VENV_DIR"
+            _warn "Removed runtime slot versions/$SRC_VERSION before a clean role-aware rebuild"
+        fi
+    fi
 
     if [[ ! -x "$VENV_PYTHON" ]]; then
         if [[ "$have_uv" -eq 1 ]]; then
@@ -777,6 +792,10 @@ _ensure_runtime() {
             exit 1
         fi
         _versioned_mark_complete
+        if ! "$VENV_PYTHON" "$SCRIPT_DIR/versioned_runtime.py" --root "$INSTALL_DIR" --link-name ".venv" is-complete "$SRC_VERSION" >/dev/null 2>&1; then
+            _fail "Runtime completion marker was not published for versions/$SRC_VERSION -- not activating"
+            exit 1
+        fi
         _versioned_activate || exit 1
     fi
 
@@ -1121,11 +1140,7 @@ EOF
 }
 
 _status() {
-    if [[ -x "$LINK_PYTHON" ]]; then
-        "$LINK_PYTHON" -m agent_index status
-    else
-        _skip "Runtime not installed: $INSTALL_DIR"
-    fi
+    bash "$SCRIPT_DIR/runtime-gate.sh" status
 }
 
 _start() {

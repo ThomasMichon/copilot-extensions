@@ -397,6 +397,12 @@ def resolve_role() -> str:
     return UNCONFIGURED_ROLE
 
 
+def configured_role() -> str | None:
+    """Return the explicit machine role, or ``None`` when inactive."""
+    role = resolve_role()
+    return None if role == UNCONFIGURED_ROLE else role
+
+
 @dataclass(frozen=True)
 class Config:
     """Resolved service configuration."""
