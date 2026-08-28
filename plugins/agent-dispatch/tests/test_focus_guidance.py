@@ -20,7 +20,11 @@ CONFIG = Path(".agent-dispatch/session-guidance.json")
 VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
 KERNEL = (
     f"[owner: agent-dispatch@{VERSION}]\n"
-    "Before starting work likely to overlap another worktree, use the "
+    "Before choosing or starting new work, use the agent-dispatch session "
+    "command catalog's exact `argv[0]` with `worktree-status`; resume or claim "
+    "work explicitly targeted at this worktree before self-selecting unless it "
+    "conflicts with the operator's current request. Before starting work likely "
+    "to overlap another worktree, use the "
     "agent-dispatch session command catalog's exact `argv[0]` with "
     "`focus --list`. At the start of substantial operator-led or "
     "task-less work, and when its direction changes, advertise it early with "
@@ -206,6 +210,8 @@ def test_enabled_opt_in_emits_exact_bounded_owned_kernel(tmp_path: Path) -> None
             f"[owner: agent-dispatch@{VERSION}]"
         ) == 1
         kernel = json.loads(result.stdout)["additionalContext"]
+        assert "`worktree-status`" in kernel
+        assert "resume or claim work explicitly targeted" in kernel
         assert (
             "Before starting work likely to overlap another worktree, use the "
             "agent-dispatch session command catalog's exact `argv[0]` with "

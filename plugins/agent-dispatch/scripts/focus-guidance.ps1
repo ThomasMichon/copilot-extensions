@@ -181,7 +181,12 @@ function Invoke-WithCleanGitEnvironment([scriptblock] $Action) {
 try {
     $PluginVersion = Read-PluginVersion
     $Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
-        'Before starting work likely to overlap another worktree, use the ' +
+        'Before choosing or starting new work, use the agent-dispatch session ' +
+        "command catalog's exact " +
+        '`argv[0]` with `worktree-status`; resume or claim work explicitly ' +
+        'targeted at this worktree before self-selecting unless it conflicts ' +
+        'with the operator''s current request. Before starting work likely to ' +
+        'overlap another worktree, use the ' +
         "agent-dispatch session command catalog's exact " +
         '`argv[0]` with ' +
         '`focus --list`. At the start of substantial operator-led ' +

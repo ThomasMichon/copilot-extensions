@@ -162,6 +162,12 @@ its repo). So from inside your worktree you pass **no** identity flags:
 <agent-dispatch catalog argv[0]> claim               # lease an eligible task; owner is auto-stamped
 ```
 
+**Inbox before invention.** At session start and before choosing new work, run
+`worktree-status`. Resume or claim a task explicitly targeted at this worktree
+before self-selecting unrelated work, unless it conflicts with the operator's
+current request. A targeted assignment is durable intent; do not overlook it
+because a broad backlog query found something newer.
+
 Override (or supply, when `agent-worktrees` is absent) with `--machine` /
 `--worktree`. **Do not** invent an identity or type one by hand when the CWD can
 resolve it -- let the resolution stand.
@@ -323,6 +329,38 @@ The **lane** (`--repo`) defaults to the calling repo -- omit it inside your
 worktree. `--target-repo` is different: it's metadata naming the *code* a
 cross-repo task touches; the task still lives in **your** lane and a same-lane
 agent does the cross-repo work via `agent-worktrees:working-cross-repo`.
+
+**Bind tracked bugs to one canonical task.** When work is selected from a
+GitHub issue, first look for an existing task with the exact issue key. Reuse a
+queued task with `claim --task <id>`; resume one already owned by this
+worktree; stop if another live owner holds it. Only when no task exists, create
+the first work episode with the issue identity for both provenance and dedup:
+
+```bash
+<agent-dispatch catalog argv[0]> create "Fix owner/repo#42: concise title" \
+  --prompt "Work https://github.com/owner/repo/issues/42 end-to-end ..." \
+  --source github-issue \
+  --origin-ref issue/owner/repo#42 \
+  --dedup-key issue:owner/repo#42 \
+  --claim
+```
+
+For a newly created task, `claimed_by_me: true` means the issue is yours. If
+create returns an existing row, inspect its `status` and `owner` instead of
+treating `claimed_by_me: false` as an automatic loss: queued tasks can be
+claimed, this worktree's active tasks can be resumed, another live owner's task
+is a collision, and terminal history is not an active claim. A reopened issue
+needs an explicit deterministic episode suffix derived from its reopen event,
+for example `issue:owner/repo#42:reopen:<event-id>`.
+
+To assign work across machines, use a shared coordinator
+(`<argv[0]> --shared create ... --target-machine <m>`) or remote embodiment
+(`--target-machine <m> --spawn --spawn-backend embody`). A bare
+`--target-machine` against a local coordinator does not deliver an inbox item
+to the other machine. When machines use separate coordinators and neither
+delivery path is available, pair the local task with the issue tracker's
+visible claim/assignment protocol; the queue cannot arbitrate a peer it cannot
+see.
 
 **Selectors — include (`--require`) and exclude (`--exclude`).** Both take
 tokens over an open namespace; at claim time a worker's identity is folded into
