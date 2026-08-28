@@ -1,15 +1,15 @@
 # GitHub account conduct
 
-Before contributing code or mutating an issue, PR, release, or settings,
-identify target `owner/repo`; never infer its account from cwd or active `gh`.
-Resolve with
-`agent-worktrees repos account-for <owner/repo>` or
+Before code or issue/PR/release/settings mutations, identify target
+`owner/repo` (`owner` for org calls); never infer its account from cwd or active
+`gh`. Resolve via
+`agent-worktrees repos account-for <owner|owner/repo>` or
 `agent-worktrees:agent-worktrees-repos`.
 
-Run ordinary `gh` via
-`agent-worktrees repos gh <owner/repo> -- <gh args>`; it resolves per process.
-On ambient fallback, verify identity.
+Run ordinary `gh` through
+`agent-worktrees repos gh <owner/repo> -- <gh args>`; it scopes identity per
+process. Verify any ambient fallback.
 
-The active account is global/shared/racy: never switch ordinarily.
-Account-scoped transports (for example CodeSpaces) and auth repair are
-exceptions; follow their owning skill and restore the prior account.
+Active account is global/shared/racy: never switch ordinarily. Account-scoped
+transports (e.g. CodeSpaces) and auth repair are exceptions; follow their skill,
+then restore the prior account.

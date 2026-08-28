@@ -34,20 +34,19 @@ def test_conduct_fragment_present_and_shaped():
     assert not text.lstrip().startswith(m._INSTRUCTION_MARKER)
     # Requires repo/account discovery before mutation, then keeps ordinary
     # execution race-safe while delegating ambient-account exceptions.
-    assert "Before contributing code" in text
-    assert "mutating an issue, PR, release, or settings" in text
-    assert "identify target `owner/repo`" in text
-    assert "never infer its account" in text
-    assert "repos account-for" in text
+    assert "Before code or" in text
+    assert "issue/PR/release/settings mutations" in text
+    assert "target\n`owner/repo` (`owner` for org calls)" in text
+    assert "never infer its account from cwd or active\n`gh`" in text
+    assert "repos account-for <owner|owner/repo>" in text
     assert "repos gh" in text
-    assert "active account is global/shared/racy" in text
+    assert "Active account is global/shared/racy" in text
     assert "never switch ordinarily" in text
-    assert "Account-scoped transports (for example CodeSpaces) and auth repair" in text
-    assert "are\nexceptions" in text
-    assert "their owning skill" in text
+    assert "Account-scoped\ntransports (e.g. CodeSpaces) and auth repair are exceptions" in text
+    assert "follow their skill" in text
     assert "restore the prior account" in text
-    assert "resolves per process" in text
-    assert "ambient fallback, verify identity" in text
+    assert "scopes identity per\nprocess" in text
+    assert "Verify any ambient fallback" in text
     assert "agent-worktrees:agent-worktrees-repos" in text
     assert "GH_TOKEN" not in text
     assert len(text.rstrip()) <= 700
