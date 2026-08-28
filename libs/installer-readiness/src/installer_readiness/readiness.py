@@ -4,25 +4,34 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any
 
 from .discovery import READINESS_SCHEMA, READINESS_VERSION
 from .model import ReadinessResult, ReadinessState
 
 
-def parse_readiness(value: str | bytes | Mapping[str, Any]) -> ReadinessResult:
+def parse_readiness(value: object) -> ReadinessResult:
     """Parse one readiness result without accepting extension-shaped typos."""
     if isinstance(value, bytes):
-        value = value.decode("utf-8")
+        try:
+            value = value.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise ValueError(f"invalid readiness UTF-8: {error}") from error
     if isinstance(value, str):
         try:
             data = json.loads(value)
         except json.JSONDecodeError as error:
             raise ValueError(f"invalid readiness JSON: {error}") from error
+    elif isinstance(value, Mapping):
+        try:
+            data = dict(value)
+        except Exception as error:
+            raise ValueError(f"invalid readiness mapping: {error}") from error
     else:
-        data = dict(value)
+        raise ValueError("readiness result must be JSON text, bytes, or a mapping")
     if not isinstance(data, dict):
         raise ValueError("readiness result must be an object")
+    if any(not isinstance(key, str) for key in data):
+        raise ValueError("readiness result property names must be strings")
     unknown = sorted(set(data) - {"schema", "version", "module", "state", "detail"})
     if unknown:
         raise ValueError(f"readiness result has unknown fields: {', '.join(unknown)}")

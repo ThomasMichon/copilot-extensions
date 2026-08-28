@@ -23,7 +23,9 @@ reference to `plugin.json`:
 The referenced document is owned by that payload and validated against
 [`schema.json`](schema.json). It names only payload-local scripts and logical
 commands already declared by `payload-invocation.json`; it cannot inject an
-absolute executable or rely on `PATH`.
+absolute executable or rely on `PATH`. A contract made entirely of
+`payload-script` invocations does not need `payload-invocation.json`; the command
+manifest is loaded and validated only when a `payload-command` is encountered.
 
 Module ids use `<plugin>/<local-module>`. Discovery qualifies them as
 `<marketplace-id>::<plugin>/<local-module>`, where `marketplace-id` comes from
@@ -111,11 +113,15 @@ There are two read-only entry points:
 - `discover_modules(installations)` accepts host-resolved enabled payloads with
   explicit `MarketplaceProvenance`. This is the seam for a CLI host that already
   knows each enabled manifest root.
-- `discover_from_settings(settings_groups, durable_home)` merges each explicit
-  settings group using native-first precedence, normalizes its marketplace
-  source through `agent-installation-context`, joins it to active
-  `namespace.json` and `install.json` receipts, and reads the payload root from
-  the validated receipt.
+- `discover_from_settings(settings_groups, durable_home)` accepts explicitly
+  typed `SettingsGroup(..., layer=SettingsLayer.USER|PROJECT)` records. User
+  groups read only top-level `settings.json` plus `settings.local.json`; project
+  groups read only the Claude and Copilot-native repository paths. The complete
+  stack merges user before project, with local-over-base and native-over-Claude
+  precedence, **then** filters disabled plugins. Marketplace sources are
+  normalized through `agent-installation-context`, joined to active
+  `namespace.json` and `install.json` receipts, and the payload root is read
+  from the validated receipt.
 
 Neither path knows the Copilot installed-plugin cache layout or searches
 `PATH`. The caller supplies settings roots and the source-neutral installation

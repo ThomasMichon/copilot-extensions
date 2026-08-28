@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 from pathlib import Path
 
@@ -15,16 +16,33 @@ from installer_readiness import (
     ReadinessResult,
     ReadinessState,
     SettingsGroup,
+    SettingsLayer,
     build_plan,
     discover_from_settings,
     discover_modules,
     parse_readiness,
 )
 
+PAYLOAD_GENERATOR = (
+    Path(__file__).resolve().parents[2] / "payload-invocation" / "generate.py"
+)
+_SPEC = importlib.util.spec_from_file_location(
+    "installer_readiness_payload_generator",
+    PAYLOAD_GENERATOR,
+)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError("cannot load payload-invocation generator")
+payload_generator = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(payload_generator)
+
 
 def _write(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _command_id(plugin: str) -> str:
+    return plugin if plugin.startswith("agent-") else f"agent-{plugin}"
 
 
 def _invocations(
@@ -42,7 +60,7 @@ def _invocations(
         }
         readiness[platform] = {
             "kind": "payload-command",
-            "command": plugin,
+            "command": _command_id(plugin),
             "arguments": ["status", "--json"],
         }
     return installer, readiness
@@ -74,6 +92,26 @@ def _module(
     }
 
 
+def _script_module(
+    plugin: str,
+    *,
+    platforms: tuple[str, ...] = ("windows", "linux"),
+) -> dict[str, object]:
+    module = _module(plugin, platforms=platforms)
+    readiness = module["readiness"]
+    assert isinstance(readiness, dict)
+    invocations = readiness["invocations"]
+    assert isinstance(invocations, dict)
+    for platform in platforms:
+        suffix = "ps1" if platform == "windows" else "sh"
+        invocations[platform] = {
+            "kind": "payload-script",
+            "path": f"scripts/readiness.{suffix}",
+            "arguments": ["--json"],
+        }
+    return module
+
+
 def _payload(
     root: Path,
     plugin: str,
@@ -81,6 +119,7 @@ def _payload(
     modules: list[dict[str, object]] | None = None,
     declined: str | None = None,
     include_reference: bool = True,
+    include_command_manifest: bool = True,
 ) -> Path:
     manifest: dict[str, object] = {
         "name": plugin,
@@ -90,23 +129,29 @@ def _payload(
     if include_reference:
         manifest["installerReadiness"] = "installer-readiness.json"
     _write(root / "plugin.json", manifest)
-    _write(
-        root / "payload-invocation.json",
-        {
-            "schema": "copilot-extensions.payload-invocation",
-            "version": 1,
-            "command": plugin,
-            "module": plugin.replace("-", "_"),
-            "runtimeRoot": f".{plugin}",
-            "noSelfProvisionEnv": f"{plugin.replace('-', '_').upper()}_NO_SELFPROVISION",
-            "purpose": "Fixture command",
-        },
-    )
+    if include_command_manifest:
+        command = _command_id(plugin)
+        _write(
+            root / "payload-invocation.json",
+            {
+                "schema": "copilot-extensions.payload-invocation",
+                "version": 1,
+                "command": command,
+                "module": command.replace("-", "_"),
+                "runtimeRoot": f".{command}",
+                "noSelfProvisionEnv": (
+                    f"{command.replace('-', '_').upper()}_NO_SELFPROVISION"
+                ),
+                "purpose": "Fixture command",
+            },
+        )
     for path in (
         root / "scripts" / "install.ps1",
         root / "scripts" / "install.sh",
-        root / "bin" / f"{plugin}.ps1",
-        root / "bin" / plugin,
+        root / "scripts" / "readiness.ps1",
+        root / "scripts" / "readiness.sh",
+        root / "bin" / f"{_command_id(plugin)}.ps1",
+        root / "bin" / _command_id(plugin),
     ):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("fixture\n", encoding="utf-8")
@@ -194,6 +239,87 @@ def _settings(repo: Path, plugins: tuple[str, ...], *, key: str = "example") -> 
             "enabledPlugins": {f"{plugin}@{key}": True for plugin in plugins},
         },
     )
+
+
+def _user_settings(
+    copilot_home: Path,
+    plugins: tuple[str, ...],
+    *,
+    key: str = "example",
+) -> None:
+    _write(
+        copilot_home / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                key: {
+                    "source": {
+                        "source": "github",
+                        "repo": "example/marketplace",
+                    }
+                }
+            },
+            "enabledPlugins": {f"{plugin}@{key}": True for plugin in plugins},
+        },
+    )
+
+
+def test_user_settings_discover_enabled_plugin(tmp_path):
+    durable = tmp_path / "durable"
+    copilot_home = tmp_path / "copilot"
+    _user_settings(copilot_home, ("demo",))
+    _stamp(durable, _payload(tmp_path / "demo", "demo"), "demo")
+
+    report = discover_from_settings(
+        [SettingsGroup(copilot_home, "global", SettingsLayer.USER)],
+        durable,
+    )
+
+    assert report.valid
+    assert [module.module_id for module in report.modules] == ["demo/runtime"]
+    assert report.modules[0].owner.scopes == ("global",)
+
+
+def test_project_disable_overrides_user_enablement_before_filtering(tmp_path):
+    durable = tmp_path / "durable"
+    copilot_home = tmp_path / "copilot"
+    repo = tmp_path / "repo"
+    _user_settings(copilot_home, ("demo",))
+    _write(
+        repo / ".claude" / "settings.local.json",
+        {"enabledPlugins": {"demo@example": True}},
+    )
+    _write(
+        repo / ".github" / "copilot" / "settings.json",
+        {"enabledPlugins": {"demo@example": False}},
+    )
+    _stamp(durable, _payload(tmp_path / "demo", "demo"), "demo")
+
+    report = discover_from_settings(
+        [
+            SettingsGroup(repo, "project:fixture", SettingsLayer.PROJECT),
+            SettingsGroup(copilot_home, "global", SettingsLayer.USER),
+        ],
+        durable,
+    )
+
+    assert report.valid
+    assert report.modules == ()
+    assert report.machine_gated_owners == ()
+
+
+def test_project_group_does_not_read_top_level_settings(tmp_path):
+    durable = tmp_path / "durable"
+    repo = tmp_path / "repo"
+    _user_settings(repo, ("demo",))
+    _stamp(durable, _payload(tmp_path / "demo", "demo"), "demo")
+
+    report = discover_from_settings(
+        [SettingsGroup(repo, "project:fixture", SettingsLayer.PROJECT)],
+        durable,
+    )
+
+    assert report.valid
+    assert report.modules == ()
 
 
 def test_fixture_inventory_covers_every_enabled_machine_gated_plugin(tmp_path):
@@ -349,15 +475,67 @@ def test_unknown_payload_command_fails(tmp_path):
     assert "not declared" in report.findings[0].message
 
 
+def test_script_only_module_does_not_require_payload_command_manifest(tmp_path):
+    payload = _payload(
+        tmp_path / "demo",
+        "demo",
+        modules=[_script_module("demo")],
+        include_command_manifest=False,
+    )
+
+    report = discover_modules([_installation(payload, "demo")])
+
+    assert report.valid
+    assert report.modules[0].installer[Platform.WINDOWS].kind == "payload-script"
+    assert report.modules[0].readiness[Platform.LINUX].kind == "payload-script"
+
+
+def test_payload_command_requires_payload_command_manifest(tmp_path):
+    payload = _payload(
+        tmp_path / "demo",
+        "demo",
+        include_command_manifest=False,
+    )
+
+    report = discover_modules([_installation(payload, "demo")])
+
+    assert not report.valid
+    assert "payload-command requires payload-invocation.json" in (
+        report.findings[0].message
+    )
+
+
+def test_contradictory_payload_command_shapes_match_canonical_rejection(tmp_path):
+    payload = _payload(tmp_path / "agent-demo", "agent-demo")
+    manifest = payload / "payload-invocation.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["plugin"] = "agent-demo"
+    data["commands"] = [
+        {
+            "command": "agent-demo",
+            "module": "agent_demo",
+            "purpose": "Fixture command",
+        }
+    ]
+    _write(manifest, data)
+
+    with pytest.raises(ValueError, match="cannot be combined"):
+        payload_generator.load_manifest(manifest)
+    report = discover_modules([_installation(payload, "agent-demo")])
+
+    assert not report.valid
+    assert "cannot be combined" in report.findings[0].message
+
+
 def test_payload_command_cannot_escape_through_linked_output_dir(tmp_path):
     payload = _payload(tmp_path / "demo", "demo")
     outside = tmp_path / "outside"
     outside.mkdir()
-    (outside / "demo").write_text("fixture\n", encoding="utf-8")
-    (outside / "demo").chmod(0o755)
-    (outside / "demo.ps1").write_text("fixture\n", encoding="utf-8")
-    (payload / "bin" / "demo").unlink()
-    (payload / "bin" / "demo.ps1").unlink()
+    (outside / "agent-demo").write_text("fixture\n", encoding="utf-8")
+    (outside / "agent-demo").chmod(0o755)
+    (outside / "agent-demo.ps1").write_text("fixture\n", encoding="utf-8")
+    (payload / "bin" / "agent-demo").unlink()
+    (payload / "bin" / "agent-demo.ps1").unlink()
     (payload / "bin").rmdir()
     try:
         (payload / "bin").symlink_to(outside, target_is_directory=True)
@@ -547,6 +725,19 @@ def test_readiness_parser_accepts_only_contract_states():
                 "version": True,
                 "module": "demo/runtime",
                 "state": "ready",
+            }
+        )
+
+
+def test_readiness_parser_rejects_non_string_mapping_keys_as_value_error():
+    with pytest.raises(ValueError, match="property names must be strings"):
+        parse_readiness(
+            {
+                "schema": "copilot-extensions.module-readiness",
+                "version": 1,
+                "module": "demo/runtime",
+                "state": "ready",
+                1: "invalid",
             }
         )
 

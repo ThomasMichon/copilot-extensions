@@ -7,8 +7,9 @@ import os
 import re
 import stat
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -39,29 +40,46 @@ CONTRACT_VERSION = 1
 READINESS_SCHEMA = "copilot-extensions.module-readiness"
 READINESS_VERSION = 1
 PLUGIN_MANIFEST_PATHS = (("plugin.json",), (".claude-plugin", "plugin.json"))
-SETTINGS_PATHS = (
+PROJECT_SETTINGS_PATHS = (
     (".claude", "settings.json"),
     (".claude", "settings.local.json"),
     (".github", "copilot", "settings.json"),
     (".github", "copilot", "settings.local.json"),
 )
+USER_SETTINGS_PATHS = (("settings.json",), ("settings.local.json",))
 _ID = re.compile(r"^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$")
 _MODULE_ID = re.compile(
     r"^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?/"
     r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
 )
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9-]*$")
+_PLUGIN_ID = re.compile(r"^agent-[a-z0-9-]+$")
+_PYTHON_MODULE = re.compile(
+    r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$"
+)
+_RUNTIME_ROOT = re.compile(r"^\.[a-z0-9-]+$")
+_ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]+$")
+_PURPOSE = re.compile(r"^[A-Za-z0-9 ._/-]+$")
+_OUTPUT_DIR = re.compile(r"^[a-z0-9][a-z0-9_./-]*$")
 _MARKETPLACE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*--[0-9a-f]{16}$")
 _FINGERPRINT = re.compile(r"^sha256:[0-9a-f]{64}$")
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 
 
+class SettingsLayer(str, Enum):
+    """Settings path family and merge precedence."""
+
+    USER = "user"
+    PROJECT = "project"
+
+
 @dataclass(frozen=True)
 class SettingsGroup:
-    """One precedence-ordered settings scope."""
+    """One explicitly typed settings scope."""
 
     root: Path
     scope: str
+    layer: SettingsLayer = SettingsLayer.PROJECT
 
 
 @dataclass(frozen=True)
@@ -71,6 +89,13 @@ class _Enabled:
     fingerprint: str
     scope: str
     source: str
+
+
+@dataclass
+class _SettingsValues:
+    enabled: dict[str, tuple[bool, str]]
+    marketplaces: dict[str, tuple[dict[str, Any], Path, Path]]
+    findings: list[Finding]
 
 
 class _ContractProblem(ValueError):
@@ -183,33 +208,81 @@ def _plugin_manifest(root: Path) -> tuple[Path, dict[str, Any]]:
     raise _ContractProblem("plugin manifest is missing")
 
 
+def _payload_command(
+    value: Any,
+    *,
+    label: str,
+) -> tuple[str, str, str]:
+    data = _object(value, label)
+    command = _string(data.get("command"), f"{label}.command")
+    module = _string(data.get("module"), f"{label}.module")
+    purpose = _string(data.get("purpose"), f"{label}.purpose")
+    if not _COMMAND_ID.fullmatch(command):
+        raise _ContractProblem(f"{label}.command is invalid")
+    if not _PYTHON_MODULE.fullmatch(module):
+        raise _ContractProblem(f"{label}.module is invalid")
+    if not _PURPOSE.fullmatch(purpose):
+        raise _ContractProblem(f"{label}.purpose is invalid")
+    return command, module, purpose
+
+
 def _payload_commands(root: Path) -> tuple[dict[str, Path], str]:
+    if not (root / "payload-invocation.json").exists():
+        raise _ContractProblem(
+            "payload-command requires payload-invocation.json in the owning payload"
+        )
     path = _payload_path(root, "payload-invocation.json", "payload invocation manifest")
     data = _object(_strict_json(path), "payload invocation manifest")
     if data.get("schema") != "copilot-extensions.payload-invocation":
         raise _ContractProblem("payload invocation manifest has unsupported schema/version")
     _version(data.get("version"), 1, "payload invocation version")
+    runtime_root = data.get("runtimeRoot")
+    if not isinstance(runtime_root, str) or not _RUNTIME_ROOT.fullmatch(runtime_root):
+        raise _ContractProblem("payload invocation runtimeRoot is invalid")
+    no_self_provision = data.get("noSelfProvisionEnv")
+    if (
+        not isinstance(no_self_provision, str)
+        or not _ENVIRONMENT_NAME.fullmatch(no_self_provision)
+    ):
+        raise _ContractProblem("payload invocation noSelfProvisionEnv is invalid")
     output_dir = data.get("outputDir", "bin")
     if (
         not isinstance(output_dir, str)
         or not output_dir
-        or Path(output_dir).is_absolute()
-        or "." in Path(output_dir).parts
+        or not _OUTPUT_DIR.fullmatch(output_dir)
         or ".." in Path(output_dir).parts
     ):
         raise _ContractProblem("payload invocation outputDir is invalid")
     raw_commands = data.get("commands")
     if raw_commands is None:
-        raw_commands = [{"command": data.get("command")}]
-    if not isinstance(raw_commands, list) or not raw_commands:
-        raise _ContractProblem("payload invocation commands must be a non-empty array")
+        command = _payload_command(data, label="payload command")
+        raw_plugin = data.get("plugin", command[0])
+        if raw_plugin != command[0]:
+            raise _ContractProblem(
+                "legacy payload plugin must equal command; use commands for "
+                "distinct plugin identity"
+            )
+        parsed_commands = [command]
+    else:
+        if any(field in data for field in ("command", "module", "purpose")):
+            raise _ContractProblem(
+                "payload invocation commands cannot be combined with "
+                "top-level command/module/purpose"
+            )
+        if not isinstance(raw_commands, list) or not raw_commands:
+            raise _ContractProblem(
+                "payload invocation commands must be a non-empty array"
+            )
+        parsed_commands = [
+            _payload_command(item, label=f"payload commands[{index}]")
+            for index, item in enumerate(raw_commands)
+        ]
+        raw_plugin = data.get("plugin")
+    if not isinstance(raw_plugin, str) or not _PLUGIN_ID.fullmatch(raw_plugin):
+        raise _ContractProblem("payload invocation plugin is invalid")
     commands: dict[str, Path] = {}
-    for index, item in enumerate(raw_commands):
-        command = _string(
-            _object(item, f"payload command {index}").get("command"),
-            f"payload command {index}.command",
-        )
-        if not _COMMAND_ID.fullmatch(command) or command in commands:
+    for command, _module_name, _purpose in parsed_commands:
+        if command in commands:
             raise _ContractProblem(f"payload command id is invalid or duplicate: {command}")
         commands[command] = Path(output_dir) / command
     windows_shim = data.get("windowsCatalogShim", "powershell")
@@ -223,8 +296,7 @@ def _invocation(
     *,
     root: Path,
     platform: Platform,
-    commands: Mapping[str, Path],
-    windows_shim: str,
+    command_loader: Callable[[], tuple[Mapping[str, Path], str]],
     label: str,
 ) -> Invocation:
     data = _object(value, label)
@@ -252,6 +324,7 @@ def _invocation(
         return Invocation(kind=kind, target=target, arguments=arguments)
     if "path" in data:
         raise _ContractProblem(f"{label} cannot combine command and path")
+    commands, windows_shim = command_loader()
     command = _string(data.get("command"), f"{label}.command")
     if not _COMMAND_ID.fullmatch(command) or command not in commands:
         raise _ContractProblem(
@@ -284,8 +357,7 @@ def _platform_invocations(
     *,
     root: Path,
     platforms: tuple[Platform, ...],
-    commands: Mapping[str, Path],
-    windows_shim: str,
+    command_loader: Callable[[], tuple[Mapping[str, Path], str]],
     label: str,
 ) -> dict[Platform, Invocation]:
     data = _object(value, label)
@@ -308,8 +380,7 @@ def _platform_invocations(
             data[platform.value],
             root=root,
             platform=platform,
-            commands=commands,
-            windows_shim=windows_shim,
+            command_loader=command_loader,
             label=f"{label}.{platform.value}",
         )
         for platform in platforms
@@ -321,8 +392,7 @@ def _module(
     *,
     owner: PluginInstallation,
     source: Path,
-    commands: Mapping[str, Path],
-    windows_shim: str,
+    command_loader: Callable[[], tuple[Mapping[str, Path], str]],
 ) -> Module:
     data = _object(value, "module")
     _keys(
@@ -409,16 +479,14 @@ def _module(
             data.get("installer"),
             root=owner.payload_root,
             platforms=platforms,
-            commands=commands,
-            windows_shim=windows_shim,
+            command_loader=command_loader,
             label="module.installer",
         ),
         readiness=_platform_invocations(
             readiness_data.get("invocations"),
             root=owner.payload_root,
             platforms=platforms,
-            commands=commands,
-            windows_shim=windows_shim,
+            command_loader=command_loader,
             label="module.readiness.invocations",
         ),
         configuration_empty=configuration_empty,
@@ -490,14 +558,20 @@ def _discover_installation(
         raw_modules = contract.get("modules")
         if not isinstance(raw_modules, list) or not raw_modules:
             raise _ContractProblem("supported declarations require a non-empty modules array")
-        commands, windows_shim = _payload_commands(installation.payload_root)
+        command_data: tuple[dict[str, Path], str] | None = None
+
+        def load_commands() -> tuple[Mapping[str, Path], str]:
+            nonlocal command_data
+            if command_data is None:
+                command_data = _payload_commands(installation.payload_root)
+            return command_data
+
         modules = [
             _module(
                 value,
                 owner=installation,
                 source=contract_path,
-                commands=commands,
-                windows_shim=windows_shim,
+                command_loader=load_commands,
             )
             for value in raw_modules
         ]
@@ -741,11 +815,30 @@ def discover_modules(
     )
 
 
-def _settings_group(group: SettingsGroup) -> tuple[list[_Enabled], list[Finding]]:
+def _settings_group(group: SettingsGroup) -> _SettingsValues:
     enabled: dict[str, bool] = {}
-    marketplaces: dict[str, tuple[dict[str, Any], Path]] = {}
+    marketplaces: dict[str, tuple[dict[str, Any], Path, Path]] = {}
     findings: list[Finding] = []
-    for parts in SETTINGS_PATHS:
+    try:
+        layer = SettingsLayer(group.layer)
+    except ValueError:
+        return _SettingsValues(
+            enabled={},
+            marketplaces={},
+            findings=[
+                _finding(
+                    "invalid-settings-layer",
+                    f"settings layer must be user or project, got {group.layer!r}",
+                    group.root,
+                )
+            ],
+        )
+    paths = (
+        USER_SETTINGS_PATHS
+        if layer is SettingsLayer.USER
+        else PROJECT_SETTINGS_PATHS
+    )
+    for parts in paths:
         path = group.root.joinpath(*parts)
         if not path.exists():
             continue
@@ -802,10 +895,41 @@ def _settings_group(group: SettingsGroup) -> tuple[list[_Enabled], list[Finding]
                         )
                     )
                     continue
-                marketplaces[key] = (declaration, path)
+                marketplaces[key] = (declaration, path, group.root)
+
+    return _SettingsValues(
+        enabled={source: (value, group.scope) for source, value in enabled.items()},
+        marketplaces=marketplaces,
+        findings=findings,
+    )
+
+
+def _enabled_from_settings_groups(
+    settings_groups: Iterable[SettingsGroup],
+) -> tuple[list[_Enabled], list[Finding]]:
+    indexed_groups = list(enumerate(settings_groups))
+    layer_order = {SettingsLayer.USER: 0, SettingsLayer.PROJECT: 1}
+    try:
+        ordered = sorted(
+            indexed_groups,
+            key=lambda item: (layer_order[SettingsLayer(item[1].layer)], item[0]),
+        )
+    except ValueError:
+        ordered = indexed_groups
+
+    enabled: dict[str, tuple[bool, str]] = {}
+    marketplaces: dict[str, tuple[dict[str, Any], Path, Path]] = {}
+    findings: list[Finding] = []
+    for _index, group in ordered:
+        values = _settings_group(group)
+        enabled.update(values.enabled)
+        marketplaces.update(values.marketplaces)
+        findings.extend(values.findings)
 
     result: list[_Enabled] = []
-    for source in sorted(name for name, value in enabled.items() if value):
+    for source in sorted(
+        name for name, (value, _scope) in enabled.items() if value
+    ):
         plugin_id, separator, marketplace_key = source.partition("@")
         if not separator or not _ID.fullmatch(plugin_id) or not marketplace_key:
             findings.append(
@@ -830,7 +954,7 @@ def _settings_group(group: SettingsGroup) -> tuple[list[_Enabled], list[Finding]
                 )
             )
             continue
-        value, path = declaration
+        value, path, declaration_root = declaration
         descriptor = value.get("source")
         if not isinstance(descriptor, dict):
             findings.append(
@@ -842,7 +966,7 @@ def _settings_group(group: SettingsGroup) -> tuple[list[_Enabled], list[Finding]
             )
             continue
         try:
-            normalized = normalize_source(descriptor, group.root)
+            normalized = normalize_source(descriptor, declaration_root)
             identity = source_identity(normalized, marketplace_key)
         except InstallationContextError as error:
             findings.append(
@@ -858,7 +982,7 @@ def _settings_group(group: SettingsGroup) -> tuple[list[_Enabled], list[Finding]
                 plugin_id=plugin_id,
                 marketplace_key=marketplace_key,
                 fingerprint=identity["fingerprint"],
-                scope=group.scope,
+                scope=enabled[source][1],
                 source=source,
             )
         )
@@ -872,11 +996,8 @@ def installations_from_settings(
     """Join enabled settings to active, validated installation-cell receipts."""
     durable = Path(durable_home)
     findings: list[Finding] = []
-    enabled: list[_Enabled] = []
-    for group in settings_groups:
-        group_enabled, group_findings = _settings_group(group)
-        enabled.extend(group_enabled)
-        findings.extend(group_findings)
+    enabled, settings_findings = _enabled_from_settings_groups(settings_groups)
+    findings.extend(settings_findings)
 
     cells_by_fingerprint: dict[str, list[dict[str, Any]]] = defaultdict(list)
     marketplaces = durable / "marketplaces"

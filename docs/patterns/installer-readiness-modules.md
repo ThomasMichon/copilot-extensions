@@ -56,6 +56,13 @@ equivalent, identity-verified enabled-plugin manifest may provide those records
 directly. Discovery never guesses an installed-cache path, chooses by plugin
 name alone, or searches `PATH`.
 
+Settings inputs name their layer explicitly. A user layer reads only the
+Copilot-home `settings.json` / `settings.local.json`; a project layer reads only
+the repository's Claude and Copilot-native settings paths. Discovery merges
+user before project, local after base, and native after Claude before filtering
+disabled plugins. A repository root therefore cannot accidentally authorize an
+unrelated top-level `settings.json`.
+
 Two active cells matching one source fingerprint are ambiguous and fail before
 planning. Two different marketplace cells may publish the same plugin/module id
 without colliding because their qualified ids differ.
@@ -73,6 +80,9 @@ Both forms carry an argument array, never shell text. Absolute paths, path
 escapes, undeclared command ids, platform/suffix mismatches, and missing targets
 are invalid. The contract therefore points at the plugin's real independently
 runnable installer and probe without copying their behavior into the consumer.
+`payload-invocation.json` is loaded lazily: a script-only contract does not need
+one, while the first payload command requires the canonical command-manifest
+shape and rejects mixed legacy `command` fields with `commands[]`.
 
 ### Module semantics
 
