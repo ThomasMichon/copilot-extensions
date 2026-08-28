@@ -81,6 +81,10 @@ completion.
 - Consuming a handoff starts a new relay leg; it is not evidence that the
   worktree is done. Re-read the founding request, continuing objective,
   successor work roster, and any cited effort or issue.
+- When `effort-focus show --json` reports a valid open binding, the cited effort
+  README is the canonical objective and completion gate. A handoff should carry
+  its pointer, the next slice, and only the immediate relay delta rather than
+  copying the effort's request, plan, or journal.
 - Keep driving every actionable next phase already permitted by that objective,
   as far as the current context and available work allow. Do not wait for the
   user to restate or reauthorize known work merely because a phase or PR landed.
@@ -94,6 +98,12 @@ completion.
 Before finalizing, re-check the parent objective rather than the most recent
 milestone. A consumed or completed handoff task, a completed phase, a clean git
 status, or a merged PR is not proof that the worktree has no remaining work.
+An effort-bound worktree remains responsible until the effort is `Done`, every
+Plan and Validation Plan checkbox is resolved, deferred or blocked work is
+transferred with the checked form
+`Deferred to \`<tracked objective>\`: ...` or
+`Blocked; transferred to \`<tracked objective>\`: ...`, required review/merge
+gates have passed, and the effort is archived and released.
 
 ## Am I in a Worktree?
 

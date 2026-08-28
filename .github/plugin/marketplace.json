@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev673"
+    "version": "1.7.5-dev674"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev654",
+      "version": "1.5.3-dev655",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -48,19 +48,19 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev71",
+      "version": "0.1.1-dev72",
       "source": "plugins/agent-logger"
     },
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a Copilot CLI session extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover so the predecessor is retired only after pickup",
-      "version": "0.1.0-dev46",
+      "version": "0.1.0-dev47",
       "source": "plugins/context-handoff"
     },
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev15",
+      "version": "0.1.0-dev16",
       "source": "plugins/efforts"
     },
     {

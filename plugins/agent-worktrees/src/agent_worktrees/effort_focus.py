@@ -23,7 +23,16 @@ _HEADER_RE = re.compile(
     r"(?mi)^-\s+\*\*(?P<name>Slug|Status):\*\*\s*(?P<value>[^\r\n]+?)\s*$"
 )
 _HEADING_RE = re.compile(r"(?m)^##\s+(.+?)\s*$")
-_TASK_RE = re.compile(r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\[([^\]])\]\s+")
+_TASK_RE = re.compile(
+    r"(?m)^\s*(?:[-*+]|\d+[.)])\s+\[([^\]])\]\s+(?P<text>[^\r\n]+?)\s*$"
+)
+_TRANSFER_TASK_PREFIX_RE = re.compile(
+    r"(?i)^(?:deferred(?:\s+to|:)|blocked(?:;|:))"
+)
+_TRANSFER_TASK_RE = re.compile(
+    r"(?i)^(?:deferred to|blocked;\s*transferred to)\s+"
+    r"`(?P<target>[^`\r\n<>]+)`:\s+\S"
+)
 _HTML_COMMENT_RE = re.compile(r"\s*<!--.*?-->\s*$")
 _SPACE_RE = re.compile(r"\s+")
 _ILLEGAL_CTRL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -505,16 +514,26 @@ def _completion_ready(text: str) -> bool:
     normalized = _normalized_status(status)
     plan = _section(text, "Plan")
     validation = _section(text, "Validation Plan")
-    task_states = [
-        match.group(1).casefold()
+    task_entries = [
+        (match.group(1).casefold(), _SPACE_RE.sub(" ", match.group("text")).strip())
         for section in (plan, validation)
         for match in _TASK_RE.finditer(section)
     ]
+
+    def task_complete(entry: tuple[str, str]) -> bool:
+        state, task_text = entry
+        if state != "x":
+            return False
+        if not _TRANSFER_TASK_PREFIX_RE.match(task_text):
+            return True
+        transfer = _TRANSFER_TASK_RE.match(task_text)
+        return bool(transfer and transfer.group("target").strip())
+
     return bool(
         normalized in _CLOSED_STATUSES
         and plan
         and validation
-        and all(state == "x" for state in task_states)
+        and all(task_complete(entry) for entry in task_entries)
     )
 
 

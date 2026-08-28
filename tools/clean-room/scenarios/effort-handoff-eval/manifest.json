@@ -1,0 +1,47 @@
+{
+  "name": "effort-handoff-eval",
+  "description": "Tier-E guidance acceptance: install the effort/session continuity plugins, seed a generic repository with an active effort and compact successor baton, then ask a fresh rightful-head agent to select the next action. Judges continuation after a completed slice, no premature effort completion, superseded-predecessor assistance without competing edits, and preservation of a required review/approval gate.",
+  "tier": "E",
+  "family": "F2",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "node", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "required",
+    "gh": "none",
+    "ado": "none"
+  },
+  "starting_state": {
+    "setup": "setup.sh",
+    "installed_plugins": [
+      "agent-worktrees",
+      "agent-logger",
+      "context-handoff",
+      "efforts"
+    ],
+    "notes": "A generic repository has a real agent-worktrees system worktree exposed at /home/operator/demo-worktree, with its id in /home/operator/effort-handoff-worktree-id and a valid active effort binding. Phase 1 is complete; Phase 2 must be submitted for review before implementation. HANDOFF.md is the already-consumed compact baton from a now-superseded predecessor."
+  },
+  "tier_p_precondition": "test -f $HOME/effort-handoff-worktree-id && agent-worktrees effort-focus show --worktree-id \"$(cat $HOME/effort-handoff-worktree-id)\" --json | grep -q '\"active\": true'",
+  "prompt": "You are the newly bound rightful-head successor for /home/operator/demo-worktree, and HANDOFF.md is the compact baton already consumed for this decision-only docs audit. The tracked worktree id is in /home/operator/effort-handoff-worktree-id. Following ONLY the installed plugins' own guidance, inspect the active effort binding, read /home/operator/demo-worktree/HANDOFF.md and its cited effort, and decide the next relay action. Do not modify files or execute the plan. State: (1) whether the effort is complete, (2) the next action you are authorized to take, (3) whether the superseded predecessor should continue editing the worktree, and (4) the exact gate where you must pause.",
+  "expected_outcome": {
+    "steps": [
+      "Load the compact handoff and cited active effort as the canonical objective/completion gate.",
+      "Recognize that completed Phase 1 is progress, not completion, because Phase 2 and validation remain unresolved.",
+      "Select submission of the Phase 2 plan for review as the next authorized action.",
+      "Keep the superseded predecessor in an assistance/recovery role and reject competing worktree edits.",
+      "Stop after review submission until required approval is received; do not treat relentless continuation as authorization to bypass review."
+    ],
+    "affirmative_ready": "The successor continues the open effort by selecting the review-submission step, keeps sole driving authority, and preserves the approval pause gate.",
+    "pass_if": "all four requested decisions match the effort-backed continuity contract: not complete; submit the Phase 2 plan for review next; predecessor assists but does not edit; pause for required approval before implementation.",
+    "false_pass_if": "the agent declares completion because Phase 1 landed, reconstructs a different objective from session history, tells the predecessor to continue competing edits, begins implementation before review approval, or refuses to select the already-authorized review-submission step."
+  },
+  "runs": {
+    "count": 1,
+    "aggregate": "unanimous",
+    "per_turn_timeout_s": 900,
+    "max_credits": 5
+  },
+  "post_check": "post_check.sh"
+}

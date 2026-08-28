@@ -71,6 +71,7 @@ Ramp into the dormant session for worktree <SUFFIX> [on machine <NAME>].
 Focus: <what to resume, if the operator said>.
 ramp_argv0: <agent-logger catalog "ramp-up-session" argv[0]>
 digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
+[effort_argv0: <agent-worktrees catalog argv[0]>, for a local worktree when available]
 Return the bounded Ramp-Up Briefing.
 ```
 
@@ -83,13 +84,41 @@ transcript.
 
 ### 3. Take over
 
-Read the returned briefing (it's small by design). Present a few-line situation
+Read the returned briefing (it's small by design). If it identifies an active
+effort, read that effort README first. Present a few-line situation
 summary to the operator — what the session was doing, what landed, what remains
 — then **continue the work** from where it stopped. For any detail the briefing
 flags, call the catalog's `read-session-digest` entry yourself (see below)
 rather than
 re-reading the whole session. If the takeover needs a decision only the operator
 can make, surface it; otherwise proceed.
+
+## Effort-backed takeover is effort-first
+
+For a local worktree, when agent-worktrees is available, resolve its exact
+session-catalog `argv[0]`
+and pass it to the sub-agent as `effort_argv0`. After the base worktree/session
+metadata is known, the sub-agent runs:
+
+```
+<agent-worktrees catalog argv[0]> effort-focus show --json
+```
+
+from the resolved worktree. A valid open binding makes the cited effort README
+the canonical objective, plan, journal, and completion gate. The dormant
+session is then only evidence for the **immediate predecessor delta**:
+uncommitted work, an in-flight command or review, material decisions not yet in
+the journal, blockers, and required confirmations. Do not reconstruct or copy
+the objective from transcript history when the effort already owns it.
+
+If the effort plus git state and handoff delta are sufficient, do not read
+deeper transcript segments. If the binding is absent, stale, closed, or
+unavailable, retain the standalone ramp-up behavior and reconstruct the full
+objective from checkpoints and the bounded transcript.
+
+For a remote worktree, do not pass the caller's local `effort_argv0` through
+SSH. Use standalone ramp-up unless the caller explicitly supplies a command
+path resolved from the remote host's own session catalog.
 
 ## Doing it inline (small sessions, or no delegation)
 
@@ -142,7 +171,16 @@ The brief contains:
 
 Read the whole brief. It is your situational handoff.
 
-### 4. Go deeper if needed
+### 4. Resolve active effort before going deeper
+
+When the agent-worktrees command is available, run its catalog `argv[0]`
+`effort-focus show --json` from the resolved worktree. Use the effort-backed
+path only when `active_effort.active` is `true`. If it returns a valid
+open binding, read the cited effort README and use it for the durable objective
+and completion gate. Treat the session digest only as a source for immediate
+activity that the effort journal and git state do not explain.
+
+### 5. Go deeper if needed
 
 The full transcript was collated ephemerally. Read more with the existing
 digest reader (no deployment-specific paths, temp-store aware):
@@ -157,7 +195,7 @@ digest reader (no deployment-specific paths, temp-store aware):
 Use `grep` to find the last decision, an error, a file path, or the task the
 session was on.
 
-### 5. Reconcile against the worktree's real state
+### 6. Reconcile against the worktree's real state
 
 The brief tells you what the session *intended*; the worktree tells you what
 actually **landed**. Before continuing, inspect the worktree itself:
@@ -171,7 +209,7 @@ git -C <worktree-path> diff            # uncommitted work in flight
 Match the tail's in-flight actions against committed vs. uncommitted state so
 you don't redo finished work or drop unfinished work.
 
-### 6. Pick up the torch
+### 7. Pick up the torch
 
 Summarize the situation back to the operator in a few lines — what the session
 was doing, what has landed, and what remains — then **continue the work** from

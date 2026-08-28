@@ -18,7 +18,7 @@
     "skills/"
   ],
   "hooks": "hooks.json",
-  "version": "1.5.3-dev654",
+  "version": "1.5.3-dev655",
   "runtimeScope": "universal",
   "installerReadiness": "installer-readiness.json"
 }
