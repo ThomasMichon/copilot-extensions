@@ -344,11 +344,18 @@ def test_stamp_refuses_generation_overflow_before_replacing_receipt(
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
-def test_validate_rejects_generation_above_portable_maximum(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "generation",
+    (9223372036854775808, 10000000000000000000),
+)
+def test_validate_rejects_generation_above_portable_maximum(
+    tmp_path: Path,
+    generation: int,
+) -> None:
     layout = _receipt_layout(tmp_path)
     namespace = Path(layout["namespace"])
     receipt = json.loads(namespace.read_text(encoding="utf-8"))
-    receipt["generation"] = 9223372036854775808
+    receipt["generation"] = generation
     _write_json(namespace, receipt)
     result = _run_ps(
         "validate",

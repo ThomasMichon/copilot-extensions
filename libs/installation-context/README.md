@@ -18,7 +18,8 @@ cells. Mutation remains explicit and non-automatic:
 All three normalize marketplace source descriptors, derive source fingerprints
 and marketplace ids, resolve payload provenance, compute the approved durable
 layout, strictly validate receipts, and expose the same bounded `stamp` and
-`activation-cas` mutations. They also expose read-only `status` and
+`activation-cas` mutations. They also expose immutable `snapshot-stamp` and
+read-only `snapshot-validate` provenance actions plus read-only `status` and
 `probe-legacy` actions for installation-mode governance. `stamp` creates or
 updates only `namespace.json` and `install.json`. `activation-cas` explicitly
 publishes only `installation-activation.json` after pinning the caller-observed
@@ -74,6 +75,20 @@ writes an actionable error to stderr and exits nonzero.
   -LegacyDisposition absent `
   -LegacyProbeJson '{"declared":true,"result":"absent","checkedAt":null}'
 
+.\installation-context.ps1 snapshot-stamp `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -ExpectedNamespaceGeneration 1 `
+  -ExpectedInstallGeneration 1 `
+  -SnapshotId 1.0.0
+
+.\installation-context.ps1 snapshot-validate `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -SnapshotId 1.0.0
+
 .\installation-context.ps1 status `
   -PayloadRoot $env:COPILOT_PLUGIN_ROOT `
   -PluginId agent-example `
@@ -123,6 +138,20 @@ writes an actionable error to stderr and exits nonzero.
   --legacy-probe-json \
   '{"declared":true,"result":"absent","checkedAt":null}'
 
+./installation-context.sh snapshot-stamp \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --expected-namespace-generation 1 \
+  --expected-install-generation 1 \
+  --snapshot-id 1.0.0
+
+./installation-context.sh snapshot-validate \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --snapshot-id 1.0.0
+
 ./installation-context.sh status \
   --payload-root "$COPILOT_PLUGIN_ROOT" \
   --plugin-id agent-example \
@@ -144,6 +173,15 @@ Callers that already have a private Python toolchain may import
 explicit management transaction may call `compare_and_swap_activation`; all
 three expected-generation arguments and validated legacy probe evidence are
 mandatory.
+Snapshot producers may call `stamp_snapshot_provenance`; consumers may call
+`validate_snapshot_provenance`. Both require explicit context, exact
+marketplace/plugin identity, and a portable snapshot id. Publication additionally
+requires both caller-observed receipt generations and an existing non-empty
+snapshot directory beneath the canonical `snapshotsRoot`; it writes only the
+sidecar. Validation requires non-sidecar snapshot content to remain present.
+The sidecar is immutable, cell-local, and non-operative. It provides same-user
+ownership consistency and stale-generation detection, not cryptographic
+attestation of snapshot contents.
 Read-only callers may import `resolve_installation_mode` and
 `probe_legacy_entrypoint`. Their optional `os_profile`, `platform`,
 `wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit
@@ -184,8 +222,10 @@ Receipt replacement is same-directory and atomic, and the lock token is
 revalidated immediately before replacement. Existing receipt updates compare
 the caller-observed namespace and install generations while holding their
 respective locks; stale writers must resolve again. Generations are positive
-signed 64-bit integers on every implementation, and mutation fails before
-replacement when the next generation cannot be represented portably.
+signed 64-bit integers on every implementation. CLI expectations use unsigned
+ASCII decimal syntax and normalize leading zeroes before comparison. Mutation
+fails before replacement when the next generation cannot be represented
+portably.
 
 Activation CAS acquires the marketplace genesis lock and then the plugin
 installation lock, revalidates both context receipts while both are held, and
@@ -221,6 +261,7 @@ exemplar payloads. No exemplar installer or bootstrap calls `activation-cas`;
 the existing callers only protect legacy mutation and do not activate a
 namespaced root.
 
-Later slices still own snapshot provenance, tombstone writing, migration,
-runtime-root activation, payload-invocation schema changes, reconciliation,
-and dual-cell exemplars.
+Later slices still own snapshot consumption during provisioning, runtime-slot
+ownership, tombstone writing, migration, runtime-root activation and cutover,
+rollback/uninstall enforcement, payload-invocation schema changes, and dual-cell
+exemplars.

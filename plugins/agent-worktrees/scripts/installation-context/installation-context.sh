@@ -790,9 +790,23 @@ assert_receipt_generation() {
     local value="$1" name="$2"
     assert_positive_integer "$value" "$name"
     if ((${#value} > 19)) ||
-        ((${#value} == 19)) && [[ "$value" > 9223372036854775807 ]]; then
+        { ((${#value} == 19)) && [[ "$value" > 9223372036854775807 ]]; }; then
         fail "$name exceeds the portable signed 64-bit maximum."
     fi
+}
+
+normalize_expected_generation_into() {
+    local target="$1" value="$2" name="$3"
+    [[ "$value" =~ ^[0-9]+$ ]] ||
+        fail "Expected $name generation must be a non-negative integer."
+    while [[ ${#value} -gt 1 && "${value:0:1}" == 0 ]]; do
+        value="${value:1}"
+    done
+    if ((${#value} > 19)) ||
+        { ((${#value} == 19)) && [[ "$value" > 9223372036854775807 ]]; }; then
+        fail "Expected $name generation exceeds the portable signed 64-bit maximum."
+    fi
+    printf -v "$target" '%s' "$value"
 }
 
 assert_receipt_state() {
@@ -951,12 +965,16 @@ NS_GENERATION=""
 validate_namespace_receipt() {
     local receipt_path="$1" durable_home="$2" actual cell_root marketplaces_root canonical_receipt
     local schema version receipt_id generation state source_prefix fingerprint slug receipt_marketplace_id
+    [[ ! -L "$receipt_path" ]] ||
+        fail "namespace.json may not be a symbolic link or reparse point."
     actual="$(canonical_path "$receipt_path" true)"
     cell_root="$(canonical_path "$(dirname -- "$actual")")"
     marketplaces_root="$(canonical_path "$durable_home/marketplaces")"
     path_is_within "$cell_root" "$marketplaces_root" ||
         fail "Namespace receipt '$actual' is outside the durable marketplaces root."
     receipt_id="$(basename -- "$cell_root")"
+    [[ ! -L "$cell_root/namespace.json" ]] ||
+        fail "namespace.json may not be a symbolic link or reparse point."
     canonical_receipt="$(canonical_path "$cell_root/namespace.json")"
     paths_equal "$actual" "$canonical_receipt" ||
         fail "namespace.json is not at its exact canonical receipt location '$canonical_receipt'."
@@ -1004,19 +1022,38 @@ resolve_relative_root() {
 }
 
 CONTEXT_JSON=""
+CTX_MARKETPLACE_ID=""
+CTX_PLUGIN_ID=""
+CTX_PAYLOAD_ROOT=""
+CTX_CELL_ROOT=""
+CTX_PLUGIN_ROOT=""
+CTX_SNAPSHOTS_ROOT=""
+CTX_NAMESPACE_RECEIPT=""
+CTX_INSTALL_RECEIPT=""
+CTX_NAMESPACE_GENERATION=""
+CTX_INSTALL_GENERATION=""
+CTX_INSTALL_STATE=""
+CTX_SOURCE_KIND=""
+CTX_SOURCE_CANONICAL=""
+CTX_SOURCE_REF=""
+CTX_SOURCE_FINGERPRINT=""
 
 validate_context_receipt() {
     local receipt_path="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
     local expected_payload="$5" expected_cell="$6"
     local actual schema version marketplace_id plugin_id cell_root plugin_root canonical_receipt
+    local marketplaces_root plugins_root lexical_marketplaces lexical_cell lexical_plugins lexical_plugin
     local receipt_plugin_root generation state namespace_path payload_root payload_version payload_origin
     local roots_json="" name value resolved delimiter="" inherited_payload namespace_receipt
+    local snapshots_root=""
     local payload_origin_receipt payload_origin_receipt_type
     is_absolute "$receipt_path" || fail "The installation-context receipt pointer must be absolute."
     [[ -z "$expected_payload" ]] || is_absolute "$expected_payload" ||
         fail "expected payload root must be absolute."
     [[ -z "$expected_cell" ]] || is_absolute "$expected_cell" ||
         fail "expected cell root must be absolute."
+    [[ ! -L "$receipt_path" ]] ||
+        fail "install.json may not be a symbolic link or reparse point."
     actual="$(canonical_path "$receipt_path" true)"
     json_optional_string_into schema "$actual" schema
     version="$(json_optional_path "$actual" version)"
@@ -1030,8 +1067,32 @@ validate_context_receipt() {
     [[ "$marketplace_id" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
         fail "Invalid source-derived marketplace id '$marketplace_id'."
     assert_plugin_id "$plugin_id"
-    cell_root="$(canonical_path "$durable_home/marketplaces/$marketplace_id")"
-    plugin_root="$(canonical_path "$cell_root/plugins/$plugin_id")"
+    lexical_marketplaces="$durable_home/marketplaces"
+    [[ ! -L "$lexical_marketplaces" ]] ||
+        fail "The marketplaces root may not be a symbolic link or reparse point."
+    marketplaces_root="$(canonical_path "$lexical_marketplaces")"
+    paths_equal "$(dirname -- "$marketplaces_root")" "$durable_home" ||
+        fail "The marketplaces root escapes the durable installation home."
+    lexical_cell="$marketplaces_root/$marketplace_id"
+    [[ ! -L "$lexical_cell" ]] ||
+        fail "The marketplace cell root may not be a symbolic link or reparse point."
+    cell_root="$(canonical_path "$lexical_cell")"
+    paths_equal "$(dirname -- "$cell_root")" "$marketplaces_root" ||
+        fail "The marketplace cell root escapes the marketplaces root."
+    lexical_plugins="$cell_root/plugins"
+    [[ ! -L "$lexical_plugins" ]] ||
+        fail "The cell plugins root may not be a symbolic link or reparse point."
+    plugins_root="$(canonical_path "$lexical_plugins")"
+    paths_equal "$(dirname -- "$plugins_root")" "$cell_root" ||
+        fail "The cell plugins root escapes the marketplace cell."
+    lexical_plugin="$plugins_root/$plugin_id"
+    [[ ! -L "$lexical_plugin" ]] ||
+        fail "The plugin root may not be a symbolic link or reparse point."
+    plugin_root="$(canonical_path "$lexical_plugin")"
+    paths_equal "$(dirname -- "$plugin_root")" "$plugins_root" ||
+        fail "The plugin root escapes the cell plugins root."
+    [[ ! -L "$plugin_root/install.json" ]] ||
+        fail "install.json may not be a symbolic link or reparse point."
     canonical_receipt="$(canonical_path "$plugin_root/install.json")"
     paths_equal "$actual" "$canonical_receipt" ||
         fail "install.json is not at its exact canonical receipt location '$canonical_receipt'."
@@ -1050,11 +1111,13 @@ validate_context_receipt() {
     assert_json_type "$actual" state string "install.json state"
     assert_receipt_generation "$generation" "install.json generation"
     assert_receipt_state "$state" "install.json state"
+    [[ ! -L "$cell_root/namespace.json" ]] ||
+        fail "namespace.json may not be a symbolic link or reparse point."
     namespace_path="$(canonical_path "$cell_root/namespace.json")"
     json_optional_string_into namespace_receipt "$actual" namespaceReceipt
     paths_equal "$namespace_receipt" "$namespace_path" ||
         fail "install.json namespaceReceipt is not the exact namespace receipt in the same cell."
-    validate_namespace_receipt "$namespace_path" "$durable_home"
+    validate_namespace_receipt "$cell_root/namespace.json" "$durable_home"
     [[ "$NS_MARKETPLACE_ID" == "$marketplace_id" ]] ||
         fail "namespace.json marketplaceId does not match install.json."
     json_optional_string_into payload_root "$actual" "$(path_join payload root)"
@@ -1085,6 +1148,9 @@ validate_context_receipt() {
     for name in versions snapshots state run logs cache launchers; do
         json_optional_string_into value "$actual" "$(path_join roots "$name")"
         resolved="$(resolve_relative_root "$plugin_root" "$value" "$name")"
+        if [[ "$name" == snapshots ]]; then
+            snapshots_root="$resolved"
+        fi
         roots_json+="$delimiter$(json_quote "${name}Root"):$(
             json_quote "$resolved"
         )"
@@ -1112,6 +1178,21 @@ validate_context_receipt() {
         \"generation\":$generation,
         \"state\":$(json_quote "$state")
     }"
+    CTX_MARKETPLACE_ID="$marketplace_id"
+    CTX_PLUGIN_ID="$plugin_id"
+    CTX_PAYLOAD_ROOT="$payload_root"
+    CTX_CELL_ROOT="$cell_root"
+    CTX_PLUGIN_ROOT="$plugin_root"
+    CTX_SNAPSHOTS_ROOT="$snapshots_root"
+    CTX_NAMESPACE_RECEIPT="$namespace_path"
+    CTX_INSTALL_RECEIPT="$actual"
+    CTX_NAMESPACE_GENERATION="$NS_GENERATION"
+    CTX_INSTALL_GENERATION="$generation"
+    CTX_INSTALL_STATE="$state"
+    CTX_SOURCE_KIND="$SOURCE_KIND"
+    CTX_SOURCE_CANONICAL="$SOURCE_CANONICAL"
+    CTX_SOURCE_REF="$SOURCE_REF"
+    CTX_SOURCE_FINGERPRINT="$NS_FINGERPRINT"
 }
 
 locator_matches_namespace() {
@@ -1266,10 +1347,10 @@ stamp_context() {
     esac
     assert_receipt_state "$NAMESPACE_STATE" "namespace.json state"
     assert_receipt_state "$INSTALL_STATE" "install.json state"
-    [[ "$EXPECTED_NAMESPACE_GENERATION" =~ ^[0-9]+$ ]] ||
-        fail "Expected namespace.json generation must be a non-negative integer."
-    [[ "$EXPECTED_INSTALL_GENERATION" =~ ^[0-9]+$ ]] ||
-        fail "Expected install.json generation must be a non-negative integer."
+    normalize_expected_generation_into EXPECTED_NAMESPACE_GENERATION \
+        "$EXPECTED_NAMESPACE_GENERATION" namespace.json
+    normalize_expected_generation_into EXPECTED_INSTALL_GENERATION \
+        "$EXPECTED_INSTALL_GENERATION" install.json
     if [[ -n "$PAYLOAD_ORIGIN_RECEIPT" ]]; then
         is_absolute "$PAYLOAD_ORIGIN_RECEIPT" || fail "payload origin receipt must be absolute."
         PAYLOAD_ORIGIN_RECEIPT="$(canonical_path "$PAYLOAD_ORIGIN_RECEIPT" true)"
@@ -1399,6 +1480,325 @@ stamp_context() {
     CONTEXT_JSON="${CONTEXT_JSON/\"action\":\"validate\"/\"action\":\"stamp\"}"
     CONTEXT_JSON="${CONTEXT_JSON%\}},\"namespaceChanged\":$namespace_changed,\"installChanged\":$install_changed,\"operative\":false}"
     printf '%s\n' "$CONTEXT_JSON"
+}
+
+assert_snapshot_id() {
+    local value="$1" basename
+    [[ "$value" =~ ^[A-Za-z0-9]([A-Za-z0-9._+-]*[A-Za-z0-9])?$ && "$value" != . && "$value" != .. ]] ||
+        fail "Invalid filesystem-safe snapshot id '$value'."
+    basename="${value%%.*}"
+    basename="${basename^^}"
+    case "$basename" in
+        CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])
+            fail "Invalid filesystem-safe snapshot id '$value'." ;;
+    esac
+}
+
+PAYLOAD_IDENTITY_ROOT=""
+PAYLOAD_IDENTITY_VERSION=""
+PAYLOAD_IDENTITY_ORIGIN=""
+PAYLOAD_IDENTITY_ORIGIN_RECEIPT=""
+PAYLOAD_IDENTITY_JSON=""
+
+load_payload_identity() {
+    local install="$1" origin_type origin_json=null
+    json_optional_string_into PAYLOAD_IDENTITY_ROOT "$install" "$(path_join payload root)"
+    is_absolute "$PAYLOAD_IDENTITY_ROOT" || fail "payload.root must be absolute."
+    PAYLOAD_IDENTITY_ROOT="$(canonical_path "$PAYLOAD_IDENTITY_ROOT")"
+    json_optional_string_into PAYLOAD_IDENTITY_VERSION "$install" "$(path_join payload version)"
+    [[ -n "${PAYLOAD_IDENTITY_VERSION//[[:space:]]/}" ]] ||
+        fail "payload.version must be a non-empty string."
+    json_optional_string_into PAYLOAD_IDENTITY_ORIGIN "$install" "$(path_join payload origin)"
+    case "$PAYLOAD_IDENTITY_ORIGIN" in installed|directory|staged|explicit) ;; *)
+        fail "payload.origin must be installed, directory, staged, or explicit." ;;
+    esac
+    PAYLOAD_IDENTITY_ORIGIN_RECEIPT=""
+    origin_type="$(json_optional_type_path "$install" "$(path_join payload originReceipt)")"
+    if [[ -n "$origin_type" && "$origin_type" != null ]]; then
+        [[ "$origin_type" == string ]] || fail "payload.originReceipt must be a string."
+        json_optional_string_into PAYLOAD_IDENTITY_ORIGIN_RECEIPT "$install" "$(path_join payload originReceipt)"
+        is_absolute "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT" ||
+            fail "payload.originReceipt must be absolute."
+        PAYLOAD_IDENTITY_ORIGIN_RECEIPT="$(canonical_path "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT")"
+        origin_json="$(json_quote "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT")"
+    fi
+    PAYLOAD_IDENTITY_JSON="{
+        \"root\":$(json_quote "$PAYLOAD_IDENTITY_ROOT"),
+        \"version\":$(json_quote "$PAYLOAD_IDENTITY_VERSION"),
+        \"origin\":$(json_quote "$PAYLOAD_IDENTITY_ORIGIN"),
+        \"originReceipt\":$origin_json
+    }"
+}
+
+SNAPSHOT_ROOT=""
+SNAPSHOT_PROVENANCE=""
+SNAPSHOT_JSON=""
+
+resolve_snapshot_paths() {
+    local snapshots_root="$1" snapshot_id="$2" lexical_root lexical_provenance
+    local entries=() entry materialized=false
+    assert_snapshot_id "$snapshot_id"
+    lexical_root="$snapshots_root/$snapshot_id"
+    [[ ! -L "$lexical_root" ]] ||
+        fail "Snapshot root may not be a symbolic link or reparse point."
+    [[ -d "$lexical_root" ]] ||
+        fail "Snapshot root must be an existing materialized directory."
+    SNAPSHOT_ROOT="$(canonical_path "$lexical_root" true)"
+    paths_equal "$(dirname -- "$SNAPSHOT_ROOT")" "$snapshots_root" ||
+        fail "Snapshot root must be one direct child of snapshotsRoot."
+    [[ "$(basename -- "$SNAPSHOT_ROOT")" == "$snapshot_id" ]] ||
+        fail "Snapshot root does not retain the requested snapshot id."
+    shopt -s nullglob dotglob
+    entries=("$SNAPSHOT_ROOT"/*)
+    shopt -u nullglob dotglob
+    for entry in "${entries[@]}"; do
+        if [[ "$(basename -- "$entry")" != snapshot-provenance.json ]]; then
+            materialized=true
+            break
+        fi
+    done
+    [[ "$materialized" == true ]] ||
+        fail "Snapshot root must contain materialized payload content."
+    lexical_provenance="$SNAPSHOT_ROOT/snapshot-provenance.json"
+    [[ ! -L "$lexical_provenance" ]] ||
+        fail "Snapshot provenance may not be a symbolic link or reparse point."
+    SNAPSHOT_PROVENANCE="$(canonical_path "$lexical_provenance")"
+    path_is_within "$SNAPSHOT_PROVENANCE" "$snapshots_root" ||
+        fail "Snapshot provenance path escapes snapshotsRoot."
+}
+
+validate_snapshot_provenance() {
+    local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
+    local snapshot_id="$5" provenance schema version marketplace_id plugin_id source_prefix
+    local fingerprint snapshot_recorded_id snapshot_recorded_root namespace_path install_path
+    local namespace_generation install_generation namespace_state created_at created_epoch
+    local payload_root payload_version payload_origin payload_origin_type payload_origin_receipt=""
+    local payload_origin_receipt_json=null current_source_kind current_source_canonical
+    local current_source_ref current_source_fingerprint readable_name
+
+    [[ -n "$context" ]] || fail "snapshot-validate requires --context."
+    [[ -n "$expected_marketplace" ]] ||
+        fail "snapshot-validate requires --expected-marketplace-id."
+    [[ -n "$expected_plugin" ]] ||
+        fail "snapshot-validate requires --expected-plugin-id."
+    [[ -n "$snapshot_id" ]] || fail "snapshot-validate requires --snapshot-id."
+    assert_snapshot_id "$snapshot_id"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" "" ""
+    resolve_snapshot_paths "$CTX_SNAPSHOTS_ROOT" "$snapshot_id"
+    provenance="$(canonical_path "$SNAPSHOT_PROVENANCE" true)"
+    paths_equal "$provenance" "$SNAPSHOT_PROVENANCE" ||
+        fail "Snapshot provenance is not at its exact canonical location '$SNAPSHOT_PROVENANCE'."
+    [[ "$(json_type_path "$provenance" "")" == object ]] ||
+        fail "Snapshot provenance must be a JSON object."
+    json_optional_string_into schema "$provenance" schema
+    version="$(json_optional_path "$provenance" version)"
+    assert_json_type "$provenance" schema string "snapshot provenance schema"
+    assert_json_type "$provenance" version number "snapshot provenance version"
+    [[ "$schema" == copilot-extensions.snapshot-provenance && "$version" == 1 ]] ||
+        fail "Snapshot provenance has an unsupported schema or version."
+    json_optional_string_into marketplace_id "$provenance" marketplaceId
+    json_optional_string_into plugin_id "$provenance" pluginId
+    [[ "$marketplace_id" == "$expected_marketplace" ]] ||
+        fail "Expected marketplace '$expected_marketplace', snapshot provenance names '$marketplace_id'."
+    [[ "$plugin_id" == "$expected_plugin" ]] ||
+        fail "Expected plugin '$expected_plugin', snapshot provenance names '$plugin_id'."
+
+    current_source_kind="$CTX_SOURCE_KIND"
+    current_source_canonical="$CTX_SOURCE_CANONICAL"
+    current_source_ref="$CTX_SOURCE_REF"
+    current_source_fingerprint="$CTX_SOURCE_FINGERPRINT"
+    source_prefix=source
+    [[ "$(json_type_path "$provenance" "$source_prefix")" == object ]] ||
+        fail "Snapshot provenance source is missing."
+    normalize_source "$provenance" "$source_prefix" "" true
+    readable_name="${marketplace_id%--*}"
+    derive_identity "$readable_name"
+    json_optional_string_into fingerprint "$provenance" "$(path_join source fingerprint)"
+    [[ "$MARKETPLACE_ID" == "$marketplace_id" ]] ||
+        fail "Snapshot provenance marketplaceId does not match its normalized source."
+    [[ "$SOURCE_FINGERPRINT" == "$fingerprint" ]] ||
+        fail "Snapshot provenance fingerprint does not match its normalized source."
+    [[ "$fingerprint" == "$current_source_fingerprint" &&
+       "$SOURCE_KIND" == "$current_source_kind" &&
+       "$SOURCE_CANONICAL" == "$current_source_canonical" &&
+       "$SOURCE_REF" == "$current_source_ref" ]] ||
+        fail "Snapshot provenance source does not match the canonical namespace receipt."
+
+    [[ "$(json_type_path "$provenance" snapshot)" == object ]] ||
+        fail "Snapshot provenance snapshot identity is missing."
+    json_optional_string_into snapshot_recorded_id "$provenance" "$(path_join snapshot id)"
+    [[ "$snapshot_recorded_id" == "$snapshot_id" ]] ||
+        fail "Snapshot provenance id does not match its canonical snapshot directory."
+    json_optional_string_into snapshot_recorded_root "$provenance" "$(path_join snapshot root)"
+    is_absolute "$snapshot_recorded_root" ||
+        fail "Snapshot provenance snapshot.root must be absolute."
+    paths_equal "$snapshot_recorded_root" "$SNAPSHOT_ROOT" ||
+        fail "Snapshot provenance snapshot.root is not its exact canonical location."
+
+    [[ "$(json_type_path "$provenance" namespaceReceipt)" == object &&
+       "$(json_type_path "$provenance" installReceipt)" == object ]] ||
+        fail "Snapshot provenance receipt references are missing."
+    json_optional_string_into namespace_path "$provenance" "$(path_join namespaceReceipt path)"
+    json_optional_string_into install_path "$provenance" "$(path_join installReceipt path)"
+    is_absolute "$namespace_path" && is_absolute "$install_path" ||
+        fail "Snapshot provenance receipt paths must be absolute."
+    paths_equal "$namespace_path" "$CTX_NAMESPACE_RECEIPT" ||
+        fail "Snapshot provenance namespace receipt does not match the current context."
+    paths_equal "$install_path" "$CTX_INSTALL_RECEIPT" ||
+        fail "Snapshot provenance install receipt does not match the current context."
+    namespace_generation="$(json_optional_path "$provenance" "$(path_join namespaceReceipt generation)")"
+    install_generation="$(json_optional_path "$provenance" "$(path_join installReceipt generation)")"
+    assert_json_type "$provenance" "$(path_join namespaceReceipt generation)" number \
+        "snapshot provenance namespace generation"
+    assert_json_type "$provenance" "$(path_join installReceipt generation)" number \
+        "snapshot provenance install generation"
+    assert_receipt_generation "$namespace_generation" "snapshot provenance namespace generation"
+    assert_receipt_generation "$install_generation" "snapshot provenance install generation"
+    [[ "$namespace_generation" == "$CTX_NAMESPACE_GENERATION" ]] ||
+        fail "Snapshot provenance namespace generation is stale; restart snapshot production."
+    [[ "$install_generation" == "$CTX_INSTALL_GENERATION" ]] ||
+        fail "Snapshot provenance install generation is stale; restart snapshot production."
+    json_optional_string_into namespace_state "$CTX_NAMESPACE_RECEIPT" state
+    [[ "$namespace_state" == active && "$CTX_INSTALL_STATE" == active ]] ||
+        fail "Snapshot provenance requires active namespace and install receipts."
+
+    [[ "$(json_type_path "$provenance" payload)" == object ]] ||
+        fail "Snapshot provenance payload identity is missing."
+    json_optional_string_into payload_root "$provenance" "$(path_join payload root)"
+    is_absolute "$payload_root" || fail "Snapshot provenance payload.root must be absolute."
+    payload_root="$(canonical_path "$payload_root")"
+    json_optional_string_into payload_version "$provenance" "$(path_join payload version)"
+    [[ -n "${payload_version//[[:space:]]/}" ]] ||
+        fail "Snapshot provenance payload.version must be a non-empty string."
+    json_optional_string_into payload_origin "$provenance" "$(path_join payload origin)"
+    case "$payload_origin" in installed|directory|staged|explicit) ;; *)
+        fail "Snapshot provenance payload.origin is invalid." ;;
+    esac
+    payload_origin_type="$(json_optional_type_path "$provenance" "$(path_join payload originReceipt)")"
+    [[ -n "$payload_origin_type" ]] ||
+        fail "Snapshot provenance payload.originReceipt must be present."
+    if [[ "$payload_origin_type" != null ]]; then
+        [[ "$payload_origin_type" == string ]] ||
+            fail "Snapshot provenance payload.originReceipt must be a string or null."
+        json_optional_string_into payload_origin_receipt "$provenance" "$(path_join payload originReceipt)"
+        is_absolute "$payload_origin_receipt" ||
+            fail "Snapshot provenance payload.originReceipt must be absolute."
+        payload_origin_receipt="$(canonical_path "$payload_origin_receipt")"
+        payload_origin_receipt_json="$(json_quote "$payload_origin_receipt")"
+    fi
+    load_payload_identity "$CTX_INSTALL_RECEIPT"
+    [[ "$payload_root" == "$PAYLOAD_IDENTITY_ROOT" &&
+       "$payload_version" == "$PAYLOAD_IDENTITY_VERSION" &&
+       "$payload_origin" == "$PAYLOAD_IDENTITY_ORIGIN" &&
+       "$payload_origin_receipt" == "$PAYLOAD_IDENTITY_ORIGIN_RECEIPT" ]] ||
+        fail "Snapshot provenance payload does not match the pinned install receipt."
+    json_optional_string_into created_at "$provenance" createdAt
+    created_epoch="$(parse_utc_epoch "$created_at")" ||
+        fail "Snapshot provenance createdAt must be RFC3339 UTC."
+    [[ -n "$created_epoch" ]] ||
+        fail "Snapshot provenance createdAt must be RFC3339 UTC."
+
+    SNAPSHOT_JSON="{
+        \"action\":\"snapshot-validate\",
+        \"status\":\"ready\",
+        \"reason\":\"snapshot-provenance-valid\",
+        \"provenance\":$(json_quote "$provenance"),
+        \"snapshotRoot\":$(json_quote "$SNAPSHOT_ROOT"),
+        \"snapshotId\":$(json_quote "$snapshot_id"),
+        \"marketplaceId\":$(json_quote "$marketplace_id"),
+        \"pluginId\":$(json_quote "$plugin_id"),
+        \"sourceFingerprint\":$(json_quote "$fingerprint"),
+        \"namespaceReceipt\":$(json_quote "$(canonical_path "$namespace_path")"),
+        \"installReceipt\":$(json_quote "$(canonical_path "$install_path")"),
+        \"namespaceGeneration\":$namespace_generation,
+        \"installGeneration\":$install_generation,
+        \"payload\":{
+            \"root\":$(json_quote "$payload_root"),
+            \"version\":$(json_quote "$payload_version"),
+            \"origin\":$(json_quote "$payload_origin"),
+            \"originReceipt\":$payload_origin_receipt_json
+        },
+        \"operative\":false
+    }"
+}
+
+stamp_snapshot_provenance() {
+    local genesis_lock install_lock namespace_state snapshot_changed=false desired now
+    [[ -n "$CONTEXT" ]] || fail "snapshot-stamp requires --context."
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] ||
+        fail "snapshot-stamp requires --expected-marketplace-id."
+    [[ -n "$EXPECTED_PLUGIN_ID" ]] ||
+        fail "snapshot-stamp requires --expected-plugin-id."
+    [[ -n "$SNAPSHOT_ID" ]] || fail "snapshot-stamp requires --snapshot-id."
+    assert_snapshot_id "$SNAPSHOT_ID"
+    normalize_expected_generation_into EXPECTED_NAMESPACE_GENERATION \
+        "$EXPECTED_NAMESPACE_GENERATION" namespace.json
+    normalize_expected_generation_into EXPECTED_INSTALL_GENERATION \
+        "$EXPECTED_INSTALL_GENERATION" install.json
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+    genesis_lock="$DURABLE_HOME/marketplaces/.locks/$EXPECTED_MARKETPLACE_ID.genesis"
+    install_lock="$CTX_CELL_ROOT/.locks/$EXPECTED_PLUGIN_ID.install.lock"
+    acquire_lock "$genesis_lock" genesis "$EXPECTED_MARKETPLACE_ID"
+    acquire_lock "$install_lock" install "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" "$CTX_CELL_ROOT"
+    assert_expected_generation "$CTX_NAMESPACE_GENERATION" "$EXPECTED_NAMESPACE_GENERATION" "namespace.json"
+    assert_expected_generation "$CTX_INSTALL_GENERATION" "$EXPECTED_INSTALL_GENERATION" "install.json"
+    json_optional_string_into namespace_state "$CTX_NAMESPACE_RECEIPT" state
+    [[ "$namespace_state" == active && "$CTX_INSTALL_STATE" == active ]] ||
+        fail "Snapshot provenance requires active namespace and install receipts."
+    resolve_snapshot_paths "$CTX_SNAPSHOTS_ROOT" "$SNAPSHOT_ID"
+    if [[ -e "$SNAPSHOT_PROVENANCE" || -L "$SNAPSHOT_PROVENANCE" ]]; then
+        validate_snapshot_provenance \
+            "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID"
+    else
+        load_payload_identity "$CTX_INSTALL_RECEIPT"
+        now="$(utc_now)"
+        desired="{
+  \"schema\":\"copilot-extensions.snapshot-provenance\",
+  \"version\":1,
+  \"marketplaceId\":$(json_quote "$EXPECTED_MARKETPLACE_ID"),
+  \"pluginId\":$(json_quote "$EXPECTED_PLUGIN_ID"),
+  \"source\":{
+    \"kind\":$(json_quote "$CTX_SOURCE_KIND"),
+    \"canonical\":$(json_quote "$CTX_SOURCE_CANONICAL"),
+    \"ref\":$(json_quote "$CTX_SOURCE_REF"),
+    \"fingerprint\":$(json_quote "$CTX_SOURCE_FINGERPRINT")
+  },
+  \"snapshot\":{
+    \"id\":$(json_quote "$SNAPSHOT_ID"),
+    \"root\":$(json_quote "$SNAPSHOT_ROOT")
+  },
+  \"payload\":$PAYLOAD_IDENTITY_JSON,
+  \"namespaceReceipt\":{
+    \"path\":$(json_quote "$CTX_NAMESPACE_RECEIPT"),
+    \"generation\":$CTX_NAMESPACE_GENERATION
+  },
+  \"installReceipt\":{
+    \"path\":$(json_quote "$CTX_INSTALL_RECEIPT"),
+    \"generation\":$CTX_INSTALL_GENERATION
+  },
+  \"createdAt\":$(json_quote "$now")
+}"
+        atomic_write_json "$SNAPSHOT_PROVENANCE" "$desired"
+        snapshot_changed=true
+        validate_snapshot_provenance \
+            "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID"
+    fi
+    release_lock
+    release_lock
+    SNAPSHOT_JSON="${SNAPSHOT_JSON/\"action\":\"snapshot-validate\"/\"action\":\"snapshot-stamp\"}"
+    if [[ "$snapshot_changed" == true ]]; then
+        SNAPSHOT_JSON="${SNAPSHOT_JSON/\"reason\":\"snapshot-provenance-valid\"/\"reason\":\"snapshot-provenance-published\"}"
+    else
+        SNAPSHOT_JSON="${SNAPSHOT_JSON/\"reason\":\"snapshot-provenance-valid\"/\"reason\":\"snapshot-provenance-current\"}"
+    fi
+    SNAPSHOT_JSON="${SNAPSHOT_JSON%\}},\"snapshotChanged\":$snapshot_changed,\"pluginRoot\":$(json_quote "$CTX_PLUGIN_ROOT")}"
+    printf '%s\n' "$SNAPSHOT_JSON"
 }
 
 emit_source_identity() {
@@ -1912,12 +2312,12 @@ activation_cas() {
         fail "activation-cas requires --expected-plugin-id."
     assert_marketplace_id "$EXPECTED_MARKETPLACE_ID"
     assert_plugin_id "$EXPECTED_PLUGIN_ID"
-    [[ "$EXPECTED_NAMESPACE_GENERATION" =~ ^[0-9]+$ ]] ||
-        fail "Expected namespace generation must be a non-negative integer."
-    [[ "$EXPECTED_INSTALL_GENERATION" =~ ^[0-9]+$ ]] ||
-        fail "Expected install generation must be a non-negative integer."
-    [[ "$EXPECTED_ACTIVATION_GENERATION" =~ ^[0-9]+$ ]] ||
-        fail "Expected activation generation must be a non-negative integer."
+    normalize_expected_generation_into EXPECTED_NAMESPACE_GENERATION \
+        "$EXPECTED_NAMESPACE_GENERATION" namespace
+    normalize_expected_generation_into EXPECTED_INSTALL_GENERATION \
+        "$EXPECTED_INSTALL_GENERATION" install
+    normalize_expected_generation_into EXPECTED_ACTIVATION_GENERATION \
+        "$EXPECTED_ACTIVATION_GENERATION" activation
     case "$ACTIVATION_MODE/$ACTIVATION_STATE" in
         namespaced/active | legacy/deactivated) ;;
         *) fail "Activation mode/state pair is invalid." ;;
@@ -2671,8 +3071,8 @@ run_status_action() {
 }
 
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|status|probe-legacy} [options]"
+[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -2695,6 +3095,7 @@ PAYLOAD_ORIGIN_RECEIPT=""
 EXPECTED_NAMESPACE_GENERATION=""
 EXPECTED_INSTALL_GENERATION=""
 EXPECTED_ACTIVATION_GENERATION=""
+SNAPSHOT_ID=""
 NAMESPACE_STATE="active"
 INSTALL_STATE="active"
 ACTIVATION_MODE=""
@@ -2728,6 +3129,7 @@ while (($#)); do
         --expected-namespace-generation) need_value "$@"; EXPECTED_NAMESPACE_GENERATION="$2"; shift 2 ;;
         --expected-install-generation) need_value "$@"; EXPECTED_INSTALL_GENERATION="$2"; shift 2 ;;
         --expected-activation-generation) need_value "$@"; EXPECTED_ACTIVATION_GENERATION="$2"; shift 2 ;;
+        --snapshot-id) need_value "$@"; SNAPSHOT_ID="$2"; shift 2 ;;
         --namespace-state) need_value "$@"; NAMESPACE_STATE="$2"; shift 2 ;;
         --install-state) need_value "$@"; INSTALL_STATE="$2"; shift 2 ;;
         --activation-mode) need_value "$@"; ACTIVATION_MODE="$2"; shift 2 ;;
@@ -2781,7 +3183,7 @@ if [[ "$ACTION" == source-id ]]; then
     exit 0
 fi
 
-if [[ "$ACTION" != activation-cas ]]; then
+if [[ "$ACTION" != activation-cas && "$ACTION" != snapshot-stamp && "$ACTION" != snapshot-validate ]]; then
     CONTEXT="${CONTEXT:-${COPILOT_EXTENSIONS_CONTEXT:-}}"
 fi
 if [[ "$ACTION" == validate ]]; then
@@ -2790,6 +3192,19 @@ if [[ "$ACTION" == validate ]]; then
         "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
         "${EXPECTED_PAYLOAD_ROOT:-$PAYLOAD_ROOT}" "$EXPECTED_CELL_ROOT"
     printf '%s\n' "$CONTEXT_JSON"
+    exit 0
+fi
+
+if [[ "$ACTION" == snapshot-validate ]]; then
+    validate_snapshot_provenance \
+        "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
+        "$SNAPSHOT_ID"
+    printf '%s\n' "$SNAPSHOT_JSON"
+    exit 0
+fi
+
+if [[ "$ACTION" == snapshot-stamp ]]; then
+    stamp_snapshot_provenance
     exit 0
 fi
 

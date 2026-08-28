@@ -520,17 +520,22 @@ def test_stamp_refuses_generation_overflow_before_replacing_receipt(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+@pytest.mark.parametrize(
+    "generation",
+    (9223372036854775808, 10000000000000000000),
+)
 def test_validate_rejects_generation_above_portable_maximum(
     tmp_path: Path,
     runner_name: str,
     command: tuple[str, ...],
+    generation: int,
 ) -> None:
     runner_root = tmp_path / runner_name
     runner_root.mkdir()
     layout = _receipt_layout(runner_root)
     namespace = Path(layout["namespace"])
     receipt = json.loads(namespace.read_text(encoding="utf-8"))
-    receipt["generation"] = 9223372036854775808
+    receipt["generation"] = generation
     _write_json(namespace, receipt)
     result = _run(
         command,
