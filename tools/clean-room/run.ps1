@@ -250,6 +250,7 @@ if (-not (Test-Path (Join-Path $ScenarioDir 'scenario.sh')) -and
     throw "scenario '$ScenarioName' has neither scenario.sh (Tier-P) nor setup.sh (Tier-E)"
 }
 $LibDir = Join-Path $Here 'lib'
+. (Join-Path $LibDir 'acp-command.ps1')
 # Optional per-suite shared helpers: if the selected scenario's parent dir holds
 # a `_lib/`, mount it read-only at /home/operator/scenario-lib and expose it as
 # $CR_SCENARIO_LIB, so sibling scenarios in a suite can source shared phase
@@ -273,6 +274,8 @@ $DriveAgent = "cleanroom:$Container"        # the namespaced agent-bridge addres
 # copilot --acp does not reliably load enabled plugins headless). Script-scoped so
 # Invoke-Eval can set it before Invoke-BridgeRegister bakes it into the manifest.
 $script:AcpCommand = 'copilot --acp --stdio --allow-all-tools'
+$script:AcpCwd = ''
+$script:BridgeContainerId = ''
 
 if (-not $ResultsDir) { $ResultsDir = $env:CR_RESULTS_DIR }
 if (-not $ResultsDir) {
@@ -450,7 +453,28 @@ function Invoke-Shell {
 }
 
 function Invoke-Down {
-    docker rm -f $Container 2>$null | Out-Null
+    $containerId = $script:BridgeContainerId
+    if (-not $containerId) {
+        $containerId = (& docker inspect -f '{{.Id}}' $Container 2>$null | Out-String).Trim()
+    }
+    if (-not $containerId) {
+        try {
+            Invoke-BridgeUnregister | Out-Null
+        } catch {
+            throw "no container found and stale registration cleanup failed for ${Container}: $_"
+        }
+        Write-Host "removed $Container" -ForegroundColor Green
+        return
+    }
+    docker rm -f $containerId 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "could not remove $Container ($containerId)"
+    }
+    try {
+        Invoke-BridgeUnregister -ContainerId $containerId | Out-Null
+    } catch {
+        throw "removed $Container but could not unregister it from agent-bridge: $_"
+    }
     Write-Host "removed $Container" -ForegroundColor Green
 }
 
@@ -463,14 +487,38 @@ function Invoke-BridgeRegister {
     Ensure-Container
     $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
     if (-not $py) { throw "python not found on PATH (needed to register the agent-bridge provider)" }
-    & $py.Source (Join-Path $Here 'bridge_register.py') --acp-command $script:AcpCommand register --container $Container --name $AgentName
+    $bridgeArgs = @('--acp-command', $script:AcpCommand)
+    if ($script:AcpCwd) { $bridgeArgs += @('--acp-cwd', $script:AcpCwd) }
+    $bridgeArgs += @('register', '--container', $Container, '--name', $AgentName)
+    $response = (& $py.Source (Join-Path $Here 'bridge_register.py') @bridgeArgs | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { throw "bridge registration failed" }
+    try {
+        $registration = $response | ConvertFrom-Json
+        $script:BridgeContainerId = [string]$registration.container_id
+    } catch {
+        throw "bridge registration returned invalid JSON"
+    }
+    if (-not $script:BridgeContainerId) {
+        throw "bridge registration returned no container ID"
+    }
+    Write-Host $response
     Write-Host "drive it:  agent-bridge create $DriveAgent `"<prompt>`"" -ForegroundColor Green
 }
-function Invoke-BridgeUnregister {
+function Invoke-BridgeUnregister([string]$ContainerId = '') {
     $py = (Get-Command python -ErrorAction SilentlyContinue) ?? (Get-Command python3 -ErrorAction SilentlyContinue)
     if (-not $py) { throw "python not found on PATH" }
-    & $py.Source (Join-Path $Here 'bridge_register.py') unregister --name $AgentName --container $Container
+    if (-not $ContainerId) { $ContainerId = $script:BridgeContainerId }
+    if (-not $ContainerId) {
+        $ContainerId = (& docker inspect -f '{{.Id}}' $Container 2>$null | Out-String).Trim()
+    }
+    $unregisterArgs = @('unregister', '--name', $AgentName, '--container', $Container)
+    if ($ContainerId) {
+        $unregisterArgs += @('--container-id', $ContainerId)
+    } else {
+        $unregisterArgs += @('--stale')
+    }
+    & $py.Source (Join-Path $Here 'bridge_register.py') @unregisterArgs
+    if ($LASTEXITCODE -ne 0) { throw "bridge unregistration failed" }
 }
 # End any prior agent-bridge session for an agent so a fresh `create` isn't
 # refused with "already has an active session" (a recreated box leaves the old
@@ -550,19 +598,35 @@ function Invoke-Eval {
     $perTurnTimeout = if ($manifest.runs -and $manifest.runs.per_turn_timeout_s) { [int]$manifest.runs.per_turn_timeout_s } else { 0 }
     $postCheck = $manifest.post_check
     if (-not $postCheck -and (Test-Path (Join-Path $ScenarioDir 'post_check.sh'))) { $postCheck = 'post_check.sh' }
-    # ACP command for the driven agent: a scenario may declare eval.acp_plugin_dirs
-    # (in-container paths) so the driven Copilot loads its plugins via --plugin-dir
-    # (a bare `copilot --acp` does not reliably load enabled plugins headless). The
-    # cleanroom: provider bakes this into its spawn. Kept generic -- the rig names no
-    # plugin; the scenario declares its own in-container plugin dirs.
-    $acp = 'copilot --acp --stdio --allow-all-tools'
+    # ACP launch settings. A static cwd is known now; a setup-generated cwd file
+    # is resolved after the setup driver runs.
+    $acpCwd = ''
+    $acpCwdFile = ''
+    $acpPluginDirs = @()
     if ($manifest.eval -and $manifest.eval.acp_plugin_dirs) {
-        foreach ($d in @($manifest.eval.acp_plugin_dirs)) {
-            if ($d) { $acp += " --plugin-dir $d" }
+        $acpPluginDirs = @($manifest.eval.acp_plugin_dirs) | Where-Object { $_ }
+        foreach ($acpPluginDir in $acpPluginDirs) {
+            $acpPluginDir = [string]$acpPluginDir
+            if (-not $acpPluginDir.StartsWith('/') -or $acpPluginDir -match "[`0`r`n`t]") {
+                throw 'eval.acp_plugin_dirs entries must be absolute in-container POSIX paths'
+            }
         }
     }
-    $script:AcpCommand = $acp
-    Write-Host "eval: ACP command -> $acp" -ForegroundColor DarkGray
+    if ($manifest.eval -and $manifest.eval.acp_cwd) {
+        $acpCwd = [string]$manifest.eval.acp_cwd
+        if (-not $acpCwd.StartsWith('/') -or $acpCwd -match "[`0`r`n`t]") {
+            throw 'eval.acp_cwd must be an absolute in-container POSIX path'
+        }
+    }
+    if ($manifest.eval -and $manifest.eval.acp_cwd_file) {
+        $acpCwdFile = [string]$manifest.eval.acp_cwd_file
+        if (-not $acpCwdFile.StartsWith('/') -or $acpCwdFile -match "[`0`r`n`t]") {
+            throw 'eval.acp_cwd_file must be an absolute in-container POSIX path'
+        }
+    }
+    if ($acpCwd -and $acpCwdFile) {
+        throw 'eval.acp_cwd and eval.acp_cwd_file are mutually exclusive'
+    }
     # Tier-P precondition: an in-box command that must exit 0 before we spend the
     # drive (a broken CLI surface would fail the eval for the wrong reason).
     # Explicit manifest.tier_p_precondition wins; else `<first installed plugin>
@@ -586,6 +650,33 @@ function Invoke-Eval {
     if ($LASTEXITCODE -ne 0) {
         Write-Host "warn: setup driver exited $LASTEXITCODE -- the starting state may be incomplete (see cr-report.json)." -ForegroundColor Yellow
     }
+
+    # Resolve and build the driven-agent command after setup. acp_cwd_file lets
+    # setup publish a generated managed-worktree path without using a symlink.
+    if ($acpCwdFile) {
+        $acpCwd = (& docker exec $Container python3 -c @'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+lines = p.read_text(encoding="utf-8").splitlines()
+if len(lines) != 1 or not lines[0].startswith("/") or any(c in lines[0] for c in "\0\r\n\t"):
+    raise SystemExit("invalid ACP cwd file")
+cwd = pathlib.Path(lines[0])
+if not cwd.is_dir():
+    raise SystemExit("ACP cwd is not a directory")
+print(cwd)
+'@ $acpCwdFile | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $acpCwd) {
+            throw "eval: could not resolve a valid cwd from '$acpCwdFile'"
+        }
+    }
+    $acp = New-CleanRoomAcpCommand -PluginDirs $acpPluginDirs
+    $script:AcpCwd = $acpCwd
+    if ($acpCwd) {
+        $quotedCwd = ConvertTo-CleanRoomBashLiteral $acpCwd
+        $acp = "cd -- $quotedCwd && $acp"
+    }
+    $script:AcpCommand = $acp
+    Write-Host "eval: ACP command -> $acp" -ForegroundColor DarkGray
 
     # --- Tier-P precondition: cheap in-box smoke of the plugin CLI -----------
     # Don't spend an eval's credits on a broken CLI surface -- if `<plugin>
@@ -655,7 +746,13 @@ function Invoke-Eval {
     }
 
     # --- 7) unregister the bridge agent --------------------------------------
-    Invoke-BridgeUnregister 2>$null
+    $bridgeCleanupError = ''
+    try {
+        Invoke-BridgeUnregister 2>$null
+    } catch {
+        $bridgeCleanupError = "could not unregister $Container from agent-bridge: $_"
+        Write-Warning $bridgeCleanupError
+    }
 
     # --- write the eval run-manifest (judge packet index) --------------------
     $copilotVer = (docker exec $Container /bin/bash -lc 'copilot --version 2>/dev/null' 2>$null | Select-Object -First 1)
@@ -674,6 +771,7 @@ function Invoke-Eval {
         docs_hash        = $docsHash
         per_turn_timeout_s = $perTurnTimeout
         tier_p_precondition = if ($SkipTierPGate) { "$tierPCmd (SKIPPED)" } else { $tierPCmd }
+        bridge_cleanup_error = $bridgeCleanupError
         max_credits_note = "runs.max_credits is advisory: the agent-bridge `create` transport does not expose per-turn credits, so it cannot be hard-enforced from the runner (see TIER-E-EXECUTION.md)."
         report       = 'cr-report.json'
         cr_logs      = 'cr-logs/'
@@ -694,6 +792,7 @@ function Invoke-Eval {
         'shell' { Invoke-Shell }
         'down'  { Invoke-Down }
     }
+    if ($bridgeCleanupError) { throw $bridgeCleanupError }
 }
 
 switch ($Mode) {

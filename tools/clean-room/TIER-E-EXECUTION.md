@@ -148,6 +148,18 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
     "notes": "agent-vault installed solo; no worktree base; no .kdbx configured"
   },
 
+  // Optional ACP launch settings. acp_cwd is an absolute in-container POSIX
+  // path known before setup. When setup generates the path, acp_cwd_file names
+  // an absolute in-container file containing exactly that one path. They are
+  // mutually exclusive. The runner uses the resolved cwd for both the launched
+  // shell and ACP session/new so cwd-scoped sessionStart hooks see that path.
+  // acp_plugin_dirs adds headless plugin payloads; each entry must be an
+  // absolute in-container POSIX path and is shell-quoted by the runner.
+  "eval": {
+    "acp_cwd_file": "/home/operator/worktree-path",
+    "acp_plugin_dirs": ["/home/operator/.copilot/installed-plugins/example"]
+  },
+
   // WHAT the driven agent is told to do (stated-purpose prose). Inline or prompt.md.
   "prompt": "Using the agent-vault plugin that is installed here, set it up for use and then list the entries in my vault. Do exactly what agent-vault's own documentation tells you.",
 
@@ -170,6 +182,17 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
   "post_check": "post_check.sh"
 }
 ```
+
+Each running clean-room container has its own provider registration record,
+bound to that container's immutable Docker ID. Concurrent evaluations therefore
+keep their own ACP command and resolved workspace folder even though they share
+the `cleanroom:` namespace manifest. The manifest invokes a stable provider copy
+under agent-bridge state rather than a disposable source-worktree path. Resolve
+and readiness checks require the same running container ID and a still-existing
+ACP cwd. Normal unregister compares the caller-retained immutable ID; explicit
+stale cleanup only removes a record after its recorded ID is gone. Cleanup
+failures are reported in `eval-run.json` instead of discarding an otherwise
+complete judge packet.
 
 **Design choices:**
 

@@ -378,3 +378,7 @@ class TestSessionRole:
             session_id="s", worktree_id=None, worktree_dir=None))
         assert rc == 0
         assert captured["role"] == "untracked"
+
+    def test_parser_accepts_json_compatibility_flag(self):
+        args = m.build_parser().parse_args(["session-role", "--json"])
+        assert args.json is True
