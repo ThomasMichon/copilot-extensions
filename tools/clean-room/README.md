@@ -141,6 +141,8 @@ scenarios/<name>/
   ```powershell
   ./run.ps1 -Os windows -Scenario partner-harness-setup `
       -PartnerPath C:\path\to\partner-tree -DockerEndpoint tcp://127.0.0.1:2375
+  ./run.ps1 -Os windows -Scenario installation-mode-governance `
+      -PartnerPath C:\path\to\copilot-extensions -DockerEndpoint tcp://127.0.0.1:2375
   # or -PartnerRepo <url> to clone the partner tree on the host first
   ```
 
@@ -189,6 +191,7 @@ check — proving the substrate generalises without an internal dependency.
 | [`agent-dispatch-cutover`](scenarios/agent-dispatch-cutover/) | P | **Graceful daemon cutover — agent-dispatch** (correct-install-flows, dotfiles#1393): a queued task survives; a claimed+started **held task** survives and the worker re-adopts via the durable queue DB; an **aborted cutover** is healed (undrain); a **wedged daemon** is stood-up-beside and retired. Stdlib-only probe. |
 | [`agent-index-cutover`](scenarios/agent-index-cutover/) | P | **Graceful daemon cutover — agent-index** (service + durable engine): the swappable versioned service cuts over without disturbing the durable, warm embedding engine/model on its own lifecycle. Stdlib-only probe. |
 | [`agent-vault-cutover`](scenarios/agent-vault-cutover/) | P | **Cutover witness — agent-vault** (#609): proves the client-side rendezvous **cutover fallback ladder** (override → live file → legacy) deterministically, and reports the **daemon-side** active/passive zdd cutover as a forward-looking gap (INFO — vault has not yet vendored `zdd`). Stays green today; its phase-3 battery lights up once vault adopts the connection-owner contract. |
+| [`installation-mode-governance`](scenarios/installation-mode-governance/) | P | **Windows installation-governance proof:** runs the real PowerShell 5.1 resolver in a disposable Windows container and verifies policy precedence, activation-required legacy pinning, migration-required behavior, sticky active namespaced roots, orphaned-transfer refusal, maintenance blocking, and read-only evaluation. |
 | [`partner-harness-setup`](scenarios/partner-harness-setup/) | P | **Downstream partner-harness setup gate:** given a partner harness tree (mounted `CR_PARTNER_PATH` or cloned `CR_PARTNER_REPO`), assert the vendored plugin **drop is structurally coherent** (plugins parse + are marketplace-listed + ship installers; setup entrypoint + golden-path doc present), the partner's **read-only `setup check` runs without crashing**, and the partner's **OWN setup/update test suite passes**. Name-free via `CR_PARTNER_*`. A consuming gate is a downstream vendored-plugin sync — *never publish a drop that breaks the partner's setup flow.* |
 
 Downstream/internal scenarios (naming a specific harness's repos — e.g.

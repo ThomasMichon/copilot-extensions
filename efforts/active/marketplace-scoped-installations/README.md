@@ -469,6 +469,24 @@ See [`design.md`](design.md).
   it does not write activation, tombstone, maintenance, or namespaced runtime
   state.
 
+### 2026-08-27 — Windows installation-governance clean-room proof
+
+- Added a Tier-P Windows scenario that runs the real PowerShell 5.1
+  installation-mode resolver inside a disposable Hyper-V-isolated Windows
+  container.
+- The scenario covers absent policy, authoritative plugin precedence with
+  pre-activation legacy pinning, migration-required legacy state, sticky active
+  namespaced state, orphaned ownership transfer, stale maintenance, and the
+  read-only filesystem invariant.
+- The formal Windows-container arm runs on a dedicated Windows-container host;
+  host-side execution remains a fast compatibility probe rather than the
+  acceptance proof.
+- The formal Hyper-V-isolated Windows-container run passed against commit
+  `05235922940fa10eb2ee86ce357db61077680fb1`: 16 assertions passed, zero
+  failures, zero jams, and phases 0–6 were represented. The retrieved report's
+  SHA-256 was
+  `4573A0180814CDF5FB87E1CA2B9A6B8D03A195F3DF53388CBF2BEFD5F75BC4AA`.
+
 ### 2026-08-26 — Runtime plugin hook audit
 
 - Audited every runtime-bearing `agent-*` marketplace plugin against the
