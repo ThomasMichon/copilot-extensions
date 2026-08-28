@@ -219,6 +219,7 @@ class Endpoint:
         alt = tuple(
             cls(transport=t, address=a, source=source)
             for entry in (data.get("alt") or [])
+            if isinstance(entry, dict)
             for t, a in [
                 (str(entry.get("transport", "")).strip(), str(entry.get("endpoint", "")).strip())
             ]
@@ -357,8 +358,17 @@ def clear_endpoint(runtime_dir: Path | str) -> None:
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:
     """Read + parse the rendezvous file; ``None`` if absent, unreadable, or malformed."""
     try:
-        return read_endpoint_strict(runtime_dir)
-    except EndpointStateError:
+        raw = endpoint_file(runtime_dir).read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return None
+    try:
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return None
+        if int(data.get("schema", 0)) != SCHEMA:
+            return None
+        return Endpoint.from_record(data)
+    except (ValueError, TypeError, KeyError):
         return None
 
 
@@ -375,8 +385,11 @@ def read_endpoint_strict(runtime_dir: Path | str) -> Endpoint | None:
         data = json.loads(raw)
         if not isinstance(data, dict):
             raise TypeError("top-level endpoint state must be an object")
-        if int(data.get("schema", 0)) != SCHEMA:
-            raise ValueError(f"unsupported endpoint schema {data.get('schema')!r}")
+        schema = data.get("schema")
+        if isinstance(schema, bool) or not isinstance(schema, int):
+            raise TypeError("endpoint schema must be an integer")
+        if schema != SCHEMA:
+            raise ValueError(f"unsupported endpoint schema {schema!r}")
         return _endpoint_from_record_strict(data)
     except (json.JSONDecodeError, ValueError, TypeError, KeyError) as exc:
         raise EndpointStateError(f"{path}: malformed endpoint state: {exc}") from exc
