@@ -7,7 +7,7 @@
 - **Scope:** leaf (a per-plugin vision under the
   [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Active
-- **Last revised:** 2026-08-22
+- **Last revised:** 2026-08-27
 - **Reality docs:** [`docs/architecture.md`](../../../docs/architecture.md) and
   the plugin's [`README`](../../../plugins/agent-containers/README.md)
 
@@ -55,6 +55,12 @@ The agent receives a full repository clone inside its container and can use
 ordinary local version control there. It does not receive a shared host
 worktree or visibility into unrelated host paths. The host owns venue and
 workspace lifecycle.
+
+### Restricted session-evidence rescue
+A restricted venue may surrender its Copilot session evidence to a host-owned
+consumer before the disposable container is replaced. Rescue preserves the
+record needed for later analysis without turning the venue's home, repository,
+or worktrees into durable shared state.
 
 ### Explicit capability envelope
 Credentials, network reach, environment values, tools, and resource budgets are
@@ -114,8 +120,20 @@ of inferring it from configuration.
 
 ### bounded-disposable-execution
 Restricted fleets can bound compute and process resources so a runaway agent is
-contained, and their venues can be discarded without losing anything outside
-the repository proposal they produced.
+contained, and their venues can be discarded without losing the session evidence
+the host explicitly rescued or the repository proposal they already published.
+
+### recoverable-restricted-session-evidence
+Restricted fleets expose a narrow, host-driven rescue seam for Copilot
+session-state. The export is suitable for asynchronous analysis and shared-corpus
+ingest; it does not preserve or restore the container's workspace, settings, or
+runtime identity.
+
+### active-session-safe replacement
+A new image or policy may be prepared while a restricted venue is active, but
+replacement never destroys the container beneath a live agent session or turn.
+The old instance remains marked drifted and usable by its current owner until it
+reaches a safe boundary.
 
 ## Behaviors
 
@@ -143,6 +161,21 @@ A restricted venue never relies on a shared host git worktree. Its repository
 state is container-local, so branch ownership and worktree metadata cannot
 escape or dangle across the boundary.
 
+### rescue-before-destructive-replacement
+A planned destructive replacement first attempts an atomic, allowlisted rescue
+of session-state to a host-owned destination **while the container is still
+running**. A failed rescue blocks stop/removal unless an explicit force/abandon
+decision accepts the loss. Periodic or turn-boundary checkpoints may reduce the
+unrescued tail after an unexpected container loss; the next venue still starts
+clean.
+
+### drain-live-session-before-replace
+Provider and session liveness are checked immediately before replacement. A live
+turn, live session, or active lease blocks recreation; the venue drains or ends
+at a turn boundary, rescues its session evidence, verifies that rescue, and only
+then releases and replaces the container. Deployment itself may report drift but
+does not imply termination.
+
 ### policy-legible-before-dispatch
 The provider exposes enough effective posture for a caller to reject an
 incorrect venue before starting an agent. Security is not a promise discoverable
@@ -161,6 +194,9 @@ only after inspecting a running process.
   impersonates the host by default.
 - **Not a shared host worktree.** Host workspace mounts are outside the
   restricted model.
+- **Not workspace/session resume.** Session rescue preserves evidence for later
+  consumers; it does not rehydrate a prior Copilot session or container
+  workspace into a replacement venue.
 
 ## See Also
 
@@ -184,3 +220,12 @@ only after inspecting a running process.
   **untrusted/restricted** mode stays a bounded substrate where the provider
   mostly wrangles the container runtime and offers à-la-carte tools. This is the
   container-side complement of the `venue-parity` vision.
+- **2026-08-27** — Added restricted session-evidence rescue after a real
+  replacement demonstrated that ephemeral Copilot state otherwise disappears.
+  The venue remains disposable: only allowlisted session-state leaves for
+  asynchronous analysis, and replacements start with fresh runtime/workspace
+  state.
+- **2026-08-27 (replacement safety)** — Clarified the operational trigger:
+  deploying a newer image must not recreate a container under an active agent.
+  Liveness/lease guards, turn-boundary drain, verified session-state rescue, then
+  replacement are the required sequence.
