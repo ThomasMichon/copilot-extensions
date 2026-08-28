@@ -12,6 +12,9 @@ import pytest
 PLUGIN = Path(__file__).resolve().parents[1]
 VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["version"]
 GUIDE = PLUGIN / "references" / "contribution-ground-rules.md"
+CONTRIBUTION_SKILL = (
+    PLUGIN / "skills" / "contributing-to-copilot-extensions" / "SKILL.md"
+)
 
 
 def _without_plugin_root() -> dict[str, str]:
@@ -33,6 +36,23 @@ def test_bash_hook_has_interpreter_and_json_fallbacks() -> None:
     )
     assert "command -v python3 || command -v python" in script
     assert script.count("printf '{}'") >= 3
+
+
+def test_public_claim_guidance_has_scoped_identity_and_safe_fallback() -> None:
+    text = CONTRIBUTION_SKILL.read_text(encoding="utf-8")
+
+    assert (
+        "repos gh ThomasMichon/copilot-extensions -- issue create"
+        in text
+    )
+    assert "scoped `api user` result must" in text
+    assert "never use `gh auth switch`" in text
+    assert "`agent-issue-claim:v1`" in text
+    assert "deduplicated `agent-dispatch` task" in text
+    assert "must not block local implementation" in text
+    assert "Never mention or link them" in text
+    assert "this public repository's issue" in text
+    assert "Re-run the scoped public search before publication" in text
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
