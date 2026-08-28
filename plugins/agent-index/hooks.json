@@ -6,13 +6,13 @@
         "type": "command",
         "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; $s = (Join-Path $r 'scripts\\bootstrap-check.ps1'); if (Test-Path $s) { & $s }",
         "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; s=\"$r/scripts/bootstrap-check.sh\"; [ -f \"$s\" ] && bash \"$s\"",
-        "timeoutSec": 15
+        "timeoutSec": 30
       },
       {
         "type": "command",
         "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; $s = (Join-Path $r 'scripts\\ensure-service.ps1'); if (Test-Path $s) { & $s }",
         "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; s=\"$r/scripts/ensure-service.sh\"; [ -f \"$s\" ] && bash \"$s\"",
-        "timeoutSec": 10
+        "timeoutSec": 20
       },
       {
         "type": "command",
