@@ -6,7 +6,7 @@ This plugin ships two cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
-| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and this worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time worktree-state file outside the repo checkout. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this worktree's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
+| **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and a linked worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time machine-local state file outside the repo checkout, including from an adopted anchor. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this checkout's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
 ## Why an extension (and not a pure plugin)
@@ -116,6 +116,10 @@ ledger, and then retires the predecessor pane through
 
 This keeps recovery safe: if the successor never comes up or never consumes the
 handoff, the predecessor pane remains available and the terminal is not closed.
+The stored metadata also records the predecessor's mux session; retirement
+verifies that the pane token still belongs to that session, so a token reused
+after a mux restart is treated as an already-gone predecessor rather than an
+unrelated pane to interrupt.
 
 ### Continuity is objective-driven, not phase-driven
 
@@ -180,22 +184,30 @@ The plugin remains useful in a plain Copilot CLI session with only
 
 - `generate_handoff_prompt` and `save_handoff_prompt` work without
   agent-dispatch when agent-worktrees can resolve a worktree state directory.
-- If `agent-dispatch` is absent, unhealthy, or a worktree cannot be resolved,
-  `save_handoff_prompt` writes a one-time file under the worktree state
-  directory outside the repo checkout.
-- `continue_handoff` is best-effort. Without a resolvable worktree + live mux it
-  does nothing destructive and tells the agent to use the saved paste or
-  `/resume-handoff` fallback.
+- If `agent-dispatch` is absent or unhealthy, `save_handoff_prompt` writes a
+  one-time file under the machine-local state directory reported by
+  `agent-worktrees get worktree-state-dir`. Linked worktrees use their normal
+  state namespace; an adopted anchor uses the stable `@anchor` namespace. Both
+  are outside the repo checkout.
+- File consumption uses an atomic claim. A dead consumer's claim is recoverable,
+  and a retry from the same successor session can recover delivery after the
+  durable spent mark; another session still receives the one-time stop notice.
+- `continue_handoff` is best-effort. A linked worktree targets its `wt-<id>`
+  mux; an adopted anchor targets the exact caller-owned mux containing the
+  predecessor pane. Without a live mux it does nothing destructive and tells
+  the agent to use the saved paste or `/resume-handoff` fallback.
 - `/resume-handoff` first tries a pinned agent-dispatch handoff task when that
   stack is available; otherwise it falls back to the newest unconsumed
   worktree-state handoff file for the current CWD.
 
 For a **natural-language** resume request handled by the skill (for example,
 "resume from handoff" without an exact id), discovery is deliberately
-worktree-local first: resolve `agent-worktrees get worktree-state-dir`, consume
+checkout-local first: resolve `agent-worktrees get worktree-state-dir`, consume
 the newest valid unconsumed file under its `handoff/` directory, then inspect
-the worktree's local disposition history for an exact task-backed handoff
-pointer. A broader agent-dispatch list is only a fallback and must be filtered
+the worktree's local disposition history (when the checkout is a linked
+worktree) for an exact task-backed handoff pointer. The same first step works
+after restarting in an adopted anchor because its `@anchor` state namespace is
+stable. A broader agent-dispatch list is only a fallback and must be filtered
 to the current worktree before selecting a task; cross-session history is last.
 
 ### The `handoff-cli.mjs` fallback (extension didn't load at all)

@@ -1645,8 +1645,64 @@ def _mux_bin(mux: str | None = None) -> str:
 def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     """Session target string. tmux uses the ``=`` exact-match prefix; psmux
     does not support it (rejected as an unknown session)."""
-    sess = mux_session_name(worktree_id)
+    return _mux_named_session_target(mux_session_name(worktree_id), mux_bin)
+
+
+def _mux_named_session_target(session_name: str, mux_bin: str) -> str:
+    """Return an exact mux target for an already-known session name."""
+    sess = str(session_name)
     return sess if mux_bin == "psmux" else f"={sess}"
+
+
+def current_mux_session(
+    pane_id: str | None = None,
+    *,
+    mux: str | None = None,
+) -> str | None:
+    """Return the mux session containing ``pane_id`` (or this process).
+
+    Unlike worktree launch sessions, an adopted anchor may be running inside a
+    caller-owned mux whose name is not ``wt-<id>``.  Handoff cutover uses this
+    exact lookup rather than guessing a synthetic session name.
+    """
+    import subprocess
+
+    mux_bin = _mux_bin(mux)
+    argv = [mux_bin, "display-message", "-p"]
+    if pane_id:
+        argv += ["-t", pane_id]
+    argv.append("#{session_name}")
+    try:
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        name = result.stdout.strip()
+        return name or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def has_mux_session_named(
+    session_name: str,
+    *,
+    mux: str | None = None,
+) -> bool:
+    """Check whether an exact, caller-supplied mux session exists."""
+    import subprocess
+
+    mux_bin = _mux_bin(mux)
+    target = _mux_named_session_target(session_name, mux_bin)
+    try:
+        result = subprocess.run(
+            [mux_bin, "has-session", "-t", target],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def _mux_pane_cmd(
@@ -1748,17 +1804,24 @@ def build_mux_new_window_argv(
     pane_wrapper: str | None = None,
     initial_prompt: str | None = None,
     prompt_receipt: str | None = None,
+    session_name: str | None = None,
 ) -> list[str]:
-    """Build the argv to open a new window in ``wt-<id>`` running ``cmd``.
+    """Build the argv to open a new window in a mux session running ``cmd``.
 
     Mirrors the launcher's pane construction: the command is wrapped by the
     platform pane-wrapper when present; Linux/WSL additionally strips ambient
     identity vars. Profile env is re-propagated with ``-e`` for parity regardless
-    of session-env inheritance. ``-P -F '#{pane_id}'`` prints the new pane id.
+    of session-env inheritance. ``session_name`` defaults to ``wt-<id>``;
+    adopted-anchor cutover passes the current caller-owned mux session instead.
+    ``-P -F '#{pane_id}'`` prints the new pane id.
     """
     mux_bin = _mux_bin(mux)
     is_tmux = mux_bin != "psmux"
-    target = _mux_session_target(worktree_id, mux_bin)
+    target = (
+        _mux_named_session_target(session_name, mux_bin)
+        if session_name
+        else _mux_session_target(worktree_id, mux_bin)
+    )
 
     argv = [mux_bin, "new-window", "-P", "-F", "#{pane_id}", "-t", target]
     if work_dir:
@@ -2050,6 +2113,40 @@ def mux_active_pane(worktree_id: str, *, mux: str | None = None) -> str | None:
         return None
 
 
+def mux_active_pane_named(
+    session_name: str,
+    *,
+    mux: str | None = None,
+) -> str | None:
+    """Return the active pane of an exact, caller-supplied mux session."""
+    import subprocess
+
+    mux_bin = _mux_bin(mux)
+    target = _mux_named_session_target(session_name, mux_bin)
+    try:
+        result = subprocess.run(
+            [mux_bin, "display-message", "-p", "-t", target, "#{pane_id}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        pane = result.stdout.strip()
+        return pane or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def mux_session_for_pane(
+    pane_id: str,
+    *,
+    mux: str | None = None,
+) -> str | None:
+    """Return the exact mux session currently containing ``pane_id``."""
+    return current_mux_session(pane_id, mux=mux)
+
+
 def mux_binding_for_session(
     session_id: str,
     *,
@@ -2230,8 +2327,9 @@ def mux_new_window(
     initial_prompt: str | None = None,
     prompt_receipt_timeout: float = 8.0,
     prompt_startup_grace: float = 3.5,
+    session_name: str | None = None,
 ) -> dict:
-    """Open + select a new window in ``wt-<id>`` running ``cmd``.
+    """Open + select a new window in a mux session running ``cmd``.
 
     ``new-window`` selects the new window by default (no ``-d``), so the
     operator is cut over to the successor immediately. Returns
@@ -2256,6 +2354,7 @@ def mux_new_window(
             mux=mux,
             initial_prompt=initial_prompt,
             prompt_receipt=str(receipt_path) if receipt_path else None,
+            session_name=session_name,
         )
         r = subprocess.run(argv, capture_output=True, text=True, timeout=15)
     except (OSError, RuntimeError, subprocess.TimeoutExpired) as e:

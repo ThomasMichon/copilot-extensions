@@ -1,6 +1,6 @@
 {
   "name": "context-handoff-cutover",
-  "description": "Tier-P F1 scenario: on a fresh box, install the live-cutover trio (agent-worktrees + agent-dispatch + context-handoff) and assert the handoff-cutover ROBUSTNESS contract from GitHub issue #853. (1) Seed invariant: the shipped context-handoff `cutover-seed.mjs` builds a BASH-FIRST task-cutover seed -- the successor's first action is a core `bash` command chain (agent-dispatch consume --defer-complete && agent-worktrees conclude-session && agent-worktrees handoff-cutover --retire-pane), NOT the `consume_handoff` extension tool -- so the successor cannot be orphaned by the CLI's startup extension-reload race; file-backed / unknown-pane handoffs correctly fall back to the tool-based seed. (2) Verbs are real: the three CLI verbs the bash-first seed relies on exist on a fresh install. (3) Mechanism (best-effort, needs tmux): the retire verb actually retires a live mux pane. Name-free / public.",
+  "description": "Tier-P F1 scenario: on a fresh box, install the live-cutover trio (agent-worktrees + agent-dispatch + context-handoff) and assert the handoff-cutover robustness contract. It verifies the bash-first task seed, the required CLI verbs, live pane retirement, and the no-coordinator adopted-anchor fallback: durable storage outside the checkout, state-first discovery, exactly-once consumption, and anchor mux cutover resolution. Name-free / public.",
   "tier": "P",
   "family": "F1",
   "image": "base",
@@ -13,6 +13,7 @@
   },
   "expected_artifacts": [
     "~/.copilot/installed-plugins/<marketplace>/context-handoff/extensions/context-handoff/cutover-seed.mjs",
+    "~/.copilot/installed-plugins/<marketplace>/context-handoff/extensions/context-handoff/handoff-cli.mjs",
     "~/.local/bin/agent-worktrees (binstub)",
     "~/.local/bin/agent-dispatch (binstub)"
   ],
@@ -22,6 +23,7 @@
     { "n": 2, "title": "runtimes provision on first session" },
     { "n": 3, "title": "seed invariant: bash-first task cutover (issue #853)" },
     { "n": 4, "title": "the bash-first seed's CLI verbs are real" },
-    { "n": 5, "title": "mechanism: retire verb kills a live mux pane (best-effort)" }
+    { "n": 5, "title": "mechanism: retire verb kills a live mux pane (best-effort)" },
+    { "n": 6, "title": "adopted anchor: no-coordinator file fallback and mux resolution" }
   ]
 }

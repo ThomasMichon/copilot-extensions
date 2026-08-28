@@ -135,8 +135,8 @@ recovery.
 |---|---|---|
 | yes | yes | Store a `proposed`, `handoff`-labeled task pinned to this worktree. `continue_handoff` spawns the successor. The successor calls `consume_handoff` for that task, which runs the consume path and retires the recorded predecessor pane after pickup. |
 | yes | no | Store the same task. Reply with the short paste prompt containing the full `agent-dispatch consume <id>` command. <!-- marketplace-isolation: allow handoff-seed-startup --> |
-| no | yes | Store a one-time JSON handoff file under the worktree state directory reported by agent-worktrees, outside the repo checkout. `continue_handoff` spawns the successor. The successor calls `consume_handoff`, which marks the file consumed and retires the recorded predecessor pane. |
-| no | no | Store the same one-time worktree-state file. Reply with the short paste prompt telling the next session to call `consume_handoff` with the handoff id. |
+| no | yes | Store a one-time JSON handoff file under the machine-local state directory reported by agent-worktrees, outside the repo checkout (`<worktree-id>` for a linked worktree, `@anchor` for an adopted anchor). `continue_handoff` spawns the successor in the worktree mux or the anchor's caller-owned mux. The successor calls `consume_handoff`, which marks the file consumed and retires the recorded predecessor pane. |
+| no | no | Store the same one-time machine-local file. Reply with the short paste prompt telling the next session to call `consume_handoff` with the exact stored path. |
 
 ### Steps (default = live cutover)
 
@@ -255,6 +255,9 @@ the agent-worktrees state is the authoritative first stop:
    `<agent-worktrees catalog argv[0]> get worktree-state-dir`. If the session resumed with a CWD
    outside its worktree, retry with the current session id:
    `<agent-worktrees catalog argv[0]> get worktree-state-dir --session-id <session-id>`.
+   From an adopted anchor this resolves the stable machine-local `@anchor`
+   namespace, so a restarted session can perform the same state-first sweep
+   without enumerating global Copilot session history.
 2. Sweep `<worktree-state-dir>/handoff/*.json`, newest first. Select only a
    valid `kind: "context-handoff"` record for this worktree whose `consumed`
    value is not `true`. Call `consume_handoff` with its exact `path`; do not
