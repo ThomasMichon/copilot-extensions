@@ -20,8 +20,12 @@ param(
     [string]$PayloadOriginReceipt,
     [long]$ExpectedNamespaceGeneration = -1,
     [long]$ExpectedInstallGeneration = -1,
+    [long]$ExpectedActivationGeneration = -1,
     [string]$NamespaceState = 'active',
     [string]$InstallState = 'active',
+    [string]$ActivationMode,
+    [string]$ActivationState,
+    [string]$LegacyDisposition,
     [string]$LegacyRoot,
     [string]$LegacyProbeJson,
     [string]$LegacyProbeFile,
@@ -34,8 +38,7 @@ $utf8NoBom = New-Object Text.UTF8Encoding($false)
 $strictUtf8 = New-Object Text.UTF8Encoding($false, $true)
 $OutputEncoding = $utf8NoBom
 try { [Console]::OutputEncoding = $utf8NoBom } catch {}
-$script:HeldLockPath = ''
-$script:HeldLockToken = ''
+$script:HeldLocks = @()
 
 if ($env:OS -eq 'Windows_NT' -and -not ('CeFinalPath' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -400,6 +403,54 @@ public static class CeAtomicFile {
 '@
 }
 
+if (-not ('CeAtomicDirectory' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class CeAtomicDirectory {
+    private const int ERROR_ACCESS_DENIED = 5;
+    private const int ERROR_SHARING_VIOLATION = 32;
+    private const int ERROR_FILE_EXISTS = 80;
+    private const int ERROR_ALREADY_EXISTS = 183;
+    private const int EEXIST = 17;
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateDirectoryW(string path, IntPtr security);
+
+    [DllImport("libc", EntryPoint = "mkdir", SetLastError = true)]
+    private static extern int PosixMkdir(string path, uint mode);
+
+    public static int CreateWindows(string path) {
+        if (CreateDirectoryW(path, IntPtr.Zero)) {
+            return 1;
+        }
+        int error = Marshal.GetLastWin32Error();
+        if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
+            return 0;
+        }
+        if (error == ERROR_ACCESS_DENIED || error == ERROR_SHARING_VIOLATION) {
+            return -1;
+        }
+        throw new Win32Exception(error);
+    }
+
+    public static int CreatePosix(string path) {
+        if (PosixMkdir(path, 448) == 0) {
+            return 1;
+        }
+        int error = Marshal.GetLastWin32Error();
+        if (error == EEXIST) {
+            return 0;
+        }
+        throw new Win32Exception(error);
+    }
+}
+'@
+}
+
 function Fail([string]$Message) {
     throw [System.InvalidOperationException]::new($Message)
 }
@@ -417,8 +468,8 @@ function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
     try {
         $json = $Value | ConvertTo-Json -Depth 12
         [IO.File]::WriteAllText($temporary, $json + "`n", $utf8NoBom)
-        if (-not $SkipLockCheck -and $script:HeldLockPath) {
-            Assert-LockOwned
+        if (-not $SkipLockCheck -and $script:HeldLocks.Count -gt 0) {
+            Assert-AllLocksOwned
         }
         [CeAtomicFile]::Replace($temporary, $Path)
     }
@@ -471,14 +522,47 @@ function Assert-LockOwnerShape(
 }
 
 function Assert-LockOwned {
-    if (-not $script:HeldLockPath -or
-        -not (Test-Path -LiteralPath $script:HeldLockPath -PathType Container)) {
+    if ($script:HeldLocks.Count -eq 0) {
         Fail 'Installation lock is not held.'
     }
-    $owner = Read-LockOwner (Join-Path $script:HeldLockPath 'owner.json')
-    if ((Get-StringProperty $owner 'token') -ne $script:HeldLockToken) {
-        Fail "Installation lock '$script:HeldLockPath' ownership changed during mutation."
+    $held = $script:HeldLocks[$script:HeldLocks.Count - 1]
+    if (-not (Test-Path -LiteralPath $held.path -PathType Container)) {
+        Fail "Installation lock '$($held.path)' is not held."
     }
+    $owner = Read-LockOwner (Join-Path $held.path 'owner.json')
+    if ((Get-StringProperty $owner 'token') -ne $held.token) {
+        Fail "Installation lock '$($held.path)' ownership changed during mutation."
+    }
+}
+
+function Assert-AllLocksOwned {
+    if ($script:HeldLocks.Count -eq 0) {
+        Fail 'Installation lock is not held.'
+    }
+    foreach ($held in $script:HeldLocks) {
+        if (-not (Test-Path -LiteralPath $held.path -PathType Container)) {
+            Fail "Installation lock '$($held.path)' is not held."
+        }
+        $owner = Read-LockOwner (Join-Path $held.path 'owner.json')
+        if ((Get-StringProperty $owner 'token') -ne $held.token) {
+            Fail "Installation lock '$($held.path)' ownership changed during mutation."
+        }
+    }
+}
+
+function Pop-HeldLock {
+    if ($script:HeldLocks.Count -le 1) {
+        $script:HeldLocks = @()
+        return
+    }
+    $script:HeldLocks = @($script:HeldLocks[0..($script:HeldLocks.Count - 2)])
+}
+
+function Try-CreateLockDirectory([string]$Path) {
+    if ($env:OS -eq 'Windows_NT') {
+        return [CeAtomicDirectory]::CreateWindows($Path)
+    }
+    return [CeAtomicDirectory]::CreatePosix($Path)
 }
 
 function Acquire-Lock(
@@ -495,10 +579,12 @@ function Acquire-Lock(
     $hostName = [Environment]::MachineName.Split('.')[0].ToLowerInvariant()
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     while ($stopwatch.Elapsed -lt [TimeSpan]::FromSeconds(5)) {
-        try {
-            New-Item -ItemType Directory -Path $Path -ErrorAction Stop | Out-Null
-            $script:HeldLockPath = $Path
-            $script:HeldLockToken = $token
+        $lockResult = Try-CreateLockDirectory $Path
+        if ($lockResult -eq 1) {
+            $script:HeldLocks += [pscustomobject]@{
+                path = $Path
+                token = $token
+            }
             $owner = [ordered]@{
                 schema = 'copilot-extensions.installation-lock'
                 version = 1
@@ -516,16 +602,18 @@ function Acquire-Lock(
             catch {
                 Remove-Item -LiteralPath (Join-Path $Path 'owner.json') -Force -ErrorAction SilentlyContinue
                 Remove-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
-                $script:HeldLockPath = ''
-                $script:HeldLockToken = ''
+                Pop-HeldLock
                 throw
             }
             return
         }
-        catch [System.IO.IOException] {
-            if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
-                continue
-            }
+        if ($lockResult -eq -1) {
+            Start-Sleep -Milliseconds 10
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+            Start-Sleep -Milliseconds 10
+            continue
         }
         $ownerPath = Join-Path $Path 'owner.json'
         if (-not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) {
@@ -544,6 +632,22 @@ function Acquire-Lock(
         if ($ownerHost -eq $hostName) {
             $ownerProcess = Get-Process -Id $ownerPid -ErrorAction SilentlyContinue
             if ($null -eq $ownerProcess) {
+                Start-Sleep -Milliseconds 10
+                if (-not (Test-Path -LiteralPath $Path -PathType Container) -or
+                    -not (Test-Path -LiteralPath $ownerPath -PathType Leaf)) {
+                    continue
+                }
+                try {
+                    $currentOwner = Read-LockOwner $ownerPath
+                }
+                catch [System.Management.Automation.ItemNotFoundException] {
+                    continue
+                }
+                Assert-LockOwnerShape $currentOwner $Kind $MarketplaceIdValue $PluginIdValue
+                if ((Get-StringProperty $currentOwner 'token') -cne
+                    (Get-StringProperty $owner 'token')) {
+                    continue
+                }
                 Fail "Installation lock '$Path' has a stale owner (host=$ownerHost, pid=$ownerPid); explicit repair is required."
             }
             Start-Sleep -Milliseconds 10
@@ -564,10 +668,10 @@ function Acquire-Lock(
 
 function Release-Lock {
     Assert-LockOwned
-    Remove-Item -LiteralPath (Join-Path $script:HeldLockPath 'owner.json') -Force
-    Remove-Item -LiteralPath $script:HeldLockPath -Force
-    $script:HeldLockPath = ''
-    $script:HeldLockToken = ''
+    $held = $script:HeldLocks[$script:HeldLocks.Count - 1]
+    Remove-Item -LiteralPath (Join-Path $held.path 'owner.json') -Force
+    Remove-Item -LiteralPath $held.path -Force
+    Pop-HeldLock
 }
 
 function Get-PropertyValue($Object, [string]$Name, $Default = $null) {
@@ -1609,6 +1713,16 @@ function Test-SameEnvironment($Left, $Right) {
     return $leftDistro -ceq $rightDistro
 }
 
+function Test-EnvironmentPathRooted([string]$Path, [string]$Platform) {
+    if ($Platform -ceq 'windows') {
+        return (
+            $Path -match '^[A-Za-z]:[\\/]' -or
+            $Path -match '^\\\\[^\\/]+[\\/][^\\/]+'
+        )
+    }
+    return $Path.StartsWith('/', [StringComparison]::Ordinal)
+}
+
 function Get-CurrentEnvironment {
     if ($env:OS -eq 'Windows_NT') {
         if (-not $env:USERPROFILE) { Fail 'USERPROFILE is required on Windows.' }
@@ -1651,7 +1765,7 @@ function Read-EnvironmentObject($EnvironmentObject, [string]$Label) {
         Fail "$Label.platform must be windows or posix."
     }
     $homeRealPath = Get-StringProperty $EnvironmentObject 'homeRealPath'
-    if (-not [IO.Path]::IsPathRooted($homeRealPath)) {
+    if (-not (Test-EnvironmentPathRooted $homeRealPath $platform)) {
         Fail "$Label.homeRealPath must be absolute."
     }
     if (-not (Has-ExactProperty $EnvironmentObject 'wslDistro')) {
@@ -2614,6 +2728,198 @@ function Assert-ExpectedGeneration(
     }
 }
 
+function Invoke-ActivationCas([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'activation-cas requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'activation-cas requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'activation-cas requires -ExpectedPluginId.'
+    }
+    Assert-MarketplaceId $ExpectedMarketplaceId
+    Assert-PluginId $ExpectedPluginId
+    if ($ExpectedNamespaceGeneration -lt 0) {
+        Fail 'activation-cas requires -ExpectedNamespaceGeneration.'
+    }
+    if ($ExpectedInstallGeneration -lt 0) {
+        Fail 'activation-cas requires -ExpectedInstallGeneration.'
+    }
+    if ($ExpectedActivationGeneration -lt 0) {
+        Fail 'activation-cas requires -ExpectedActivationGeneration.'
+    }
+    if (($ActivationMode -ceq 'namespaced' -and $ActivationState -ceq 'active') -or
+        ($ActivationMode -ceq 'legacy' -and $ActivationState -ceq 'deactivated')) {
+    }
+    else {
+        Fail 'Activation mode/state pair is invalid.'
+    }
+    if ($LegacyDisposition -cnotin @('absent', 'quiesced', 'retained-inert', 'restored')) {
+        Fail 'Activation legacy disposition is invalid.'
+    }
+    if (-not $LegacyProbeJson -and -not $LegacyProbeFile) {
+        Fail 'activation-cas requires -LegacyProbeJson or -LegacyProbeFile.'
+    }
+    $recordedProbe = Read-LegacyProbe
+    $currentEnvironment = Get-CurrentEnvironment
+    if (-not (Test-EnvironmentPathRooted $Context $currentEnvironment.platform)) {
+        Fail 'Activation context must be absolute.'
+    }
+    $contextPath = Canonical-Path $Context -MustExist
+    $cellRoot = Canonical-Path (Join-Path (Join-Path $ResolvedDurableHome 'marketplaces') $ExpectedMarketplaceId)
+    $pluginRoot = Canonical-Path (Join-Path (Join-Path $cellRoot 'plugins') $ExpectedPluginId)
+    $installPath = Canonical-Path (Join-Path $pluginRoot 'install.json')
+    if (-not (Paths-Equal $contextPath $installPath)) {
+        Fail 'Activation context is not the canonical install receipt.'
+    }
+    $resolvedLegacyRoot = $LegacyRoot
+    if (-not $resolvedLegacyRoot) {
+        $resolvedLegacyRoot = Join-Path $currentEnvironment.homeRealPath ('.' + $ExpectedPluginId)
+    }
+    if (-not (Test-EnvironmentPathRooted $resolvedLegacyRoot $currentEnvironment.platform)) {
+        Fail '-LegacyRoot must be absolute.'
+    }
+    $resolvedLegacyRoot = Canonical-Path $resolvedLegacyRoot
+    $activationPath = Join-Path $pluginRoot 'installation-activation.json'
+    $genesisLock = Join-Path (Join-Path $ResolvedDurableHome 'marketplaces/.locks') ($ExpectedMarketplaceId + '.genesis')
+    $installLock = Join-Path (Join-Path $cellRoot '.locks') ($ExpectedPluginId + '.install.lock')
+    $startingLockCount = $script:HeldLocks.Count
+    $operationFailed = $false
+
+    try {
+        Acquire-Lock $genesisLock 'genesis' $ExpectedMarketplaceId
+        Acquire-Lock $installLock 'install' $ExpectedMarketplaceId $ExpectedPluginId
+        $validated = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $contextPath $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' $cellRoot
+        }
+        $actualNamespaceGeneration = [long]$validated.namespaceGeneration
+        $actualInstallGeneration = [long]$validated.generation
+        $activation = Validate-ActivationReceipt `
+            $activationPath `
+            $ResolvedDurableHome `
+            $ExpectedMarketplaceId `
+            $ExpectedPluginId `
+            $resolvedLegacyRoot `
+            $currentEnvironment
+        $actualActivationGeneration = 0
+        if ($activation.classification -ceq 'foreign-environment') {
+            Fail 'Existing activation receipt belongs to a foreign environment.'
+        }
+        if ($activation.classification -ceq 'invalid') {
+            Fail 'Existing activation receipt is invalid.'
+        }
+        if ($activation.classification -cin @('valid', 'revalidation-required')) {
+            $actualActivationGeneration = [long]$activation.activationGeneration
+        }
+
+        if ($actualNamespaceGeneration -ne $ExpectedNamespaceGeneration -or
+            $actualInstallGeneration -ne $ExpectedInstallGeneration -or
+            $actualActivationGeneration -ne $ExpectedActivationGeneration) {
+            return [pscustomobject][ordered]@{
+                action = 'activation-cas'
+                status = 'revalidation-required'
+                reason = 'generation-changed'
+                activation = $(if ($activation.present) { $activation.path } else { $null })
+                activationChanged = $false
+                activationGeneration = $actualActivationGeneration
+                namespaceGeneration = $actualNamespaceGeneration
+                installGeneration = $actualInstallGeneration
+                expectedActivationGeneration = $ExpectedActivationGeneration
+                expectedNamespaceGeneration = $ExpectedNamespaceGeneration
+                expectedInstallGeneration = $ExpectedInstallGeneration
+                operative = $false
+            }
+        }
+        $namespaceReceipt = Read-Json $validated.namespaceReceipt
+        if ((Get-StringProperty $namespaceReceipt 'state') -cne 'active' -or
+            (Get-StringProperty $validated 'state') -cne 'active') {
+            Fail 'Activation requires active namespace and install receipts.'
+        }
+        if ($actualActivationGeneration -eq [int64]::MaxValue) {
+            Fail 'installation-activation.json generation cannot be incremented; explicit repair is required.'
+        }
+
+        $now = Get-UtcTimestamp
+        $createdAt = $now
+        if ($activation.present) {
+            $existing = Read-Json $activation.path
+            $createdAt = Get-ReceiptTimestamp $existing 'createdAt' $now
+        }
+        $nextGeneration = $actualActivationGeneration + 1
+        $receipt = [ordered]@{
+            schema = 'copilot-extensions.installation-activation'
+            version = 1
+            marketplaceId = $ExpectedMarketplaceId
+            pluginId = $ExpectedPluginId
+            mode = $ActivationMode
+            state = $ActivationState
+            environment = $currentEnvironment
+            context = $contextPath
+            namespaceGeneration = $actualNamespaceGeneration
+            installGeneration = $actualInstallGeneration
+            generation = $nextGeneration
+            legacy = [ordered]@{
+                disposition = $LegacyDisposition
+                probe = $recordedProbe
+            }
+            createdAt = $createdAt
+            updatedAt = $now
+        }
+        Assert-AllLocksOwned
+        Write-AtomicJson $activationPath $receipt
+        $published = Validate-ActivationReceipt `
+            $activationPath `
+            $ResolvedDurableHome `
+            $ExpectedMarketplaceId `
+            $ExpectedPluginId `
+            $resolvedLegacyRoot `
+            $currentEnvironment
+        if ($published.classification -cne 'valid') {
+            Fail 'Published activation receipt did not validate as current.'
+        }
+        return [pscustomobject][ordered]@{
+            action = 'activation-cas'
+            status = 'ready'
+            reason = 'activation-published'
+            activation = $published.path
+            activationChanged = $true
+            activationGeneration = [long]$published.activationGeneration
+            namespaceGeneration = $actualNamespaceGeneration
+            installGeneration = $actualInstallGeneration
+            environment = $currentEnvironment
+            mode = $ActivationMode
+            state = $ActivationState
+            context = $contextPath
+            operative = $false
+        }
+    }
+    catch {
+        $operationFailed = $true
+        throw
+    }
+    finally {
+        $releaseError = $null
+        while ($script:HeldLocks.Count -gt $startingLockCount) {
+            try {
+                Release-Lock
+            }
+            catch {
+                Pop-HeldLock
+                if ($null -eq $releaseError) {
+                    $releaseError = $_.Exception
+                }
+                if ($operationFailed) {
+                    [Console]::Error.WriteLine(
+                        "installation-context: $($_.Exception.Message) while preserving the original activation failure."
+                    )
+                }
+            }
+        }
+        if (-not $operationFailed -and $null -ne $releaseError) {
+            throw $releaseError
+        }
+    }
+}
+
 function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
     if ([string]::IsNullOrWhiteSpace($PayloadVersion)) {
         Fail 'stamp requires -PayloadVersion.'
@@ -2713,7 +3019,7 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
         throw
     }
     finally {
-        if ($script:HeldLockPath) {
+        if ($script:HeldLocks.Count -gt 0) {
             try { Release-Lock }
             catch {
                 if (-not $genesisFailed) { throw }
@@ -2819,7 +3125,7 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
         throw
     }
     finally {
-        if ($script:HeldLockPath) {
+        if ($script:HeldLocks.Count -gt 0) {
             try { Release-Lock }
             catch {
                 if (-not $installFailed) { throw }
@@ -2839,7 +3145,7 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
 }
 
 try {
-    Assert-ExactChoice $Action @('source-id', 'resolve', 'validate', 'stamp', 'status', 'probe-legacy') 'Action'
+    Assert-ExactChoice $Action @('source-id', 'resolve', 'validate', 'stamp', 'activation-cas', 'status', 'probe-legacy') 'Action'
     if ($PayloadOrigin -cnotin @('', 'installed', 'directory', 'staged', 'explicit')) {
         Fail 'payload origin must be installed, directory, staged, or explicit.'
     }
@@ -2869,6 +3175,9 @@ try {
     }
     elseif ($Action -eq 'status' -or $Action -eq 'probe-legacy') {
         $result = Resolve-InstallationStatus $resolvedCopilotHome $resolvedProjectRoot $resolvedDurableHome
+    }
+    elseif ($Action -eq 'activation-cas') {
+        $result = Invoke-ActivationCas $resolvedDurableHome
     }
     elseif ($Action -eq 'validate') {
         $pointer = $Context

@@ -170,13 +170,27 @@ the record. Cleanup is the only operation permitted to delete it, and only
 after all companion ownership, rollback, service, task, lease, and tombstone
 evidence has been cleared under the required locks.
 
-Activation writes use compare-and-swap under the cell installation lock. The
-CAS pins the caller-observed activation `generation`, `namespaceGeneration`,
-and `installGeneration`; any mismatch returns `revalidation-required`. The
-environment tuple is exact. A Windows receipt never validates in WSL, one WSL
-distribution never validates in another, and no roots are shared across
-environments absent a future explicit sharing contract. A foreign-environment
-receipt fails closed.
+Activation writes use compare-and-swap while holding the marketplace genesis
+lock and then the cell installation lock. The fixed order prevents inverse
+acquisition. While both locks are held, the writer revalidates `namespace.json`
+and `install.json` and pins the caller-observed activation `generation`,
+`namespaceGeneration`, and `installGeneration`; any mismatch returns
+`revalidation-required` without replacing the activation receipt. Malformed,
+overflowed, or foreign-environment activation receipts are never overwritten.
+`revalidation-required` is a successfully constructed compare-and-swap result,
+not a published activation: CLI callers receive exit 0 and must inspect
+`status` and `activationChanged`. Publication requires both context receipts to
+remain in `state: active`.
+The environment tuple is exact. A Windows receipt never validates in WSL, one
+WSL distribution never validates in another, and no roots are shared across
+environments absent a future explicit sharing contract.
+
+The shared activation CAS is a low-level explicit management primitive. It
+records actual mode but does not create a runtime slot, migrate legacy state,
+write the companion tombstone, launch a process, or authorize itself from
+ambient policy or `COPILOT_EXTENSIONS_CONTEXT`. The caller must supply the
+canonical context receipt explicitly. A migration or rollback caller remains
+responsible for the larger lock and evidence transaction.
 
 #### Legacy ownership tombstone schema
 
@@ -451,15 +465,17 @@ state cannot be determined, they treat the target as quiesced and do not
 provision, reconcile, ensure, or start anything.
 
 The canonical dependency-light primitive lives in
-`libs/installation-context/`. Its `stamp` operation is the only Phase 3
-receipt-mutation surface: it creates or updates `namespace.json` under the
-marketplace genesis lock, then `install.json` under the plugin installation
-lock. Both existing-receipt mutations require the caller-observed generation
-and fail when it changed. Lock directories contain attributable live-owner
-receipts; writers revalidate their ownership token immediately before atomic
-same-directory replacement. `tools/sync-installation-context.py` keeps the
-future `agent-machines` and `agent-index` exemplar copies byte-identical while
-they remain non-operative.
+`libs/installation-context/`. Its `stamp` operation creates or updates
+`namespace.json` under the marketplace genesis lock, then `install.json` under
+the plugin installation lock. Its explicit `activation-cas` operation acquires
+those locks in the same order and publishes only a generation-pinned
+`installation-activation.json`. Existing-receipt mutations require the
+caller-observed generations and fail when they changed. Lock directories
+contain attributable live-owner receipts; writers revalidate every held
+ownership token immediately before atomic same-directory replacement.
+`tools/sync-installation-context.py` keeps the future `agent-machines` and
+`agent-index` exemplar copies byte-identical. Their installers do not call the
+activation writer and remain on legacy runtime roots.
 
 Payload-local command shims are generated from the canonical templates in
 `libs/payload-invocation/`. Each adopting plugin commits a
@@ -480,9 +496,10 @@ not replace installation identity, and not every plugin surface receives it.
 > later in this document describe the currently deployed legacy layout. They
 > remain valid only for unchanged legacy installers during the phased migration.
 > New or migrated installer surfaces follow the cell contract above.
-> Until activation governance becomes operative, missing user policy means the
-> legacy layout remains authoritative. Context receipts may be stamped
-> non-operatively without selecting the cell runtime.
+> Until an explicit installer or management caller wires activation and runtime
+> selection, missing user policy means the legacy layout remains authoritative.
+> Context receipts may be stamped without selecting the cell runtime, and the
+> low-level activation CAS never invokes itself from ambient policy.
 
 ## Plugin update ≠ runtime install
 
