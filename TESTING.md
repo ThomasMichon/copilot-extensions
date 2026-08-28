@@ -35,6 +35,7 @@ python tools/check-version-consistency.py      # plugin.json / pyproject / marke
 python tools/check-marketplace-isolation.py    # report-only legacy installation inventory
 python libs/payload-invocation/generate.py --all --check  # generated payload shims match manifests
 python tools/sync-installation-context.py --check  # inert exemplar copies match the canonical primitive
+python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fixtures
 ```
 
 ## Per-plugin coverage (unit suites)

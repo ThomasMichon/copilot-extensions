@@ -153,6 +153,15 @@ core of the principles above; a reviewer checks a change against these.
   `PATH`. Enforced by
   `libs/payload-invocation/tests/test_agent_plugin_coverage.py`. See
   [`runtime-agent-plugin.md`](runtime-agent-plugin.md).
+- **Enabled machine-gated runtimes are never silently omitted.** Each enabled
+  `runtimeScope: machine-gated` plugin publishes a bounded, plugin-owned
+  installer/readiness module manifest or an explicit decline. Discovery
+  qualifies module identity by validated marketplace installation provenance,
+  resolves only payload-local scripts or declared payload commands, validates
+  the complete dependency graph before mutation, and leaves execution and
+  whole-run policy to an optional consumer. The plugin remains independently
+  installable without that consumer. See
+  [`installer-readiness-modules.md`](installer-readiness-modules.md).
 - **Initial command context stays static.** A session command glossary contains
   exact attributable invocation data and, at most, stable bounded pivots such
   as machine/repository names. It never snapshots worktrees, sessions, leases,
@@ -232,6 +241,7 @@ the exemplars, and the vision it serves):
 | [a-la-carte-independence](a-la-carte-independence.md) | Standalone-first plugins that compose gracefully, incl. the provider-manifest registry pattern |
 | [drop-in-registry-hygiene](drop-in-registry-hygiene.md) | How cross-plugin `*.d` registries keep routine sweeps non-blocking while making malformed, missing, disabled, ambiguous, duplicate, and stale contributions visible and safely cleanable through consumer-owned doctor commands |
 | [runtime-self-provisioning](runtime-self-provisioning.md) | How a plugin provisions its own runtime with no manual step and **no dependency on a sibling launcher** — the layered bootstrap (self-provisioning binstub → sessionStart auto-stamp → skill-driven readiness self-check) + toolchain self-acquisition (vendored uv, pip-index bridge), reaching confined envs (Copilot app, cloud agent) |
+| [installer-readiness-modules](installer-readiness-modules.md) | How enabled machine-gated plugins publish attributable installer/readiness modules (or an explicit decline), how discovery joins settings to installation-cell provenance without cache/PATH assumptions, and how strict graph validation produces an execution-free deterministic plan |
 | [cross-platform-parity](cross-platform-parity.md) | One behavior across Windows and Linux/WSL: shells, UTF-8, the WSL/Windows boundary, binstubs |
 | [project-scoped-invocation](project-scoped-invocation.md) | Reach any layer against an explicitly named project (`--project`), CWD-independently, and the per-project `<repo>` binstub as a uniform `<repo> <layer> …` dispatcher over the agent-* fleet |
 | [marketplace-installation-cells](marketplace-installation-cells.md) | Qualify runtime, state, lifecycle, invocation, composition, project adoption, migration, and uninstall by globally distinguishing marketplace provenance so same-named plugin suites coexist safely |

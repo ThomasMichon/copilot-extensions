@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ThomasMichon/copilot-extensions/tree/main/libs/installer-readiness/schema.json",
+  "title": "Copilot Extensions installer/readiness modules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "version", "owner", "state"],
+  "properties": {
+    "schema": {
+      "const": "copilot-extensions.installer-readiness"
+    },
+    "version": {
+      "const": 1
+    },
+    "owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plugin"],
+      "properties": {
+        "plugin": {
+          "$ref": "#/$defs/id"
+        }
+      }
+    },
+    "state": {
+      "enum": ["supported", "declined"]
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    },
+    "modules": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/module"
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "state": {
+            "const": "supported"
+          }
+        }
+      },
+      "then": {
+        "required": ["modules"],
+        "not": {
+          "required": ["reason"]
+        }
+      },
+      "else": {
+        "required": ["reason"],
+        "not": {
+          "required": ["modules"]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+    },
+    "moduleId": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+    },
+    "invocation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": {
+              "const": "payload-script"
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "arguments": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "command"],
+          "properties": {
+            "kind": {
+              "const": "payload-command"
+            },
+            "command": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]*$"
+            },
+            "arguments": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "platformInvocations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "windows": {
+          "$ref": "#/$defs/invocation"
+        },
+        "linux": {
+          "$ref": "#/$defs/invocation"
+        },
+        "wsl": {
+          "$ref": "#/$defs/invocation"
+        },
+        "macos": {
+          "$ref": "#/$defs/invocation"
+        }
+      }
+    },
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "platforms",
+        "classification",
+        "installer",
+        "readiness",
+        "dependsOn",
+        "restart"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/moduleId"
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["windows", "linux", "wsl", "macos"]
+          }
+        },
+        "classification": {
+          "enum": ["required", "optional"]
+        },
+        "installer": {
+          "$ref": "#/$defs/platformInvocations"
+        },
+        "readiness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "version",
+            "configurationEmpty",
+            "invocations"
+          ],
+          "properties": {
+            "schema": {
+              "const": "copilot-extensions.module-readiness"
+            },
+            "version": {
+              "const": 1
+            },
+            "configurationEmpty": {
+              "enum": ["satisfied", "unsatisfied"]
+            },
+            "invocations": {
+              "$ref": "#/$defs/platformInvocations"
+            }
+          }
+        },
+        "dependsOn": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/moduleId"
+          }
+        },
+        "restart": {
+          "enum": ["none", "shell", "session", "machine"]
+        }
+      }
+    }
+  }
+}
