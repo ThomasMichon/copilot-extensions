@@ -79,6 +79,8 @@ Detailed contracts and proposed record shapes are in
 
 ## Request
 
+_Verbatim operator request; original spelling and punctuation preserved._
+
 > Our agent-worktrees leasing system is intended to block a worktree from moving
 > into finalized, prune-able state, without first dealing with and releasing
 > those claims. However, there are two loose ends:
