@@ -1,0 +1,21 @@
+{
+  "name": "delegation-guidance",
+  "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
+  "version": "0.1.0-dev1",
+  "runtimeScope": "none",
+  "hooks": "hooks.json",
+  "author": {
+    "name": "Thomas Michon"
+  },
+  "homepage": "https://github.com/ThomasMichon/copilot-extensions",
+  "repository": "https://github.com/ThomasMichon/copilot-extensions",
+  "license": "MIT",
+  "keywords": [
+    "delegation",
+    "sub-agents",
+    "coordination",
+    "context-management",
+    "copilot-extension"
+  ],
+  "skills": "skills/"
+}
