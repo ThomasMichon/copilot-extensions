@@ -1,0 +1,63 @@
+"""Declarative installer/readiness discovery and planning primitives."""
+
+from .discovery import (
+    CONTRACT_SCHEMA,
+    CONTRACT_VERSION,
+    READINESS_SCHEMA,
+    READINESS_VERSION,
+    SettingsGroup,
+    SettingsLayer,
+    discover_from_settings,
+    discover_modules,
+    installations_from_settings,
+)
+from .model import (
+    ConfigurationEmpty,
+    Decline,
+    DiscoveryReport,
+    Finding,
+    Invocation,
+    MarketplaceProvenance,
+    Module,
+    Plan,
+    PlanState,
+    PlanStep,
+    Platform,
+    PluginInstallation,
+    ReadinessResult,
+    ReadinessState,
+    Requirement,
+    Restart,
+)
+from .planning import build_plan
+from .readiness import parse_readiness
+
+__all__ = [
+    "CONTRACT_SCHEMA",
+    "CONTRACT_VERSION",
+    "READINESS_SCHEMA",
+    "READINESS_VERSION",
+    "ConfigurationEmpty",
+    "Decline",
+    "DiscoveryReport",
+    "Finding",
+    "Invocation",
+    "MarketplaceProvenance",
+    "Module",
+    "Plan",
+    "PlanState",
+    "PlanStep",
+    "Platform",
+    "PluginInstallation",
+    "ReadinessResult",
+    "ReadinessState",
+    "Requirement",
+    "Restart",
+    "SettingsGroup",
+    "SettingsLayer",
+    "build_plan",
+    "discover_from_settings",
+    "discover_modules",
+    "installations_from_settings",
+    "parse_readiness",
+]

@@ -524,6 +524,21 @@ A plugin declares whether — and where — its runtime should be reconciled via
 | `universal` | Reconcile the runtime on **every** machine (a non-Python runtime that every machine needs and that deploys outside the plugin payload). |
 | `machine-gated` | Reconcile the runtime only on machines in the plugin's allowed set (e.g. `agent-bridge`, `agent-codespaces`, `agent-containers`, `agent-mcp`). |
 
+The reusable installer/readiness contract for `machine-gated` plugins is defined
+by [`patterns/installer-readiness-modules.md`](patterns/installer-readiness-modules.md)
+and implemented by `libs/installer-readiness/`. A participating plugin points
+`plugin.json` `installerReadiness` at one bounded payload manifest. That manifest
+either publishes installer/readiness modules or intentionally declines with a
+reason; omission is an error. Discovery joins enabled settings to validated
+installation-cell receipts and resolves only payload-local scripts or commands
+declared by the owning `payload-invocation.json`--never an installed-cache
+convention or `PATH`.
+
+The base contract validates and plans but does not execute installers, interpret
+machine-gate policy, or summarize a run. Plugin-specific declarations and the
+out-of-plugin consumer are separate adoption slices. Until those declarations
+land, the existing reconciler below remains the operative behavior.
+
 The machine set for `machine-gated` plugins is **not** hard-coded in the plugin:
 the reconciler reads it from a **control-harness gate manifest** — by default a
 file named `external-repos.yaml` (`repos.*.services[].{name, deploy_machines}`),

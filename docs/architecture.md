@@ -62,6 +62,14 @@ through that attributable session glossary rather than ambient `PATH`.
 runtime roots are still unqualified; repo/project binstubs remain the intended
 machine-global command surface.
 
+The repository now also carries the non-operative
+`libs/installer-readiness/` foundation for a later out-of-plugin configurator.
+It defines plugin-owned installer/readiness metadata, joins enabled settings to
+validated marketplace installation-cell receipts, and produces a validated
+dependency plan without executing it. No runtime plugin publishes an adapter in
+this slice, and no central orchestrator is introduced; each plugin's existing
+self-provisioning path remains independent and authoritative.
+
 
 ## Install topology — marketplace to local paths
 
