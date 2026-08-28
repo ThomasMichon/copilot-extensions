@@ -79,8 +79,10 @@ Git environment, and emits only when `agent-worktrees` identifies a managed
 project and exposes its status core. If agent-worktrees is absent, the plugin
 remains fully standalone and the hook emits `{}`.
 
-The guidance asks agents to check `agent-dispatch focus --list` before choosing
-likely-overlapping work and advertise their own focus early.
+The guidance asks agents to check `agent-dispatch worktree-status` before
+starting new work, resume or claim tasks explicitly assigned to their worktree,
+then check `agent-dispatch focus --list` before choosing likely-overlapping
+work and advertise their own focus early.
 `agent-dispatch focus` is shorthand for writing the same agent-worktrees
 status-core summary; agent-worktrees conduct and regular
 `agent-worktrees status --summary` remain authoritative for ongoing disposition
