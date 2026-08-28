@@ -139,7 +139,7 @@ So efforts are actually used, add to the repo's agent instructions
 
   ```markdown
   <!-- efforts:static-fallback:start -->
-  **Fallback policy `[owner: efforts@0.1.0-dev16]`:** This repository requires
+  **Fallback policy `[owner: efforts@0.1.0-dev17]`:** This repository requires
   efforts for substantial multi-step work. Create or resume the canonical effort
   with `planning-efforts`; the rightful head must not declare the worktree complete
   until the effort is explicitly Done and every Plan and Validation Plan item is
@@ -210,6 +210,12 @@ So efforts are actually used, add to the repo's agent instructions
   command catalog. The POSIX wrapper requires a usable system `python3` or
   `python` and fails open with one diagnostic when neither is available; the
   PowerShell producer is native.
+- Direct-probe cross-repository capability with
+  `emit-policy.sh --check-adoption <absolute-repo-path>` or
+  `emit-policy.ps1 -CheckAdoption <absolute-repo-path>`. Only exact JSON
+  `{"version":1,"capability":"efforts","adopted":true}` proves adoption; `{}` is
+  the fail-closed answer for absent, malformed, non-local, and remote-only
+  targets.
 
 ## Migrating from a legacy plans directory
 

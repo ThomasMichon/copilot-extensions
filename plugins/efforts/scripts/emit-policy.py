@@ -69,7 +69,11 @@ def _emit_empty() -> int:
 
 
 def _read_bounded(path: Path, limit: int) -> bytes:
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     descriptor = os.open(path, flags)
     try:
         info = os.fstat(descriptor)
@@ -93,6 +97,31 @@ def _has_symlink(root: Path, relative: Path) -> bool:
         except FileNotFoundError:
             return False
     return False
+
+
+def _has_symlink_in_path(path: Path) -> bool:
+    current = path
+    while True:
+        try:
+            if stat.S_ISLNK(current.lstat().st_mode):
+                return True
+        except FileNotFoundError:
+            return False
+        if current == current.parent:
+            return False
+        current = current.parent
+
+
+def _clean_git_environment() -> dict[str, str]:
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in GIT_ENV_NAMES
+        and not any(key.startswith(prefix) for prefix in GIT_ENV_PREFIXES)
+    }
+    environment["GIT_NO_LAZY_FETCH"] = "1"
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
+    return environment
 
 
 def _payload_cwd() -> Path | None:
@@ -120,16 +149,10 @@ def _repository_root(cwd: Path) -> Path | None:
     git = shutil.which("git")
     if not git:
         return None
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in GIT_ENV_NAMES
-        and not any(key.startswith(prefix) for prefix in GIT_ENV_PREFIXES)
-    }
     try:
         result = subprocess.run(
             [git, "-C", str(cwd), "rev-parse", "--show-toplevel"],
-            env=environment,
+            env=_clean_git_environment(),
             capture_output=True,
             text=True,
             check=False,
@@ -152,18 +175,10 @@ def _repository_root(cwd: Path) -> Path | None:
     return root
 
 
-def _is_adopting(root: Path) -> bool:
-    path = root / CONFIG
-    if not path.exists() and not path.is_symlink():
-        return False
-    if _has_symlink(root, CONFIG):
-        _diagnostic("repository effort config is not a contained regular file")
-        return False
+def _is_valid_config(raw: bytes) -> bool:
     try:
-        raw = _read_bounded(path, MAX_CONFIG_BYTES)
         data = _load_json(raw)
-    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
-        _diagnostic("repository effort config is malformed; no policy context emitted")
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
         return False
     return (
         isinstance(data, dict)
@@ -172,6 +187,110 @@ def _is_adopting(root: Path) -> bool:
         and data["version"] == 1
         and data["enforcement"] == "required"
     )
+
+
+def _read_committed_config(root: Path) -> bytes | None:
+    git = shutil.which("git")
+    if not git:
+        return None
+    environment = _clean_git_environment()
+    try:
+        head_result = subprocess.run(
+            [git, "-C", str(root), "rev-parse", "--verify", "HEAD"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        head = head_result.stdout.strip()
+        if head_result.returncode != 0 or re.fullmatch(r"[0-9a-fA-F]{40,64}", head) is None:
+            return None
+        tree_result = subprocess.run(
+            [
+                git,
+                "-C",
+                str(root),
+                "ls-tree",
+                head,
+                "--",
+                CONFIG.as_posix(),
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        tree_match = re.fullmatch(
+            rf"(?:100644|100755) blob ([0-9a-fA-F]{{40,64}})\t"
+            rf"{re.escape(CONFIG.as_posix())}\n?",
+            tree_result.stdout,
+        )
+        if tree_result.returncode != 0 or tree_match is None:
+            return None
+        object_name = tree_match.group(1)
+        size_result = subprocess.run(
+            [git, "-C", str(root), "cat-file", "-s", object_name],
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        size_text = size_result.stdout.strip()
+        if (
+            size_result.returncode != 0
+            or not size_text.isascii()
+            or not size_text.isdecimal()
+            or int(size_text) > MAX_CONFIG_BYTES
+        ):
+            return None
+        blob_result = subprocess.run(
+            [git, "-C", str(root), "cat-file", "blob", object_name],
+            env=environment,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError, UnicodeError, ValueError):
+        return None
+    if (
+        blob_result.returncode != 0
+        or len(blob_result.stdout) > MAX_CONFIG_BYTES
+        or b"\0" in blob_result.stdout
+    ):
+        return None
+    return blob_result.stdout
+
+
+def _is_adopting(
+    root: Path,
+    *,
+    diagnostics: bool = True,
+    require_committed: bool = False,
+) -> bool:
+    path = root / CONFIG
+    if not path.exists() and not path.is_symlink():
+        return False
+    if _has_symlink(root, CONFIG):
+        if diagnostics:
+            _diagnostic("repository effort config is not a contained regular file")
+        return False
+    try:
+        raw = _read_bounded(path, MAX_CONFIG_BYTES)
+    except (OSError, ValueError):
+        if diagnostics:
+            _diagnostic("repository effort config is malformed; no policy context emitted")
+        return False
+    if not _is_valid_config(raw):
+        if diagnostics:
+            _diagnostic("repository effort config is malformed; no policy context emitted")
+        return False
+    if not require_committed:
+        return True
+    committed = _read_committed_config(root)
+    return committed is not None and _is_valid_config(committed)
 
 
 def _plugin_version() -> str | None:
@@ -205,13 +324,40 @@ def _kernel(version: str) -> str:
         "uncertainty, prerequisites, required review, or required "
         "safety/admin confirmation. Handoffs name the effort and next slice; "
         "bounded predecessor ramp-up covers only immediate activity. Keep "
-        "cross-repo planning in the host unless an authoritative local target "
-        "checkout has valid efforts adoption; then use one target-owned "
-        "sub-effort referenced one-way."
+        "cross-repo planning host-owned by default. Valid adoption only permits "
+        "an explicitly selected target-owned sub-effort referenced one-way."
     )
 
 
+def _emit_adoption_capability(raw_target: str) -> int:
+    if (
+        not raw_target
+        or not os.path.isabs(raw_target)
+        or any(ord(character) < 32 for character in raw_target)
+    ):
+        return _emit_empty()
+    target = Path(raw_target)
+    if _has_symlink_in_path(target) or not target.is_dir():
+        return _emit_empty()
+    root = _repository_root(target)
+    if root is None or not _is_adopting(
+        root,
+        diagnostics=False,
+        require_committed=True,
+    ):
+        return _emit_empty()
+    sys.stdout.write(
+        '{"version":1,"capability":"efforts","adopted":true}'
+    )
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) > 1:
+        if len(sys.argv) == 3 and sys.argv[1] == "--check-adoption":
+            return _emit_adoption_capability(sys.argv[2])
+        _diagnostic("invalid arguments; no policy context emitted")
+        return _emit_empty()
     cwd = _payload_cwd()
     if cwd is None:
         return _emit_empty()

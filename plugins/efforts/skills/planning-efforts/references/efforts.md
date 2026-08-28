@@ -242,9 +242,28 @@ handoff state, or create another `sessionStart` producer.
 
 ## Cross-repo placement
 
-An effort frequently touches a repo other than the one it lives in. There are
-**three placement models**; the choice is deliberate, not forced — pick per the
-work.
+An effort frequently touches a repo other than the one it lives in. Before
+placing any effort in the target, resolve an authoritative local checkout or
+worktree through the target's owning repository tool. Resolve the efforts plugin
+root by walking two parents up from the loaded `planning-efforts` skill base,
+then run the platform-native read-only capability probe:
+
+```bash
+bash <efforts-plugin-root>/scripts/emit-policy.sh --check-adoption <absolute-target-path>
+```
+
+```powershell
+& <efforts-plugin-root>\scripts\emit-policy.ps1 -CheckAdoption <absolute-target-path>
+```
+
+Only exact JSON
+`{"version":1,"capability":"efforts","adopted":true}` proves compatible
+adoption. `{}`, malformed output, an absent checkout, or a remote-only target
+means capability is unproven and orchestration stays in the host. The probe
+resolves the Git root and reads the bounded adoption JSON without executing
+target code or trusting a repository name.
+
+With that decision made, there are **three placement models**:
 
 1. **Local / tracking-only (default).** The effort folder lives in the control
    repo and *coordinates* work that lands in one or more target repos. The folder
@@ -254,12 +273,12 @@ work.
    paths** — so a cross-repo issue references the *tracked work*, not a path it
    can't resolve.
 
-2. **Build directly in the target repo.** When the **target repo has adopted
-   `efforts/`** and the stretch is genuinely *about that repo*, author the effort
-   **in the target**, through that repo's own flow (grouping, tracker, review
-   gate, addendum). An effort about a tool can live with the tool. Treat the
-   target as host: **its conventions outrank the control repo's** while you work
-   there (a good-citizen contribution, not a transplant of this repo's habits).
+2. **Build directly in the target repo.** When the exact probe reports
+   compatible adoption and the stretch is genuinely *about that repo*, author
+   one canonical target-owned effort **in the target**, through that repo's own
+   flow (grouping, tracker, review gate, addendum). The host retains its private
+   orchestration context and a one-way reference to the target effort. The
+   target effort never points back into host-private state.
 
 3. **Hybrid (split public/private).** Keep a **generalized** effort in a
    **public / portable** repo and a **fuller, downstream-private** effort in the
@@ -270,6 +289,15 @@ work.
    *elaborates* it (private names, hosts, downstream wiring) and **links back**.
    Keep the public artifact **generic**, per the repo's public-artifact rule; put
    anything downstream-private only in the private effort.
+
+**Several hosts, one compatible target:** the first host creates or claims the
+target-local effort through the target's normal public coordination flow.
+Later hosts discover and reference that same effort while retaining only their
+own host orchestration context. The target effort is canonical for target-local
+scope. Do not create cyclic references, reciprocal ownership, drifting peer
+copies, or multiple target-local efforts for the same objective. A malformed
+target config, including unknown keys or a value that attempts to weaken
+required enforcement, is not adoption and cannot change plugin-owned policy.
 
 **Ordering (all three models):** *propose before you do* — PR the not-yet-done
 plan, let it clear review, make the external changes, then report completion as a
