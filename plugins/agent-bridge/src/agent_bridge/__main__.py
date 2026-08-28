@@ -3256,24 +3256,24 @@ def _start_agent_session(
 def _render_head_guard_refusal(exc: "BridgeClientError") -> bool:
     """Print the session-lifecycle head-guard refusal, if that's what ``exc`` is.
 
-    The server refuses a create into a worktree whose ground-layer head is still
-    ``active`` with a 409 ``reason: worktree_head_active`` carrying the three
-    deliberate resolutions (reuse / handoff / sunset) + the ``reclaim`` break-
-    glass. Renders them for a human and returns True when handled; False when
+    The server refuses a create into an occupied worktree with a 409 active- or
+    pending-head reason, choices, and the ``reclaim`` break-glass. Renders them
+    for a human and returns True when handled; False when
     ``exc`` is some other error (caller keeps its normal handling).
     """
     if getattr(exc, "status", None) != 409:
         return False
     detail = getattr(exc, "detail", None)
-    if not isinstance(detail, dict) or detail.get("reason") != "worktree_head_active":
+    if (
+        not isinstance(detail, dict)
+        or detail.get("reason") not in (
+            "worktree_head_active", "worktree_head_pending"
+        )
+    ):
         return False
     wt = detail.get("worktree_id", "?")
-    head = detail.get("head_session", "?")
-    print(
-        f"[BLOCKED] Worktree {wt} already has a current session ({head}). "
-        "Starting a new one would run in parallel with it.",
-        file=sys.stderr,
-    )
+    print(f"[BLOCKED] {detail.get('message', f'Worktree {wt} is occupied.')}",
+          file=sys.stderr)
     for choice in detail.get("choices", []):
         tag = " (preferred)" if choice.get("preferred") else ""
         print(f"  - {choice.get('action')}{tag}: {choice.get('description', '')}",

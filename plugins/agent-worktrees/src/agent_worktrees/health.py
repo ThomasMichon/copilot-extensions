@@ -416,3 +416,20 @@ def registered_session_ids(records) -> set[str]:
             if sid:
                 ids.add(sid)
     return ids
+
+
+def find_stale_head_caches(records) -> list:
+    """Records whose materialized head cache disagrees with ledger replay."""
+    stale = []
+    for record in records:
+        transitions = getattr(record, "head_transitions", None) or []
+        if not transitions:
+            continue
+        transition = record.replayed_head_transition
+        if (
+            record.head_session != record.replayed_head_session
+            or transition is None
+            or record.head_revision != transition.revision
+        ):
+            stale.append(record)
+    return stale

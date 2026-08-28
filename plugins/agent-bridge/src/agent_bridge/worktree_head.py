@@ -40,7 +40,9 @@ class HeadInfo:
     """A worktree's derived head, as read from the ground layer.
 
     - ``active`` -- the worktree has a current, un-concluded head session that a
-      fresh create would run in parallel with. This is the guard signal.
+      fresh create would run in parallel with.
+    - ``occupied`` -- either an active head or an in-flight numbered handoff
+      reserves the worktree. This is the create-guard signal.
     - ``head_session`` -- that session's id (a Copilot session-state GUID), or
       None when there is no active head.
     - ``state`` -- the head's lifecycle state (``active`` normally), or None.
@@ -49,12 +51,15 @@ class HeadInfo:
     """
 
     active: bool
+    occupied: bool = False
     head_session: str | None = None
     state: str | None = None
     tracked: bool = False
 
 
-_UNKNOWN = HeadInfo(active=False, head_session=None, state=None, tracked=False)
+_UNKNOWN = HeadInfo(
+    active=False, occupied=False, head_session=None, state=None, tracked=False
+)
 
 
 def resolve_head(worktree_id: str) -> HeadInfo:
@@ -117,8 +122,10 @@ def parse_head_payload(stdout: str | None) -> HeadInfo:
     if not isinstance(doc, dict):
         return _UNKNOWN
     head = doc.get("head_session")
+    active = bool(doc.get("active"))
     return HeadInfo(
-        active=bool(doc.get("active")),
+        active=active,
+        occupied=bool(doc.get("occupied", active)),
         head_session=head if isinstance(head, str) else None,
         state=doc.get("state") if isinstance(doc.get("state"), str) else None,
         tracked=bool(doc.get("tracked")),

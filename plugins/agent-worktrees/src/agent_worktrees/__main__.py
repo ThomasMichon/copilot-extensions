@@ -62,7 +62,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -5002,7 +5002,18 @@ _CONCLUDED_STATES = ("handed-off", "concluded")
 
 def _pending_handoff_predecessor_safe(record, *, exclude):
     try:
-        return tracking._pending_handoff_predecessor(record, exclude=exclude)
+        pending = record.pending_handoffs
+        if pending:
+            predecessor = record.session_entry(pending[-1].predecessor)
+            if predecessor is not None and predecessor.session_id != exclude:
+                return predecessor
+        # Legacy records had no numbered ledger; retain read compatibility.
+        for entry in reversed(record.sessions or ()):
+            if entry.session_id != exclude and (
+                entry.state == "handed-off" and entry.successor is None
+            ):
+                return entry
+        return None
     except Exception:
         return None
 
@@ -16387,12 +16398,19 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
     sp.add_argument("--emit-context", action="store_true",
                     help="Emit sessionStart additionalContext for the recovered binding")
+    sp.add_argument("--handoff-token", default=None,
+                    help="Exact pending handoff token this session is consuming")
 
     sp = sub.add_parser("deregister-session",
                         help="Mark a Copilot session as ended on a worktree")
     sp.add_argument("--worktree-id", default=None,
                     help="Worktree ID (resolved from cwd or launch binding when omitted)")
-    sp.add_argument("--session-id", required=True, help="Copilot session ID")
+    sp.add_argument("--session-id", default=None,
+                    help="Copilot session ID (read from --stdin payload when omitted)")
+    sp.add_argument("--cwd", default=None,
+                    help="Session cwd from the sessionEnd payload")
+    sp.add_argument("--stdin", action="store_true",
+                    help="Read the Copilot sessionEnd JSON payload from stdin")
     sp.add_argument("--launch-id", dest="launch_id", default=None,
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
 
@@ -16411,6 +16429,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
     sp.add_argument("--pid", type=int, default=None,
                     help="PID of the Copilot process (diagnostic only)")
+    sp.add_argument("--handoff-token", default=None,
+                    help="Exact pending handoff token this successor consumes")
 
     # bind-nudge -- postToolUse hook: nudge an unbound-but-active session to bind
     sp = sub.add_parser(
@@ -16495,9 +16515,8 @@ def build_parser() -> argparse.ArgumentParser:
     # conclude-session -- assert a session's conclusion (handed-off | concluded)
     sp = sub.add_parser(
         "conclude-session",
-        help="Assert a session concluded (handed-off|concluded); advances the "
-             "head off it (JSON) -- the durable write context-handoff's cutover "
-             "shells to",
+        help="Assert a session concluded (handed-off|concluded); clears it as "
+             "head (JSON) without guessing a successor",
     )
     sp.add_argument("--worktree", "--worktree-id", dest="worktree_id",
                     required=True, help="Worktree ID (full or 4-char suffix)")
@@ -16506,6 +16525,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--state", choices=["handed-off", "concluded"],
                     default="handed-off",
                     help="Conclusion kind (default: handed-off)")
+    sp.add_argument("--handoff-token", default=None,
+                    help="Stable token for the pending handoff")
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
@@ -16524,6 +16545,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--predecessor-state", dest="predecessor_state",
                     choices=["handed-off", "concluded"], default="handed-off",
                     help="Predecessor conclusion kind (default: handed-off)")
+    sp.add_argument("--handoff-token", default=None,
+                    help="Stable token for this succession link")
     sp.add_argument("--json", action="store_true",
                     help="Emit JSON (default; accepted for caller compatibility)")
 
@@ -16672,6 +16695,36 @@ def _read_hook_stdin() -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _hook_event_timestamp(payload: dict | None) -> str | None:
+    """Normalize a hook payload timestamp without using it for ordering."""
+    if not payload:
+        return None
+    value = payload.get("timestamp")
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        seconds = float(value)
+        if seconds > 10_000_000_000:
+            seconds /= 1000
+        try:
+            return datetime.fromtimestamp(
+                seconds, tz=timezone.utc
+            ).replace(tzinfo=None).strftime("%Y-%m-%dT%H:%M:%S")
+        except (OSError, OverflowError, ValueError):
+            return None
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = datetime.fromisoformat(
+                value.strip().replace("Z", "+00:00")
+            )
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed.strftime("%Y-%m-%dT%H:%M:%S")
+        except ValueError:
+            return None
+    return None
+
+
 def cmd_register_session(args: argparse.Namespace) -> int:
     """Register a Copilot session against a worktree (hook-invoked).
 
@@ -16689,6 +16742,8 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     session_id = getattr(args, "session_id", None)
     cwd = getattr(args, "cwd", None)
     pid = getattr(args, "pid", None)
+    event_at = None
+    source = "hook"
     pane_id = (
         getattr(args, "pane", None)
         or os.environ.get("TMUX_PANE")
@@ -16703,6 +16758,10 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         if payload:
             session_id = session_id or payload.get("sessionId")
             cwd = cwd or payload.get("cwd")
+            event_at = _hook_event_timestamp(payload)
+            hook_source = payload.get("source")
+            if isinstance(hook_source, str) and hook_source.strip():
+                source = f"hook:{hook_source.strip()}"
 
     # Last-resort env fallback (set for tool subprocesses, not the hook).
     if not session_id:
@@ -16759,7 +16818,15 @@ def cmd_register_session(args: argparse.Namespace) -> int:
         pid = pid or mux_binding.get("copilot_pid")
 
     try:
-        tracking.register_session(wt_id, session_id, pid=pid, pane_id=pane_id)
+        tracking.register_session(
+            wt_id,
+            session_id,
+            pid=pid,
+            pane_id=pane_id,
+            started_at=event_at,
+            source=source,
+            handoff_token=getattr(args, "handoff_token", None),
+        )
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
@@ -16909,6 +16976,8 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             wt_id, session_id,
             pid=getattr(args, "pid", None),
             pane_id=pane_id,
+            source="bind",
+            handoff_token=getattr(args, "handoff_token", None),
         )
     except Exception as e:
         return _json_error(f"failed to bind session: {e}")
@@ -17032,6 +17101,30 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
         parts.append(f"handoff task {task}")
     summary = " -- ".join(parts) if parts else "handoff stored"
 
+    handoff_ordinal = None
+    if task and session_id:
+        try:
+            yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+            existing = tracking.load_record(yaml_path)
+            if existing.session_entry(session_id) is None:
+                tracking.register_session(
+                    wt_id, session_id, source="handoff",
+                )
+            with tracking._RecordLock(yaml_path):
+                record = tracking.load_record(yaml_path)
+                handoff = tracking.open_handoff(
+                    record,
+                    session_id,
+                    task,
+                    save=False,
+                )
+                tracking.save_record(record, yaml_path)
+                handoff_ordinal = handoff.ordinal
+        except Exception:
+            # The history pointer remains useful even when the predecessor was
+            # not yet associated; handoff storage itself must stay fail-open.
+            handoff_ordinal = None
+
     disposition_history.append(
         wt_id,
         at=tracking._now_iso(),
@@ -17047,6 +17140,7 @@ def cmd_note_handoff(args: argparse.Namespace) -> int:
         "worktree_id": wt_id,
         "session": session_id,
         "task": task or None,
+        "handoff_ordinal": handoff_ordinal,
     })
     return 0
 
@@ -17152,22 +17246,56 @@ def cmd_deregister_session(args: argparse.Namespace) -> int:
     """
     wt_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
+    cwd = getattr(args, "cwd", None)
+    event_at = None
+    source = "hook"
+    if getattr(args, "stdin", False):
+        payload = _read_hook_stdin()
+        if payload:
+            session_id = session_id or payload.get("sessionId")
+            cwd = cwd or payload.get("cwd")
+            event_at = _hook_event_timestamp(payload)
+            hook_source = payload.get("source")
+            if isinstance(hook_source, str) and hook_source.strip():
+                source = f"hook:{hook_source.strip()}"
+    if not session_id:
+        session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
+    if not session_id:
+        return 0
     if not wt_id:
         wt_id = _activate_session_binding(session_id)
-    # Infer the worktree from CWD (git-like) when not passed explicitly -- the
-    # sessionEnd hook runs in the worktree, so no ambient WORKTREE_ID is needed.
+    if not wt_id and cwd:
+        _activate_project_for_path(cwd)
+        try:
+            wt_id = tracking.find_worktree_id_by_cwd(cwd)
+        except Exception:
+            wt_id = None
+    # A sessionEnd hook may run outside the worktree. Resolve the exact prior
+    # association across projects rather than guessing from the hook process cwd.
     if not wt_id:
-        wt_id = _infer_worktree_id(None)
+        yaml_path = _find_tracking_file_by_session(session_id)
+        if yaml_path is not None:
+            try:
+                wt_id = tracking.load_record(yaml_path).worktree_id
+                _activate_project_for_worktree_id(wt_id)
+            except Exception:
+                wt_id = None
     if wt_id:
-        wt_id = _resolve_worktree_id(wt_id)
-    if not wt_id or not session_id:
-        output.err(
-            "Usage: deregister-session --session-id ID "
-            "[--worktree-id ID | run from inside the worktree]"
-        )
-        return 1
+        if not cfg.active_project():
+            _activate_project_for_worktree_id(wt_id)
+        try:
+            wt_id = _resolve_worktree_id(wt_id)
+        except Exception:
+            return 0
+    if not wt_id:
+        return 0
     try:
-        tracking.deregister_session(wt_id, session_id)
+        tracking.deregister_session(
+            wt_id,
+            session_id,
+            ended_at=event_at,
+            source=source,
+        )
         # Capture session title from workspace.yaml → tracking YAML
         _capture_session_title(wt_id, session_id)
     except Exception as e:
@@ -17361,6 +17489,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     misaligned = []
     orphaned = []
     orphaned_fixed = 0
+    stale_heads: list[str] = []
+    stale_heads_fixed = 0
 
     if proj_name:
         tracking_dir = cfg.tracking_dir()
@@ -17390,7 +17520,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
         records = tracking.list_records(tracking_dir)
 
-        # 3. Stale status: active + completed_at -> complete
+        # 3. The transition ledger is authoritative; the stored head fields are
+        # only a materialized cache for cheap readers.
+        for record in health.find_stale_head_caches(records):
+            stale_heads.append(record.worktree_id)
+            if apply and tracking.repair_head_cache(record):
+                tracking.save_record(record)
+                stale_heads_fixed += 1
+
+        # 4. Stale status: active + completed_at -> complete
         stale = health.find_stale_status(records)
         if apply:
             for r in stale:
@@ -17398,7 +17536,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 tracking.save_record(r)
                 stale_fixed += 1
 
-        # 4. Empty session-state shells.
+        # 5. Empty session-state shells.
         exclude = health.registered_session_ids(records) | _current_session_ids()
         shells = health.find_empty_session_shells(
             session_dir, exclude_ids=frozenset(exclude)
@@ -17407,17 +17545,19 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             session_dir, store_db, shells, apply=(apply and do_gc)
         )
 
-        # 5. Alignment audit (report-only)
+        # 6. Alignment audit (report-only)
         misaligned = health.audit_alignment(records, session_dir)
 
-        # 5b. Re-activate only stale orphaned handoff tails.
+        # 6b. Re-activate only stale orphaned handoff tails.
         orphaned = health.find_orphaned_handoffs(records)
         if apply:
             for o in orphaned:
                 entry = o.record.session_entry(o.session_id)
                 if entry is not None and entry.state == "handed-off":
                     entry.state = "active"
-                    o.record.head_session = o.session_id
+                    tracking.set_head_session(
+                        o.record, o.session_id, save=False,
+                    )
                     tracking.save_record(o.record)
                     o.reactivated = True
                     orphaned_fixed += 1
@@ -17469,6 +17609,11 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             ],
         },
         "backfill": backfill,
+        "head_cache": {
+            "found": len(stale_heads),
+            "fixed": stale_heads_fixed,
+            "ids": stale_heads,
+        },
         "stale_status": {"found": len(stale), "fixed": stale_fixed,
                          "ids": [r.worktree_id for r in stale]},
         "empty_sessions": gc_result,
@@ -17522,6 +17667,14 @@ def _render_doctor_report(report: dict, *, applied: bool, gc_applied: bool) -> N
     else:
         print(f"  \u2022 Backfill candidates: {bf['worktrees']} worktree(s) "
               f"w/ discoverable sessions, {bf['titles']} missing title(s)")
+
+    hc = report.get("head_cache", {"found": 0, "fixed": 0, "ids": []})
+    if hc["found"]:
+        print(f"  {chk if applied else '!'} Stale head cache: {hc['found']} "
+              f"{'fixed' if applied else 'found'} -> "
+              f"{', '.join(hc['ids'][:8])}")
+    else:
+        print(f"  {chk} Head caches match the transition ledger")
 
     ss = report["stale_status"]
     if ss["found"]:
@@ -17643,6 +17796,8 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
 
     by_session: dict[str, dict] = {}
     head_session: str | None = None
+    head_revision = 0
+    handoffs: list[dict] = []
     for rec in records:
         for s in sessions.list_worktree_sessions(rec):
             row = dict(s)
@@ -17679,10 +17834,17 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     # ground-layer record; no rival pointer (agent-fabric derive-dont-duplicate).
     if wt_id and records:
         head_session = records[0].resolved_head_session
+        transition = records[0].replayed_head_transition
+        head_revision = transition.revision if transition is not None else 0
+        handoffs = [
+            dataclasses.asdict(handoff) for handoff in records[0].handoffs
+        ]
 
     _json_output({
         "sessions": list(by_session.values()),
         "head_session": head_session,
+        "head_revision": head_revision,
+        "handoffs": handoffs,
     })
     return 0
 
@@ -17744,6 +17906,22 @@ def _find_tracking_file(raw_id: str) -> Path | None:
     return matches[0] if len(matches) == 1 else None
 
 
+def _find_tracking_file_by_session(session_id: str) -> Path | None:
+    """Locate the first exact registered association in deterministic order."""
+    for tracking_dir in _all_tracking_dirs():
+        if not tracking_dir.exists():
+            continue
+        for path in sorted(tracking_dir.glob("*.yaml"), key=lambda item: item.name):
+            try:
+                if session_id not in path.read_text(encoding="utf-8"):
+                    continue
+                if tracking.load_record(path).session_entry(session_id):
+                    return path
+            except Exception:
+                continue
+    return None
+
+
 def cmd_head_session(args: argparse.Namespace) -> int:
     """Emit a worktree's **asserted head session** and its lifecycle state (JSON).
 
@@ -17780,18 +17958,34 @@ def cmd_head_session(args: argparse.Namespace) -> int:
             "tracked": False,
             "head_session": None,
             "active": False,
+            "occupied": False,
             "state": None,
+            "head_revision": 0,
+            "pending_handoffs": [],
         })
         return 0
     record = tracking.load_record(yaml_path)
     head = record.resolved_head_session
     entry = record.session_entry(head) if head else None
+    transition = record.replayed_head_transition
+    pending = [
+        {
+            "ordinal": handoff.ordinal,
+            "token": handoff.token,
+            "predecessor": handoff.predecessor,
+            "opened_at": handoff.opened_at,
+        }
+        for handoff in record.pending_handoffs
+    ]
     _json_output({
         "worktree_id": record.worktree_id or raw,
         "tracked": True,
         "head_session": head,
         "active": head is not None,
+        "occupied": head is not None or bool(pending),
         "state": (entry.state if entry is not None else None),
+        "head_revision": transition.revision if transition is not None else 0,
+        "pending_handoffs": pending,
     })
     return 0
 
@@ -17801,12 +17995,10 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
 
     The ground-layer WRITE that context-handoff's live cutover shells to so the
     retired session leaves a durable, asserted lifecycle record -- not merely a
-    killed pane. Concluding the outgoing session ``handed-off`` advances the head
-    off it (``resolved_head_session`` derives the newest survivor, or None),
-    which is what closes the spent-baton replay: neither a stale replay nor the
-    agent-bridge create guard treats the worktree as still holding the concluded
-    session. The successor completes the two-way link when it registers
-    (:func:`tracking.register_session`).
+    killed pane. Concluding the outgoing session clears it as head without
+    guessing a replacement from list order. An exact-token successor bind
+    performs the normal atomic link; this command remains the compatibility and
+    explicit-sunset primitive.
 
     Resolves the worktree across all projects (a higher-layer caller's CWD is
     unrelated to the worktree). Unlike the read-only ``head-session``, an unknown
@@ -17822,7 +18014,12 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
         record = tracking.load_record(yaml_path)
         try:
             tracking.conclude_session(
-                record, args.session_id, state=state, save=False)
+                record,
+                args.session_id,
+                state=state,
+                handoff_token=getattr(args, "handoff_token", None),
+                save=False,
+            )
         except tracking.SessionLifecycleError as e:
             return _json_error(str(e))
         # Persist to the RESOLVED path, not ``record.yaml_path`` -- this verb is
@@ -17837,6 +18034,10 @@ def cmd_conclude_session(args: argparse.Namespace) -> int:
         "session": args.session_id,
         "state": (entry.state if entry is not None else None),
         "head_session": record.resolved_head_session,
+        "head_revision": record.head_revision,
+        "pending_handoffs": [
+            dataclasses.asdict(handoff) for handoff in record.pending_handoffs
+        ],
     })
     return 0
 
@@ -17863,6 +18064,7 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
                 record, args.predecessor, args.successor,
                 predecessor_state=getattr(
                     args, "predecessor_state", "handed-off"),
+                handoff_token=getattr(args, "handoff_token", None),
                 save=False,
             )
         except tracking.SessionLifecycleError as e:
@@ -17878,6 +18080,7 @@ def cmd_link_succession(args: argparse.Namespace) -> int:
         "successor": args.successor,
         "predecessor_state": (pred.state if pred is not None else None),
         "head_session": record.resolved_head_session,
+        "head_revision": record.head_revision,
     })
     return 0
 
@@ -18571,7 +18774,7 @@ def _git_toplevel(path: Path | None) -> Path | None:
 _NO_PROJECT_COMMANDS = {
     "--version", "-V", "--help", "-h", "repos", "accounts", "related", "install",
     "register", "hook", "knowledge", "reconcile-marketplaces",
-    "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session",
+    "picker", "doctor", "reap-shells", "status-updater", "status-monitor", "status-monitor-restart", "restart", "register-session", "deregister-session",
     "bind-session",
     "bind-nudge",
     "history-digest",

@@ -88,6 +88,7 @@ def test_registers_missing_session_on_populated_record(tmp_path, monkeypatch):
         "known", "missing"]
     assert after.session_entry("missing").state == "active"
     assert after.session_entry("missing").ended_at is None
+    assert after.lifecycle_revision > 0
     assert report["registered"] == 1
 
 

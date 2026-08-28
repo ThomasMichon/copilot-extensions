@@ -191,11 +191,7 @@ class ResidentSessionReconciler:
         return True
 
     def _repair_head(self, record: tracking.WorktreeRecord) -> bool:
-        resolved = record.resolved_head_session
-        if record.head_session and record.head_session != resolved:
-            record.head_session = resolved
-            return True
-        return False
+        return tracking.repair_head_cache(record)
 
     def _index_record(self, project: str, yaml_path: Path) -> dict:
         result = {"records": 0, "heads": 0, "mux": 0, "registered_mux": 0}
@@ -328,12 +324,22 @@ class ResidentSessionReconciler:
                 protected_head = self._heads.get((project, worktree_id))
                 entry = record.session_entry(observation["session_id"])
                 if entry is None:
+                    observed_at = observation["started_at"] or _canonical_timestamp(
+                        datetime.now()
+                    )
                     entry = tracking.SessionEntry(
                         session_id=observation["session_id"],
-                        started_at=observation["started_at"],
+                        started_at=observed_at,
                         pid=_session_live_pid(observation["entry"]),
+                        activations=[tracking.SessionActivation(
+                            ordinal=1,
+                            started_at=observed_at,
+                            start_recorded_at=_canonical_timestamp(datetime.now()),
+                            start_source="reconciled",
+                        )],
                     )
                     self._insert_session(record.sessions, entry)
+                    tracking._next_lifecycle_revision(record)
                     result["registered"] = 1
                     changed = True
                 else:
@@ -342,12 +348,23 @@ class ResidentSessionReconciler:
                         entry.pid != live_pid or entry.ended_at is not None
                     ):
                         entry.pid = live_pid
-                        entry.ended_at = None
+                        activation_added = tracking._start_session_activation(
+                            entry,
+                            event_at=observation["started_at"] or _canonical_timestamp(
+                                datetime.now()
+                            ),
+                            recorded_at=_canonical_timestamp(datetime.now()),
+                            source="reconciled",
+                        )
+                        if activation_added:
+                            tracking._next_lifecycle_revision(record)
                         result["pids"] = 1
                         changed = True
                 if (protected_head is not None
                         and record.resolved_head_session != protected_head):
-                    record.head_session = protected_head
+                    tracking.set_head_session(
+                        record, protected_head, save=False,
+                    )
                     result["heads"] = 1
                     changed = True
                 if changed:

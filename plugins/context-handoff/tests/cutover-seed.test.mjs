@@ -51,21 +51,21 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
     "bash-first task seed must NOT reference the consume_handoff extension tool",
   );
 
-  // It carries the exact three verbs consume_handoff shells to, in order.
+  // It consumes, claims the exact numbered handoff while binding, then retires.
   const consumeAt = seed.indexOf(`agent-dispatch consume ${TASK} --defer-complete`);
-  const concludeAt = seed.indexOf(
-    `agent-worktrees conclude-session --worktree ${WT} --session ${SID} --state handed-off`,
-  );
   const retireAt = seed.indexOf(
     `agent-worktrees handoff-cutover --retire-pane ${PANE} --successor-verified`,
   );
   assert.ok(consumeAt >= 0, "seed must contain the consume verb");
   const bindAt = seed.indexOf(
-    `agent-worktrees bind-session --worktree-id ${WT}`,
+    `agent-worktrees bind-session --worktree-id ${WT} --handoff-token ${TASK}`,
   );
   assert.ok(bindAt > consumeAt, "successor binding must follow consume");
-  assert.ok(concludeAt > bindAt, "conclude verb must follow successor binding");
-  assert.ok(retireAt > concludeAt, "retire verb must follow conclude");
+  assert.ok(retireAt > bindAt, "retire verb must follow successor binding");
+  assert.ok(
+    !seed.includes("agent-worktrees conclude-session"),
+    "exact handoff binding atomically concludes the predecessor",
+  );
 
   assert.match(seed, new RegExp(`worktree ID ${WT}`));
   assert.ok(seed.includes(`intended cwd "${WTDIR}"`));

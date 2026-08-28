@@ -1029,6 +1029,21 @@ def list_worktree_sessions(record) -> list[dict]:
         entry = record.session_entry(sid) if sid else None
         meta["state"] = entry.state if entry is not None else "active"
         meta["is_head"] = sid is not None and sid == head
+        if entry is not None:
+            meta["started_at_marker"] = entry.started_at
+            meta["ended_at_marker"] = entry.ended_at
+            meta["activations"] = [
+                {
+                    "ordinal": activation.ordinal,
+                    "started_at": activation.started_at,
+                    "start_recorded_at": activation.start_recorded_at,
+                    "start_source": activation.start_source,
+                    "ended_at": activation.ended_at,
+                    "end_recorded_at": activation.end_recorded_at,
+                    "end_source": activation.end_source,
+                }
+                for activation in entry.activations
+            ]
     return out
 
 
