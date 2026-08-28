@@ -210,10 +210,10 @@ if ($Os -eq 'windows') {
 
     Write-Host "== running Windows clean-room scenario '$sname' (through stage $Until) ==" -ForegroundColor Cyan
     & docker @dh run --rm --isolation=hyperv `
-        -v "${sdir}:C:\scenario" `
-        -v "${libDir}:C:\lib" `
+        -v "${sdir}:C:\scenario:ro" `
+        -v "${libDir}:C:\lib:ro" `
         -v "${ResultsDir}:C:\out" `
-        -v "${partner}:C:\partner" `
+        -v "${partner}:C:\partner:ro" `
         -e "CR_LIB=C:\lib\clean-room-lib.ps1" `
         -e "CR_PARTNER_PATH=C:\partner" `
         -e "CR_PARTNER_NAME=$PartnerName" `

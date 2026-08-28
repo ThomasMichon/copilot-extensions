@@ -1,0 +1,36 @@
+{
+  "name": "installation-mode-governance",
+  "description": "Tier-P Windows clean-room proof for the non-operative installation-mode resolver: policy precedence with proven provenance, pre-activation legacy pinning, migration-required legacy, sticky namespaced activation, orphaned transfer, maintenance blocking, and read-only evaluation.",
+  "tier": "P",
+  "family": "F1",
+  "image": "base",
+  "platforms": ["windows"],
+  "prereqs": {
+    "present": ["powershell"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "none",
+    "gh": "none",
+    "ado": "none"
+  },
+  "inputs": {
+    "CR_PARTNER_PATH": "mounted copilot-extensions source tree; the Windows runner mounts -PartnerPath at C:\\partner"
+  },
+  "expected_artifacts": [
+    "$HOME\\cr-report.json (phases + jams; ok iff failed==0)"
+  ],
+  "stages": [
+    {"n": 0, "title": "source and evaluator present"},
+    {"n": 1, "title": "absent policy selects legacy without writes"},
+    {"n": 2, "title": "proven plugin policy requests activation while legacy remains actual"},
+    {"n": 3, "title": "legacy footprint requires migration"},
+    {"n": 4, "title": "active namespaced mode stays pinned when policy is removed"},
+    {"n": 5, "title": "orphaned transfer fails closed"},
+    {"n": 6, "title": "stale maintenance marker blocks without auto-clear"}
+  ],
+  "notes": [
+    "Windows-only by design: this scenario exercises the real PowerShell 5.1 evaluator in a disposable Windows container.",
+    "The mounted source is read-only; all receipts, policies, ownership records, and reports live in disposable scenario state."
+  ]
+}
