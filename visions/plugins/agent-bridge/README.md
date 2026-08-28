@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-03
+- **Last revised:** 2026-08-27
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -56,6 +56,16 @@ The bridge exposes authenticated local control and reconnectable event delivery
 for tools, UI/fronts, and other agents. Prompt submission and event consumption
 are separate concerns so a consumer can reconnect to the same session history
 instead of making a long turn depend on a single live socket.
+
+### AHP host face
+
+The bridge exposes bridge-owned agent, session, chat, and event state to clients
+through the Agent Host Protocol (AHP). AHP is the upstream client-to-host
+contract; ACP remains the downstream contract used to drive an agent runtime.
+When the bridge federates a native-host-owned session, that native host remains
+authoritative and the bridge acts as a proxy or fidelity-declared projection.
+The bridge maps between roles without pretending the protocols have identical
+identity, lifecycle, replay semantics, or ownership.
 
 ### session host
 
@@ -115,6 +125,14 @@ The same coordination fabric is drivable from a CLI and from authenticated local
 control surfaces: start or resume sessions, submit turns, stream events, inspect
 state and context usage, interrupt the current turn without ending the session,
 and intentionally stop or end the session.
+
+### standards-compatible-host-control
+
+An AHP client can discover agents, create or subscribe to sessions and chats,
+drive turns, reconnect to ordered state, and mediate supported tool or input
+requests without binding to agent-bridge's private REST vocabulary. Existing
+CLI, REST, and ACP faces remain usable while clients converge on the standard
+host boundary.
 
 ### cursor-stable-event-replay
 
@@ -259,6 +277,24 @@ competing dialogue. Protocol interpretation belongs at the protocol edge; the
 bridge preserves the downstream agent's semantics while adding routing,
 ownership, and recovery.
 
+### host-protocol-above-agent-protocol
+
+AHP and ACP occupy different layers. For bridge-owned resources, the AHP face
+owns shared client-visible host state, subscriptions, ordering, replay, and
+named capabilities; the ACP face drives the downstream agent. A bridge never
+labels an ACP transport, session-host envelope, or REST event stream as AHP
+merely because the same conversation passes through it.
+
+### native-hosts-are-feature-detected-peers
+
+When the underlying CLI supplies a released, stable AHP host of its own, the
+bridge and its clients interoperate through that public contract. The bridge may
+delegate a local primitive to the native host or coexist as the richer
+multi-venue host by owning distinct resources. It never creates parallel
+lifecycle or replay authority for a native-owned session, never hard-depends on
+unreleased internals, and never drops its durable routing, recovery, or remote
+capabilities in the name of convergence.
+
 ### represent-at-honest-fidelity
 
 When representing a session it does not own, the bridge reports the fidelity it
@@ -343,6 +379,10 @@ machine may deliberately gate outbound reach until policy allows it.
   routes over declared reachability.
 - **Not a web UX.** A rich UI/front may consume the bridge, but the bridge is the
   runtime and headless control plane underneath it.
+- **Not a private reimplementation of a native local host.** The bridge exposes
+  a standards-compatible host boundary and retains its differentiated
+  multi-venue coordination value. Released native hosts are feature-detected
+  peers or providers, not private internals to copy or require.
 - **Not a credential broker.** The bridge launches sessions in environments that
   may carry credentials; credential storage, ceremonies, and policy live in the
   trust layer or host environment.
@@ -368,6 +408,11 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-08-27** — Extended the vision to distinguish the upstream AHP
+  client-to-host contract from downstream ACP agent control. Added the
+  standards-compatible host surface and the released-surface convergence
+  boundary for native local hosts, while retaining bridge-specific durable and
+  multi-venue value.
 - **2026-08-03** — Authored to give agent-bridge its own canonical plugin vision
   (the coordination-layer sibling of the agent-dispatch leaf), distilled and
   portabilized from a downstream facility's agent-bridge vision, surfaced while
