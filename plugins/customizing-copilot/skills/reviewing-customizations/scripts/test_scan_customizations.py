@@ -48,13 +48,17 @@ def _settings(repo: Path, enabled: dict, marketplaces: dict) -> None:
 
 def _installed_plugin(root: Path, mkt: str, name: str, *,
                       triggers: list[str] | None = None,
-                      repository: str | None = None) -> None:
+                      repository: str | None = None,
+                      version: str = "1.2.3") -> None:
     pdir = root / mkt / name
     (pdir / "skills").mkdir(parents=True, exist_ok=True)
     _skill(pdir / "skills", name, triggers=triggers)
+    manifest = {"name": name, "version": version}
     if repository:
-        (pdir / "plugin.json").write_text(
-            json.dumps({"name": name, "repository": repository}), encoding="utf-8")
+        manifest["repository"] = repository
+    (pdir / "plugin.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +114,7 @@ def test_assemble_github_marketplace_is_external_with_source(tmp_path: Path):
     assert len(srcs) == 1
     assert srcs[0].controlled is False
     assert srcs[0].source == "https://github.com/owner/mrepo"
+    assert srcs[0].version == "1.2.3"
 
 
 def test_assemble_source_falls_back_to_plugin_manifest(tmp_path: Path):
@@ -200,6 +205,28 @@ def test_local_vs_external_collision_is_annotated(tmp_path: Path):
     assert "contributing-to-copilot-extensions" in m  # the bridge pointer
 
 
+def test_suite_source_skill_supersedes_installed_copy(tmp_path: Path):
+    repo = tmp_path / "repo"
+    suite_skills = repo / "plugins" / "suite-skill" / "skills"
+    _skill(suite_skills, "worker", triggers=["shared phrase"])
+    installed = tmp_path / "installed" / "suite-skill"
+    _skill(
+        installed / "skills", "worker", triggers=["shared phrase"]
+    )
+    source = scan.PluginSource(
+        skills_root=installed / "skills",
+        origin="copilot-extensions/suite-skill",
+        controlled=False,
+        version="1.2.3",
+    )
+
+    report = _run_with_sources(repo, [source])
+
+    assert not any(
+        f.check == "trigger-collision" for f in report.findings
+    )
+
+
 def test_controlled_plugin_gets_full_checks(tmp_path: Path):
     """An in-repo (controlled) plugin is checked like an owned skill -- a
     name/folder mismatch is a BLOCKING finding, not reference-only silence."""
@@ -257,7 +284,165 @@ def test_controlled_plugin_agents_get_frontmatter_and_recursion_checks(
     report = scan.run(repo, [source])
 
     assert any(f.check == "agent-frontmatter" for f in report.findings)
-    assert sum(f.check == "anti-recursion" for f in report.findings) == 2
+    assert any(f.check == "mcp-readiness" for f in report.findings)
+    assert any(f.check == "anti-recursion" for f in report.findings)
+
+
+def test_task_capable_project_agent_requires_self_guard(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    finding = next(f for f in report.findings if f.check == "anti-recursion")
+    assert finding.severity == scan.BLOCKING
+    assert "`worker` agent" in finding.message
+
+
+def test_task_disabled_agent_is_exempt_from_self_guard(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "reader.agent.md").write_text(
+        "---\n"
+        "description: Reader.\n"
+        "tools:\n"
+        "  - read\n"
+        "  - search\n"
+        "---\n\n"
+        "# Reader\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(f.check == "anti-recursion" for f in report.findings)
+
+
+def test_scoped_wildcard_does_not_grant_task(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "reader.agent.md").write_text(
+        "---\n"
+        "description: Reader.\n"
+        "tools: ['read', 'service/*']\n"
+        "---\n\n"
+        "# Reader\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(f.check == "anti-recursion" for f in report.findings)
+
+
+def test_nested_mcp_tools_do_not_imply_task_is_disabled(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "mcp-servers:\n"
+        "  service:\n"
+        "    tools: ['*']\n"
+        "---\n\n"
+        "## MCP Readiness\n"
+        "Probe service_health.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert any(f.check == "anti-recursion" for f in report.findings)
+
+
+def test_coordinator_can_delegate_other_types_with_self_guard(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".github" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "coordinator.agent.md").write_text(
+        "---\ndescription: Coordinator.\ntools: ['*']\n---\n\n"
+        "Delegate bounded evidence work to research agents when authorized.\n"
+        "Do NOT use the task tool to spawn another `coordinator` agent.\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert not any(f.check == "anti-recursion" for f in report.findings)
+
+
+def test_claude_project_agents_receive_equivalent_checks(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / ".claude" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    assert any(
+        f.check == "anti-recursion"
+        and f.severity == scan.BLOCKING
+        and f.path.endswith("worker.agent.md")
+        for f in report.findings
+    )
+
+
+def test_suite_plugin_agent_is_blocking_from_editable_source(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / "plugins" / "suite-agent" / "agents"
+    agents.mkdir(parents=True)
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n",
+        encoding="utf-8",
+    )
+
+    report = scan.run(repo)
+
+    finding = next(f for f in report.findings if f.check == "anti-recursion")
+    assert finding.severity == scan.BLOCKING
+
+
+def test_suite_source_agent_supersedes_installed_copy(tmp_path: Path):
+    repo = tmp_path / "repo"
+    agents = repo / "plugins" / "suite-agent" / "agents"
+    agents.mkdir(parents=True)
+    content = (
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n"
+    )
+    (agents / "worker.agent.md").write_text(content, encoding="utf-8")
+    installed = tmp_path / "installed" / "suite-agent"
+    installed_agents = installed / "agents"
+    installed_agents.mkdir(parents=True)
+    (installed_agents / "worker.agent.md").write_text(
+        content, encoding="utf-8"
+    )
+    source = scan.PluginSource(
+        skills_root=installed / "skills",
+        origin="copilot-extensions/suite-agent",
+        controlled=False,
+        version="1.2.3",
+    )
+
+    report = scan.run(repo, [source])
+
+    findings = [
+        f for f in report.findings if f.check == "anti-recursion"
+    ]
+    assert len(findings) == 1
+    assert findings[0].severity == scan.BLOCKING
+    assert findings[0].path.endswith("worker.agent.md")
+    assert not findings[0].path.startswith("<plugin:")
 
 
 def test_agent_mcp_agent_requires_materialized_fallback(tmp_path: Path):
@@ -387,25 +572,69 @@ def test_fallback_parser_rejects_common_negations():
         assert not scan.has_mcp_fallback(phrase)
 
 
-def test_external_plugin_agents_remain_reference_only(tmp_path: Path):
+def test_external_plugin_agent_guard_is_origin_version_advisory(tmp_path: Path):
     repo = tmp_path / "repo"
     repo.mkdir()
     plugin = tmp_path / "installed" / "mkt" / "external"
     agents = plugin / "agents"
     agents.mkdir(parents=True)
-    (agents / "invalid.agent.md").write_text(
-        "# No frontmatter\n", encoding="utf-8"
+    (agents / "worker.agent.md").write_text(
+        "---\ndescription: Worker.\ntools: ['*']\n---\n\n# Worker\n",
+        encoding="utf-8",
     )
     source = scan.PluginSource(
         skills_root=plugin / "skills",
         origin="mkt/external",
         controlled=False,
+        source="https://github.com/example/external",
+        version="4.5.6",
     )
 
     report = scan.run(repo, [source])
 
-    assert not any(f.check in {"agent-frontmatter", "anti-recursion"}
-                   for f in report.findings)
+    finding = next(f for f in report.findings if f.check == "anti-recursion")
+    assert finding.severity == scan.WARNING
+    assert finding.path == (
+        "<plugin:mkt/external@4.5.6>/agents/worker.agent.md"
+    )
+    assert "`mkt/external@4.5.6`" in finding.message
+    assert "https://github.com/example/external" in finding.message
+    assert "cannot edit its installed payload" in finding.message
+
+
+def test_external_plugin_agent_mcp_checks_are_advisory(tmp_path: Path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    plugin = tmp_path / "installed" / "mkt" / "external"
+    agents = plugin / "agents"
+    agents.mkdir(parents=True)
+    (agents / "service.agent.md").write_text(
+        "---\n"
+        "description: Service.\n"
+        "tools: ['read']\n"
+        "mcp-servers:\n"
+        "  service:\n"
+        "    command: agent-mcp\n"
+        "---\n\n"
+        "# Service\n",
+        encoding="utf-8",
+    )
+    source = scan.PluginSource(
+        skills_root=plugin / "skills",
+        origin="mkt/external",
+        controlled=False,
+        source="https://github.com/example/external",
+        version="4.5.6",
+    )
+
+    report = scan.run(repo, [source])
+
+    findings = {
+        f.check: f for f in report.findings
+        if f.check in {"mcp-readiness", "mcp-fallback"}
+    }
+    assert set(findings) == {"mcp-readiness", "mcp-fallback"}
+    assert all(f.severity == scan.WARNING for f in findings.values())
 
 
 def test_controlled_plugin_text_files_get_secret_checks(tmp_path: Path):
@@ -526,21 +755,31 @@ def test_context_budget_counts_static_custom_and_metadata(
     (repo / "AGENTS.md").write_bytes(b"repo guidance\r\n")
     nested = repo / "pkg"
     nested.mkdir()
-    (nested / "AGENTS.md").write_text("nested rule\n", encoding="utf-8")
-    (nested / "CLAUDE.md").write_text("nested claude\n", encoding="utf-8")
-    (nested / "GEMINI.md").write_text("nested gemini\n", encoding="utf-8")
-    (repo / "CLAUDE.md").write_text("claude guidance\n", encoding="utf-8")
-    (repo / "GEMINI.md").write_text("gemini guidance\n", encoding="utf-8")
+    (nested / "AGENTS.md").write_text(
+        "nested rule\n", encoding="utf-8", newline=""
+    )
+    (nested / "CLAUDE.md").write_text(
+        "nested claude\n", encoding="utf-8", newline=""
+    )
+    (nested / "GEMINI.md").write_text(
+        "nested gemini\n", encoding="utf-8", newline=""
+    )
+    (repo / "CLAUDE.md").write_text(
+        "claude guidance\n", encoding="utf-8", newline=""
+    )
+    (repo / "GEMINI.md").write_text(
+        "gemini guidance\n", encoding="utf-8", newline=""
+    )
     custom_one = tmp_path / "instructions-one"
     custom_one.mkdir()
     (custom_one / "operator.instructions.md").write_text(
-        "operator policy one\n", encoding="utf-8")
+        "operator policy one\n", encoding="utf-8", newline="")
     (custom_one / "unrelated.md").write_text(
         "not an instruction payload\n", encoding="utf-8")
     custom_two = tmp_path / "instructions-two"
     custom_two.mkdir()
     (custom_two / "machine.instructions.md").write_text(
-        "operator policy two\n", encoding="utf-8"
+        "operator policy two\n", encoding="utf-8", newline=""
     )
     monkeypatch.setenv(
         "COPILOT_CUSTOM_INSTRUCTIONS_DIRS",
@@ -550,7 +789,7 @@ def test_context_budget_counts_static_custom_and_metadata(
     personal = home / ".copilot"
     personal.mkdir(parents=True)
     (personal / "copilot-instructions.md").write_text(
-        "personal policy\n", encoding="utf-8"
+        "personal policy\n", encoding="utf-8", newline=""
     )
 
     _skill(repo / ".github" / "skills", "local", desc="Local description.")

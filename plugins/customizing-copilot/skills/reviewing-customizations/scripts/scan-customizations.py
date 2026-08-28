@@ -17,9 +17,10 @@ Checks (all stdlib, no dependencies):
                             inline *prose* quoted phrases count, and (with
                             `--include-plugins`) collisions are detected across
                             LOCAL skills and installed-plugin skills too.
-  4. anti-recursion      -- an agent that declares `mcp-servers` also carries an
-                            MCP-readiness probe and an anti-self-delegation line;
-                            agent-mcp-backed agents name a materialized fallback.
+  4. agent safety        -- every Task-capable agent carries an agent-specific
+                            anti-self-delegation line; MCP-owning agents also
+                            carry an MCP-readiness section, and agent-mcp-backed
+                            agents name an equivalent materialized fallback.
   5. secrets             -- a secret-looking key is assigned a literal value
                             (not an env-var / placeholder) in a scanned file.
   6. raw IPs             -- an ssh/scp/rsync command targets a raw IPv4 literal
@@ -36,11 +37,11 @@ plugin set **actually loaded for this repo** -- from its
 `.github/copilot/settings.json` (+ user settings) `enabledPlugins` /
 `extraKnownMarketplaces` -- and brings each into scope: an in-repo `directory`
 marketplace plugin (e.g. `./.ai`) is **owned** (fully checked), while an
-external marketplace plugin is **reference-only** (its skills join the collision
-map, and a collision that touches it is annotated with a fix pointer + upstream
-`source`). `--include-plugins` / `--include-installed` still add raw
-installed-plugin trees (layout `<root>/<marketplace>/<plugin>/skills/...`) the
-same reference-only way. Exit code is 0 unless `--strict` is given and at least
+external marketplace plugin is **advisory**: its skills join the collision map
+and its agents receive origin/version-aware safety findings without making the
+consumer repo fail strict mode. `--include-plugins` / `--include-installed` add raw
+installed-plugin trees (layout `<root>/<marketplace>/<plugin>/...`) the
+same advisory way. Exit code is 0 unless `--strict` is given and at least
 one BLOCKING finding was reported. `--context-budget` inventories always-loaded
 and conditional repository instructions, standard personal instructions,
 configured instruction directories, enabled skill/agent frontmatter, and
@@ -105,11 +106,6 @@ SSH_RAW_IP = re.compile(
 NEGATIVE_EXAMPLE = re.compile(
     r"(?i)\b(wrong|never|don'?t|do not|avoid|bad|incorrect|counter-?example)\b|\u274c"
 )
-# Anti-self-delegation intent -- matched against a whitespace-collapsed body so
-# it survives line wrapping. "do not ... (task tool|spawn|delegate)" within a
-# short window; deliberately lenient (a false negative is safer than crying wolf).
-ANTI_DELEGATE = re.compile(r"(?i)do\s*not\b.{0,80}?(task\s*tool|spawn|delegate)\b")
-MCP_READINESS = re.compile(r"(?i)mcp[\s_-]*readiness|readiness\s+(check|probe)")
 MCP_FALLBACK_ACTION = re.compile(
     r"(?i)\b(use|invoke|run|switch|continue|fall\s+back)\b.{0,120}"
     r"\b(materialized|fleets?|stubs?|agent-mcp\s+materialize)\b",
@@ -141,6 +137,40 @@ def has_mcp_fallback(text: str) -> bool:
         return True
     return False
 
+
+def frontmatter_tool_names(frontmatter: str) -> set[str] | None:
+    """Return normalized tool names, or None when tools are unrestricted."""
+    if not re.search(r"(?im)^tools\s*:", frontmatter):
+        return None
+    raw = get_field_block(frontmatter, "tools")
+    without_comments = "\n".join(line.split("#", 1)[0] for line in raw.splitlines())
+    return {
+        token.lower()
+        for token in re.findall(
+            r"[A-Za-z*][A-Za-z0-9_.*:/-]*", without_comments
+        )
+    }
+
+
+def agent_can_invoke_task(frontmatter: str) -> bool:
+    """Whether an agent's declared tool surface includes the Task/agent tool."""
+    tools = frontmatter_tool_names(frontmatter)
+    return tools is None or bool({"*", "agent", "task"} & tools)
+
+
+def has_anti_self_delegation(text: str, agent_name: str) -> bool:
+    """Require an explicit do-not-spawn/delegate line naming this agent type."""
+    flat = re.sub(r"\s+", " ", text)
+    name = re.escape(agent_name.strip().strip("'\""))
+    if not name:
+        return False
+    return bool(re.search(
+        rf"(?i)do\s+not\b.{{0,160}}"
+        rf"(?:task\s+tool|spawn|delegate)\b.{{0,160}}"
+        rf"(?:another\s+)?[`'\"]?{name}[`'\"]?\s+agent\b",
+        flat,
+    ))
+
 CONFIG_SUFFIXES = {".json", ".yaml", ".yml", ".toml", ".psd1", ".env", ".ini", ".conf"}
 # Heavy / irrelevant trees to skip when walking a large monorepo.
 PRUNE_DIRS = {
@@ -167,20 +197,21 @@ class Finding:
 
 @dataclass
 class PluginSource:
-    """A plugin whose skills join the review, with ownership + source origin.
+    """A loaded plugin with ownership, source, and release identity.
 
     ``controlled`` is True when the repo under review OWNS the plugin (its own
     in-repo ``.ai`` directory-marketplace plugins, or its ``plugins/*`` suite):
     those get full checks and their findings are actionable in-repo. When False
     the plugin is **external** (installed from another marketplace) -- its skills
-    are reference-only for collision detection, and a collision that touches it
-    carries a remediation pointer (fix in-repo, or upstream at ``source``).
+    are reference-only for collision detection, while agent safety findings are
+    advisory and carry an upstream remediation pointer.
     """
 
     skills_root: Path
     origin: str                # "<marketplace>/<plugin>" label
     controlled: bool = False
     source: str = ""           # upstream repo URL for an external plugin ("" if in-repo/unknown)
+    version: str = ""          # installed plugin version ("" when unavailable)
 
     @property
     def payload_root(self) -> Path:
@@ -242,6 +273,19 @@ def _plugin_repo_url(footprint: Path) -> str:
                 val = val.get("url", "")
             if isinstance(val, str) and val.strip():
                 return val.strip()
+    return ""
+
+
+def _plugin_version(footprint: Path) -> str:
+    """Return the plugin's declared version from either manifest spelling."""
+    for manifest in (
+        footprint / "plugin.json",
+        footprint / ".claude-plugin" / "plugin.json",
+    ):
+        data = _load_json(manifest)
+        value = data.get("version")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
     return ""
 
 
@@ -338,6 +382,7 @@ def assemble_enabled_plugins(
             out.append(PluginSource(
                 skills_root=skills_root, origin=origin,
                 controlled=controlled, source=source_url,
+                version=_plugin_version(footprint),
             ))
     return out
 
@@ -491,7 +536,11 @@ def scan_skills(root: Path, report: Report,
     # Owned skills: local `.github/skills` + this repo's own `plugins/*`. Full
     # checks apply, and both structured + prose triggers feed the collision map.
     owned = sorted(root.glob(".github/skills/*/SKILL.md"))
-    owned += sorted(root.glob("plugins/*/skills/*/SKILL.md"))
+    suite_owned = sorted(root.glob("plugins/*/skills/*/SKILL.md"))
+    owned += suite_owned
+    owned_plugin_skills = {
+        (sf.parent.parent.parent.name, sf.parent.name) for sf in suite_owned
+    }
     for sf in owned:
         text = sf.read_text(encoding="utf-8", errors="replace")
         fm = split_frontmatter(text)
@@ -510,8 +559,14 @@ def scan_skills(root: Path, report: Report,
     # an owned collision participant; an *external* plugin is reference-only, its
     # skills joining the collision map so a LOCAL<->PLUGIN clash is visible and
     # annotated with a fix pointer.
-    for ps in (plugin_sources or []):
+    for ps in sorted(
+        plugin_sources or [], key=lambda item: not item.controlled
+    ):
         for sf in sorted(ps.skills_root.glob("*/SKILL.md")):
+            plugin_name = ps.origin.rsplit("/", 1)[-1]
+            logical_key = (plugin_name, sf.parent.name)
+            if not ps.controlled and logical_key in owned_plugin_skills:
+                continue
             fm = split_frontmatter(sf.read_text(encoding="utf-8", errors="replace"))
             if fm is None:
                 continue
@@ -526,6 +581,8 @@ def scan_skills(root: Path, report: Report,
             for t in _dedup(extract_triggers(frontmatter)
                             + extract_prose_triggers(frontmatter)):
                 trigger_owner.setdefault(t.lower(), set()).add(label)
+            if ps.controlled:
+                owned_plugin_skills.add(logical_key)
 
     for phrase, owners in sorted(trigger_owner.items()):
         uniq = sorted(owners)
@@ -552,57 +609,115 @@ def scan_agents(
     report: Report,
     plugin_sources: list[PluginSource] | None = None,
 ) -> None:
-    agent_files = set(root.glob(".github/agents/*.agent.md"))
-    agent_files.update(root.glob("plugins/*/agents/*.agent.md"))
-    for source in plugin_sources or []:
-        if source.controlled:
-            agent_files.update(source.payload_root.glob("agents/*.agent.md"))
-    for af in sorted(agent_files):
+    # Path -> source. None means editable project/suite source. Owned sources
+    # take precedence if the same payload is also discovered as installed.
+    agent_files: dict[Path, PluginSource | None] = {}
+    owned_plugin_agents: set[tuple[str, str]] = set()
+    for af in (
+        set(root.glob(".github/agents/*.agent.md"))
+        | set(root.glob(".claude/agents/*.agent.md"))
+    ):
+        agent_files[af.resolve()] = None
+    for af in root.glob("plugins/*/agents/*.agent.md"):
+        agent_files[af.resolve()] = None
+        owned_plugin_agents.add((af.parent.parent.name, af.name))
+    for source in sorted(
+        plugin_sources or [], key=lambda item: not item.controlled
+    ):
+        for af in source.payload_root.glob("agents/*.agent.md"):
+            plugin_name = source.origin.rsplit("/", 1)[-1]
+            logical_key = (plugin_name, af.name)
+            if not source.controlled and logical_key in owned_plugin_agents:
+                continue
+            resolved = af.resolve()
+            if resolved not in agent_files:
+                agent_files[resolved] = source
+            elif source.controlled and agent_files[resolved] is not None:
+                agent_files[resolved] = source
+            if source.controlled:
+                owned_plugin_agents.add(logical_key)
+
+    for af, source in sorted(agent_files.items(), key=lambda item: str(item[0])):
+        external = source is not None and not source.controlled
+        severity = WARNING if external else BLOCKING
+        if external:
+            identity = source.origin
+            if source.version:
+                identity += f"@{source.version}"
+            else:
+                identity += "@<unknown-version>"
+            path: Path | str = f"<plugin:{identity}>/agents/{af.name}"
+            upstream = source.source or f"the `{source.origin}` marketplace source"
+            suffix = (
+                f" External enabled plugin `{identity}` is advisory because this "
+                f"repo cannot edit its installed payload. Disable or configure "
+                f"the plugin here, or fix it upstream at {upstream} using that "
+                f"repo's contribution workflow (prefer its `<repo>-harness` "
+                f"contributing skill when enabled)."
+            )
+        else:
+            path = af
+            suffix = ""
+
+        def add(check: str, message: str) -> None:
+            report.add(severity, check, path, message + suffix)
+
         text = af.read_text(encoding="utf-8", errors="replace")
         fm = split_frontmatter(text)
         if fm is None:
-            report.add(BLOCKING, "agent-frontmatter", af,
-                       ".agent.md has no YAML frontmatter (--- block)")
+            add("agent-frontmatter",
+                ".agent.md has no YAML frontmatter (--- block)")
             continue
         frontmatter, body = fm
         if "description" not in frontmatter.lower():
-            report.add(BLOCKING, "agent-frontmatter", af,
-                       "frontmatter missing `description`")
-        if re.search(r"(?im)^\s*mcp-servers\s*:", frontmatter):
-            flat = re.sub(r"\s+", " ", body)
-            readiness_match = re.search(
-                r"(?ims)^##\s+MCP\s+Readiness\b(.*?)(?=^##\s|\Z)",
-                body,
+            add("agent-frontmatter", "frontmatter missing `description`")
+
+        declared_name = get_field(frontmatter, "name")
+        agent_name = (
+            declared_name.strip().strip("'\"")
+            if declared_name
+            else af.name.removesuffix(".agent.md")
+        )
+        has_mcp = bool(re.search(
+            r"(?im)^\s*mcp-servers\s*:", frontmatter
+        ))
+        readiness_match = re.search(
+            r"(?ims)^##\s+MCP\s+Readiness\b(.*?)(?=^##\s|\Z)",
+            body,
+        )
+        readiness = re.sub(
+            r"\s+", " ", readiness_match.group(1) if readiness_match else "",
+        )
+
+        if has_mcp and readiness_match is None:
+            add(
+                "mcp-readiness",
+                "declares mcp-servers but has no `## MCP Readiness` section "
+                "(probe one tool on startup and preserve the exact error)",
             )
-            readiness = re.sub(
-                r"\s+", " ", readiness_match.group(1) if readiness_match else body,
-            )
-            has_readiness = bool(MCP_READINESS.search(flat))
-            has_anti = bool(ANTI_DELEGATE.search(flat))
-            uses_agent_mcp = bool(
-                re.search(
-                    r"(?im)^\s*command\s*:\s*['\"]?agent-mcp['\"]?"
-                    r"\s*(?:#.*)?$",
-                    frontmatter,
+
+        if agent_can_invoke_task(frontmatter):
+            anti_scope = readiness if has_mcp else body
+            if not has_anti_self_delegation(anti_scope, agent_name):
+                location = " in `## MCP Readiness`" if has_mcp else ""
+                add(
+                    "anti-recursion",
+                    "Task-capable agent has no agent-specific anti-self-"
+                    f"delegation line{location} (use: \"Do NOT use the task "
+                    f"tool to spawn another `{agent_name}` agent.\")",
                 )
+
+        uses_agent_mcp = bool(re.search(
+            r"(?im)^\s*command\s*:\s*['\"]?agent-mcp['\"]?"
+            r"\s*(?:#.*)?$",
+            frontmatter,
+        ))
+        if uses_agent_mcp and not has_mcp_fallback(readiness):
+            add(
+                "mcp-fallback",
+                "uses agent-mcp but has no equivalent materialized CLI "
+                "fallback over the same bridge config",
             )
-            has_fallback = has_mcp_fallback(readiness)
-            if not has_readiness:
-                report.add(BLOCKING, "anti-recursion", af,
-                           "declares mcp-servers but has no MCP-readiness section "
-                           "(probe one tool on startup; preserve the exact error)")
-            if not has_anti:
-                report.add(BLOCKING, "anti-recursion", af,
-                           "declares mcp-servers but has no anti-self-delegation "
-                           "line (\"do NOT spawn another <agent> agent\")")
-            if uses_agent_mcp and not has_fallback:
-                report.add(
-                    BLOCKING,
-                    "mcp-fallback",
-                    af,
-                    "uses agent-mcp but has no equivalent materialized CLI "
-                    "fallback over the same bridge config",
-                )
 
 
 def _walk_customization_files(root: Path):
@@ -712,6 +827,7 @@ def _sources_from_raw_dir(root: Path) -> list[PluginSource]:
         out.append(PluginSource(
             skills_root=plugin_dir / "skills", origin=origin,
             controlled=False, source=_plugin_repo_url(plugin_dir),
+            version=_plugin_version(plugin_dir),
         ))
     return out
 
@@ -1145,7 +1261,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="assemble the plugin set actually LOADED for this repo "
                          "(from .github/copilot/settings.json + user settings) and "
                          "bring each into scope -- in-repo plugins fully checked, "
-                         "external ones reference-only + source-classified")
+                         "external skill collisions and agent findings advisory "
+                         "+ source/version-classified")
     ap.add_argument("--include-plugins", action="append", default=[], metavar="DIR",
                     help="installed-plugin tree (<root>/<marketplace>/<plugin>/...) "
                          "whose payloads join the inventory; repeatable")

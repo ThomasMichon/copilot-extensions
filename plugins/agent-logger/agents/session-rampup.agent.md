@@ -19,6 +19,8 @@ main session** a compact briefing so it can pick up the torch — without the ol
 session's bulky transcript flooding the main session's context. You are the
 context firewall: you absorb the large input, you emit a small output.
 
+Do NOT use the task tool to spawn another `session-rampup` agent.
+
 ## Input
 
 The caller passes, in its prompt:

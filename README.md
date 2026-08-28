@@ -474,11 +474,11 @@ Your source repos and their `.worktrees` content are never touched.
 |----------|-------------|
 | [README](plugins/customizing-copilot/README.md) | Plugin overview, the seven skills, no-install delivery |
 | [authoring-skills](plugins/customizing-copilot/skills/authoring-skills/SKILL.md) | SKILL.md format, folder convention, validation, hooks, custom instructions |
-| [defining-subagents](plugins/customizing-copilot/skills/defining-subagents/SKILL.md) | Custom agents: `.agent.md`, tool aliases, MCP ownership, anti-recursion |
+| [defining-subagents](plugins/customizing-copilot/skills/defining-subagents/SKILL.md) | Custom agents: `.agent.md`, bounded execution, MCP ownership, Task-capable anti-recursion |
 | [registering-mcp-servers](plugins/customizing-copilot/skills/registering-mcp-servers/SKILL.md) | MCP registration hierarchy, config formats, writing a server |
 | [installing-plugins](plugins/customizing-copilot/skills/installing-plugins/SKILL.md) | Repo `settings.json` registration, experimental mode, payload-vs-runtime |
 | [building-harnesses](plugins/customizing-copilot/skills/building-harnesses/SKILL.md) | In-session entry to the Control-Harness Runbook (greenfield / brownfield / audit) |
-| [reviewing-customizations](plugins/customizing-copilot/skills/reviewing-customizations/SKILL.md) | Review a harness's skills, sub-agents, `AGENTS.md`, hooks, MCP configs |
+| [reviewing-customizations](plugins/customizing-copilot/skills/reviewing-customizations/SKILL.md) | Review a harness's skills, owned and enabled-plugin sub-agents, `AGENTS.md`, hooks, MCP configs |
 | [authoring-harness-plugins](plugins/customizing-copilot/skills/authoring-harness-plugins/SKILL.md) | The `<repo>-harness` standard: ship operator skills for a repo |
 
 ### Agent Dispatch

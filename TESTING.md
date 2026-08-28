@@ -70,6 +70,10 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   attribution, the 2 KB context budget, direct script fallback, missing-root
   failure-open behavior, skill trigger boundaries, README inventory, and live
   Bash/PowerShell parity when both shells are available.
+- **customizing-copilot:** payload-only scanner tests covering loaded-plugin
+  discovery, project/`.claude`/`.ai`/suite agent ownership, Task-disabled
+  exemptions, MCP readiness and equivalent fallback checks, origin/version-aware
+  external advisories, collision remediation, and counts-only context inventory.
 - **efforts:** payload-only policy-producer tests covering exact repository
   adoption, authoritative payload cwd, Git/config containment, malformed input,
   symlink/reparse rejection, contaminated Git environments, manifest-derived
