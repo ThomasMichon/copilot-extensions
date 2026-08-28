@@ -128,23 +128,26 @@ rather than binding to private implementation details.
 - [ ] Establish bidirectional conformance probes using an independent AHP
       client and server implementation where available.
 
-### Phase 1 — Add the AHP edge
+### Phase 1 — Build the internal AHP kernel
 
-- [ ] Add an attributable AHP server command/endpoint alongside existing CLI,
-      REST/SSE, ACP, and Session Host surfaces.
+- [ ] Add internal JSON-RPC framing and channel routing without registering a
+      production endpoint.
 - [ ] Do not enable an AHP state writer until #1460's tolerant-reader,
       old-writer-fencing, and rollback prerequisites cover every shared durable
       record the adapter will change.
-- [ ] Implement JSON-RPC framing, channel routing, `ping`, `initialize`,
-      version selection, implementation metadata, client capabilities, and the
-      exact named agent capabilities defined by the selected version.
+- [ ] Implement `ping`, `initialize`, version selection, implementation
+      metadata, client capabilities, and the exact named agent capabilities
+      defined by the selected version.
 - [ ] Project agent discovery into authoritative `ahp-root://` state without
       exposing session resources before their ownership and URI mapping are
       defined.
-- [ ] Preserve the repository's local-first transport and endpoint-discovery
-      invariants; AHP must not introduce a fixed or globally exposed port.
+- [ ] Allocate every server action once in one durable, monotonically ordered
+      `serverSeq` space per future AHP endpoint, shared across all channels and
+      persisted before any observer can receive it.
+- [ ] Keep the kernel transport-neutral and preserve the repository's
+      local-first endpoint-discovery invariants for the later exposure phase.
 
-### Phase 2 — Define authority, identity, and the default chat
+### Phase 2 — Define authority, identity, and the read-only catalog
 
 - [ ] Define the ownership matrix before the ledger: bridge-owned resources use
       bridge domain state; native-host-owned resources remain authoritative in
@@ -156,8 +159,8 @@ rather than binding to private implementation details.
       when defining those mappings; do not introduce a second bridge lifecycle
       identity inside the AHP adapter.
 - [ ] After that identity contract is fixed, implement paginated `listSessions`
-      plus ephemeral `root/sessionAdded`, `root/sessionRemoved`, and
-      `root/sessionSummaryChanged` notifications.
+      plus the internal production of ephemeral `root/sessionAdded`,
+      `root/sessionRemoved`, and `root/sessionSummaryChanged` notifications.
 - [ ] Create every ready session with a catalogued `defaultChat`; treat
       additional chats, fork, and side-chat creation as optional behavior gated
       only by the exact `multipleChats` capability fields.
@@ -175,14 +178,17 @@ rather than binding to private implementation details.
       metadata, and occupancy. Keep Git worktrees optional and require
       `multipleWorkingDirectories` before multi-directory mutation.
 
-### Phase 3 — Build durable ordering and reconciliation
+### Phase 3 — Expose the read-only edge and reconciliation
 
-- [ ] Define root/session/chat snapshots and allocate each server action once
-      in one durable, monotonically ordered `serverSeq` space per exposed AHP
-      server endpoint, shared across every state channel, client, and transport
-      reconnection on that endpoint.
-- [ ] Persist actions before delivery and remove the current crash window where
-      a live consumer can observe an event before durable commit.
+- [ ] Register an attributable, local-first AHP server command/endpoint only
+      after the internal ordering, root-state, identity, and catalog contracts
+      are coherent.
+- [ ] Initially expose only `ping`, `initialize`, subscriptions, reconnect, root
+      state, and the read-only session/default-chat catalog; do not enable
+      create, mutation, or turn-driving methods in this phase.
+- [ ] Define root/session/chat snapshots against the durable `serverSeq`
+      outbox, preserving the persist-before-delivery invariant across every
+      connection and transport reconnection.
 - [ ] Implement subscribe, unsubscribe, reconnect replay, snapshot fallback,
       missing-resource handling, catalog re-fetch after reconnect, and
       optimistic client-action reconciliation.
