@@ -102,12 +102,14 @@ preserves every existing harness capability before it lands.
       `staged-behind-released-surfaces`, `reversible-and-gated-adoption`.
       **Blocked** until those native surfaces ship stable.
 
-### Phase D — Live-session steering onto cloud/agent-host (#989)
-- [ ] Map the harness's live-session coordination and handoff onto the CLI's
-      cloud steering (task→session→environment) over its agent-host protocol,
-      instead of a parallel channel, contributing the cross-machine and claim
-      semantics the native surface does not carry. Closes native-convergence
-      §Concepts/native-cloud-steering, §Features/`ride-native-identity-and-steering`.
+### Phase D — Live-session steering onto cloud/agent-host (#989, #1266)
+- [ ] Drive the dedicated
+      [`agent-bridge-ahp-convergence`](../agent-bridge-ahp-convergence/README.md)
+      effort: expose agent-bridge as an AHP host, map live-session coordination
+      and handoff onto released native host surfaces, and retain the
+      cross-machine and claim semantics those surfaces do not carry. Closes
+      native-convergence §Concepts/native-cloud-steering and
+      §Features/`ride-native-identity-and-steering`.
 
 ## Validation
 
@@ -136,6 +138,11 @@ issues; the public artifacts stay self-contained and general-purpose.
 
 ## Journal
 
+- **2026-08-27** — Expanded Phase D into the dedicated
+  [`agent-bridge-ahp-convergence`](../agent-bridge-ahp-convergence/README.md)
+  effort and public umbrella #1266. The narrower #989 remains the native
+  live-session steering slice; the new effort owns the complete AHP host
+  compatibility contract.
 - **2026-08-23** — Effort authored alongside the new
   [`visions/native-convergence`](../../../visions/native-convergence/README.md)
   vision. Filed the umbrella (#985) and four phase issues (#986–#989) citing the
