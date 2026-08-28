@@ -3,6 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import stat
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -59,6 +64,29 @@ def test_posix_binstub_resolves_only_active_or_complete_slots() -> None:
     assert '_aw_exec_resolved "$@"' in sh
 
 
+def test_lean_provision_deploys_runtime_resolvers() -> None:
+    sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
+    sh_provision = sh.split("    provision)", 1)[1].split("    install)", 1)[0]
+    sh_deploy = sh.split("deploy_runtime_resolvers() {", 1)[1].split(
+        "deploy_wrappers() {", 1
+    )[0]
+    assert "deploy_runtime_resolvers || exit 1" in sh_provision
+    assert 'mktemp "$BIN_DIR/$resolver.XXXXXX"' in sh_deploy
+    assert 'chmod +x "$tmp"' in sh_deploy
+    assert 'mv -f "$tmp" "$BIN_DIR/$resolver"' in sh_deploy
+
+    ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    ps1_provision = ps1.split("    'provision' {", 1)[1].split(
+        "    'install' {", 1
+    )[0]
+    ps1_deploy = ps1.split("function Deploy-RuntimeResolvers {", 1)[1].split(
+        "function Deploy-Binstub {", 1
+    )[0]
+    assert "Deploy-RuntimeResolvers" in ps1_provision
+    assert "Copy-Item $src $tmp -Force" in ps1_deploy
+    assert "Move-Item $tmp $dst -Force" in ps1_deploy
+
+
 def test_generated_project_binstubs_use_shared_three_tier_resolvers() -> None:
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
     ps1 = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -87,3 +115,97 @@ def test_windows_stamp_reuses_immutable_version_snapshot() -> None:
     assert "if (-not (Test-Path $snapDir))" in stamp
     assert "Snapshot already stamped" in stamp
     assert "Remove-Item $snapDir" not in stamp
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX installer integration")
+def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    payload = (
+        home
+        / ".copilot"
+        / "installed-plugins"
+        / "copilot-extensions"
+        / "agent-worktrees"
+    )
+    shutil.copytree(PLUGIN, payload)
+
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_uv = fake_bin / "uv"
+    fake_uv.write_text(
+        """#!/usr/bin/env bash
+set -eu
+case "${1:-}" in
+  venv)
+    target="$2"
+    mkdir -p "$target/bin" "$target/fake-site/agent_worktrees"
+    cat > "$target/bin/python" <<'PY'
+#!/bin/sh
+set -eu
+slot_dir="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+if [ "${1:-}" = "-c" ]; then
+  case "${2:-}" in
+    *"import agent_worktrees, os"*)
+      printf '%s\n' "$slot_dir/fake-site/agent_worktrees"
+      exit 0
+      ;;
+    *"import agent_worktrees"*) exit 0 ;;
+  esac
+fi
+if [ "${1:-}" = "-m" ] && [ "${2:-}" = "agent_worktrees" ]; then
+  shift 2
+  printf 'fake-agent-worktrees %s\n' "$*"
+  exit 0
+fi
+exec "$REAL_PYTHON" "$@"
+PY
+    chmod +x "$target/bin/python"
+    ;;
+  pip) ;;
+  *) exit 2 ;;
+esac
+""",
+        encoding="utf-8",
+    )
+    fake_uv.chmod(0o755)
+
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "PATH": f"{fake_bin}{os.pathsep}{env['PATH']}",
+            "REAL_PYTHON": sys.executable,
+            "COPILOT_PLUGIN_INSTALL_DEADLINE_SEC": "0",
+        }
+    )
+    provision = subprocess.run(
+        ["bash", str(payload / "scripts" / "install.sh"), "provision"],
+        cwd=home,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert provision.returncode == 0, provision.stderr
+
+    runtime_bin = home / ".agent-worktrees" / "bin"
+    resolver = runtime_bin / "resolve-runtime.sh"
+    assert resolver.read_bytes() == (payload / "scripts" / resolver.name).read_bytes()
+    assert resolver.stat().st_uid == os.getuid()
+    assert resolver.stat().st_mode & stat.S_IXUSR
+
+    launchers = [
+        home / ".local" / "bin" / "agent-worktrees",
+        payload / "bin" / "payload" / "agent-worktrees",
+    ]
+    for launcher in launchers:
+        launched = subprocess.run(
+            [str(launcher), "--version"],
+            cwd=home,
+            env={**env, "AGENT_WORKTREES_NO_SELFPROVISION": "1"},
+            capture_output=True,
+            text=True,
+        )
+        assert launched.returncode == 0, launched.stderr
+        assert launched.stdout.strip() == "fake-agent-worktrees --version"
