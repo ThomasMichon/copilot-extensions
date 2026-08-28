@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -63,6 +64,19 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
+def _write_command_shim(path: Path, command: str, target: str) -> None:
+    if os.name == "nt":
+        (path / f"{command}.cmd").write_text(
+            f'@echo off\r\n"{target}" %*\r\nexit /b %errorlevel%\r\n',
+            encoding="utf-8",
+        )
+        return
+    _write_executable(
+        path / command,
+        f"#!/bin/sh\nexec {shlex.quote(target)} \"$@\"\n",
+    )
+
+
 def _tool_path(
     path: Path,
     *,
@@ -75,11 +89,7 @@ def _tool_path(
     for command in tool_names:
         target = shutil.which(command)
         assert target
-        name = Path(target).name if os.name == "nt" else command
-        try:
-            (path / name).symlink_to(target)
-        except OSError:
-            shutil.copy2(target, path / name)
+        _write_command_shim(path, command, target)
     if include_aw:
         if os.name == "nt":
             project = "echo example-project" if managed else "exit /b 1"
@@ -121,6 +131,15 @@ def _tool_path(
                 "exit 1\n",
             )
     return path
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command shim regression")
+def test_tool_path_does_not_relocate_windows_executables(tmp_path: Path) -> None:
+    tools = _tool_path(tmp_path / "bin")
+
+    assert (tools / "git.cmd").is_file()
+    assert (tools / "python.cmd").is_file()
+    assert list(tools.glob("*.exe")) == []
 
 
 def _repo(path: Path, *, enabled: object | None = True) -> Path:
