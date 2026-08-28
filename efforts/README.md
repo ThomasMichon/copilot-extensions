@@ -10,6 +10,7 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Effort-Driven Session Loops](active/effort-driven-session-loops/README.md) | Draft | #1255 |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |
 | [Plugin Process Hygiene](active/plugin-process-hygiene/README.md) | Active | #736 |
