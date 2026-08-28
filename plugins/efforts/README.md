@@ -41,6 +41,26 @@ required use. `efforts-setup` also reconciles a small owner-marked fallback into
 the repository's existing agent instructions so the active effort remains the
 completion gate when extension hooks are unavailable.
 
+For cross-repository placement, the same strict validator exposes a read-only
+target capability probe. Resolve an authoritative local checkout or worktree
+through the repository owner, then invoke the producer from this plugin's
+payload:
+
+```bash
+bash <efforts-plugin-root>/scripts/emit-policy.sh --check-adoption <absolute-target-path>
+```
+
+```powershell
+& <efforts-plugin-root>\scripts\emit-policy.ps1 -CheckAdoption <absolute-target-path>
+```
+
+Only the exact response
+`{"version":1,"capability":"efforts","adopted":true}` authorizes a target-owned
+effort. `{}` means the target is absent, malformed, unavailable, or otherwise
+not proven compatible. The probe resolves the target's Git root and reads only
+the bounded adoption JSON; it does not execute target code, infer capability
+from a repository name, or inspect a remote-only target piecemeal.
+
 `scripts/emit-policy.sh` and `scripts/emit-policy.ps1` implement the richer,
 cwd/config-gated policy kernel and are covered by live parity tests. They are
 not yet registered in `plugin.json`: Copilot CLI issue

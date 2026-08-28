@@ -73,9 +73,10 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 - **efforts:** payload-only policy-producer tests covering exact repository
   adoption, authoritative payload cwd, Git/config containment, malformed input,
   symlink/reparse rejection, contaminated Git environments, manifest-derived
-  ownership, the 1 KB context budget, setup-fallback structure, and live
-  Bash/PowerShell parity when `pwsh` is available. Hook registration remains
-  deferred while #1234 prevents deterministic multi-plugin context aggregation.
+  ownership, the read-only cross-repository adoption probe, the 1 KB context
+  budget, setup-fallback structure, and live Bash/PowerShell parity when `pwsh`
+  is available. Hook registration remains deferred while #1234 prevents
+  deterministic multi-plugin context aggregation.
 
 ---
 

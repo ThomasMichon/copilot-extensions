@@ -5,6 +5,8 @@ $MaxPayloadBytes = 65536
 $MaxConfigBytes = 4096
 $MaxManifestBytes = 4096
 $MaxContextBytes = 1024
+$ProbeMode = $false
+$CheckAdoption = $null
 
 function Write-Diagnostic([string] $Message) {
     [Console]::Error.WriteLine("[efforts] $Message")
@@ -299,8 +301,18 @@ function ConvertFrom-StrictJsonObject([string] $Text) {
     return $Value
 }
 
+function Test-WindowsPlatform {
+    $PlatformVariable = Get-Variable `
+        -Name IsWindows `
+        -ErrorAction SilentlyContinue
+    if ($null -ne $PlatformVariable) {
+        return [bool]$PlatformVariable.Value
+    }
+    return $env:OS -eq 'Windows_NT'
+}
+
 function Test-AbsolutePath([string] $Value) {
-    if ($env:OS -eq 'Windows_NT') {
+    if (Test-WindowsPlatform) {
         return $Value -cmatch '^(?:[A-Za-z]:[\\/]|\\\\[^\\/]+[\\/][^\\/]+)'
     }
     return $Value.StartsWith('/')
@@ -328,11 +340,77 @@ function Test-RelativePathContainsReparsePoint(
     }
 }
 
-function Read-BoundedUtf8([string] $Path, [int] $Limit) {
+function Test-PathContainsReparsePoint([string] $Path) {
+    try {
+        $Current = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        while ($null -ne $Current) {
+            if (($Current.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                return $true
+            }
+            $Current = $Current.Parent
+        }
+        return $false
+    } catch {
+        return $true
+    }
+}
+
+function Test-NativeRegularFile([string] $Path) {
+    if (Test-WindowsPlatform) {
+        return $true
+    }
+    $Stat = '/usr/bin/stat'
+    if (-not (Test-Path -LiteralPath $Stat -PathType Leaf)) {
+        return $false
+    }
+    $Process = $null
+    try {
+        $StartInfo = New-Object Diagnostics.ProcessStartInfo
+        $StartInfo.FileName = $Stat
+        $StartInfo.UseShellExecute = $false
+        $StartInfo.CreateNoWindow = $true
+        $StartInfo.RedirectStandardOutput = $true
+        $StartInfo.RedirectStandardError = $true
+        if ($IsLinux) {
+            $StartInfo.ArgumentList.Add('-c')
+            $StartInfo.ArgumentList.Add('%F')
+            $Expected = 'regular file'
+        } elseif ($IsMacOS) {
+            $StartInfo.ArgumentList.Add('-f')
+            $StartInfo.ArgumentList.Add('%HT')
+            $Expected = 'Regular File'
+        } else {
+            return $false
+        }
+        $StartInfo.ArgumentList.Add($Path)
+        $Process = New-Object Diagnostics.Process
+        $Process.StartInfo = $StartInfo
+        if (-not $Process.Start()) { return $false }
+        if (-not $Process.WaitForExit(2000)) {
+            $Process.Kill()
+            $Process.WaitForExit()
+            return $false
+        }
+        if ($Process.ExitCode -ne 0) { return $false }
+        return $Process.StandardOutput.ReadToEnd().Trim() -ceq $Expected
+    } catch {
+        return $false
+    } finally {
+        if ($null -ne $Process) { $Process.Dispose() }
+    }
+}
+
+function Read-BoundedUtf8(
+    [string] $Path,
+    [int] $Limit
+) {
     $Item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
         $Item.PSIsContainer -or $Item.Length -gt $Limit) {
         throw 'not a bounded regular file'
+    }
+    if (-not (Test-NativeRegularFile $Path)) {
+        throw 'not a regular file'
     }
     $Stream = [IO.File]::Open(
         $Path,
@@ -359,7 +437,7 @@ function Read-BoundedUtf8([string] $Path, [int] $Limit) {
     return $Utf8.GetString($Buffer, 0, $Count)
 }
 
-function Invoke-CleanGitRoot([string] $Cwd) {
+function Invoke-CleanGitText([string] $Cwd, [string] $Arguments) {
     $Names = @(
         'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE',
         'GIT_OBJECT_DIRECTORY', 'GIT_ALTERNATE_OBJECT_DIRECTORIES',
@@ -378,7 +456,7 @@ function Invoke-CleanGitRoot([string] $Cwd) {
     try {
         $StartInfo = New-Object Diagnostics.ProcessStartInfo
         $StartInfo.FileName = 'git'
-        $StartInfo.Arguments = 'rev-parse --show-toplevel'
+        $StartInfo.Arguments = $Arguments
         $StartInfo.WorkingDirectory = $Cwd
         $StartInfo.UseShellExecute = $false
         $StartInfo.CreateNoWindow = $true
@@ -387,6 +465,8 @@ function Invoke-CleanGitRoot([string] $Cwd) {
         foreach ($Name in $Names) {
             $StartInfo.EnvironmentVariables.Remove($Name)
         }
+        $StartInfo.EnvironmentVariables['GIT_NO_LAZY_FETCH'] = '1'
+        $StartInfo.EnvironmentVariables['GIT_NO_REPLACE_OBJECTS'] = '1'
         $Process = New-Object Diagnostics.Process
         $Process.StartInfo = $StartInfo
         if (-not $Process.Start()) { return $null }
@@ -396,7 +476,7 @@ function Invoke-CleanGitRoot([string] $Cwd) {
             return $null
         }
         if ($Process.ExitCode -ne 0) { return $null }
-        return ($Process.StandardOutput.ReadLine())
+        return $Process.StandardOutput.ReadToEnd().TrimEnd("`r", "`n")
     } catch {
         return $null
     } finally {
@@ -404,40 +484,68 @@ function Invoke-CleanGitRoot([string] $Cwd) {
     }
 }
 
+function Invoke-CleanGitRoot([string] $Cwd) {
+    return Invoke-CleanGitText $Cwd 'rev-parse --show-toplevel'
+}
+
 try {
-    $Stream = [Console]::OpenStandardInput()
-    $Buffer = New-Object byte[] ($MaxPayloadBytes + 1)
-    $Count = 0
-    while ($Count -lt $Buffer.Length) {
-        $Read = $Stream.Read($Buffer, $Count, $Buffer.Length - $Count)
-        if ($Read -eq 0) { break }
-        $Count += $Read
+    if ($args.Count -gt 0) {
+        if ($args.Count -eq 2 -and
+            $args[0] -is [string] -and
+            $args[0] -ceq '-CheckAdoption' -and
+            $args[1] -is [string]) {
+            $ProbeMode = $true
+            $CheckAdoption = $args[1]
+        } else {
+            Write-Diagnostic 'invalid arguments; no policy context emitted'
+            Emit-Empty
+        }
     }
-    if ($Count -gt $MaxPayloadBytes -or
-        [Array]::IndexOf($Buffer, [byte]0, 0, $Count) -ge 0) {
-        Write-Diagnostic 'missing or malformed sessionStart payload; no policy context emitted'
-        Emit-Empty
-    }
-    try {
-        $Utf8 = New-Object Text.UTF8Encoding($false, $true)
-        $PayloadText = $Utf8.GetString($Buffer, 0, $Count)
-        $Payload = ConvertFrom-StrictJsonObject $PayloadText
-        $Cwd = $Payload.cwd
+    if ($ProbeMode) {
+        $Cwd = $CheckAdoption
         if ($Cwd -isnot [string] -or -not (Test-AbsolutePath $Cwd) -or
             $Cwd -match '[\x00-\x1f]' -or
             -not (Test-Path -LiteralPath $Cwd -PathType Container)) {
             throw 'invalid cwd'
         }
-    } catch {
-        Write-Diagnostic 'missing or malformed sessionStart payload; no policy context emitted'
-        Emit-Empty
+        if (Test-PathContainsReparsePoint $Cwd) {
+            Emit-Empty
+        }
+    } else {
+        $Stream = [Console]::OpenStandardInput()
+        $Buffer = New-Object byte[] ($MaxPayloadBytes + 1)
+        $Count = 0
+        while ($Count -lt $Buffer.Length) {
+            $Read = $Stream.Read($Buffer, $Count, $Buffer.Length - $Count)
+            if ($Read -eq 0) { break }
+            $Count += $Read
+        }
+        if ($Count -gt $MaxPayloadBytes -or
+            [Array]::IndexOf($Buffer, [byte]0, 0, $Count) -ge 0) {
+            Write-Diagnostic 'missing or malformed sessionStart payload; no policy context emitted'
+            Emit-Empty
+        }
+        try {
+            $Utf8 = New-Object Text.UTF8Encoding($false, $true)
+            $PayloadText = $Utf8.GetString($Buffer, 0, $Count)
+            $Payload = ConvertFrom-StrictJsonObject $PayloadText
+            $Cwd = $Payload.cwd
+            if ($Cwd -isnot [string] -or -not (Test-AbsolutePath $Cwd) -or
+                $Cwd -match '[\x00-\x1f]' -or
+                -not (Test-Path -LiteralPath $Cwd -PathType Container)) {
+                throw 'invalid cwd'
+            }
+        } catch {
+            Write-Diagnostic 'missing or malformed sessionStart payload; no policy context emitted'
+            Emit-Empty
+        }
     }
 
     $RawRoot = Invoke-CleanGitRoot $Cwd
     if (-not $RawRoot) { Emit-Empty }
     $RepoRoot = [EffortsCanonicalPath]::Resolve($RawRoot)
     $CwdRoot = [EffortsCanonicalPath]::Resolve($Cwd)
-    $Comparison = if ($env:OS -eq 'Windows_NT') {
+    $Comparison = if (Test-WindowsPlatform) {
         [StringComparison]::OrdinalIgnoreCase
     } else {
         [StringComparison]::Ordinal
@@ -462,7 +570,9 @@ try {
         Emit-Empty
     }
     try {
-        $ConfigText = Read-BoundedUtf8 $ConfigPath $MaxConfigBytes
+        $ConfigText = Read-BoundedUtf8 `
+            $ConfigPath `
+            $MaxConfigBytes
         $Config = ConvertFrom-StrictJsonObject $ConfigText
         $Properties = @($Config.PSObject.Properties.Name)
         if ($Properties.Count -ne 2 -or
@@ -476,6 +586,52 @@ try {
     } catch {
         Write-Diagnostic 'repository effort config is malformed; no policy context emitted'
         Emit-Empty
+    }
+
+    if ($ProbeMode) {
+        $Head = Invoke-CleanGitText $RepoRoot 'rev-parse --verify HEAD'
+        if ($Head -cnotmatch '\A[0-9a-fA-F]{40,64}\z') {
+            Emit-Empty
+        }
+        $TreeEntry = Invoke-CleanGitText `
+            $RepoRoot "ls-tree $Head -- $ConfigRelativePath"
+        if ($TreeEntry -cnotmatch (
+            '\A(?:100644|100755) blob ([0-9a-fA-F]{40,64})\t' +
+            [Regex]::Escape($ConfigRelativePath) +
+            '\z'
+        )) {
+            Emit-Empty
+        }
+        $ObjectName = $Matches[1]
+        $CommittedSize = Invoke-CleanGitText $RepoRoot "cat-file -s $ObjectName"
+        if ($CommittedSize -cnotmatch '\A[0-9]+\z' -or
+            [long]$CommittedSize -gt $MaxConfigBytes) {
+            Emit-Empty
+        }
+        $CommittedConfigText = Invoke-CleanGitText `
+            $RepoRoot "cat-file blob $ObjectName"
+        if ($null -eq $CommittedConfigText) {
+            Emit-Empty
+        }
+        try {
+            $CommittedConfig = ConvertFrom-StrictJsonObject $CommittedConfigText
+            $CommittedProperties = @($CommittedConfig.PSObject.Properties.Name)
+            if ($CommittedProperties.Count -ne 2 -or
+                $CommittedProperties -cnotcontains 'version' -or
+                $CommittedProperties -cnotcontains 'enforcement' -or
+                ($CommittedConfig.version -isnot [int] -and
+                    $CommittedConfig.version -isnot [long]) -or
+                $CommittedConfig.version -ne 1 -or
+                $CommittedConfig.enforcement -cne 'required') {
+                throw 'invalid committed config'
+            }
+        } catch {
+            Emit-Empty
+        }
+        [Console]::Out.Write(
+            '{"version":1,"capability":"efforts","adopted":true}'
+        )
+        exit 0
     }
 
     $PluginRoot = Split-Path -Parent $PSScriptRoot
@@ -505,9 +661,8 @@ try {
         'uncertainty, prerequisites, required review, or required ' +
         'safety/admin confirmation. Handoffs name the effort and next slice; ' +
         'bounded predecessor ramp-up covers only immediate activity. Keep ' +
-        'cross-repo planning in the host unless an authoritative local target ' +
-        'checkout has valid efforts adoption; then use one target-owned ' +
-        'sub-effort referenced one-way.'
+        'cross-repo planning host-owned by default. Valid adoption only permits ' +
+        'an explicitly selected target-owned sub-effort referenced one-way.'
     if ([Text.Encoding]::UTF8.GetByteCount($Kernel) -ge $MaxContextBytes) {
         Write-Diagnostic 'policy context exceeds its byte budget; no policy context emitted'
         Emit-Empty

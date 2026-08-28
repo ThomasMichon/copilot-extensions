@@ -226,20 +226,20 @@ Public-safe transcription of the operator request:
 
 ### Phase 4 - Capability-aware cross-repository efforts
 
-- [ ] Expose a read-only capability check that can determine whether a target
+- [x] Expose a read-only capability check that can determine whether a target
       repository has valid effort adoption configuration without executing target
       code or trusting repository names. Version 1 checks an authoritative local
       checkout/worktree; a remote-only target remains host-owned until it is
       fetched and inspected.
-- [ ] Update the planning and cross-repository guidance: keep orchestration in
+- [x] Update the planning and cross-repository guidance: keep orchestration in
       the host when the target has not adopted efforts; when it has, allow a
       target-owned sub-effort linked one-way from the host effort.
-- [ ] Define ownership rules for multiple hosts collaborating on one compatible
+- [x] Define ownership rules for multiple hosts collaborating on one compatible
       target: the target sub-effort is canonical for target-local scope, while
       each host retains only its own orchestration context and a reference.
-- [ ] Reject cyclic references, drifting peer copies, and target configuration
+- [x] Reject cyclic references, drifting peer copies, and target configuration
       that attempts to weaken plugin-owned policy.
-- [ ] Cover host-only, compatible-target, malformed-target, and concurrent-host
+- [x] Cover host-only, compatible-target, malformed-target, and concurrent-host
       placement cases in skills/docs tests or clean-room scenarios.
 
 ### Phase 5 - Integrated validation and release
@@ -286,7 +286,7 @@ Public-safe transcription of the operator request:
       boundaries until the explicit release rule is met; only the rightful head
       drives, and required review, genuine uncertainty, and destructive or
       administrative confirmation remain legitimate pause gates.
-- [ ] Cross-repository placement uses validated target capability: host-owned
+- [x] Cross-repository placement uses validated target capability: host-owned
       when absent, one-way target-owned sub-effort when present, and no cyclic or
       duplicate canonical effort.
 - [ ] All changed plugin versions and marketplace entries remain consistent, and
@@ -396,6 +396,9 @@ earlier slices.
 
 ### 2026-08-28 - Phase 3 effort-backed continuity implemented
 
+- Merged reviewed Phase 3 PR
+  [#1273](https://github.com/ThomasMichon/copilot-extensions/pull/1273);
+  its `Closes #1258` linkage closed the compact-handoff implementation issue.
 - Added a compact context-handoff shape for worktrees whose
   `active_effort.active` value is true. The baton links the canonical effort,
   bound participant/current slice, next slice, immediate session delta, and
@@ -425,3 +428,26 @@ earlier slices.
 - Bumped context-handoff to `0.1.0-dev47`, agent-logger to `0.1.1-dev72`,
   agent-worktrees to `1.5.3-dev655`, efforts to `0.1.0-dev16`, and marketplace
   metadata to `1.7.5-dev674`.
+
+### 2026-08-28 - Phase 4 capability-aware ownership implemented
+
+- Added a read-only adoption probe to the existing Bash/Python and native
+  PowerShell efforts producers. Only an exact committed version 1
+  `required` config plus a valid checkout copy emits the stable compatible
+  capability response; absent, malformed, uncommitted, locally weakened,
+  remote-only, non-repository, symlink/reparse, special-file, replacement-ref,
+  and missing-object cases fail closed.
+- The probe resolves an authoritative local Git root with contaminated Git
+  variables removed, lazy fetching and replacement objects disabled, a literal
+  regular-file tree entry required, and bounded blob reads by object ID. It does
+  not execute target code or infer support from repository names.
+- Made host-owned orchestration the unambiguous default. Compatible adoption
+  permits, but does not automatically select, one canonical target-local effort;
+  hosts retain only their own context and one-way references, and later hosts
+  join the same target effort rather than creating cycles or drifting copies.
+- Extended planning, setup, plugin, testing, and cross-repository guidance plus
+  64 deterministic parity and placement tests. Repeated adversarial review
+  tightened committed-state authority, path indirection, Git object safety,
+  special-file handling, exact argument parsing, and ownership wording.
+- Bumped agent-worktrees to `1.5.3-dev657`, efforts to `0.1.0-dev17`, and
+  marketplace metadata to `1.7.5-dev677`.

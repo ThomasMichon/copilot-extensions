@@ -50,6 +50,32 @@ its checkout **path**, the **locus** (where work happens), **availability**, the
 not linked yet, link it first via `agent-worktrees-related` (offer to, then
 proceed).
 
+### Capability-aware effort placement
+
+When the cross-repository task is coordinated by an effort, invoke
+`planning-efforts` before deciding where a target-local effort belongs. Resolve
+this skill's authoritative local target checkout/worktree as above, resolve the
+efforts plugin root by walking two parents up from the loaded
+`planning-efforts` skill base, and use its read-only probe:
+
+```bash
+bash <efforts-plugin-root>/scripts/emit-policy.sh --check-adoption <absolute-target-path>
+```
+
+```powershell
+& <efforts-plugin-root>\scripts\emit-policy.ps1 -CheckAdoption <absolute-target-path>
+```
+
+Only exact JSON
+`{"version":1,"capability":"efforts","adopted":true}` permits a target-owned
+effort. `{}`, malformed output, an unavailable checkout, and a remote-only
+target keep orchestration host-owned. The probe reads the target's bounded
+adoption data and Git root only; it does not execute target code or infer
+capability from a repository name. If target-owned placement is explicitly
+selected, use one canonical target-local effort with one-way references from
+host efforts. Multiple hosts join that target effort rather than creating
+cyclic or drifting peer copies.
+
 ## Orient before you crawl -- the root `AGENTS.md` is the map
 
 Before reading source, **read the target repo's root `AGENTS.md`** (and, if you

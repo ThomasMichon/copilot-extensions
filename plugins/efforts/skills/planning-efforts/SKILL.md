@@ -244,29 +244,49 @@ The README is the shared contract — keep it **ahead of the conversation**. But
 
 ### Cross-repo efforts — where the effort folder lives
 
-When an effort touches **another** repo, you have three placement models. Pick
-per the work; none is mandatory, and the choice is the operator's/agent's to make
-(see [`references/efforts.md`](references/efforts.md) § Cross-repo placement for
-the fuller rationale).
+When an effort touches **another** repo, placement follows validated target
+capability, not directory presence, repository names, or private assumptions.
+Resolve an authoritative local target checkout/worktree through its owning
+repository tool first. Then resolve this skill's owning efforts plugin root by
+walking two parents up from this skill's base directory and run the native
+read-only probe:
 
-**Default to the target repo when the work mostly lands there and it has the
-structure.** If a stretch is predominantly *about one target repo* and that repo
-has adopted `efforts/`, author the effort **there** (as a good citizen of its
-flow) rather than reflexively tracking it locally — the plan then lives where the
-work and its reviewers are, so every party tracks it in one place. Fall back to
-local/tracking-only only when the work spans several targets or the target hasn't
-adopted `efforts/`.
+```bash
+bash <efforts-plugin-root>/scripts/emit-policy.sh --check-adoption <absolute-target-path>
+```
+
+```powershell
+& <efforts-plugin-root>\scripts\emit-policy.ps1 -CheckAdoption <absolute-target-path>
+```
+
+Only exact JSON
+`{"version":1,"capability":"efforts","adopted":true}` proves compatible
+adoption. `{}`, malformed output, an unavailable checkout, and a remote-only
+target all mean **host-owned orchestration**. Do not execute target code, source
+target files, or fetch individual remote files to manufacture a capability
+answer.
+
+After that check, choose among the placement models below (see
+[`references/efforts.md`](references/efforts.md) § Cross-repo placement for the
+fuller rationale).
+
+**Host-owned orchestration is the default.** A compatible target may own one
+canonical target-local effort when the stretch is predominantly about that
+target and placing the plan with its work and reviewers is an explicit,
+deliberate choice. Capability permits that placement; it does not silently move
+ownership out of the host.
 
 - **Local / tracking-only (default).** The effort folder lives in *this*
   (control) repo and coordinates work that lands elsewhere — the folder tracks,
   the real changes happen in the target. Use when the work spans several targets,
   or the target repo hasn't adopted `efforts/`.
 - **Build directly in the target repo.** If the **target repo has adopted
-  `efforts/`** and the stretch is genuinely *about that repo*, **prefer to author**
-  the effort **there**, through *that repo's* flow — its grouping, tracker, review
-  gate, and addendum — instead of here. An effort about a tool can live with the
-  tool. Work it as a **good citizen** of the target repo: follow its conventions
-  over this repo's.
+  `efforts/`** according to the exact probe and the stretch is genuinely *about
+  that repo*, **prefer to author** one canonical target-owned effort **there**,
+  through *that repo's* flow — its grouping, tracker, review gate, and addendum —
+  instead of here. The host keeps only its own orchestration context and a
+  one-way reference to the target effort; the target effort does not point back
+  into host-private state.
 - **Hybrid (split public/private).** Keep a **generalized** effort in a
   **public / portable** repo *and* a **fuller, downstream-private** effort in the
   control repo that **links to it**. The **public effort is canonical** — it is
@@ -274,6 +294,12 @@ adopted `efforts/`.
   *elaborates* it with deployment-specific context (private names, hosts, downstream
   wiring) and links back. Keep the public artifact **generic** — no
   downstream-private names — per the repo's public-artifact rule.
+
+When several hosts collaborate on one compatible target, the first host creates
+or claims the target-local effort through the target's normal coordination
+flow; later hosts discover and reference that same effort. Each host retains
+only its own orchestration context. Never create drifting peer copies, reciprocal
+ownership links, or a second target-local effort for the same scope.
 
 **One ordering rule holds across all three: propose before you do.** Reviewers
 can't meaningfully comment on external work that's already committed, so:
