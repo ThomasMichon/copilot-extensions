@@ -68,7 +68,7 @@ ordering, reconnect reconciliation, shared session/chat state, rich content,
 resources, tools, confirmations, and durable elicitation.
 
 The released baseline for this effort is
-[AHP 0.8.0](https://github.com/microsoft/agent-host-protocol/releases/tag/spec/v0.8.0).
+[AHP 0.8.0](https://github.com/microsoft/agent-host-protocol/tree/v0.8.0).
 The specification remains a working draft and the repository is developing an
 unreleased 1.0 line. The implementation therefore targets 0.8 first, negotiates
 versions explicitly, and isolates version-specific codecs rather than allowing
