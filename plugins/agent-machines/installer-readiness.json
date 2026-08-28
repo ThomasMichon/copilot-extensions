@@ -1,0 +1,87 @@
+{
+  "schema": "copilot-extensions.installer-readiness",
+  "version": 1,
+  "owner": {
+    "plugin": "agent-machines"
+  },
+  "state": "supported",
+  "modules": [
+    {
+      "id": "agent-machines/runtime",
+      "platforms": [
+        "windows",
+        "linux",
+        "wsl",
+        "macos"
+      ],
+      "classification": "required",
+      "installer": {
+        "windows": {
+          "kind": "payload-script",
+          "path": "scripts/init.ps1",
+          "arguments": [
+            "init"
+          ]
+        },
+        "linux": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        },
+        "wsl": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        },
+        "macos": {
+          "kind": "payload-script",
+          "path": "scripts/init.sh",
+          "arguments": [
+            "init"
+          ]
+        }
+      },
+      "readiness": {
+        "schema": "copilot-extensions.module-readiness",
+        "version": 1,
+        "configurationEmpty": "satisfied",
+        "invocations": {
+          "windows": {
+            "kind": "payload-command",
+            "command": "agent-machines",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "linux": {
+            "kind": "payload-command",
+            "command": "agent-machines",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "wsl": {
+            "kind": "payload-command",
+            "command": "agent-machines",
+            "arguments": [
+              "installer-readiness"
+            ]
+          },
+          "macos": {
+            "kind": "payload-command",
+            "command": "agent-machines",
+            "arguments": [
+              "installer-readiness"
+            ]
+          }
+        }
+      },
+      "dependsOn": [],
+      "restart": "none"
+    }
+  ]
+}

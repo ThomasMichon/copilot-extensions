@@ -500,17 +500,27 @@ def _discover_installation(
     installation: PluginInstallation,
 ) -> tuple[list[Module], Decline | None, list[Finding], bool]:
     findings: list[Finding] = []
+    is_machine_gated = False
     try:
         manifest_path, plugin = _plugin_manifest(installation.payload_root)
+        runtime_scope = plugin.get("runtimeScope")
+        if runtime_scope is not None:
+            runtime_scope = _string(runtime_scope, "plugin manifest runtimeScope")
+            if runtime_scope not in {"machine-gated", "universal", "none"}:
+                raise _ContractProblem(
+                    "plugin manifest runtimeScope must be machine-gated, "
+                    "universal, or none"
+                )
+        is_machine_gated = runtime_scope == "machine-gated"
         plugin_name = _string(plugin.get("name"), "plugin manifest name")
         if plugin_name != installation.plugin_id:
             raise _ContractProblem(
                 f"plugin manifest names '{plugin_name}', expected '{installation.plugin_id}'"
             )
-        if plugin.get("runtimeScope") != "machine-gated":
-            return [], None, findings, False
         reference = plugin.get("installerReadiness")
         if reference is None:
+            if not is_machine_gated:
+                return [], None, findings, False
             findings.append(
                 _finding(
                     "missing-module-metadata",
@@ -523,7 +533,7 @@ def _discover_installation(
                     ),
                 )
             )
-            return [], None, findings, True
+            return [], None, findings, is_machine_gated
         contract_path = _payload_path(
             installation.payload_root,
             reference,
@@ -552,7 +562,12 @@ def _discover_installation(
             if "modules" in contract:
                 raise _ContractProblem("declined declarations cannot contain modules")
             reason = _string(contract.get("reason"), "declined reason")
-            return [], Decline(installation, reason, contract_path), findings, True
+            return (
+                [],
+                Decline(installation, reason, contract_path),
+                findings,
+                is_machine_gated,
+            )
         if "reason" in contract:
             raise _ContractProblem("supported declarations cannot contain a decline reason")
         raw_modules = contract.get("modules")
@@ -575,7 +590,7 @@ def _discover_installation(
             )
             for value in raw_modules
         ]
-        return modules, None, findings, True
+        return modules, None, findings, is_machine_gated
     except (InstallationContextError, _ContractProblem) as error:
         findings.append(
             _finding(
@@ -586,7 +601,7 @@ def _discover_installation(
                 remedy="Correct the plugin-owned installer/readiness declaration.",
             )
         )
-        return [], None, findings, True
+        return [], None, findings, is_machine_gated
 
 
 def _validate_graph(modules: Sequence[Module]) -> list[Finding]:

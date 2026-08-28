@@ -36,9 +36,13 @@ class TestCLI:
         assert rc == 1
 
     def test_version(self, capsys):
+        import agent_codespaces
+
         rc = main(["version"])
         assert rc == 0
-        assert "0.1.0" in capsys.readouterr().out
+        assert capsys.readouterr().out.strip() == (
+            f"agent-codespaces {agent_codespaces.__version__}"
+        )
 
     def test_config_validate_no_repos(self, tmp_path, monkeypatch, capsys):
         runtime = tmp_path / ".agent-codespaces"
