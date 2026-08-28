@@ -24,6 +24,17 @@ export function leadFrom(title) {
   return `Task: ${t || "Continue the current work"}`;
 }
 
+export const CONTINUATION_DIRECTIVE =
+  "Treat the handoff as active responsibility for the original objective, " +
+  "not as proof that the predecessor's latest phase finished the work. After " +
+  "loading the brief, keep driving every actionable next phase the original " +
+  "request permits, as far as your context and available work allow, without " +
+  "waiting for another user nudge. Stop only when the parent objective's " +
+  "completion gate is met, an explicit user scope boundary or required " +
+  "confirmation stops you, or a real blocker needs input; if context pressure " +
+  "returns first, hand off again with the same parent objective and remaining " +
+  "roster.";
+
 // Build the single-line ASCII CUTOVER seed (the HANDOFF_SEED) for a live
 // cutover successor. Kept as the ONE source of this string so
 // save_handoff_prompt and retry_handoff_cutover always spawn an identical
@@ -86,8 +97,10 @@ export function buildCutoverSeed(
         `handoff-cutover --retire-pane ${oldPane} --successor-verified ` +
         `--retire-reason handoff-consume --worktree-id ${worktree} --session-id ` +
         `${sessionId} . The first command prints your full brief; the trailing ` +
-        `JSON lines are bookkeeping. Then continue the prior session's work, and ` +
-        `ONLY when you reach the handoff's goal run: agent-dispatch complete ${id} .`
+        `JSON lines are bookkeeping. ${CONTINUATION_DIRECTIVE} For this deferred ` +
+        `handoff task, completion of the predecessor's latest phase is not enough; ` +
+        `ONLY when you reach the handoff's completion gate run: agent-dispatch ` +
+        `complete ${id} .`
       );
     }
     return (
@@ -96,13 +109,15 @@ export function buildCutoverSeed(
       `Call the context-handoff consume_handoff tool with arguments ` +
       `{"task_id":"${id}","defer_complete":true}.${retryClause} That consumes ` +
       `the handoff, loads your full brief, and retires the predecessor pane only ` +
-      `after you are alive. Do the work, and ONLY when you reach the ` +
-      `handoff's goal run: agent-dispatch complete ${id} .`
+      `after you are alive. ${CONTINUATION_DIRECTIVE} For this deferred handoff ` +
+      `task, completion of the predecessor's latest phase is not enough; ONLY ` +
+      `when you reach the handoff's completion gate run: agent-dispatch complete ` +
+      `${id} .`
     );
   }
   return (
     `${lead}. Call the context-handoff consume_handoff tool with ` +
     `arguments {"handoff_id":"${id}"} to load this one-time file-backed ` +
-    `handoff and continue in place.${retryClause}`
+    `handoff and continue in place.${retryClause} ${CONTINUATION_DIRECTIVE}`
   );
 }

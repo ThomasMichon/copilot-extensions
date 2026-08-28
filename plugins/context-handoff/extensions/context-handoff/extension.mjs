@@ -41,7 +41,11 @@ import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { approveAll } from "@github/copilot-sdk";
 import { joinSession } from "@github/copilot-sdk/extension";
-import { leadFrom, buildCutoverSeed } from "./cutover-seed.mjs";
+import {
+  CONTINUATION_DIRECTIVE,
+  leadFrom,
+  buildCutoverSeed,
+} from "./cutover-seed.mjs";
 import { supersededHandoffIds } from "./handoff-tasks.mjs";
 import { loadContextHandoffConfig } from "./config.mjs";
 import { contextPressure, formatContextUsage } from "./thresholds.mjs";
@@ -768,6 +772,7 @@ function buildResumePrompt(handoffText, source) {
     `follows -- treat it as the founding brief for this session and carry the`,
     `work forward from where the previous session left off. Do NOT start over`,
     `or spin up a fresh worktree; continue in place.`,
+    CONTINUATION_DIRECTIVE,
     ``,
     `---`,
     ``,
@@ -873,8 +878,10 @@ const session = await joinSession({
       description:
         "Generate structured session facts for creating a continuation " +
         "prompt. Returns session metadata, files modified, git status, " +
-        "and key tool invocations. The agent should compose the final " +
-        "prose handoff using this data plus its own live context.",
+        "and key tool invocations. The agent should compose the final prose " +
+        "handoff using this data plus its own live context, preserving the " +
+        "parent objective and an actionable successor work roster rather than " +
+        "describing only the latest completed phase.",
       skipPermission: true,
       parameters: {
         type: "object",
@@ -927,9 +934,13 @@ const session = await joinSession({
             "",
             "---",
             "Now follow the context-handoff skill:",
-            "1. Compose the FULL handoff markdown — direction + motivation of the",
-            "   work, key next action items, and target goals — from this data",
-            "   plus your live context. Lead with the original topic/request.",
+            "1. Compose the FULL handoff markdown from this data plus your live",
+            "   context. Preserve the original request and parent objective, then",
+            "   give the successor an ordered work roster and separate completion",
+            "   gates for this handoff leg and the worktree's parent objective.",
+            "   A completed phase is progress, not a reason to omit later work.",
+            "   If the parent objective truly has no actionable work left, do not",
+            "   create a live handoff merely to report that fact; finish instead.",
             "2. Call save_handoff_prompt with the full markdown as `prompt_text`",
             "   (and an optional short `title`). It stores the handoff — as an",
             "   agent-dispatch task when a coordinator is reachable, else a",
@@ -1041,7 +1052,8 @@ const session = await joinSession({
               `${lead}. You are resuming a handoff (agent-dispatch task ` +
               `${taskId}); continue the prior session's work IN PLACE -- do not ` +
               `restart or create a new worktree. Load your full brief by ` +
-              `running: agent-dispatch consume ${taskId} .`;
+              `running: agent-dispatch consume ${taskId} . ` +
+              `${CONTINUATION_DIRECTIVE}`;
             cutoverSeed = buildCutoverSeed("task", taskId, lead, {
               oldPane: stored?.metadata?.oldPane,
               worktree: stored?.metadata?.worktree,
