@@ -977,7 +977,10 @@ exit /b %ERRORLEVEL%
 '@.Replace('__COMMAND__', $name)
         [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
     }
-    Write-Ok "Compatibility binstubs: $($BinstubNames.Count) commands on PATH"
+    $auxiliaryCount = @(
+        $BinstubNames | Where-Object { $_ -ne 'agent-logger' }
+    ).Count
+    Write-Ok "Auxiliary compatibility binstubs: $auxiliaryCount commands on PATH"
 }
 
 function Invoke-Stamp {

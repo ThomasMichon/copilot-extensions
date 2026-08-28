@@ -613,7 +613,7 @@ exec "$_shim" "$@"
 STUBEOF
         chmod +x "${LOCAL_BIN}/${name}"
     done
-    ok "compatibility binstubs: 6 commands on PATH"
+    ok "auxiliary compatibility binstubs: 5 commands on PATH"
 }
 
 publish_payload_snapshot() {
