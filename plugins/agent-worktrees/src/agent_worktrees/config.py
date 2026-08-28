@@ -537,6 +537,10 @@ def load_machines_yaml(repo_dir: str | Path) -> dict[str, MachineEntry]:
                 capabilities.append(capability)
         ssh_envs: list[SSHEnvironment] = []
         ssh_block = data.get("ssh", {})
+        if ssh_block is None:
+            ssh_block = {}
+        if not isinstance(ssh_block, dict):
+            raise ValueError(f"machine '{key}' ssh must be a mapping")
         for env in ssh_block.get("environments", []):
             if isinstance(env, dict) and "name" in env and "alias" in env:
                 ssh_envs.append(SSHEnvironment(

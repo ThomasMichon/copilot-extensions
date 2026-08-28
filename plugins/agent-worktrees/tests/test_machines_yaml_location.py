@@ -94,6 +94,15 @@ def test_load_rejects_non_string_description(tmp_path: Path):
         cfg.load_machines_yaml(tmp_path)
 
 
+def test_load_rejects_non_mapping_ssh(tmp_path: Path):
+    _write(
+        tmp_path / "machines.yaml",
+        "machines:\n  m1:\n    ssh: not-a-mapping\n",
+    )
+    with pytest.raises(ValueError, match="ssh must be a mapping"):
+        cfg.load_machines_yaml(tmp_path)
+
+
 # ---------------------------------------------------------------------------
 # State-root config-overlay (E1e): a stateless harness with no machines.yaml of
 # its own redirects to the bound knowledge repo's machines.yaml.

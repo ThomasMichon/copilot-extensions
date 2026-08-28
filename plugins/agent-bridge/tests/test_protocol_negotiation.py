@@ -27,7 +27,8 @@ from agent_bridge.protocol import (
 
 
 def test_machine_metadata_capability_is_advertised() -> None:
-    assert MACHINE_METADATA_PROTOCOL_VERSION == HTTP_PROTOCOL_VERSION
+    assert MACHINE_METADATA_PROTOCOL_VERSION == 5
+    assert MACHINE_METADATA_PROTOCOL_VERSION <= HTTP_PROTOCOL_VERSION
 
 
 def _app(tmp_path):
