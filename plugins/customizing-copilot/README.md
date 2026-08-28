@@ -18,11 +18,11 @@ skill name) and Copilot loads the matching skill:
 | Skill | Use it when... | Covers |
 |-------|----------------|--------|
 | [authoring-skills](skills/authoring-skills/SKILL.md) | creating or auditing `SKILL.md`, hooks, or custom instructions | Skill locations and frontmatter, folder conventions, validation checklist, hooks, custom-instruction surfaces, and portable plugin runtime context |
-| [defining-subagents](skills/defining-subagents/SKILL.md) | creating a `.agent.md` or delegating work to a custom agent | Agent frontmatter, tool aliases, invocation, per-agent MCP ownership, equivalent materialized CLI fallback, and anti-recursion / MCP-readiness guards |
+| [defining-subagents](skills/defining-subagents/SKILL.md) | creating, defining, or reviewing a custom agent / `.agent.md` | Agent frontmatter, bounded direct-execution contracts, Task-capable anti-self-delegation, per-agent MCP ownership, shared-tool exceptions, equivalent materialized CLI fallback, and MCP-readiness guards |
 | [registering-mcp-servers](skills/registering-mcp-servers/SKILL.md) | adding or debugging MCP servers | Per-agent / project / global registration, config formats, env-var substitution, relocatable plugin servers, CLI commands, and server authoring |
 | [installing-plugins](skills/installing-plugins/SKILL.md) | enabling plugins or adding a marketplace | Repo-scoped `.github/copilot/settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), global installs, `.ai` directory marketplaces, payload-vs-runtime, and launch-time reconciliation |
 | [building-harnesses](skills/building-harnesses/SKILL.md) | building or auditing an agent control harness | Entry point to the [Control-Harness Runbook](../../docs/harness-runbook.md): plugin set, repo adoption, `AGENTS.md`, delegation, validation, efforts, and visions |
-| [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, sub-agents, instructions, hooks, MCP configs, and loaded plugins |
+| [reviewing-customizations](skills/reviewing-customizations/SKILL.md) | reviewing a repo's customization surfaces | Mechanical scan + design critique over skills, project/`.ai` agents, origin/version-aware advisory checks for enabled external plugin agents, instructions, hooks, and MCP configs |
 | [authoring-harness-plugins](skills/authoring-harness-plugins/SKILL.md) | packaging a repo's operator guidance for other control repos | The payload-only `<repo>-harness` pattern: contribute/diagnose skills, README bar, marketplace wiring, and adoption |
 
 Each skill supplements the base CLI documentation with this repo's authoring
@@ -75,6 +75,10 @@ Extensions API is not yet fully replaceable.
 Provides:
 
 - Seven skills and the bundled `reviewing-customizations` scanner.
+- Source-aware agent validation: editable project, `.ai`, and suite agents are
+  enforced locally; enabled external plugin agents produce actionable advisory
+  findings without editing installed payloads, while editable suite source
+  supersedes duplicate installed copies.
 - A shared runtime-context reference for relocatable hook, MCP, extension, and
   LSP entry points.
 - Guidance for both loose repo customizations and plugin-packaged

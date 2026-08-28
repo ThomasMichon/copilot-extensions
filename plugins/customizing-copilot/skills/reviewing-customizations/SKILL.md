@@ -35,7 +35,8 @@ Gather the harness's customization surfaces:
 
 - **Skills** — every `SKILL.md` under `.github/skills/` (and any plugin skills
   the harness authors).
-- **Sub-agents** — every `.agent.md` under `.github/agents/`.
+- **Sub-agents** — every `.agent.md` under `.github/agents/` and
+  `.claude/agents/`, plus agents shipped by the plugins enabled for this repo.
 - **Instructions** — root `AGENTS.md` and any nested `AGENTS.md` / custom
   instruction files.
 - **Hooks** — `.github/hooks/*.json` (or `hooks.json`).
@@ -61,10 +62,11 @@ python3 <skill-dir>/scripts/scan-customizations.py <repo-root> [--json] [--stric
 
 It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
 `description`), **name/folder match**, **trigger collisions** across skills,
-**anti-recursion** (an agent that declares `mcp-servers` but lacks an MCP-readiness
-section or an anti-self-delegation line) and **agent-mcp fallback** (an
-an agent-mcp-backed agent without an equivalent materialized CLI fallback),
-**inline secrets** in config files, and **raw IPs** in ssh/scp/rsync commands.
+**anti-recursion** (a Task-capable agent without an agent-specific
+anti-self-delegation line), **MCP readiness** (an MCP-owning agent without a
+`## MCP Readiness` section), **agent-mcp fallback** (an agent-mcp-backed agent
+without an equivalent materialized CLI fallback), **inline secrets** in config
+files, and **raw IPs** in ssh/scp/rsync commands.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
 gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather
 than cry wolf; feed its findings into the design critique, don't treat a clean
@@ -108,26 +110,36 @@ set and brings each into scope:
 
 ```bash
 # review against exactly what this repo loads (in-repo .ai plugins fully
-# checked; external marketplace plugins reference-only + source-classified):
+# checked; external marketplace plugin agents advisory + source-classified):
 python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
 ```
 
 - An **in-repo `directory` marketplace** plugin (e.g. `./.ai`) is *owned* — it
   gets the full frontmatter / name-folder / trigger checks, closing the gap
   where a repo's own `.ai` skills were invisible to the scan.
-- An **external marketplace** plugin is *reference-only*: its skills join the
-  collision map (so a `LOCAL ↔ PLUGIN` clash is visible) but its own frontmatter
-  problems are not flagged — you don't own it.
+- An **external marketplace** plugin is *advisory*: its skills join the
+  collision map (so a `LOCAL ↔ PLUGIN` clash is visible), and its Task-capable
+  agents receive anti-self-delegation / MCP-readiness / agent-mcp-fallback
+  checks. Findings are warnings tagged with plugin origin, installed version,
+  source, and the upstream contribution path because the consumer cannot edit
+  the installed payload.
+- When an editable `plugins/*` suite skill or agent matches an installed copy
+  by plugin and item name, the editable source wins. The scanner does not
+  report stale installed copies as external collisions or agent advisories.
+- A Task-disabled agent whose explicit `tools` list omits `agent` / Task is
+  exempt from the anti-self-delegation check. A coordinator agent is not exempt:
+  it may delegate other types when authorized, but it must still forbid another
+  copy of itself.
 
 Collision owners are tagged with their origin (`skill [marketplace/plugin]`).
 (The older `--include-installed` / `--include-plugins DIR` still work — they add
-a raw installed-plugin tree the same reference-only way — but `--from-settings`
+a raw installed-plugin tree the same advisory way — but `--from-settings`
 is preferred because it scopes to the *enabled* set, not every installed
 plugin.)
 
-**A collision that touches an external plugin is outside your repo's control.**
-The scan says so, names the upstream `source`, and points at the fix path. You
-can't edit the plugin in-repo, so choose:
+**A finding that touches an external plugin is outside your repo's control.**
+The scan says so, names the upstream `source` and version, and points at the fix
+path. You can't edit the plugin in-repo, so choose:
 
 1. **In-repo workaround** — reclaim the phrase with a local authority-override
    skill, disable the offending plugin for this repo, or narrow *your* trigger.
@@ -160,7 +172,8 @@ equivalent independent reviewer. Ask it for **bugs and design flaws, not style**
   procedures stay in the skill (see `customizing-copilot:authoring-skills`
   § *sessionStart context injection*);
 - **contradictory rules** between `AGENTS.md`, skills, and hooks;
-- sub-agents missing the **anti-recursion / MCP-readiness** guard;
+- Task-capable sub-agents missing the agent-specific **anti-recursion** guard,
+  and MCP-owning agents missing readiness / equivalent fallback behavior;
 - **footguns** — destructive commands without confirmation, hardcoded paths,
   raw IPs in SSH, secrets in config;
 - instructions that tell the agent to *do* something no surface can express
@@ -176,7 +189,7 @@ Cross-check each artifact against the skill that governs its format:
 | Artifact | Check against | Look for |
 |----------|---------------|----------|
 | Skills | **`authoring-skills`** | frontmatter (`name`, `description` with triggers), folder convention, description length, discoverable triggers |
-| Sub-agents | **`defining-subagents`** | `.agent.md` frontmatter, valid `tools` aliases, per-agent MCP ownership, anti-recursion pattern |
+| Sub-agents | **`defining-subagents`** | `.agent.md` frontmatter, bounded direct-execution contract, Task-capability, per-agent MCP ownership, anti-recursion pattern |
 | MCP servers | **`registering-mcp-servers`** | registration scope (per-agent vs project vs global), config shape, env substitution, no inline secrets |
 | Plugin registration | **`installing-plugins`** | repo `settings.json` (`extraKnownMarketplaces` + `enabledPlugins`), payload-vs-runtime, no "just in case" plugins |
 | Instructions | this skill + `authoring-skills` | `AGENTS.md` is a lean map with repository-owned invariants/fail-safes; plugin ambient policy uses config-backed injection; skills hold detailed procedures; headless/cloud fallback coverage remains |
@@ -191,6 +204,9 @@ file and the concrete fix. Then:
 - **Surface the structural ones** to the operator — skills that should merge,
   a missing anti-recursion guard, an instruction that needs a new surface —
   before acting, since they change design.
+- **Treat external-plugin findings as upstream work.** Do not edit the installed
+  payload. Configure/disable it locally or use the reported source and
+  contribution path to fix the owning repository.
 
 Re-run after fixes until the design critique is clean and every artifact
 conforms.

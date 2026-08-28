@@ -48,7 +48,7 @@
     {
       "name": "agent-logger",
       "description": "Reusable Copilot CLI session logging - segment sessions into digestible chunks, write Markdown session logs, sync raw sessions to a configurable target, and optionally run a scheduled orchestrator that crunches a backlog into committed logs",
-      "version": "0.1.1-dev72",
+      "version": "0.1.1-dev73",
       "source": "plugins/agent-logger"
     },
     {
@@ -72,7 +72,7 @@
     {
       "name": "customizing-copilot",
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev39",
+      "version": "0.1.0-dev40",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable contribution, diagnosis, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev22",
+      "version": "0.1.0-dev23",
       "source": "plugins/copilot-extensions-harness"
     },
     {

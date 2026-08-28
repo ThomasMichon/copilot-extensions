@@ -596,15 +596,22 @@ Cross-check each authored artifact against its authoring skill:
 - **Skills** → **`authoring-skills`** (frontmatter, folder convention,
   trigger phrasing, validation checklist).
 - **Sub-agents** → **`customizing-copilot:defining-subagents`** (`.agent.md` format, tool aliases,
-  per-agent MCP ownership, the anti-recursion / MCP-readiness pattern).
+  bounded direct-execution contracts, per-agent MCP ownership, Task-capable
+  anti-self-delegation, and the MCP-readiness pattern).
 - **MCP servers** → **`registering-mcp-servers`** (registration hierarchy,
   config format, env substitution).
 - **Plugin registration** → **`installing-plugins`** (repo `settings.json`,
   payload-vs-runtime, launch-time reconciliation).
 
+Run the mechanical scan with `--from-settings` so the checked set includes
+project and `.ai` agents plus the enabled external plugin agents. Owned findings
+are blocking; external agent findings are origin/version-aware advisories with
+an upstream fix path and never authorize editing an installed payload.
+
 **Done when:** rubber-duck reports no high-severity issues on the harness's
-skills/agents, and each artifact conforms to its `customizing-copilot` skill's
-checklist.
+skills/agents, owned artifacts conform to their `customizing-copilot` checklists,
+and external advisories are either accepted, configured around, or tracked
+upstream.
 
 ---
 
@@ -626,7 +633,10 @@ agent's `mcp-servers` config, one bridge file per server. Prefer an **in-repo**
 
 Give each MCP-backed capability its **own sub-agent** that owns that MCP server,
 instead of registering many MCP tools on the primary agent. This keeps the
-primary context lean and isolates credential scope. Define these with the
+primary context lean, isolates credential scope, and keeps verbose service
+catalogs and payloads in the domain agent. Compact shared research and
+orchestration MCPs may remain with the coordinator when their results directly
+support decomposition, arbitration, or task state. Define agents with the
 **`customizing-copilot:defining-subagents`** skill, and honor its **MCP-readiness / anti-recursion**
 pattern: a sub-agent checks its MCP tools are actually available before using
 them. For an authorization-equivalent agent-mcp bridge, it records a catalog

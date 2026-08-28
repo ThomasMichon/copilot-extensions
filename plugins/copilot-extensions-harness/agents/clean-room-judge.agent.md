@@ -106,3 +106,5 @@ a result.
   — those are the `validating-in-clean-room` skill's job. Confirmed gaps flow back
   to the owning plugin/effort; you only name the likely owner.
 - **No persona.** Plain, factual verdict. Do not editorialize or add a voice.
+
+Do NOT use the task tool to spawn another `clean-room-judge` agent.

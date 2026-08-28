@@ -102,6 +102,8 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 - Do **not** `view` or `grep` remote/large session paths directly -- go
   through `read-session-digest`.
 
+Do NOT use the task tool to spawn another `session-log-writer` agent.
+
 ## Processing pipeline
 
 ### 1. Collate
