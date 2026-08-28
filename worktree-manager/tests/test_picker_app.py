@@ -13,12 +13,14 @@ import json
 import threading
 from contextlib import redirect_stdout
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from worktree_manager import demo, demo_engine
 from worktree_manager import engine_client as ec
 from worktree_manager import picker_app
+from worktree_manager import __main__ as entrypoint
 from worktree_manager.engine_client import EngineError, Worktree
 from worktree_manager.pivot_runtime import PivotLoadError, PivotPayload
 from worktree_manager.plugin_contracts import parse_manifest
@@ -619,6 +621,31 @@ def test_run_picker_invokes_on_launch(monkeypatch):
     code = picker_app.run_picker(lambda: [], project="r", on_launch=on_launch)
     assert code == 42
     assert captured["req"].worktree_id == "aaaa1111"
+
+
+def test_run_launch_honors_no_mux(monkeypatch):
+    from worktree_manager import launcher
+
+    plan = SimpleNamespace(action="exec", exit_code=0)
+    monkeypatch.setattr(
+        picker_app.ec,
+        "resolve_launch_plan",
+        lambda *args, **kwargs: plan,
+    )
+    calls = []
+    monkeypatch.setattr(
+        launcher,
+        "launch",
+        lambda actual, *, want_mux: calls.append((actual, want_mux)) or 0,
+    )
+
+    assert entrypoint._run_launch(picker_app.LaunchRequest(
+        project="r",
+        worktree_id="aaaa1111",
+        mode="resume",
+        no_mux=True,
+    )) == 0
+    assert calls == [(plan, False)]
 
 
 def test_demo_engine_resolve_emits_plan():

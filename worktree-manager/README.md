@@ -142,6 +142,22 @@ worktrees.
 Streaming, actions, cards/forms, and configuration sections remain subsequent
 parity slices; the bundled Picker stays in place until those are complete.
 
+## Production Picker transplant
+
+The established production Picker source now lives under
+[`src/worktree_manager/production_picker/`](src/worktree_manager/production_picker/)
+as a wholesale copy of the still-shipping agent-worktrees implementation.
+`worktree-manager picker <project>` runs that transplanted UI; the minimal
+`picker_app` remains only for its existing demo/screenshot development surface.
+
+During the migration, the copied presentation modules reach their existing
+engine/data operations through a private compatibility boundary to the active
+agent-worktrees runtime. That boundary is intentionally temporary: it preserves
+the proven UX first, while later slices replace each dependency with the
+Manager-owned CLI/service contracts. Bare project invocation remains on the
+bundled production Picker until the Manager-hosted copy passes the full legacy
+UX and visual-capture suites.
+
 **Projects** are the repos promoted to first-class harness projects (worthy of
 binstubs + profiles, in `projects.yaml`); **Repos** are everything else in the
 registry. The views expose worktree mode, agent mode, PR model, ownership, the
