@@ -22,6 +22,7 @@ param(
     [object]$ExpectedInstallGeneration,
     [object]$ExpectedActivationGeneration,
     [string]$SnapshotId,
+    [string]$RuntimeVersion,
     [string]$NamespaceState = 'active',
     [string]$InstallState = 'active',
     [string]$ActivationMode,
@@ -40,6 +41,7 @@ $strictUtf8 = New-Object Text.UTF8Encoding($false, $true)
 $OutputEncoding = $utf8NoBom
 try { [Console]::OutputEncoding = $utf8NoBom } catch {}
 $script:HeldLocks = @()
+$script:RuntimeSlotLockTimeoutSeconds = 30
 
 if ($env:OS -eq 'Windows_NT' -and -not ('CeFinalPath' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -416,13 +418,30 @@ public static class CeAtomicDirectory {
     private const int ERROR_FILE_EXISTS = 80;
     private const int ERROR_ALREADY_EXISTS = 183;
     private const int EEXIST = 17;
+    private const int ENOTEMPTY_LINUX = 39;
+    private const int ENOTEMPTY_DARWIN = 66;
+    private const int AT_FDCWD = -100;
+    private const uint MOVEFILE_WRITE_THROUGH = 0x00000008;
+    private const uint RENAME_NOREPLACE = 1;
+    private const uint RENAME_EXCL = 0x00000004;
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateDirectoryW(string path, IntPtr security);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool MoveFileExW(string existing, string replacement, uint flags);
+
     [DllImport("libc", EntryPoint = "mkdir", SetLastError = true)]
     private static extern int PosixMkdir(string path, uint mode);
+
+    [DllImport("libc", EntryPoint = "renameat2", SetLastError = true)]
+    private static extern int RenameAt2(
+        int oldDirectory, string oldPath, int newDirectory, string newPath, uint flags);
+
+    [DllImport("libc", EntryPoint = "renamex_np", SetLastError = true)]
+    private static extern int RenameExclusive(string oldPath, string newPath, uint flags);
 
     public static int CreateWindows(string path) {
         if (CreateDirectoryW(path, IntPtr.Zero)) {
@@ -451,6 +470,39 @@ public static class CeAtomicDirectory {
         }
         throw new Win32Exception(error);
     }
+
+    public static int MoveWindows(string source, string destination) {
+        if (MoveFileExW(source, destination, MOVEFILE_WRITE_THROUGH)) {
+            return 1;
+        }
+        int error = Marshal.GetLastWin32Error();
+        if (error == ERROR_FILE_EXISTS || error == ERROR_ALREADY_EXISTS) {
+            return 0;
+        }
+        throw new Win32Exception(error);
+    }
+
+    public static int MoveLinux(string source, string destination) {
+        if (RenameAt2(AT_FDCWD, source, AT_FDCWD, destination, RENAME_NOREPLACE) == 0) {
+            return 1;
+        }
+        int error = Marshal.GetLastWin32Error();
+        if (error == EEXIST || error == ENOTEMPTY_LINUX) {
+            return 0;
+        }
+        throw new Win32Exception(error);
+    }
+
+    public static int MoveDarwin(string source, string destination) {
+        if (RenameExclusive(source, destination, RENAME_EXCL) == 0) {
+            return 1;
+        }
+        int error = Marshal.GetLastWin32Error();
+        if (error == EEXIST || error == ENOTEMPTY_DARWIN) {
+            return 0;
+        }
+        throw new Win32Exception(error);
+    }
 }
 '@
 }
@@ -461,6 +513,21 @@ function Fail([string]$Message) {
 
 function Get-UtcTimestamp {
     return [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Get-FileSha256([string]$Path) {
+    $stream = [IO.File]::OpenRead($Path)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace(
+            '-',
+            ''
+        ).ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+        $stream.Dispose()
+    }
 }
 
 function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
@@ -573,7 +640,8 @@ function Acquire-Lock(
     [string]$Path,
     [string]$Kind,
     [string]$MarketplaceIdValue,
-    [string]$PluginIdValue = ''
+    [string]$PluginIdValue = '',
+    [int]$TimeoutSeconds = 5
 ) {
     $parent = Split-Path -Parent $Path
     if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
@@ -584,7 +652,7 @@ function Acquire-Lock(
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     $accessDeniedSince = $null
     $lastLockResult = $null
-    while ($stopwatch.Elapsed -lt [TimeSpan]::FromSeconds(5)) {
+    while ($stopwatch.Elapsed -lt [TimeSpan]::FromSeconds($TimeoutSeconds)) {
         $lockResult = Try-CreateLockDirectory $Path
         $lastLockResult = $lockResult
         if ($lockResult -eq 1) {
@@ -776,6 +844,17 @@ function Canonical-Path([string]$Path, [switch]$MustExist) {
     $pathRoot = [IO.Path]::GetPathRoot($fullPath)
     if ($fullPath -eq $pathRoot) { return $fullPath }
     return $fullPath.TrimEnd('\', '/')
+}
+
+function Test-FullyQualifiedPath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    if ($env:OS -eq 'Windows_NT') {
+        return (
+            $Path -cmatch '^[A-Za-z]:[\\/]' -or
+            $Path -cmatch '^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)'
+        )
+    }
+    return $Path.StartsWith('/', [StringComparison]::Ordinal)
 }
 
 function Path-IsWithin([string]$Child, [string]$Parent) {
@@ -1529,6 +1608,26 @@ function Assert-SnapshotId([string]$Value) {
     if ($baseName -in @('CON', 'PRN', 'AUX', 'NUL') -or
         $baseName -match '^(COM|LPT)[1-9]$') {
         Fail "Invalid filesystem-safe snapshot id '$Value'."
+    }
+}
+
+function Assert-RuntimeVersion([string]$Value) {
+    if ([Text.Encoding]::UTF8.GetByteCount($Value) -gt 128) {
+        Fail 'Runtime version exceeds the portable 128-character limit.'
+    }
+    foreach ($character in $Value.ToCharArray()) {
+        if ([char]::IsControl($character)) {
+            Fail "Invalid filesystem-safe runtime version '$Value'."
+        }
+    }
+    if ($Value -notmatch '\A[A-Za-z0-9](?:[A-Za-z0-9._+-]*[A-Za-z0-9])?\z' -or
+        $Value -in @('.', '..')) {
+        Fail "Invalid filesystem-safe runtime version '$Value'."
+    }
+    $baseName = $Value.Split([char]'.')[0].ToUpperInvariant()
+    if ($baseName -in @('CON', 'PRN', 'AUX', 'NUL') -or
+        $baseName -match '^(COM|LPT)[1-9]$') {
+        Fail "Invalid filesystem-safe runtime version '$Value'."
     }
 }
 
@@ -3119,7 +3218,8 @@ function Validate-SnapshotProvenance(
     [string]$ResolvedDurableHome,
     [string]$MarketplaceExpectation,
     [string]$PluginExpectation,
-    [string]$RequestedSnapshotId
+    [string]$RequestedSnapshotId,
+    [bool]$RequireCurrentReceipts = $true
 ) {
     if (-not $ContextPath) { Fail 'snapshot-validate requires -Context.' }
     if (-not $MarketplaceExpectation) {
@@ -3224,15 +3324,22 @@ function Validate-SnapshotProvenance(
     $installGeneration = Get-PropertyValue $installReference 'generation'
     Assert-ReceiptGeneration $namespaceGeneration 'snapshot provenance namespace generation'
     Assert-ReceiptGeneration $installGeneration 'snapshot provenance install generation'
-    if ([long]$namespaceGeneration -ne [long]$validated.namespaceGeneration) {
-        Fail 'Snapshot provenance namespace generation is stale; restart snapshot production.'
+    if ($RequireCurrentReceipts) {
+        if ([long]$namespaceGeneration -ne [long]$validated.namespaceGeneration) {
+            Fail 'Snapshot provenance namespace generation is stale; restart snapshot production.'
+        }
+        if ([long]$installGeneration -ne [long]$validated.generation) {
+            Fail 'Snapshot provenance install generation is stale; restart snapshot production.'
+        }
     }
-    if ([long]$installGeneration -ne [long]$validated.generation) {
-        Fail 'Snapshot provenance install generation is stale; restart snapshot production.'
+    elseif ([long]$validated.namespaceGeneration -lt [long]$namespaceGeneration -or
+        [long]$validated.generation -lt [long]$installGeneration) {
+        Fail 'Current receipt generation predates the owned runtime slot.'
     }
     $namespace = Read-Json $validated.namespaceReceipt
-    if ((Get-StringProperty $namespace 'state') -cne 'active' -or
-        (Get-StringProperty $validated 'state') -cne 'active') {
+    if ($RequireCurrentReceipts -and
+        ((Get-StringProperty $namespace 'state') -cne 'active' -or
+         (Get-StringProperty $validated 'state') -cne 'active')) {
         Fail 'Snapshot provenance requires active namespace and install receipts.'
     }
 
@@ -3266,12 +3373,22 @@ function Validate-SnapshotProvenance(
         }
         $payloadOriginReceipt = Canonical-Path $payloadOriginReceipt
     }
-    $currentPayload = Get-PayloadIdentity $validated.installReceipt
-    if (-not (Paths-Equal $payloadRoot $currentPayload.root) -or
-        $payloadVersion -cne $currentPayload.version -or
-        $payloadOrigin -cne $currentPayload.origin -or
-        $payloadOriginReceipt -cne $currentPayload.originReceipt) {
-        Fail 'Snapshot provenance payload does not match the pinned install receipt.'
+    $recordedPayload = [pscustomobject][ordered]@{
+        root = $payloadRoot
+        version = $payloadVersion
+        origin = $payloadOrigin
+        originReceipt = $payloadOriginReceipt
+    }
+    $resultPayload = $recordedPayload
+    if ($RequireCurrentReceipts) {
+        $currentPayload = Get-PayloadIdentity $validated.installReceipt
+        if (-not (Paths-Equal $payloadRoot $currentPayload.root) -or
+            $payloadVersion -cne $currentPayload.version -or
+            $payloadOrigin -cne $currentPayload.origin -or
+            $payloadOriginReceipt -cne $currentPayload.originReceipt) {
+            Fail 'Snapshot provenance payload does not match the pinned install receipt.'
+        }
+        $resultPayload = $currentPayload
     }
     [void](Read-ExactUtcTimestampValue (
         Get-PropertyValue $provenance 'createdAt'
@@ -3291,7 +3408,7 @@ function Validate-SnapshotProvenance(
         installReceipt = Canonical-Path $installPath
         namespaceGeneration = [long]$namespaceGeneration
         installGeneration = [long]$installGeneration
-        payload = $currentPayload
+        payload = $resultPayload
         operative = $false
     }
 }
@@ -3418,6 +3535,455 @@ function Invoke-SnapshotStamp([string]$ResolvedDurableHome) {
         }
         if (-not $operationFailed -and $null -ne $releaseError) {
             throw $releaseError
+        }
+    }
+}
+
+function Assert-ExactPropertyCount($Object, [int]$Expected, [string]$Label) {
+    if ($null -eq $Object -or $Object -isnot [pscustomobject]) {
+        Fail "$Label must be a JSON object."
+    }
+    if (@($Object.PSObject.Properties).Count -ne $Expected) {
+        Fail "$Label contains unknown or missing fields."
+    }
+}
+
+function Resolve-RuntimeSlotPaths(
+    $Validated,
+    [string]$RequestedRuntimeVersion,
+    [bool]$RequireExisting
+) {
+    Assert-RuntimeVersion $RequestedRuntimeVersion
+    $pluginRoot = Canonical-Path ([string]$Validated.pluginRoot)
+    $install = Read-Json ([string]$Validated.installReceipt)
+    $roots = Get-PropertyValue $install 'roots'
+    $versionsRelative = Get-StringProperty $roots 'versions'
+    $separatorPattern = $(if ($env:OS -eq 'Windows_NT') { '[\\/]' } else { '/' })
+    $cursor = $pluginRoot
+    foreach ($part in @($versionsRelative -split $separatorPattern)) {
+        if (-not $part) { continue }
+        $cursor = Join-Path $cursor $part
+        Assert-NotReparsePoint $cursor 'Versions root'
+        $entry = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($null -ne $entry -and -not $entry.PSIsContainer) {
+            Fail 'Versions root path components must be ordinary directories.'
+        }
+    }
+    if ($RequireExisting -and
+        -not (Test-Path -LiteralPath $cursor -PathType Container)) {
+        Fail 'Versions root must be an existing directory.'
+    }
+    $versionsRoot = Canonical-Path $cursor
+    if (-not (Paths-Equal $versionsRoot ([string]$Validated.versionsRoot))) {
+        Fail 'Versions root does not match the validated install receipt.'
+    }
+    if ((Paths-Equal $versionsRoot $pluginRoot) -or
+        -not (Path-IsWithin $versionsRoot $pluginRoot)) {
+        Fail 'Versions root must remain beneath the canonical plugin root.'
+    }
+
+    $lexicalSlotRoot = Join-Path $versionsRoot $RequestedRuntimeVersion
+    Assert-NotReparsePoint $lexicalSlotRoot 'Runtime slot'
+    $slotEntry = Get-Item -LiteralPath $lexicalSlotRoot -Force -ErrorAction SilentlyContinue
+    if ($null -ne $slotEntry -and -not $slotEntry.PSIsContainer) {
+        Fail 'Runtime slot must be an ordinary directory.'
+    }
+    if ($RequireExisting -and $null -eq $slotEntry) {
+        Fail 'Runtime slot must be an existing directory.'
+    }
+    $slotRoot = Canonical-Path $lexicalSlotRoot
+    if (-not (Paths-Equal (Split-Path -Parent $slotRoot) $versionsRoot)) {
+        Fail 'Runtime slot must be one direct child of versionsRoot.'
+    }
+    $comparison = [StringComparison]::Ordinal
+    if ($env:OS -eq 'Windows_NT') {
+        $comparison = [StringComparison]::OrdinalIgnoreCase
+    }
+    if (-not [string]::Equals(
+        (Split-Path -Leaf $slotRoot),
+        $RequestedRuntimeVersion,
+        $comparison
+    )) {
+        Fail 'Runtime slot does not retain the requested runtime version.'
+    }
+    $ownership = Join-Path $slotRoot '.runtime-slot-ownership.json'
+    Assert-NotReparsePoint $ownership 'Runtime slot ownership'
+    return [pscustomobject][ordered]@{
+        versionsRelative = $versionsRelative
+        versionsRoot = $versionsRoot
+        slotRoot = $slotRoot
+        ownership = $ownership
+        slotExists = ($null -ne $slotEntry)
+    }
+}
+
+function Ensure-VersionsRootChain($Validated, [string]$VersionsRelative) {
+    $separatorPattern = $(if ($env:OS -eq 'Windows_NT') { '[\\/]' } else { '/' })
+    $cursor = Canonical-Path ([string]$Validated.pluginRoot)
+    foreach ($part in @($VersionsRelative -split $separatorPattern)) {
+        if (-not $part) { continue }
+        $cursor = Join-Path $cursor $part
+        Assert-NotReparsePoint $cursor 'Versions root'
+        $entry = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($null -eq $entry) {
+            try {
+                New-Item -ItemType Directory -Path $cursor -ErrorAction Stop | Out-Null
+            }
+            catch {
+                Assert-NotReparsePoint $cursor 'Versions root'
+                $entry = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+                if ($null -eq $entry -or -not $entry.PSIsContainer) {
+                    Fail "Cannot create versions root component '$cursor': $($_.Exception.Message)"
+                }
+            }
+        }
+        Assert-NotReparsePoint $cursor 'Versions root'
+        $entry = Get-Item -LiteralPath $cursor -Force -ErrorAction SilentlyContinue
+        if ($null -eq $entry -or -not $entry.PSIsContainer) {
+            Fail 'Versions root path components must be ordinary directories.'
+        }
+    }
+}
+
+function New-RuntimeSlotOwnership(
+    $Validated,
+    $Snapshot,
+    [string]$RequestedRuntimeVersion,
+    [string]$SlotRoot,
+    [string]$CreatedAt
+) {
+    return [ordered]@{
+        schema = 'copilot-extensions.runtime-slot-ownership'
+        version = 1
+        marketplaceId = [string]$Validated.marketplaceId
+        pluginId = [string]$Validated.pluginId
+        sourceFingerprint = [string]$Validated.sourceFingerprint
+        runtime = [ordered]@{
+            version = $RequestedRuntimeVersion
+            root = $SlotRoot
+        }
+        snapshot = [ordered]@{
+            id = [string]$Snapshot.snapshotId
+            root = [string]$Snapshot.snapshotRoot
+            provenance = [string]$Snapshot.provenance
+            provenanceSha256 = Get-FileSha256 ([string]$Snapshot.provenance)
+        }
+        namespaceReceipt = [ordered]@{
+            path = [string]$Snapshot.namespaceReceipt
+            generation = [long]$Snapshot.namespaceGeneration
+        }
+        installReceipt = [ordered]@{
+            path = [string]$Snapshot.installReceipt
+            generation = [long]$Snapshot.installGeneration
+        }
+        createdAt = $CreatedAt
+    }
+}
+
+function Validate-RuntimeSlotOwnershipCore(
+    $Validated,
+    $Snapshot,
+    [string]$RequestedRuntimeVersion
+) {
+    $paths = Resolve-RuntimeSlotPaths $Validated $RequestedRuntimeVersion $true
+    if (-not (Test-Path -LiteralPath $paths.ownership)) {
+        Fail 'Runtime slot ownership must exist.'
+    }
+    $actualOwnership = Canonical-Path $paths.ownership -MustExist
+    if (-not (Paths-Equal $actualOwnership $paths.ownership)) {
+        Fail "Runtime slot ownership is not at its exact canonical location '$($paths.ownership)'."
+    }
+    $ownershipEntry = Get-Item -LiteralPath $actualOwnership -Force
+    if ($ownershipEntry.PSIsContainer -or
+        (($ownershipEntry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Fail 'Runtime slot ownership must be an ordinary file.'
+    }
+    $ownership = Read-Json $actualOwnership
+    Assert-ExactPropertyCount $ownership 10 'Runtime slot ownership'
+    $runtime = Get-PropertyValue $ownership 'runtime'
+    $recordedSnapshot = Get-PropertyValue $ownership 'snapshot'
+    $namespaceReference = Get-PropertyValue $ownership 'namespaceReceipt'
+    $installReference = Get-PropertyValue $ownership 'installReceipt'
+    Assert-ExactPropertyCount $runtime 2 'Runtime slot ownership runtime identity'
+    Assert-ExactPropertyCount $recordedSnapshot 4 'Runtime slot ownership snapshot identity'
+    Assert-ExactPropertyCount $namespaceReference 2 'Runtime slot ownership namespace receipt'
+    Assert-ExactPropertyCount $installReference 2 'Runtime slot ownership install receipt'
+
+    $ownershipVersion = Get-PropertyValue $ownership 'version'
+    Assert-PositiveInteger $ownershipVersion 'runtime slot ownership version'
+    if ((Get-StringProperty $ownership 'schema') -cne
+            'copilot-extensions.runtime-slot-ownership' -or
+        $ownershipVersion -ne 1) {
+        Fail 'Runtime slot ownership has an unsupported schema or version.'
+    }
+    [void](Read-ExactUtcTimestampValue (
+        Get-PropertyValue $ownership 'createdAt'
+    ) 'runtime slot ownership createdAt')
+    $namespaceGeneration = Get-PropertyValue $namespaceReference 'generation'
+    $installGeneration = Get-PropertyValue $installReference 'generation'
+    Assert-ReceiptGeneration $namespaceGeneration 'runtime slot ownership namespace generation'
+    Assert-ReceiptGeneration $installGeneration 'runtime slot ownership install generation'
+
+    if ((Get-StringProperty $ownership 'marketplaceId') -cne
+            [string]$Snapshot.marketplaceId -or
+        (Get-StringProperty $ownership 'pluginId') -cne
+            [string]$Snapshot.pluginId -or
+        (Get-StringProperty $ownership 'sourceFingerprint') -cne
+            [string]$Snapshot.sourceFingerprint -or
+        (Get-StringProperty $runtime 'version') -cne $RequestedRuntimeVersion -or
+        (Get-StringProperty $recordedSnapshot 'id') -cne
+            [string]$Snapshot.snapshotId -or
+        (Get-StringProperty $recordedSnapshot 'provenanceSha256') -cne
+            (Get-FileSha256 ([string]$Snapshot.provenance)) -or
+        [long]$namespaceGeneration -ne [long]$Snapshot.namespaceGeneration -or
+        [long]$installGeneration -ne [long]$Snapshot.installGeneration) {
+        Fail 'Runtime slot ownership does not match the validated snapshot and installation receipts.'
+    }
+
+    $pathFields = @(
+        @($runtime, 'root', [string]$paths.slotRoot),
+        @($recordedSnapshot, 'root', [string]$Snapshot.snapshotRoot),
+        @($recordedSnapshot, 'provenance', [string]$Snapshot.provenance),
+        @($namespaceReference, 'path', [string]$Snapshot.namespaceReceipt),
+        @($installReference, 'path', [string]$Snapshot.installReceipt)
+    )
+    foreach ($field in $pathFields) {
+        $recordedPath = Get-StringProperty $field[0] ([string]$field[1])
+        if (-not (Test-FullyQualifiedPath $recordedPath)) {
+            Fail "Runtime slot ownership $($field[1]) must be absolute."
+        }
+        if (-not (Paths-Equal $recordedPath ([string]$field[2]))) {
+            Fail 'Runtime slot ownership does not match the validated snapshot and installation receipts.'
+        }
+    }
+
+    $namespace = Read-Json ([string]$Validated.namespaceReceipt)
+    $slotContent = @(
+        Get-ChildItem -LiteralPath $paths.slotRoot -Force |
+            Where-Object { $_.Name -cne '.runtime-slot-ownership.json' } |
+            Select-Object -First 1
+    )
+    return [pscustomobject][ordered]@{
+        action = 'slot-validate'
+        status = 'ready'
+        reason = 'runtime-slot-ownership-valid'
+        slotRoot = [string]$paths.slotRoot
+        runtimeVersion = $RequestedRuntimeVersion
+        ownership = $actualOwnership
+        snapshotId = [string]$Snapshot.snapshotId
+        snapshotProvenance = [string]$Snapshot.provenance
+        marketplaceId = [string]$Validated.marketplaceId
+        pluginId = [string]$Validated.pluginId
+        sourceFingerprint = [string]$Validated.sourceFingerprint
+        namespaceReceipt = [string]$Snapshot.namespaceReceipt
+        installReceipt = [string]$Snapshot.installReceipt
+        namespaceGeneration = [long]$Snapshot.namespaceGeneration
+        installGeneration = [long]$Snapshot.installGeneration
+        namespaceState = Get-StringProperty $namespace 'state'
+        installState = Get-StringProperty $Validated 'state'
+        slotEmpty = ($slotContent.Count -eq 0)
+        activated = $false
+        operative = $false
+    }
+}
+
+function Invoke-SlotValidate([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'slot-validate requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'slot-validate requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'slot-validate requires -ExpectedPluginId.'
+    }
+    if (-not $SnapshotId) { Fail 'slot-validate requires -SnapshotId.' }
+    if (-not $RuntimeVersion) { Fail 'slot-validate requires -RuntimeVersion.' }
+    Assert-MarketplaceId $ExpectedMarketplaceId
+    Assert-PluginId $ExpectedPluginId
+    Assert-SnapshotId $SnapshotId
+    Assert-RuntimeVersion $RuntimeVersion
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $snapshot = Validate-SnapshotProvenance `
+        $Context `
+        $ResolvedDurableHome `
+        $ExpectedMarketplaceId `
+        $ExpectedPluginId `
+        $SnapshotId `
+        $false
+    return Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
+}
+
+function Invoke-SlotProvision([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'slot-provision requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'slot-provision requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'slot-provision requires -ExpectedPluginId.'
+    }
+    if (-not $SnapshotId) { Fail 'slot-provision requires -SnapshotId.' }
+    if (-not $RuntimeVersion) { Fail 'slot-provision requires -RuntimeVersion.' }
+    Assert-MarketplaceId $ExpectedMarketplaceId
+    Assert-PluginId $ExpectedPluginId
+    Assert-SnapshotId $SnapshotId
+    Assert-RuntimeVersion $RuntimeVersion
+
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $cellRoot = [string]$validated.cellRoot
+    $genesisLock = Join-Path (Join-Path $ResolvedDurableHome 'marketplaces/.locks') ($ExpectedMarketplaceId + '.genesis')
+    $installLock = Join-Path (Join-Path $cellRoot '.locks') ($ExpectedPluginId + '.install.lock')
+    $startingLockCount = $script:HeldLocks.Count
+    $operationFailed = $false
+    $temporarySlot = ''
+    $temporaryOwnership = ''
+    try {
+        Acquire-Lock $genesisLock 'genesis' $ExpectedMarketplaceId '' `
+            $script:RuntimeSlotLockTimeoutSeconds
+        Acquire-Lock $installLock 'install' $ExpectedMarketplaceId $ExpectedPluginId `
+            $script:RuntimeSlotLockTimeoutSeconds
+        $validated = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $validated.installReceipt $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' $cellRoot
+        }
+        $paths = Resolve-RuntimeSlotPaths $validated $RuntimeVersion $false
+        if ($paths.slotExists) {
+            $snapshot = Validate-SnapshotProvenance `
+                $validated.installReceipt `
+                $ResolvedDurableHome `
+                $ExpectedMarketplaceId `
+                $ExpectedPluginId `
+                $SnapshotId `
+                $false
+            $result = Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
+            $result.action = 'slot-provision'
+            $result.reason = 'runtime-slot-ownership-current'
+            $result | Add-Member -NotePropertyName slotChanged -NotePropertyValue $false
+            return $result
+        }
+
+        $snapshot = Validate-SnapshotProvenance `
+            $validated.installReceipt `
+            $ResolvedDurableHome `
+            $ExpectedMarketplaceId `
+            $ExpectedPluginId `
+            $SnapshotId
+        Ensure-VersionsRootChain $validated $paths.versionsRelative
+        $paths = Resolve-RuntimeSlotPaths $validated $RuntimeVersion $false
+
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $slotDigest = ([BitConverter]::ToString(
+                $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes([string]$paths.slotRoot))
+            )).Replace('-', '').ToLowerInvariant().Substring(0, 16)
+        }
+        finally {
+            $sha.Dispose()
+        }
+        $temporarySlot = Join-Path (
+            Split-Path -Parent $paths.versionsRoot
+        ) ('.runtime-slot-' + $slotDigest + '-' + [guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $temporarySlot -ErrorAction Stop | Out-Null
+        $temporaryOwnership = Join-Path $temporarySlot '.runtime-slot-ownership.json'
+        $ownership = New-RuntimeSlotOwnership `
+            $validated `
+            $snapshot `
+            $RuntimeVersion `
+            ([string]$paths.slotRoot) `
+            (Get-UtcTimestamp)
+        Write-AtomicJson $temporaryOwnership $ownership
+        Assert-AllLocksOwned
+        try {
+            if ($env:OS -eq 'Windows_NT') {
+                $moveResult = [CeAtomicDirectory]::MoveWindows(
+                    $temporarySlot,
+                    [string]$paths.slotRoot
+                )
+            }
+            elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                    [Runtime.InteropServices.OSPlatform]::Linux
+                )) {
+                $moveResult = [CeAtomicDirectory]::MoveLinux(
+                    $temporarySlot,
+                    [string]$paths.slotRoot
+                )
+            }
+            elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                    [Runtime.InteropServices.OSPlatform]::OSX
+                )) {
+                $moveResult = [CeAtomicDirectory]::MoveDarwin(
+                    $temporarySlot,
+                    [string]$paths.slotRoot
+                )
+            }
+            else {
+                Fail 'Atomic no-replace directory publication is unavailable.'
+            }
+        }
+        catch {
+            if (Test-Path -LiteralPath $paths.slotRoot) {
+                Fail 'Runtime slot appeared during publication; refusing replacement.'
+            }
+            Fail "Cannot publish runtime slot '$($paths.slotRoot)': $($_.Exception.Message)"
+        }
+        if ($moveResult -eq 0) {
+            Fail 'Runtime slot appeared during publication; refusing replacement.'
+        }
+        $temporarySlot = ''
+        $temporaryOwnership = ''
+        $result = Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
+        $result.action = 'slot-provision'
+        $result.reason = 'runtime-slot-ownership-published'
+        $result | Add-Member -NotePropertyName slotChanged -NotePropertyValue $true
+        return $result
+    }
+    catch {
+        $operationFailed = $true
+        throw
+    }
+    finally {
+        $cleanupError = $null
+        try {
+            if ($temporaryOwnership -and
+                (Test-Path -LiteralPath $temporaryOwnership -PathType Leaf)) {
+                [IO.File]::Delete($temporaryOwnership)
+            }
+            if ($temporarySlot -and
+                (Test-Path -LiteralPath $temporarySlot -PathType Container)) {
+                [IO.Directory]::Delete($temporarySlot, $false)
+            }
+        }
+        catch {
+            $cleanupError = $_.Exception
+            if ($operationFailed) {
+                [Console]::Error.WriteLine(
+                    "installation-context: $($_.Exception.Message) while preserving the original slot provisioning failure."
+                )
+            }
+        }
+        $releaseError = $null
+        while ($script:HeldLocks.Count -gt $startingLockCount) {
+            try {
+                Release-Lock
+            }
+            catch {
+                Pop-HeldLock
+                if ($null -eq $releaseError) {
+                    $releaseError = $_.Exception
+                }
+                if ($operationFailed) {
+                    [Console]::Error.WriteLine(
+                        "installation-context: $($_.Exception.Message) while preserving the original slot provisioning failure."
+                    )
+                }
+            }
+        }
+        if (-not $operationFailed -and $null -ne $releaseError) {
+            throw $releaseError
+        }
+        if (-not $operationFailed -and $null -ne $cleanupError) {
+            throw $cleanupError
         }
     }
 }
@@ -3655,6 +4221,8 @@ try {
         'activation-cas',
         'snapshot-stamp',
         'snapshot-validate',
+        'slot-provision',
+        'slot-validate',
         'status',
         'probe-legacy'
     ) 'Action'
@@ -3714,6 +4282,12 @@ try {
             $ExpectedMarketplaceId `
             $ExpectedPluginId `
             $SnapshotId
+    }
+    elseif ($Action -eq 'slot-provision') {
+        $result = Invoke-SlotProvision $resolvedDurableHome
+    }
+    elseif ($Action -eq 'slot-validate') {
+        $result = Invoke-SlotValidate $resolvedDurableHome
     }
     elseif ($Action -eq 'validate') {
         $pointer = $Context

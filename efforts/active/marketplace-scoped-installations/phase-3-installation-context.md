@@ -465,30 +465,34 @@ uninstall behavior.
 
 - A snapshot installer validates its sidecar against `install.json` before
   building a version.
-- The initial Python reference exposes explicit `slot-provision` and
-  `slot-validate` transactions. Provisioning revalidates the receipt chain under
-  the genesis and installation locks, then atomically publishes only
+- The Python, dependency-light Bash, and PowerShell runners expose explicit
+  `slot-provision` and `slot-validate` transactions. Provisioning revalidates
+  the receipt chain under the genesis and installation locks, then exclusively
+  publishes only
   `<versionsRoot>/<runtime-version>/.runtime-slot-ownership.json`.
 - The ownership marker pins marketplace, plugin, source fingerprint, runtime
-  version/root, snapshot id/root/provenance, canonical receipt paths, and
-  namespace/install generations. Matching ownership is idempotent; markerless,
+  version/root, snapshot id/root/provenance and provenance digest, canonical
+  receipt paths, and namespace/install generations. Matching ownership is idempotent; markerless,
   malformed, copied, linked, stale, or conflicting slots fail without
   replacement.
 - New publication requires current active snapshot provenance. Existing slot
   validation continues across later receipt generations by matching the
   immutable snapshot and stable cell identity while rejecting generation
   regression, so update and state transitions do not strand rollback slots.
-- Python publication uses a reserved hidden sibling outside `versionsRoot` and
-  an atomic no-replace rename. Interrupted hidden siblings are inert, remain
-  outside canonical slot enumeration, and require explicit reconciliation.
-  Dependency-light parity may use a different primitive but must preserve
-  exclusive no-clobber reservation and fail-closed validation.
+- Python and PowerShell publication use a reserved hidden sibling outside
+  `versionsRoot` and an OS-native atomic no-replace rename. Interrupted hidden siblings
+  are inert, remain outside canonical slot enumeration, and require explicit
+  reconciliation. Bash uses atomic final-slot `mkdir` reservation followed by
+  no-replace hard-link marker publication from within the reserved slot.
+  Ordinary failures remove their still-empty owned reservation; an interruption
+  between those steps leaves a markerless slot that remains untouched and fails
+  closed pending explicit repair/release.
 - Results distinguish attributable ownership from lifecycle readiness with
   `namespaceState`, `installState`, and `slotEmpty`. Runtime versions remain
   immutable build identities; conflicting slots await a separate explicit
   repair/release transaction rather than automatic reclamation.
-- Slot ownership remains non-activating and unadopted until equivalent
-  dependency-light Bash and PowerShell behavior exists. It does not write
+- Slot ownership remains non-activating and unadopted until an installer or
+  bootstrap explicitly adopts the parity-proven primitive. It does not write
   payloads, completion/current/LKG markers, activation receipts, launchers,
   services, state, or tombstones.
 - Versioned-runtime receives the resolved `pluginRoot` explicitly.

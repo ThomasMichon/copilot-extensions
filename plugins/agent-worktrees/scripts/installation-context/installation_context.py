@@ -27,6 +27,7 @@ LOCK_SCHEMA = "copilot-extensions.installation-lock"
 LOCK_VERSION = 1
 LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
 LOCK_POLL_SECONDS = 0.01
+RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS = 30.0
 MAX_NAMESPACE_LOCATORS = 16
 MAX_RECEIPT_GENERATION = (1 << 63) - 1
 ROOT_NAMES = ("versions", "snapshots", "state", "run", "logs", "cache", "launchers")
@@ -231,6 +232,13 @@ def _json_bytes(value: Mapping[str, Any]) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def _sha256_file(path: Path) -> str:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError as error:
+        _fail(f"Cannot hash '{path}': {error}")
+
+
 def _atomic_write_json(
     path: Path,
     value: Mapping[str, Any],
@@ -287,11 +295,13 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
         kind: str,
         marketplace_id: str,
         plugin_id: str | None = None,
+        timeout_seconds: float = LOCK_INITIALIZATION_GRACE_SECONDS,
     ) -> None:
         self.path = path
         self.kind = kind
         self.marketplace_id = marketplace_id
         self.plugin_id = plugin_id
+        self.timeout_seconds = timeout_seconds
         self.token = secrets.token_hex(16)
         self.owner_path = path / "owner.json"
         self.host = socket.gethostname().split(".", 1)[0].casefold()
@@ -324,7 +334,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
 
     def acquire(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        deadline = time.monotonic() + LOCK_INITIALIZATION_GRACE_SECONDS
+        deadline = time.monotonic() + self.timeout_seconds
         while True:
             if time.monotonic() >= deadline:
                 if self.path.exists() and not self.owner_path.exists():
@@ -2048,6 +2058,9 @@ def _runtime_slot_ownership_value(
             "id": _string_property(snapshot, "snapshotId"),
             "root": _string_property(snapshot, "snapshotRoot"),
             "provenance": _string_property(snapshot, "provenance"),
+            "provenanceSha256": _sha256_file(
+                Path(_string_property(snapshot, "provenance"))
+            ),
         },
         "namespaceReceipt": {
             "path": _string_property(snapshot, "namespaceReceipt"),
@@ -2287,12 +2300,14 @@ def provision_runtime_slot(
         / f"{expected_marketplace_id}.genesis",
         kind="genesis",
         marketplace_id=expected_marketplace_id,
+        timeout_seconds=RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
     )
     install_lock = _DirectoryLock(
         cell_root / ".locks" / f"{expected_plugin_id}.install.lock",
         kind="install",
         marketplace_id=expected_marketplace_id,
         plugin_id=expected_plugin_id,
+        timeout_seconds=RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS,
     )
     with genesis_lock, install_lock:
         validated = validate_context_receipt(
