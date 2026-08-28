@@ -276,6 +276,77 @@ def test_powershell_hook_forwards_runtime_script_output(tmp_path: Path):
     assert result.stdout == expected
 
 
+def test_register_session_powershell_coalesces_context_and_fails_open(
+    tmp_path: Path,
+):
+    powershell = _powershell()
+    home = tmp_path / "home"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    plugin_root = tmp_path / "plugin"
+    scripts_dir = plugin_root / "scripts"
+    bin_dir.mkdir(parents=True)
+    scripts_dir.mkdir(parents=True)
+
+    fake_python = tmp_path / "fake-python.ps1"
+    fake_python.write_text(
+        "Write-Output '{\"additionalContext\":\"worktree binding\"}'\n",
+        encoding="utf-8",
+    )
+    escaped_python = str(fake_python).replace("'", "''")
+    (bin_dir / "resolve-runtime.ps1").write_text(
+        f"$AwPy = '{escaped_python}'\n",
+        encoding="utf-8",
+    )
+    catalog = scripts_dir / "emit-command-catalog.ps1"
+    catalog.write_text(
+        "Write-Output '{\"additionalContext\":\"command catalog\"}'\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["USERPROFILE"] = str(home)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
+    command = [
+        powershell,
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        str(_PLUGIN / "scripts" / "register-session.ps1"),
+    ]
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "command catalog\n\nworktree binding"
+    }
+
+    catalog.write_text(
+        "Write-Output 'invalid catalog JSON'\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        command,
+        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "additionalContext": "worktree binding"
+    }
+
+
 def test_register_session_scripts_keep_catalog_and_binding_together():
     for name in ("register-session.sh", "register-session.ps1"):
         text = (_PLUGIN / "scripts" / name).read_text(encoding="utf-8")

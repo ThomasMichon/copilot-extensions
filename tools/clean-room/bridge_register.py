@@ -171,14 +171,18 @@ def cmd_register(args) -> int:
     """
     pdir = _providers_dir()
     pdir.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--acp-command",
+        args.acp_command,
+    ]
+    if args.acp_cwd:
+        command.extend(["--acp-cwd", args.acp_cwd])
+    command.extend(["--name-filter", args.name_filter])
     manifest = {
         "namespace": NAMESPACE,
-        "command": [
-            sys.executable, str(Path(__file__).resolve()),
-            "--acp-command", args.acp_command,
-            "--acp-cwd", args.acp_cwd,
-            "--name-filter", args.name_filter,
-        ],
+        "command": command,
         "restricted": True,
         "description": "Clean-room validation containers (agent-driven Tier-E eval)",
     }
