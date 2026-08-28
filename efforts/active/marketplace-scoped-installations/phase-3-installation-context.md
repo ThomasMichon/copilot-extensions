@@ -494,15 +494,17 @@ identity is the reference implementation that #1108 generalizes.
    policy, activation, tombstone, resolver, and effective-mode contract in
    [`docs/install-contract.md`](../../../docs/install-contract.md#installation-mode-governance);
    no runtime behavior changes.
-2. **Primitive, non-operative** — add the canonical Python/POSIX/PowerShell
-   implementations and unit tests; payload shims still use legacy roots.
+2. **Primitive foundation** — add the canonical Python/POSIX/PowerShell
+   implementations and unit tests; bounded receipt mutations do not make
+   payload shims leave legacy roots.
 3. **Cell-aware reconciliation prerequisite** — teach bootstrap checks and the
    agent-worktrees reconciler to recognize a context-selected deploy manifest
    without migrating agent-worktrees project state.
 4. **Activation governance prerequisite** — implement the shared default-off
-   desired/actual resolver and legacy-entrypoint probe from the
+   desired/actual resolver, legacy-entrypoint probe, and explicit
+   generation-pinned activation CAS from the
    [install contract](../../../docs/install-contract.md#installation-mode-governance)
-   without changing a runtime root.
+   without automatically changing a runtime root.
 5. **agent-machines exemplar** — make installation context explicitly operative
    for one CLI-only runtime and add dual-cell install/update/rollback tests.
 6. **agent-index exemplar** — namespace its service and durable state and add

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve and validate non-operative marketplace installation context."""
+"""Resolve, validate, and explicitly mutate marketplace installation context."""
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,7 @@ import warnings
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import quote, urlsplit, urlunsplit
 
@@ -138,7 +138,7 @@ def _atomic_write_json(
     path: Path,
     value: Mapping[str, Any],
     *,
-    lock: _DirectoryLock | None = None,
+    lock: _DirectoryLock | Sequence[_DirectoryLock] | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp-{secrets.token_hex(16)}")
@@ -148,8 +148,14 @@ def _atomic_write_json(
             stream.write(_json_bytes(value))
             stream.flush()
             os.fsync(stream.fileno())
-        if lock is not None:
-            lock.assert_owned()
+        if lock is None:
+            locks: Sequence[_DirectoryLock] = ()
+        elif isinstance(lock, Sequence):
+            locks = lock
+        else:
+            locks = (lock,)
+        for held_lock in locks:
+            held_lock.assert_owned()
         os.replace(temporary, path)
         if os.name != "nt":
             directory = os.open(path.parent, os.O_RDONLY)
@@ -223,6 +229,18 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         deadline = time.monotonic() + LOCK_INITIALIZATION_GRACE_SECONDS
         while True:
+            if time.monotonic() >= deadline:
+                if self.path.exists() and not self.owner_path.exists():
+                    try:
+                        age = time.time() - self.path.stat().st_mtime
+                    except FileNotFoundError:
+                        continue
+                    if age >= LOCK_INITIALIZATION_GRACE_SECONDS:
+                        _fail(
+                            f"Installation lock '{self.path}' has no owner receipt; "
+                            "explicit repair is required."
+                        )
+                _fail(f"Installation lock '{self.path}' remained busy.")
             try:
                 self.path.mkdir()
             except FileExistsError:
@@ -250,6 +268,17 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 owner_pid = _property(owner, "pid")
                 if owner_host == self.host:
                     if not _pid_is_live(owner_pid):
+                        time.sleep(LOCK_POLL_SECONDS)
+                        try:
+                            current_owner = self._owner()
+                        except InstallationContextError:
+                            if not self.path.exists() or not self.owner_path.exists():
+                                continue
+                            raise
+                        if _string_property(current_owner, "token") != _string_property(
+                            owner, "token"
+                        ):
+                            continue
                         _fail(
                             f"Installation lock '{self.path}' has a stale owner "
                             f"(host={owner_host}, pid={owner_pid}); explicit repair is required."
@@ -1629,8 +1658,14 @@ def _validate_environment_record(
     if platform not in {"windows", "posix"}:
         _fail(f"{label}.platform must be exactly 'windows' or 'posix'.")
     home = _required_string(value, "homeRealPath", label)
-    pure_path = PureWindowsPath(home) if platform == "windows" else PurePosixPath(home)
-    if not pure_path.is_absolute():
+    if platform == "windows":
+        absolute = bool(
+            re.match(r"^[A-Za-z]:[\\/]", home)
+            or re.match(r"^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)", home)
+        )
+    else:
+        absolute = PurePosixPath(home).is_absolute()
+    if not absolute:
         _fail(f"{label}.homeRealPath must be absolute.")
     distro_value = _exact_property(value, "wslDistro")
     if distro_value is _MISSING:
@@ -1972,6 +2007,230 @@ def _activation_result(
             reason="activation-invalid",
         )
         return result
+
+
+def compare_and_swap_activation(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    expected_namespace_generation: int,
+    expected_install_generation: int,
+    expected_activation_generation: int,
+    activation_mode: str,
+    activation_state: str,
+    legacy_disposition: str,
+    legacy_probe: Mapping[str, Any],
+    durable_home: str | os.PathLike[str] | None = None,
+    legacy_root: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+    os_profile: str | os.PathLike[str] | None = None,
+    platform: str | None = None,
+    wsl_distro: str | None = None,
+) -> dict[str, Any]:
+    """Atomically publish a generation-pinned activation receipt."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    if (activation_mode, activation_state) not in {
+        ("namespaced", "active"),
+        ("legacy", "deactivated"),
+    }:
+        _fail("Activation mode/state pair is invalid.")
+    if legacy_disposition not in {
+        "absent",
+        "quiesced",
+        "retained-inert",
+        "restored",
+    }:
+        _fail("Activation legacy disposition is invalid.")
+    recorded_probe = _validate_legacy_probe(
+        legacy_probe,
+        "activation legacy probe",
+    )
+    expected_generations = {
+        "namespace": expected_namespace_generation,
+        "install": expected_install_generation,
+        "activation": expected_activation_generation,
+    }
+    for name, value in expected_generations.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            _fail(f"Expected {name} generation must be a non-negative integer.")
+
+    caller_environment = environment if environment is not None else os.environ
+    current_environment, _ = _current_environment(
+        environment=caller_environment,
+        os_profile=os_profile,
+        platform=platform,
+        wsl_distro=wsl_distro,
+    )
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not context_path.is_absolute():
+        _fail("Activation context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    marketplace_id = _string_property(validated, "marketplaceId")
+    plugin_id = _string_property(validated, "pluginId")
+    cell_root = canonical_path(_string_property(validated, "cellRoot"))
+    plugin_root = canonical_path(_string_property(validated, "pluginRoot"))
+    install_path = canonical_path(_string_property(validated, "installReceipt"))
+    activation_path = plugin_root / "installation-activation.json"
+    legacy_root_value = legacy_root or (
+        Path(current_environment["homeRealPath"]) / f".{plugin_id}"
+    )
+    if not Path(legacy_root_value).is_absolute():
+        _fail("Activation legacy root must be absolute.")
+    resolved_legacy_root = canonical_path(legacy_root_value)
+
+    genesis_lock = _DirectoryLock(
+        durable / "marketplaces" / ".locks" / f"{marketplace_id}.genesis",
+        kind="genesis",
+        marketplace_id=marketplace_id,
+    )
+    install_lock = _DirectoryLock(
+        cell_root / ".locks" / f"{plugin_id}.install.lock",
+        kind="install",
+        marketplace_id=marketplace_id,
+        plugin_id=plugin_id,
+    )
+    with genesis_lock, install_lock:
+        validated = validate_context_receipt(
+            install_path,
+            durable,
+            expected_marketplace_id=marketplace_id,
+            expected_plugin_id=plugin_id,
+            expected_cell_root=cell_root,
+            environment={},
+        )
+        actual_namespace_generation = int(validated["namespaceGeneration"])
+        actual_install_generation = int(validated["generation"])
+        activation = _activation_result(
+            plugin_root=plugin_root,
+            durable_home=durable,
+            marketplace_id=marketplace_id,
+            plugin_id=plugin_id,
+            current_environment=current_environment,
+            legacy_root=resolved_legacy_root,
+        )
+        existing: Mapping[str, Any] | None = None
+        if activation["state"] == "missing":
+            actual_activation_generation = 0
+        elif activation["state"] == "foreign":
+            _fail("Existing activation receipt belongs to a foreign environment.")
+        elif activation["state"] == "invalid":
+            _fail("Existing activation receipt is invalid.")
+        else:
+            actual_activation_generation = int(activation["activationGeneration"])
+            loaded = read_json(activation_path)
+            if not isinstance(loaded, Mapping):
+                _fail("Existing activation receipt must be a JSON object.")
+            existing = loaded
+
+        actual_generations = {
+            "namespace": actual_namespace_generation,
+            "install": actual_install_generation,
+            "activation": actual_activation_generation,
+        }
+        if actual_generations != expected_generations:
+            return {
+                "action": "activation-cas",
+                "status": "revalidation-required",
+                "reason": "generation-changed",
+                "activation": (
+                    str(canonical_path(activation_path))
+                    if os.path.lexists(activation_path)
+                    else None
+                ),
+                "activationChanged": False,
+                "activationGeneration": actual_activation_generation,
+                "namespaceGeneration": actual_namespace_generation,
+                "installGeneration": actual_install_generation,
+                "expectedActivationGeneration": expected_activation_generation,
+                "expectedNamespaceGeneration": expected_namespace_generation,
+                "expectedInstallGeneration": expected_install_generation,
+                "operative": False,
+            }
+
+        namespace_receipt = read_json(validated["namespaceReceipt"])
+        if not isinstance(namespace_receipt, Mapping):
+            _fail("namespace.json must be a JSON object.")
+        if (
+            _string_property(namespace_receipt, "state") != "active"
+            or _string_property(validated, "state") != "active"
+        ):
+            _fail("Activation requires active namespace and install receipts.")
+
+        if actual_activation_generation >= MAX_RECEIPT_GENERATION:
+            _fail(
+                "installation-activation.json generation cannot be incremented; "
+                "explicit repair is required."
+            )
+        next_generation = actual_activation_generation + 1
+        now = _utc_now()
+        desired: dict[str, Any] = {
+            "schema": ACTIVATION_SCHEMA,
+            "version": 1,
+            "marketplaceId": marketplace_id,
+            "pluginId": plugin_id,
+            "mode": activation_mode,
+            "state": activation_state,
+            "environment": current_environment,
+            "context": str(install_path),
+            "namespaceGeneration": actual_namespace_generation,
+            "installGeneration": actual_install_generation,
+            "generation": next_generation,
+            "legacy": {
+                "disposition": legacy_disposition,
+                "probe": recorded_probe,
+            },
+            "createdAt": (
+                _exact_property(existing, "createdAt")
+                if existing is not None
+                else now
+            ),
+            "updatedAt": now,
+        }
+        _atomic_write_json(
+            activation_path,
+            desired,
+            lock=(genesis_lock, install_lock),
+        )
+
+        published = _activation_result(
+            plugin_root=plugin_root,
+            durable_home=durable,
+            marketplace_id=marketplace_id,
+            plugin_id=plugin_id,
+            current_environment=current_environment,
+            legacy_root=resolved_legacy_root,
+        )
+        if published["state"] != "valid":
+            _fail("Published activation receipt did not validate as current.")
+        return {
+            "action": "activation-cas",
+            "status": "ready",
+            "reason": "activation-published",
+            "activation": published["path"],
+            "activationChanged": True,
+            "activationGeneration": published["activationGeneration"],
+            "namespaceGeneration": actual_namespace_generation,
+            "installGeneration": actual_install_generation,
+            "environment": current_environment,
+            "mode": activation_mode,
+            "state": activation_state,
+            "context": str(install_path),
+            "operative": False,
+        }
 
 
 def _tombstone_result(
@@ -2588,6 +2847,45 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_common_paths(stamp_parser)
 
+    activation_parser = subparsers.add_parser("activation-cas")
+    activation_parser.add_argument("--context", required=True)
+    activation_parser.add_argument("--expected-marketplace-id", required=True)
+    activation_parser.add_argument("--expected-plugin-id", required=True)
+    activation_parser.add_argument(
+        "--expected-namespace-generation",
+        required=True,
+        type=int,
+    )
+    activation_parser.add_argument(
+        "--expected-install-generation",
+        required=True,
+        type=int,
+    )
+    activation_parser.add_argument(
+        "--expected-activation-generation",
+        required=True,
+        type=int,
+    )
+    activation_parser.add_argument(
+        "--activation-mode",
+        required=True,
+        choices=("namespaced", "legacy"),
+    )
+    activation_parser.add_argument(
+        "--activation-state",
+        required=True,
+        choices=("active", "deactivated"),
+    )
+    activation_parser.add_argument(
+        "--legacy-disposition",
+        required=True,
+        choices=("absent", "quiesced", "retained-inert", "restored"),
+    )
+    activation_parser.add_argument("--legacy-probe-json")
+    activation_parser.add_argument("--legacy-probe-file")
+    activation_parser.add_argument("--legacy-root")
+    activation_parser.add_argument("--durable-home")
+
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
 
@@ -2658,6 +2956,26 @@ def main(argv: Sequence[str] | None = None) -> int:
                 marketplace_key=arguments.marketplace_key,
                 namespace_state=arguments.namespace_state,
                 install_state=arguments.install_state,
+            )
+        elif arguments.action == "activation-cas":
+            if legacy_probe is None:
+                _fail(
+                    "activation-cas requires --legacy-probe-json or "
+                    "--legacy-probe-file."
+                )
+            result = compare_and_swap_activation(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                expected_namespace_generation=arguments.expected_namespace_generation,
+                expected_install_generation=arguments.expected_install_generation,
+                expected_activation_generation=arguments.expected_activation_generation,
+                activation_mode=arguments.activation_mode,
+                activation_state=arguments.activation_state,
+                legacy_disposition=arguments.legacy_disposition,
+                legacy_probe=legacy_probe,
+                durable_home=arguments.durable_home,
+                legacy_root=arguments.legacy_root,
             )
         else:
             mode_arguments = {
