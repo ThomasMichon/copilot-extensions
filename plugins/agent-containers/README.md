@@ -279,7 +279,10 @@ descriptor, and is syntax/execution tested. FIFO, device, socket, symlink, and
 oversize members are excluded as explicit partial evidence instead of blocking
 all valid members. Inventory is NUL-framed and never descends into `files/`,
 rewind snapshots, or research; its byte ceiling is enforced while streaming,
-terminating the helper immediately on overflow. Host-received bytes are SHA-256 hashed,
+terminating the helper immediately on overflow. Helper diagnostics are drained
+concurrently into a separate bounded buffer so stderr cannot deadlock the
+stream; diagnostic overflow likewise terminates the helper. Host-received bytes
+are SHA-256 hashed,
 re-verified, fsynced, and published as part of one atomic capture with path-free
 status metadata. A missing session-state root is recorded as verified-partial,
 distinct from a present but empty root.

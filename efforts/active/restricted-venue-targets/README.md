@@ -447,3 +447,8 @@ key and relay projection; restricted venues never enter that path.
   the container ID therefore invalidates the prior run's rescue; final
   pre-destruction verification defers until the new generation is freshly
   rescued or explicitly abandoned.
+- PR advisory review aligned idempotent re-borrow contention with the standard
+  `ProviderAdmissionError` busy contract and made inventory helper stderr a
+  concurrently drained, bounded diagnostic channel. Pipe-filling diagnostics
+  can no longer deadlock stdout rescue; deadline or diagnostic overflow
+  terminates the helper with bounded useful context.

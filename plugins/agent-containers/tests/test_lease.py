@@ -129,7 +129,10 @@ def test_idempotent_reborrow_is_also_blocked_by_provider_hold(fleet):
     lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
 
     with lease_mod.deploy_hold("myrepo-1", "recreate"):
-        with pytest.raises(RuntimeError, match="provider recreate is in progress"):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="provider recreate is in progress",
+        ):
             lease_mod.borrow(fleet, "effort-a")
 
 

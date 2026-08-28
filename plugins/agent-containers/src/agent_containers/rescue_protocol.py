@@ -17,6 +17,7 @@ from agent_procutil import no_window_flags
 from .restricted_exec import sanitized_exec_prefix
 
 _INVENTORY_LIMIT = 4 * 1024**2
+_DIAGNOSTIC_LIMIT = 64 * 1024
 _NODE_COMMON = r"""
 const fs = require("fs");
 const C = fs.constants;
@@ -229,10 +230,12 @@ def _docker_bytes(
         raise RescueError("session evidence inventory did not expose pipes")
 
     chunks: queue.Queue[bytes | BaseException | None] = queue.Queue(maxsize=4)
-    cancel_reader = threading.Event()
+    cancel_readers = threading.Event()
+    diagnostics = bytearray()
+    diagnostic_overflow = threading.Event()
 
     def enqueue(item: bytes | BaseException | None) -> None:
-        while not cancel_reader.is_set():
+        while not cancel_readers.is_set():
             try:
                 chunks.put(item, timeout=0.05)
                 return
@@ -250,8 +253,32 @@ def _docker_bytes(
         except BaseException as exc:
             enqueue(exc)
 
-    reader = threading.Thread(target=read_stdout, daemon=True)
-    reader.start()
+    def read_stderr() -> None:
+        try:
+            while not cancel_readers.is_set():
+                chunk = proc.stderr.read(65536)
+                if not chunk:
+                    return
+                available = _DIAGNOSTIC_LIMIT - len(diagnostics)
+                if available > 0:
+                    diagnostics.extend(chunk[:available])
+                if len(chunk) > available:
+                    diagnostic_overflow.set()
+                    proc.terminate()
+                    enqueue(
+                        RescueError(
+                            "session evidence helper diagnostics exceeded "
+                            "their byte limit"
+                        )
+                    )
+                    return
+        except BaseException as exc:
+            enqueue(exc)
+
+    stdout_reader = threading.Thread(target=read_stdout, daemon=True)
+    stderr_reader = threading.Thread(target=read_stderr, daemon=True)
+    stdout_reader.start()
+    stderr_reader.start()
     payload = bytearray()
     try:
         while True:
@@ -263,6 +290,8 @@ def _docker_bytes(
                 ) from exc
             if item is None:
                 break
+            if isinstance(item, RescueError):
+                raise item
             if isinstance(item, BaseException):
                 raise RescueError("session evidence inventory stream failed") from item
             if len(payload) + len(item) > _INVENTORY_LIMIT:
@@ -272,11 +301,11 @@ def _docker_bytes(
                 )
             payload.extend(item)
         return_code = proc.wait(timeout=_remaining(deadline, 30.0))
-        cancel_reader.set()
-        reader.join(timeout=0.1)
-        stderr = proc.stderr.read(65536)
+        stdout_reader.join(timeout=0.1)
+        stderr_reader.join(timeout=0.1)
+        cancel_readers.set()
     except Exception:
-        cancel_reader.set()
+        cancel_readers.set()
         if proc.poll() is None:
             proc.terminate()
             try:
@@ -287,10 +316,15 @@ def _docker_bytes(
                     proc.wait(timeout=0.5)
                 except subprocess.TimeoutExpired:
                     pass
-        reader.join(timeout=0.1)
+        stdout_reader.join(timeout=0.1)
+        stderr_reader.join(timeout=0.1)
         raise
+    if diagnostic_overflow.is_set():
+        raise RescueError(
+            "session evidence helper diagnostics exceeded their byte limit"
+        )
     if return_code != 0:
-        detail = stderr.decode("utf-8", errors="replace").strip()
+        detail = bytes(diagnostics).decode("utf-8", errors="replace").strip()
         raise RescueError(f"session evidence inventory failed: {detail or 'unknown error'}")
     return bytes(payload)
 
@@ -442,6 +476,8 @@ def _stream_member(
                     ) from exc
                 if item is None:
                     break
+                if isinstance(item, RescueError):
+                    raise item
                 if isinstance(item, BaseException):
                     raise RescueError("session evidence member stream failed") from item
                 chunk = item

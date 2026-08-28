@@ -377,7 +377,7 @@ def borrow(
                 chosen = held_by_effort[0]
                 hold = holds.get(chosen)
                 if hold:
-                    raise RuntimeError(
+                    raise ProviderAdmissionError(
                         f"Container '{chosen}' is unavailable while provider "
                         f"{hold.operation} is in progress"
                     )

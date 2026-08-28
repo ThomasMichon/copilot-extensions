@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from contextlib import contextmanager
 
@@ -539,6 +540,42 @@ def test_inventory_limit_terminates_child_during_stream(monkeypatch):
         )
 
     assert proc._terminated is True
+
+
+def test_inventory_drains_pipe_filling_stderr_without_hanging(monkeypatch):
+    real_popen = subprocess.Popen
+
+    def helper(_args, **kwargs):
+        return real_popen(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stderr.buffer.write(b'x' * 200000); "
+                    "sys.stderr.flush(); "
+                    "sys.stdout.buffer.write(b'@root\\0present\\0')"
+                ),
+            ],
+            stdin=kwargs.get("stdin"),
+            stdout=kwargs.get("stdout"),
+            stderr=kwargs.get("stderr"),
+        )
+
+    monkeypatch.setattr(rescue_protocol.subprocess, "Popen", helper)
+    started = time.monotonic()
+
+    with pytest.raises(rescue.RescueError, match="diagnostics exceeded"):
+        rescue_protocol._docker_bytes(
+            "instance",
+            "agent",
+            "/usr/local/bin/node",
+            "/home/agent",
+            "script",
+            deadline=time.monotonic() + 2,
+        )
+
+    assert time.monotonic() - started < 2
 
 
 @pytest.mark.parametrize("reason", ["symlink", "irregular", "oversize"])
