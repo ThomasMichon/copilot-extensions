@@ -6,9 +6,12 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks', 'stamp', 'provision')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks', 'stamp', 'provision', 'slot-provision', 'slot-validate')]
     [string]$Action = 'install',
     [string]$InstallDir,
+    [string]$Context,
+    [string]$ExpectedMarketplaceId,
+    [string]$DurableHome,
     [switch]$NoService,
     [switch]$Purge,
     [switch]$Force,
@@ -35,7 +38,7 @@ $probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
 
 # Refuse every mutating lifecycle action before self-staging touches the legacy
 # runtime. Status remains read-only and does not need mutation authorization.
-if ($Action -ne 'status') {
+if ($Action -notin @('status', 'slot-provision', 'slot-validate')) {
     $probeLegacyRoot = if ($InstallDir) {
         [IO.Path]::GetFullPath($InstallDir)
     } else {
@@ -52,10 +55,22 @@ if ($Action -ne 'status') {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
-# Status is read-only, so do not enter the self-stage block that creates and
-# reaps legacy staging directories.
-$legacyReadOnlyStatus = $Action -eq 'status' -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
-if ($legacyReadOnlyStatus) { $env:COPILOT_PLUGIN_INSTALL_STAGED = 'read-only-status' }
+# Status and dependency-light cell-slot actions do not enter the self-stage
+# block that creates and reaps legacy staging directories.
+$cellSlotAction = $Action -in @('slot-provision', 'slot-validate')
+if ($cellSlotAction) {
+    Set-Location -LiteralPath $env:USERPROFILE
+    [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+}
+$skipSelfStage = $Action -in @('status', 'slot-provision', 'slot-validate') -and
+    -not $env:COPILOT_PLUGIN_INSTALL_STAGED
+if ($skipSelfStage) {
+    if ($Action -eq 'status') {
+        $env:COPILOT_PLUGIN_INSTALL_STAGED = 'read-only-status'
+    } else {
+        $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
+    }
+}
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -178,7 +193,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
     }
 }
 # === end install-contract:v4 self-stage ===
-if ($legacyReadOnlyStatus) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
+if ($skipSelfStage) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -280,6 +295,40 @@ if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VER
         $LinkDir = $VenvDir
         $LinkPython = $VenvPython
     }
+}
+
+if ($Action -in @('slot-provision', 'slot-validate')) {
+    if ([string]::IsNullOrWhiteSpace($Context)) {
+        Write-Fail "$Action requires -Context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedMarketplaceId)) {
+        Write-Fail "$Action requires -ExpectedMarketplaceId"
+        exit 2
+    }
+    if (-not $SrcVersion) {
+        Write-Fail 'Cannot determine plugin version from pyproject.toml'
+        exit 1
+    }
+    $slotRunner = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+    if (-not (Test-Path -LiteralPath $slotRunner -PathType Leaf)) {
+        Write-Fail 'Installation-context runner is unavailable'
+        exit 1
+    }
+    $slotArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $slotRunner,
+        $Action,
+        '-Context', $Context,
+        '-ExpectedMarketplaceId', $ExpectedMarketplaceId,
+        '-ExpectedPluginId', 'agent-index',
+        '-ExpectedPayloadRoot', $PluginDir,
+        '-ExpectedPayloadVersion', $SrcVersion,
+        '-SnapshotId', $SrcVersion,
+        '-RuntimeVersion', $SrcVersion
+    )
+    if ($DurableHome) { $slotArgs += @('-DurableHome', $DurableHome) }
+    & (Get-Process -Id $PID).Path @slotArgs
+    exit $LASTEXITCODE
 }
 
 function Test-VenvIsLink {

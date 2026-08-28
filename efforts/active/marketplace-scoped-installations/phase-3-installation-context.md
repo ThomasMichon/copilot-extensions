@@ -491,10 +491,16 @@ uninstall behavior.
   `namespaceState`, `installState`, and `slotEmpty`. Runtime versions remain
   immutable build identities; conflicting slots await a separate explicit
   repair/release transaction rather than automatic reclamation.
-- Slot ownership remains non-activating and unadopted until an installer or
-  bootstrap explicitly adopts the parity-proven primitive. It does not write
-  payloads, completion/current/LKG markers, activation receipts, launchers,
-  services, state, or tombstones.
+- Slot ownership remains non-activating. Agent Machines and Agent Index expose
+  explicit installer adapter actions that supply their fixed plugin identity
+  plus exact payload root and current payload version to the parity-proven
+  primitive, but no normal install or bootstrap path calls them. The snapshot
+  must match those payload expectations under the receipt locks. The adapters
+  derive the root from the executing plugin payload rather than ambient
+  self-stage metadata. The actions do
+  not write payloads,
+  completion/current/LKG markers, activation receipts, launchers, services,
+  state, or tombstones.
 - Versioned-runtime receives the resolved `pluginRoot` explicitly.
 - `current-version`, `last-known-good`, process checks, and garbage collection
   never enumerate outside that plugin root.
@@ -539,6 +545,12 @@ perpetually missing, recreate its legacy root, or trigger install on every
 session. This compatibility prerequisite coordinates with #1105 without moving
 agent-worktrees' own project state in Phase 3.
 
+Its pre-activation adapter requires an explicit context receipt and expected
+marketplace id, then reserves or validates only the payload version's empty
+owned slot after matching snapshot provenance to the exact installer payload
+root and version. Ambient context is not authorization, and this adapter does
+not complete the operative exemplar slice.
+
 ### Service-bearing: agent-index
 
 agent-index was the first payload-invocation pilot and has strong clean-room and
@@ -559,6 +571,11 @@ rollout, not permission to convert unrelated services in the same PR.
 It does not alter the Phase 2 payload-command contract. Its cell-scoped service
 identity is the reference implementation that #1108 generalizes.
 
+Its pre-activation adapter has the same explicit authorization and empty-slot
+boundary as Agent Machines, including exact snapshot payload root/version
+matching. It does not build the runtime or mutate service, engine, task/unit,
+endpoint, current/LKG, or activation identity.
+
 ## Delivery slices
 
 1. **Contract and fixture corpus** — land this proposal and the normative
@@ -576,6 +593,9 @@ identity is the reference implementation that #1108 generalizes.
    generation-pinned activation CAS from the
    [install contract](../../../docs/install-contract.md#installation-mode-governance)
    without automatically changing a runtime root.
+   A non-operative adapter sub-slice may wire both exemplars to
+   `slot-provision` / `slot-validate` before their separate operative
+   conversions; this does not complete slices 5 or 6.
 5. **agent-machines exemplar** — make installation context explicitly operative
    for one CLI-only runtime and add dual-cell install/update/rollback tests.
 6. **agent-index exemplar** — namespace its service and durable state and add

@@ -28,9 +28,12 @@ otherwise migrate legacy state, launch a runtime, or wire an automatic caller.
 The Python module additionally exposes importable slot APIs. All three runners
 provide equivalent `slot-provision` and `slot-validate` CLI actions that create
 or validate only an immutable ownership marker in a cell-local version slot and
-never activate it. No installer or bootstrap calls them yet. Every mutation
-requires an explicit `--context` / `-Context`; it never adopts an ambient
-`COPILOT_EXTENSIONS_CONTEXT` as authorization.
+never activate it. Agent Machines and Agent Index expose explicit installer
+adapter actions for these two transactions; their normal install/bootstrap
+paths do not call them. The adapters also bind the selected snapshot to their
+exact payload root and version. Every mutation requires an explicit `--context`
+/ `-Context`; it never adopts an ambient `COPILOT_EXTENSIONS_CONTEXT` as
+authorization.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
@@ -97,6 +100,8 @@ writes an actionable error to stderr and exits nonzero.
   -Context $env:COPILOT_EXTENSIONS_CONTEXT `
   -ExpectedMarketplaceId example--0123456789abcdef `
   -ExpectedPluginId agent-example `
+  -ExpectedPayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -ExpectedPayloadVersion 1.0.0 `
   -SnapshotId 1.0.0 `
   -RuntimeVersion 1.0.0
 
@@ -104,6 +109,8 @@ writes an actionable error to stderr and exits nonzero.
   -Context $env:COPILOT_EXTENSIONS_CONTEXT `
   -ExpectedMarketplaceId example--0123456789abcdef `
   -ExpectedPluginId agent-example `
+  -ExpectedPayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -ExpectedPayloadVersion 1.0.0 `
   -SnapshotId 1.0.0 `
   -RuntimeVersion 1.0.0
 
@@ -174,6 +181,8 @@ writes an actionable error to stderr and exits nonzero.
   --context "$COPILOT_EXTENSIONS_CONTEXT" \
   --expected-marketplace-id example--0123456789abcdef \
   --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
   --snapshot-id 1.0.0 \
   --runtime-version 1.0.0
 
@@ -181,6 +190,8 @@ writes an actionable error to stderr and exits nonzero.
   --context "$COPILOT_EXTENSIONS_CONTEXT" \
   --expected-marketplace-id example--0123456789abcdef \
   --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
   --snapshot-id 1.0.0 \
   --runtime-version 1.0.0
 
@@ -200,6 +211,8 @@ python installation_context.py slot-provision \
   --context "$COPILOT_EXTENSIONS_CONTEXT" \
   --expected-marketplace-id example--0123456789abcdef \
   --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
   --snapshot-id 1.0.0 \
   --runtime-version 1.0.0
 
@@ -207,6 +220,8 @@ python installation_context.py slot-validate \
   --context "$COPILOT_EXTENSIONS_CONTEXT" \
   --expected-marketplace-id example--0123456789abcdef \
   --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
   --snapshot-id 1.0.0 \
   --runtime-version 1.0.0
 ```
@@ -238,6 +253,9 @@ exactly matches the requested marketplace, plugin, source, runtime version,
 snapshot provenance bytes, receipt paths, and pinned generations. Markerless,
 malformed, copied, linked, stale, or conflicting slots fail without replacement. `slot-validate`
 and `validate_runtime_slot_ownership` perform the same read-only validation.
+Optional expected-payload-root/version arguments additionally bind the selected
+snapshot sidecar to the invoking payload; exemplar installer adapters require
+both.
 Creating a new slot requires the snapshot generations and payload to match the
 current active receipts. Once published, an owned slot remains attributable
 when those receipts advance for later updates: its marker must still match its

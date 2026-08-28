@@ -17,9 +17,12 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'slot-provision', 'slot-validate')]
     [string]$Action = 'install',
     [string]$InstallDir,
+    [string]$Context,
+    [string]$ExpectedMarketplaceId,
+    [string]$DurableHome,
     [switch]$Force
 )
 
@@ -37,20 +40,34 @@ $probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
 } else {
     (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 }
-$probeLegacyRoot = if ($InstallDir) {
-    [IO.Path]::GetFullPath($InstallDir)
-} else {
-    Join-Path $env:USERPROFILE '.agent-machines'
-}
-$legacyProbe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
-if (-not (Test-Path -LiteralPath $legacyProbe -PathType Leaf)) {
-    Write-Host '  [FAIL] Legacy mutation probe is unavailable' -ForegroundColor Red
-    exit 1
-}
 $probeHost = (Get-Process -Id $PID).Path
-& $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
-    -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($Action -notin @('slot-provision', 'slot-validate')) {
+    $probeLegacyRoot = if ($InstallDir) {
+        [IO.Path]::GetFullPath($InstallDir)
+    } else {
+        Join-Path $env:USERPROFILE '.agent-machines'
+    }
+    $legacyProbe = Join-Path $PSScriptRoot 'installation-context\legacy-entrypoint-probe.ps1'
+    if (-not (Test-Path -LiteralPath $legacyProbe -PathType Leaf)) {
+        Write-Host '  [FAIL] Legacy mutation probe is unavailable' -ForegroundColor Red
+        exit 1
+    }
+    & $probeHost -NoProfile -ExecutionPolicy Bypass -File $legacyProbe `
+        -PayloadRoot $probePayload -LegacyRoot $probeLegacyRoot
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
+# The dependency-light cell-slot runner does not need the legacy installer's
+# payload self-stage, whose staging root is itself legacy state.
+$cellSlotAction = $Action -in @('slot-provision', 'slot-validate')
+if ($cellSlotAction) {
+    Set-Location -LiteralPath $env:USERPROFILE
+    [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
+}
+$cellSlotDirect = $cellSlotAction -and -not $env:COPILOT_PLUGIN_INSTALL_STAGED
+if ($cellSlotDirect) {
+    $env:COPILOT_PLUGIN_INSTALL_STAGED = 'cell-slot-action'
+}
 
 # === install-contract:v4 self-stage -- keep byte-identical across plugins ===
 # dotfiles #935: a plugin installer reads its own payload (src/, libs/,
@@ -173,6 +190,7 @@ if (-not $env:COPILOT_PLUGIN_INSTALL_STAGED) {
     }
 }
 # === end install-contract:v4 self-stage ===
+if ($cellSlotDirect) { Remove-Item Env:COPILOT_PLUGIN_INSTALL_STAGED }
 
 # === install-contract:v4 smoke seam (test-only) -- keep byte-identical ===
 # #935 install-flow test hook. When COPILOT_PLUGIN_INSTALL_SMOKE is set, prove
@@ -272,6 +290,40 @@ if ($SrcVersion) {
     $VersionedRuntime = $false
 }
 # === end install-contract:v3 versioned-venv ===
+
+if ($Action -in @('slot-provision', 'slot-validate')) {
+    if ([string]::IsNullOrWhiteSpace($Context)) {
+        Write-Fail "$Action requires -Context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
+        exit 2
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedMarketplaceId)) {
+        Write-Fail "$Action requires -ExpectedMarketplaceId"
+        exit 2
+    }
+    if (-not $SrcVersion) {
+        Write-Fail 'Cannot determine plugin version from pyproject.toml'
+        exit 1
+    }
+    $slotRunner = Join-Path $PSScriptRoot 'installation-context\installation-context.ps1'
+    if (-not (Test-Path -LiteralPath $slotRunner -PathType Leaf)) {
+        Write-Fail 'Installation-context runner is unavailable'
+        exit 1
+    }
+    $slotArgs = @(
+        '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $slotRunner,
+        $Action,
+        '-Context', $Context,
+        '-ExpectedMarketplaceId', $ExpectedMarketplaceId,
+        '-ExpectedPluginId', 'agent-machines',
+        '-ExpectedPayloadRoot', $PluginDir,
+        '-ExpectedPayloadVersion', $SrcVersion,
+        '-SnapshotId', $SrcVersion,
+        '-RuntimeVersion', $SrcVersion
+    )
+    if ($DurableHome) { $slotArgs += @('-DurableHome', $DurableHome) }
+    & $probeHost @slotArgs
+    exit $LASTEXITCODE
+}
 
 $utf8NoBom = New-Object System.Text.UTF8Encoding $false
 

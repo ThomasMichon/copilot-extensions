@@ -14,6 +14,7 @@ param(
     [string]$ExpectedMarketplaceId,
     [string]$ExpectedPluginId,
     [string]$ExpectedPayloadRoot,
+    [string]$ExpectedPayloadVersion,
     [string]$ExpectedCellRoot,
     [string]$PayloadVersion,
     [string]$PayloadOrigin,
@@ -3219,7 +3220,9 @@ function Validate-SnapshotProvenance(
     [string]$MarketplaceExpectation,
     [string]$PluginExpectation,
     [string]$RequestedSnapshotId,
-    [bool]$RequireCurrentReceipts = $true
+    [bool]$RequireCurrentReceipts = $true,
+    [string]$PayloadRootExpectation = '',
+    [string]$PayloadVersionExpectation = ''
 ) {
     if (-not $ContextPath) { Fail 'snapshot-validate requires -Context.' }
     if (-not $MarketplaceExpectation) {
@@ -3232,6 +3235,16 @@ function Validate-SnapshotProvenance(
     Assert-MarketplaceId $MarketplaceExpectation
     Assert-PluginId $PluginExpectation
     Assert-SnapshotId $RequestedSnapshotId
+    if ($PayloadRootExpectation) {
+        if (-not (Test-FullyQualifiedPath $PayloadRootExpectation)) {
+            Fail 'Expected snapshot payload root must be absolute.'
+        }
+        $PayloadRootExpectation = Canonical-Path $PayloadRootExpectation
+    }
+    if ($PayloadVersionExpectation -and
+        [string]::IsNullOrWhiteSpace($PayloadVersionExpectation)) {
+        Fail 'Expected snapshot payload version must be a non-empty string.'
+    }
     $validated = Invoke-WithoutPluginRoot {
         Validate-ContextReceipt $ContextPath $ResolvedDurableHome $MarketplaceExpectation $PluginExpectation '' ''
     }
@@ -3378,6 +3391,14 @@ function Validate-SnapshotProvenance(
         version = $payloadVersion
         origin = $payloadOrigin
         originReceipt = $payloadOriginReceipt
+    }
+    if ($PayloadRootExpectation -and
+        -not (Paths-Equal $payloadRoot $PayloadRootExpectation)) {
+        Fail "Expected snapshot payload root '$PayloadRootExpectation', provenance names '$payloadRoot'."
+    }
+    if ($PayloadVersionExpectation -and
+        $payloadVersion -cne $PayloadVersionExpectation) {
+        Fail "Expected snapshot payload version '$PayloadVersionExpectation', provenance names '$payloadVersion'."
     }
     $resultPayload = $recordedPayload
     if ($RequireCurrentReceipts) {
@@ -3810,7 +3831,9 @@ function Invoke-SlotValidate([string]$ResolvedDurableHome) {
         $ExpectedMarketplaceId `
         $ExpectedPluginId `
         $SnapshotId `
-        $false
+        $false `
+        $ExpectedPayloadRoot `
+        $ExpectedPayloadVersion
     return Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
 }
 
@@ -3855,7 +3878,9 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
                 $ExpectedMarketplaceId `
                 $ExpectedPluginId `
                 $SnapshotId `
-                $false
+                $false `
+                $ExpectedPayloadRoot `
+                $ExpectedPayloadVersion
             $result = Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
             $result.action = 'slot-provision'
             $result.reason = 'runtime-slot-ownership-current'
@@ -3868,7 +3893,10 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
             $ResolvedDurableHome `
             $ExpectedMarketplaceId `
             $ExpectedPluginId `
-            $SnapshotId
+            $SnapshotId `
+            $true `
+            $ExpectedPayloadRoot `
+            $ExpectedPayloadVersion
         Ensure-VersionsRootChain $validated $paths.versionsRelative
         $paths = Resolve-RuntimeSlotPaths $validated $RuntimeVersion $false
 
@@ -4226,6 +4254,32 @@ try {
         'status',
         'probe-legacy'
     ) 'Action'
+    $expectedPayloadRootSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadRoot')
+    $expectedPayloadVersionSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadVersion')
+    if ($Action -in @('slot-provision', 'slot-validate')) {
+        if ($expectedPayloadRootSupplied -and
+            [string]::IsNullOrWhiteSpace($ExpectedPayloadRoot)) {
+            Fail 'Expected snapshot payload root must be absolute.'
+        }
+        if ($expectedPayloadVersionSupplied -and
+            [string]::IsNullOrWhiteSpace($ExpectedPayloadVersion)) {
+            Fail 'Expected snapshot payload version must be a non-empty string.'
+        }
+    }
+    elseif ($expectedPayloadVersionSupplied) {
+        Fail '-ExpectedPayloadVersion is valid only for slot-provision and slot-validate.'
+    }
+    if ($expectedPayloadRootSupplied -and
+        $Action -notin @(
+            'resolve',
+            'validate',
+            'slot-provision',
+            'slot-validate',
+            'status',
+            'probe-legacy'
+        )) {
+        Fail "-ExpectedPayloadRoot is not valid for $Action."
+    }
     if ($Action -cin @('stamp', 'activation-cas', 'snapshot-stamp')) {
         $ExpectedNamespaceGeneration = ConvertTo-ExpectedGeneration `
             $ExpectedNamespaceGeneration `

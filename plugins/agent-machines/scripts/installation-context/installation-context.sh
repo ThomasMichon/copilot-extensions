@@ -1631,6 +1631,7 @@ resolve_snapshot_paths() {
 validate_snapshot_provenance() {
     local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
     local snapshot_id="$5" require_current_receipts="${6:-true}"
+    local expected_payload_root="${7:-}" expected_payload_version="${8:-}"
     local provenance schema version marketplace_id plugin_id source_prefix
     local fingerprint snapshot_recorded_id snapshot_recorded_root namespace_path install_path
     local namespace_generation install_generation namespace_state created_at created_epoch
@@ -1645,6 +1646,15 @@ validate_snapshot_provenance() {
         fail "snapshot-validate requires --expected-plugin-id."
     [[ -n "$snapshot_id" ]] || fail "snapshot-validate requires --snapshot-id."
     assert_snapshot_id "$snapshot_id"
+    if [[ -n "$expected_payload_root" ]]; then
+        is_absolute "$expected_payload_root" ||
+            fail "Expected snapshot payload root must be absolute."
+        expected_payload_root="$(canonical_path "$expected_payload_root")"
+    fi
+    if [[ -n "$expected_payload_version" ]]; then
+        [[ -n "${expected_payload_version//[[:space:]]/}" ]] ||
+            fail "Expected snapshot payload version must be a non-empty string."
+    fi
     COPILOT_PLUGIN_ROOT="" validate_context_receipt \
         "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" "" ""
     resolve_snapshot_paths "$CTX_SNAPSHOTS_ROOT" "$snapshot_id"
@@ -1755,6 +1765,14 @@ validate_snapshot_provenance() {
             fail "Snapshot provenance payload.originReceipt must be absolute."
         payload_origin_receipt="$(canonical_path "$payload_origin_receipt")"
         payload_origin_receipt_json="$(json_quote "$payload_origin_receipt")"
+    fi
+    if [[ -n "$expected_payload_root" ]]; then
+        paths_equal "$payload_root" "$expected_payload_root" ||
+            fail "Expected snapshot payload root '$expected_payload_root', provenance names '$payload_root'."
+    fi
+    if [[ -n "$expected_payload_version" &&
+          "$payload_version" != "$expected_payload_version" ]]; then
+        fail "Expected snapshot payload version '$expected_payload_version', provenance names '$payload_version'."
     fi
     if [[ "$require_current_receipts" == true ]]; then
         load_payload_identity "$CTX_INSTALL_RECEIPT"
@@ -1982,7 +2000,9 @@ publish_json_no_replace() {
 
 validate_runtime_slot_ownership() {
     local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
-    local snapshot_id="$5" runtime_version="$6" ownership actual schema version
+    local snapshot_id="$5" runtime_version="$6"
+    local expected_payload_root="${7:-}" expected_payload_version="${8:-}"
+    local ownership actual schema version
     local marketplace_id plugin_id source_fingerprint runtime_recorded_version
     local runtime_root snapshot_recorded_id snapshot_root snapshot_provenance
     local snapshot_recorded_sha256 snapshot_actual_sha256
@@ -2006,7 +2026,7 @@ validate_runtime_slot_ownership() {
         "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" "" ""
     validate_snapshot_provenance \
         "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" \
-        "$snapshot_id" false
+        "$snapshot_id" false "$expected_payload_root" "$expected_payload_version"
     resolve_runtime_slot_paths "$runtime_version" true
     ownership="$RUNTIME_OWNERSHIP_PATH"
     [[ -e "$ownership" ]] || fail "Runtime slot ownership must exist."
@@ -2141,7 +2161,8 @@ provision_runtime_slot() {
     if [[ -e "$RUNTIME_SLOT_ROOT" || -L "$RUNTIME_SLOT_ROOT" ]]; then
         validate_runtime_slot_ownership \
             "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
-            "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+            "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" "$RUNTIME_VERSION" \
+            "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
         release_lock
         release_lock
         SLOT_JSON="${SLOT_JSON/\"action\":\"slot-validate\"/\"action\":\"slot-provision\"}"
@@ -2153,7 +2174,8 @@ provision_runtime_slot() {
 
     validate_snapshot_provenance \
         "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
-        "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" true
+        "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" true \
+        "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
     ensure_versions_root_chain
     resolve_runtime_slot_paths "$RUNTIME_VERSION" false
     if ! mkdir -- "$RUNTIME_SLOT_ROOT" 2>/dev/null; then
@@ -2196,7 +2218,8 @@ provision_runtime_slot() {
     slot_changed=true
     validate_runtime_slot_ownership \
         "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
-        "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+        "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" "$RUNTIME_VERSION" \
+        "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
     release_lock
     release_lock
     SLOT_JSON="${SLOT_JSON/\"action\":\"slot-validate\"/\"action\":\"slot-provision\"}"
@@ -3492,6 +3515,9 @@ CONTEXT_SUPPLIED=false
 EXPECTED_MARKETPLACE_ID=""
 EXPECTED_PLUGIN_ID=""
 EXPECTED_PAYLOAD_ROOT=""
+EXPECTED_PAYLOAD_VERSION=""
+EXPECTED_PAYLOAD_ROOT_SUPPLIED=false
+EXPECTED_PAYLOAD_VERSION_SUPPLIED=false
 EXPECTED_CELL_ROOT=""
 PAYLOAD_VERSION=""
 PAYLOAD_ORIGIN=""
@@ -3526,7 +3552,8 @@ while (($#)); do
         --context) need_value "$@"; CONTEXT="$2"; CONTEXT_SUPPLIED=true; shift 2 ;;
         --expected-marketplace-id) need_value "$@"; EXPECTED_MARKETPLACE_ID="$2"; shift 2 ;;
         --expected-plugin-id) need_value "$@"; EXPECTED_PLUGIN_ID="$2"; shift 2 ;;
-        --expected-payload-root) need_value "$@"; EXPECTED_PAYLOAD_ROOT="$2"; shift 2 ;;
+        --expected-payload-root) need_value "$@"; EXPECTED_PAYLOAD_ROOT="$2"; EXPECTED_PAYLOAD_ROOT_SUPPLIED=true; shift 2 ;;
+        --expected-payload-version) need_value "$@"; EXPECTED_PAYLOAD_VERSION="$2"; EXPECTED_PAYLOAD_VERSION_SUPPLIED=true; shift 2 ;;
         --expected-cell-root) need_value "$@"; EXPECTED_CELL_ROOT="$2"; shift 2 ;;
         --payload-version) need_value "$@"; PAYLOAD_VERSION="$2"; shift 2 ;;
         --payload-origin) need_value "$@"; PAYLOAD_ORIGIN="$2"; shift 2 ;;
@@ -3553,6 +3580,26 @@ done
     fail "Specify only one of --source-json and --source-file."
 [[ "$LEGACY_PROBE_JSON_SUPPLIED" != true || "$LEGACY_PROBE_FILE_SUPPLIED" != true ]] ||
     fail "Specify only one of --legacy-probe-json and --legacy-probe-file."
+if [[ "$ACTION" == slot-provision || "$ACTION" == slot-validate ]]; then
+    if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true && -z "$EXPECTED_PAYLOAD_ROOT" ]]; then
+        fail "Expected snapshot payload root must be absolute."
+    fi
+    if [[ "$EXPECTED_PAYLOAD_VERSION_SUPPLIED" == true &&
+          -z "${EXPECTED_PAYLOAD_VERSION//[[:space:]]/}" ]]; then
+        fail "Expected snapshot payload version must be a non-empty string."
+    fi
+elif [[ "$EXPECTED_PAYLOAD_VERSION_SUPPLIED" == true ]]; then
+    fail "--expected-payload-version is valid only for slot-provision and slot-validate."
+fi
+if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true &&
+      "$ACTION" != resolve &&
+      "$ACTION" != validate &&
+      "$ACTION" != slot-provision &&
+      "$ACTION" != slot-validate &&
+      "$ACTION" != status &&
+      "$ACTION" != probe-legacy ]]; then
+    fail "--expected-payload-root is not valid for $ACTION."
+fi
 if [[ -n "$SOURCE_JSON" ]]; then
     if [[ "$ACTION" == status || "$ACTION" == probe-legacy ]]; then
         SOURCE_FILE="@SOURCE_JSON"
@@ -3621,7 +3668,8 @@ fi
 if [[ "$ACTION" == slot-validate ]]; then
     validate_runtime_slot_ownership \
         "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
-        "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+        "$SNAPSHOT_ID" "$RUNTIME_VERSION" \
+        "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
     printf '%s\n' "$SLOT_JSON"
     exit 0
 fi

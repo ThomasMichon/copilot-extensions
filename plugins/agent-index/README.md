@@ -45,6 +45,23 @@ when needed and installs a self-provisioning `agent-index` binstub under
 A machine whose resolved role is `client` runs no local indexer daemon. A host
 runs the local service and, when provisioned, the durable engine daemon.
 
+The installer also exposes explicit, non-activating `slot-provision` and
+`slot-validate` actions for a pre-stamped installation-context snapshot:
+
+```powershell
+scripts\install.ps1 -Action slot-provision -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id>
+scripts\install.ps1 -Action slot-validate -Context C:\path\to\install.json -ExpectedMarketplaceId <marketplace-id>
+```
+
+```bash
+scripts/install.sh slot-provision --context /path/to/install.json --expected-marketplace-id <marketplace-id>
+scripts/install.sh slot-validate --context /path/to/install.json --expected-marketplace-id <marketplace-id>
+```
+
+These actions only reserve or validate the current plugin version's empty,
+owned cell-local slot. They do not build a runtime, migrate legacy state, change
+current/LKG/activation state, or install, start, stop, or rename a service.
+
 ## Usage
 
 | Need | Use |
