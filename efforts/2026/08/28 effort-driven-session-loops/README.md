@@ -6,10 +6,10 @@
 - **Created:** 2026-08-27
 - **Status:** Done
 - **Vision:** **vision-closing** against
-  [`visions/plugins/efforts`](../../../visions/plugins/efforts/README.md),
+  [`visions/plugins/efforts`](https://github.com/ThomasMichon/copilot-extensions/blob/main/visions/plugins/efforts/README.md),
   authored with this effort to state the previously missing standing intent.
   Ambient delivery also advances
-  [`visions/harness-guidance`](../../../visions/harness-guidance/README.md).
+  [`visions/harness-guidance`](https://github.com/ThomasMichon/copilot-extensions/blob/main/visions/harness-guidance/README.md).
 - **Umbrella issue:** [#1255](https://github.com/ThomasMichon/copilot-extensions/issues/1255)
 - **Sub-issues:**
   [#1259](https://github.com/ThomasMichon/copilot-extensions/issues/1259)
@@ -138,11 +138,11 @@ Public-safe transcription of the operator request:
 
 ### Phase 1 - Repository adoption and ambient effort policy
 
-- [x] Deferred to `GitHub issue #1234`: resolve shared session-start aggregation
-      before enabling another independent marketplace hook by landing the
-      tracked runtime fix or an equivalent deterministic aggregation path.
-      Direct producer tests landed here, while end-to-end coexistence remains
-      owned by that issue.
+- [x] Deferred to `GitHub issue 1234`: [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234)
+      owns shared session-start aggregation before another independent
+      marketplace hook can be enabled, through the tracked runtime fix or an
+      equivalent deterministic aggregation path. Direct producer tests landed
+      here, while end-to-end coexistence remains owned by that issue.
 - [x] Define `.copilot-extensions/efforts/config.json` using the new committed
       repository-config convention. Version 1 accepts only the exact semantic
       `{"version":1,"enforcement":"required"}`: a valid file declares both
@@ -160,10 +160,11 @@ Public-safe transcription of the operator request:
       execution; execute in waves; treat the active effort as the completion
       gate; let only the rightful head select the next authorized slice; pause
       only at real uncertainty, prerequisite, safety, or administrative gates.
-- [x] Deferred to `GitHub issue #1234`: register the efforts hook only after the
-      shared runtime fix or an equivalent deterministic aggregation path is
-      complete. Registration remains intentionally omitted so efforts cannot
-      displace another plugin's context.
+- [x] Deferred to `GitHub issue 1234`: [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234)
+      owns registration of the efforts hook after the shared runtime fix or an
+      equivalent deterministic aggregation path is complete. Registration
+      remains intentionally omitted so efforts cannot displace another
+      plugin's context.
 - [x] Document the configuration, staged producer, and fallback contract; bump
       the efforts plugin version; and add focused schema, containment, symlink,
       gating, fail-open, parity, and byte-budget tests. The base kernel remains
@@ -539,6 +540,7 @@ earlier slices.
   Bash 3.2 parse check. Copilot's final review recommended approval with no
   findings.
 - The two intentionally gated Phase 1 registration items are explicitly
-  transferred to `GitHub issue #1234`; every remaining Plan and Validation Plan
-  item is complete. The effort completion gate is satisfied and this record is
-  archived as the final reviewed delta.
+  transferred to [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234);
+  every remaining Plan and Validation Plan item is complete. The effort
+  completion gate is satisfied and this record is archived as the final
+  reviewed delta.
