@@ -210,6 +210,45 @@ def _stamp_arguments(
     )
 
 
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+@pytest.mark.parametrize(
+    ("component", "label"),
+    (
+        ("marketplaces", "marketplaces root"),
+        ("cell", "marketplace cell root"),
+    ),
+)
+def test_stamp_rejects_linked_namespace_ownership_chain(
+    tmp_path: Path,
+    runner_name: str,
+    command: tuple[str, ...],
+    component: str,
+    label: str,
+) -> None:
+    runner_root = tmp_path / runner_name
+    runner_root.mkdir()
+    layout = _receipt_layout(runner_root)
+    paths = {
+        "marketplaces": Path(layout["durable"]) / "marketplaces",
+        "cell": Path(layout["cell"]),
+    }
+    linked_path = paths[component]
+    outside = runner_root / f"outside-{component}"
+    shutil.move(linked_path, outside)
+    try:
+        linked_path.symlink_to(outside, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
+    arguments, _ = _stamp_arguments(
+        runner_root,
+        expected_namespace_generation=1,
+        expected_install_generation=2,
+    )
+    result = _run(command, *arguments, check=False)
+    assert result.returncode != 0
+    assert label in result.stderr.lower()
+
+
 def test_python_stamp_creates_and_idempotently_validates_receipts(tmp_path: Path) -> None:
     arguments, values = _stamp_arguments(tmp_path)
     first = json.loads(_run(PYTHON_COMMAND, *arguments).stdout)

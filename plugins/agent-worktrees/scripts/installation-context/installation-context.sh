@@ -964,14 +964,26 @@ NS_GENERATION=""
 
 validate_namespace_receipt() {
     local receipt_path="$1" durable_home="$2" actual cell_root marketplaces_root canonical_receipt
+    local lexical_marketplaces lexical_cell
     local schema version receipt_id generation state source_prefix fingerprint slug receipt_marketplace_id
+    is_absolute "$receipt_path" || fail "The namespace receipt pointer must be absolute."
+    lexical_marketplaces="$durable_home/marketplaces"
+    [[ ! -L "$lexical_marketplaces" ]] ||
+        fail "The marketplaces root may not be a symbolic link or reparse point."
+    marketplaces_root="$(canonical_path "$lexical_marketplaces")"
+    paths_equal "$(dirname -- "$marketplaces_root")" "$durable_home" ||
+        fail "The marketplaces root escapes the durable installation home."
+    lexical_cell="$(dirname -- "$receipt_path")"
+    [[ ! -L "$lexical_cell" ]] ||
+        fail "The marketplace cell root may not be a symbolic link or reparse point."
+    cell_root="$(canonical_path "$lexical_cell")"
+    paths_equal "$(dirname -- "$cell_root")" "$marketplaces_root" ||
+        fail "Namespace receipt '$receipt_path' is outside the durable marketplaces root."
     [[ ! -L "$receipt_path" ]] ||
         fail "namespace.json may not be a symbolic link or reparse point."
     actual="$(canonical_path "$receipt_path" true)"
-    cell_root="$(canonical_path "$(dirname -- "$actual")")"
-    marketplaces_root="$(canonical_path "$durable_home/marketplaces")"
-    path_is_within "$cell_root" "$marketplaces_root" ||
-        fail "Namespace receipt '$actual' is outside the durable marketplaces root."
+    paths_equal "$(dirname -- "$actual")" "$cell_root" ||
+        fail "namespace.json escapes its canonical marketplace cell."
     receipt_id="$(basename -- "$cell_root")"
     [[ ! -L "$cell_root/namespace.json" ]] ||
         fail "namespace.json may not be a symbolic link or reparse point."

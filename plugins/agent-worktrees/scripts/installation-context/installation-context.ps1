@@ -1437,12 +1437,26 @@ function Validate-NamespaceReceipt(
     [string]$ReceiptPath,
     [string]$ResolvedDurableHome
 ) {
+    $hostPlatform = $(if ($env:OS -eq 'Windows_NT') { 'windows' } else { 'posix' })
+    if (-not (Test-EnvironmentPathRooted $ReceiptPath $hostPlatform)) {
+        Fail 'The namespace receipt pointer must be absolute.'
+    }
+    $lexicalMarketplacesRoot = Join-Path $ResolvedDurableHome 'marketplaces'
+    Assert-NotReparsePoint $lexicalMarketplacesRoot 'The marketplaces root'
+    $marketplacesRoot = Canonical-Path $lexicalMarketplacesRoot
+    if (-not (Paths-Equal (Split-Path -Parent $marketplacesRoot) $ResolvedDurableHome)) {
+        Fail 'The marketplaces root escapes the durable installation home.'
+    }
+    $lexicalCellRoot = Split-Path -Parent $ReceiptPath
+    Assert-NotReparsePoint $lexicalCellRoot 'The marketplace cell root'
+    $cellRoot = Canonical-Path $lexicalCellRoot
+    if (-not (Paths-Equal (Split-Path -Parent $cellRoot) $marketplacesRoot)) {
+        Fail "Namespace receipt '$ReceiptPath' is outside the durable marketplaces root."
+    }
     Assert-NotReparsePoint $ReceiptPath 'namespace.json'
     $actualReceipt = Canonical-Path $ReceiptPath -MustExist
-    $cellRoot = Split-Path -Parent $actualReceipt
-    $marketplacesRoot = Canonical-Path (Join-Path $ResolvedDurableHome 'marketplaces')
-    if (-not (Path-IsWithin $cellRoot $marketplacesRoot)) {
-        Fail "Namespace receipt '$actualReceipt' is outside the durable marketplaces root."
+    if (-not (Paths-Equal (Split-Path -Parent $actualReceipt) $cellRoot)) {
+        Fail 'namespace.json escapes its canonical marketplace cell.'
     }
     $marketplaceId = Split-Path -Leaf $cellRoot
     $lexicalCanonicalReceipt = Join-Path $cellRoot 'namespace.json'
@@ -1544,7 +1558,8 @@ function Validate-ContextReceipt(
     [string]$PayloadExpectation,
     [string]$CellExpectation
 ) {
-    if (-not [IO.Path]::IsPathRooted($ReceiptPath)) {
+    $hostPlatform = $(if ($env:OS -eq 'Windows_NT') { 'windows' } else { 'posix' })
+    if (-not (Test-EnvironmentPathRooted $ReceiptPath $hostPlatform)) {
         Fail 'The installation-context receipt pointer must be absolute.'
     }
     Assert-NotReparsePoint $ReceiptPath 'install.json'
@@ -1552,7 +1567,8 @@ function Validate-ContextReceipt(
         @('expected payload root', $PayloadExpectation),
         @('expected cell root', $CellExpectation)
     )) {
-        if ($expectation[1] -and -not [IO.Path]::IsPathRooted([string]$expectation[1])) {
+        if ($expectation[1] -and
+            -not (Test-EnvironmentPathRooted ([string]$expectation[1]) $hostPlatform)) {
             Fail "$($expectation[0]) must be absolute."
         }
     }

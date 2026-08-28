@@ -808,13 +808,29 @@ def validate_namespace_receipt(
     durable_home: str | os.PathLike[str],
 ) -> dict[str, Any]:
     receipt_pointer = Path(receipt_path)
+    if not receipt_pointer.is_absolute():
+        _fail("The namespace receipt pointer must be absolute.")
+    durable = canonical_path(durable_home)
+    lexical_marketplaces_root = durable / "marketplaces"
+    if _is_link_or_junction(lexical_marketplaces_root):
+        _fail("The marketplaces root may not be a symbolic link or reparse point.")
+    marketplaces_root = canonical_path(lexical_marketplaces_root)
+    if not paths_equal(marketplaces_root.parent, durable):
+        _fail("The marketplaces root escapes the durable installation home.")
+    lexical_cell_root = receipt_pointer.parent
+    if _is_link_or_junction(lexical_cell_root):
+        _fail("The marketplace cell root may not be a symbolic link or reparse point.")
+    cell_root = canonical_path(lexical_cell_root)
+    if not paths_equal(cell_root.parent, marketplaces_root):
+        _fail(
+            f"Namespace receipt '{receipt_pointer}' is outside the durable "
+            "marketplaces root."
+        )
     if _is_link_or_junction(receipt_pointer):
         _fail("namespace.json may not be a symbolic link or reparse point.")
     actual_receipt = canonical_path(receipt_pointer, must_exist=True)
-    cell_root = actual_receipt.parent
-    marketplaces_root = canonical_path(Path(durable_home) / "marketplaces")
-    if not path_is_within(cell_root, marketplaces_root):
-        _fail(f"Namespace receipt '{actual_receipt}' is outside the durable marketplaces root.")
+    if not paths_equal(actual_receipt.parent, cell_root):
+        _fail("namespace.json escapes its canonical marketplace cell.")
     marketplace_id = cell_root.name
     lexical_canonical_receipt = cell_root / "namespace.json"
     if _is_link_or_junction(lexical_canonical_receipt):
