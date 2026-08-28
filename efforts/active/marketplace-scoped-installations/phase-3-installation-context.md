@@ -420,6 +420,47 @@ namespace or explicit management context. If the original payload has already
 been replaced, the receipt/fingerprint remains the confirmation source; the
 temporary sidecar alone is never trusted.
 
+The canonical sidecar is
+`<snapshotsRoot>/<snapshot-id>/snapshot-provenance.json`. `snapshot-stamp`
+publishes it only while holding the marketplace genesis lock and then the plugin
+installation lock, after the producer has materialized a non-empty snapshot
+directory at that exact cell-local root. Publication writes only the sidecar;
+it does not create the snapshot root or accept a sidecar-only snapshot. The
+immutable version 1 record carries:
+
+- normalized source kind/canonical/ref plus the full fingerprint;
+- exact marketplace and plugin ids;
+- the originating payload root, version, origin, and nullable origin receipt;
+- the canonical snapshot id/root;
+- canonical namespace/install receipt paths and both pinned generations; and
+- one RFC3339 UTC creation timestamp.
+
+`snapshot-validate` receives an explicit canonical `install.json`, expected
+marketplace/plugin ids, and snapshot id. It revalidates both receipts, recomputes
+the source fingerprint and marketplace id, compares all payload and receipt
+identity, requires active receipts, and rejects a sidecar after either receipt
+generation changes. It does not require the original payload bytes to remain at
+the recorded path after staging; the canonical receipt chain remains authority.
+Both publication and validation require at least one non-sidecar snapshot entry
+to remain present; this enforces operation ordering without asserting content
+integrity. An existing malformed or conflicting sidecar is never overwritten.
+
+The sidecar inherits the receipt threat model above. It detects accidental
+cross-cell copying, stale generations, and ambiguous ownership; it does not
+cryptographically prove which same-user process produced either the snapshot
+contents or the record. Provisioning therefore validates this receipt chain and
+separately owns any content-integrity guarantee.
+
+Canonical receipt validation also pins the physical ownership chain after the
+durable home: `marketplaces`, the marketplace cell, `plugins`, and the plugin
+root are exact direct children and may not traverse a symbolic link, junction,
+or reparse point. The canonical `namespace.json` and `install.json` receipt
+leaves must also be ordinary files rather than links or reparse points.
+
+Both actions return `operative: false`. This slice creates no version slot,
+marker, activation, migration, tombstone, launcher, cutover, rollback, or
+uninstall behavior.
+
 ### Provision and cutover
 
 - A snapshot installer validates its sidecar against `install.json` before

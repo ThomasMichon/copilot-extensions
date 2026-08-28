@@ -157,6 +157,11 @@ reachable when their ownership is explicit.
     environment.
 - [ ] Persist and validate marketplace, plugin, payload, runtime, and instance
   identity through stamp, snapshot, provision, cutover, rollback, and uninstall.
+  - [x] Publish and independently validate immutable, generation-pinned snapshot
+    provenance at the exact cell-local snapshot path without creating or
+    activating a runtime slot.
+  - [ ] Carry validated snapshot identity into provision/runtime-slot ownership,
+    cutover, rollback, and uninstall.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
   simultaneous marketplace cells before broad rollout.
 
@@ -593,3 +598,21 @@ See [`design.md`](design.md).
   reviews, and green PR CI. The unrelated installation-context concurrent
   first-stamp diagnostic race recurred once and passed on rerun; it remains
   tracked by [#1228](https://github.com/ThomasMichon/copilot-extensions/issues/1228).
+
+### 2026-08-28 — Snapshot provenance identity
+
+- Added explicit `snapshot-stamp` and `snapshot-validate` actions to the
+  canonical Python, dependency-light POSIX, and PowerShell installation-context
+  runners.
+- Made the sidecar immutable at
+  `<snapshotsRoot>/<snapshot-id>/snapshot-provenance.json`, with normalized
+  source/fingerprint, marketplace/plugin identity, originating payload
+  metadata, canonical receipt references, and pinned namespace/install
+  generations.
+- The producer holds both receipt locks in canonical order; the consumer
+  independently revalidates the receipt chain and rejects stale, copied,
+  malformed, unsupported, escaping, or cross-cell evidence without overwriting
+  it.
+- Kept the slice non-operative: no version slot, activation, migration,
+  tombstone, cutover, rollback, or uninstall behavior is created. Provisioning
+  and later lifecycle ownership remain unchecked.

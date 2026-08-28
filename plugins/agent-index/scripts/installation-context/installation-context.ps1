@@ -18,9 +18,10 @@ param(
     [string]$PayloadVersion,
     [string]$PayloadOrigin,
     [string]$PayloadOriginReceipt,
-    [long]$ExpectedNamespaceGeneration = -1,
-    [long]$ExpectedInstallGeneration = -1,
-    [long]$ExpectedActivationGeneration = -1,
+    [object]$ExpectedNamespaceGeneration,
+    [object]$ExpectedInstallGeneration,
+    [object]$ExpectedActivationGeneration,
+    [string]$SnapshotId,
     [string]$NamespaceState = 'active',
     [string]$InstallState = 'active',
     [string]$ActivationMode,
@@ -1436,14 +1437,31 @@ function Validate-NamespaceReceipt(
     [string]$ReceiptPath,
     [string]$ResolvedDurableHome
 ) {
+    $hostPlatform = $(if ($env:OS -eq 'Windows_NT') { 'windows' } else { 'posix' })
+    if (-not (Test-EnvironmentPathRooted $ReceiptPath $hostPlatform)) {
+        Fail 'The namespace receipt pointer must be absolute.'
+    }
+    $lexicalMarketplacesRoot = Join-Path $ResolvedDurableHome 'marketplaces'
+    Assert-NotReparsePoint $lexicalMarketplacesRoot 'The marketplaces root'
+    $marketplacesRoot = Canonical-Path $lexicalMarketplacesRoot
+    if (-not (Paths-Equal (Split-Path -Parent $marketplacesRoot) $ResolvedDurableHome)) {
+        Fail 'The marketplaces root escapes the durable installation home.'
+    }
+    $lexicalCellRoot = Split-Path -Parent $ReceiptPath
+    Assert-NotReparsePoint $lexicalCellRoot 'The marketplace cell root'
+    $cellRoot = Canonical-Path $lexicalCellRoot
+    if (-not (Paths-Equal (Split-Path -Parent $cellRoot) $marketplacesRoot)) {
+        Fail "Namespace receipt '$ReceiptPath' is outside the durable marketplaces root."
+    }
+    Assert-NotReparsePoint $ReceiptPath 'namespace.json'
     $actualReceipt = Canonical-Path $ReceiptPath -MustExist
-    $cellRoot = Split-Path -Parent $actualReceipt
-    $marketplacesRoot = Canonical-Path (Join-Path $ResolvedDurableHome 'marketplaces')
-    if (-not (Path-IsWithin $cellRoot $marketplacesRoot)) {
-        Fail "Namespace receipt '$actualReceipt' is outside the durable marketplaces root."
+    if (-not (Paths-Equal (Split-Path -Parent $actualReceipt) $cellRoot)) {
+        Fail 'namespace.json escapes its canonical marketplace cell.'
     }
     $marketplaceId = Split-Path -Leaf $cellRoot
-    $canonicalReceipt = Canonical-Path (Join-Path $cellRoot 'namespace.json')
+    $lexicalCanonicalReceipt = Join-Path $cellRoot 'namespace.json'
+    Assert-NotReparsePoint $lexicalCanonicalReceipt 'namespace.json'
+    $canonicalReceipt = Canonical-Path $lexicalCanonicalReceipt
     if (-not (Paths-Equal $actualReceipt $canonicalReceipt)) {
         Fail "namespace.json is not at its exact canonical receipt location '$canonicalReceipt'."
     }
@@ -1497,6 +1515,23 @@ function Assert-PluginId([string]$Value) {
     }
 }
 
+function Assert-SnapshotId([string]$Value) {
+    foreach ($character in $Value.ToCharArray()) {
+        if ([char]::IsControl($character)) {
+            Fail "Invalid filesystem-safe snapshot id '$Value'."
+        }
+    }
+    if ($Value -notmatch '\A[A-Za-z0-9](?:[A-Za-z0-9._+-]*[A-Za-z0-9])?\z' -or
+        $Value -in @('.', '..')) {
+        Fail "Invalid filesystem-safe snapshot id '$Value'."
+    }
+    $baseName = $Value.Split([char]'.')[0].ToUpperInvariant()
+    if ($baseName -in @('CON', 'PRN', 'AUX', 'NUL') -or
+        $baseName -match '^(COM|LPT)[1-9]$') {
+        Fail "Invalid filesystem-safe snapshot id '$Value'."
+    }
+}
+
 function Resolve-RelativeRoot([string]$PluginRootPath, [string]$Relative, [string]$Name) {
     if ([string]::IsNullOrWhiteSpace($Relative) -or [IO.Path]::IsPathRooted($Relative)) {
         Fail "roots.$Name must be a non-empty relative path."
@@ -1523,14 +1558,17 @@ function Validate-ContextReceipt(
     [string]$PayloadExpectation,
     [string]$CellExpectation
 ) {
-    if (-not [IO.Path]::IsPathRooted($ReceiptPath)) {
+    $hostPlatform = $(if ($env:OS -eq 'Windows_NT') { 'windows' } else { 'posix' })
+    if (-not (Test-EnvironmentPathRooted $ReceiptPath $hostPlatform)) {
         Fail 'The installation-context receipt pointer must be absolute.'
     }
+    Assert-NotReparsePoint $ReceiptPath 'install.json'
     foreach ($expectation in @(
         @('expected payload root', $PayloadExpectation),
         @('expected cell root', $CellExpectation)
     )) {
-        if ($expectation[1] -and -not [IO.Path]::IsPathRooted([string]$expectation[1])) {
+        if ($expectation[1] -and
+            -not (Test-EnvironmentPathRooted ([string]$expectation[1]) $hostPlatform)) {
             Fail "$($expectation[0]) must be absolute."
         }
     }
@@ -1549,9 +1587,33 @@ function Validate-ContextReceipt(
         Fail "Invalid source-derived marketplace id '$marketplaceId'."
     }
     Assert-PluginId $receiptPluginId
-    $cellRoot = Canonical-Path (Join-Path (Join-Path $ResolvedDurableHome 'marketplaces') $marketplaceId)
-    $expectedPluginRoot = Canonical-Path (Join-Path (Join-Path $cellRoot 'plugins') $receiptPluginId)
-    $canonicalReceipt = Canonical-Path (Join-Path $expectedPluginRoot 'install.json')
+    $lexicalMarketplacesRoot = Join-Path $ResolvedDurableHome 'marketplaces'
+    Assert-NotReparsePoint $lexicalMarketplacesRoot 'The marketplaces root'
+    $marketplacesRoot = Canonical-Path $lexicalMarketplacesRoot
+    if (-not (Paths-Equal (Split-Path -Parent $marketplacesRoot) $ResolvedDurableHome)) {
+        Fail 'The marketplaces root escapes the durable installation home.'
+    }
+    $lexicalCellRoot = Join-Path $marketplacesRoot $marketplaceId
+    Assert-NotReparsePoint $lexicalCellRoot 'The marketplace cell root'
+    $cellRoot = Canonical-Path $lexicalCellRoot
+    if (-not (Paths-Equal (Split-Path -Parent $cellRoot) $marketplacesRoot)) {
+        Fail 'The marketplace cell root escapes the marketplaces root.'
+    }
+    $lexicalPluginsRoot = Join-Path $cellRoot 'plugins'
+    Assert-NotReparsePoint $lexicalPluginsRoot 'The cell plugins root'
+    $pluginsRoot = Canonical-Path $lexicalPluginsRoot
+    if (-not (Paths-Equal (Split-Path -Parent $pluginsRoot) $cellRoot)) {
+        Fail 'The cell plugins root escapes the marketplace cell.'
+    }
+    $lexicalPluginRoot = Join-Path $pluginsRoot $receiptPluginId
+    Assert-NotReparsePoint $lexicalPluginRoot 'The plugin root'
+    $expectedPluginRoot = Canonical-Path $lexicalPluginRoot
+    if (-not (Paths-Equal (Split-Path -Parent $expectedPluginRoot) $pluginsRoot)) {
+        Fail 'The plugin root escapes the cell plugins root.'
+    }
+    $lexicalCanonicalReceipt = Join-Path $expectedPluginRoot 'install.json'
+    Assert-NotReparsePoint $lexicalCanonicalReceipt 'install.json'
+    $canonicalReceipt = Canonical-Path $lexicalCanonicalReceipt
     if (-not (Paths-Equal $actualReceipt $canonicalReceipt)) {
         Fail "install.json is not at its exact canonical receipt location '$canonicalReceipt'."
     }
@@ -1570,11 +1632,13 @@ function Validate-ContextReceipt(
     Assert-ReceiptGeneration (Get-PropertyValue $install 'generation') 'install.json generation'
     Assert-ReceiptState (Get-StringProperty $install 'state') 'install.json state'
 
-    $namespacePath = Canonical-Path (Join-Path $cellRoot 'namespace.json')
+    $lexicalNamespacePath = Join-Path $cellRoot 'namespace.json'
+    Assert-NotReparsePoint $lexicalNamespacePath 'namespace.json'
+    $namespacePath = Canonical-Path $lexicalNamespacePath
     if (-not (Paths-Equal (Get-StringProperty $install 'namespaceReceipt') $namespacePath)) {
         Fail 'install.json namespaceReceipt is not the exact namespace receipt in the same cell.'
     }
-    $validatedNamespace = Validate-NamespaceReceipt $namespacePath $ResolvedDurableHome
+    $validatedNamespace = Validate-NamespaceReceipt $lexicalNamespacePath $ResolvedDurableHome
     if ($validatedNamespace.marketplaceId -cne $marketplaceId) {
         Fail 'namespace.json marketplaceId does not match install.json.'
     }
@@ -2755,6 +2819,26 @@ function Assert-ExpectedGeneration(
     }
 }
 
+function ConvertTo-ExpectedGeneration($Value, [string]$ReceiptName) {
+    if ($null -eq $Value) {
+        Fail "Expected $ReceiptName generation must be a non-negative integer."
+    }
+    $text = [Convert]::ToString($Value, [Globalization.CultureInfo]::InvariantCulture)
+    if ($text -notmatch '\A[0-9]+\z') {
+        Fail "Expected $ReceiptName generation must be a non-negative integer."
+    }
+    [long]$parsed = 0
+    if (-not [long]::TryParse(
+        $text,
+        [Globalization.NumberStyles]::None,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$parsed
+    )) {
+        Fail "Expected $ReceiptName generation exceeds the portable signed 64-bit maximum."
+    }
+    return $parsed
+}
+
 function Invoke-ActivationCas([string]$ResolvedDurableHome) {
     if (-not $Context) { Fail 'activation-cas requires -Context.' }
     if (-not $ExpectedMarketplaceId) {
@@ -2937,6 +3021,397 @@ function Invoke-ActivationCas([string]$ResolvedDurableHome) {
                 if ($operationFailed) {
                     [Console]::Error.WriteLine(
                         "installation-context: $($_.Exception.Message) while preserving the original activation failure."
+                    )
+                }
+            }
+        }
+        if (-not $operationFailed -and $null -ne $releaseError) {
+            throw $releaseError
+        }
+    }
+}
+
+function Get-PayloadIdentity([string]$InstallPath) {
+    $install = Read-Json $InstallPath
+    $payload = Get-PropertyValue $install 'payload'
+    $root = Get-StringProperty $payload 'root'
+    if (-not [IO.Path]::IsPathRooted($root)) { Fail 'payload.root must be absolute.' }
+    $root = Canonical-Path $root
+    $version = Get-StringProperty $payload 'version'
+    if ([string]::IsNullOrWhiteSpace($version)) {
+        Fail 'payload.version must be a non-empty string.'
+    }
+    $origin = Get-StringProperty $payload 'origin'
+    if ($origin -cnotin @('installed', 'directory', 'staged', 'explicit')) {
+        Fail 'payload.origin must be installed, directory, staged, or explicit.'
+    }
+    $originReceipt = Get-PropertyValue $payload 'originReceipt'
+    if ($null -ne $originReceipt) {
+        if ($originReceipt -isnot [string]) {
+            Fail 'payload.originReceipt must be a string.'
+        }
+        if (-not [IO.Path]::IsPathRooted($originReceipt)) {
+            Fail 'payload.originReceipt must be absolute.'
+        }
+        $originReceipt = Canonical-Path $originReceipt
+    }
+    return [pscustomobject][ordered]@{
+        root = $root
+        version = $version
+        origin = $origin
+        originReceipt = $originReceipt
+    }
+}
+
+function Assert-NotReparsePoint([string]$Path, [string]$Label) {
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and
+        (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Fail "$Label may not be a symbolic link or reparse point."
+    }
+}
+
+function Resolve-SnapshotPaths($Validated, [string]$RequestedSnapshotId) {
+    Assert-SnapshotId $RequestedSnapshotId
+    $snapshotsRoot = Canonical-Path ([string]$Validated.snapshotsRoot)
+    $lexicalRoot = Join-Path $snapshotsRoot $RequestedSnapshotId
+    Assert-NotReparsePoint $lexicalRoot 'Snapshot root'
+    if (-not (Test-Path -LiteralPath $lexicalRoot -PathType Container)) {
+        Fail 'Snapshot root must be an existing materialized directory.'
+    }
+    $snapshotRoot = Canonical-Path $lexicalRoot -MustExist
+    if (-not (Paths-Equal (Split-Path -Parent $snapshotRoot) $snapshotsRoot)) {
+        Fail 'Snapshot root must be one direct child of snapshotsRoot.'
+    }
+    $nameComparison = [StringComparison]::Ordinal
+    if ($env:OS -eq 'Windows_NT') {
+        $nameComparison = [StringComparison]::OrdinalIgnoreCase
+    }
+    if (-not [string]::Equals(
+        (Split-Path -Leaf $snapshotRoot),
+        $RequestedSnapshotId,
+        $nameComparison
+    )) {
+        Fail 'Snapshot root does not retain the requested snapshot id.'
+    }
+    $materialized = @(
+        Get-ChildItem -LiteralPath $snapshotRoot -Force |
+            Where-Object { $_.Name -cne 'snapshot-provenance.json' } |
+            Select-Object -First 1
+    )
+    if ($materialized.Count -eq 0) {
+        Fail 'Snapshot root must contain materialized payload content.'
+    }
+    $lexicalProvenance = Join-Path $snapshotRoot 'snapshot-provenance.json'
+    Assert-NotReparsePoint $lexicalProvenance 'Snapshot provenance'
+    $provenance = Canonical-Path $lexicalProvenance
+    if (-not (Path-IsWithin $provenance $snapshotsRoot)) {
+        Fail 'Snapshot provenance path escapes snapshotsRoot.'
+    }
+    return [pscustomobject][ordered]@{
+        snapshotRoot = $snapshotRoot
+        provenance = $provenance
+    }
+}
+
+function Validate-SnapshotProvenance(
+    [string]$ContextPath,
+    [string]$ResolvedDurableHome,
+    [string]$MarketplaceExpectation,
+    [string]$PluginExpectation,
+    [string]$RequestedSnapshotId
+) {
+    if (-not $ContextPath) { Fail 'snapshot-validate requires -Context.' }
+    if (-not $MarketplaceExpectation) {
+        Fail 'snapshot-validate requires -ExpectedMarketplaceId.'
+    }
+    if (-not $PluginExpectation) {
+        Fail 'snapshot-validate requires -ExpectedPluginId.'
+    }
+    if (-not $RequestedSnapshotId) { Fail 'snapshot-validate requires -SnapshotId.' }
+    Assert-MarketplaceId $MarketplaceExpectation
+    Assert-PluginId $PluginExpectation
+    Assert-SnapshotId $RequestedSnapshotId
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $ContextPath $ResolvedDurableHome $MarketplaceExpectation $PluginExpectation '' ''
+    }
+    $paths = Resolve-SnapshotPaths $validated $RequestedSnapshotId
+    $actualProvenance = Canonical-Path $paths.provenance -MustExist
+    if (-not (Paths-Equal $actualProvenance $paths.provenance)) {
+        Fail "Snapshot provenance is not at its exact canonical location '$($paths.provenance)'."
+    }
+    $provenance = Read-Json $actualProvenance
+    if ($null -eq $provenance -or $provenance -isnot [pscustomobject]) {
+        Fail 'Snapshot provenance must be a JSON object.'
+    }
+    $provenanceVersion = Get-PropertyValue $provenance 'version'
+    Assert-PositiveInteger $provenanceVersion 'snapshot provenance version'
+    if ((Get-StringProperty $provenance 'schema') -cne
+            'copilot-extensions.snapshot-provenance' -or
+        $provenanceVersion -ne 1) {
+        Fail 'Snapshot provenance has an unsupported schema or version.'
+    }
+    $marketplaceId = Get-StringProperty $provenance 'marketplaceId'
+    $receiptPluginId = Get-StringProperty $provenance 'pluginId'
+    if ($marketplaceId -cne $MarketplaceExpectation) {
+        Fail "Expected marketplace '$MarketplaceExpectation', snapshot provenance names '$marketplaceId'."
+    }
+    if ($receiptPluginId -cne $PluginExpectation) {
+        Fail "Expected plugin '$PluginExpectation', snapshot provenance names '$receiptPluginId'."
+    }
+
+    $source = Get-PropertyValue $provenance 'source'
+    if ($null -eq $source -or $source -isnot [pscustomobject]) {
+        Fail 'Snapshot provenance source is missing.'
+    }
+    $normalized = Normalize-Source ([pscustomobject][ordered]@{
+        kind = Get-StringProperty $source 'kind'
+        canonical = Get-StringProperty $source 'canonical'
+        ref = Get-StringProperty $source 'ref'
+    }) '' -FromReceipt
+    $readableName = $marketplaceId.Substring(0, $marketplaceId.LastIndexOf('--'))
+    $identity = Source-Identity $normalized $readableName
+    $fingerprint = Get-StringProperty $source 'fingerprint'
+    if ($identity.marketplaceId -cne $marketplaceId) {
+        Fail 'Snapshot provenance marketplaceId does not match its normalized source.'
+    }
+    if ($identity.fingerprint -cne $fingerprint) {
+        Fail 'Snapshot provenance fingerprint does not match its normalized source.'
+    }
+    if ($fingerprint -cne $validated.sourceFingerprint -or
+        $normalized.kind -cne $validated.source.kind -or
+        $normalized.canonical -cne $validated.source.canonical -or
+        $normalized.ref -cne $validated.source.ref) {
+        Fail 'Snapshot provenance source does not match the canonical namespace receipt.'
+    }
+
+    $snapshot = Get-PropertyValue $provenance 'snapshot'
+    if ($null -eq $snapshot -or $snapshot -isnot [pscustomobject]) {
+        Fail 'Snapshot provenance snapshot identity is missing.'
+    }
+    if ((Get-StringProperty $snapshot 'id') -cne $RequestedSnapshotId) {
+        Fail 'Snapshot provenance id does not match its canonical snapshot directory.'
+    }
+    $recordedSnapshotRoot = Get-StringProperty $snapshot 'root'
+    if (-not [IO.Path]::IsPathRooted($recordedSnapshotRoot)) {
+        Fail 'Snapshot provenance snapshot.root must be absolute.'
+    }
+    if (-not (Paths-Equal $recordedSnapshotRoot $paths.snapshotRoot)) {
+        Fail 'Snapshot provenance snapshot.root is not its exact canonical location.'
+    }
+
+    $namespaceReference = Get-PropertyValue $provenance 'namespaceReceipt'
+    $installReference = Get-PropertyValue $provenance 'installReceipt'
+    if ($null -eq $namespaceReference -or
+        $namespaceReference -isnot [pscustomobject] -or
+        $null -eq $installReference -or
+        $installReference -isnot [pscustomobject]) {
+        Fail 'Snapshot provenance receipt references are missing.'
+    }
+    $namespacePath = Get-StringProperty $namespaceReference 'path'
+    $installPath = Get-StringProperty $installReference 'path'
+    if (-not [IO.Path]::IsPathRooted($namespacePath) -or
+        -not [IO.Path]::IsPathRooted($installPath)) {
+        Fail 'Snapshot provenance receipt paths must be absolute.'
+    }
+    if (-not (Paths-Equal $namespacePath $validated.namespaceReceipt)) {
+        Fail 'Snapshot provenance namespace receipt does not match the current context.'
+    }
+    if (-not (Paths-Equal $installPath $validated.installReceipt)) {
+        Fail 'Snapshot provenance install receipt does not match the current context.'
+    }
+    $namespaceGeneration = Get-PropertyValue $namespaceReference 'generation'
+    $installGeneration = Get-PropertyValue $installReference 'generation'
+    Assert-ReceiptGeneration $namespaceGeneration 'snapshot provenance namespace generation'
+    Assert-ReceiptGeneration $installGeneration 'snapshot provenance install generation'
+    if ([long]$namespaceGeneration -ne [long]$validated.namespaceGeneration) {
+        Fail 'Snapshot provenance namespace generation is stale; restart snapshot production.'
+    }
+    if ([long]$installGeneration -ne [long]$validated.generation) {
+        Fail 'Snapshot provenance install generation is stale; restart snapshot production.'
+    }
+    $namespace = Read-Json $validated.namespaceReceipt
+    if ((Get-StringProperty $namespace 'state') -cne 'active' -or
+        (Get-StringProperty $validated 'state') -cne 'active') {
+        Fail 'Snapshot provenance requires active namespace and install receipts.'
+    }
+
+    $payload = Get-PropertyValue $provenance 'payload'
+    if ($null -eq $payload -or $payload -isnot [pscustomobject]) {
+        Fail 'Snapshot provenance payload identity is missing.'
+    }
+    if (-not (Has-ExactProperty $payload 'originReceipt')) {
+        Fail 'Snapshot provenance payload.originReceipt must be present.'
+    }
+    $payloadRoot = Get-StringProperty $payload 'root'
+    if (-not [IO.Path]::IsPathRooted($payloadRoot)) {
+        Fail 'Snapshot provenance payload.root must be absolute.'
+    }
+    $payloadRoot = Canonical-Path $payloadRoot
+    $payloadVersion = Get-StringProperty $payload 'version'
+    if ([string]::IsNullOrWhiteSpace($payloadVersion)) {
+        Fail 'Snapshot provenance payload.version must be a non-empty string.'
+    }
+    $payloadOrigin = Get-StringProperty $payload 'origin'
+    if ($payloadOrigin -cnotin @('installed', 'directory', 'staged', 'explicit')) {
+        Fail 'Snapshot provenance payload.origin is invalid.'
+    }
+    $payloadOriginReceipt = Get-PropertyValue $payload 'originReceipt'
+    if ($null -ne $payloadOriginReceipt) {
+        if ($payloadOriginReceipt -isnot [string]) {
+            Fail 'Snapshot provenance payload.originReceipt must be a string or null.'
+        }
+        if (-not [IO.Path]::IsPathRooted($payloadOriginReceipt)) {
+            Fail 'Snapshot provenance payload.originReceipt must be absolute.'
+        }
+        $payloadOriginReceipt = Canonical-Path $payloadOriginReceipt
+    }
+    $currentPayload = Get-PayloadIdentity $validated.installReceipt
+    if (-not (Paths-Equal $payloadRoot $currentPayload.root) -or
+        $payloadVersion -cne $currentPayload.version -or
+        $payloadOrigin -cne $currentPayload.origin -or
+        $payloadOriginReceipt -cne $currentPayload.originReceipt) {
+        Fail 'Snapshot provenance payload does not match the pinned install receipt.'
+    }
+    [void](Read-ExactUtcTimestampValue (
+        Get-PropertyValue $provenance 'createdAt'
+    ) 'snapshot provenance createdAt')
+
+    return [pscustomobject][ordered]@{
+        action = 'snapshot-validate'
+        status = 'ready'
+        reason = 'snapshot-provenance-valid'
+        provenance = $actualProvenance
+        snapshotRoot = $paths.snapshotRoot
+        snapshotId = $RequestedSnapshotId
+        marketplaceId = $marketplaceId
+        pluginId = $receiptPluginId
+        sourceFingerprint = $fingerprint
+        namespaceReceipt = Canonical-Path $namespacePath
+        installReceipt = Canonical-Path $installPath
+        namespaceGeneration = [long]$namespaceGeneration
+        installGeneration = [long]$installGeneration
+        payload = $currentPayload
+        operative = $false
+    }
+}
+
+function Invoke-SnapshotStamp([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'snapshot-stamp requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'snapshot-stamp requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'snapshot-stamp requires -ExpectedPluginId.'
+    }
+    if (-not $SnapshotId) { Fail 'snapshot-stamp requires -SnapshotId.' }
+    Assert-MarketplaceId $ExpectedMarketplaceId
+    Assert-PluginId $ExpectedPluginId
+    Assert-SnapshotId $SnapshotId
+    if ($ExpectedNamespaceGeneration -lt 0) {
+        Fail 'snapshot-stamp requires -ExpectedNamespaceGeneration.'
+    }
+    if ($ExpectedInstallGeneration -lt 0) {
+        Fail 'snapshot-stamp requires -ExpectedInstallGeneration.'
+    }
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $cellRoot = [string]$validated.cellRoot
+    $genesisLock = Join-Path (Join-Path $ResolvedDurableHome 'marketplaces/.locks') ($ExpectedMarketplaceId + '.genesis')
+    $installLock = Join-Path (Join-Path $cellRoot '.locks') ($ExpectedPluginId + '.install.lock')
+    $startingLockCount = $script:HeldLocks.Count
+    $operationFailed = $false
+    try {
+        Acquire-Lock $genesisLock 'genesis' $ExpectedMarketplaceId
+        Acquire-Lock $installLock 'install' $ExpectedMarketplaceId $ExpectedPluginId
+        $validated = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $validated.installReceipt $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' $cellRoot
+        }
+        Assert-ExpectedGeneration ([long]$validated.namespaceGeneration) $ExpectedNamespaceGeneration 'namespace.json'
+        Assert-ExpectedGeneration ([long]$validated.generation) $ExpectedInstallGeneration 'install.json'
+        $namespace = Read-Json $validated.namespaceReceipt
+        if ((Get-StringProperty $namespace 'state') -cne 'active' -or
+            (Get-StringProperty $validated 'state') -cne 'active') {
+            Fail 'Snapshot provenance requires active namespace and install receipts.'
+        }
+        $paths = Resolve-SnapshotPaths $validated $SnapshotId
+        $snapshotChanged = $false
+        $existingEntry = Get-Item -LiteralPath $paths.provenance -Force -ErrorAction SilentlyContinue
+        if ($null -ne $existingEntry) {
+            $published = Validate-SnapshotProvenance `
+                $validated.installReceipt `
+                $ResolvedDurableHome `
+                $ExpectedMarketplaceId `
+                $ExpectedPluginId `
+                $SnapshotId
+        }
+        else {
+            $payload = Get-PayloadIdentity $validated.installReceipt
+            $receipt = [ordered]@{
+                schema = 'copilot-extensions.snapshot-provenance'
+                version = 1
+                marketplaceId = $ExpectedMarketplaceId
+                pluginId = $ExpectedPluginId
+                source = [ordered]@{
+                    kind = [string]$validated.source.kind
+                    canonical = [string]$validated.source.canonical
+                    ref = [string]$validated.source.ref
+                    fingerprint = [string]$validated.sourceFingerprint
+                }
+                snapshot = [ordered]@{
+                    id = $SnapshotId
+                    root = [string]$paths.snapshotRoot
+                }
+                payload = $payload
+                namespaceReceipt = [ordered]@{
+                    path = [string]$validated.namespaceReceipt
+                    generation = [long]$validated.namespaceGeneration
+                }
+                installReceipt = [ordered]@{
+                    path = [string]$validated.installReceipt
+                    generation = [long]$validated.generation
+                }
+                createdAt = Get-UtcTimestamp
+            }
+            Assert-AllLocksOwned
+            Write-AtomicJson $paths.provenance $receipt
+            $snapshotChanged = $true
+            $published = Validate-SnapshotProvenance `
+                $validated.installReceipt `
+                $ResolvedDurableHome `
+                $ExpectedMarketplaceId `
+                $ExpectedPluginId `
+                $SnapshotId
+        }
+        $published.action = 'snapshot-stamp'
+        $published.reason = $(if ($snapshotChanged) {
+            'snapshot-provenance-published'
+        } else {
+            'snapshot-provenance-current'
+        })
+        $published | Add-Member -NotePropertyName snapshotChanged -NotePropertyValue $snapshotChanged
+        $published | Add-Member -NotePropertyName pluginRoot -NotePropertyValue ([string]$validated.pluginRoot)
+        return $published
+    }
+    catch {
+        $operationFailed = $true
+        throw
+    }
+    finally {
+        $releaseError = $null
+        while ($script:HeldLocks.Count -gt $startingLockCount) {
+            try {
+                Release-Lock
+            }
+            catch {
+                Pop-HeldLock
+                if ($null -eq $releaseError) {
+                    $releaseError = $_.Exception
+                }
+                if ($operationFailed) {
+                    [Console]::Error.WriteLine(
+                        "installation-context: $($_.Exception.Message) while preserving the original snapshot failure."
                     )
                 }
             }
@@ -3172,7 +3647,30 @@ function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
 }
 
 try {
-    Assert-ExactChoice $Action @('source-id', 'resolve', 'validate', 'stamp', 'activation-cas', 'status', 'probe-legacy') 'Action'
+    Assert-ExactChoice $Action @(
+        'source-id',
+        'resolve',
+        'validate',
+        'stamp',
+        'activation-cas',
+        'snapshot-stamp',
+        'snapshot-validate',
+        'status',
+        'probe-legacy'
+    ) 'Action'
+    if ($Action -cin @('stamp', 'activation-cas', 'snapshot-stamp')) {
+        $ExpectedNamespaceGeneration = ConvertTo-ExpectedGeneration `
+            $ExpectedNamespaceGeneration `
+            'namespace.json'
+        $ExpectedInstallGeneration = ConvertTo-ExpectedGeneration `
+            $ExpectedInstallGeneration `
+            'install.json'
+    }
+    if ($Action -ceq 'activation-cas') {
+        $ExpectedActivationGeneration = ConvertTo-ExpectedGeneration `
+            $ExpectedActivationGeneration `
+            'activation'
+    }
     if ($PayloadOrigin -cnotin @('', 'installed', 'directory', 'staged', 'explicit')) {
         Fail 'payload origin must be installed, directory, staged, or explicit.'
     }
@@ -3205,6 +3703,17 @@ try {
     }
     elseif ($Action -eq 'activation-cas') {
         $result = Invoke-ActivationCas $resolvedDurableHome
+    }
+    elseif ($Action -eq 'snapshot-stamp') {
+        $result = Invoke-SnapshotStamp $resolvedDurableHome
+    }
+    elseif ($Action -eq 'snapshot-validate') {
+        $result = Validate-SnapshotProvenance `
+            $Context `
+            $resolvedDurableHome `
+            $ExpectedMarketplaceId `
+            $ExpectedPluginId `
+            $SnapshotId
     }
     elseif ($Action -eq 'validate') {
         $pointer = $Context

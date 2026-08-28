@@ -57,6 +57,94 @@ complete.
    runtime beside unattributed legacy state, and disabling policy never silently
    reactivates legacy writers after a cell is active.
 
+After canonicalizing the configured durable home, receipt validation requires
+the physical path chain `marketplaces/<marketplace-id>/plugins/<plugin-id>` to
+retain that exact hierarchy. Each component is one direct child of its
+predecessor and none may be a symbolic link, junction, or other reparse point.
+The canonical `namespace.json` and `install.json` receipt leaves likewise must
+be ordinary files rather than links or reparse points.
+Relocating an installation subtree therefore requires an explicit durable-home
+configuration or management migration rather than an in-tree filesystem link.
+
+### Snapshot provenance
+
+A staged payload or snapshot directory is a location, not installation identity.
+Before a snapshot can become input to provisioning, its producer publishes
+`snapshot-provenance.json` at the exact canonical path
+`<snapshotsRoot>/<snapshot-id>/snapshot-provenance.json` while holding the
+marketplace genesis lock and then the plugin installation lock.
+
+The sidecar schema is:
+
+```json
+{
+  "schema": "copilot-extensions.snapshot-provenance",
+  "version": 1,
+  "marketplaceId": "example--0123456789abcdef",
+  "pluginId": "agent-example",
+  "source": {
+    "kind": "github",
+    "canonical": "github:owner/repository",
+    "ref": "",
+    "fingerprint": "sha256:<full digest>"
+  },
+  "snapshot": {
+    "id": "1.0.0",
+    "root": "<absolute canonical snapshot root>"
+  },
+  "payload": {
+    "root": "<originating absolute payload root>",
+    "version": "1.0.0",
+    "origin": "installed",
+    "originReceipt": null
+  },
+  "namespaceReceipt": {
+    "path": "<absolute canonical namespace.json>",
+    "generation": 1
+  },
+  "installReceipt": {
+    "path": "<absolute canonical install.json>",
+    "generation": 1
+  },
+  "createdAt": "2026-01-01T00:00:00Z"
+}
+```
+
+`snapshot-stamp` requires explicit context, expected marketplace/plugin
+identity, both caller-observed receipt generations, and one portable snapshot
+id. The producer must first materialize a non-empty snapshot directory beneath
+the canonical `snapshotsRoot`; publication neither creates that directory nor
+accepts a sidecar-only snapshot. It validates active receipts under both locks,
+creates only the sidecar, and treats an existing valid sidecar as immutable and
+idempotent. It never overwrites malformed or conflicting provenance.
+
+`snapshot-validate` independently validates the normalized source and full
+fingerprint against the canonical namespace receipt, validates marketplace,
+plugin, payload, receipt path, and pinned-generation identity against the
+canonical install receipt, and requires the sidecar to remain at its exact
+cell-local location. Validation also requires at least one non-sidecar entry to
+remain in the snapshot directory; this is an ordering/presence check, not a
+content-integrity claim. The original payload path need not remain readable
+after snapshot production; the canonical receipts and fingerprint are
+authoritative. If either receipt changes, the sidecar is stale and cannot
+authorize a later provisioning transaction.
+
+Both actions are non-operative. They do not create a runtime slot, activate a
+root, migrate state, cut over a marker, write a tombstone, or remove anything.
+Malformed JSON, duplicate keys, a BOM, wrong known-field types, unsupported
+versions, path escape, copied cross-cell provenance, or any identity mismatch
+fails before sidecar replacement or provisioning.
+
+Snapshot provenance shares the receipt threat model: it prevents accidental
+cross-cell adoption, stale-generation reuse, and ambiguous ownership, but it is
+not a cryptographic attestation of producer execution or snapshot contents. A
+malicious process running as the same user can rewrite receipts and sidecars;
+later provisioning must still enforce the canonical receipt chain and its own
+content-integrity requirements.
+
+Expected generation arguments use unsigned ASCII decimal syntax, normalize
+leading zeroes before comparison, and must fit the portable signed 64-bit range.
+
 ### Installation-mode governance
 
 This section is the normative authority for desired-mode policy, actual-mode
