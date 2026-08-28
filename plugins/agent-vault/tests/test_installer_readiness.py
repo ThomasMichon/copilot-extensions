@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+
+import pytest
 
 from agent_vault import cli
 from agent_vault.config import ResolvedVault
 from agent_vault.installer_readiness import emit, evaluate
+from agent_vault.service import VaultService
 
 
 def _context(kpdb: str | None) -> ResolvedVault:
@@ -40,6 +44,19 @@ def test_unlocked_configured_vault_is_ready():
     assert "currently unlocked" in result["detail"]
 
 
+def test_ping_reports_selected_vault_locked_when_another_is_unlocked():
+    service = VaultService()
+    service.cli._cli_path = "keepassxc-cli"
+    service.cli.set_password("other.kdbx", "secret")
+
+    response = service.handle_request(
+        {"action": "ping", "kpdb": "selected.kdbx", "vault": "selected"}
+    )
+
+    assert response["cli"] == "locked"
+    assert response["unlocked_vaults"] == ["other.kdbx"]
+
+
 def test_corrupt_config_or_service_failure_is_failed():
     invalid = evaluate(None, None, ["config.json: malformed JSON"])
     unavailable = evaluate(_context("example.kdbx"), None)
@@ -63,7 +80,7 @@ def test_payload_command_only_pings_and_never_starts_or_unlocks(
     monkeypatch.setattr(
         cli,
         "send_command",
-        lambda request: {"ok": True, "cli": "locked"}
+        lambda request, **_kwargs: {"ok": True, "cli": "locked"}
         if request == {"action": "ping"}
         else None,
     )
@@ -139,7 +156,9 @@ def test_payload_command_rejects_invalid_endpoint_and_port(
     monkeypatch.setattr(
         cli,
         "send_command",
-        lambda _request: (_ for _ in ()).throw(ValueError("malformed endpoint")),
+        lambda _request, **_kwargs: (_ for _ in ()).throw(
+            ValueError("malformed endpoint")
+        ),
     )
 
     assert cli.main(["installer-readiness"]) == 1
@@ -160,3 +179,155 @@ def test_strict_context_rejects_invalid_environment_port(monkeypatch):
         assert "port must be an integer" in str(exc)
     else:
         raise AssertionError("strict resolution accepted an invalid port")
+
+
+def test_readiness_allows_absent_endpoint_state_to_use_legacy_fallback(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(tmp_path / "absent"))
+    monkeypatch.setattr(
+        "agent_vault.config.resolve_context",
+        lambda **_kwargs: _context("example.kdbx"),
+    )
+    monkeypatch.setattr(cli, "_send_socket", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        cli,
+        "_send_tcp",
+        lambda request, _host, _port, _timeout: {
+            "ok": True,
+            "cli": "locked",
+        },
+    )
+    monkeypatch.setattr(
+        "agent_vault.extensions.get_registry",
+        lambda: type(
+            "Registry",
+            (),
+            {
+                "apply_cli_commands": lambda *_args, **_kwargs: None,
+                "try_transports": lambda *_args, **_kwargs: None,
+            },
+        )(),
+    )
+
+    assert cli.main(["installer-readiness"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "ready"
+
+
+def test_readiness_rejects_malformed_present_endpoint_before_legacy_fallback(
+    tmp_path, monkeypatch, capsys
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "endpoint.json").write_text("{", encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(
+        cli,
+        "_send_tcp",
+        lambda *_args, **_kwargs: pytest.fail("must not use legacy fallback"),
+    )
+
+    assert cli.main(["installer-readiness"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert "malformed endpoint state" in result["detail"]
+
+
+def test_normal_endpoint_discovery_remains_tolerant_of_malformed_state(
+    tmp_path, monkeypatch
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "endpoint.json").write_text("{", encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(cli, "IS_WSL", False)
+
+    assert cli._discover_endpoint(_context("example.kdbx")) is None
+
+
+def test_readiness_rejects_endpoint_file_shape_before_legacy_fallback(
+    tmp_path, monkeypatch, capsys
+):
+    run_dir = tmp_path / "run"
+    (run_dir / "endpoint.json").mkdir(parents=True)
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(
+        cli,
+        "_send_tcp",
+        lambda *_args, **_kwargs: pytest.fail("must not use legacy fallback"),
+    )
+
+    assert cli.main(["installer-readiness"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert "unreadable endpoint state" in result["detail"]
+
+
+def test_readiness_rejects_unreadable_endpoint_before_legacy_fallback(
+    tmp_path, monkeypatch, capsys
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    endpoint = run_dir / "endpoint.json"
+    endpoint.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    original_read_text = Path.read_text
+
+    def fail_endpoint_read(path, *args, **kwargs):
+        if path == endpoint:
+            raise PermissionError("denied")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_endpoint_read)
+    monkeypatch.setattr(
+        cli,
+        "_send_tcp",
+        lambda *_args, **_kwargs: pytest.fail("must not use legacy fallback"),
+    )
+
+    assert cli.main(["installer-readiness"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert "unreadable endpoint state" in result["detail"]
+
+
+@pytest.mark.parametrize(
+    "record",
+    (
+        {
+            "schema": 1,
+            "transport": "tcp",
+            "endpoint": "not-a-host-port",
+            "pid": None,
+            "started_at": None,
+        },
+        {
+            "schema": 1,
+            "transport": "tcp",
+            "endpoint": "127.0.0.1:19999",
+            "pid": None,
+            "started_at": None,
+            "alt": ["not-an-endpoint-object"],
+        },
+    ),
+)
+def test_readiness_rejects_wrong_shaped_endpoint_before_legacy_fallback(
+    record, tmp_path, monkeypatch, capsys
+):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "endpoint.json").write_text(
+        json.dumps(record),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_VAULT_RUN_DIR", str(run_dir))
+    monkeypatch.setattr(
+        cli,
+        "_send_tcp",
+        lambda *_args, **_kwargs: pytest.fail("must not use legacy fallback"),
+    )
+
+    assert cli.main(["installer-readiness"]) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "failed"
+    assert "malformed endpoint state" in result["detail"]

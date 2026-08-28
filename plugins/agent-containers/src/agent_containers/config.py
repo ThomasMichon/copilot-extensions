@@ -512,12 +512,13 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
         return config
 
     try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        parsed = yaml.safe_load(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as exc:
         if strict:
             raise RuntimeError(f"Failed to read {path}: {exc}") from exc
         log.warning("Failed to read %s: %s", path, exc)
         return config
+    data = {} if parsed is None else parsed
     if not isinstance(data, dict):
         message = f"{path}: top-level configuration must be a mapping"
         if strict:

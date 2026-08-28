@@ -373,7 +373,7 @@ class VaultService:
                 "pid": os.getpid(),
                 "ttl": self.ttl,
                 "cached": len(self.cache),
-                "cli": self.cli.status(),
+                "cli": self.cli.status(kpdb or None),
                 "unlocked_vaults": self.cli.unlocked_vaults(),
             }
 

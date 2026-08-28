@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from agent_containers import __main__ as cli
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.installer_readiness import emit, evaluate, inspect_toolchain
@@ -125,3 +127,23 @@ def test_strict_shape_validation_does_not_change_normal_config_fallback(
     monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
 
     assert cli.load_config().fleets == {}
+
+
+@pytest.mark.parametrize("content", ("[]\n", "false\n", "0\n", '""\n'))
+def test_strict_config_rejects_every_falsy_non_mapping(
+    content, tmp_path, monkeypatch
+):
+    path = tmp_path / "containers.yaml"
+    path.write_text(content, encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    with pytest.raises(RuntimeError, match="top-level configuration must be a mapping"):
+        cli.load_config(strict=True)
+
+
+def test_strict_config_accepts_empty_yaml_document(tmp_path, monkeypatch):
+    path = tmp_path / "containers.yaml"
+    path.write_text("", encoding="utf-8")
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(path))
+
+    assert cli.load_config(strict=True).fleets == {}
