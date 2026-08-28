@@ -345,6 +345,51 @@ function Test-PathContainsReparsePoint([string] $Path) {
     }
 }
 
+function Test-NativeRegularFile([string] $Path) {
+    if ($env:OS -eq 'Windows_NT') {
+        return $true
+    }
+    $Stat = '/usr/bin/stat'
+    if (-not (Test-Path -LiteralPath $Stat -PathType Leaf)) {
+        return $false
+    }
+    $Process = $null
+    try {
+        $StartInfo = New-Object Diagnostics.ProcessStartInfo
+        $StartInfo.FileName = $Stat
+        $StartInfo.UseShellExecute = $false
+        $StartInfo.CreateNoWindow = $true
+        $StartInfo.RedirectStandardOutput = $true
+        $StartInfo.RedirectStandardError = $true
+        if ($IsLinux) {
+            $StartInfo.ArgumentList.Add('-c')
+            $StartInfo.ArgumentList.Add('%F')
+            $Expected = 'regular file'
+        } elseif ($IsMacOS) {
+            $StartInfo.ArgumentList.Add('-f')
+            $StartInfo.ArgumentList.Add('%HT')
+            $Expected = 'Regular File'
+        } else {
+            return $false
+        }
+        $StartInfo.ArgumentList.Add($Path)
+        $Process = New-Object Diagnostics.Process
+        $Process.StartInfo = $StartInfo
+        if (-not $Process.Start()) { return $false }
+        if (-not $Process.WaitForExit(2000)) {
+            $Process.Kill()
+            $Process.WaitForExit()
+            return $false
+        }
+        if ($Process.ExitCode -ne 0) { return $false }
+        return $Process.StandardOutput.ReadToEnd().Trim() -ceq $Expected
+    } catch {
+        return $false
+    } finally {
+        if ($null -ne $Process) { $Process.Dispose() }
+    }
+}
+
 function Read-BoundedUtf8(
     [string] $Path,
     [int] $Limit,
@@ -355,12 +400,8 @@ function Read-BoundedUtf8(
         $Item.PSIsContainer -or $Item.Length -gt $Limit) {
         throw 'not a bounded regular file'
     }
-    if ($RejectSpecial -and $env:OS -ne 'Windows_NT') {
-        $UnixModeProperty = $Item.PSObject.Properties['UnixMode']
-        if ($null -eq $UnixModeProperty -or
-            -not ([string]$UnixModeProperty.Value).StartsWith('-')) {
-            throw 'not a regular POSIX file'
-        }
+    if ($RejectSpecial -and -not (Test-NativeRegularFile $Path)) {
+        throw 'not a regular file'
     }
     $Stream = [IO.File]::Open(
         $Path,
