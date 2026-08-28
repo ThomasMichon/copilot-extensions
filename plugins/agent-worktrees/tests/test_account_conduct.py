@@ -32,16 +32,21 @@ def test_conduct_fragment_present_and_shaped():
     # Plain guidance -- no ownership marker / frontmatter: it is emitted as
     # additionalContext, not scanned as a *.instructions.md file.
     assert not text.lstrip().startswith(m._INSTRUCTION_MARKER)
-    # Keeps only the race-safety invariant and preferred per-process path.
+    # Requires repo/account discovery before mutation, then keeps ordinary
+    # execution race-safe while delegating ambient-account exceptions.
+    assert "Before code or" in text
+    assert "issue/PR/release/settings mutations" in text
+    assert "target\n`owner/repo` (`owner` for org calls)" in text
+    assert "never infer its account from cwd or active\n`gh`" in text
+    assert "repos account-for <owner|owner/repo>" in text
     assert "repos gh" in text
-    assert "gh auth switch" in text
-    assert "global, shared, and racy" in text
-    assert "ordinary calls, never" in text
-    assert "auth-repair flow is the exception" in text
+    assert "Active account is global/shared/racy" in text
+    assert "never switch ordinarily" in text
+    assert "Account-scoped\ntransports (e.g. CodeSpaces) and auth repair are exceptions" in text
+    assert "follow their skill" in text
     assert "restore the prior account" in text
-    assert "per process when a token is available" in text
-    assert "ambient-auth\nfallback" in text
-    assert "verify identity before mutation" in text
+    assert "scopes identity per\nprocess" in text
+    assert "Verify any ambient fallback" in text
     assert "agent-worktrees:agent-worktrees-repos" in text
     assert "GH_TOKEN" not in text
     assert len(text.rstrip()) <= 700

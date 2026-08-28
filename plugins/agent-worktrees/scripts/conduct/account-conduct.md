@@ -1,12 +1,15 @@
 # GitHub account conduct
 
-The active `gh` account is global, shared, and racy. For ordinary calls, never
-run `gh auth switch`; the documented auth-repair flow is the exception and must
-restore the prior account. Use
-`agent-worktrees repos gh <owner/repo> -- <gh args>`; it injects the resolved
-account per process when a token is available. If it reports ambient-auth
-fallback, verify identity before mutation. Agent-worktrees commands already
-handle account resolution.
+Before code or issue/PR/release/settings mutations, identify target
+`owner/repo` (`owner` for org calls); never infer its account from cwd or active
+`gh`. Resolve via
+`agent-worktrees repos account-for <owner|owner/repo>` or
+`agent-worktrees:agent-worktrees-repos`.
 
-For details, load `agent-worktrees:agent-worktrees-repos` or run
-`agent-worktrees repos gh --help` / `agent-worktrees accounts --help`.
+Run ordinary `gh` through
+`agent-worktrees repos gh <owner/repo> -- <gh args>`; it scopes identity per
+process. Verify any ambient fallback.
+
+Active account is global/shared/racy: never switch ordinarily. Account-scoped
+transports (e.g. CodeSpaces) and auth repair are exceptions; follow their skill,
+then restore the prior account.
