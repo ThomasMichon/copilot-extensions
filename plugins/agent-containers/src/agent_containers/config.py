@@ -28,9 +28,18 @@ import yaml
 
 log = logging.getLogger("agent-containers")
 
-# Canonical runtime paths
+# Canonical runtime paths.
 RUNTIME_DIR = Path.home() / ".agent-containers"
-LEASE_FILE = RUNTIME_DIR / "leases.json"
+# Windows/WSL installations that share one Docker provider can point only their
+# mutable coordination state at one filesystem-visible directory. Runtime venvs
+# and platform-specific installation artifacts remain under ``RUNTIME_DIR``.
+STATE_DIR = Path(
+    os.environ.get(
+        "AGENT_CONTAINERS_STATE_DIR",
+        str(RUNTIME_DIR),
+    )
+).expanduser()
+LEASE_FILE = STATE_DIR / "leases.json"
 LOG_FILE = RUNTIME_DIR / "agent-containers.log"
 CONFIG_FILENAME = "containers.yaml"
 
@@ -52,6 +61,11 @@ TRUSTED_PROFILE = "trusted"
 RESTRICTED_PROFILE = "restricted"
 SECURITY_PROFILES = {TRUSTED_PROFILE, RESTRICTED_PROFILE}
 RESTRICTED_POLICY_VERSION = 2
+DEFAULT_RESCUE_MEMBER_BYTES = 64 * 1024**2
+DEFAULT_RESCUE_CAPTURE_BYTES = 256 * 1024**2
+DEFAULT_RESCUE_TOTAL_BYTES = 1024**3
+DEFAULT_RESCUE_RETAIN_PER_CONTAINER = 3
+DEFAULT_RESCUE_OPERATION_SECONDS = 600.0
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _SENSITIVE_ENV_RE = re.compile(
     r"(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|API_KEY|PRIVATE_KEY|CREDENTIALS?)($|_)"
@@ -121,6 +135,37 @@ class HarnessConfig:
 
     def host_repo(self) -> Path | None:
         return Path(self.repo).expanduser() if self.repo else None
+
+
+@dataclass
+class RescueConfig:
+    """Host-side limits for restricted session-evidence captures."""
+
+    max_member_bytes: int = DEFAULT_RESCUE_MEMBER_BYTES
+    max_capture_bytes: int = DEFAULT_RESCUE_CAPTURE_BYTES
+    max_total_bytes: int = DEFAULT_RESCUE_TOTAL_BYTES
+    retain_per_container: int = DEFAULT_RESCUE_RETAIN_PER_CONTAINER
+    operation_timeout_seconds: float = DEFAULT_RESCUE_OPERATION_SECONDS
+
+    def validate(self) -> None:
+        for name in ("max_member_bytes", "max_capture_bytes", "max_total_bytes"):
+            if getattr(self, name) <= 0:
+                raise RuntimeError(f"rescue.{name} must be positive")
+        if self.max_capture_bytes < self.max_member_bytes:
+            raise RuntimeError(
+                "rescue.max_capture_bytes must be at least max_member_bytes"
+            )
+        if self.max_total_bytes < self.max_capture_bytes:
+            raise RuntimeError(
+                "rescue.max_total_bytes must be at least max_capture_bytes"
+            )
+        if self.retain_per_container <= 0:
+            raise RuntimeError("rescue.retain_per_container must be positive")
+        if (
+            self.operation_timeout_seconds <= 0
+            or not math.isfinite(self.operation_timeout_seconds)
+        ):
+            raise RuntimeError("rescue.operation_timeout_seconds must be positive")
 
 
 @dataclass
@@ -329,6 +374,8 @@ class ContainersConfig:
     # the standard repo-layout convention, no install). None (default) disables
     # it -> no on-venue harness; the local control-plane agent owns effort updates.
     harness: HarnessConfig | None = None
+    # Host-owned restricted session-evidence retention and size limits.
+    rescue: RescueConfig = field(default_factory=RescueConfig)
     fleets: dict[str, FleetConfig] = field(default_factory=dict)
 
     def effective_acp_command(
@@ -514,6 +561,34 @@ def load_config() -> ContainersConfig:
             hc.install_command = str(ic) if ic else None
         config.harness = hc
 
+    rescue = data.get("rescue", {}) or {}
+    if not isinstance(rescue, dict):
+        raise RuntimeError("rescue config must be a key/value mapping")
+    config.rescue = RescueConfig(
+        max_member_bytes=int(
+            rescue.get("max_member_bytes", config.rescue.max_member_bytes)
+        ),
+        max_capture_bytes=int(
+            rescue.get("max_capture_bytes", config.rescue.max_capture_bytes)
+        ),
+        max_total_bytes=int(
+            rescue.get("max_total_bytes", config.rescue.max_total_bytes)
+        ),
+        retain_per_container=int(
+            rescue.get(
+                "retain_per_container",
+                config.rescue.retain_per_container,
+            )
+        ),
+        operation_timeout_seconds=float(
+            rescue.get(
+                "operation_timeout_seconds",
+                config.rescue.operation_timeout_seconds,
+            )
+        ),
+    )
+    config.rescue.validate()
+
     fleets = data.get("fleets", {}) or {}
     for name, raw in fleets.items():
         raw = raw or {}
@@ -576,3 +651,8 @@ def load_config() -> ContainersConfig:
 def ensure_runtime_dir() -> None:
     """Create the runtime directory if it does not exist."""
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_state_dir() -> None:
+    """Create the mutable coordination-state directory if needed."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)

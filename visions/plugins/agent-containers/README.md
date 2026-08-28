@@ -19,6 +19,16 @@ agent-containers provides local, disposable, repo-shaped venues and makes their
 security posture an explicit part of the venue rather than an assumption hidden
 in launch defaults.
 
+The restricted posture is primarily **mistake containment** for a fallible or
+weaker worker model: a destructive shell command, unsafe tool choice, or
+prompt-injected instruction should damage at most a disposable container and
+its one repository workspace. It is not premised on an omnipotent hostile
+tenant defeating the container runtime. Defense stays proportionate: preserve
+hard host-filesystem and credential boundaries, keep rescued bytes allowlisted
+and analysis-only, and prevent arbitrary internet reach, without accumulating
+mechanisms whose only value is resisting an actively malicious in-container
+adversary.
+
 The provider serves two legitimate modes. A **trusted development venue** may
 borrow host capabilities needed for ordinary engineering work — and, more than
 that, aims to project **as much of the harness as possible** into the container
@@ -67,6 +77,12 @@ Credentials, network reach, environment values, tools, and resource budgets are
 capabilities of the fleet profile. Restricted venues begin without ambient host
 capability and gain only named grants appropriate to their assignment.
 
+### Controlled information ingress
+Prompt-injection exposure is chiefly bounded by egress and information-source
+choice. A restricted worker has no arbitrary internet access; its intended
+online surface is the configured repository forge plus a controlled basic-search
+interceptor, with any further endpoint granted explicitly.
+
 ### Coordination-layer face
 Trusted and restricted containers are presented through the same
 `container:` venue-provider contract. The coordination layer addresses the
@@ -105,8 +121,9 @@ venue.
 
 ### explicit-network-envelope
 Network access for a restricted fleet is intentional and bounded to what its
-assignment requires. A venue that needs one model endpoint does not thereby gain
-ambient reach to every host or network service.
+assignment requires. A venue that needs its model endpoint, repository forge,
+and controlled basic-search interceptor does not thereby gain ambient internet
+or reach to every host and network service.
 
 ### harness-and-tool-latitude
 The provider can launch a full agent CLI, a smaller harness, or a purpose-built
@@ -141,6 +158,14 @@ reaches a safe boundary.
 In a restricted venue, absent capability is structurally unavailable. A prompt,
 tool call, or harness mistake cannot recover a host credential, mount an
 unrelated host path, add privilege, or widen network reach after launch.
+
+### proportionate-mistake-containment
+Restricted safeguards prioritize the realistic failure modes: mistaken system
+commands, destructive tool use, prompt-injected actions, active-session
+replacement races, and unintended data or credential reach. Defense-in-depth at
+the host boundary and rescue allowlist remains mandatory, while design
+complexity must earn its place against those concrete failures rather than an
+assumed all-powerful hostile worker.
 
 ### secure-restricted-defaults
 Selecting the restricted profile produces a coherent safe baseline without
@@ -188,6 +213,10 @@ only after inspecting a running process.
   worktree lifecycle policy belong to higher orchestration layers.
 - **Not prompt-based safety.** Instructions may guide an agent, but they are not
   the containment boundary.
+- **Not a hostile multi-tenant security product.** Restricted venues do not
+  claim to withstand an omnipotent adversary controlling the container; the
+  container runtime is trusted, and the posture is optimized for accidental and
+  prompt-injected blast-radius containment.
 - **Not one mandatory harness.** Containment must survive replacing the agent
   harness.
 - **Not ambient host identity for restricted work.** A restricted venue never
@@ -229,3 +258,8 @@ only after inspecting a running process.
   deploying a newer image must not recreate a container under an active agent.
   Liveness/lease guards, turn-boundary drain, verified session-state rescue, then
   replacement are the required sequence.
+- **2026-08-27 (threat model)** — Clarified that restricted venues chiefly
+  contain mistaken/destructive commands from fallible workers. Arbitrary
+  internet is absent; repository and controlled-search access are narrow grants.
+  Host credential/filesystem boundaries and rescue allowlists remain hard, but
+  complexity aimed only at an omnipotent malicious tenant is out of scope.

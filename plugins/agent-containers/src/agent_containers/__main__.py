@@ -74,12 +74,19 @@ def main(argv: list[str] | None = None) -> int:
     up_p = sub.add_parser("up", help="Provision/top-up a fleet")
     up_p.add_argument("fleet", help="Fleet name (from containers.yaml)")
     up_p.add_argument("--count", type=int, default=None, help="Target size")
+    up_p.add_argument("--json", action="store_true", help="Emit operation result JSON")
     up_p.add_argument(
         "--recreate",
         action="store_true",
         help="Recreate restricted members that drifted from the fleet's current "
         "image/policy (instead of refusing). Removes and re-provisions them on "
-        "the current image; the deterministic name preserves the lease.",
+        "the current image; active/unknown/leased members are deferred.",
+    )
+    up_p.add_argument(
+        "--force-abandon",
+        action="store_true",
+        help="Allow an idle restricted member to be recreated when verified "
+        "session-evidence rescue fails. Never overrides active or unknown liveness.",
     )
 
     for name, helptext in (
@@ -89,6 +96,15 @@ def main(argv: list[str] | None = None) -> int:
     ):
         p = sub.add_parser(name, help=helptext)
         p.add_argument("fleet", help="Fleet name")
+        if name in {"down", "rm"}:
+            p.add_argument("--json", action="store_true", help="Emit operation result JSON")
+        if name in {"down", "rm"}:
+            p.add_argument(
+                "--force-abandon",
+                action="store_true",
+                help="Accept unavailable/failed restricted session evidence. "
+                "Never overrides active or unknown liveness.",
+            )
         if name == "rm":
             p.add_argument("--force", action="store_true", help="Force removal")
 
@@ -101,6 +117,15 @@ def main(argv: list[str] | None = None) -> int:
     release_p.add_argument("target", help="Container name or effort name")
 
     sub.add_parser("leases", help="Show active leases")
+    lifecycle_clear = sub.add_parser(
+        "lifecycle-clear",
+        help="Clear only expired/dead provider holds and session admissions",
+    )
+    lifecycle_clear.add_argument(
+        "name",
+        nargs="?",
+        help="Optional container name; omitted clears all safely stale records",
+    )
 
     exec_p = sub.add_parser("exec", help="Run the ACP launch command in a container")
     exec_p.add_argument("name", help="Container name")
@@ -209,6 +234,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_release(args)
         if args.command == "leases":
             return _cmd_leases()
+        if args.command == "lifecycle-clear":
+            return _cmd_lifecycle_clear(args)
         if args.command == "exec":
             return _cmd_exec(args)
         if args.command == "session-host-prepare":
@@ -480,8 +507,9 @@ def _cmd_relay_profile() -> int:
 
 
 def _cmd_fleet(args: argparse.Namespace) -> int:
-    from .lease import get_lease
+    from .lease import deploy_hold_status, get_lease
     from .lifecycle import inspect_container, list_containers, restricted_policy_errors
+    from .rescue import latest_rescue_status
     config = load_config()
     containers = list_containers(config)
     if getattr(args, "json", False):
@@ -490,6 +518,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
         out = []
         for c in containers:
             lease = get_lease(c.name)
+            hold_status = deploy_hold_status(c.name)
             fleet = config.fleets.get(c.fleet or "")
             posture_errors = []
             actual_profile = c.security_profile
@@ -542,6 +571,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                 "fleet": c.fleet,
                 "local_folder": c.local_folder,
                 "lease": lease.effort if lease else None,
+                "lifecycle_hold": hold_status,
                 "security_profile": actual_profile,
                 "configured_security_profile": (
                     fleet.security_profile if fleet else None
@@ -554,6 +584,7 @@ def _cmd_fleet(args: argparse.Namespace) -> int:
                     "github_token": forward,
                     "relay": relay,
                 },
+                "rescue": latest_rescue_status(c.name),
             })
         print(json.dumps(out, indent=2, default=str))
         return 0
@@ -572,30 +603,84 @@ def _cmd_up(args: argparse.Namespace) -> int:
     from . import fleet as fleet_mod
 
     config = load_config()
-    created = fleet_mod.up(
-        config, args.fleet, count=args.count, recreate=args.recreate,
+    result = fleet_mod.reconcile_up(
+        config,
+        args.fleet,
+        count=args.count,
+        recreate=args.recreate,
+        force_abandon=args.force_abandon,
     )
-    if created:
-        print(f"Created: {', '.join(created)}")
+    if args.json:
+        print(json.dumps(asdict(result), indent=2))
+        return _BUSY_EXIT if result.deferred else 0
+    if result.created:
+        print(f"Created: {', '.join(result.created)}")
+    elif result.deferred:
+        print("Created: (none)")
     else:
         print("Fleet already at target size.")
-    return 0
+    for name, reason in result.deferred.items():
+        print(f"Deferred: {name} ({reason})")
+    if result.telemetry_abandoned:
+        print(
+            "Telemetry abandoned: "
+            + ", ".join(result.telemetry_abandoned)
+        )
+    return _BUSY_EXIT if result.deferred else 0
 
 
 def _cmd_fleet_op(args: argparse.Namespace) -> int:
     from . import fleet as fleet_mod
 
     config = load_config()
+    deferred = False
     if args.command == "down":
-        names = fleet_mod.down(config, args.fleet)
-        print(f"Stopped: {', '.join(names) if names else '(none)'}")
+        result = fleet_mod.down_fleet(
+            config,
+            args.fleet,
+            force_abandon=args.force_abandon,
+        )
+        if args.json:
+            print(json.dumps(asdict(result), indent=2))
+            return _BUSY_EXIT if result.deferred else 0
+        print(
+            f"Stopped: {', '.join(result.stopped) if result.stopped else '(none)'}"
+        )
+        for name, reason in result.deferred.items():
+            print(f"Deferred: {name} ({reason})")
+        for name, reason in result.unchanged.items():
+            print(f"Unchanged: {name} ({reason})")
+        if result.telemetry_abandoned:
+            print(
+                "Telemetry abandoned: "
+                + ", ".join(result.telemetry_abandoned)
+            )
+        deferred = bool(result.deferred)
     elif args.command == "start":
         names = fleet_mod.start(config, args.fleet)
         print(f"Started: {', '.join(names) if names else '(none)'}")
     elif args.command == "rm":
-        names = fleet_mod.rm(config, args.fleet, force=args.force)
-        print(f"Removed: {', '.join(names) if names else '(none)'}")
-    return 0
+        result = fleet_mod.remove_fleet(
+            config,
+            args.fleet,
+            force=args.force,
+            force_abandon=args.force_abandon,
+        )
+        if args.json:
+            print(json.dumps(asdict(result), indent=2))
+            return _BUSY_EXIT if result.deferred else 0
+        print(
+            f"Removed: {', '.join(result.removed) if result.removed else '(none)'}"
+        )
+        for name, reason in result.deferred.items():
+            print(f"Deferred: {name} ({reason})")
+        if result.telemetry_abandoned:
+            print(
+                "Telemetry abandoned: "
+                + ", ".join(result.telemetry_abandoned)
+            )
+        deferred = bool(result.deferred)
+    return _BUSY_EXIT if deferred else 0
 
 
 def _cmd_borrow(args: argparse.Namespace) -> int:
@@ -627,6 +712,18 @@ def _cmd_leases() -> int:
     print(f"{'CONTAINER':<28} {'EFFORT':<24} {'HOST':<16} {'PID'}")
     for lease in leases:
         print(f"{lease.container:<28} {lease.effort:<24} {lease.host:<16} {lease.pid}")
+    return 0
+
+
+def _cmd_lifecycle_clear(args: argparse.Namespace) -> int:
+    from .lease import clear_stale_provider_records
+
+    cleared = clear_stale_provider_records(args.name)
+    print(
+        "Cleared stale provider records: "
+        f"deploy_holds={cleared['deploy_holds']}, "
+        f"session_admissions={cleared['session_admissions']}"
+    )
     return 0
 
 
@@ -774,9 +871,16 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     acp_command = config.acp_command_for(fleet)
 
     if actual_profile == RESTRICTED_PROFILE:
-        return _launch_container_agent(
-            args, config, fleet, actual_profile, user, acp_command
-        )
+        from .lease import ProviderAdmissionError, session_admission
+
+        try:
+            with session_admission(args.name):
+                return _launch_container_agent(
+                    args, config, fleet, actual_profile, user, acp_command
+                )
+        except ProviderAdmissionError as busy:
+            print(str(busy), file=sys.stderr)
+            return _BUSY_EXIT
 
     from ssh_manager import TargetBusyError, TargetLock
 

@@ -7,7 +7,11 @@ from types import SimpleNamespace
 import pytest
 
 from agent_containers import fleet as fleet_mod
-from agent_containers.config import ContainersConfig, FleetConfig
+from agent_containers.config import (
+    RESTRICTED_POLICY_VERSION,
+    ContainersConfig,
+    FleetConfig,
+)
 from agent_containers.lifecycle import DockerContainerInfo, restricted_policy_errors
 
 
@@ -179,12 +183,19 @@ def test_restricted_image_run_applies_boundary_flags(monkeypatch):
     assert run[run.index("--cpus") + 1] == "3"
     assert run[run.index("--pids-limit") + 1] == "128"
     assert "--mount" not in run
+    assert "--volume" not in run
+    assert "-v" not in run
     tmpfs = [run[i + 1] for i, value in enumerate(run) if value == "--tmpfs"]
-    assert any(value.startswith("/workspace:") for value in tmpfs)
-    assert any(value.startswith("/home/vscode:") for value in tmpfs)
+    assert {value.split(":", 1)[0] for value in tmpfs} == {
+        "/workspace",
+        "/home/vscode",
+        "/tmp",  # noqa: S108
+        "/run",
+    }
     assert "HOME=/home/vscode" in run
     assert "MODEL_NAME=local-model" in run
     assert "--add-host=host.docker.internal:host-gateway" not in run
+    assert RESTRICTED_POLICY_VERSION == 2
 
 
 def test_restricted_network_defaults_to_none(monkeypatch):
@@ -388,16 +399,22 @@ def test_start_restricted_validates_before_start(monkeypatch):
 
 
 def test_restricted_stale_container_recreated_with_recreate_flag(monkeypatch):
-    """`up(..., recreate=True)` removes a drifted restricted member and
-    re-provisions it on the current image (same name preserves the lease)."""
+    """Confirmed-idle drifted members are rescued and recreated fresh."""
+    from agent_containers import replacement
+
     config = ContainersConfig()
     config.fleets["sandbox"] = FleetConfig(
         image="example/agent",
         security_profile="restricted",
         acp_command="minimal-agent --stdio",
     )
-    stale = SimpleNamespace(
+    stale = DockerContainerInfo(
         name="sandbox-1",
+        container_id="old-instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="sandbox",
         security_profile="restricted",
         security_policy="old-policy",
         security_image_id="sha256:old",
@@ -410,13 +427,15 @@ def test_restricted_stale_container_recreated_with_recreate_flag(monkeypatch):
     # Current image differs from the running member -> image drift.
     monkeypatch.setattr(fleet_mod, "_image_id", lambda image: "sha256:new")
 
-    removed: list[str] = []
-
-    def fake_remove(name, force=False):
-        removed.append(name)
-        members["list"] = []  # the member is gone after removal
-
-    monkeypatch.setattr(fleet_mod, "remove_container", fake_remove)
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_args, **_kwargs: replacement.DestructiveResult(
+            "sandbox-1",
+            "removed",
+            rescue={"status": "verified"},
+        ),
+    )
 
     provisioned: list[str] = []
 
@@ -428,6 +447,418 @@ def test_restricted_stale_container_recreated_with_recreate_flag(monkeypatch):
 
     created = fleet_mod.up(config, "sandbox", recreate=True)
 
-    assert removed == ["sandbox-1"]  # drifted member removed
     assert provisioned == ["sandbox-1"]  # re-provisioned under the same name
     assert created == ["sandbox-1"]
+
+
+def test_restricted_recreate_defers_members_independently(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(
+        image="example/agent",
+        security_profile="restricted",
+        acp_command="minimal-agent --stdio",
+        size=2,
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"old-{index}",
+            image="example/agent",
+            state="running",
+            status="Up",
+            fleet="sandbox",
+            security_profile="restricted",
+            security_policy="old-policy",
+            security_image_id="sha256:old",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(
+        fleet_mod,
+        "inspect_container",
+        lambda name: {
+            "Id": name,
+            "State": {"StartedAt": "2026-01-01T00:00:00Z"},
+        },
+    )
+    monkeypatch.setattr(fleet_mod, "_image_id", lambda _image: "sha256:new")
+
+    def destroy(_config, _fleet, info, **_kwargs):
+        if info.name == "sandbox-1":
+            return replacement.DestructiveResult(
+                info.name,
+                "removed",
+                rescue={"status": "verified"},
+            )
+        return replacement.DestructiveResult(
+            info.name,
+            "deferred",
+            "active Copilot session-state lock present",
+        )
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", destroy)
+    provisioned = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_image_run",
+        lambda _fleet_name, _fleet, name, **_kwargs: (
+            provisioned.append(name) or name
+        ),
+    )
+
+    result = fleet_mod.reconcile_up(config, "sandbox", recreate=True)
+
+    assert result.created == ["sandbox-1"]
+    assert result.recreated == ["sandbox-1"]
+    assert result.deferred == {
+        "sandbox-2": "active Copilot session-state lock present"
+    }
+    assert provisioned == ["sandbox-1"]
+
+
+def test_recreate_timeout_defers_one_member_and_continues(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+                size=2,
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"old-{index}",
+            image="example/agent",
+            state="running",
+            status="Up",
+            fleet="sandbox",
+            security_profile="restricted",
+            security_policy="old",
+            security_image_id="sha256:old",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_check_docker", lambda: None)
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(fleet_mod, "_image_id", lambda _image: "sha256:new")
+
+    def destroy(_config, _fleet, info, **_kwargs):
+        if info.name == "sandbox-1":
+            raise RuntimeError("docker rm timed out after 30s")
+        return replacement.DestructiveResult(info.name, "removed")
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", destroy)
+    created = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "_image_run",
+        lambda _fleet_name, _fleet, name, **_kwargs: created.append(name) or name,
+    )
+
+    result = fleet_mod.reconcile_up(config, "sandbox", recreate=True)
+
+    assert "timed out" in result.deferred["sandbox-1"]
+    assert result.recreated == ["sandbox-2"]
+    assert created == ["sandbox-2"]
+
+
+def test_trusted_remove_behavior_does_not_enter_restricted_rescue(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig(
+        fleets={"example": FleetConfig(image="example/agent")}
+    )
+    member = DockerContainerInfo(
+        name="example-1",
+        container_id="instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="example",
+        security_profile="trusted",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [member])
+    monkeypatch.setattr(
+        replacement,
+        "destroy_restricted_member",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("trusted member must not enter restricted rescue")
+        ),
+    )
+    removed = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda name, force=False: removed.append((name, force)),
+    )
+
+    result = fleet_mod.remove_fleet(config, "example", force=True)
+
+    assert result.removed == ["example-1"]
+    assert result.deferred == {}
+    assert removed == [("example-1", True)]
+
+
+def test_requested_restricted_fleet_rejects_foreign_trusted_label(monkeypatch):
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/restricted",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            ),
+            "trusted": FleetConfig(image="example/trusted"),
+        }
+    )
+    conflict = DockerContainerInfo(
+        name="sandbox-1",
+        container_id="instance",
+        image="example/trusted",
+        state="running",
+        status="Up",
+        fleet="trusted",
+        security_profile="trusted",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [conflict])
+    monkeypatch.setattr(
+        fleet_mod,
+        "remove_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("foreign label must not bypass restricted lifecycle")
+        ),
+    )
+
+    result = fleet_mod.remove_fleet(config, "sandbox", force=True)
+
+    assert result.removed == []
+    assert "conflicts with requested fleet" in result.deferred["sandbox-1"]
+
+
+def test_restricted_down_uses_safe_per_member_stop(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"instance-{index}",
+            image="example/agent",
+            state="running",
+            status="Up",
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(
+        fleet_mod,
+        "stop_container",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("restricted down must not call unconditional stop")
+        ),
+    )
+
+    def safe_stop(_config, _fleet, info, **_kwargs):
+        if info.name == "sandbox-1":
+            return replacement.DestructiveResult(
+                info.name,
+                "stopped",
+                rescue={"status": "verified"},
+            )
+        return replacement.DestructiveResult(
+            info.name,
+            "deferred",
+            "active Copilot session-state lock present",
+        )
+
+    monkeypatch.setattr(replacement, "stop_restricted_member", safe_stop)
+
+    result = fleet_mod.down_fleet(config, "sandbox")
+
+    assert result.stopped == ["sandbox-1"]
+    assert result.deferred == {
+        "sandbox-2": "active Copilot session-state lock present"
+    }
+
+
+def test_restricted_down_timeout_defers_member_and_continues(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"instance-{index}",
+            image="example/agent",
+            state="running",
+            status="Up",
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+
+    def stop(_config, _fleet, info, **_kwargs):
+        if info.name == "sandbox-1":
+            raise RuntimeError("docker stop timed out after 30s")
+        return replacement.DestructiveResult(info.name, "stopped")
+
+    monkeypatch.setattr(replacement, "stop_restricted_member", stop)
+
+    result = fleet_mod.down_fleet(config, "sandbox")
+
+    assert "timed out" in result.deferred["sandbox-1"]
+    assert result.stopped == ["sandbox-2"]
+
+
+def test_restricted_remove_timeout_defers_member_and_continues(monkeypatch):
+    from agent_containers import replacement
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{index}",
+            container_id=f"instance-{index}",
+            image="example/agent",
+            state="running",
+            status="Up",
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+        for index in (1, 2)
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+
+    def destroy(_config, _fleet, info, **_kwargs):
+        if info.name == "sandbox-1":
+            raise RuntimeError("docker inspect timed out after 30s")
+        return replacement.DestructiveResult(info.name, "removed")
+
+    monkeypatch.setattr(replacement, "destroy_restricted_member", destroy)
+
+    result = fleet_mod.remove_fleet(config, "sandbox", force=True)
+
+    assert "timed out" in result.deferred["sandbox-1"]
+    assert result.removed == ["sandbox-2"]
+
+
+def test_trusted_down_behavior_remains_direct(monkeypatch):
+    config = ContainersConfig(
+        fleets={"example": FleetConfig(image="example/agent")}
+    )
+    member = DockerContainerInfo(
+        name="example-1",
+        container_id="instance",
+        image="example/agent",
+        state="running",
+        status="Up",
+        fleet="example",
+        security_profile="trusted",
+    )
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: [member])
+    stopped = []
+    monkeypatch.setattr(
+        fleet_mod,
+        "stop_container",
+        lambda name: stopped.append(name),
+    )
+
+    result = fleet_mod.down_fleet(config, "example")
+
+    assert result.stopped == ["example-1"]
+    assert stopped == ["example-1"]
+
+
+def test_restricted_down_classifies_stopped_paused_and_unknown_states(monkeypatch):
+    from agent_containers import rescue
+
+    config = ContainersConfig(
+        fleets={
+            "sandbox": FleetConfig(
+                image="example/agent",
+                security_profile="restricted",
+                acp_command="minimal-agent --stdio",
+            )
+        }
+    )
+    members = [
+        DockerContainerInfo(
+            name=f"sandbox-{state}",
+            container_id=f"instance-{state}",
+            image="example/agent",
+            state=state,
+            status=state,
+            fleet="sandbox",
+            security_profile="restricted",
+        )
+        for state in ("exited", "created", "paused", "restarting", "removing", "unknown")
+    ]
+    monkeypatch.setattr(fleet_mod, "_fleet_members", lambda *_args: members)
+    monkeypatch.setattr(
+        fleet_mod,
+        "inspect_container",
+        lambda name: {
+            "Id": name,
+            "State": {"StartedAt": "2026-01-01T00:00:00Z"},
+        },
+    )
+    monkeypatch.setattr(
+        rescue,
+        "verified_capture_for_instance",
+        lambda *_args: None,
+    )
+    losses = []
+    monkeypatch.setattr(
+        rescue,
+        "record_telemetry_loss",
+        lambda **kwargs: losses.append(kwargs),
+    )
+
+    result = fleet_mod.down_fleet(config, "sandbox")
+
+    assert set(result.unchanged) == {"sandbox-exited", "sandbox-created"}
+    assert set(result.deferred) == {
+        "sandbox-paused",
+        "sandbox-restarting",
+        "sandbox-removing",
+        "sandbox-unknown",
+    }
+    assert {item["container"] for item in losses} == {
+        "sandbox-exited",
+        "sandbox-created",
+    }

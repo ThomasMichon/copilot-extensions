@@ -14,6 +14,7 @@ from agent_containers.lifecycle import (
     _parse_labels,
     _row_to_info,
     remove_container,
+    unpause_container,
 )
 
 
@@ -32,6 +33,36 @@ def test_remove_container_surfaces_bounded_timeout(monkeypatch):
 
     with pytest.raises(RuntimeError, match="did not finish within 120s"):
         remove_container("example-1", force=True)
+
+
+def test_docker_timeout_is_normalized_to_runtime_error(monkeypatch):
+    monkeypatch.setattr(
+        "agent_containers.lifecycle.subprocess.run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(["docker", "inspect"], 30)
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="docker inspect example-1 timed out after 30s",
+    ):
+        from agent_containers.lifecycle import _docker
+
+        _docker(["inspect", "example-1"], timeout=30)
+
+
+def test_unpause_container_uses_explicit_docker_operation(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "agent_containers.lifecycle._docker",
+        lambda args, timeout=30: calls.append((args, timeout))
+        or subprocess.CompletedProcess(args, 0, "", ""),
+    )
+
+    unpause_container("example-1")
+
+    assert calls == [(["unpause", "example-1"], 60.0)]
 
 
 def test_parse_labels_empty():

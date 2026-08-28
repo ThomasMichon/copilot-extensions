@@ -52,6 +52,11 @@ def _docker(args: list[str], timeout: float = 30.0) -> subprocess.CompletedProce
         )
     except FileNotFoundError:
         raise RuntimeError("docker CLI not found on PATH") from None
+    except subprocess.TimeoutExpired as exc:
+        command = " ".join(["docker", *args[:3]])
+        raise RuntimeError(
+            f"{command} timed out after {timeout:.0f}s"
+        ) from exc
 
 
 def _check_docker() -> None:
@@ -407,6 +412,13 @@ def start_container(name: str, timeout: float = 60.0) -> None:
     res = _docker(["start", name], timeout=timeout)
     if res.returncode != 0:
         raise RuntimeError(f"docker start {name} failed: {res.stderr.strip()}")
+
+
+def unpause_container(name: str, timeout: float = 60.0) -> None:
+    """Unpause a paused container so liveness and evidence can be inspected."""
+    res = _docker(["unpause", name], timeout=timeout)
+    if res.returncode != 0:
+        raise RuntimeError(f"docker unpause {name} failed: {res.stderr.strip()}")
 
 
 def stop_container(name: str, timeout: float = 60.0) -> None:

@@ -12,6 +12,7 @@ import asyncio
 import sys
 import types
 
+import pytest
 from ssh_manager import SSHConfig
 
 from agent_containers.resolver import (
@@ -20,6 +21,22 @@ from agent_containers.resolver import (
     build_spawn_command,
     build_wrapper_command,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_provider_lifecycle_hold(monkeypatch):
+    from agent_containers import resolver as resolver_mod
+
+    monkeypatch.setattr(
+        resolver_mod,
+        "get_deploy_hold",
+        lambda _name: None,
+    )
+    monkeypatch.setattr(
+        resolver_mod,
+        "deploy_hold_status",
+        lambda _name: {"state": "none", "operation": None, "reason": None},
+    )
 
 
 def test_trusted_spawn_command_references_token_by_name_only():
@@ -184,6 +201,11 @@ def test_resolve_spec_exposes_workspace_folder_and_profile(monkeypatch):
             "credential_relay": False,
             "session_host": False,
         },
+        "lifecycle_hold": {
+            "state": "none",
+            "operation": None,
+            "reason": None,
+        },
     }
     # unchanged contract fields still present
     assert spec["type"] == "command"
@@ -295,6 +317,82 @@ def test_resolve_spec_stopped_restricted_target_is_not_ready(monkeypatch):
     assert spec["venue"]["state"] == "exited"
     assert spec["venue"]["ready"] is False
     assert spec["venue"]["posture_verified"] is False
+
+
+def test_resolve_spec_provider_hold_blocks_new_dispatch(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    monkeypatch.setattr(
+        r,
+        "get_container",
+        lambda config, name: types.SimpleNamespace(
+            fleet="sandbox",
+            container_id="instance-123",
+            security_profile="restricted",
+            state="running",
+            is_running=True,
+        ),
+    )
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(
+        workspace_folder="/workspace",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        r,
+        "deploy_hold_status",
+        lambda name: {
+            "state": "active",
+            "operation": "recreate",
+            "reason": None,
+        },
+    )
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("sandbox-1"))
+
+    assert spec["venue"]["ready"] is False
+    assert spec["venue"]["lifecycle_hold"]["operation"] == "recreate"
+
+
+def test_resolve_spec_corrupt_hold_state_is_observable_and_not_ready(monkeypatch):
+    from agent_containers import resolver as r
+    from agent_containers.config import ContainersConfig, FleetConfig
+
+    monkeypatch.setattr(
+        r,
+        "get_container",
+        lambda config, name: types.SimpleNamespace(
+            fleet="sandbox",
+            container_id="instance-123",
+            security_profile="restricted",
+            state="running",
+            is_running=True,
+        ),
+    )
+    config = ContainersConfig()
+    config.fleets["sandbox"] = FleetConfig(
+        workspace_folder="/workspace",
+        security_profile="restricted",
+    )
+    monkeypatch.setattr(r, "load_config", lambda: config)
+    monkeypatch.setattr(r, "get_lease", lambda name: None)
+    monkeypatch.setattr(
+        r,
+        "deploy_hold_status",
+        lambda name: {
+            "state": "unknown",
+            "operation": None,
+            "reason": "deploy-holds.json is unreadable",
+        },
+    )
+
+    spec = asyncio.run(ContainerResolver().resolve_spec("sandbox-1"))
+
+    assert spec["venue"]["ready"] is False
+    assert spec["venue"]["lifecycle_hold"]["state"] == "unknown"
 
 
 def test_resolve_spec_configured_restricted_mismatch_fails_closed(monkeypatch):

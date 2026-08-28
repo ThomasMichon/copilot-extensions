@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import textwrap
 
 import pytest
@@ -397,3 +400,50 @@ class TestKnowledgeOverlayResolver:
         from agent_containers.config import _knowledge_overlay_config
         monkeypatch.setattr("shutil.which", lambda name: None)
         assert _knowledge_overlay_config() is None
+
+
+def test_rescue_limits_load_with_bounded_defaults(tmp_path, monkeypatch):
+    config_file = tmp_path / "containers.yaml"
+    config_file.write_text(
+        """
+rescue:
+  max_member_bytes: 1024
+  max_capture_bytes: 4096
+  max_total_bytes: 8192
+  retain_per_container: 2
+  operation_timeout_seconds: 30
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_CONTAINERS_CONFIG", str(config_file))
+
+    config = load_config()
+
+    assert config.rescue.max_member_bytes == 1024
+    assert config.rescue.max_capture_bytes == 4096
+    assert config.rescue.max_total_bytes == 8192
+    assert config.rescue.retain_per_container == 2
+    assert config.rescue.operation_timeout_seconds == 30
+
+
+def test_coordination_state_dir_can_be_shared_without_moving_runtime(tmp_path):
+    env = os.environ.copy()
+    env["AGENT_CONTAINERS_STATE_DIR"] = str(tmp_path / "shared-state")
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "from agent_containers.config import RUNTIME_DIR, STATE_DIR; "
+                "print(RUNTIME_DIR); print(STATE_DIR)"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+
+    runtime, state = proc.stdout.splitlines()
+    assert state == str(tmp_path / "shared-state")
+    assert runtime != state

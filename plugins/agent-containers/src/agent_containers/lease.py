@@ -16,22 +16,32 @@ import json
 import logging
 import os
 import platform
+import sys
+import threading
 import time
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 
-from .config import LEASE_FILE, RUNTIME_DIR, ContainersConfig, ensure_runtime_dir
+from ssh_manager.locks import pid_alive
+
+from .config import LEASE_FILE, STATE_DIR, ContainersConfig, ensure_state_dir
 from .lifecycle import list_containers
 
 log = logging.getLogger("agent-containers")
 
-_LOCK_FILE = RUNTIME_DIR / "leases.lock"
+_LOCK_FILE = STATE_DIR / "leases.lock"
+_DEPLOY_HOLDS_FILE = STATE_DIR / "deploy-holds.json"
+_SESSION_ADMISSIONS_FILE = STATE_DIR / "session-admissions.json"
 # Leases are held by an *effort* (a logical entity), not by the short-lived
 # CLI process that created them, so reclamation is TTL-based. A long-running
 # holder can refresh via ``heartbeat``; otherwise a forgotten lease expires
 # after the TTL. ``release`` is the normal way to free a lease.
 DEFAULT_TTL = 24 * 3600.0
+DEPLOY_HOLD_TTL = 15 * 60.0
+SESSION_ADMISSION_TTL = 5 * 60.0
+_RECORD_HEARTBEAT_INTERVAL = 30.0
 
 
 @dataclass
@@ -49,19 +59,68 @@ class Lease:
         return time.time() - self.heartbeat_at
 
 
+@dataclass
+class DeployHold:
+    """Provider-owned admission hold around destructive lifecycle work."""
+
+    container: str
+    operation: str
+    token: str
+    pid: int
+    host: str
+    environment: str
+    acquired_at: float
+    heartbeat_at: float
+    expires_at: float
+    uncertain: bool = False
+
+
+@dataclass
+class SessionAdmission:
+    """Host-wrapper admission record held for one provider-launched session."""
+
+    container: str
+    token: str
+    pid: int
+    host: str
+    environment: str
+    acquired_at: float
+    heartbeat_at: float
+
+
+class ProviderAdmissionError(RuntimeError):
+    """Provider lifecycle admission state is busy or indeterminate."""
+
+
+class DeployHoldError(ProviderAdmissionError):
+    """A provider lifecycle hold could not be acquired."""
+
+
 def _this_host() -> str:
     return platform.node()
+
+
+def _this_environment() -> str:
+    if sys.platform == "win32":
+        return "windows"
+    release = platform.release().lower()
+    if "microsoft" in release or "wsl" in release:
+        return "wsl"
+    return "posix"
 
 
 @contextmanager
 def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
     """Cross-platform exclusive lock via O_CREAT|O_EXCL lock file."""
-    ensure_runtime_dir()
+    ensure_state_dir()
     deadline = time.monotonic() + timeout
     fd = None
+    owner_token = uuid.uuid4().hex
     while True:
         try:
             fd = os.open(str(_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, owner_token.encode("ascii"))
+            os.fsync(fd)
             break
         except FileExistsError:
             if time.monotonic() >= deadline:
@@ -82,7 +141,11 @@ def _lease_lock(timeout: float = 10.0, poll: float = 0.05) -> Iterator[None]:
     finally:
         if fd is not None:
             os.close(fd)
-        _LOCK_FILE.unlink(missing_ok=True)
+        try:
+            if _LOCK_FILE.read_text(encoding="ascii") == owner_token:
+                _LOCK_FILE.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _read_leases() -> dict[str, Lease]:
@@ -105,11 +168,114 @@ def _read_leases() -> dict[str, Lease]:
 
 def _write_leases(leases: dict[str, Lease]) -> None:
     """Atomically write leases.json."""
-    ensure_runtime_dir()
+    ensure_state_dir()
     tmp = LEASE_FILE.with_suffix(".json.tmp")
     payload = {c: asdict(lease) for c, lease in leases.items()}
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     os.replace(tmp, LEASE_FILE)
+
+
+def _read_records(path, record_type, *, fail_closed: bool = False):
+    if not path.exists():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        if fail_closed:
+            raise ProviderAdmissionError(
+                f"{path.name} is unreadable; refusing provider admission"
+            ) from exc
+        log.warning("%s unreadable; treating as empty", path.name)
+        return {}
+    if not isinstance(raw, dict):
+        if fail_closed:
+            raise ProviderAdmissionError(
+                f"{path.name} does not contain a provider admission mapping"
+            )
+        return {}
+    records = {}
+    for key, rec in (raw or {}).items():
+        try:
+            records[key] = record_type(**rec)
+        except TypeError as exc:
+            if fail_closed:
+                raise ProviderAdmissionError(
+                    f"{path.name} contains an invalid provider admission record"
+                ) from exc
+            continue
+    return records
+
+
+def _write_records(path, records) -> None:
+    ensure_state_dir()
+    tmp = path.with_suffix(f"{path.suffix}.tmp")
+    tmp.write_text(
+        json.dumps({key: asdict(value) for key, value in records.items()}, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+
+
+def _record_live(record, ttl: float) -> bool:
+    expires_at = getattr(record, "expires_at", None)
+    if expires_at is not None and time.time() >= expires_at:
+        return False
+    if getattr(record, "uncertain", False):
+        return True
+    if time.time() - record.heartbeat_at > ttl:
+        return False
+    if (
+        record.host != _this_host()
+        or record.environment != _this_environment()
+    ):
+        # Windows and WSL cannot safely inspect each other's process IDs.
+        # Preserve the shared-Docker record until its bounded heartbeat TTL.
+        return True
+    return _pid_alive(record.pid)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Use ssh-manager's OpenProcess-safe cross-platform liveness primitive."""
+    return pid_alive(pid)
+
+
+def _read_live_records(path, record_type, ttl: float):
+    records = _read_records(path, record_type, fail_closed=True)
+    try:
+        live = {
+            key: value
+            for key, value in records.items()
+            if _record_live(value, ttl)
+        }
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ProviderAdmissionError(
+            f"{path.name} contains invalid provider admission values"
+        ) from exc
+    if len(live) != len(records):
+        _write_records(path, live)
+    return live
+
+
+def _heartbeat_record(
+    path,
+    record_type,
+    key: str,
+    token: str,
+    ttl: float,
+    stop: threading.Event,
+) -> None:
+    interval = min(_RECORD_HEARTBEAT_INTERVAL, max(1.0, ttl / 3))
+    while not stop.wait(interval):
+        try:
+            with _lease_lock():
+                records = _read_live_records(path, record_type, ttl)
+                record = records.get(key)
+                if record is None or record.token != token:
+                    return
+                record.heartbeat_at = time.time()
+                _write_records(path, records)
+        except RuntimeError:
+            log.exception("Could not heartbeat provider admission record")
 
 
 def _is_stale(lease: Lease, ttl: float) -> bool:
@@ -166,6 +332,11 @@ def borrow(
     """
     with _lease_lock():
         leases = _prune(_read_leases(), ttl)
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
         members = list_containers(config)
         if fleet:
             members = [c for c in members if c.fleet == fleet]
@@ -180,6 +351,12 @@ def borrow(
             if container not in by_name:
                 raise RuntimeError(
                     f"Container '{container}' is not a known fleet member"
+                )
+            hold = holds.get(container)
+            if hold:
+                raise ProviderAdmissionError(
+                    f"Container '{container}' is unavailable while provider "
+                    f"{hold.operation} is in progress"
                 )
             held = leases.get(container)
             if held and held.effort != effort:
@@ -198,13 +375,22 @@ def borrow(
             )
             if held_by_effort:
                 chosen = held_by_effort[0]
+                hold = holds.get(chosen)
+                if hold:
+                    raise RuntimeError(
+                        f"Container '{chosen}' is unavailable while provider "
+                        f"{hold.operation} is in progress"
+                    )
             else:
                 # Prefer running, then startable; skip those already leased.
-                free = [c for c in members if c.name not in leases]
+                free = [
+                    c for c in members
+                    if c.name not in leases and c.name not in holds
+                ]
                 if not free:
                     raise RuntimeError(
-                        "All fleet containers are currently leased. "
-                        "Release one or grow the fleet."
+                        "All fleet containers are currently leased or under "
+                        "provider lifecycle hold. Release one or grow the fleet."
                     )
                 free.sort(key=lambda c: (not c.is_running, c.name))
                 chosen = free[0].name
@@ -262,3 +448,263 @@ def get_lease(container: str, ttl: float = DEFAULT_TTL) -> Lease | None:
         if lease.container == container:
             return lease
     return None
+
+
+def get_deploy_hold(container: str) -> DeployHold | None:
+    """Return a live provider lifecycle hold for ``container``, if any."""
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        return holds.get(container)
+
+
+def deploy_hold_status(container: str) -> dict:
+    """Return observable hold state without weakening strict admission reads."""
+    try:
+        hold = get_deploy_hold(container)
+    except ProviderAdmissionError as exc:
+        return {
+            "state": "unknown",
+            "operation": None,
+            "reason": str(exc),
+        }
+    if hold is None:
+        return {"state": "none", "operation": None, "reason": None}
+    return {
+        "state": "active",
+        "operation": hold.operation,
+        "reason": None,
+        "owner_environment": hold.environment,
+        "heartbeat_age_seconds": max(0.0, time.time() - hold.heartbeat_at),
+        "uncertain": hold.uncertain,
+    }
+
+
+def verify_deploy_hold(container: str, token: str) -> DeployHold:
+    """Prove that the current live hold still belongs to this operation."""
+    hold = get_deploy_hold(container)
+    if hold is None or hold.token != token:
+        raise ProviderAdmissionError(
+            f"Provider lifecycle hold for '{container}' is no longer owned "
+            "by this operation"
+        )
+    return hold
+
+
+def mark_deploy_hold_uncertain(container: str, token: str) -> None:
+    """Keep an unconfirmed Docker action fail-closed until hold expiry."""
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        hold = holds.get(container)
+        if hold is None or hold.token != token:
+            raise ProviderAdmissionError(
+                f"Provider lifecycle hold for '{container}' cannot record "
+                "an unconfirmed action"
+            )
+        hold.uncertain = True
+        hold.heartbeat_at = time.time()
+        _write_records(_DEPLOY_HOLDS_FILE, holds)
+
+
+def active_session_admissions(container: str) -> list[SessionAdmission]:
+    """Return live provider wrapper admissions for one container."""
+    with _lease_lock():
+        admissions = _read_live_records(
+            _SESSION_ADMISSIONS_FILE,
+            SessionAdmission,
+            SESSION_ADMISSION_TTL,
+        )
+        return [
+            admission
+            for admission in admissions.values()
+            if admission.container == container
+        ]
+
+
+def clear_stale_provider_records(container: str | None = None) -> dict[str, int]:
+    """Safely clear only expired/dead holds and session admissions.
+
+    Fresh records owned by another OS environment remain fail-closed because
+    Windows and WSL cannot safely inspect each other's process IDs.
+    """
+    cleared = {"deploy_holds": 0, "session_admissions": 0}
+    with _lease_lock():
+        for path, record_type, ttl, counter in (
+            (
+                _DEPLOY_HOLDS_FILE,
+                DeployHold,
+                DEPLOY_HOLD_TTL,
+                "deploy_holds",
+            ),
+            (
+                _SESSION_ADMISSIONS_FILE,
+                SessionAdmission,
+                SESSION_ADMISSION_TTL,
+                "session_admissions",
+            ),
+        ):
+            try:
+                records = _read_records(path, record_type, fail_closed=True)
+            except ProviderAdmissionError:
+                try:
+                    old_enough = time.time() - path.stat().st_mtime > ttl
+                except OSError:
+                    old_enough = False
+                if not old_enough:
+                    raise
+                path.unlink(missing_ok=True)
+                cleared[counter] += 1
+                continue
+            kept = {}
+            for key, record in records.items():
+                selected = container is None or record.container == container
+                if selected and not _record_live(record, ttl):
+                    cleared[counter] += 1
+                    continue
+                kept[key] = record
+            if len(kept) != len(records):
+                _write_records(path, kept)
+    return cleared
+
+
+@contextmanager
+def deploy_hold(
+    container: str,
+    operation: str,
+    *,
+    max_lifetime: float = DEPLOY_HOLD_TTL,
+) -> Iterator[DeployHold]:
+    """Block new provider borrow/session admission during a destructive check."""
+    if max_lifetime <= 0:
+        raise DeployHoldError("Provider lifecycle hold lifetime must be positive")
+    token = uuid.uuid4().hex
+    now = time.time()
+    hold = DeployHold(
+        container=container,
+        operation=operation,
+        token=token,
+        pid=os.getpid(),
+        host=_this_host(),
+        environment=_this_environment(),
+        acquired_at=now,
+        heartbeat_at=now,
+        expires_at=now + max_lifetime,
+    )
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        existing = holds.get(container)
+        if existing:
+            raise DeployHoldError(
+                f"Container '{container}' already has a provider "
+                f"{existing.operation} hold"
+            )
+        holds[container] = hold
+        _write_records(_DEPLOY_HOLDS_FILE, holds)
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_record,
+        args=(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            container,
+            token,
+            DEPLOY_HOLD_TTL,
+            heartbeat_stop,
+        ),
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        yield hold
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
+        with _lease_lock():
+            holds = _read_live_records(
+                _DEPLOY_HOLDS_FILE,
+                DeployHold,
+                DEPLOY_HOLD_TTL,
+            )
+            current = holds.get(container)
+            if (
+                current is not None
+                and current.token == token
+                and not current.uncertain
+            ):
+                del holds[container]
+                _write_records(_DEPLOY_HOLDS_FILE, holds)
+
+
+@contextmanager
+def session_admission(container: str) -> Iterator[SessionAdmission]:
+    """Admit one provider launch only when no destructive hold is present."""
+    token = uuid.uuid4().hex
+    key = f"{container}:{token}"
+    admission = SessionAdmission(
+        container=container,
+        token=token,
+        pid=os.getpid(),
+        host=_this_host(),
+        environment=_this_environment(),
+        acquired_at=time.time(),
+        heartbeat_at=time.time(),
+    )
+    with _lease_lock():
+        holds = _read_live_records(
+            _DEPLOY_HOLDS_FILE,
+            DeployHold,
+            DEPLOY_HOLD_TTL,
+        )
+        hold = holds.get(container)
+        if hold:
+            raise ProviderAdmissionError(
+                f"Container '{container}' is unavailable while provider "
+                f"{hold.operation} is in progress"
+            )
+        admissions = _read_live_records(
+            _SESSION_ADMISSIONS_FILE,
+            SessionAdmission,
+            SESSION_ADMISSION_TTL,
+        )
+        admissions[key] = admission
+        _write_records(_SESSION_ADMISSIONS_FILE, admissions)
+    heartbeat_stop = threading.Event()
+    heartbeat_thread = threading.Thread(
+        target=_heartbeat_record,
+        args=(
+            _SESSION_ADMISSIONS_FILE,
+            SessionAdmission,
+            key,
+            token,
+            SESSION_ADMISSION_TTL,
+            heartbeat_stop,
+        ),
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        yield admission
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=2)
+        with _lease_lock():
+            admissions = _read_live_records(
+                _SESSION_ADMISSIONS_FILE,
+                SessionAdmission,
+                SESSION_ADMISSION_TTL,
+            )
+            current = admissions.get(key)
+            if current is not None and current.token == token:
+                del admissions[key]
+                _write_records(_SESSION_ADMISSIONS_FILE, admissions)
