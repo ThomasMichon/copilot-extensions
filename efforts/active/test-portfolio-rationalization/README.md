@@ -88,7 +88,7 @@ The detailed scoring and tiering design is in
 > It seems like our agent-* plugins now have thousands of tests each. These runs
 > take a ton of time, and many risk running actual processes that misbehave or
 > collide with the main system. We should come up with a way to "triage" these
-> tests value value and effectivess, and start an effort to pare down the tests
+> tests for value and effectiveness, and start an effort to pare down the tests
 > into the best, most-thorough set.
 
 Scope decision: govern every test-bearing plugin, with the largest `agent-*`
