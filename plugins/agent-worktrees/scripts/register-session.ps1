@@ -66,7 +66,9 @@ foreach ($raw in @($catalogJson)) {
         }
     } catch { }
 }
-$contexts.Add($registrationContext)
+if (-not $contexts.Contains($registrationContext)) {
+    $contexts.Add($registrationContext)
+}
 if ($contexts.Count -gt 0) {
     [Console]::Out.Write((@{
         additionalContext = $contexts -join "`n`n"
