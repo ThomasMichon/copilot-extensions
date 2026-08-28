@@ -65,6 +65,18 @@ DEFAULT_ACP = "copilot --acp --stdio --allow-all-tools"
 _NS_NOT_FOUND_EXIT = 3
 
 
+def _absolute_posix_path(value: str) -> str:
+    if not value:
+        return value
+    if not value.startswith("/") or any(
+        character in value for character in "\0\r\n\t"
+    ):
+        raise argparse.ArgumentTypeError(
+            "must be an absolute in-container POSIX path without control characters"
+        )
+    return value
+
+
 def _bridge_dir() -> Path:
     return Path(os.environ.get("AGENT_BRIDGE_CONFIG_DIR", "~/.agent-bridge")).expanduser()
 
@@ -228,7 +240,7 @@ def main() -> int:
     # namespace-* subcommand) so the daemon's `<command...> namespace-list` works.
     ap.add_argument("--acp-command", default=DEFAULT_ACP,
                     help="in-container Copilot ACP command (with --plugin-dir flags)")
-    ap.add_argument("--acp-cwd", default="",
+    ap.add_argument("--acp-cwd", default="", type=_absolute_posix_path,
                     help="in-container ACP session/new cwd exposed as workspace_folder")
     ap.add_argument("--name-filter", default=DEFAULT_NAME_FILTER,
                     help="only containers whose name starts with this are clean-room boxes")

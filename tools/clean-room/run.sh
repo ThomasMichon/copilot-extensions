@@ -375,13 +375,6 @@ PY
             acp_cwd_file) ACP_CWD_FILE="$_v" ;;
         esac
     done <<< "$parsed"
-    local -a ACP_PLUGIN_DIRS=()
-    mapfile -t ACP_PLUGIN_DIRS < <("$(_py)" -c '
-import json, sys
-for value in json.loads(sys.argv[1]):
-    print(value)
-' "$ACP_DIRS_JSON")
-
     if [ "${RUNS_OVERRIDE:-0}" -gt 0 ] 2>/dev/null; then RUN_COUNT="$RUNS_OVERRIDE"; fi
     [ "$TIER" = E ] || echo "warn: scenario '$SCENARIO_NAME' is tier '$TIER', not 'E' -- eval expects a Tier-E scenario." >&2
     [ -f "$SCENARIO_DIR/$SETUP_REL" ] || { echo "eval: setup driver '$SETUP_REL' not found in scenario dir" >&2; exit 2; }
@@ -412,7 +405,11 @@ print(cwd)
             exit 2
         }
     fi
-    ACP_COMMAND="$(clean_room_build_acp_command "${ACP_PLUGIN_DIRS[@]}")"
+    ACP_COMMAND="$("$(_py)" -c '
+import json, sys
+for value in json.loads(sys.argv[1]):
+    print(value)
+' "$ACP_DIRS_JSON" | clean_room_build_acp_command)"
     if [ -n "$ACP_CWD" ]; then
         local _quoted_cwd
         _quoted_cwd="$(clean_room_quote_bash "$ACP_CWD")"

@@ -128,7 +128,7 @@ phase 3 "create and bind a real managed worktree"
 capture "install-worktree-runtime" -- \
     bash "$INSTALLED_ROOT/agent-worktrees/scripts/install.sh" install || true
 _agent_worktrees="$(bash -lc 'command -v agent-worktrees' 2>/dev/null || true)"
-if [ -n "$_agent_worktrees" ]; then
+if [ -f "$_agent_worktrees" ] && [ -x "$_agent_worktrees" ]; then
     pass "agent-worktrees runtime installed"
 else
     jam "path-binstub" "agent-worktrees is not callable after runtime install" "inspect install-worktree-runtime.log"

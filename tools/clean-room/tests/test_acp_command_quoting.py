@@ -67,7 +67,7 @@ def test_bash_acp_command_quotes_plugin_dirs(tmp_path: Path):
             "bash",
             "-c",
             f"source {shlex.quote(str(helper))}; "
-            'clean_room_build_acp_command "$TEST_PLUGIN_DIR"',
+            'printf "%s\\n" "$TEST_PLUGIN_DIR" | clean_room_build_acp_command',
         ],
         env={**os.environ, "TEST_PLUGIN_DIR": plugin_dir},
         capture_output=True,
