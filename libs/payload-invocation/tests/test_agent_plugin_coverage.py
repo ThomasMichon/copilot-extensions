@@ -3,8 +3,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
+
+if os.name != "nt":
+    import pwd
 
 SCRIPT = Path(__file__).resolve().parents[1] / "generate.py"
 REPO = SCRIPT.parents[2]
@@ -15,6 +23,31 @@ if _spec is None or _spec.loader is None:
     raise RuntimeError("cannot load payload-invocation generator")
 generator = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generator)
+
+
+def _runtime_agent_plugins() -> list[tuple[str, Path, dict]]:
+    marketplace = json.loads(
+        (REPO / ".github" / "plugin" / "marketplace.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    plugins: list[tuple[str, Path, dict]] = []
+    for entry in marketplace["plugins"]:
+        name = entry["name"]
+        plugin = REPO / entry["source"]
+        if (
+            name.startswith("agent-")
+            and (plugin / "pyproject.toml").is_file()
+            and (plugin / "payload-invocation.json").is_file()
+        ):
+            plugins.append(
+                (
+                    name,
+                    plugin,
+                    generator.load_manifest(plugin / "payload-invocation.json"),
+                )
+            )
+    return plugins
 
 
 def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> None:
@@ -104,6 +137,95 @@ def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> No
                         f"{shell_field} {required_hook} command hook"
                     )
 
+    assert not failures, "\n" + "\n".join(failures)
+
+
+@pytest.mark.parametrize(
+    ("name", "plugin", "manifest"),
+    _runtime_agent_plugins(),
+    ids=lambda value: value if isinstance(value, str) else None,
+)
+def test_default_legacy_stamp_publishes_every_payload_command(
+    name: str,
+    plugin: Path,
+    manifest: dict,
+    tmp_path: Path,
+) -> None:
+    """Absent namespaced policy preserves the complete legacy PATH fallback."""
+    if os.name != "nt":
+        profile_home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+        if (profile_home / ".copilot-extensions" / "installation-mode.json").exists():
+            pytest.skip("OS-profile installation-mode policy is present")
+    installer = str(manifest["installer"])
+    home = tmp_path / name
+    home.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+            "COPILOT_PLUGIN_INSTALL_STAGED": "1",
+        }
+    )
+    for key in tuple(env):
+        if key.startswith(
+            (
+                "COPILOT_EXT_INSTALLATION_",
+                "COPILOT_EXTENSIONS_INSTALLATION_",
+            )
+        ):
+            env.pop(key, None)
+    if os.name == "nt":
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            pytest.skip("PowerShell is unavailable")
+        command = [
+            pwsh,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(plugin / "scripts" / f"{installer}.ps1"),
+            "stamp",
+        ]
+    else:
+        command = [
+            "bash",
+            str(plugin / "scripts" / f"{installer}.sh"),
+            "stamp",
+        ]
+    result = subprocess.run(
+        command,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+        cwd=home,
+    )
+    assert result.returncode == 0, (
+        f"{name} stamp failed\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    )
+    local_bin = home / ".local" / "bin"
+    failures: list[str] = []
+    for command_spec in manifest["commands"]:
+        command_name = str(command_spec["command"])
+        if os.name == "nt":
+            candidates = (
+                local_bin / f"{command_name}.ps1",
+                local_bin / f"{command_name}.cmd",
+                local_bin / command_name,
+            )
+            if not any(path.is_file() for path in candidates):
+                failures.append(
+                    f"{name}: stamp did not publish a Windows binstub for "
+                    f"{command_name}"
+                )
+        else:
+            path = local_bin / command_name
+            if not path.is_file() or not os.access(path, os.X_OK):
+                failures.append(f"{name}: stamp did not publish {path.name}")
     assert not failures, "\n" + "\n".join(failures)
 
 

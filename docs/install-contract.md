@@ -1070,6 +1070,18 @@ management wrapper, but a
 redeploy the binstub/venv. Without a nudge, the runtime silently lags the payload
 until someone re-runs the installer by hand.
 
+Until a plugin has a validated namespaced-active installation, absent/default
+installation-mode policy remains legacy and its cheap `stamp` path publishes a
+global compatibility wrapper for **every command** declared by
+`payload-invocation.json`, not only the primary plugin command. Those wrappers
+are backups: agent-facing guidance still uses the attributable payload command
+catalog, and multi-command compatibility wrappers should delegate to the owning
+payload shims rather than independently selecting a runtime. A namespaced-active
+installer suppresses legacy wrapper publication only after the shared
+installation-mode resolver proves that actual mode. Transition cleanup
+removes only ownership-proven legacy wrappers, preserving unrelated user
+commands; a desired flag or environment hint alone is insufficient.
+
 So every Python runtime plugin **self-reconciles at session start**: it declares
 a `sessionStart` hook that re-runs its own installer **only when the deployed
 version drifts** from the payload.
@@ -1088,6 +1100,10 @@ version drifts** from the payload.
   `scripts/emit-command-catalog.{ps1,sh}` from `COPILOT_PLUGIN_ROOT` and emits
   exact payload-local `argv` plus `availability`. It never snapshots dynamic
   runtime state or falls through to the legacy global wrapper.
+- Roster-wide tests run every runtime `agent-*` plugin's cheap stamp in an
+  isolated profile with no installation-mode policy and require all declared
+  commands to have a `~/.local/bin` fallback. This protects legacy/default
+  operation while namespaced rollout is still opt-in.
 
 This reconciles the **tool**, never machine state or config. First install remains
 the one-time setup step; the hook only keeps an installed runtime current.

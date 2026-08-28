@@ -48,7 +48,8 @@ def test_runtime_is_reconciled_on_every_machine() -> None:
     assert "$script:SkipPackageInstall" in install_ps1
     assert "$script:SkipStamp" in install_ps1
     assert "Refusing stale agent-logger" in install_ps1
-    assert "Move-Item -LiteralPath $stampedTmp" in install_ps1
+    assert "'stamped-version' = $SrcVersion" in install_ps1
+    assert "Move-Item -LiteralPath $tmp -Destination $path -Force" in install_ps1
     assert (
         "$Action -in @('install', 'update', 'provision', 'stamp')" in install_ps1
     )
