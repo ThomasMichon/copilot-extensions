@@ -4,8 +4,8 @@ description: >
   Persistent Agent-bridge control plane -- send prompts to persistent Copilot
   sessions
   over the local bridge service: local agents, SSH machines, CodeSpaces,
-  containers, and live interactive sessions. Use this for durable/cross-venue
-  communication, NOT the Task tool.
+  containers, and live interactive sessions. Use this for live cross-boundary
+  communication, not queued task-loop management or the Task tool.
   Trigger phrases include:
   - 'agent-bridge'
   - 'agent-bridge send'
@@ -103,7 +103,7 @@ problems:
 **Rule:** When asked to "talk to", "send to", "relay to", or "communicate with"
 a named bridge agent/venue (topology agent, `codespace:...`, `container:...`, or
 live session), **use `<agent-bridge catalog argv[0]> send <agent-name> "prompt"`**. Never use the
-Task tool for cross-machine or durable cross-session communication -- it cannot
+Task tool for live cross-boundary communication -- it cannot
 reach those bridge venues.
 
 Run `<agent-bridge catalog argv[0]> agents` to see which agent names are available. If
@@ -111,29 +111,19 @@ your deployment includes a deployment-specific adapter skill (e.g.
 `multi-machine system-agent-bridge`), it will list the concrete machine and agent
 names for your environment.
 
-### Which coordination system? (sub-agent vs agent-bridge vs agent-dispatch)
+### Responsibility boundary
 
-There are **three** ways to coordinate agent work on top of agent-worktrees (the
-durable worktree/session substrate), and the choice is easy to get wrong. Pick
-by **what you're doing**:
+- Use a native Task sub-agent for bounded work inside the current session.
+- Use agent-bridge when the caller must converse with, steer, wait on, or take
+  over a live agent across a repository, worktree, machine, or venue boundary.
+- Use **`agent-dispatch:agent-dispatch`** when the durable task record, atomic
+  claim, retry/supervision state, or eight-state task lifecycle is the product.
+  A dispatched worker may be embodied through agent-bridge, but the queue owns
+  the task and agent-bridge owns only the live conversation transport.
 
-| Scenario | Use |
-|----------|-----|
-| **In-worktree sub-task** — exploration, safely-parallel writes, MCP round-trips | **native sub-agent** (Task tool) |
-| **Cross-repo / cross-machine sub-task you drive or converse with** — enforce the target repo's conventions, interactive back-and-forth | **agent-bridge** |
-| **Fleet-wide chat / broadcast / status / negotiation** — reserve a resource or deploy slot, coordinate over a bug | **agent-bridge** |
-| **Task claims / dedup of concurrent work** — claim an effort/item so two agents don't collide; release/complete when done | **agent-dispatch** |
-| **Spin-off work you don't wait on** — optional follow-up, a tangential bug found mid-task; the outcome isn't essential | **agent-dispatch** |
-| **Context handoff** — same worktree, next session | **agent-dispatch** task (complete-on-pickup) |
-
-**The distinguishing axis** (the one agents get wrong): **agent-bridge = drive or
-converse with a live agent you own or steer** (you wait on it, answer it, take it
-over); **agent-dispatch = fire-and-forget queued/claimed work you don't own** —
-you may poll its status or send steering messages, but it is *not* a controlled
-sub-agent. Both agent-bridge and agent-dispatch cross machines; the axis is
-**ownership, not location**. For the queue side (claim, dedup, the six-state
-lifecycle) see the **`agent-dispatch:agent-dispatch`** skill; for dedup-safe open-ended
-self-dispatch see **`pick-and-claim`**.
+For generic task decomposition and the decision to delegate at all, use
+**`delegation-guidance:delegating-work`**. For dedup-safe open-ended task
+selection, use **`agent-dispatch:pick-and-claim`**.
 
 ### Relay Chain Pattern
 

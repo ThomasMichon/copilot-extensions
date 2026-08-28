@@ -1,4 +1,4 @@
-# Reliable MCP-backed sub-agent
+# Reliable agent-mcp transport and fallback
 
 Use one reviewed agent-mcp bridge config to expose two equivalent surfaces:
 
@@ -8,6 +8,11 @@ Use one reviewed agent-mcp bridge config to expose two equivalent surfaces:
 The fallback is reliable only when both surfaces preserve the same auth source,
 identity, tool filter, and authorization boundary.
 
+This reference owns only agent-mcp's bridge and fallback mechanics. Author the
+surrounding agent, its domain-service ownership, bounded execution contract,
+`## MCP Readiness` section, and anti-self-delegation guard with
+**`customizing-copilot:defining-subagents`**.
+
 Use the exact `argv[0]` from the agent-mcp session command catalog for every
 shell operation below. Replace `<agent-mcp catalog argv[0]>` with that path;
 in PowerShell invoke it as `& "<agent-mcp catalog argv[0]>" <args>`. Never
@@ -15,7 +20,7 @@ search `PATH` for a same-named command. If session-start hooks did not publish
 the catalog, use the compatibility readiness path from the **`agent-mcp`**
 skill before continuing.
 
-## Bridge and agent
+## Bridge and agent-mcp wiring
 
 ```yaml
 # .github/agents/service.mcp.yaml
@@ -34,21 +39,22 @@ tools:
 timeout: 120
 ```
 
-```markdown
----
-name: service
-description: Manage Example Service.
-tools: ["*"]
+Add this transport stanza to the agent frontmatter produced by
+`customizing-copilot:defining-subagents`:
+
+```yaml
 mcp-servers:
   service-mcp:
     type: stdio
     command: agent-mcp # marketplace-isolation: allow mcp-server-startup
     args: [bridge, --config, .github/agents/service.mcp.yaml]
     tools: ["*"]
----
+```
 
-## MCP Readiness
+In the authoring skill's required `## MCP Readiness` section, include these
+transport-specific steps:
 
+```markdown
 1. Probe `service_read`.
 2. If the catalog did not load, preserve the exact primary error and use the
    existing `service` materialized fleet.
@@ -60,11 +66,8 @@ mcp-servers:
 6. If both surfaces fail, report both errors and stop.
 7. If fallback succeeds, include the preserved primary error in the final
    response.
-
-Do NOT use the task tool to spawn another `service` agent.
 ```
 
-Keep the anti-self-delegation line literal enough for customization scanners.
 The fallback is not permission to call the product API directly.
 
 Top-level `tools:` is the authorization boundary shared by bridge and CLI

@@ -7,6 +7,16 @@ It replaces single-purpose wrapper scripts -- e.g. a script hardcoded to one
 upstream endpoint and one auth command -- with a config-driven, multi-transport,
 multi-auth bridge packaged as a Copilot CLI plugin.
 
+## Responsibility boundary
+
+agent-mcp owns MCP **transport mechanics**: upstream launch and protocol
+negotiation, credential injection, filtering and catalog reshaping,
+materialization, and bridge-equivalent fallback. It does not own the authoring
+policy for custom agents or the runtime decision to delegate. Use
+`customizing-copilot:defining-subagents` for agent structure, domain-service
+ownership, readiness sections, and anti-self-delegation; use
+`delegation-guidance:delegating-work` for task decomposition.
+
 ## Standalone quick start
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a
@@ -43,9 +53,10 @@ plugin-root interpolation contract and may run before or independently of
 session command-catalog context. That surface cannot consume the payload-local
 argv until the host provides a plugin-root-capable MCP launcher contract.
 
-## Reliable agents: one bridge, two surfaces
+## Reliable transport: one bridge, two surfaces
 
-A robust MCP-backed sub-agent pairs its primary `mcp-servers` catalog with a
+After `customizing-copilot:defining-subagents` establishes the agent contract,
+an agent-mcp-backed agent pairs its primary `mcp-servers` catalog with a
 materialized CLI fleet over the **same bridge config**. When Copilot fails to
 register or retain the catalog, the agent preserves that error, probes the
 identity-matched fleet, and continues through the CLI surface. It stops only
@@ -74,9 +85,9 @@ readiness/fallback calls unless the deployment lifecycle evicts warm sessions
 after config/auth changes. Warmth can amortize cold starts, but cannot rescue an
 upstream that does not initialize.
 
-The full reusable `.agent.md` template, platform commands, failure matrix,
-security boundaries, and deploy/drift checklist are in
-[Reliable MCP-backed sub-agent](skills/agent-mcp/references/reliable-agent.md).
+The agent-mcp-specific wiring, platform commands, failure matrix, security
+boundaries, and deploy/drift checklist are in
+[Reliable agent-mcp transport and fallback](skills/agent-mcp/references/reliable-agent.md).
 
 ## Concepts
 

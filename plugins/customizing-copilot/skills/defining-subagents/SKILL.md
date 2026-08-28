@@ -312,7 +312,8 @@ values into the bridge config/overlay rather than exporting them ad hoc.
 Decorator stacks are intentionally not applied by `call`/`materialize`. The
 fleet exposes raw upstream names/results after the top-level `tools:` filter, so
 an agent whose safety depends on decorator-only `filter`/`gate` cannot use this
-fallback. See **`agent-mcp:agent-mcp`** → *Reliable MCP-backed sub-agent*.
+fallback. See **`agent-mcp:agent-mcp`** →
+*Reliable agent-mcp transport and fallback*.
 
 Three boundaries keep this coherent with the readiness rule above:
 
