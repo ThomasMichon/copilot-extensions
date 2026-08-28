@@ -159,11 +159,18 @@ def _validate_config_data(data: dict[str, Any], label: str) -> None:
             raise RuntimeError(f"{label}: {key} must be a non-empty string")
     if "port" in data and data["port"] is not None:
         port = data["port"]
-        if isinstance(port, bool):
+        if isinstance(port, bool) or not (
+            isinstance(port, int)
+            or (
+                isinstance(port, str)
+                and port.isascii()
+                and port.isdigit()
+            )
+        ):
             raise RuntimeError(f"{label}: port must be an integer from 1 to 65535")
         try:
             parsed_port = int(port)
-        except (TypeError, ValueError) as exc:
+        except ValueError as exc:
             raise RuntimeError(
                 f"{label}: port must be an integer from 1 to 65535"
             ) from exc
@@ -172,6 +179,11 @@ def _validate_config_data(data: dict[str, Any], label: str) -> None:
 
     raw_vaults = data.get("vaults")
     if raw_vaults is None:
+        default_vault = data.get("default_vault")
+        if default_vault is not None:
+            raise RuntimeError(
+                f"{label}: default_vault {default_vault!r} is not a configured vault"
+            )
         return
     if not isinstance(raw_vaults, dict):
         raise RuntimeError(f"{label}: vaults must be an object")

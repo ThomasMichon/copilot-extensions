@@ -607,12 +607,14 @@ def load_config(*, strict: bool = False) -> ContainersConfig:
             raise RuntimeError("fleets config must be a key/value mapping")
         log.warning("fleets config must be a key/value mapping; ignoring it")
         return config
-    for name, raw in fleets.items():
-        raw = raw or {}
+    for name, raw_value in fleets.items():
+        if strict and not isinstance(raw_value, dict):
+            raise RuntimeError(
+                f"Fleet '{name}' config must be a key/value mapping"
+            )
+        raw = raw_value or {}
         if not isinstance(raw, dict):
             message = f"Fleet '{name}' config must be a key/value mapping"
-            if strict:
-                raise RuntimeError(message)
             log.warning("%s; ignoring it", message)
             continue
         security_profile = str(raw.get("security_profile", TRUSTED_PROFILE)).lower()
