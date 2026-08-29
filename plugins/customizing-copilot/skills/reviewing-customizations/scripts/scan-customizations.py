@@ -261,9 +261,43 @@ def _load_json(path: Path) -> dict:
     return data
 
 
+def _load_jsonc(path: Path) -> dict:
+    """Best-effort load for Copilot's leading-comment config.json."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        body = "\n".join(
+            line for line in text.splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        data = json.loads(body)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _repo_is_trusted(repo_root: Path, home: Path) -> bool:
+    """Match Copilot's exact persisted-folder trust boundary."""
+    data = _load_jsonc(home / ".copilot" / "config.json")
+    folders = data.get("trustedFolders")
+    if not isinstance(folders, list):
+        return False
+    resolved = repo_root.resolve()
+    for value in folders:
+        if not isinstance(value, str):
+            continue
+        try:
+            if Path(value).expanduser().resolve(strict=True) == resolved:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _merged_settings(
     repo_root: Path,
     home: Path | None = None,
+    *,
+    require_trust: bool = False,
 ) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]]:
     """Merge the settings that decide a repo's *loaded* plugin set.
 
@@ -274,13 +308,19 @@ def _merged_settings(
     booleans use last-layer-wins semantics, including explicit ``false``.
     """
     selected_home = home or Path.home()
-    layers = [
-        (selected_home / ".copilot" / "settings.json", selected_home),
-        (repo_root / ".claude" / "settings.json", repo_root),
-        (repo_root / ".claude" / "settings.local.json", repo_root),
-        (repo_root / ".github" / "copilot" / "settings.json", repo_root),
-        (repo_root / ".github" / "copilot" / "settings.local.json", repo_root),
-    ]
+    layers = [(selected_home / ".copilot" / "settings.json", selected_home)]
+    if not require_trust or _repo_is_trusted(repo_root, selected_home):
+        layers.extend(
+            (
+                (repo_root / ".claude" / "settings.json", repo_root),
+                (repo_root / ".claude" / "settings.local.json", repo_root),
+                (repo_root / ".github" / "copilot" / "settings.json", repo_root),
+                (
+                    repo_root / ".github" / "copilot" / "settings.local.json",
+                    repo_root,
+                ),
+            )
+        )
     enabled: dict[str, bool] = {}
     marketplaces: dict[str, tuple[dict, Path]] = {}
     for p, base in layers:                 # later layers win (repo over user)
@@ -454,6 +494,7 @@ def assemble_enabled_plugins(
     installed_root: Path | None = None,
     *,
     home: Path | None = None,
+    require_trust: bool = False,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope.
 
@@ -469,7 +510,11 @@ def assemble_enabled_plugins(
     selected_home = home or Path.home()
     if installed_root is None:
         installed_root = selected_home / ".copilot" / "installed-plugins"
-    enabled, marketplaces = _merged_settings(repo_root, home)
+    enabled, marketplaces = _merged_settings(
+        repo_root,
+        home,
+        require_trust=require_trust,
+    )
     out: list[PluginSource] = []
     for key in sorted(enabled):
         if not enabled[key]:
@@ -1711,7 +1756,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sources: list[PluginSource] = []
     if args.from_settings:
-        sources += assemble_enabled_plugins(root)
+        sources += assemble_enabled_plugins(root, require_trust=True)
 
     plugin_dirs = list(args.include_plugins)
     if args.include_installed:

@@ -1748,7 +1748,8 @@ def test_json_context_budget_shape(tmp_path: Path, capsys, monkeypatch):
     monkeypatch.setattr(scan.Path, "home", lambda: tmp_path / "empty-home")
 
     assert scan.main([str(repo), "--json", "--context-budget"]) == 0
-    payload = json.loads(capsys.readouterr().out)
+    output = capsys.readouterr().out
+    payload = json.loads(output)
     assert set(payload["context_budget"]) == {
         "token_estimate",
         "static_instruction_payloads",
@@ -1787,6 +1788,12 @@ def test_json_from_settings_includes_identity_role_inventory(
         {"zz-context-injection@copilot-extensions": True},
         {},
     )
+    copilot = home / ".copilot"
+    copilot.mkdir(parents=True, exist_ok=True)
+    (copilot / "config.json").write_text(
+        json.dumps({"trustedFolders": [str(repo)]}),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(scan.Path, "home", lambda: home)
 
     assert scan.main([str(repo), "--json", "--from-settings"]) == 0
@@ -1804,6 +1811,31 @@ def test_json_from_settings_includes_identity_role_inventory(
             "possible_non_empty": "yes",
         }],
     }
+
+
+def test_from_settings_ignores_untrusted_repository_settings(
+    tmp_path: Path, capsys, monkeypatch,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    home = tmp_path / "home"
+    installed = home / ".copilot" / "installed-plugins"
+    _session_plugin(
+        installed, "copilot-extensions", "zz-context-injection"
+    )
+    _settings(
+        repo,
+        {"zz-context-injection@copilot-extensions": True},
+        {},
+    )
+    monkeypatch.setattr(scan.Path, "home", lambda: home)
+
+    assert scan.main([str(repo), "--json", "--from-settings"]) == 0
+
+    output = capsys.readouterr().out
+    payload = json.loads(output)
+    assert payload["session_context"]["plugins"] == []
+    assert payload["session_context"]["authority_proven"] is False
     assert "do-not-report-this-command" not in output
 
 
