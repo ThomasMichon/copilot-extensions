@@ -332,18 +332,6 @@ def _adapter_vectors() -> list[dict[str, object]]:
     ]
 
 
-def _assert_source_identity(
-    actual: dict[str, object],
-    vector: dict[str, object],
-) -> None:
-    assert actual["kind"] == vector["normalized"]["kind"]
-    assert actual["canonical"] == vector["normalized"]["canonical"]
-    assert actual["ref"] == vector["normalized"]["ref"]
-    assert actual["record"] == vector["record"]
-    assert actual["sha256"] == vector["sha256"]
-    assert actual["marketplaceId"] == vector["marketplaceId"]
-
-
 def _run(
     command: tuple[str, ...],
     *arguments: object,
