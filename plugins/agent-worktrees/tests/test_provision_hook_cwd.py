@@ -24,6 +24,7 @@ def test_every_hook_leaves_payload_cwd_before_running_script():
         bash = str(hook["bash"])
         assert "$env:USERPROFILE" in powershell
         assert "-ErrorAction Stop" in powershell
+        assert "GetPathRoot" in powershell
         ps_detach = powershell.find("Set-Location")
         ps_script = powershell.find("$s")
         assert ps_detach >= 0 and ps_script >= 0
