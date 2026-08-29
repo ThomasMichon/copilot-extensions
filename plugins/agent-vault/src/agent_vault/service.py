@@ -170,7 +170,17 @@ class VaultService:
         max_queue_seconds: float = PASSWORD_MUTATION_MAX_QUEUE_SECONDS,
     ) -> dict:
         deadline = time.monotonic() + max_queue_seconds
-        with self._credential_lock:
+        if not self._credential_lock.acquire(timeout=max_queue_seconds):
+            return {
+                "ok": False,
+                "error": "Password mutation expired before the backend write",
+            }
+        try:
+            if time.monotonic() > deadline:
+                return {
+                    "ok": False,
+                    "error": "Password mutation expired before the backend write",
+                }
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
@@ -260,6 +270,8 @@ class VaultService:
                     "error": str(exc),
                 }
             return {"ok": True, "message": msg, "generation": generation}
+        finally:
+            self._credential_lock.release()
 
     @property
     def ttl(self) -> int:

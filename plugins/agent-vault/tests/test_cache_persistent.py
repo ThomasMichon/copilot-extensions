@@ -327,6 +327,7 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
     persistent = get_cache()
     assert persistent.put("A/x", "password", "old", 1)
     writes = []
+    unlocks = []
 
     class Backend:
         @staticmethod
@@ -335,7 +336,13 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
             return True, "updated"
 
     monkeypatch.setattr(service, "get_cache", lambda: persistent)
-    svc = _rotation_service(Backend(), monkeypatch)
+    svc = service.VaultService()
+    svc.cli = Backend()
+    monkeypatch.setattr(
+        svc,
+        "ensure_unlocked",
+        lambda *_args, **_kwargs: unlocks.append(True) or True,
+    )
     result = {}
 
     def rotate():
@@ -354,10 +361,12 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
         time.sleep(0.05)
     rotator.join(timeout=5)
 
+    assert not rotator.is_alive()
     assert result == {
         "ok": False,
         "error": "Password mutation expired before the backend write",
     }
+    assert unlocks == []
     assert writes == []
     assert persistent.get("A/x", "password") == "old"
 
