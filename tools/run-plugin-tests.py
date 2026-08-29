@@ -209,9 +209,13 @@ def _ensure_venv(name: str, uv: str, *, reinstall: bool) -> Path:
     return py
 
 
-def _test_file_groups(name: str, max_files: int) -> list[list[Path]]:
+def _test_file_groups(
+    name: str, max_files: int, *, filtered: bool = False
+) -> list[list[Path]]:
     tests = _plugin_dir(name) / "tests"
     files = sorted(tests.rglob("test_*.py"))
+    if filtered and files:
+        return [files]
     return partition(files, max_files) or [[]]
 
 
@@ -251,7 +255,11 @@ def run_plugin(
         )
         tools_path = str(REPO / "tools")
         env["PYTHONPATH"] = tools_path
-        groups = _test_file_groups(name, max_files_per_subsuite)
+        groups = _test_file_groups(
+            name,
+            max_files_per_subsuite,
+            filtered=bool(guards or kexpr),
+        )
         plugin_started = time.monotonic()
         for index, group in enumerate(groups, start=1):
             remaining = plugin_timeout - (time.monotonic() - plugin_started)

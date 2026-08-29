@@ -123,6 +123,42 @@ def test_timeout_reaps_recursive_descendant(tmp_path):
     assert not _pid_exists(pid)
 
 
+def test_timeout_reaps_descendant_requesting_detachment(tmp_path):
+    pid_file = tmp_path / "detached-descendant.pid"
+    procutil_src = REPO / "libs" / "agent-procutil" / "src"
+    script = (
+        "import pathlib,subprocess,sys,time;"
+        f"sys.path.insert(0,{str(procutil_src)!r});"
+        "from agent_procutil import detached_kwargs;"
+        "p=subprocess.Popen("
+        "[sys.executable,'-c','import time;time.sleep(60)'],"
+        "**detached_kwargs(breakaway=True));"
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(p.pid),encoding='ascii');"
+        "time.sleep(60)"
+    )
+    env = isolated_environment(os.environ, tmp_path)
+    rc = run_contained(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        sandbox=tmp_path,
+        limits=Limits(
+            wall_seconds=0.5,
+            max_processes=8,
+            max_memory_mb=256,
+            max_temp_mb=32,
+            poll_seconds=0.05,
+        ),
+    )
+
+    assert rc == 124
+    pid = int(pid_file.read_text(encoding="ascii"))
+    deadline = time.monotonic() + 5
+    while _pid_exists(pid) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert not _pid_exists(pid)
+
+
 def test_temp_budget_stops_tree(tmp_path):
     script = (
         "import os,pathlib,time;"

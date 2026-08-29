@@ -7,7 +7,8 @@ The Session Host must **outlive the agent-bridge frontend**. Two seams:
   *outside* its own teardown domain: on Windows ``CREATE_BREAKAWAY_FROM_JOB``
   (escaping the daemon's kill-on-close job, which now permits breakaway -- see
   ``winjob``); on POSIX ``start_new_session=True`` (own session, immune to the
-  front's process-group teardown).
+  front's process-group teardown). The shared contained-test policy suppresses
+  both forms so the repository test supervisor retains ownership.
 * **The host hardening itself once running** -- :func:`apply_host_survival`
   re-asserts session/job isolation from inside the host process (idempotent),
   and arms the host's *own* kill-on-close job on Windows so the child dies with
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agent_procutil import no_window_flags
+from agent_procutil import contained_test_mode, windowless_daemon_kwargs
 
 from .. import winjob
 from . import protocol as proto
@@ -58,10 +59,7 @@ def host_spawn_kwargs() -> dict[str, Any]:
     (permitted because that job now carries ``JOB_OBJECT_LIMIT_BREAKAWAY_OK``);
     on POSIX it gets its own session.
     """
-    if sys.platform == "win32":
-        # CREATE_NO_WINDOW keeps it headless; breakaway escapes the front's job.
-        return {"creationflags": no_window_flags() | winjob.CREATE_BREAKAWAY_FROM_JOB}  # headless-guard: allow: no_window_flags() composed with the winjob breakaway primitive
-    return {"start_new_session": True}
+    return windowless_daemon_kwargs(breakaway=True)
 
 
 @dataclass
@@ -168,6 +166,8 @@ def apply_host_survival() -> None:
     kill-on-close job so the child dies with the host (the host itself already
     broke away from the front's job at spawn time).
     """
+    if contained_test_mode():
+        return
     if sys.platform == "win32":
         winjob.setup_kill_on_close_job(allow_breakaway=True)
     else:
