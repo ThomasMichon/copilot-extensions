@@ -529,6 +529,23 @@ class TestControlPlaneRelatedPRTier:
         monkeypatch.setattr(_related, "find_control_plane_anchor", _boom)
         assert cfg._control_plane_related_pr_map() == {}
 
+    def test_load_config_can_skip_control_plane_related_pr(
+        self, tmp_path, monkeypatch
+    ):
+        def _boom():
+            raise AssertionError("control-plane PR overlay should be skipped")
+
+        anchor = tmp_path / "ext"
+        anchor.mkdir()
+        cfgfile = tmp_path / "config.yaml"
+        self._write_machine(cfgfile, anchor)
+        monkeypatch.setattr(cfg, "_control_plane_related_pr_map", _boom)
+        loaded = cfg.load_config(
+            cfgfile,
+            include_control_plane_related_pr=False,
+        )
+        assert isinstance(loaded, cfg.Config)
+
     def test_cp_related_pr_map_discovers_from_registry_e2e(self, tmp_path, monkeypatch):
         # End-to-end wiring: a registered control-plane repo whose related.yaml
         # carries a foreign repo's pr: block is discovered and surfaced.

@@ -84,7 +84,11 @@ def split(tmp_path: Path, monkeypatch):
         "# copilot-extensions narrative\n", encoding="utf-8")
     (kdir / "machines.yaml").write_text(_KNOWLEDGE_MACHINES, encoding="utf-8")
 
-    monkeypatch.setattr(cfg, "load_config", lambda: _stateless_config(harness))
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda *args, **kwargs: _stateless_config(harness),
+    )
     monkeypatch.setattr(
         sr, "_checkout_path",
         lambda name: str(knowledge) if name == "knowledge" else None)
@@ -163,7 +167,11 @@ def test_related_conduct_merges_configured_and_related_corpora(
             merge_actor="submitter-direct",
         ),
     )
-    monkeypatch.setattr(cfg, "load_config", lambda: configured)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda *args, **kwargs: configured,
+    )
     assert cli.cmd_related_dispatch(
         ["--conduct", "--repo", str(harness)]
     ) == 0
@@ -219,7 +227,11 @@ def test_typical_session_conduct_stays_within_context_budget(
     configured.repos["injected-tool"] = cfg.RepoConfig(
         anchor="/injected", worktree_root="/injected.wt"
     )
-    monkeypatch.setattr(cfg, "load_config", lambda: configured)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda *args, **kwargs: configured,
+    )
 
     assert cli.cmd_related_dispatch(
         ["--conduct", "--repo", str(harness)]

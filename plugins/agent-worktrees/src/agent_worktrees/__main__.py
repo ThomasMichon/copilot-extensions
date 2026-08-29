@@ -14271,7 +14271,8 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
     """
     try:
         srcs = state_root_mod.config_source_anchors(
-            cfg.load_config(), base_anchor=base_anchor
+            cfg.load_config(include_control_plane_related_pr=False),
+            base_anchor=base_anchor,
         )
         anchors = [s.anchor for s in srcs if s.anchor]
     except Exception:
@@ -14287,16 +14288,14 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
     # CodeSpace locus, which any base/knowledge/user entry can still override.
     try:
         from . import related as _related_mod
-        existing = {os.path.abspath(a) for a in anchors}
+        existing = {_related_mod._anchor_key(a) for a in anchors}
         plugin_anchors = [
             p
-            for p in _related_mod.installed_plugin_related_anchors(
-                repo_dirs=anchors
-            )
-            if os.path.abspath(p) not in existing
+            for p in _related_mod.installed_plugin_related_anchors()
+            if _related_mod._anchor_key(p) not in existing
         ]
     except Exception:
-        plugin_anchors = []
+        return anchors
     return [*plugin_anchors, *anchors]
 
 
@@ -14837,7 +14836,7 @@ def _related_conduct(anchor: str) -> int:
     from . import related
 
     try:
-        config = cfg.load_config()
+        config = cfg.load_config(include_control_plane_related_pr=False)
     except Exception:
         return 0
 
