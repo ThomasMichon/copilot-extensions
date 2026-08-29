@@ -117,13 +117,22 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
         for key in ("labels", "headless_labels", "cli_labels"):
             spec[key] = sorted(set(spec.get(key) or []))
         for key in ("interval", "reactive_interval"):
-            spec[key] = float(spec[key])
+            try:
+                spec[key] = float(spec[key])
+            except (TypeError, ValueError):
+                pass
         for key in ("max_concurrent", "max_attempts", "verify_timeout"):
-            spec[key] = int(spec[key])
-        spec["label_max_attempts"] = {
-            str(key): int(value)
-            for key, value in (spec.get("label_max_attempts") or {}).items()
-        }
+            try:
+                spec[key] = int(spec[key])
+            except (TypeError, ValueError):
+                pass
+        label_attempts = {}
+        for key, value in (spec.get("label_max_attempts") or {}).items():
+            try:
+                label_attempts[str(key)] = int(value)
+            except (TypeError, ValueError):
+                label_attempts[str(key)] = value
+        spec["label_max_attempts"] = label_attempts
     return json.dumps(
         {"kind": kind, "spec": spec},
         sort_keys=True,

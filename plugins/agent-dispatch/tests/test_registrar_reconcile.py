@@ -378,6 +378,33 @@ def test_direct_override_suppresses_equivalent_declared_replacement():
     assert summary.deduplicated == ["general"]
 
 
+def test_malformed_direct_defaults_do_not_crash_reconciliation():
+    decl = _decl("general", labels=["general"])
+    declared = declaration_to_registration(decl, machine="host-a")
+    direct = {
+        **declared,
+        "id": "general",
+        "spec": {
+            **declared["spec"],
+            "interval": "not-a-number",
+            "label_max_attempts": {"general": "not-a-number"},
+        },
+        "source": "direct",
+    }
+    daemon = SupervisorDaemon(
+        FakeClient([direct]),
+        "host-a",
+        launcher=FakeLauncher(),
+        clock=Clock(),
+        declared_source=lambda: [decl],
+    )
+
+    summary = daemon.reconcile_once()
+
+    assert set(summary.running) == {"general", "declared:local:general"}
+    assert len(summary.conflicts) == 1
+
+
 def test_daemon_without_declared_source_is_store_only():
     launcher = FakeLauncher()
     daemon = SupervisorDaemon(FakeClient([]), "host-a", launcher=launcher, clock=Clock())
