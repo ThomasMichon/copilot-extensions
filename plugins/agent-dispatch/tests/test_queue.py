@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import json
 import sqlite3
 import threading
 
@@ -73,8 +74,50 @@ def test_complete_persists_schema_neutral_structured_result(q):
     assert done.status == Status.COMPLETED
     assert done.result_ref == "artifact/42"
     assert done.result == result
+    assert done.has_result is True
     assert q.get(t.id).result == result
-    assert q.list()[0].result == result
+    listed = q.list()[0]
+    assert listed.result is None
+    assert listed.has_result is True
+
+
+def test_bulk_reads_skip_result_bodies_while_full_reads_decode_them(q):
+    large_task = q.create("bulk large")
+    q.claim_one("worker-1", task_id=large_task.id)
+    q.start(large_task.id, "worker-1")
+    large_result = {"data": "x" * 60_000}
+    q.complete(large_task.id, "worker-1", result=large_result)
+
+    invalid_task = q.create("bulk invalid")
+    q.claim_one("worker-2", task_id=invalid_task.id)
+    q.start(invalid_task.id, "worker-2")
+    q.complete(invalid_task.id, "worker-2", result={"valid": True})
+
+    assigned_task = q.create("bulk inbox", target_worktree="wt-1")
+    with sqlite3.connect(q.db_path) as conn:
+        conn.execute(
+            "UPDATE tasks SET result = ? WHERE id IN (?, ?)",
+            ("{not-json", invalid_task.id, assigned_task.id),
+        )
+
+    for tasks in (q.list(), q.find("bulk"), q.sweep()):
+        by_id = {task.id: task for task in tasks}
+        assert by_id[large_task.id].result is None
+        assert by_id[large_task.id].has_result is True
+        assert by_id[invalid_task.id].result is None
+        assert by_id[invalid_task.id].has_result is True
+
+    inbox = q.mine("host-a", "wt-1")
+    assigned = {task.id: task for task in inbox["assigned"]}
+    assert assigned[assigned_task.id].result is None
+    assert assigned[assigned_task.id].has_result is True
+
+    assert q.get(large_task.id).result == large_result
+    assert q.read_result(large_task.id) == large_result
+    with pytest.raises(json.JSONDecodeError):
+        q.get(invalid_task.id)
+    with pytest.raises(json.JSONDecodeError):
+        q.read_result(invalid_task.id)
 
 
 @pytest.mark.parametrize("invalid", ["{}", 7, True])

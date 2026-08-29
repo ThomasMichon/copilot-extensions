@@ -64,7 +64,7 @@ def _headers_of(ctx: Any) -> dict[str, str]:
 
 def _bulk_task_dict(task: Task) -> dict:
     result = asdict(task)
-    result["has_result"] = result.pop("result") is not None
+    result.pop("result")
     return result
 
 

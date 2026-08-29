@@ -474,7 +474,7 @@ def _task_dict(task: Task) -> dict:
 
 def _bulk_task_dict(task: Task) -> dict:
     result = asdict(task)
-    result["has_result"] = result.pop("result") is not None
+    result.pop("result")
     return result
 
 

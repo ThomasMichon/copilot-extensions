@@ -287,6 +287,9 @@ class Task:
     #: Optional schema-neutral completion result, decoded from canonical JSON.
     #: The coordinator stores it atomically with terminal completion.
     result: object | None = None
+    #: Whether a structured completion result exists. Bulk reads populate this
+    #: without selecting or decoding the result body.
+    has_result: bool = False
     #: Latest-only structured progress beat (JSON: phase/summary/blocker/pr/ts),
     #: or None. The "how far toward the goal" signal for at-a-glance tracking.
     latest_progress: str | None = None
@@ -335,6 +338,8 @@ class Task:
 
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> Task:
+        columns = set(row.keys())
+        raw_result = row["result"] if "result" in columns else None
         return cls(
             id=row["id"],
             title=row["title"],
@@ -364,7 +369,12 @@ class Task:
             completed_at=row["completed_at"],
             completed_by=row["completed_by"],
             result_ref=row["result_ref"],
-            result=json.loads(row["result"]) if row["result"] is not None else None,
+            result=json.loads(raw_result) if raw_result is not None else None,
+            has_result=(
+                bool(row["has_result"])
+                if "has_result" in columns
+                else raw_result is not None
+            ),
             latest_progress=row["latest_progress"],
             goal=row["goal"],
             done_criteria=row["done_criteria"],
@@ -380,6 +390,17 @@ class Task:
             wake_status=row["wake_status"],
             wake_operation_id=row["wake_operation_id"],
         )
+
+
+_TASK_DB_COLUMNS = tuple(
+    field.name
+    for field in dataclasses.fields(Task)
+    if field.name not in {"result", "has_result"}
+)
+_TASK_SELECT = ", ".join((*_TASK_DB_COLUMNS, "result"))
+_TASK_BULK_SELECT = ", ".join(
+    (*_TASK_DB_COLUMNS, "result IS NOT NULL AS has_result")
+)
 
 
 @dataclass(frozen=True)
@@ -858,7 +879,9 @@ class TaskQueue:
         )
 
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None:
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute(
+            f"SELECT {_TASK_SELECT} FROM tasks WHERE id = ?", (task_id,)
+        ).fetchone()
         return Task._from_row(row) if row else None
 
     def _enqueue_wake(
@@ -1040,7 +1063,8 @@ class TaskQueue:
             conn.execute("BEGIN IMMEDIATE")
             if dedup_key is not None:
                 existing = conn.execute(
-                    "SELECT * FROM tasks WHERE dedup_key = ?", (dedup_key,)
+                    f"SELECT {_TASK_SELECT} FROM tasks WHERE dedup_key = ?",
+                    (dedup_key,),
                 ).fetchone()
                 if existing is not None:
                     conn.execute("COMMIT")
@@ -1167,12 +1191,14 @@ class TaskQueue:
             conn.execute("BEGIN IMMEDIATE")
             if task_id is not None:
                 rows = conn.execute(
-                    "SELECT * FROM tasks WHERE id = ? AND status = ? AND not_before <= ?",
+                    f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                    "WHERE id = ? AND status = ? AND not_before <= ?",
                     (task_id, Status.QUEUED, ts),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM tasks WHERE status = ? AND not_before <= ?"
+                    f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                    "WHERE status = ? AND not_before <= ?"
                     " ORDER BY created_at ASC",
                     (Status.QUEUED, ts),
                 ).fetchall()
@@ -1239,14 +1265,15 @@ class TaskQueue:
         repo_param: tuple = (repo,) if repo is not None else ()
         with self._connect() as conn:
             assigned_rows = conn.execute(
-                "SELECT * FROM tasks WHERE status = ? AND ("  # noqa: S608 (repo_clause is a constant; all values parameterized)
+                f"SELECT {_TASK_BULK_SELECT} FROM tasks WHERE status = ? AND ("  # noqa: S608 (repo_clause is a constant; all values parameterized)
                 "  target_worktree = ?"
                 "  OR (target_machine = ? COLLATE NOCASE AND target_worktree IS NULL)"
                 ")" + repo_clause + " ORDER BY created_at ASC",
                 (Status.QUEUED, worktree, machine, *repo_param),
             ).fetchall()
             owned_rows = conn.execute(
-                "SELECT * FROM tasks WHERE owner = ? AND status IN (?, ?, ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
+                f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                "WHERE owner = ? AND status IN (?, ?, ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at ASC",
                 (
                     owner,
@@ -2861,7 +2888,9 @@ class TaskQueue:
         with self._connect() as conn:
             # `where` is built from literal clause strings; values are bound.
             rows = conn.execute(
-                f"SELECT * FROM tasks {where} ORDER BY created_at DESC LIMIT ?", params  # noqa: S608
+                f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                f"{where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
+                params,
             ).fetchall()
         tasks = [Task._from_row(r) for r in rows]
         if label is not None:
@@ -2878,7 +2907,8 @@ class TaskQueue:
         repo_param: tuple = (repo,) if repo is not None else ()
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM tasks WHERE (title LIKE ? OR prompt LIKE ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
+                f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                "WHERE (title LIKE ? OR prompt LIKE ?)" + repo_clause  # noqa: S608 (constant clause; parameterized)
                 + " ORDER BY created_at DESC LIMIT ?",
                 (like, like, *repo_param, limit),
             ).fetchall()
