@@ -19,10 +19,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
-import shutil
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 
 #: The engine binstub name (the self-provisioning agent-worktrees tool CLI).
 ENGINE_BIN = "agent-worktrees"
@@ -34,6 +35,10 @@ ENGINE_BIN = "agent-worktrees"
 #: through the same subprocess + JSON-parse path. The ``--demo`` Picker mode sets
 #: this to the bundled Aperture Labs fake engine.
 ENGINE_CMD_ENV = "WORKTREE_MANAGER_ENGINE_CMD"
+
+#: Exact provider argv handed to the Manager by agent-worktrees. JSON avoids
+#: shell quoting and preserves an attributable immutable runtime command.
+ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 
 #: A generous ceiling: a cold engine self-provisions on first use, and a classify
 #: pass can enumerate many worktrees. Kept bounded so the Manager never hangs.
@@ -72,6 +77,133 @@ def _engine_override() -> list[str] | None:
     return shlex.split(raw, posix=os.name != "nt")
 
 
+def _engine_argv_override() -> list[str] | None:
+    """Return the provider-owned exact argv inherited from the launch seam."""
+    raw = os.environ.get(ENGINE_ARGV_ENV)
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError as exc:
+        raise EngineError(f"{ENGINE_ARGV_ENV} is not valid JSON") from exc
+    if (
+        not isinstance(parsed, list)
+        or not parsed
+        or any(not isinstance(part, str) or not part for part in parsed)
+    ):
+        raise EngineError(f"{ENGINE_ARGV_ENV} must be a non-empty JSON string array")
+    return list(parsed)
+
+
+_INHERITED_ENGINE_COMMAND: list[str] | None = None
+
+
+def accept_inherited_engine_command() -> str | None:
+    """Consume the provider handoff before launching any child processes.
+
+    Returns a warning when the inherited value was malformed. Recovery commands
+    remain usable and the bad value is never inherited by descendants.
+    """
+    global _INHERITED_ENGINE_COMMAND
+    raw = os.environ.pop(ENGINE_ARGV_ENV, None)
+    if raw is None:
+        _INHERITED_ENGINE_COMMAND = None
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        _INHERITED_ENGINE_COMMAND = None
+        return f"{ENGINE_ARGV_ENV} is not valid JSON"
+    if (
+        not isinstance(parsed, list)
+        or not parsed
+        or any(not isinstance(part, str) or not part for part in parsed)
+    ):
+        _INHERITED_ENGINE_COMMAND = None
+        return f"{ENGINE_ARGV_ENV} must be a non-empty JSON string array"
+    _INHERITED_ENGINE_COMMAND = list(parsed)
+    return None
+
+
+def _state_home() -> Path:
+    variable = "USERPROFILE" if os.name == "nt" else "HOME"
+    return Path(os.environ.get(variable) or Path.home())
+
+
+def _version_key(version: str):
+    supported = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?", version)
+    if supported:
+        major, minor, patch, dev = supported.groups()
+        return (
+            0,
+            int(major),
+            int(minor),
+            int(patch),
+            1 if dev is None else 0,
+            int(dev or 0),
+        )
+    tokens = re.split(r"(\d+)", version.casefold())
+    return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
+
+
+def _runtime_candidates(root: Path) -> list[Path]:
+    versions = root / "versions"
+    candidates: list[Path] = []
+    for marker_name in ("current-version", "last-known-good"):
+        try:
+            version = (root / marker_name).read_text(encoding="utf-8").strip()
+        except OSError:
+            version = ""
+        if version:
+            candidates.append(versions / version)
+    try:
+        fallback = sorted(
+            (path for path in versions.iterdir() if path.is_dir()),
+            key=lambda path: _version_key(path.name),
+            reverse=True,
+        )
+    except OSError:
+        fallback = []
+    candidates.extend(fallback)
+    out: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = os.path.normcase(str(candidate.resolve()))
+        if key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    return out
+
+
+def installed_engine_command() -> list[str] | None:
+    """Resolve the exact marker-selected agent-worktrees runtime.
+
+    The deployment manifest binds the runtime slot to the owning provider and
+    version. A bare command name or PATH lookup is never accepted.
+    """
+    root = _state_home() / ".agent-worktrees"
+    try:
+        manifest = json.loads(
+            (root / "deploy-manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError, TypeError):
+        return None
+    source = manifest.get("source") if isinstance(manifest, dict) else None
+    if (
+        manifest.get("service") != ENGINE_BIN
+        or not isinstance(source, dict)
+        or source.get("plugin") != ENGINE_BIN
+    ):
+        return None
+    for slot in _runtime_candidates(root):
+        if not (slot / ".install-complete.json").is_file():
+            continue
+        python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if python.is_file():
+            return [str(python), "-m", "agent_worktrees"]
+    return None
+
+
 #: In-process base-command override (wins over the env). Set by the Picker's
 #: ``--demo`` mode to the bundled fake engine, avoiding any shell-quoting round
 #: trip through the environment.
@@ -87,29 +219,38 @@ def set_engine_command(cmd: list[str] | None) -> None:
 def engine_base_command() -> list[str] | None:
     """The base command to run the engine (before ``[--project …] <verb>``).
 
-    Resolution order: the in-process override (demo/tests) → the
-    ``WORKTREE_MANAGER_ENGINE_CMD`` env override → the resolved ``agent-worktrees``
-    binstub. None when none is available.
+    Resolution order: the in-process override (demo/tests) → the explicit
+    command override → the exact provider argv inherited from the
+    agent-worktrees front door → the validated marker-selected provider runtime.
+    A same-named command found through PATH is never used.
     """
     if _ENGINE_CMD_OVERRIDE:
         return list(_ENGINE_CMD_OVERRIDE)
     override = _engine_override()
     if override:
         return override
-    exe = engine_path()
-    return [exe] if exe else None
-
-
-def engine_path() -> str | None:
-    """Resolve the ``agent-worktrees`` binstub on PATH, or None if not installed."""
-    return shutil.which(ENGINE_BIN)
+    if _INHERITED_ENGINE_COMMAND:
+        return list(_INHERITED_ENGINE_COMMAND)
+    inherited = _engine_argv_override()
+    if inherited:
+        return inherited
+    return installed_engine_command()
 
 
 def engine_available() -> bool:
-    return engine_base_command() is not None
+    try:
+        return engine_base_command() is not None
+    except EngineError:
+        return False
 
 
-def _run(project: str | None, args: list[str], *, timeout: int = _DEFAULT_TIMEOUT) -> str:
+def _run(
+    project: str | None,
+    args: list[str],
+    *,
+    timeout: int = _DEFAULT_TIMEOUT,
+    allow_nonzero: bool = False,
+) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
     Raises :class:`EngineError` when the binstub is missing (``install_hint``),
@@ -125,15 +266,34 @@ def _run(project: str | None, args: list[str], *, timeout: int = _DEFAULT_TIMEOU
         cmd += ["--project", project]
     cmd += args
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, check=False,
-            env={**os.environ, "PYTHONUTF8": "1"},
-        )
+        kwargs = {
+            "capture_output": True,
+            "text": True,
+            "timeout": timeout,
+            "check": False,
+            "env": {
+                **os.environ,
+                "PYTHONUTF8": "1",
+                "PYTHONSAFEPATH": "1",
+            },
+            "stdin": subprocess.DEVNULL,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.run(cmd, **kwargs)
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
-    if proc.returncode != 0:
+    if proc.returncode != 0 and allow_nonzero:
+        try:
+            json.loads(proc.stdout)
+        except (ValueError, TypeError):
+            detail = _error_from_envelope(proc.stdout) or (proc.stderr or "").strip()
+            raise EngineError(
+                f"{ENGINE_BIN} {' '.join(args)} failed "
+                f"(exit {proc.returncode}): {detail or 'no output'}")
+    elif proc.returncode != 0:
         detail = _error_from_envelope(proc.stdout) or (proc.stderr or "").strip()
         raise EngineError(
             f"{ENGINE_BIN} {' '.join(args)} failed "
@@ -153,9 +313,10 @@ def _error_from_envelope(stdout: str) -> str | None:
 
 
 def run_json(project: str | None, args: list[str], *,
-             timeout: int = _DEFAULT_TIMEOUT) -> dict:
+             timeout: int = _DEFAULT_TIMEOUT,
+             allow_nonzero: bool = False) -> dict:
     """Run a ``--json`` verb and parse its stdout envelope into a dict."""
-    raw = _run(project, args, timeout=timeout)
+    raw = _run(project, args, timeout=timeout, allow_nonzero=allow_nonzero)
     try:
         obj = json.loads(raw)
     except ValueError as e:
@@ -188,7 +349,11 @@ def run_engine_passthrough(project: str | None, args: list[str], *,
     try:
         return subprocess.run(
             cmd, timeout=timeout, check=False,
-            env={**os.environ, "PYTHONUTF8": "1"},
+            env={
+                **os.environ,
+                "PYTHONUTF8": "1",
+                "PYTHONSAFEPATH": "1",
+            },
         ).returncode
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e

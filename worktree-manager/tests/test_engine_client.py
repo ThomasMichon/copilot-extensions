@@ -16,13 +16,27 @@ import pytest
 from worktree_manager import engine_client as ec
 
 
+@pytest.fixture(autouse=True)
+def _reset_engine_resolution(monkeypatch):
+    ec.set_engine_command(None)
+    monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
+    monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+
+
 def _fake_completed(cmd, returncode=0, stdout="", stderr=""):
     return subprocess.CompletedProcess(cmd, returncode, stdout=stdout, stderr=stderr)
 
 
 def _install_fake(monkeypatch, handler):
     """Point the client at a fake engine binstub + a scripted ``subprocess.run``."""
-    monkeypatch.setattr(ec, "engine_path", lambda: "/fake/agent-worktrees")
+    monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
+    ec.set_engine_command(None)
+    monkeypatch.setattr(
+        ec, "installed_engine_command", lambda: ["/fake/agent-worktrees"]
+    )
     monkeypatch.setattr(ec.subprocess, "run",
                         lambda cmd, **kw: handler(cmd, kw))
 
@@ -73,7 +87,11 @@ def test_title_null_is_none(monkeypatch):
 
 
 def test_engine_absent_raises_install_hint(monkeypatch):
-    monkeypatch.setattr(ec, "engine_path", lambda: None)
+    monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
+    ec.set_engine_command(None)
+    monkeypatch.setattr(ec, "installed_engine_command", lambda: None)
     assert ec.engine_available() is False
     with pytest.raises(ec.EngineError) as ei:
         ec.list_worktrees("dotfiles")
@@ -113,7 +131,12 @@ def test_invalid_json_raises(monkeypatch):
 
 
 def test_timeout_raises_engine_error(monkeypatch):
-    monkeypatch.setattr(ec, "engine_path", lambda: "/fake/agent-worktrees")
+    monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    ec.set_engine_command(None)
+    monkeypatch.setattr(
+        ec, "installed_engine_command", lambda: ["/fake/agent-worktrees"]
+    )
 
     def boom(cmd, **kw):
         raise subprocess.TimeoutExpired(cmd, 1)
@@ -128,6 +151,177 @@ def test_empty_worktrees_list(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps({"version": 1, "worktrees": []})))
     assert ec.list_worktrees("dotfiles") == []
+
+
+def test_inherited_provider_argv_wins(monkeypatch):
+    monkeypatch.setenv(
+        ec.ENGINE_ARGV_ENV,
+        json.dumps(["/runtime/python", "-m", "agent_worktrees"]),
+    )
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    ec.set_engine_command(None)
+    assert ec.engine_base_command() == [
+        "/runtime/python", "-m", "agent_worktrees"
+    ]
+
+
+def test_explicit_command_override_wins_over_inherited_provider(monkeypatch):
+    monkeypatch.setenv(
+        ec.ENGINE_ARGV_ENV,
+        json.dumps(["/runtime/python", "-m", "agent_worktrees"]),
+    )
+    monkeypatch.setenv(ec.ENGINE_CMD_ENV, "/fake/engine")
+    ec.set_engine_command(None)
+    assert ec.engine_base_command() == ["/fake/engine"]
+
+
+def test_accept_inherited_provider_removes_child_environment(monkeypatch):
+    inherited = ["/runtime/python", "-m", "agent_worktrees"]
+    monkeypatch.setenv(ec.ENGINE_ARGV_ENV, json.dumps(inherited))
+    monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
+    assert ec.accept_inherited_engine_command() is None
+    assert ec.ENGINE_ARGV_ENV not in ec.os.environ
+    assert ec.engine_base_command() == inherited
+
+
+def test_invalid_inherited_provider_argv_fails_closed(monkeypatch):
+    monkeypatch.setenv(ec.ENGINE_ARGV_ENV, '{"not":"argv"}')
+    ec.set_engine_command(None)
+    with pytest.raises(ec.EngineError, match=ec.ENGINE_ARGV_ENV):
+        ec.engine_base_command()
+
+
+def test_accept_invalid_inherited_provider_keeps_recovery_commands_usable(
+    monkeypatch,
+):
+    monkeypatch.setenv(ec.ENGINE_ARGV_ENV, '{"not":"argv"}')
+    warning = ec.accept_inherited_engine_command()
+    assert ec.ENGINE_ARGV_ENV not in ec.os.environ
+    assert warning and ec.ENGINE_ARGV_ENV in warning
+
+
+def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    slot = root / "versions" / "1.2.3"
+    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text("1.2.3", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {
+                "plugin": "agent-worktrees",
+                "version": "1.2.3",
+            },
+            "venv": str(slot),
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("AGENT_HOME", raising=False)
+    assert ec.installed_engine_command() == [
+        str(python), "-m", "agent_worktrees"
+    ]
+
+
+def test_installed_engine_command_allows_manifest_version_skew(monkeypatch, tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    slot = root / "versions" / "1.2.3"
+    slot.mkdir(parents=True)
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text("1.2.3", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {
+                "plugin": "agent-worktrees",
+                "version": "1.2.2",
+            },
+            "venv": str(slot),
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("AGENT_HOME", raising=False)
+    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True, exist_ok=True)
+    python.write_text("", encoding="utf-8")
+    assert ec.installed_engine_command() == [
+        str(python), "-m", "agent_worktrees"
+    ]
+
+
+def test_installed_engine_command_falls_back_to_last_known_good(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / ".agent-worktrees"
+    slot = root / "versions" / "1.2.2"
+    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text("missing", encoding="utf-8")
+    (root / "last-known-good").write_text("1.2.2", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "1.2.3"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("AGENT_HOME", raising=False)
+    assert ec.installed_engine_command() == [
+        str(python), "-m", "agent_worktrees"
+    ]
+
+
+def test_run_json_can_preserve_structured_nonzero_result(monkeypatch):
+    payload = {"ok": False, "reason": "in use"}
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: _fake_completed(
+            cmd, returncode=1, stdout=json.dumps(payload)
+        ),
+    )
+    assert ec.run_json(
+        "dotfiles", ["restart", "wt-1", "--json"], allow_nonzero=True
+    ) == payload
+
+
+def test_run_json_nonzero_without_envelope_preserves_stderr(monkeypatch):
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: _fake_completed(
+            cmd, returncode=2, stderr="unrecognized arguments: --future-flag"
+        ),
+    )
+    with pytest.raises(ec.EngineError, match="--future-flag"):
+        ec.run_json(
+            "dotfiles",
+            ["cleanup", "--future-flag", "--json"],
+            allow_nonzero=True,
+        )
+
+
+def test_captured_engine_call_is_tui_safe(monkeypatch):
+    seen = {}
+
+    def handler(cmd, kw):
+        seen.update(kw)
+        return _fake_completed(cmd, stdout='{"version":1,"worktrees":[]}')
+
+    _install_fake(monkeypatch, handler)
+    ec.list_worktrees("dotfiles")
+    assert seen["stdin"] is subprocess.DEVNULL
+    assert seen["env"]["PYTHONSAFEPATH"] == "1"
+    if ec.os.name == "nt":
+        assert seen["creationflags"] == subprocess.CREATE_NO_WINDOW
 
 
 # ── resolve_launch_plan (slice 3) ─────────────────────────────────────────────

@@ -3343,27 +3343,34 @@ def test_maintenance_executor_restart_states():
     assert ex.state("d") == "failed"  # kill failed
 
 
-def test_make_task_local_restart_calls_primitive(monkeypatch):
-    """A local restart task routes to sessions.restart_worktree_copilot with
-    the worktree id -- not the cleanup/sync helpers."""
+def test_make_task_local_restart_calls_provider_cli(monkeypatch):
+    """A local restart task crosses the same JSON process boundary as remote."""
     from worktree_manager.production_picker.picker_tui import maintenance as mnt
-    from agent_worktrees import sessions
-
     seen = {}
 
-    def _fake_restart(wt_id):
-        seen["id"] = wt_id
+    def _fake_json(project, args, *, timeout, allow_nonzero):
+        seen.update(
+            project=project,
+            args=args,
+            timeout=timeout,
+            allow_nonzero=allow_nonzero,
+        )
         return {"had_session": True, "method": "graceful", "ok": True}
 
-    monkeypatch.setattr(sessions, "restart_worktree_copilot", _fake_restart)
+    monkeypatch.setattr(mnt.engine_client, "run_json", _fake_json)
     src = types.SimpleNamespace(LOCAL=("M", "Win"))
     tasks = mnt.build_tasks(
         "restart",
         [{"id4": "wxyz", "raw": {"id": "wt-wxyz"}, "machine": "M", "env": "Win"}],
-        src)
+        src, project="demo")
     (_key, fn) = tasks[0]
     res = fn()
-    assert seen["id"] == "wt-wxyz"
+    assert seen == {
+        "project": "demo",
+        "args": ["restart", "wt-wxyz", "--json"],
+        "timeout": 120,
+        "allow_nonzero": True,
+    }
     assert res["ok"] is True
 
 

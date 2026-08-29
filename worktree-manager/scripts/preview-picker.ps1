@@ -90,7 +90,10 @@ Create it once so the preview runs your worktree code:
     return $scripts
 }
 $managerScripts = Resolve-VenvScripts $manager
-$previewPath = @($managerScripts)
+$awScripts = Resolve-VenvScripts $awPlugin
+$previewPath = @($managerScripts, $awScripts)
+$engineArgv = @((Join-Path $awScripts "python.exe"), "-m", "agent_worktrees")
+$engineArgvJson = $engineArgv | ConvertTo-Json -Compress
 
 # --- Build the isolated sandbox ------------------------------------------------
 $sandbox = Join-Path ([System.IO.Path]::GetTempPath()) ("agent-picker-preview-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
@@ -137,6 +140,7 @@ if ($Interactive) {
 `$env:WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE = '1'
 `$env:WORKTREE_PROJECT = '$Project'
 `$env:WORKTREE_MANAGER_AGENT_WORKTREES_SRC = '$(Join-Path $awPlugin "src")'
+`$env:WORKTREE_MANAGER_ENGINE_ARGV = '$engineArgvJson'
 `$env:PATH = '$($previewPath -join ';');' + `$env:PATH
 Write-Host 'Draft picker (mock) -- sandbox AGENT_HOME=$sandbox' -ForegroundColor Cyan
 Write-Host 'Arrow to the CODESPACES tab. Ctrl+C / q to exit. Mutating actions are simulated.' -ForegroundColor DarkGray
@@ -162,6 +166,7 @@ try {
     $env:WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE = "1"
     $env:WORKTREE_PROJECT = $Project
     $env:WORKTREE_MANAGER_AGENT_WORKTREES_SRC = Join-Path $awPlugin "src"
+    $env:WORKTREE_MANAGER_ENGINE_ARGV = $engineArgvJson
     $env:PATH = "$($previewPath -join ';');$env:PATH"
 
     $managerArgs = @("-m", "worktree_manager", "picker", "screenshot")

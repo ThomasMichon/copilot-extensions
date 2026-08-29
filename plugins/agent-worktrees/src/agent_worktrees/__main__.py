@@ -9452,6 +9452,18 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
 
     if raw_wt:
         wt_id = _resolve_worktree_id(raw_wt)
+        if (
+            as_json
+            and getattr(args, "yes", False)
+            and not session_id
+            and not want_all
+        ):
+            payload = reclaim_one(
+                wt_id,
+                bare_only=getattr(args, "bare_only", False),
+            )
+            _json_output(payload)
+            return 0 if payload.get("ok") else 1
         wt_path = _wt_path(wt_id)
     elif not session_id and not want_all:
         # No explicit target -- infer the worktree from the current directory.
@@ -9468,6 +9480,12 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         session_id=session_id, worktree_id=wt_id,
         worktree_path=wt_path, table=table,
     )
+    if wt_id:
+        seen_pids = {item["pid"] for item in found}
+        for bound in reclaim.resolve_bridge_bound(wt_id, table=table):
+            if bound["pid"] not in seen_pids:
+                found.append(bound)
+                seen_pids.add(bound["pid"])
     if getattr(args, "bare_only", False):
         # "orphans Stop cannot reach": a walkable non-mux ancestry ("bare"), one
         # whose homing could not be positively classified ("unknown", e.g. the
@@ -9519,8 +9537,9 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
             mux_torn_down = reclaim.teardown_detached_mux(
                 _killed_targets, table=table)
 
+    ok = all(result.get("killed") for result in reaped) if reaped else True
     payload = {
-        "ok": True,
+        "ok": ok,
         "action": "reclaim" if do_kill else "dry-run",
         "filters": {
             "session_id": session_id, "worktree_id": wt_id,
@@ -9535,13 +9554,13 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
 
     if as_json:
         _json_output(payload)
-        return 0
+        return 0 if ok else 1
 
     if not targets:
         print("No live Copilot process matched (nothing to reclaim).")
         for s in self_skipped:
             print(f"  (skipped self: {s['session_id'][:8]} pid {s['pid']})")
-        return 0
+        return 0 if ok else 1
 
     verb = "Reclaimed" if do_kill else "Would reclaim"
     print(f"{verb} {len(targets)} bound Copilot process(es):")
@@ -19607,6 +19626,7 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 
 _WORKTREE_MANAGER_BIN = "worktree-manager"
 _WORKTREE_MANAGER_MIN_PICKER_VERSION = (0, 1, 0, 21)
+_WORKTREE_MANAGER_ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 
 # The Worktree Manager's canonical, human-visitable source (shown so a user can
 # verify the install command is ours before running it -- not an attack) and the
@@ -19715,8 +19735,14 @@ def _exec_worktree_manager(mgr: str, project: str | None,
         argv += list(subcommand)
     if project:
         argv += ["--project", project]
+    env = {
+        **os.environ,
+        _WORKTREE_MANAGER_ENGINE_ARGV_ENV: json.dumps(
+            [sys.executable, "-m", "agent_worktrees"]
+        ),
+    }
     if platform.system() == "Windows":
-        proc = subprocess.Popen(argv)
+        proc = subprocess.Popen(argv, env=env)
         try:
             rc = proc.wait()
         except KeyboardInterrupt:
@@ -19726,7 +19752,7 @@ def _exec_worktree_manager(mgr: str, project: str | None,
                 proc.kill()
                 rc = 130  # 128 + SIGINT(2)
         sys.exit(rc)
-    os.execvp(mgr, argv)
+    os.execvpe(mgr, argv, env)
     return 1  # unreachable -- os.execvp replaces the process
 
 

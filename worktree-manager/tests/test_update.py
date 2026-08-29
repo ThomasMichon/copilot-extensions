@@ -95,7 +95,11 @@ def test_strip_project_removes_pair():
 # ── run_engine_passthrough ────────────────────────────────────────────────────
 
 def test_passthrough_builds_command_and_returns_code(monkeypatch):
-    monkeypatch.setattr(ec, "engine_path", lambda: "/fake/agent-worktrees")
+    monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    monkeypatch.setattr(
+        ec, "installed_engine_command", lambda: ["/fake/agent-worktrees"]
+    )
     ec.set_engine_command(None)
     seen = {}
 
@@ -111,7 +115,9 @@ def test_passthrough_builds_command_and_returns_code(monkeypatch):
 
 
 def test_passthrough_absent_engine_hints_install(monkeypatch):
-    monkeypatch.setattr(ec, "engine_path", lambda: None)
+    monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
+    monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    monkeypatch.setattr(ec, "installed_engine_command", lambda: None)
     ec.set_engine_command(None)
     with pytest.raises(ec.EngineError) as ei:
         ec.run_engine_passthrough(None, ["update"])
