@@ -9,7 +9,6 @@ description: |-
   - "where does this live"
   - "write to the state repo"
   - "knowledge worktree"
-  - "no knowledge repo is bound"
 ---
 
 # Resolving the state home

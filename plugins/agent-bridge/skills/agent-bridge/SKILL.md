@@ -16,7 +16,6 @@ description: >
   - 'send to agent'
   - 'bridge to'
   - 'cross-machine'
-  - 'codespace agent'
   - 'container agent'
   - 'external agent'
   - 'inter-agent'

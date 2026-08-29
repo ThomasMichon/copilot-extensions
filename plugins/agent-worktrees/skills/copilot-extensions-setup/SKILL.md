@@ -10,7 +10,6 @@ description: >
   - 'set up copilot extensions'
   - 'set up agent-worktrees'
   - 'bootstrap agent-bridge'
-  - 'agent-worktrees not found'
   - 'agent-bridge not installed'
   - 'agent-mcp not found'
   - 'runtime not installed'

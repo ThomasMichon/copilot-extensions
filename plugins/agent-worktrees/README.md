@@ -133,7 +133,6 @@ standalone-behavior changes.
 | `resolving-state-home` | Native stateless-harness state routing and paired knowledge-worktree resolution |
 | `repairing-worktrees` | Diagnose/repair worktree+session health via `doctor` |
 | `create-setup-script` | Generate repo-specific session setup scripts |
-| `agent-ssh` | SSH transport helpers |
 | `working-cross-repo` | Good-citizen workflow for work in another registered repo |
 
 ## Hooks

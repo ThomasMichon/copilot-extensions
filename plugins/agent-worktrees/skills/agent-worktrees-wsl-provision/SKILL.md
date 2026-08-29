@@ -6,7 +6,7 @@ description: >
   after adopting a repo on Windows to enable WSL sessions. Trigger phrases
   include:
   - 'provision in WSL'
-  - 'set up WSL'
+  - 'set up this repo in WSL'
   - 'WSL provision'
   - 'enable WSL sessions'
   - 'clone to WSL'
