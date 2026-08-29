@@ -16,6 +16,7 @@ from pathlib import Path
 
 from agent_procutil import detached_kwargs, windowless_python
 
+from .cache import get_cache
 from .config import (
     DEFAULT_TCP_PORT,
     ENDPOINT_ENV,
@@ -35,7 +36,7 @@ from .config import (
 )
 from .extensions import ActionContext, StartupContext, UnlockContext, get_registry
 from .gcm import git_credential_action
-from .keepassxc import KeePassXCBackend
+from .keepassxc import KeePassXCBackend, PasswordMutationAmbiguous
 from .prompt import prompt_password
 from .rendezvous import (
     EndpointUnavailable,
@@ -88,11 +89,13 @@ class VaultService:
     def __init__(self) -> None:
         self.cli = KeePassXCBackend()
         self.cache: dict[tuple[str, str, str], str] = {}
+        self._credential_generations: dict[tuple[str, str, str], int] = {}
         self.last_activity = time.time()
         self._password_set_at: dict[str, float] = {}
         self._shutdown = False
         self.ttl_override: int | None = None  # 0 = persistent (never expire)
         self._unlock_lock = threading.Lock()  # prevents concurrent GUI prompts
+        self._credential_lock = threading.RLock()
         self._unlock_failed_at: dict[str, float] = {}
         self._last_unlock_error: dict[str, str] = {}
         self._last_dismiss: dict[str, bool] = {}
@@ -100,6 +103,155 @@ class VaultService:
 
     def keepalive(self) -> None:
         self.last_activity = time.time()
+
+    def _prepare_password_cache(
+        self,
+        kpdb: str,
+        entry: str,
+        password: str,
+        operation: int,
+    ):
+        persistent = get_cache()
+        if not persistent.enabled:
+            return persistent, operation
+        pending = persistent.pending_replace(entry, "password")
+        if pending is not None:
+            if pending.get("candidate") == password:
+                return persistent, int(pending["operation"])
+            current = self.cli.get_entry(kpdb, entry, "password")
+            if current is None or not persistent.replace(
+                entry,
+                "password",
+                current,
+                time.time_ns(),
+            ):
+                raise RuntimeError("Could not reconcile the pending password rotation")
+        if not persistent.begin_replace(
+            entry,
+            "password",
+            password,
+            operation,
+        ):
+            raise RuntimeError("Could not journal the password rotation")
+        return persistent, operation
+
+    def _cache_updated_password(
+        self,
+        kpdb: str,
+        entry: str,
+        password: str,
+        persistent,
+        generation: int,
+    ) -> None:
+        keys_to_remove = [
+            key for key in self.cache
+            if key[0] == kpdb and key[1] == entry
+        ]
+        for key in keys_to_remove:
+            del self.cache[key]
+            self._credential_generations.pop(key, None)
+        cache_key = (kpdb, entry, "password")
+        self.cache[cache_key] = password
+        self._credential_generations[cache_key] = generation
+        if (
+            persistent.enabled
+            and not persistent.replace(entry, "password", password, generation)
+        ):
+            raise RuntimeError("Password updated, but the offline cache update failed")
+
+    def _set_password(
+        self,
+        kpdb: str,
+        entry: str,
+        password: str,
+        vault_name: str,
+        reason: str,
+    ) -> dict:
+        with self._credential_lock:
+            if not self.ensure_unlocked(kpdb, vault_name, reason):
+                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
+                return {"ok": False, "error": error_msg, "needs_unlock": True}
+            operation = time.time_ns()
+            try:
+                persistent, operation = self._prepare_password_cache(
+                    kpdb,
+                    entry,
+                    password,
+                    operation,
+                )
+            except RuntimeError as exc:
+                return {"ok": False, "error": str(exc)}
+            try:
+                ok, msg = self.cli.edit_password(kpdb, entry, password)
+            except PasswordMutationAmbiguous as exc:
+                current = self.cli.get_entry(kpdb, entry, "password")
+                if current == password:
+                    ok, msg = True, "Password updated"
+                elif current is None:
+                    cache_key = (kpdb, entry, "password")
+                    self.cache.pop(cache_key, None)
+                    self._credential_generations.pop(cache_key, None)
+                    return {
+                        "ok": False,
+                        "cache_pending": True,
+                        "error": (
+                            f"{exc}; the password update could not be confirmed, "
+                            "so the offline cache remains pending"
+                        ),
+                    }
+                else:
+                    if not persistent.enabled or persistent.replace(
+                        entry,
+                        "password",
+                        current,
+                        time.time_ns(),
+                    ):
+                        return {"ok": False, "error": str(exc)}
+                    return {
+                        "ok": False,
+                        "cache_pending": True,
+                        "error": (
+                            f"{exc}; the current password was confirmed, but "
+                            "the offline cache remains pending"
+                        ),
+                    }
+            if not ok:
+                if (
+                    persistent.enabled
+                    and not persistent.rollback_replace(
+                        entry,
+                        "password",
+                        operation,
+                    )
+                    and persistent.pending_replace(entry, "password") is not None
+                ):
+                    return {
+                        "ok": False,
+                        "cache_pending": True,
+                        "error": (
+                            f"{msg}; the prior offline cache record remains "
+                            "in a recoverable pending state"
+                        ),
+                    }
+                return {"ok": False, "error": msg}
+            generation = time.time_ns()
+            try:
+                self._cache_updated_password(
+                    kpdb,
+                    entry,
+                    password,
+                    persistent,
+                    generation,
+                )
+            except RuntimeError as exc:
+                return {
+                    "ok": False,
+                    "committed": True,
+                    "cache_updated": False,
+                    "generation": generation,
+                    "error": str(exc),
+                }
+            return {"ok": True, "message": msg, "generation": generation}
 
     @property
     def ttl(self) -> int:
@@ -136,9 +288,11 @@ class VaultService:
     def invalidate_cache(self, kpdb: str | None = None) -> None:
         if kpdb is None:
             self.cache.clear()
+            self._credential_generations.clear()
             return
         for key in [key for key in self.cache if key[0] == kpdb]:
             del self.cache[key]
+            self._credential_generations.pop(key, None)
 
     def _effective_cooldown(self, kpdb: str) -> float:
         """Return cooldown duration based on last failure mode."""
@@ -309,19 +463,38 @@ class VaultService:
         entry: str,
         field: str = "password",
         group: str | None = None,
+        refresh: bool = False,
     ) -> str | None:
-        entry = normalize_entry(entry, group)
-        cache_key = (kpdb, entry, field)
-        if cache_key in self.cache:
-            return self.cache[cache_key]
+        with self._credential_lock:
+            entry = normalize_entry(entry, group)
+            cache_key = (kpdb, entry, field)
+            if not refresh and cache_key in self.cache:
+                return self.cache[cache_key]
 
-        if not self.ensure_unlocked(kpdb):
-            return None
+            if not self.ensure_unlocked(kpdb):
+                return None
 
-        value = self.cli.get_entry(kpdb, entry, field)
-        if value is not None:
-            self.cache[cache_key] = value
-        return value
+            value = self.cli.get_entry(kpdb, entry, field)
+            if value is not None:
+                self.cache[cache_key] = value
+                self._credential_generations[cache_key] = time.time_ns()
+            return value
+
+    def get_with_generation(
+        self,
+        kpdb: str,
+        entry: str,
+        field: str = "password",
+        group: str | None = None,
+        refresh: bool = False,
+    ) -> tuple[str | None, int]:
+        with self._credential_lock:
+            value = self.get(kpdb, entry, field, group, refresh)
+            normalized = normalize_entry(entry, group)
+            return (
+                value,
+                self._credential_generations.get((kpdb, normalized, field), 0),
+            )
 
     def has(self, kpdb: str, entry: str, group: str | None = None) -> bool | None:
         """Returns True/False, or None if unlock was cancelled."""
@@ -388,9 +561,15 @@ class VaultService:
         if action == "get":
             entry = request.get("entry", "")
             field = request.get("field", "password")
-            value = self.get(kpdb, entry, field, group)
+            value, generation = self.get_with_generation(
+                kpdb,
+                entry,
+                field,
+                group,
+                refresh=bool(request.get("refresh", False)),
+            )
             if value is not None:
-                return {"ok": True, "value": value}
+                return {"ok": True, "value": value, "generation": generation}
             if not self.cli.has_password(kpdb):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
@@ -482,17 +661,7 @@ class VaultService:
                 return {"ok": False, "error": "No entry path provided"}
             if not password:
                 return {"ok": False, "error": "No password provided"}
-            if not self.ensure_unlocked(kpdb, vault_name, reason):
-                error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
-                return {"ok": False, "error": error_msg, "needs_unlock": True}
-            ok, msg = self.cli.edit_password(kpdb, entry, password)
-            if ok:
-                keys_to_remove = [k for k in self.cache if k[0] == kpdb and k[1] == entry]
-                for key in keys_to_remove:
-                    del self.cache[key]
-                log.info("Password updated for %s, %d cache entries invalidated",
-                         entry, len(keys_to_remove))
-            return {"ok": ok, "message": msg} if ok else {"ok": False, "error": msg}
+            return self._set_password(kpdb, entry, password, vault_name, reason)
 
         if action == "import-key":
             import base64
