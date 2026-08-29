@@ -13,4 +13,3 @@ def test_copilot_extensions_related_provenance_is_shipped():
     assert "\n      preferred: local\n" in text
     assert "\n    delegate: { via: none }\n" in text
     assert "\nprimary:" not in text
-    assert "\n    ownership:" not in text

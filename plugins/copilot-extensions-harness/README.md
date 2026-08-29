@@ -21,7 +21,8 @@ organization-specific needs are routed elsewhere.
 The plugin also ships `.agent-worktrees/related.yaml`, so an active
 `copilot-extensions-harness` contributes portable, lowest-precedence provenance
 for the `copilot-extensions` repository. Machine-local registration still owns
-the checkout path and repository class.
+the checkout path and repository class, and derives the operator-relative
+ownership posture (`owned` for the maintainer, `external` for other users).
 
 | Sub-agent | Covers |
 |-----------|--------|

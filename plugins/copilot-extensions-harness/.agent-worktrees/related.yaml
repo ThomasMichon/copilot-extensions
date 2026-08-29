@@ -8,3 +8,4 @@ related:
     locus:
       preferred: local
     delegate: { via: none }
+    # Ownership is operator-relative and is derived when the repo is registered.
