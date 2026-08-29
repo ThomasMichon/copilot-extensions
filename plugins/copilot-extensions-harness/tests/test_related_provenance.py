@@ -10,6 +10,7 @@ def test_copilot_extensions_related_provenance_is_shipped():
 
     assert "\n  copilot-extensions:\n" in text
     assert "\n    role: tooling\n" in text
+    assert "Use a public GitHub\n      account" in text
     assert "\n      preferred: local\n" in text
     assert "\n    delegate: { via: none }\n" in text
     assert "\nprimary:" not in text

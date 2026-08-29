@@ -23,6 +23,9 @@ The plugin also ships `.agent-worktrees/related.yaml`, so an active
 for the `copilot-extensions` repository. Machine-local registration still owns
 the checkout path and repository class, and derives the operator-relative
 ownership posture (`owned` for the maintainer, `external` for other users).
+Repository operations require a public GitHub account; enterprise-managed
+GitHub accounts are appropriate for internal organizations, while Entra
+credentials apply to Azure DevOps rather than this GitHub repository.
 
 | Sub-agent | Covers |
 |-----------|--------|
