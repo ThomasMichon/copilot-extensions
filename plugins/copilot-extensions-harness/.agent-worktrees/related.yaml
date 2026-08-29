@@ -1,0 +1,14 @@
+# Contributed by copilot-extensions-harness at the lowest precedence.
+related:
+  copilot-extensions:
+    role: tooling
+    summary: >-
+      Public source repository for the general-purpose Copilot CLI plugin
+      marketplace and its reusable agent infrastructure. Use a public GitHub
+      account for repository operations; an enterprise-managed GitHub identity
+      or an Entra credential is not the applicable account class.
+    locus:
+      preferred: local
+    delegate: { via: none }
+    # The concrete login and ownership are operator-relative and derived when
+    # the repo is registered.

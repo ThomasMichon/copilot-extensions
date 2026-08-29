@@ -778,7 +778,11 @@ def inrepo_config_path(anchor: str | Path) -> Path:
     return Path(anchor) / INREPO_CONFIG_DIRNAME / GLOBAL_CONFIG_FILENAME
 
 
-def load_config(path: Path | None = None) -> Config:
+def load_config(
+    path: Path | None = None,
+    *,
+    include_control_plane_related_pr: bool = True,
+) -> Config:
     """Load and parse the layered project config.
 
     Merges these tiers (highest precedence wins):
@@ -809,6 +813,9 @@ def load_config(path: Path | None = None) -> Config:
 
     Args:
         path: Machine-local config path. Uses the default if None.
+        include_control_plane_related_pr: Include foreign-repo PR overlays from
+            active harness plugins. Related-index bootstrap disables this to
+            avoid resolving the same active-plugin corpus twice.
 
     Returns:
         Parsed Config object.
@@ -885,7 +892,11 @@ def load_config(path: Path | None = None) -> Config:
     # Control-plane related.yaml (+ ``<repo>-harness`` plugin) ``pr:`` overlays,
     # computed once: a checked-in control-plane view of how to land PRs in a
     # FOREIGN repo, layered per-repo below. Fail-safe -> ``{}``.
-    cp_related_pr = _control_plane_related_pr_map()
+    cp_related_pr = (
+        _control_plane_related_pr_map()
+        if include_control_plane_related_pr
+        else {}
+    )
 
     # Build the set of repos to resolve: those named in the machine-local file,
     # plus the active project (so a convention-adopted repo with no
@@ -1323,11 +1334,7 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
         from . import related
 
         cp = related.find_control_plane_anchor()
-        anchors: list[str] = list(
-            related.installed_plugin_related_anchors(
-                repo_dirs=[cp] if cp else None
-            )
-        )
+        anchors: list[str] = list(related.installed_plugin_related_anchors())
         if cp:
             anchors.append(cp)
         if not anchors:

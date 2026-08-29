@@ -425,3 +425,10 @@ related:
 Reads degrade safely (a missing/malformed file yields an empty index); a bare
 `name:` is a valid minimal link. Writes emit only non-empty fields, keeping the
 committed file minimal.
+
+An active plugin may contribute a lowest-precedence related-repo fragment by
+shipping `.agent-worktrees/related.yaml` in its payload. The active corpus is
+resolved from the effective user plus adopted-project plugin configuration, so
+copied plugins and live directory-marketplace plugins follow the same enabled
+and identity-verified rules. Disabled or unresolved plugins contribute nothing;
+the project and knowledge layers still override plugin entries wholesale.
