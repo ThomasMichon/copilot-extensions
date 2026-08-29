@@ -753,7 +753,7 @@ _ensure_runtime() {
         # (lancedb/pyarrow/tree-sitter/numpy) it needs to read/write the index.
         # Those have no Windows-ARM64 wheels and are unneeded on a client.
         local pkg="$PLUGIN_DIR"
-        [[ "$(_install_role)" != "client" ]] && pkg="$PLUGIN_DIR[store]"
+        [[ "$(_install_role)" == "host" ]] && pkg="$PLUGIN_DIR[store]"
         if [[ "$have_uv" -eq 1 ]]; then
             uv pip install --python "$VENV_PYTHON" "$pkg"
         else
@@ -844,30 +844,16 @@ EOF
     _ok "Deploy manifest written (source: $kind)"
 }
 
-_install_role() {
-    # Resolve this machine's role: host runs the engine + the local indexer
-    # service; a client runs NEITHER (its MCP/CLI route to the designated host
-    # over SSH). Precedence: AGENT_INDEX_ROLE env, then the freshly-installed
-    # CLI's resolver (config.yaml role:/engine:), else client. No machine names
-    # live here.
+_machine_role() {
+    # Explicit machine-level role used by bare management calls and to preserve
+    # an already-configured host runtime during updates from another repo.
     if [[ -n "${AGENT_INDEX_ROLE:-}" ]]; then
         local r
         r="$(printf '%s' "$AGENT_INDEX_ROLE" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
         if [[ "$r" == "host" || "$r" == "client" ]]; then printf '%s' "$r"; return 0; fi
     fi
-    if [[ -x "$LINK_PYTHON" ]]; then
-        local out
-        out="$("$LINK_PYTHON" -m agent_index role 2>/dev/null | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
-        if [[ "$out" == "host" || "$out" == "client" ]]; then printf '%s' "$out"; return 0; fi
-    fi
-    # Venv-free fallback: read the machine-local config.yaml role:/engine: scalar
-    # directly (mirrors config.resolve_role + ensure-service.sh), so role resolves
-    # even if the .venv active-slot symlink is dangling (parity with install.ps1,
-    # #1504). NOTE: unlike Windows (marker-only, no junction), $LINK_PYTHON here is
-    # the `.venv` symlink that _versioned_activate repoints to the ACTIVE slot, so
-    # the deploy/cutover paths already follow the active version -- only this
-    # role-resolution fallback is added.
-    local cfg="$INSTALL_DIR/config.yaml"
+    local cfg="${AGENT_INDEX_CONFIG:-$INSTALL_DIR/config.yaml}"
+    cfg="${cfg/#\~/$HOME}"
     if [[ -f "$cfg" ]]; then
         local cr
         cr="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*"\?\([A-Za-z]*\)"\?.*/\2/p' "$cfg" | head -n1 | tr '[:upper:]' '[:lower:]')"
@@ -877,7 +863,34 @@ _install_role() {
             none|consumer) printf 'client'; return 0 ;;
         esac
     fi
-    printf 'client'
+    printf 'unconfigured'
+}
+
+_activation_role() {
+    # A repository activates agent-index only by explicitly designating its
+    # indexer(s). Bare management calls may use the machine-level role.
+    local repo_root repo_cfg me hosts
+    repo_root="${AGENT_INDEX_REPO:-}"
+    [[ -n "$repo_root" ]] || repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -z "$repo_root" ]]; then _machine_role; return 0; fi
+    repo_cfg="$repo_root/.agent-index/config.yaml"
+    [[ -f "$repo_cfg" ]] || { printf 'unconfigured'; return 0; }
+    me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" |
+        tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+    local py role
+    py="$(command -v python3 || command -v python || true)"
+    [[ -n "$py" ]] || { printf 'unconfigured'; return 0; }
+    role="$("$py" "$SCRIPT_DIR/resolve-activation-role.py" --config "$repo_cfg" --machine "$me" 2>/dev/null || true)"
+    case "$role" in host|client) printf '%s' "$role" ;; *) printf 'unconfigured' ;; esac
+}
+
+_install_role() {
+    # Preserve host/store dependencies whenever this machine explicitly owns a
+    # host runtime, even if invoked from a client/unconfigured repository.
+    local machine_role
+    machine_role="$(_machine_role)"
+    if [[ "$machine_role" == "host" ]]; then printf 'host'; return 0; fi
+    _activation_role
 }
 
 _install_engine() {
@@ -1199,8 +1212,10 @@ _ensure_service_running() {
     # host's service over the trusted SSH transport (config.client_url). Only a
     # host runs a local service -- mirrors the engine gate and the single-host-
     # service architecture (a fleet fans in SSH forwards to ONE host service).
-    if [[ "$(_install_role)" != "host" ]]; then
-        _skip 'Local indexer service skipped (role: client) -- a client runs no local daemon; MCP/CLI route to the designated host over SSH'
+    local role
+    role="$(_activation_role)"
+    if [[ "$role" != "host" ]]; then
+        _skip "Local indexer service skipped (role: $role) -- only an explicitly configured host runs a local daemon"
         return 0
     fi
     [[ -x "$LINK_PYTHON" ]] || { _skip 'Runtime not installed -- service not ensured'; return 0; }
@@ -1234,7 +1249,7 @@ _ensure_running() {
     # The DEFAULT user-mode lifecycle. No elevation. A host runs the engine then
     # the local service; a client runs neither (_ensure_service_running self-gates
     # on role), so this is a no-op on a client.
-    if [[ "$(_install_role)" == "host" ]]; then _ensure_engine_running; fi
+    if [[ "$(_activation_role)" == "host" ]]; then _ensure_engine_running; fi
     _ensure_service_running
 }
 
@@ -1249,8 +1264,13 @@ _ensure_running() {
 _service_cutover() {
     [[ "$NO_SERVICE" -eq 1 ]] && return 1
     command -v systemctl >/dev/null 2>&1 || return 1
-    # Only a host runs a local service; a client routes to the host over SSH.
-    [[ "$(_install_role)" == "host" ]] || return 1
+    # A configured host may start/cut over. An unrelated repository may only
+    # cut over an already-running service owned by an explicit machine host.
+    local role
+    role="$(_activation_role)"
+    if [[ "$role" != "host" ]]; then
+        [[ "$(_machine_role)" == "host" ]] && _service_healthy || return 1
+    fi
     [[ -x "$LINK_PYTHON" ]] || return 1
     # Cut over only a LIVE routed service; no live endpoint -> fall back.
     _service_healthy || return 1
@@ -1266,12 +1286,13 @@ _service_cutover() {
 case "$ACTION" in
     install)
         _ensure_runtime
-        _install_service
-        _role="$(_install_role)"
+        _role="$(_activation_role)"
         if [[ "$_role" == "host" ]]; then
+            _install_service
             _install_engine || true
             _register_engine_daemon
         else
+            _skip "Service install skipped (role: $_role) -- no configured host activation"
             _skip "Engine runtime skipped (role: $_role) -- set 'role: host' in $INSTALL_DIR/config.yaml or AGENT_INDEX_ROLE=host to host the durable engine"
         fi
         ;;
@@ -1281,15 +1302,28 @@ case "$ACTION" in
         # Engine: warm-preserving OUTLIVE -- leave a serving engine untouched
         # (fixed port 8421); only start one if it is down (host only), so the
         # service cutover always has a reconnect target.
-        if [[ "$(_install_role)" == "host" ]]; then _ensure_engine_running; fi
+        if [[ "$(_activation_role)" == "host" ]]; then _ensure_engine_running; fi
         # Service: move a live (even healthy) routed service to the new slot via
         # the zdd flip rather than leaving stale code serving; else fall back to
         # _install_service's SIGTERM-graceful `systemctl restart`.
-        if _service_cutover; then _install_service --no-restart; else _install_service; fi
+        if _service_cutover; then
+            _install_service --no-restart
+        elif [[ "$(_activation_role)" == "host" ]]; then
+            _install_service
+        else
+            _skip "Service install skipped (role: $(_activation_role)) -- no configured host activation"
+        fi
         ;;
     ensure) _ensure_running ;;  # user-mode auto-run safety net (sessionStart hook) -- start if not already healthy
     stamp) do_stamp ;;
-    provision) _ensure_runtime; _install_service ;;
+    provision)
+        _ensure_runtime
+        if [[ "$(_activation_role)" == "host" ]]; then
+            _install_service
+        else
+            _skip "Service install skipped (role: $(_activation_role)) -- no configured host activation"
+        fi
+        ;;
     engine) _install_engine || true; _register_engine_daemon ;;     # explicit host-side provisioning (role-independent)
     engine-update)                                                  # rebuild durable engine venv + restart daemon (decoupled from service update)
         if _install_engine upgrade; then _restart_engine_daemon; fi ;;

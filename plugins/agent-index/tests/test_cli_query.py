@@ -3,7 +3,18 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from agent_index import __main__ as cli
+
+
+@pytest.fixture(autouse=True)
+def _configured_transport(monkeypatch):
+    """Query dispatch tests exercise handlers after activation routing."""
+    monkeypatch.setattr(
+        "agent_index.transport.maybe_delegate",
+        lambda _sub, _raw: None,
+    )
 
 
 def _hit(chunk_id: str = "chunk-1") -> SimpleNamespace:
@@ -68,6 +79,36 @@ def test_search_dispatches_and_emits_json(monkeypatch, capsys) -> None:
             "content": "def example(): pass",
         }
     ]
+
+
+def test_endpoint_client_search_uses_http_without_local_store(monkeypatch, capsys) -> None:
+    captured = {}
+
+    class FakeClient:
+        def __init__(self, url):
+            captured["url"] = url
+
+        def search(self, query, **kwargs):
+            captured["query"] = query
+            captured["kwargs"] = kwargs
+            return {"available": True, "hits": [{"chunk_id": "remote"}]}
+
+    monkeypatch.setattr("agent_index.transport.plan_route", lambda: ("client", {}))
+    monkeypatch.setattr(cli, "client_url", lambda: "http://indexer:8420")
+    monkeypatch.setattr(cli, "AgentIndexClient", FakeClient)
+
+    assert cli.main(["search", "needle", "--json"]) == 0
+    assert captured == {
+        "url": "http://indexer:8420",
+        "query": "needle",
+        "kwargs": {
+            "limit": 10,
+            "source": None,
+            "language": None,
+            "repo": None,
+        },
+    }
+    assert json.loads(capsys.readouterr().out) == [{"chunk_id": "remote"}]
 
 
 def test_similar_dispatches_and_emits_json(monkeypatch, capsys) -> None:

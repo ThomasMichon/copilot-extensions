@@ -8,6 +8,7 @@ unreachable (vision §local-first-standalone, §responsive-when-cold).
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 import pytest
 
@@ -21,6 +22,11 @@ def _iso(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENT_INDEX_ENDPOINT", raising=False)
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("AGENT_INDEX_MACHINE", "boxA")
+    monkeypatch.setattr(
+        config,
+        "repo_root",
+        lambda explicit=None: Path(explicit).resolve() if explicit else None,
+    )
     from agent_index import capability
 
     monkeypatch.setattr(
@@ -50,10 +56,57 @@ def test_client_url_prefers_configured_endpoint(_iso, monkeypatch):
     assert config.client_url() == "http://indexer:8420"
 
 
+def test_client_url_reads_endpoint_from_current_repo(_iso, monkeypatch):
+    root = _iso / "repo"
+    root.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: root)
+    monkeypatch.setattr(config, "machine_id", lambda: "client")
+    config.write_indexer_designation(
+        root,
+        "host",
+        endpoint="http://indexer:8420",
+    )
+
+    assert config.client_url() == "http://indexer:8420"
+
+
+def test_client_local_endpoint_overrides_repo_endpoint(_iso, monkeypatch):
+    root = _iso / "repo"
+    root.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: root)
+    monkeypatch.setattr(config, "machine_id", lambda: "client")
+    config.write_indexer_designation(
+        root,
+        "host",
+        endpoint="http://shared-endpoint:8420",
+    )
+    config.set_machine_config(
+        {"role": "client", "endpoint": "http://local-forward:18420"}
+    )
+
+    assert config.client_url() == "http://local-forward:18420"
+
+
 def test_host_falls_through_to_local(_iso, monkeypatch):
     # No configured endpoint (a host) -> local routing is used.
+    config.set_machine_config({"role": "host"})
     monkeypatch.setattr(config, "_routing_url", lambda: "http://127.0.0.1:8420")
     assert config.client_url() == "http://127.0.0.1:8420"
+
+
+def test_unconfigured_ignores_stale_local_routing(_iso, monkeypatch):
+    monkeypatch.setattr(config, "_routing_url", lambda: "http://127.0.0.1:8420")
+    assert config.client_url() is None
+
+
+def test_unconfigured_repo_ignores_machine_host_role(_iso, monkeypatch):
+    root = _iso / "repo"
+    root.mkdir()
+    config.set_machine_config({"role": "host"})
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: root)
+    monkeypatch.setattr(config, "_routing_url", lambda: "http://127.0.0.1:8420")
+
+    assert config.client_url() is None
 
 
 def test_host_ignores_stray_configured_endpoint(_iso, monkeypatch):
@@ -69,10 +122,11 @@ def test_host_ignores_stray_configured_endpoint(_iso, monkeypatch):
 # -- setup client routing ----------------------------------------------------
 
 
-def test_client_setup_records_explicit_endpoint(_iso):
+def test_client_setup_records_explicit_endpoint(_iso, monkeypatch):
     repo = _iso / "repo"; repo.mkdir()
     cmd_setup(_args(indexer="boxB", ssh="boxB-wsl", endpoint="http://127.0.0.1:8420",
                     repo=str(repo)))
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: repo)
     assert config.resolve_role() == "client"
     assert config.configured_endpoint() == "http://127.0.0.1:8420"
     assert config.client_url() == "http://127.0.0.1:8420"

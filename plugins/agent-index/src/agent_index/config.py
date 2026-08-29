@@ -16,6 +16,7 @@ CONFIG_ENV = "AGENT_INDEX_CONFIG"
 MACHINE_ENV = "AGENT_INDEX_MACHINE"
 REPO_ENV = "AGENT_INDEX_REPO"
 VALID_ROLES = ("host", "client")
+UNCONFIGURED_ROLE = "unconfigured"
 REPO_CONFIG_RELPATH = ".agent-index/config.yaml"
 
 
@@ -378,8 +379,10 @@ def resolve_role() -> str:
     ``client`` installs only the light, torch-free service/CLI and reaches a
     remote engine/service over the trusted transport. Precedence:
     ``AGENT_INDEX_ROLE`` env, then the machine-local config file's
-    ``role:``/``engine:`` scalar, else ``client``. The plugin encodes **no**
-    machine names -- role is pure configuration (effort agent-index-engine-daemon).
+    ``role:``/``engine:`` scalar, else ``unconfigured``. Plugin enablement
+    delivers the capability; an explicit setup/configuration activates it.
+    The plugin encodes **no** machine names -- role is pure configuration
+    (effort agent-index-engine-daemon).
     """
     env = os.environ.get(ROLE_ENV)
     if env and env.strip().lower() in VALID_ROLES:
@@ -391,7 +394,7 @@ def resolve_role() -> str:
         return "host"
     if cfg in ("none", "consumer"):
         return "client"
-    return "client"
+    return UNCONFIGURED_ROLE
 
 
 @dataclass(frozen=True)
@@ -509,8 +512,30 @@ def client_url() -> str | None:
     changes every zero-downtime generation -- a fixed host ``endpoint`` there made
     ``status``/``stop`` probe a dead static port and report the running service as
     down (#1349)."""
-    if resolve_role() == "client":
+    root = repo_root()
+    indexers = read_indexers(root) if root is not None else []
+    if indexers:
+        me = machine_id().strip().lower()
+        role = (
+            "host"
+            if any(str(item.get("machine", "")).strip().lower() == me for item in indexers)
+            else "client"
+        )
+    elif root is not None:
+        return None
+    else:
+        role = resolve_role()
+    if role == "client":
+        # Client-local routing (for example an SSH forward on a machine-specific
+        # port) overrides the shared repository designation.
         endpoints = configured_endpoints()
+        if not endpoints:
+            endpoints = [
+                str(item["endpoint"]).strip()
+                for item in indexers
+                if isinstance(item.get("endpoint"), str)
+                and str(item["endpoint"]).strip()
+            ]
         if len(endpoints) > 1:
             # Ordered failover across the designated indexers (primary first): use
             # the first reachable one, so a down primary or a broken SSH hop
@@ -526,6 +551,8 @@ def client_url() -> str | None:
             # Single configured target (singular ``endpoint:`` or a one-element
             # ``endpoints:`` list): returned as-is, never health-probed (back-compat).
             return endpoints[0]
+    elif role != "host":
+        return None
 
     routed = _routing_url()
     if routed:

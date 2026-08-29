@@ -82,8 +82,26 @@ def cmd_status(_args: argparse.Namespace) -> int:
 
 
 def cmd_installer_readiness(_args: argparse.Namespace) -> int:
-    from .installer_readiness import emit, evaluate, inspect_configuration
+    from . import transport
+    from .installer_readiness import (
+        client_configured,
+        client_transport_missing,
+        emit,
+        evaluate,
+        inspect_configuration,
+        unconfigured,
+    )
 
+    role, _indexer = transport.plan_route()
+    if role == "unconfigured":
+        return emit(unconfigured())
+    if role == "client":
+        result = (
+            client_configured()
+            if transport.has_usable_client_transport()
+            else client_transport_missing()
+        )
+        return emit(result)
     return emit(evaluate(_status_payload(), inspect_configuration()))
 
 
@@ -101,10 +119,10 @@ def cmd_mcp(_args: argparse.Namespace) -> int:
 
 
 def cmd_role(args: argparse.Namespace) -> int:
-    """Print this machine's resolved agent-index role (host/client)."""
-    from agent_index.config import resolve_role
+    """Print the current repository's resolved agent-index activation role."""
+    from agent_index.transport import plan_route
 
-    role = resolve_role()
+    role, _indexer = plan_route()
     if getattr(args, "json", False):
         return _emit({"role": role})
     print(role)
@@ -446,6 +464,24 @@ def cmd_index_worker(args: argparse.Namespace) -> int:
 
 def cmd_search(args: argparse.Namespace) -> int:
     try:
+        from agent_index import transport
+
+        role, _indexer = transport.plan_route()
+        if role == "client":
+            url = client_url()
+            if not url:
+                raise RuntimeError("configured client endpoint is unavailable")
+            payload = AgentIndexClient(url).search(
+                args.query,
+                limit=args.limit,
+                source=args.source,
+                language=args.language,
+                repo=args.repo,
+            )
+            if not payload.get("available", False):
+                raise RuntimeError(payload.get("error") or "remote search unavailable")
+            return _emit(payload.get("hits", []))
+
         from agent_index.search import engine as search_engine
 
         if not args.json and sys.stdout.isatty():
@@ -473,6 +509,22 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 def cmd_similar(args: argparse.Namespace) -> int:
     try:
+        from agent_index import transport
+
+        role, _indexer = transport.plan_route()
+        if role == "client":
+            url = client_url()
+            if not url:
+                raise RuntimeError("configured client endpoint is unavailable")
+            payload = AgentIndexClient(url).similar(
+                args.chunk_id,
+                limit=args.limit,
+                source=args.source,
+            )
+            if not payload.get("available", False):
+                raise RuntimeError(payload.get("error") or "remote similarity unavailable")
+            return _emit(payload.get("hits", []))
+
         from agent_index.search import engine as search_engine
 
         engine = search_engine.create_search_engine()
@@ -484,6 +536,24 @@ def cmd_similar(args: argparse.Namespace) -> int:
 
 def cmd_clusters(args: argparse.Namespace) -> int:
     try:
+        from agent_index import transport
+
+        role, _indexer = transport.plan_route()
+        if role == "client":
+            url = client_url()
+            if not url:
+                raise RuntimeError("configured client endpoint is unavailable")
+            payload = AgentIndexClient(url).clusters(
+                source=args.source,
+                bucket=args.bucket,
+                model=args.model,
+                exact_dupes_only=args.exact_dupes_only,
+                limit=args.limit,
+            )
+            if not payload.get("available", False):
+                raise RuntimeError(payload.get("error") or "remote clusters unavailable")
+            return _emit(payload.get("clusters", []))
+
         from agent_index.index_config import IndexConfig
         from agent_index.store.cluster_store import ClusterStore
         from agent_index.store.clustering import source_bucket
@@ -710,7 +780,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_engine.set_defaults(func=cmd_engine)
 
     p_role = sub.add_parser(
-        "role", help="print this machine's resolved agent-index role (host/client)"
+        "role",
+        help="print the resolved agent-index role (host/client/unconfigured)",
     )
     p_role.add_argument("--json", action="store_true", help="emit the role as JSON")
     p_role.set_defaults(func=cmd_role)

@@ -15,16 +15,19 @@ service, or retrieval through its read CLI.
 
 ## Readiness
 
-- The plugin self-provisions. A new session's hook stamps a self-provisioning
-payload command when needed; the first command call provisions the runtime
+- The plugin self-provisions only for a repository that has explicitly adopted
+  agent-index with `.agent-index/config.yaml`. Merely enabling the plugin leaves
+  it inactive. A configured session's hook stamps a self-provisioning payload
+  command when needed; the first command call provisions the runtime
 (`::agent-provisioning::`, usually ~30-120s). If the command is missing, the
 session command catalog reports it as unavailable; surface that exact failure
 rather than searching `PATH` or improvising an install.
-- `<catalog argv[0]> status` is the first health check. It reports service reachability,
+- `<catalog argv[0]> status` is the first health check in a configured
+  repository. It reports service reachability,
 version, index availability, total chunks, per-source coverage, and indexing
 state.
-- `<catalog argv[0]> role` tells whether this machine is a `host` (local daemon) or a
-`client` (read commands route to the designated indexer over SSH).
+- `<catalog argv[0]> role` reports `host` (local daemon), `client` (read commands
+  route to the designated indexer over SSH), or `unconfigured`.
 
 ## Retrieval path
 

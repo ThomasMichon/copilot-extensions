@@ -30,6 +30,22 @@ if ($InstallDir) {
     $PSBoundParameters['InstallDir'] = $InstallDir
 }
 
+# Preserve the invoking repository across the install-contract self-stage,
+# whose child intentionally runs from a copied payload directory.
+if (-not $env:AGENT_INDEX_REPO) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = 'Continue'
+        $candidate = @(& git rev-parse --show-toplevel 2>$null)
+        if ($LASTEXITCODE -eq 0 -and $candidate.Count -gt 0) {
+            $resolved = ("$($candidate[-1])").Trim()
+            if ($resolved) { $env:AGENT_INDEX_REPO = $resolved }
+        }
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
 $probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
     [IO.Path]::GetFullPath($env:COPILOT_PLUGIN_STAGED_FROM)
 } else {
@@ -863,7 +879,7 @@ function Install-Runtime {
     # (lancedb/pyarrow/tree-sitter/numpy) it needs to read/write the index --
     # those have no Windows-ARM64 wheels and are unneeded (and unbuildable) on a
     # client, so gating keeps an ARM64 client provisionable.
-    $pkgSpec = if ((Get-InstallRole) -eq 'client') { "$PluginDir" } else { "$PluginDir[store]" }
+    $pkgSpec = if ((Get-InstallRole) -eq 'host') { "$PluginDir[store]" } else { "$PluginDir" }
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $out = & uv pip install --python $VenvPython $pkgSpec 2>&1 | Out-String
     } else {
@@ -949,32 +965,20 @@ function Write-Manifest {
     Write-Ok "Deploy manifest written (source: $kind)"
 }
 
-function Get-InstallRole {
-    # host runs the engine + the local indexer service; a client runs NEITHER
-    # (its MCP/CLI route to the designated host over SSH). Precedence:
-    # AGENT_INDEX_ROLE env, then the CLI resolver run from the ACTIVE
-    # (current-version marker) slot -- NOT $LinkPython, whose build slot may not
-    # exist when this install.ps1's version differs from the active one (#1504) --
-    # then a venv-free machine-local config.yaml read, else client.
+function Get-MachineRole {
+    # Explicit machine-level role used by bare management calls and to preserve
+    # an already-configured host runtime during updates from another repo.
     if ($env:AGENT_INDEX_ROLE) {
         $r = ($env:AGENT_INDEX_ROLE).Trim().ToLower()
         if ($r -in @('host', 'client')) { return $r }
     }
-    $rolePy = Get-ActiveSlotPython
-    if (Test-Path $rolePy) {
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $out = & $rolePy -m agent_index role 2>$null
-        $ErrorActionPreference = $prevEAP
-        if ($LASTEXITCODE -eq 0 -and $out) {
-            $r = ("$out" -replace '\s', '').ToLower()
-            if ($r -in @('host', 'client')) { return $r }
-        }
+    $cfg = if ($env:AGENT_INDEX_CONFIG) {
+        $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+            $env:AGENT_INDEX_CONFIG
+        )
+    } else {
+        Join-Path $InstallDir 'config.yaml'
     }
-    # Venv-free fallback: read the machine-local config.yaml role:/engine: scalar
-    # directly (mirrors config.resolve_role + ensure-service.ps1), so role resolves
-    # even when no slot python is available (a snapshot whose venv isn't built).
-    $cfg = Join-Path $InstallDir 'config.yaml'
     if (Test-Path $cfg) {
         $rm = Select-String -Path $cfg -Pattern '^\s*(?:role|engine)\s*:\s*"?([A-Za-z]+)"?' -ErrorAction SilentlyContinue | Select-Object -First 1
         if ($rm) {
@@ -984,7 +988,56 @@ function Get-InstallRole {
             if ($r -in @('none', 'consumer')) { return 'client' }
         }
     }
-    return 'client'
+    return 'unconfigured'
+}
+
+function Get-ActivationRole {
+    # Session/install activation is repo-scoped. A checked-out repository must
+    # explicitly designate its indexer(s); no designation means unconfigured,
+    # regardless of another repo's machine-global host role.
+    $repoRoot = if ($env:AGENT_INDEX_REPO) {
+        [IO.Path]::GetFullPath($env:AGENT_INDEX_REPO)
+    } else {
+        $previousPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = 'Continue'
+            $candidate = @(& git rev-parse --show-toplevel 2>$null)
+            if ($LASTEXITCODE -eq 0 -and $candidate.Count -gt 0) {
+                ("$($candidate[-1])").Trim()
+            } else {
+                ''
+            }
+        } finally {
+            $ErrorActionPreference = $previousPreference
+        }
+    }
+    if (-not $repoRoot) { return Get-MachineRole }
+    $repoConfig = Join-Path $repoRoot '.agent-index\config.yaml'
+    if (-not (Test-Path -LiteralPath $repoConfig -PathType Leaf)) {
+        return 'unconfigured'
+    }
+    $me = if ($env:AGENT_INDEX_MACHINE) {
+        $env:AGENT_INDEX_MACHINE.Trim().ToLower()
+    } else {
+        [Environment]::MachineName.Trim().ToLower()
+    }
+    $python = Get-Command python.exe -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
+    if (-not $python) { return 'unconfigured' }
+    $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
+    $role = (& $python.Source $resolver --config $repoConfig --machine $me 2>$null |
+        Select-Object -Last 1)
+    $role = ("$role").Trim().ToLower()
+    return $(if ($role -in @('host', 'client')) { $role } else { 'unconfigured' })
+}
+
+function Get-InstallRole {
+    # Preserve host/store dependencies whenever this machine explicitly owns a
+    # host runtime, even if the update was invoked from a client/unconfigured
+    # repository. This keeps a permitted cutover from activating a light slot.
+    $machineRole = Get-MachineRole
+    if ($machineRole -eq 'host') { return 'host' }
+    return Get-ActivationRole
 }
 
 function Test-EnginePort {
@@ -1425,8 +1478,9 @@ function Ensure-ServiceRunning {
     # engine gate in Ensure-Running and the single-host-service architecture
     # (docs/architecture.md: a fleet fans in SSH forwards to ONE host service,
     # never a fleet of listeners).
-    if ((Get-InstallRole) -ne 'host') {
-        Write-Skip 'Local indexer service skipped (role: client) -- a client runs no local daemon; MCP/CLI route to the designated host over SSH'
+    $role = Get-ActivationRole
+    if ($role -ne 'host') {
+        Write-Skip "Local indexer service skipped (role: $role) -- only an explicitly configured host runs a local daemon"
         return
     }
     # Deploy the ACTIVE (current-version marker) slot -- NOT $LinkPython (this
@@ -1457,7 +1511,7 @@ function Ensure-Running {
     # install/update/start and the sessionStart `ensure`. A host runs the engine
     # then the local service; a client runs neither (Ensure-ServiceRunning
     # self-gates on role), so this is a no-op on a client.
-    if ((Get-InstallRole) -eq 'host') { Ensure-EngineRunning }
+    if ((Get-ActivationRole) -eq 'host') { Ensure-EngineRunning }
     Ensure-ServiceRunning
 }
 
@@ -1470,8 +1524,14 @@ function Invoke-ServiceCutover {
     # routing, drains, and retires the old -- so activation moves the service to the
     # new version with no operator step (invariant #1). No live service -> start one.
     if ($NoService) { Write-Skip 'Service cutover skipped (-NoService)'; return }
-    if ((Get-InstallRole) -ne 'host') {
-        Write-Skip 'Service cutover skipped (role: client) -- a client runs no local daemon'
+    $role = Get-ActivationRole
+    $maintainExistingHost = (
+        $role -ne 'host' -and
+        (Get-MachineRole) -eq 'host' -and
+        (Test-ServiceHealthy)
+    )
+    if ($role -ne 'host' -and -not $maintainExistingHost) {
+        Write-Skip "Service cutover skipped (role: $role) -- only an explicitly configured host or an already-running host service is updated"
         return
     }
     if (-not (Test-Path $LinkPython)) { Write-Skip 'Runtime not installed -- service not cut over'; return }
@@ -1583,7 +1643,7 @@ function Invoke-Uninstall {
 switch ($Action) {
     'install' {
         Install-Runtime
-        $role = Get-InstallRole
+        $role = Get-ActivationRole
         if ($role -eq 'host') {
             Install-Engine | Out-Null
         } else {
@@ -1600,7 +1660,7 @@ switch ($Action) {
         # rebuilds or restarts it, and the new service reconnects to the same warm
         # engine. Ensure-EngineRunning leaves a serving engine untouched and only
         # starts one if it is down, so the cutover always has a reconnect target.
-        if ((Get-InstallRole) -eq 'host') { Ensure-EngineRunning }
+        if ((Get-ActivationRole) -eq 'host') { Ensure-EngineRunning }
         # Service: installer-driven zdd cutover -- move a live (even healthy) service
         # to the new slot, rather than leaving stale code serving.
         Invoke-ServiceCutover

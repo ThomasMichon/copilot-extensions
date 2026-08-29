@@ -6,23 +6,22 @@
 # safe: a healthy daemon returns immediately; an unhealthy one kicks a BACKGROUND
 # `install.sh ensure` and returns without blocking session start.
 set -u
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 INSTALL_DIR="$HOME/.agent-index"
 # Only act on a box where agent-index is actually deployed.
 [ -f "$INSTALL_DIR/deploy-manifest.json" ] || exit 0
 
-# A client runs NO local indexer daemon -- its MCP/CLI route to the designated
-# host's service over SSH -- so there is nothing to keep alive here. Skip fast
-# (no background install.sh spawn) on any non-host. Mirrors config.resolve_role
-# precedence: a VALID AGENT_INDEX_ROLE env (host/client) wins; otherwise the
-# config.yaml role:/engine: scalar; else client. An unrecognized env value is
-# ignored (falls through), never treated as a role.
-role=""
-envrole="$(printf '%s' "${AGENT_INDEX_ROLE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
-case "$envrole" in
-    host|client) role="$envrole" ;;
-    *) [ -f "$INSTALL_DIR/config.yaml" ] && role="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*"\?\([A-Za-z]\+\)"\?.*/\2/p' "$INSTALL_DIR/config.yaml" | head -n1 | tr '[:upper:]' '[:lower:]')" ;;
-esac
-case "$role" in host|engine|server|indexer) : ;; *) exit 0 ;; esac
+# Session start is repository-scoped activation. Merely enabling the plugin
+# must not start a machine-global daemon in an unrelated repository.
+repo_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$repo_root" ] || exit 0
+repo_config="$repo_root/.agent-index/config.yaml"
+[ -f "$repo_config" ] || exit 0
+me="$(printf '%s' "${AGENT_INDEX_MACHINE:-$(hostname -s)}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+py="$(command -v python3 || command -v python || true)"
+[ -n "$py" ] || exit 0
+role="$("$py" "$script_dir/resolve-activation-role.py" --config "$repo_config" --machine "$me" 2>/dev/null || true)"
+[ "$role" = "host" ] || exit 0
 
 # Fast health probe on the LIVE routing endpoint (active.json ephemeral port).
 # Resolve the runtime's OWN slot python via the canonical marker-only resolver

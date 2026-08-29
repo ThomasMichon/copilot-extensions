@@ -54,6 +54,21 @@ def test_plan_route_designation_compare_is_case_insensitive(monkeypatch):
     assert role == "host"
 
 
+def test_plan_route_secondary_indexer_is_host(monkeypatch):
+    _patch_multi(
+        monkeypatch,
+        root="/repo",
+        indexers=[
+            {"machine": "primary", "ssh": "primary"},
+            {"machine": "secondary", "ssh": "secondary"},
+        ],
+        machine="secondary",
+    )
+    role, indexer = transport.plan_route()
+    assert role == "host"
+    assert indexer["machine"] == "primary"
+
+
 def test_plan_route_no_project_falls_back_to_machine_role_host(monkeypatch):
     # No project/indexer (e.g. the delegated command running in the host's home
     # dir over SSH) -> machine-global role decides; host runs local => recursion
@@ -68,6 +83,13 @@ def test_plan_route_no_project_falls_back_to_machine_role_client(monkeypatch):
     _patch(monkeypatch, root=None, indexer=None, machine="client-host", role="client")
     role, indexer = transport.plan_route()
     assert role == "client"
+    assert indexer is None
+
+
+def test_plan_route_project_without_indexer_is_unconfigured(monkeypatch):
+    _patch(monkeypatch, root="/repo", indexer=None, machine="client-host", role="host")
+    role, indexer = transport.plan_route()
+    assert role == "unconfigured"
     assert indexer is None
 
 
@@ -91,11 +113,65 @@ def test_maybe_delegate_client_no_project_errors(monkeypatch, capsys):
     assert "no indexer transport" in out
 
 
-def test_maybe_delegate_in_project_without_indexer_runs_local(monkeypatch):
-    # Inside a repo with no indexer designation (e.g. copilot-extensions itself)
-    # -> run local; never intercept direct CLI dispatch, even on a client box.
+def test_maybe_delegate_in_project_without_indexer_is_unconfigured(monkeypatch, capsys):
     _patch(monkeypatch, root="/repo", indexer=None, machine="anybox", role="client")
+    assert transport.maybe_delegate("search", ["search", "q"]) == 1
+    assert "no usable indexer transport" in capsys.readouterr().out
+
+
+def test_maybe_delegate_endpoint_only_client_runs_local_handler(monkeypatch):
+    _patch(
+        monkeypatch,
+        root="/repo",
+        indexer={"machine": "indexer-host", "endpoint": "http://indexer:8420"},
+        machine="client-host",
+    )
+    assert transport.maybe_delegate("status", ["status"]) is None
+
+
+def test_machine_local_endpoint_precedes_repo_ssh(monkeypatch):
+    _patch(
+        monkeypatch,
+        root="/repo",
+        indexer={"machine": "indexer-host", "ssh": "indexer-host"},
+        machine="client-host",
+    )
+    monkeypatch.setattr(
+        transport.config,
+        "configured_endpoints",
+        lambda: ["http://local-forward:18420"],
+    )
+    monkeypatch.setattr(
+        transport,
+        "_delegate_over_ssh",
+        lambda *_args: (_ for _ in ()).throw(
+            AssertionError("SSH must not run when a client-local endpoint exists")
+        ),
+    )
+
     assert transport.maybe_delegate("search", ["search", "q"]) is None
+
+
+def test_machine_local_endpoint_satisfies_client_readiness(monkeypatch):
+    _patch(
+        monkeypatch,
+        root="/repo",
+        indexer={"machine": "indexer-host"},
+        machine="client-host",
+    )
+    monkeypatch.setattr(
+        transport.config,
+        "configured_endpoints",
+        lambda: ["http://local-forward:18420"],
+    )
+
+    assert transport.has_usable_client_transport()
+
+
+def test_maybe_delegate_bare_unconfigured_errors(monkeypatch, capsys):
+    _patch(monkeypatch, root=None, indexer=None, machine="anybox", role="unconfigured")
+    assert transport.maybe_delegate("status", ["status"]) == 1
+    assert "not configured on this machine" in capsys.readouterr().out
 
 
 def test_maybe_delegate_bare_host_runs_local(monkeypatch):
