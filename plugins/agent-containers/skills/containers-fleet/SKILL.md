@@ -178,7 +178,7 @@ explicit `acp_command` and forwards neither host credential path.
 For a named restricted OpenSSH target:
 
 ```bash
-<catalog argv[0]> ssh-profile restricted-worker-1 --alias sandbox
+<catalog argv prefix> ssh-profile restricted-worker-1 --alias sandbox
 ssh sandbox "command"
 ```
 
