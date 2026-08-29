@@ -1,11 +1,19 @@
 ---
 name: agent-ssh
 description: >-
-  Create and verify machine-name SSH profiles for the agent fabric, and use the
-  transport-provider contract for direct or tunnel transports. Use when deriving
-  ~/.ssh/config from a registry, validating reachability, adopting a machine into
-  an SSH mesh, exploring a reachable SSH target, or authoring a transport
-  module.yaml. Trigger phrases include:
+  Create, verify, and use machine-name SSH profiles for the agent fabric, and
+  use the transport-provider contract for direct or tunnel transports. Use when
+  deriving ~/.ssh/config from a registry, validating reachability, adopting a
+  machine into an SSH mesh, exploring or connecting to a reachable SSH target,
+  running remote commands, launching agents on remote nodes, or authoring a
+  transport module.yaml. Trigger phrases include:
+  - "ssh"
+  - "remote command"
+  - "run on"
+  - "connect to"
+  - "other machine"
+  - "remote machine"
+  - "launch on"
   - "derive SSH config"
   - "audit agent-ssh fragments"
   - "verify SSH reachability"
@@ -92,6 +100,21 @@ A failure is fail-safe: the host is not considered reachable until the probe
 succeeds. A confirmed-stale managed alias is rejected before the network probe;
 ordinary connection failure remains reachability status and does not classify
 the fragment as stale.
+
+## Use a configured target
+
+Once a machine-name profile is present and verified, use that configured name
+rather than an IP address:
+
+```bash
+ssh <machine> "<command>"
+```
+
+Match the command syntax to the target shell reported by the machine registry
+or `<catalog argv[0]> explore <machine>`. To launch a repository's agent entry
+point remotely, invoke that repository's published binstub through the same
+profile. Transport setup and repair remain in the dedicated client, host, key,
+and troubleshooting skills shipped by this plugin.
 
 ## Explore a machine
 
