@@ -116,6 +116,21 @@ def test_parse_windows_process_inventory_accepts_single_or_array_payload():
             command_line="python -V",
         )
     ]
+    array = parse_windows_process_json(
+        '[{"ProcessId":20,"ParentProcessId":2,'
+        '"ExecutablePath":"C:\\\\Python\\\\python.exe","CommandLine":"python -V"},'
+        '{"ProcessId":21,"ParentProcessId":20,'
+        '"ExecutablePath":null,"CommandLine":null}]'
+    )
+    assert array == [
+        WindowsProcess(
+            pid=20,
+            parent_pid=2,
+            executable=r"C:\Python\python.exe",
+            command_line="python -V",
+        ),
+        WindowsProcess(pid=21, parent_pid=20),
+    ]
 
 
 def test_retirement_terminates_every_selected_generation():

@@ -1205,19 +1205,27 @@ function Retire-SupervisorProcessesFallback {
                 $launcher,
                 [StringComparison]::OrdinalIgnoreCase
             ) -ge 0
-            $isSupervisor = $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
-            $isSupersededProducer = $false
-            if (
-                $currentPython -and
-                $row.ExecutablePath -and
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve|schedule\s+serve|webhook(?:\s|$))'
-            ) {
+            $exe = $null
+            $underRoot = $false
+            if ($row.ExecutablePath) {
                 try {
                     $exe = [IO.Path]::GetFullPath([string]$row.ExecutablePath)
                     $underRoot = $exe.StartsWith(
                         ([IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'),
                         [StringComparison]::OrdinalIgnoreCase
                     )
+                } catch { }
+            }
+            $isSupervisor = $underRoot -and (
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
+            )
+            $isSupersededProducer = $false
+            if (
+                $currentPython -and
+                $underRoot -and
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve|schedule\s+serve|webhook(?:\s|$))'
+            ) {
+                try {
                     $isSupersededProducer = $underRoot -and -not $exe.Equals(
                         $currentPython,
                         [StringComparison]::OrdinalIgnoreCase

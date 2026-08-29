@@ -449,3 +449,4 @@ class TestWindowsSupervisorInstall:
         assert "Stop-Process -Id $pid" in helper
         assert "$isSupersededProducer" in helper
         assert "$currentPython" in helper
+        assert "$isSupervisor = $underRoot -and (" in helper
