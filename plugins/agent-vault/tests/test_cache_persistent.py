@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -320,6 +321,45 @@ def test_ambiguous_rotation_evicts_memory_when_live_read_fails(
     assert persistent.get("A/x", "password") is None
     assert cache_key not in svc.cache
     assert cache_key not in svc._credential_generations
+
+
+def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    writes = []
+
+    class Backend:
+        @staticmethod
+        def edit_password(_kpdb, _entry, password):
+            writes.append(password)
+            return True, "updated"
+
+    monkeypatch.setattr(service, "get_cache", lambda: persistent)
+    svc = _rotation_service(Backend(), monkeypatch)
+    result = {}
+
+    def rotate():
+        result.update(svc._set_password(
+            "vault.kdbx",
+            "A/x",
+            "new",
+            "",
+            "test",
+            max_queue_seconds=0.01,
+        ))
+
+    with svc._credential_lock:
+        rotator = threading.Thread(target=rotate)
+        rotator.start()
+        time.sleep(0.05)
+    rotator.join(timeout=5)
+
+    assert result == {
+        "ok": False,
+        "error": "Password mutation expired before the backend write",
+    }
+    assert writes == []
+    assert persistent.get("A/x", "password") == "old"
 
 
 def test_cli_keeps_journal_after_ambiguous_transport(enabled_cache, monkeypatch, capsys):
