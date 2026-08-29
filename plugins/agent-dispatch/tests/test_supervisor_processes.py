@@ -98,6 +98,12 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
             old_python,
             rf'"{old_python}" -m agent_dispatch emitter tick "emitter.json"',
         ),
+        _proc(
+            302,
+            1,
+            old_python,
+            rf'"{old_python}" -m agent_dispatch supervise list',
+        ),
     ]
 
     selected = select_supervisor_generation_pids(processes, INSTALL_DIR)
@@ -106,6 +112,7 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
     assert selected.index(102) < selected.index(103) < selected.index(105)
     assert 300 not in selected
     assert 301 not in selected
+    assert 302 not in selected
     assert 201 not in selected
     assert 202 not in selected
 

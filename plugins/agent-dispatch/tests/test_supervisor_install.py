@@ -450,6 +450,7 @@ class TestWindowsSupervisorInstall:
         assert "$isRegistrarChild" in helper
         assert "$supervisorRun" in helper
         assert "$isSupervisor = $underRoot -and (" in helper
+        assert "supervise(?=\\s*(?:$|serve(?:\\s|$)|-))" in helper
         assert "$enumerationFailed" in helper
         assert "if ($rc -eq 0 -or -not $enumerationFailed)" in helper
         assert "emitter\\s+serve(?:\\s|$)" in helper

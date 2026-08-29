@@ -1214,7 +1214,7 @@ function Retire-SupervisorProcessesFallback {
                 } catch { }
             }
             $isSupervisor = $underRoot -and (
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?=\s*(?:$|serve(?:\s|$)|-))'
             )
             $isRegistrarChild = $underRoot -and (
                 $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve(?:\s|$)|schedule\s+serve(?:\s|$)|webhook(?:\s|$))'
