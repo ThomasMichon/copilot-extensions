@@ -14,6 +14,38 @@ REPO = Path(__file__).resolve().parents[3]
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
+def _find_supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    command = shutil.which("bash")
+    if command is None:
+        return None
+    version = subprocess.run(
+        [
+            command,
+            "--noprofile",
+            "--norc",
+            "-c",
+            'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=5,
+    )
+    if version.returncode != 0:
+        return None
+    try:
+        major, minor = (int(part) for part in version.stdout.split(".", 1))
+    except ValueError:
+        return None
+    return command if (major, minor) >= (4, 4) else None
+
+
+BASH = _find_supported_bash()
+
+
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
@@ -154,8 +186,9 @@ def _run(
     bootstrap = payload / "scripts" / "installation-context"
     legacy_root = profile / ".agent-example"
     if runner == "posix":
+        assert BASH is not None
         command = [
-            "bash",
+            BASH,
             str(bootstrap / "legacy-entrypoint-probe.sh"),
             "--payload-root",
             str(payload),
@@ -198,7 +231,7 @@ def _run(
     )
 
 
-RUNNERS = ["posix"] + (["powershell"] if POWERSHELL else [])
+RUNNERS = (["posix"] if BASH else []) + (["powershell"] if POWERSHELL else [])
 
 
 @pytest.mark.parametrize("runner", RUNNERS)

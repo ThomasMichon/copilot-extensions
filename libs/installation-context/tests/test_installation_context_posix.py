@@ -1,14 +1,18 @@
 """Python and dependency-light POSIX installation-context parity tests."""
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
+import traceback
 from pathlib import Path
 
 import pytest
@@ -17,23 +21,184 @@ LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
 FIXTURES = LIB / "fixtures" / "source-identities.json"
+POWERSHELL_TEST_HOST = Path(__file__).with_name("powershell-test-host.ps1")
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 POWERSHELL_COMMAND = (
     (
         str(POWERSHELL),
         "-NoProfile",
+        "-NoLogo",
+        "-NonInteractive",
         "-File",
         str(LIB / "installation-context.ps1"),
     )
     if POWERSHELL is not None
     else None
 )
+
+
+def _find_supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    command = shutil.which("bash")
+    if command is None:
+        return None
+    version = subprocess.run(
+        [
+            command,
+            "--noprofile",
+            "--norc",
+            "-c",
+            'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=5,
+    )
+    if version.returncode != 0:
+        return None
+    try:
+        major, minor = (int(part) for part in version.stdout.split(".", 1))
+    except ValueError:
+        return None
+    return command if (major, minor) >= (4, 4) else None
+
+
+BASH = _find_supported_bash()
 RUNNERS = (
     ("python", (sys.executable, str(PYTHON_SCRIPT))),
-    ("posix", (str(POSIX_SCRIPT),)),
+    *((("posix", (BASH, str(POSIX_SCRIPT))),) if BASH else ()),
 )
 PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
+_POWERSHELL_HOST: _PowerShellTestHost | None = None
+_PYTHON_RUNNER_MODULE = None
+
+
+class _PowerShellTestHost:
+    """Run each request in a fresh runspace inside one bounded PowerShell host."""
+
+    def __init__(self) -> None:
+        assert POWERSHELL is not None
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        self._process = subprocess.Popen(
+            [
+                str(POWERSHELL),
+                "-NoProfile",
+                "-NoLogo",
+                "-NonInteractive",
+                "-File",
+                str(POWERSHELL_TEST_HOST),
+                "-ScriptPath",
+                str(LIB / "installation-context.ps1"),
+                "-TimeoutSeconds",
+                "30",
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            bufsize=1,
+            creationflags=creationflags,
+        )
+        self._lock = threading.Lock()
+        self._next_request_id = 1
+
+    def run(
+        self,
+        arguments: tuple[str, ...],
+        environment: dict[str, str] | None,
+    ) -> subprocess.CompletedProcess[str]:
+        assert self._process.stdin is not None
+        assert self._process.stdout is not None
+        with self._lock:
+            if self._process.poll() is not None:
+                raise AssertionError(self._failure_message("exited before a request"))
+            request_id = self._next_request_id
+            self._next_request_id += 1
+            self._process.stdin.write(
+                json.dumps(
+                    {
+                        "id": request_id,
+                        "arguments": arguments,
+                        "environment": environment or {},
+                    },
+                    separators=(",", ":"),
+                )
+                + "\n"
+            )
+            self._process.stdin.flush()
+
+            response_line: list[str] = []
+
+            def read_response() -> None:
+                response_line.append(self._process.stdout.readline())
+
+            reader = threading.Thread(target=read_response, daemon=True)
+            reader.start()
+            reader.join(timeout=35)
+            if reader.is_alive():
+                self._terminate()
+                raise subprocess.TimeoutExpired(
+                    [*POWERSHELL_COMMAND, *arguments],
+                    timeout=35,
+                )
+            if not response_line or not response_line[0]:
+                raise AssertionError(self._failure_message("closed without a response"))
+            response = json.loads(response_line[0])
+            if response.get("id") != request_id:
+                raise AssertionError(
+                    f"PowerShell test host response id mismatch: {response!r}"
+                )
+            return subprocess.CompletedProcess(
+                [*POWERSHELL_COMMAND, *arguments],
+                int(response["returncode"]),
+                str(response["stdout"]),
+                str(response["stderr"]),
+            )
+
+    def close(self) -> None:
+        with self._lock:
+            if self._process.poll() is None and self._process.stdin is not None:
+                try:
+                    self._process.stdin.write('{"shutdown":true}\n')
+                    self._process.stdin.flush()
+                    self._process.wait(timeout=5)
+                except (BrokenPipeError, subprocess.TimeoutExpired):
+                    self._terminate()
+            self._close_pipes()
+
+    def _failure_message(self, reason: str) -> str:
+        stderr = ""
+        if self._process.stderr is not None and self._process.poll() is not None:
+            stderr = self._process.stderr.read()
+        return f"PowerShell test host {reason}: {stderr}"
+
+    def _terminate(self) -> None:
+        if self._process.poll() is None:
+            self._process.kill()
+            self._process.wait(timeout=5)
+
+    def _close_pipes(self) -> None:
+        for stream in (
+            self._process.stdin,
+            self._process.stdout,
+            self._process.stderr,
+        ):
+            if stream is not None:
+                stream.close()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bounded_powershell_host() -> None:
+    yield
+    global _POWERSHELL_HOST
+    if _POWERSHELL_HOST is not None:
+        _POWERSHELL_HOST.close()
+        _POWERSHELL_HOST = None
 
 
 @pytest.mark.parametrize(
@@ -82,6 +247,60 @@ def _load_python_module():
     return module
 
 
+def _run_python_in_process(
+    arguments: tuple[str, ...],
+    environment: dict[str, str] | None,
+) -> subprocess.CompletedProcess[str]:
+    global _PYTHON_RUNNER_MODULE
+    if _PYTHON_RUNNER_MODULE is None:
+        _PYTHON_RUNNER_MODULE = _load_python_module()
+    tracked_names = {
+        "COPILOT_EXTENSIONS_CONTEXT",
+        "COPILOT_PLUGIN_ROOT",
+        *(environment or {}),
+    }
+    original_environment = {name: os.environ.get(name) for name in tracked_names}
+    for name in tracked_names:
+        os.environ.pop(name, None)
+    if environment:
+        os.environ.update(environment)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            try:
+                returncode = int(_PYTHON_RUNNER_MODULE.main(arguments))
+            except SystemExit as error:
+                returncode = int(error.code or 0)
+            except Exception:
+                traceback.print_exc()
+                returncode = 1
+    finally:
+        for name, value in original_environment.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    return subprocess.CompletedProcess(
+        [*PYTHON_COMMAND, *arguments],
+        returncode,
+        stdout.getvalue(),
+        stderr.getvalue(),
+    )
+
+
+def _is_powershell_installation_context_command(command: tuple[str, ...]) -> bool:
+    if POWERSHELL is None or "-File" not in command:
+        return False
+    script_index = command.index("-File") + 1
+    return (
+        script_index < len(command)
+        and Path(command[0]).resolve() == Path(POWERSHELL).resolve()
+        and Path(command[script_index]).resolve()
+        == (LIB / "installation-context.ps1").resolve()
+    )
+
+
 def _vectors() -> list[dict[str, object]]:
     return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
 
@@ -91,20 +310,31 @@ def _run(
     *arguments: object,
     env: dict[str, str] | None = None,
     check: bool = True,
+    direct: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     process_env = os.environ.copy()
     process_env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     process_env.pop("COPILOT_PLUGIN_ROOT", None)
     if env:
         process_env.update(env)
-    result = subprocess.run(
-        [*command, *(str(argument) for argument in arguments)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=process_env,
-        check=False,
-    )
+    string_arguments = tuple(str(argument) for argument in arguments)
+    if not direct and command == PYTHON_COMMAND:
+        result = _run_python_in_process(string_arguments, env)
+    elif not direct and _is_powershell_installation_context_command(command):
+        global _POWERSHELL_HOST
+        if _POWERSHELL_HOST is None:
+            _POWERSHELL_HOST = _PowerShellTestHost()
+        result = _POWERSHELL_HOST.run(string_arguments, env)
+    else:
+        result = subprocess.run(
+            [*command, *string_arguments],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=process_env,
+            check=False,
+            timeout=30,
+        )
     if check and result.returncode:
         raise AssertionError(
             f"{command[0]} failed ({result.returncode}):\n"
@@ -362,6 +592,45 @@ def test_python_lock_release_does_not_mask_mutation_failure(tmp_path: Path) -> N
         with pytest.raises(RuntimeError, match="primary mutation failure"):
             with lock:
                 raise RuntimeError("primary mutation failure")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process semantics are required")
+def test_windows_pid_liveness_probe_does_not_signal_the_process() -> None:
+    module = _load_python_module()
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        creationflags=creationflags,
+    )
+    try:
+        assert module._pid_is_live(process.pid) is True
+        assert process.poll() is None
+        process.terminate()
+        process.wait(timeout=5)
+        assert module._pid_is_live(process.pid) is False
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=5)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows process semantics are required")
+def test_windows_pid_liveness_does_not_confuse_exit_code_259() -> None:
+    module = _load_python_module()
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    process = subprocess.Popen(
+        [sys.executable, "-c", "import os; os._exit(259)"],
+        creationflags=creationflags,
+    )
+    process.wait(timeout=5)
+    assert process.returncode == 259
+    assert module._pid_is_live(process.pid) is False
+
+
+def test_windows_access_denied_pid_probe_remains_conservative() -> None:
+    module = _load_python_module()
+    assert module._openprocess_denied_means_live(5) is True
+    assert module._openprocess_denied_means_live(87) is False
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
@@ -626,28 +895,46 @@ def test_validate_rejects_generation_above_portable_maximum(
     assert "exceeds the portable signed 64-bit maximum" in result.stderr
 
 
-@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
-def test_source_identity_matches_portable_vectors(
-    runner_name: str,
-    command: tuple[str, ...],
-) -> None:
-    del runner_name
+def _assert_source_identity(actual: dict[str, object], vector: dict[str, object]) -> None:
+    normalized = vector["normalized"]
+    assert isinstance(normalized, dict)
+    digest = str(vector["sha256"])
+    assert actual == {
+        "kind": normalized["kind"],
+        "canonical": normalized["canonical"],
+        "ref": normalized["ref"],
+        "record": vector["record"],
+        "sha256": digest,
+        "fingerprint": f"sha256:{digest}",
+        "marketplaceId": vector["marketplaceId"],
+    }
+
+
+def test_python_source_identity_matches_portable_vectors() -> None:
+    module = _load_python_module()
+    for vector in _vectors():
+        descriptor = vector["descriptor"]
+        assert isinstance(descriptor, dict)
+        actual = module.source_identity(
+            module.normalize_source(descriptor),
+            str(vector["marketplaceKey"]),
+        )
+        _assert_source_identity(actual, vector)
+
+
+@pytest.mark.skipif(BASH is None, reason="POSIX runner is unavailable")
+def test_posix_source_identity_matches_portable_vectors() -> None:
+    assert BASH is not None
     for vector in _vectors():
         result = _run(
-            command,
+            (BASH, str(POSIX_SCRIPT)),
             "source-id",
             "--source-json",
             json.dumps(vector["descriptor"], separators=(",", ":")),
             "--marketplace-key",
             vector["marketplaceKey"],
         )
-        actual = json.loads(result.stdout)
-        assert actual["kind"] == vector["normalized"]["kind"]
-        assert actual["canonical"] == vector["normalized"]["canonical"]
-        assert actual["ref"] == vector["normalized"]["ref"]
-        assert actual["record"] == vector["record"]
-        assert actual["sha256"] == vector["sha256"]
-        assert actual["marketplaceId"] == vector["marketplaceId"]
+        _assert_source_identity(json.loads(result.stdout), vector)
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
@@ -669,28 +956,18 @@ def test_source_identity_rejects_unused_case_colliding_properties(
 
 
 @pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
-def test_all_implementations_match_the_full_source_vector_corpus() -> None:
+def test_powershell_source_identity_matches_portable_vectors() -> None:
     assert POWERSHELL_COMMAND is not None
     for vector in _vectors():
-        commands_and_flags = [
-            (POWERSHELL_COMMAND, "-SourceJson", "-MarketplaceKey"),
-            *[
-                (command, "--source-json", "--marketplace-key")
-                for _, command in RUNNERS
-            ],
-        ]
-        outputs = []
-        for command, source_flag, key_flag in commands_and_flags:
-            result = _run(
-                command,
-                "source-id",
-                source_flag,
-                json.dumps(vector["descriptor"], separators=(",", ":")),
-                key_flag,
-                vector["marketplaceKey"],
-            )
-            outputs.append(json.loads(result.stdout))
-        assert outputs[0] == outputs[1] == outputs[2]
+        result = _run(
+            POWERSHELL_COMMAND,
+            "source-id",
+            "-SourceJson",
+            json.dumps(vector["descriptor"], separators=(",", ":")),
+            "-MarketplaceKey",
+            vector["marketplaceKey"],
+        )
+        _assert_source_identity(json.loads(result.stdout), vector)
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
@@ -850,7 +1127,7 @@ def test_literal_dollar_in_directory_path_is_not_environment_expansion(
             env={"ICBASE": ""},
         )
         outputs.append(json.loads(result.stdout))
-    assert outputs[0] == outputs[1]
+    assert outputs and all(output == outputs[0] for output in outputs[1:])
     assert outputs[0]["canonical"] == f"directory:{directory.resolve()}"
 
 
@@ -1059,7 +1336,7 @@ def test_readable_slug_is_ascii_and_locale_independent() -> None:
                 ).stdout
             )
         )
-    assert outputs[0] == outputs[1] == outputs[2]
+    assert outputs and all(output == outputs[0] for output in outputs[1:])
     assert outputs[0]["marketplaceId"].startswith("stanbul--")
 
 
@@ -1082,7 +1359,7 @@ def test_python_and_posix_installed_resolution_match(tmp_path: Path) -> None:
             durable,
         )
         outputs.append(json.loads(result.stdout))
-    assert outputs[0] == outputs[1]
+    assert outputs and all(output == outputs[0] for output in outputs[1:])
     assert outputs[0]["marketplaceId"] == _vectors()[0]["marketplaceId"]
     assert outputs[0]["operative"] is False
     after = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*"))
@@ -1190,7 +1467,7 @@ def test_python_and_posix_directory_resolution_match(tmp_path: Path) -> None:
             "agent-example",
         )
         outputs.append(json.loads(result.stdout))
-    assert outputs[0] == outputs[1]
+    assert outputs and all(output == outputs[0] for output in outputs[1:])
     assert outputs[0]["source"]["canonical"] == f"directory:{marketplace.resolve()}"
     assert outputs[0]["locator"]["marketplaceRoot"] == str(marketplace.resolve())
 
@@ -1468,7 +1745,7 @@ def test_python_and_posix_receipt_validation_match(tmp_path: Path) -> None:
             layout["cell"],
         )
         outputs.append(json.loads(result.stdout))
-    assert outputs[0] == outputs[1]
+    assert outputs and all(output == outputs[0] for output in outputs[1:])
     assert outputs[0]["pluginRoot"] == str(Path(layout["plugin_root"]).resolve())
     assert outputs[0]["generation"] == 2
 
@@ -2065,6 +2342,8 @@ def test_posix_source_resolution_does_not_require_python_or_jq(
     awk_command: str | None,
     tmp_path: Path,
 ) -> None:
+    if BASH is None:
+        pytest.skip("Bash runner is unavailable")
     if awk_command is None:
         pytest.skip("requested awk implementation is unavailable")
     tool_dir = tmp_path / "bin"
@@ -2087,7 +2366,7 @@ def test_posix_source_resolution_does_not_require_python_or_jq(
             pytest.skip(f"required POSIX test tool is unavailable: {name}")
         (tool_dir / name).symlink_to(source)
     result = _run(
-        (shutil.which("bash") or "/bin/bash", str(POSIX_SCRIPT)),
+        (BASH, str(POSIX_SCRIPT)),
         "source-id",
         "--source-json",
         json.dumps(_vectors()[0]["descriptor"], separators=(",", ":")),
@@ -2097,7 +2376,7 @@ def test_posix_source_resolution_does_not_require_python_or_jq(
     )
     assert json.loads(result.stdout)["marketplaceId"] == _vectors()[0]["marketplaceId"]
     unicode_result = _run(
-        (shutil.which("bash") or "/bin/bash", str(POSIX_SCRIPT)),
+        (BASH, str(POSIX_SCRIPT)),
         "source-id",
         "--source-json",
         json.dumps({"source": "opaque", "id": "urn:example:caf\u00e9"}),
@@ -2109,6 +2388,8 @@ def test_posix_source_resolution_does_not_require_python_or_jq(
 
 
 def test_posix_json_query_separator_cannot_forge_nested_paths(tmp_path: Path) -> None:
+    if BASH is None:
+        pytest.skip("Bash runner is unavailable")
     payload = tmp_path / "marketplace" / "payloads" / "agent-example"
     payload.mkdir(parents=True)
     manifest = tmp_path / "marketplace" / "marketplace.json"
@@ -2118,7 +2399,7 @@ def test_posix_json_query_separator_cannot_forge_nested_paths(tmp_path: Path) ->
         encoding="utf-8",
     )
     result = _run(
-        (str(POSIX_SCRIPT),),
+        (BASH, str(POSIX_SCRIPT)),
         "resolve",
         "--copilot-home",
         tmp_path / "copilot",
@@ -2151,6 +2432,7 @@ def test_newline_bearing_source_values_match_powershell() -> None:
             source_json,
             "-MarketplaceKey",
             "Newline",
+            direct=True,
         ).stdout
     )
     for _, command in RUNNERS:
@@ -2162,5 +2444,15 @@ def test_newline_bearing_source_values_match_powershell() -> None:
                 source_json,
                 "--marketplace-key",
                 "Newline",
+                direct=True,
             ).stdout
         ) == expected
+
+
+@pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
+def test_direct_entrypoints_preserve_controlled_cli_failure() -> None:
+    assert POWERSHELL_COMMAND is not None
+    for command in (PYTHON_COMMAND, POWERSHELL_COMMAND):
+        result = _run(command, "source-id", direct=True, check=False)
+        assert result.returncode == 1
+        assert "requires" in result.stderr
