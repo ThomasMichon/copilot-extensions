@@ -640,30 +640,6 @@ def test_discovery_paths_use_cross_platform_separators() -> None:
         assert windows_only_relative not in script
 
 
-@pytest.mark.parametrize("powershell_host", POWERSHELL_HOSTS or [None])
-def test_powershell_matches_portable_source_vectors(
-    powershell_host: str | None,
-) -> None:
-    if powershell_host is None:
-        pytest.skip("PowerShell is not installed")
-    for vector in _vectors():
-        result = _run_ps(
-            "source-id",
-            "-SourceJson",
-            json.dumps(vector["descriptor"], separators=(",", ":")),
-            "-MarketplaceKey",
-            vector["marketplaceKey"],
-            host=powershell_host,
-        )
-        actual = json.loads(result.stdout)
-        assert actual["kind"] == vector["normalized"]["kind"]
-        assert actual["canonical"] == vector["normalized"]["canonical"]
-        assert actual["ref"] == vector["normalized"]["ref"]
-        assert actual["record"] == vector["record"]
-        assert actual["sha256"] == vector["sha256"]
-        assert actual["marketplaceId"] == vector["marketplaceId"]
-
-
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
 def test_resolves_installed_payload_and_only_computes_target_paths(
     tmp_path: Path,

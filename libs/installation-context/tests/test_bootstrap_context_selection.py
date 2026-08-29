@@ -13,6 +13,11 @@ import pytest
 REPO = Path(__file__).resolve().parents[3]
 CONTEXT_TOOL = REPO / "libs" / "installation-context" / "installation_context.py"
 PLUGINS = ("agent-machines", "agent-index")
+BEHAVIOR_PLUGINS = (
+    PLUGINS
+    if os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
+    else ("agent-index",)
+)
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 
 
@@ -154,7 +159,7 @@ def test_selected_current_manifest_is_a_read_only_noop(
     assert not (home / f".{plugin}").exists()
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 def test_selected_missing_manifest_does_not_stamp_legacy_runtime(
     tmp_path: Path,
@@ -172,7 +177,7 @@ def test_selected_missing_manifest_does_not_stamp_legacy_runtime(
     assert not (home / f".{plugin}").exists()
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 def test_selected_drift_does_not_run_legacy_installer(
     tmp_path: Path,
@@ -194,7 +199,7 @@ def test_selected_drift_does_not_run_legacy_installer(
     assert not (home / f".{plugin}").exists()
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 def test_invalid_context_does_not_fall_back_to_legacy_runtime(
     tmp_path: Path,
@@ -216,7 +221,7 @@ def test_invalid_context_does_not_fall_back_to_legacy_runtime(
     assert not (home / f".{plugin}").exists()
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 @pytest.mark.parametrize("conflicting_key", ("pluginId", "PluginId"))
 def test_conflicting_context_plugin_id_fails_closed(
@@ -265,7 +270,7 @@ def test_context_for_other_plugin_preserves_legacy_reconcile(
     assert result.stderr == ""
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 def test_context_plugin_identity_is_case_sensitive(
     tmp_path: Path,
@@ -289,7 +294,7 @@ def test_context_plugin_identity_is_case_sensitive(
     assert result.stderr == ""
 
 
-@pytest.mark.parametrize("plugin", PLUGINS)
+@pytest.mark.parametrize("plugin", BEHAVIOR_PLUGINS)
 @pytest.mark.parametrize("runner", (_run_shell, _run_powershell))
 def test_context_payload_origin_is_case_sensitive(
     tmp_path: Path,

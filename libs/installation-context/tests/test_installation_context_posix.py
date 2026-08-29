@@ -201,6 +201,23 @@ def _bounded_powershell_host() -> None:
         _POWERSHELL_HOST = None
 
 
+EXHAUSTIVE_ADAPTERS = (
+    os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
+)
+ADAPTER_VECTOR_NAMES = {
+    "github",
+    "git-url-with-username",
+    "percent-encoded-git-url",
+    "git-zero-padded-default-port",
+    "opaque-escapes",
+    "git-expanded-ipv6",
+    "git-backslash",
+    "git-dot-segments",
+    "git-fragment-host-injection",
+    "null-ref",
+}
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     (
@@ -303,6 +320,28 @@ def _is_powershell_installation_context_command(command: tuple[str, ...]) -> boo
 
 def _vectors() -> list[dict[str, object]]:
     return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
+
+
+def _adapter_vectors() -> list[dict[str, object]]:
+    if EXHAUSTIVE_ADAPTERS:
+        return _vectors()
+    return [
+        vector
+        for vector in _vectors()
+        if str(vector["name"]) in ADAPTER_VECTOR_NAMES
+    ]
+
+
+def _assert_source_identity(
+    actual: dict[str, object],
+    vector: dict[str, object],
+) -> None:
+    assert actual["kind"] == vector["normalized"]["kind"]
+    assert actual["canonical"] == vector["normalized"]["canonical"]
+    assert actual["ref"] == vector["normalized"]["ref"]
+    assert actual["record"] == vector["record"]
+    assert actual["sha256"] == vector["sha256"]
+    assert actual["marketplaceId"] == vector["marketplaceId"]
 
 
 def _run(
@@ -963,21 +1002,6 @@ def test_python_source_identity_matches_portable_vectors() -> None:
         _assert_source_identity(actual, vector)
 
 
-@pytest.mark.skipif(BASH is None, reason="POSIX runner is unavailable")
-def test_posix_source_identity_matches_portable_vectors() -> None:
-    assert BASH is not None
-    for vector in _vectors():
-        result = _run(
-            (BASH, str(POSIX_SCRIPT)),
-            "source-id",
-            "--source-json",
-            json.dumps(vector["descriptor"], separators=(",", ":")),
-            "--marketplace-key",
-            vector["marketplaceKey"],
-        )
-        _assert_source_identity(json.loads(result.stdout), vector)
-
-
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
 def test_source_identity_rejects_unused_case_colliding_properties(
     runner_name: str,
@@ -996,10 +1020,32 @@ def test_source_identity_rejects_unused_case_colliding_properties(
     assert result.returncode != 0
 
 
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_python_and_posix_match_adapter_source_vectors(
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    del runner_name
+    vectors = _adapter_vectors()
+    if not EXHAUSTIVE_ADAPTERS:
+        assert {str(vector["name"]) for vector in vectors} == ADAPTER_VECTOR_NAMES
+    for vector in vectors:
+        result = _run(
+            command,
+            "source-id",
+            "--source-json",
+            json.dumps(vector["descriptor"], separators=(",", ":")),
+            "--marketplace-key",
+            vector["marketplaceKey"],
+            direct=True,
+        )
+        _assert_source_identity(json.loads(result.stdout), vector)
+
+
 @pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
-def test_powershell_source_identity_matches_portable_vectors() -> None:
+def test_powershell_matches_adapter_source_vectors() -> None:
     assert POWERSHELL_COMMAND is not None
-    for vector in _vectors():
+    for vector in _adapter_vectors():
         result = _run(
             POWERSHELL_COMMAND,
             "source-id",
