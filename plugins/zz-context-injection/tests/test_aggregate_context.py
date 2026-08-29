@@ -456,6 +456,22 @@ def test_source_qualified_tail_adapter_can_own_final_slot(
     assert "POLICY" in json.loads(result.stdout)["additionalContext"]
 
 
+def test_malformed_authority_override_fails_closed_with_diagnostic(
+    tmp_path: Path,
+) -> None:
+    adapter = tmp_path / "adapter"
+    shutil.copytree(PLUGIN, adapter)
+
+    result = _run(
+        tmp_path,
+        [("zz-context-injection", adapter)],
+        authority="../invalid",
+    )
+
+    assert json.loads(result.stdout) == {}
+    assert "authority identity is invalid" in result.stderr
+
+
 def test_bash_wrapper_discards_partial_output_on_aggregator_failure(
     tmp_path: Path,
 ) -> None:

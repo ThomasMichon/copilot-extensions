@@ -666,7 +666,11 @@ def main() -> int:
     if len(own) != 1:
         return _emit_empty("aggregator authority is absent or ambiguous")
     authority_source = _authority_source()
-    if authority_source is None or own[0].source != authority_source:
+    if authority_source is None:
+        return _emit_empty(
+            "configured source-qualified authority identity is invalid"
+        )
+    if own[0].source != authority_source:
         return _emit_empty("aggregator is not the selected source-qualified authority")
     max_name = max(plugin.name for plugin in active)
     if own[0].name != max_name:

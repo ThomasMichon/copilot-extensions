@@ -24,6 +24,8 @@ remote marketplaces, the repository may provide one thin tail adapter named
 `COPILOT_CONTEXT_INJECTION_AUTHORITY` to its own source-qualified identity, and
 passes its own plugin root as `COPILOT_PLUGIN_ROOT`. The adapter contains no
 composition logic; this payload remains the single engine and schema owner.
+An explicitly configured malformed authority identity fails closed with `{}`;
+it never falls back to a different source.
 
 The payload currently requires an available Python interpreter. Native
 dependency-free Bash and Windows PowerShell implementations remain required
