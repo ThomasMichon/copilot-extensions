@@ -27,6 +27,13 @@ def _pin_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(m, "_resolve_copilot", lambda: "copilot")
 
 
+@pytest.fixture(autouse=True)
+def _isolate_enabled_plugin_scopes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: [])
+    monkeypatch.setattr(m, "_INVOCATION_CWD", Path("/missing/invocation"))
+    monkeypatch.delenv(m._UPDATE_CONTEXT_ENV, raising=False)
+
+
 def _install_config(monkeypatch: pytest.MonkeyPatch, anchor: str = "/repo/anchor") -> None:
     repo = cfg.RepoConfig(
         anchor=anchor,
@@ -280,6 +287,28 @@ def test_no_config_is_noop(monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=True)
+
+
+def test_user_global_runtime_reconciles_without_project_config(monkeypatch):
+    def _boom(*a, **k):
+        raise RuntimeError("no config")
+
+    monkeypatch.setattr(cfg, "load_config", _boom)
+    _stub_reconcile(
+        monkeypatch,
+        enabled=[],
+        scopes={"agent-codespaces": "universal"},
+        deployed={"agent-codespaces": "0.3.4-dev62"},
+        payload={"agent-codespaces": "0.3.4-dev102"},
+    )
+    monkeypatch.setattr(
+        reconcile, "read_user_enabled_plugins", lambda: ["agent-codespaces"]
+    )
+    calls = _capture_installers(monkeypatch)
+
+    m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=False)
+
+    assert _installed_names(calls) == {"agent-codespaces"}
 
 
 def _capture_init_installers(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
