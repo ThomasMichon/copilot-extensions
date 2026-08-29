@@ -791,7 +791,25 @@ def scan_session_context(
 
     authority_known_safe = False
     authority_proven = False
-    if len(authority_entries) > 1:
+    effective_authorities = authority_entries
+    paired_tail = False
+    if len(authority_entries) == 2:
+        tail = [
+            entry
+            for entry in authority_entries
+            if entry.identity != AGGREGATE_AUTHORITY_IDENTITY
+            and entry.identity in supported_authorities
+        ]
+        paired_tail = (
+            len(tail) == 1
+            and {
+                entry.identity for entry in authority_entries
+            }
+            == {AGGREGATE_AUTHORITY_IDENTITY, tail[0].identity}
+        )
+        if paired_tail:
+            effective_authorities = tail
+    if len(effective_authorities) > 1:
         identities = ", ".join(
             sorted(entry.identity for entry in authority_entries)
         )
@@ -802,8 +820,8 @@ def scan_session_context(
             "multiple aggregate authorities are active: "
             f"{identities}",
         )
-    elif len(authority_entries) == 1:
-        authority = authority_entries[0]
+    elif len(effective_authorities) == 1:
+        authority = effective_authorities[0]
         authority_complete = (
             authority.identity in supported_authorities
             and authority.session_start == "yes"
@@ -851,7 +869,7 @@ def scan_session_context(
             authority_complete
             and not later_names
             and not incomplete
-            and len(authority_entries) == 1
+            and (len(authority_entries) == 1 or paired_tail)
         )
         authority_proven = authority_known_safe and not unknown_entries
 
