@@ -11,11 +11,17 @@ it needs. This document is the reference, and
 `tools/check-install-contract.py` enforces conformance (run it
 manually or wire it as a git `pre-push` hook).
 
-## Marketplace installation-cell contract
+## Core agent service installation-cell contract
 
-The prescriptive ownership boundary is a **marketplace installation cell**.
-Plugin name and version alone never select a writable runtime or lifecycle
-artifact. The normative model is defined by
+The prescriptive ownership boundary for persistent core `agent-*` runtimes is a
+**marketplace installation cell**. This is deliberately not a general plugin
+contract: payload-only plugins, non-`agent-*` plugins, downstream marketplaces,
+and consumer harnesses never create, validate, repair, explain, or depend on
+installation cells. They use ordinary Copilot plugin loading and plugin-owned
+setup surfaces.
+
+For eligible core runtimes, plugin name and version alone never select a
+writable runtime or lifecycle artifact. The normative model is defined by
 [`patterns/marketplace-installation-cells.md`](patterns/marketplace-installation-cells.md);
 the requirements below bind installers before the staged runtime migration is
 complete.
@@ -822,10 +828,12 @@ by [`patterns/installer-readiness-modules.md`](patterns/installer-readiness-modu
 and implemented by `libs/installer-readiness/`. A participating plugin points
 `plugin.json` `installerReadiness` at one bounded payload manifest. That manifest
 either publishes installer/readiness modules or intentionally declines with a
-reason; omission is an error. Discovery joins enabled settings to validated
-installation-cell receipts and resolves only payload-local scripts or commands
-declared by the owning `payload-invocation.json`--never an installed-cache
-convention or `PATH`.
+reason; omission is an error. For eligible runtime-bearing `agent-*` plugins in
+the `copilot-extensions` marketplace, discovery may join the module to a
+validated installation-cell receipt. Every other plugin remains outside the
+cell system. Discovery resolves only payload-local scripts or commands declared
+by the owning `payload-invocation.json`--never an installed-cache convention or
+`PATH`.
 
 The base contract validates and plans but does not execute installers, interpret
 machine-gate policy, or summarize a run. Plugin-specific declarations and the

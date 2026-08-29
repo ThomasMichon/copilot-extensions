@@ -1,5 +1,11 @@
 # Pattern: marketplace-installation-cells
 
+> **Scope:** private runtime infrastructure for service/runtime-bearing core
+> `agent-*` plugins shipped by the `copilot-extensions` marketplace. It is not a
+> general plugin pattern. Payload-only plugins, non-`agent-*` plugins,
+> downstream marketplaces, and consumer harnesses must not create, validate,
+> expose, or depend on installation cells.
+
 **Serves:** *Vision plugin-services/installation-cells*
 §Features/`marketplace-scoped-runtime-and-state`,
 `source-neutral-installation-home`, `independent-lifecycle`,

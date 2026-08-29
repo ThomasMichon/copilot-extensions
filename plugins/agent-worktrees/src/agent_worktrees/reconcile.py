@@ -44,6 +44,7 @@ re-invoke for a second pass (payload, then runtime).
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import platform
 import re
@@ -60,6 +61,16 @@ import yaml
 from . import config as cfg
 
 MARKETPLACE = "copilot-extensions"
+_CORE_SOURCE_RECORD = (
+    "version:1:1\n"
+    "kind:6:github\n"
+    "source:38:github:thomasmichon/copilot-extensions\n"
+    "ref:0:\n"
+)
+CORE_MARKETPLACE_ID = (
+    f"{MARKETPLACE}--"
+    f"{hashlib.sha256(_CORE_SOURCE_RECORD.encode('utf-8')).hexdigest()[:16]}"
+)
 SELF_PLUGIN = "agent-worktrees"
 CACHE_NAME = "plugin-reconcile-cache.json"
 VALID_SCOPES = ("universal", "machine-gated", "none")
@@ -286,6 +297,12 @@ def installed_payload_dir(name: str) -> Path | None:
     return None
 
 
+def core_installed_payload_dir(name: str) -> Path | None:
+    """Locate only the canonical copilot-extensions marketplace payload."""
+    payload = _copilot_home() / "installed-plugins" / MARKETPLACE / name
+    return payload if (payload / "plugin.json").is_file() else None
+
+
 def payload_version(plugin_dir: Path) -> str | None:
     data = _read_json(plugin_dir / "plugin.json") or {}
     v = data.get("version")
@@ -298,6 +315,43 @@ def manifest_runtime_scope(plugin_dir: Path) -> str | None:
     scope = data.get("runtimeScope")
     if isinstance(scope, str) and scope in VALID_SCOPES:
         return scope
+    return None
+
+
+def installation_cell_eligibility(
+    name: str,
+    plugin_dir: Path,
+) -> bool | None:
+    """Whether a plugin participates in core runtime installation cells.
+
+    Installation cells are not a general plugin mechanism. They are reserved
+    for runtime-bearing ``agent-*`` plugins shipped by the copilot-extensions
+    marketplace; payload-only plugins and downstream marketplace plugins never
+    enter this path. ``None`` means the purported core payload is malformed or
+    incomplete, so explicit-context handling must fail closed.
+    """
+    if not name.startswith("agent-"):
+        return False
+    expected = _copilot_home() / "installed-plugins" / MARKETPLACE / name
+    try:
+        if plugin_dir.resolve() != expected.resolve():
+            return False
+    except OSError:
+        return None
+    manifest = plugin_dir / "plugin.json"
+    if not manifest.is_file():
+        return None
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    scope = data.get("runtimeScope")
+    if scope == "none":
+        return False
+    if scope in {"universal", "machine-gated"}:
+        return True
     return None
 
 
@@ -328,13 +382,8 @@ def runtime_deployed_version(
     return str(v) if v else None
 
 
-def _explicit_context_target() -> tuple[Path, str] | None:
-    """Return the explicitly selected receipt and plugin id, if any.
-
-    The receipt's plugin id is only a routing hint. The plugin-local
-    installation-context primitive performs the authoritative validation before
-    any path from the receipt is used.
-    """
+def _explicit_context_receipt() -> tuple[Path, dict[str, Any]] | None:
+    """Read the bounded explicit receipt without trusting plugin identity."""
     raw = os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
     if not raw:
         return None
@@ -366,6 +415,23 @@ def _explicit_context_target() -> tuple[Path, str] | None:
         raise ValueError(
             f"COPILOT_EXTENSIONS_CONTEXT must contain a JSON object: {pointer}"
         )
+    return pointer, receipt
+
+
+def _explicit_context_target() -> tuple[Path, str] | None:
+    """Return the explicitly selected core receipt and plugin id, if any.
+
+    Foreign marketplace receipts are outside this reconciler and return
+    ``None`` before their plugin id is interpreted. Receipts claiming the exact
+    core marketplace retain the existing fail-closed identity validation.
+    """
+    parsed = _explicit_context_receipt()
+    if parsed is None:
+        return None
+    pointer, receipt = parsed
+    marketplace_id = receipt.get("marketplaceId")
+    if isinstance(marketplace_id, str) and marketplace_id != CORE_MARKETPLACE_ID:
+        return None
     plugin_id = receipt.get("pluginId")
     if not isinstance(plugin_id, str) or not plugin_id:
         raise ValueError(
@@ -408,13 +474,42 @@ def _selected_runtime_root(
     for another plugin preserves this plugin's legacy root. This prerequisite
     never activates or mutates a namespaced root.
     """
+    eligibility = installation_cell_eligibility(name, plugin_dir)
+    if eligibility is False:
+        # A downstream/direct agent-* payload is outside the cell system, but a
+        # supplied context still crosses the agent-runtime trust boundary. Parse
+        # its bounded identity before ignoring it so unsafe plugin ids never
+        # influence validator or path selection.
+        if name.startswith("agent-"):
+            _explicit_context_target()
+        return runtime_dir(name, home), False
+
     target = _explicit_context_target()
     if target is None:
         return runtime_dir(name, home), False
+    if eligibility is None:
+        raise ValueError(
+            f"installation-cell eligibility is indeterminate for {name}"
+        )
 
     pointer, target_name = target
+    target_dir = core_installed_payload_dir(target_name)
+    if not target_name.startswith("agent-"):
+        return runtime_dir(name, home), False
+    if target_dir is None:
+        raise ValueError(
+            f"installation-cell payload is missing for {target_name}"
+        )
+    target_eligibility = installation_cell_eligibility(target_name, target_dir)
+    if target_eligibility is False:
+        return runtime_dir(name, home), False
+    if target_eligibility is None:
+        raise ValueError(
+            f"installation-cell eligibility is indeterminate for {target_name}"
+        )
+
     helper_candidates: list[Path] = [plugin_dir]
-    self_dir = installed_payload_dir(SELF_PLUGIN)
+    self_dir = core_installed_payload_dir(SELF_PLUGIN)
     if self_dir is not None and self_dir not in helper_candidates:
         helper_candidates.append(self_dir)
     helper = next(
@@ -641,7 +736,7 @@ def running_version_lag(repo_dir: Path) -> list[dict[str, Any]]:
         return lags
     for name in names:
         try:
-            pdir = installed_payload_dir(name)
+            pdir = core_installed_payload_dir(name)
             if pdir is None:
                 continue
             payload = payload_version(pdir)
@@ -923,22 +1018,49 @@ def build_plan(
         }
     validated_context: tuple[str, Path] | None = None
     if explicit_context is not None:
+        _pointer, target_name = explicit_context
+        if not target_name.startswith("agent-"):
+            explicit_context = None
+        else:
+            target_dir = core_installed_payload_dir(target_name)
+            if target_dir is None:
+                return {
+                    "action": "continue",
+                    "machine": machine,
+                    "diagnostics": [{
+                        "service": target_name,
+                        "phase": "runtime",
+                        "reason": "installation-context-payload-missing",
+                        "message": (
+                            "the explicitly selected context cannot be validated "
+                            "because its plugin payload is not installed"
+                        ),
+                    }],
+                }
+            target_eligibility = installation_cell_eligibility(
+                target_name,
+                target_dir,
+            )
+            if target_eligibility is False:
+                explicit_context = None
+            elif target_eligibility is None:
+                return {
+                    "action": "continue",
+                    "machine": machine,
+                    "diagnostics": [{
+                        "service": target_name,
+                        "phase": "runtime",
+                        "reason": "installation-context-invalid",
+                        "message": (
+                            "installation-cell eligibility is indeterminate "
+                            f"for {target_name}"
+                        ),
+                    }],
+                }
+    if explicit_context is not None:
         target_name = explicit_context[1]
-        target_dir = installed_payload_dir(target_name)
-        if target_dir is None:
-            return {
-                "action": "continue",
-                "machine": machine,
-                "diagnostics": [{
-                    "service": target_name,
-                    "phase": "runtime",
-                    "reason": "installation-context-payload-missing",
-                    "message": (
-                        "the explicitly selected context cannot be validated "
-                        "because its plugin payload is not installed"
-                    ),
-                }],
-            }
+        target_dir = core_installed_payload_dir(target_name)
+        assert target_dir is not None
         try:
             selected_root, context_selected = _selected_runtime_root(
                 target_name, target_dir
@@ -969,7 +1091,7 @@ def build_plan(
 
     for name in names:
         entry: dict[str, Any] = plugins_cache.setdefault(name, {})
-        pdir = installed_payload_dir(name)
+        pdir = core_installed_payload_dir(name)
 
         if pdir is None:
             # Payload not installed yet. Installing it is a MARKETPLACE PULL

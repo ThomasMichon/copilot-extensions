@@ -11972,7 +11972,7 @@ def _update_one_plugin_payload(
     from . import reconcile
 
     ref = f"{name}@{marketplace}"
-    installed = reconcile.installed_payload_dir(name) is not None
+    installed = reconcile.core_installed_payload_dir(name) is not None
     verb = "update" if installed else "install"
     try:
         r = subprocess.run(
@@ -12220,7 +12220,7 @@ def _reconcile_one_runtime(name: str, platform: str, *, force: bool) -> str:
     on a run; else a short error."""
     from . import reconcile
 
-    pdir = reconcile.installed_payload_dir(name)
+    pdir = reconcile.core_installed_payload_dir(name)
     if pdir is None:
         return "payload not installed"
     scope = reconcile.manifest_runtime_scope(pdir) or "none"
@@ -15445,7 +15445,7 @@ def plan_pre_launch() -> dict:
     bootstrap = {s.name: s for s in all_services if s.name in _BOOTSTRAP_SERVICES}
     diagnostics: list[dict[str, str]] = []
     aw_context_selected = False
-    aw_plugin_dir = _reconcile.installed_payload_dir("agent-worktrees")
+    aw_plugin_dir = _reconcile.core_installed_payload_dir("agent-worktrees")
     try:
         explicit_context = _reconcile._explicit_context_target()
     except ValueError as error:
