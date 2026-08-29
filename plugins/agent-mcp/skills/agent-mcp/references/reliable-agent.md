@@ -140,9 +140,9 @@ Do not pipe or pass inline JSON through Windows `.ps1`/`.cmd` shims: the
 PowerShell shim does not forward pipeline input, and cmd.exe reparses quotes and
 metacharacters. Use `.ps1 --request-file`.
 
-The payload-local agent-mcp catalog likewise names a `.cmd` on Windows to
-preserve stdio. Pass structured call arguments with `--request-file`; do not
-place raw JSON or metacharacter-bearing paths inline on its CMD command line.
+The payload-local agent-mcp catalog uses an absolute PowerShell 7.3+ host
+prefix ending in the payload `.ps1`, preserving arguments and stdio. Pass
+structured call arguments with `--request-file` or stdin.
 
 ## Failure classification
 

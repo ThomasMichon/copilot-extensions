@@ -139,11 +139,11 @@ catalog and include their exact `argv` prefix values with the manifest path:
 
 ```text
 Manifest: <manifest-path>
-collate_argv0: <agent-logger catalog "collate-session" argv prefix>
-digest_argv0: <agent-logger catalog "read-session-digest" argv prefix>
+collate_argv_prefix: <agent-logger catalog "collate-session" argv prefix>
+digest_argv_prefix: <agent-logger catalog "read-session-digest" argv prefix>
 ```
 
-The writer must forward the exact digest-reader path into every explore
+The writer must forward the exact digest-reader argv prefix into every explore
 sub-agent prompt it creates. The agent is intentionally read-only: it collates,
 reads the digest, and returns a complete artifact block for the exact
 `target_log_path`.

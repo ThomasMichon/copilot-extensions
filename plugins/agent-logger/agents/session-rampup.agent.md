@@ -33,9 +33,9 @@ The caller passes, in its prompt:
 - **session** — an optional specific session UUID (otherwise the most recent
   session for the worktree is used).
 - an optional **focus** — what the operator cares about resuming, if given.
-- **effort_argv0** — the optional exact agent-worktrees session-catalog
+- **effort_argv_prefix** — the optional exact agent-worktrees session-catalog
   `argv prefix` for a local worktree. Never search `PATH` for it. Do not use a local
-  path for a remote worktree.
+  argv prefix for a remote worktree.
 
 ## Budget — this is the whole point
 
@@ -52,7 +52,7 @@ The caller passes, in its prompt:
 
 ### 1. Produce the base brief
 
-The invocation prompt must include exact `ramp_argv0` and `digest_argv0` paths
+The invocation prompt must include exact `ramp_argv_prefix` and `digest_argv_prefix` values
 resolved from the caller's agent-logger
 session catalog. Refuse to run if either is absent. Never search `PATH` or
 invoke a legacy venv module.
@@ -74,10 +74,10 @@ installation context is carried across remote execution.
 
 ### 2. Resolve durable effort intent
 
-For a local worktree, if the caller supplied `effort_argv0`, run:
+For a local worktree, if the caller supplied `effort_argv_prefix`, run:
 
 ```
-<effort_argv0> effort-focus show --json
+<effort_argv_prefix> effort-focus show --json
 ```
 
 from the resolved worktree. Add `--worktree-id <known-id>` when the caller

@@ -86,7 +86,7 @@ The caller passes a **manifest file path** in its prompt. Read it with the
 ## Tool policy
 
 - **Require caller-supplied payload commands.** The invocation prompt must
-  include `collate_argv0` and `digest_argv0` paths resolved from the caller's
+  include `collate_argv_prefix` and `digest_argv_prefix` values resolved from the caller's
   session catalog for agent-logger. Refuse to run
   if either is absent. Never search `PATH`, substitute another payload's
   command, or invoke a legacy venv interpreter.
@@ -143,7 +143,7 @@ include a short failure entry rather than inventing details.
 - **Always** summarize a session's segments through an **explore** sub-agent
   -- never read a session's raw segments directly into this agent's own
   context. Dispatch **one explore sub-agent per session** (in parallel across
-  sessions). Include the exact caller-supplied `digest_argv0` path in every
+  sessions). Include the exact caller-supplied `digest_argv_prefix` in every
   explore prompt; each sub-agent runs it with `<session-id> list`,
   then with `<session-id> segment <N>` for every segment and returns
   a summary (output contract: workstreams, files changed, key commands,

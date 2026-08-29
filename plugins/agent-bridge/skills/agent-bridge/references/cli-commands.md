@@ -345,14 +345,14 @@ Some local agents must run **elevated** (admin) -- e.g. an enlistment-based
 `base_repo` agent that needs admin plus a build environment. Such a project is
 flagged once, at adoption time:
 
-```bash
+```powershell
 agent-worktrees register <Project> --base-repo --elevated # marketplace-isolation: allow agent-worktrees-management
 ```
 
 After that, **just send to it by its bare name** -- no special prefix:
 
-```bash
-<agent-bridge catalog argv prefix> send <Project> "do the elevated work"
+```powershell
+& <agent-bridge catalog argv prefix> send <Project> "do the elevated work"
 ```
 
 The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so

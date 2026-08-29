@@ -69,16 +69,16 @@ focus) in the prompt, e.g.:
 Ramp into the dormant session for worktree <SUFFIX> [on machine <NAME>].
 [Optionally: session <UUID>.]
 Focus: <what to resume, if the operator said>.
-ramp_argv0: <agent-logger catalog "ramp-up-session" argv prefix>
-digest_argv0: <agent-logger catalog "read-session-digest" argv prefix>
-[effort_argv0: <agent-worktrees catalog argv prefix>, for a local worktree when available]
+ramp_argv_prefix: <agent-logger catalog "ramp-up-session" argv prefix>
+digest_argv_prefix: <agent-logger catalog "read-session-digest" argv prefix>
+[effort_argv_prefix: <agent-worktrees catalog argv prefix>, for a local worktree when available]
 Return the bounded Ramp-Up Briefing.
 ```
 
 Resolve both command ids from this session's agent-logger catalog before
-spawning the agent. The agent invokes the supplied `ramp-up-session` path with
+spawning the agent. The agent invokes the supplied `ramp-up-session` argv prefix with
 `<suffix> [--machine <name>]`, reads the digest surgically through the
-supplied `read-session-digest` path, inspects the worktree's git state,
+supplied `read-session-digest` argv prefix, inspects the worktree's git state,
 reconciles intent vs. reality, and returns only the briefing — no raw
 transcript.
 
@@ -97,7 +97,7 @@ can make, surface it; otherwise proceed.
 
 For a local worktree, when agent-worktrees is available, resolve its exact
 session-catalog `argv prefix`
-and pass it to the sub-agent as `effort_argv0`. After the base worktree/session
+and pass it to the sub-agent as `effort_argv_prefix`. After the base worktree/session
 metadata is known, the sub-agent runs:
 
 ```
@@ -116,9 +116,9 @@ deeper transcript segments. If the binding is absent, stale, closed, or
 unavailable, retain the standalone ramp-up behavior and reconstruct the full
 objective from checkpoints and the bounded transcript.
 
-For a remote worktree, do not pass the caller's local `effort_argv0` through
+For a remote worktree, do not pass the caller's local `effort_argv_prefix` through
 SSH. Use standalone ramp-up unless the caller explicitly supplies a command
-path resolved from the remote host's own session catalog.
+argv prefix resolved from the remote host's own session catalog.
 
 ## Doing it inline (small sessions, or no delegation)
 

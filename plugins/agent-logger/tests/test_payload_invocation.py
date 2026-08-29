@@ -80,7 +80,7 @@ def test_rampup_guidance_uses_effort_as_durable_intent() -> None:
     assert "skip deeper transcript reads entirely" in normalized_agent
     assert "--tail-turns 10" in agent
     assert "active_effort.active" in agent
-    assert "do not pass the caller's local `effort_argv0` through" in skill
+    assert "do not pass the caller's local `effort_argv_prefix` through" in skill
 
 
 @pytest.mark.parametrize(
@@ -123,7 +123,7 @@ def test_ramp_brief_uses_caller_supplied_command_paths(tmp_path: Path) -> None:
         other_count=1,
     )
 
-    assert "caller-supplied `digest_argv0`" in brief
+    assert "caller-supplied `digest_argv_prefix`" in brief
     assert "caller-supplied ramp command" in brief
     assert "read-session-digest example-session" not in brief
     assert "`ramp-up-session" not in brief

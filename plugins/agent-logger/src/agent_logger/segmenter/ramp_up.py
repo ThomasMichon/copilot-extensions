@@ -329,7 +329,7 @@ def _render_brief(
     parts.append("## Read More\n")
     parts.append(
         f"The full transcript was collated (ephemerally) to `{digest_dir}`. "
-        "Read deeper with the caller-supplied `digest_argv0` path and these "
+        "Read deeper with the caller-supplied `digest_argv_prefix` and these "
         "arguments:"
     )
     parts.append("")

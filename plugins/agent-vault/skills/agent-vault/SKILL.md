@@ -186,9 +186,8 @@ printf '%s' "$TOKEN" | <agent-vault catalog argv prefix> seal spark > token.seal
 <agent-vault catalog argv prefix> kek-list
 ```
 
-On Windows the catalog names the payload `.cmd` so stdin reaches `seal`.
-Quote ordinary arguments and avoid metacharacter-bearing inline values; use
-files or stdin for structured content.
+On Windows the catalog uses an absolute PowerShell 7.3+ host prefix ending in
+the payload `.ps1`, preserving arguments and stdin for `seal`.
 
 Requires `cryptography`; otherwise the command returns a clear error.
 

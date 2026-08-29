@@ -113,11 +113,11 @@ catalog and include the same keys required by the writer:
 
 ```text
 Manifest: <manifest-path>
-collate_argv0: <agent-logger catalog "collate-session" argv prefix>
-digest_argv0: <agent-logger catalog "read-session-digest" argv prefix>
+collate_argv_prefix: <agent-logger catalog "collate-session" argv prefix>
+digest_argv_prefix: <agent-logger catalog "read-session-digest" argv prefix>
 ```
 
-Require the writer to forward `digest_argv0` into every explore sub-agent
+Require the writer to forward `digest_argv_prefix` into every explore sub-agent
 prompt. In batch mode it triages each session (standalone / digest / skip) and
 returns a JSON render bundle. It does not write files.
 

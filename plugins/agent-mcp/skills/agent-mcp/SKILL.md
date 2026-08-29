@@ -398,9 +398,9 @@ of speaking JSON-RPC.
   <agent-mcp catalog argv prefix> call gitea create_issue --request-file req.json
   ```
 
-  The Windows catalog intentionally names the payload `.cmd` so stdio reaches
-  the child through a native process. Do not pass inline JSON through CMD;
-  provide it on stdin or with `--request-file` at a simple temporary path.
+  The Windows catalog uses an absolute PowerShell 7.3+ host prefix ending in
+  the payload `.ps1`, preserving arguments and stdio. Provide structured input
+  on stdin or with `--request-file`.
 
 - **`materialize`** projects the whole `tools/list` catalog into a discoverable,
   pipeable command fleet under `~/.agent-mcp/materialized/<server>/`:

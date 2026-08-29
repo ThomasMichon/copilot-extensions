@@ -774,12 +774,13 @@ mcp-servers:
 This remains an explicit startup compatibility boundary: static
 `mcp-servers.command` cannot consume a session command catalog.
 
-On Windows the session catalog names the payload-local `.cmd`, not its sibling
-`.ps1`, so shell pipelines enter through a native process and preserve stdio.
+On Windows the session catalog names an absolute PowerShell 7.3+ host prefix
+ending in the payload-local `.ps1`; the prefix preserves arguments and stdio.
 Operator-facing commands elsewhere in this README intentionally use the
 compatibility global wrapper; agent-facing skills use the exact catalog argv.
-Because CMD reparses argv, Windows agent-facing calls pass structured input
-through stdin or `--request-file`, never as inline JSON.
+Compatibility `.cmd` wrappers still reparse argv; pass their structured input
+through stdin or `--request-file`. Catalog-backed PowerShell 7.3+ calls preserve
+the tested argument domain directly.
 
 ## Troubleshooting
 
