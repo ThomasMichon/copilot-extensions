@@ -10,12 +10,12 @@ import shutil
 import socket
 import subprocess
 import sys
-import threading
 import time
 import traceback
 from pathlib import Path
 
 import pytest
+from powershell_test_host import PowerShellTestHost
 
 LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
@@ -73,123 +73,8 @@ RUNNERS = (
 )
 PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
-_POWERSHELL_HOST: _PowerShellTestHost | None = None
+_POWERSHELL_HOST: PowerShellTestHost | None = None
 _PYTHON_RUNNER_MODULE = None
-
-
-class _PowerShellTestHost:
-    """Run each request in a fresh runspace inside one bounded PowerShell host."""
-
-    def __init__(self) -> None:
-        assert POWERSHELL is not None
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        self._process = subprocess.Popen(
-            [
-                str(POWERSHELL),
-                "-NoProfile",
-                "-NoLogo",
-                "-NonInteractive",
-                "-File",
-                str(POWERSHELL_TEST_HOST),
-                "-ScriptPath",
-                str(LIB / "installation-context.ps1"),
-                "-TimeoutSeconds",
-                "30",
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            encoding="utf-8",
-            bufsize=1,
-            creationflags=creationflags,
-        )
-        self._lock = threading.Lock()
-        self._next_request_id = 1
-
-    def run(
-        self,
-        arguments: tuple[str, ...],
-        environment: dict[str, str] | None,
-    ) -> subprocess.CompletedProcess[str]:
-        assert self._process.stdin is not None
-        assert self._process.stdout is not None
-        with self._lock:
-            if self._process.poll() is not None:
-                raise AssertionError(self._failure_message("exited before a request"))
-            request_id = self._next_request_id
-            self._next_request_id += 1
-            self._process.stdin.write(
-                json.dumps(
-                    {
-                        "id": request_id,
-                        "arguments": arguments,
-                        "environment": environment or {},
-                    },
-                    separators=(",", ":"),
-                )
-                + "\n"
-            )
-            self._process.stdin.flush()
-
-            response_line: list[str] = []
-
-            def read_response() -> None:
-                response_line.append(self._process.stdout.readline())
-
-            reader = threading.Thread(target=read_response, daemon=True)
-            reader.start()
-            reader.join(timeout=35)
-            if reader.is_alive():
-                self._terminate()
-                raise subprocess.TimeoutExpired(
-                    [*POWERSHELL_COMMAND, *arguments],
-                    timeout=35,
-                )
-            if not response_line or not response_line[0]:
-                raise AssertionError(self._failure_message("closed without a response"))
-            response = json.loads(response_line[0])
-            if response.get("id") != request_id:
-                raise AssertionError(
-                    f"PowerShell test host response id mismatch: {response!r}"
-                )
-            return subprocess.CompletedProcess(
-                [*POWERSHELL_COMMAND, *arguments],
-                int(response["returncode"]),
-                str(response["stdout"]),
-                str(response["stderr"]),
-            )
-
-    def close(self) -> None:
-        with self._lock:
-            if self._process.poll() is None and self._process.stdin is not None:
-                try:
-                    self._process.stdin.write('{"shutdown":true}\n')
-                    self._process.stdin.flush()
-                    self._process.wait(timeout=5)
-                except (BrokenPipeError, subprocess.TimeoutExpired):
-                    self._terminate()
-            self._close_pipes()
-
-    def _failure_message(self, reason: str) -> str:
-        stderr = ""
-        if self._process.stderr is not None and self._process.poll() is not None:
-            stderr = self._process.stderr.read()
-        return f"PowerShell test host {reason}: {stderr}"
-
-    def _terminate(self) -> None:
-        if self._process.poll() is None:
-            self._process.kill()
-            self._process.wait(timeout=5)
-
-    def _close_pipes(self) -> None:
-        for stream in (
-            self._process.stdin,
-            self._process.stdout,
-            self._process.stderr,
-        ):
-            if stream is not None:
-                stream.close()
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -350,7 +235,12 @@ def _run(
     elif not direct and _is_powershell_installation_context_command(command):
         global _POWERSHELL_HOST
         if _POWERSHELL_HOST is None:
-            _POWERSHELL_HOST = _PowerShellTestHost()
+            assert POWERSHELL is not None
+            _POWERSHELL_HOST = PowerShellTestHost(
+                str(POWERSHELL),
+                POWERSHELL_TEST_HOST,
+                LIB / "installation-context.ps1",
+            )
         result = _POWERSHELL_HOST.run(string_arguments, env)
     else:
         result = subprocess.run(

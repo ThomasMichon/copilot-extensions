@@ -17,10 +17,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from powershell_test_host import PowerShellTestHost
 
 LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
+POWERSHELL_TEST_HOST = Path(__file__).with_name("powershell-test-host.ps1")
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 FIXTURES = LIB / "fixtures" / "source-identities.json"
 BUILD_PID_ERROR = (
@@ -32,6 +34,7 @@ IMMUTABLE_PID_ERROR = (
     "9223372036854775807"
 )
 Runner = tuple[str, tuple[str, ...], str]
+_POWERSHELL_HOST: PowerShellTestHost | None = None
 
 def _supported_bash() -> str | None:
     if os.name == "nt":
@@ -152,6 +155,15 @@ def _interoperability_pairs() -> tuple[object, ...]:
 
 
 INTEROPERABILITY_PAIRS = _interoperability_pairs()
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _bounded_powershell_host() -> None:
+    yield
+    global _POWERSHELL_HOST
+    if _POWERSHELL_HOST is not None:
+        _POWERSHELL_HOST.close()
+        _POWERSHELL_HOST = None
 
 
 def _load_python_module() -> Any:
@@ -380,26 +392,42 @@ def _run(
     environment.pop("COPILOT_PLUGIN_ROOT", None)
     if environment_overrides:
         environment.update(environment_overrides)
-    result = subprocess.run(
-        _command(
-            runner,
-            action,
-            layout,
-            snapshot_id=snapshot_id,
-            runtime_version=runtime_version,
-            expected_namespace_generation=expected_namespace_generation,
-            expected_install_generation=expected_install_generation,
-            expected_payload_root=expected_payload_root,
-            expected_payload_version=expected_payload_version,
-            expected_current_version=expected_current_version,
-            expect_current_absent=expect_current_absent,
-        ),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        check=False,
+    command = _command(
+        runner,
+        action,
+        layout,
+        snapshot_id=snapshot_id,
+        runtime_version=runtime_version,
+        expected_namespace_generation=expected_namespace_generation,
+        expected_install_generation=expected_install_generation,
+        expected_payload_root=expected_payload_root,
+        expected_payload_version=expected_payload_version,
+        expected_current_version=expected_current_version,
+        expect_current_absent=expect_current_absent,
     )
+    if runner[0] == "powershell":
+        global _POWERSHELL_HOST
+        if _POWERSHELL_HOST is None:
+            assert POWERSHELL is not None
+            _POWERSHELL_HOST = PowerShellTestHost(
+                str(POWERSHELL),
+                POWERSHELL_TEST_HOST,
+                LIB / "installation-context.ps1",
+            )
+        _, prefix, _ = runner
+        result = _POWERSHELL_HOST.run(
+            tuple(command[len(prefix) :]),
+            environment_overrides,
+        )
+    else:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            env=environment,
+            check=False,
+        )
     if check and result.returncode:
         raise AssertionError(
             f"{runner[0]} failed ({result.returncode}):\n"
@@ -439,19 +467,29 @@ def _run_context_validate(
     environment = os.environ.copy()
     environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
     environment.pop("COPILOT_PLUGIN_ROOT", None)
+    arguments = (
+        "validate",
+        _flag(style, "context"),
+        str(layout["install"]),
+        _flag(style, "durable-home"),
+        str(layout["durable"]),
+        _flag(style, "expected-marketplace-id"),
+        str(layout["marketplace_id"]),
+        _flag(style, "expected-plugin-id"),
+        str(layout["plugin_id"]),
+    )
+    if runner[0] == "powershell":
+        global _POWERSHELL_HOST
+        if _POWERSHELL_HOST is None:
+            assert POWERSHELL is not None
+            _POWERSHELL_HOST = PowerShellTestHost(
+                str(POWERSHELL),
+                POWERSHELL_TEST_HOST,
+                LIB / "installation-context.ps1",
+            )
+        return _POWERSHELL_HOST.run(arguments, None)
     return subprocess.run(
-        [
-            *prefix,
-            "validate",
-            _flag(style, "context"),
-            str(layout["install"]),
-            _flag(style, "durable-home"),
-            str(layout["durable"]),
-            _flag(style, "expected-marketplace-id"),
-            str(layout["marketplace_id"]),
-            _flag(style, "expected-plugin-id"),
-            str(layout["plugin_id"]),
-        ],
+        [*prefix, *arguments],
         capture_output=True,
         text=True,
         encoding="utf-8",
