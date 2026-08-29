@@ -1034,7 +1034,7 @@ def test_suite_identity_uses_editable_plugin_source(
     assert scan._editable_plugin_footprint(repo, sources[0]) == editable
 
 
-def test_session_context_inventory_proves_one_final_authority(
+def test_session_context_inventory_rejects_order_dependent_authority(
     tmp_path: Path, monkeypatch,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
@@ -1071,8 +1071,8 @@ def test_session_context_inventory_proves_one_final_authority(
 
     inventory = scan.scan_session_context(repo, sources, report)
 
-    assert inventory["disposition"] == "guaranteed-last-proven"
-    assert inventory["authority_proven"] is True
+    assert inventory["disposition"] == "unsupported-order-dependent-authority"
+    assert inventory["authority_proven"] is False
     assert {
         entry["identity"]: entry["role"]
         for entry in inventory["plugins"]
@@ -1084,13 +1084,22 @@ def test_session_context_inventory_proves_one_final_authority(
         "copilot-extensions/zz-context-injection":
             "aggregate-authority",
     }
-    assert not report.findings
+    assert any(
+        finding.check == "session-context-ordering"
+        and finding.severity == scan.BLOCKING
+        for finding in report.findings
+    )
+    assert any(
+        finding.check == "session-context-collision"
+        and finding.severity == scan.BLOCKING
+        for finding in report.findings
+    )
     rendered = json.dumps(inventory)
     assert "do-not-report-this-command" not in rendered
     assert "scripts/emit-context" not in rendered
 
 
-def test_session_context_accepts_declared_tail_adapter(
+def test_session_context_rejects_declared_tail_adapter(
     tmp_path: Path, monkeypatch,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
@@ -1130,9 +1139,17 @@ def test_session_context_accepts_declared_tail_adapter(
 
     inventory = scan.scan_session_context(repo, sources, report)
 
-    assert inventory["authority_proven"] is True
-    assert inventory["disposition"] == "guaranteed-last-proven"
-    assert not report.findings
+    assert inventory["authority_proven"] is False
+    assert inventory["disposition"] == "unsupported-order-dependent-authority"
+    assert any(
+        finding.check == "session-context-authority"
+        and "multiple aggregate authorities" in finding.message
+        for finding in report.findings
+    )
+    assert sum(
+        finding.check == "session-context-ordering"
+        for finding in report.findings
+    ) == 2
 
 
 def test_session_context_rejects_external_self_declared_tail_adapter(
@@ -1164,13 +1181,15 @@ def test_session_context_rejects_external_self_declared_tail_adapter(
 
     assert inventory["authority_proven"] is False
     assert any(
-        finding.check == "session-context-authority"
+        finding.check == "session-context-ordering"
+        and finding.severity == scan.BLOCKING
         for finding in report.findings
     )
 
 
-def test_session_context_authority_must_be_lexically_final(
-    tmp_path: Path, monkeypatch,
+@pytest.mark.parametrize("authority_first", [False, True])
+def test_enabled_plugins_key_order_never_proves_context_authority(
+    tmp_path: Path, monkeypatch, authority_first: bool,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
     repo = tmp_path / "repo"
@@ -1179,15 +1198,16 @@ def test_session_context_authority_must_be_lexically_final(
     _session_plugin(
         installed, "copilot-extensions", "zz-context-injection"
     )
-    _session_plugin(
-        installed, "copilot-extensions", "zzz-side-effect"
-    )
+    _session_plugin(installed, "copilot-extensions", "ambient-policy")
+    enabled_items = [
+        ("ambient-policy@copilot-extensions", True),
+        ("zz-context-injection@copilot-extensions", True),
+    ]
+    if authority_first:
+        enabled_items.reverse()
     _settings(
         repo,
-        {
-            "zz-context-injection@copilot-extensions": True,
-            "zzz-side-effect@copilot-extensions": True,
-        },
+        dict(enabled_items),
         {},
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
@@ -1199,6 +1219,7 @@ def test_session_context_authority_must_be_lexically_final(
     assert any(
         finding.check == "session-context-ordering"
         and finding.severity == scan.BLOCKING
+        and "`enabledPlugins` JSON key order" in finding.message
         for finding in report.findings
     )
 
@@ -1448,7 +1469,7 @@ def test_unknown_external_plugin_output_is_warning_only(
     assert warning.severity == scan.WARNING
 
 
-def test_unknown_external_does_not_turn_proven_known_stack_into_blocker(
+def test_unknown_external_keeps_order_dependent_stack_blocked(
     tmp_path: Path, monkeypatch,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
@@ -1478,15 +1499,21 @@ def test_unknown_external_does_not_turn_proven_known_stack_into_blocker(
 
     inventory = scan.scan_session_context(repo, sources, report)
 
-    assert inventory["disposition"] == "indeterminate-stand-down"
-    assert report.blocking == 0
+    assert inventory["disposition"] == "unsupported-order-dependent-authority"
+    assert report.blocking > 0
     assert any(
         finding.check == "session-context-unknown"
         and finding.severity == scan.WARNING
         for finding in report.findings
     )
-    assert not any(
+    assert any(
+        finding.check == "session-context-ordering"
+        and finding.severity == scan.BLOCKING
+        for finding in report.findings
+    )
+    assert any(
         finding.check == "session-context-collision"
+        and finding.severity == scan.BLOCKING
         for finding in report.findings
     )
 
@@ -1880,8 +1907,8 @@ def test_json_from_settings_includes_identity_role_inventory(
     output = capsys.readouterr().out
     payload = json.loads(output)
     assert payload["session_context"] == {
-        "disposition": "guaranteed-last-proven",
-        "authority_proven": True,
+        "disposition": "unsupported-order-dependent-authority",
+        "authority_proven": False,
         "plugins": [{
             "identity": "copilot-extensions/zz-context-injection",
             "role": "aggregate-authority",
@@ -1890,6 +1917,11 @@ def test_json_from_settings_includes_identity_role_inventory(
             "possible_non_empty": "yes",
         }],
     }
+    assert any(
+        finding["check"] == "session-context-ordering"
+        and finding["severity"] == scan.BLOCKING
+        for finding in payload["findings"]
+    )
 
 
 def test_from_settings_ignores_untrusted_repository_settings(

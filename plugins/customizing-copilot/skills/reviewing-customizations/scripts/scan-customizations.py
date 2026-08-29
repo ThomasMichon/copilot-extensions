@@ -26,8 +26,9 @@ Checks (all stdlib, no dependencies):
   6. raw IPs             -- an ssh/scp/rsync command targets a raw IPv4 literal
                             instead of a configured alias.
   7. session context     -- with `--from-settings`, active session-start plugins
-                            are classified by declared aggregation role and
-                            unsafe multi-output stacks are rejected statically.
+                            are classified by declared aggregation role; unsafe
+                            multi-output stacks and order-dependent aggregate
+                            authorities are rejected statically.
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
@@ -193,8 +194,6 @@ SESSION_CONTEXT_VERSION = 1
 SESSION_CONTEXT_MAX_TIMEOUT_SECONDS = 10
 SESSION_CONTEXT_MAX_BYTES = 65536
 AGGREGATE_AUTHORITY_NAME = "zz-context-injection"
-AGGREGATE_AUTHORITY_IDENTITY = "copilot-extensions/zz-context-injection"
-AGGREGATE_ENGINE_SOURCE = "zz-context-injection@copilot-extensions"
 SESSION_CONTEXT_ROLES = {
     "authority": "aggregate-authority",
     "contributor": "complete-declared-contributor",
@@ -700,28 +699,6 @@ def _session_context_declaration(
     return "complete", len(contributors)
 
 
-def _supported_aggregate_authority(
-    footprint: Path,
-    identity: str,
-    *,
-    controlled: bool,
-) -> bool:
-    """Accept the official engine or an explicit thin tail adapter."""
-    if identity == AGGREGATE_AUTHORITY_IDENTITY:
-        return True
-    if not controlled:
-        return False
-    manifest = _load_json(footprint / "plugin.json")
-    if not manifest:
-        manifest = _load_json(footprint / ".claude-plugin" / "plugin.json")
-    authority = manifest.get("sessionContextAuthority")
-    return (
-        isinstance(authority, dict)
-        and authority.get("mode") == "tail-adapter"
-        and authority.get("engine") == AGGREGATE_ENGINE_SOURCE
-    )
-
-
 def scan_session_context(
     root: Path,
     plugin_sources: list[PluginSource],
@@ -736,20 +713,12 @@ def scan_session_context(
     authority_entries: list[SessionContextEntry] = []
     known_session_start: list[SessionContextEntry] = []
     unknown_entries: list[SessionContextEntry] = []
-    supported_authorities: set[str] = set()
-    active_names = [source.plugin_name for source in plugin_sources]
 
     for source in plugin_sources:
         footprint = _editable_plugin_footprint(root, source)
         session_start = _session_start_state(footprint)
         declaration, contributor_count = _session_context_declaration(footprint)
         is_authority = source.plugin_name == AGGREGATE_AUTHORITY_NAME
-        if is_authority and _supported_aggregate_authority(
-            footprint,
-            source.origin,
-            controlled=source.controlled,
-        ):
-            supported_authorities.add(source.origin)
 
         if is_authority:
             role = SESSION_CONTEXT_ROLES["authority"]
@@ -789,27 +758,8 @@ def scan_session_context(
                 "establish whether it emits session-start context",
             )
 
-    authority_known_safe = False
     authority_proven = False
-    effective_authorities = authority_entries
-    paired_tail = False
-    if len(authority_entries) == 2:
-        tail = [
-            entry
-            for entry in authority_entries
-            if entry.identity != AGGREGATE_AUTHORITY_IDENTITY
-            and entry.identity in supported_authorities
-        ]
-        paired_tail = (
-            len(tail) == 1
-            and {
-                entry.identity for entry in authority_entries
-            }
-            == {AGGREGATE_AUTHORITY_IDENTITY, tail[0].identity}
-        )
-        if paired_tail:
-            effective_authorities = tail
-    if len(effective_authorities) > 1:
+    if len(authority_entries) > 1:
         identities = ", ".join(
             sorted(entry.identity for entry in authority_entries)
         )
@@ -820,11 +770,9 @@ def scan_session_context(
             "multiple aggregate authorities are active: "
             f"{identities}",
         )
-    elif len(effective_authorities) == 1:
-        authority = effective_authorities[0]
+    for authority in authority_entries:
         authority_complete = (
-            authority.identity in supported_authorities
-            and authority.session_start == "yes"
+            authority.session_start == "yes"
             and authority.declaration == "complete"
         )
         if not authority_complete:
@@ -832,21 +780,20 @@ def scan_session_context(
                 BLOCKING,
                 "session-context-authority",
                 f"<plugin:{authority.identity}>",
-                f"`{authority.identity}` is `{authority.role}` but is not a "
-                "complete source-qualified session-start authority",
+                f"`{authority.identity}` is `{authority.role}` but does not "
+                "have a complete session-start declaration",
             )
-        later_names = sorted(
-            name for name in active_names
-            if name > authority.plugin_name
+        report.add(
+            BLOCKING,
+            "session-context-ordering",
+            f"<plugin:{authority.identity}>",
+            f"`{authority.identity}` is `{authority.role}`, but relative plugin "
+            "execution order is not an author-facing priority contract; "
+            "`enabledPlugins` JSON key order, lexical names, and current "
+            "inventory order cannot prove that it runs last",
         )
-        if later_names:
-            report.add(
-                BLOCKING,
-                "session-context-ordering",
-                f"<plugin:{authority.identity}>",
-                f"`{authority.identity}` is `{authority.role}` but is not "
-                "lexically after every active plugin name",
-            )
+
+    if authority_entries:
         incomplete = [
             entry for entry in known_session_start
             if entry.declaration != "complete"
@@ -865,19 +812,12 @@ def scan_session_context(
                 "aggregate activation is unsafe because known session-start "
                 f"plugins are not complete-declared: {identities}",
             )
-        authority_known_safe = (
-            authority_complete
-            and not later_names
-            and not incomplete
-            and (len(authority_entries) == 1 or paired_tail)
-        )
-        authority_proven = authority_known_safe and not unknown_entries
 
     possible_outputs = [
         entry for entry in known_session_start
         if entry.role != SESSION_CONTEXT_ROLES["side_effect"]
     ]
-    if len(possible_outputs) > 1 and not authority_known_safe:
+    if len(possible_outputs) > 1:
         identities = ", ".join(
             sorted(
                 f"{entry.identity} ({entry.role})"
@@ -889,14 +829,12 @@ def scan_session_context(
             "session-context-collision",
             "<plugin-stack>",
             "multiple possible non-empty session-start outputs are not "
-            "superseded by one proven final aggregate authority or proven "
-            f"byte-identical broker output: {identities}",
+            "composed by runtime-defined merge semantics or one attributable "
+            f"owner that does not rely on a last-writer race: {identities}",
         )
 
-    if authority_proven:
-        disposition = "guaranteed-last-proven"
-    elif authority_entries and not authority_known_safe:
-        disposition = "unsafe-aggregate-authority"
+    if authority_entries:
+        disposition = "unsupported-order-dependent-authority"
     elif unknown_entries:
         disposition = "indeterminate-stand-down"
     elif len(possible_outputs) > 1:

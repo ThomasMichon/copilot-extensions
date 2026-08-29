@@ -67,7 +67,8 @@ anti-self-delegation line), **MCP readiness** (an MCP-owning agent without a
 `## MCP Readiness` section), **agent-mcp fallback** (an agent-mcp-backed agent
 without an equivalent materialized CLI fallback), **inline secrets** in config
 files, **raw IPs** in ssh/scp/rsync commands, and, with `--from-settings`,
-**session-start context composition**.
+**session-start context composition**, including unsupported designs that
+depend on `enabledPlugins` order or one plugin running last.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
 gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather
 than cry wolf; feed its findings into the design critique, don't treat a clean
@@ -144,21 +145,23 @@ without executing hooks. It reports plugin identities and these roles only:
 - **legacy direct or unknown** — no complete declaration proves the hook's
   context behavior.
 
-The current guaranteed-last proof is deliberately strict: exactly one
-source-qualified `zz-context-injection` authority must be active, its plugin
-name must sort lexically after every other active plugin name, every known
-active command `sessionStart` plugin must be complete-declared, and no second
-authority may exist. A known session-start plugin missing that declaration
-blocks safe aggregate activation. An external plugin whose payload cannot be
-inspected remains a warning because the scanner cannot establish whether it
-emits context; the aggregate must stand down rather than assume it is safe.
+The scanner never infers plugin priority from `enabledPlugins` JSON key order,
+lexical plugin names, catalog order, or the current inventory. Those are not
+author-facing compatibility contracts. An aggregate-authority design that needs
+its plugin to run last is therefore BLOCKING even when one observed runtime
+orders it that way. A known session-start plugin missing its declaration also
+blocks safe composition. An external plugin whose payload cannot be inspected
+remains a warning because the scanner cannot establish whether it emits
+context.
 
-More than one possible non-empty result is BLOCKING unless the inventory proves
-that the one final authority supersedes all earlier direct backups or that every
-producer returns byte-identical output from one compatible broker. The current
-version-1 declaration provides the guaranteed-last proof; it does not infer a
-broker contract. Reports never include hook commands, contributor argv, or
-emitted context.
+More than one possible non-empty result is BLOCKING unless the runtime defines
+merge semantics for that event/field or one attributable owner composes the
+outputs without relying on a last-writer race. The version-1 declaration makes
+contributors inspectable; it does not prove host execution order. Reports never
+include hook commands, contributor argv, or emitted context. The full execution
+and output-composition contract, including the open start-hook runtime work, is
+in `authoring-skills`'
+[`references/session-context-aggregation.md`](../authoring-skills/references/session-context-aggregation.md).
 
 Collision owners are tagged with their origin (`skill [marketplace/plugin]`).
 (The older `--include-installed` / `--include-plugins DIR` still work — they add
@@ -201,6 +204,8 @@ equivalent independent reviewer. Ask it for **bugs and design flaws, not style**
   procedures stay in the skill (see `customizing-copilot:authoring-skills`
   § *sessionStart context injection*);
 - **contradictory rules** between `AGENTS.md`, skills, and hooks;
+- hook or plugin designs that treat `enabledPlugins` key order, lexical names,
+  catalog order, or a plugin being the last context emitter as arbitration;
 - Task-capable sub-agents missing the agent-specific **anti-recursion** guard,
   and MCP-owning agents missing readiness / equivalent fallback behavior;
 - **footguns** — destructive commands without confirmation, hardcoded paths,
