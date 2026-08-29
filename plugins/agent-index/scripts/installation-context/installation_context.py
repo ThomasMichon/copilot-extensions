@@ -280,6 +280,12 @@ def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
         stream.write(_json_bytes(value))
         stream.flush()
         os.fsync(stream.fileno())
+    if os.name != "nt":
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
 
 
 def _openprocess_denied_means_live(last_error: int) -> bool:

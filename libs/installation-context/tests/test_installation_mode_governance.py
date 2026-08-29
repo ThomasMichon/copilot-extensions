@@ -21,6 +21,31 @@ GOVERNANCE_FIXTURES = LIB / "fixtures" / "installation-mode-governance.json"
 PLUGIN_ID = "agent-example"
 
 
+def _supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    candidate = shutil.which("bash")
+    if candidate is None:
+        return None
+    result = subprocess.run(
+        [
+            candidate,
+            "--noprofile",
+            "--norc",
+            "-c",
+            "((BASH_VERSINFO[0] > 4 || "
+            "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
+        ],
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+    return candidate if result.returncode == 0 else None
+
+
+BASH = _supported_bash()
+
+
 def _load_module():
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader
@@ -338,12 +363,9 @@ def _runner_command(name: str, arguments: list[str]) -> list[str]:
     if name == "python":
         return [sys.executable, str(PYTHON_SCRIPT), *arguments]
     if name == "posix":
-        if os.name == "nt":
-            pytest.skip("Bash runner is unavailable on native Windows")
-        bash = shutil.which("bash")
-        if bash is None:
+        if BASH is None:
             pytest.skip("Bash runner is unavailable")
-        return [bash, str(POSIX_SCRIPT), *arguments]
+        return [BASH, str(POSIX_SCRIPT), *arguments]
     assert POWERSHELL is not None
     mapping = {
         "--payload-root": "-PayloadRoot",

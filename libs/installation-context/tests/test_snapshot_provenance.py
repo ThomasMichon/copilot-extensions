@@ -33,12 +33,15 @@ def _supported_bash() -> str | None:
     result = subprocess.run(
         [
             candidate,
+            "--noprofile",
+            "--norc",
             "-c",
             "((BASH_VERSINFO[0] > 4 || "
             "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
         ],
         capture_output=True,
         check=False,
+        timeout=5,
     )
     return candidate if result.returncode == 0 else None
 
@@ -84,6 +87,21 @@ def _vectors() -> list[dict[str, object]]:
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def test_private_json_write_syncs_file_and_posix_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_python_module()
+    syncs: list[int] = []
+    monkeypatch.setattr(module.os, "fsync", syncs.append)
+
+    path = tmp_path / "private.json"
+    module._write_private_json(path, {"value": 1})
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"value": 1}
+    assert len(syncs) == (1 if os.name == "nt" else 2)
 
 
 def _receipt_layout(
