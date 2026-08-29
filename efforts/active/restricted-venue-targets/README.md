@@ -202,14 +202,14 @@ mount, credential relay, merge authority, or deployment authority.
       unchanged. Preserve trusted-fleet lifecycle behavior.
 
 ### Phase 4 — SSH-compatible restricted provider exec
-- [ ] Define an agent-ssh provider-exec transport that maps OpenSSH stdio to the
+- [x] Define an agent-ssh provider-exec transport that maps OpenSSH stdio to the
       venue provider boundary without preparing authorized keys or starting
       sshd.
-- [ ] Keep the container on its existing network set with no published port,
+- [x] Keep the container on its existing network set with no published port,
       host gateway, or relay reverse-forward.
-- [ ] Emit a named profile from stable provider-target metadata and fail loudly
+- [x] Emit a named profile from stable provider-target metadata and fail loudly
       when the target is absent, unready, or no longer restricted.
-- [ ] Add synthetic transport-provider and forbidden-projection tests; bump
+- [x] Add synthetic transport-provider and forbidden-projection tests; bump
       agent-containers and agent-ssh as required.
 
 ### Phase 5 — Provider-backed worktree sources and Picker
@@ -284,9 +284,9 @@ mount, credential relay, merge authority, or deployment authority.
       JSON lines are retried, and checkpoint age/failure is observable.
 - [ ] Workspace, settings, credentials, and prior Copilot session execution state
       are not restored into the replacement container.
-- [ ] Restricted ACP/provider-exec Docker argv contains no token, relay, SSH,
+- [x] Restricted ACP/provider-exec Docker argv contains no token, relay, SSH,
       host-path, network, or gateway projection.
-- [ ] The named transport reaches only the provider target and fails closed if
+- [x] The named transport reaches only the provider target and fails closed if
       live posture no longer matches the restricted contract.
 - [ ] Picker and bridge show one venue/workspace owner, never a duplicate
       physical machine or local worktree.
@@ -520,3 +520,28 @@ key and relay projection; restricted venues never enter that path.
   failure now completes sibling venues but exits nonzero. Filesystem selected-
   session staging/backups live outside discoverable `session-state`; read-only-
   aware cleanup failure is surfaced instead of silently leaving ghost sessions.
+
+### 2026-08-29 - Restricted provider-exec transport
+- Phase 4 merged in PR #1359. The restricted target now exposes an
+  SSH-compatible stdio transport through agent-containers and publishes a named,
+  hardened OpenSSH profile through agent-ssh without installing an in-container
+  sshd, preparing target keys, opening a listener, or projecting host authority.
+- Synthetic coverage proves the single-channel command and PTY paths, remote
+  exit and stderr propagation, provider-owned target user, hardened profile
+  options, forbidden forwarding/subsystem requests, live posture reinspection,
+  and absence of credential, relay, mount, port, gateway, or extra-network
+  projection.
+- Live validation confirmed command and PTY operation through the named profile,
+  distinct stdout/stderr and remote exit status, target-user isolation, absent
+  sshd/host keys/credential-shaped environment, and fail-closed behavior for an
+  absent target, remote forwarding, and SFTP. Docker identity and restricted
+  posture were unchanged before and after the sessions.
+- Disconnect validation exposed a lifecycle gap: Paramiko can report the client
+  disconnect while leaving the channel object open. PR #1375 made transport
+  inactivity part of the disconnect predicate and added a loop-level regression
+  proving nonce-bound process-group cleanup.
+- After deployment, terminating only the OpenSSH client caused the bounded,
+  nonce-tagged target workload to disappear immediately. A concurrent restricted
+  lifecycle action was deferred with an active provider admission, and the
+  container identity, network set, read-only root, empty ports/mounts, dropped
+  privilege, and capability posture remained unchanged.
