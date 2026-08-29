@@ -61,11 +61,15 @@ import yaml
 from . import config as cfg
 
 MARKETPLACE = "copilot-extensions"
-_CORE_SOURCE_RECORD = (
-    "version:1:1\n"
-    "kind:6:github\n"
-    "source:38:github:thomasmichon/copilot-extensions\n"
-    "ref:0:\n"
+_CORE_SOURCE_FIELDS = (
+    ("version", "1"),
+    ("kind", "github"),
+    ("source", "github:thomasmichon/copilot-extensions"),
+    ("ref", ""),
+)
+_CORE_SOURCE_RECORD = "".join(
+    f"{name}:{len(value.encode('utf-8'))}:{value}\n"
+    for name, value in _CORE_SOURCE_FIELDS
 )
 CORE_MARKETPLACE_ID = (
     f"{MARKETPLACE}--"
