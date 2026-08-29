@@ -1332,6 +1332,24 @@ def test_dotfiles_managed_home_ancestor_is_allowed(tmp_path: Path) -> None:
     assert summary.accepted == 1
 
 
+def test_rescue_state_rejects_symlinked_home_ancestor(tmp_path: Path) -> None:
+    root = tmp_path / "rescues"
+    _write_capture(root, "100-a")
+    outside = tmp_path / "outside-home"
+    outside.mkdir()
+    alias = tmp_path / "alias-home"
+    try:
+        alias.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    cfg = _cfg(tmp_path)
+    cfg.home = alias / ".agent-logger"
+
+    with pytest.raises(RescueSourceError, match="not a regular directory|must not traverse"):
+        rescue.push_rescues(cfg, rescue_roots=[root])
+    assert list(outside.iterdir()) == []
+
+
 def test_rescue_sync_state_itself_cannot_be_repository(tmp_path: Path) -> None:
     root = tmp_path / "rescues"
     _write_capture(root, "100-a")

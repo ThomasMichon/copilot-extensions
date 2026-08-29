@@ -15,6 +15,7 @@ from agent_logger import sessions
 from agent_logger.config import Config
 from agent_logger.sync.provenance import (
     MAX_PROVENANCE_BYTES,
+    ensure_real_directory,
 )
 from agent_logger.sync.provenance import (
     SCHEMA_VERSION as PROVENANCE_SCHEMA_VERSION,
@@ -190,7 +191,12 @@ def _write_provenance(path: Path, payload: dict[str, Any]) -> None:
 
 def _stage_root(cfg: Config) -> Path:
     root = cfg.home / "rescue-sync" / "staging"
-    root.mkdir(parents=True, exist_ok=True)
+    try:
+        root = ensure_real_directory(root)
+    except OSError as exc:
+        raise RescueSourceError(
+            f"rescue projection root is unsafe: {root}"
+        ) from exc
     require_directory(root, "rescue projection root")
     try:
         os.chmod(root, 0o700)

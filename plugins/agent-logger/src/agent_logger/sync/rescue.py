@@ -16,6 +16,10 @@ from typing import Any
 from agent_logger.config import Config
 from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.origin import classify_source_repo
+from agent_logger.sync.provenance import (
+    ensure_real_directory,
+    existing_real_directory,
+)
 from agent_logger.sync.rescue_projection import push_venue
 from agent_logger.sync.rescue_validation import (
     SUPPORTED_PROVIDER,
@@ -81,7 +85,7 @@ def _validate_home(home: Path) -> None:
     while not existing.exists() and existing.parent != existing:
         existing = existing.parent
     require_directory(existing, "agent-logger home ancestor")
-    if existing.is_symlink():
+    if existing_real_directory(existing) is None:
         raise RescueSourceError(f"agent-logger home must not traverse a symlink: {home}")
     if state_root.exists():
         require_directory(state_root, "rescue sync state root")
@@ -100,6 +104,10 @@ def _load_checkpoint(path: Path) -> dict[str, Any]:
             "captures": {},
             "sessions": {},
         }
+    if existing_real_directory(path.parent) is None:
+        raise RescueSourceError(
+            f"rescue checkpoint directory is unsafe: {path.parent}"
+        )
     try:
         payload = json.loads(read_regular(path, max_bytes=_MAX_CHECKPOINT_BYTES))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -120,8 +128,14 @@ def _load_checkpoint(path: Path) -> dict[str, Any]:
 
 
 def _write_checkpoint(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    require_directory(path.parent, "rescue checkpoint directory")
+    try:
+        parent = ensure_real_directory(path.parent)
+    except OSError as exc:
+        raise RescueSourceError(
+            f"rescue checkpoint directory is unsafe: {path.parent}"
+        ) from exc
+    path = parent / path.name
+    require_directory(parent, "rescue checkpoint directory")
     try:
         os.chmod(path.parent, 0o700)
     except OSError:
