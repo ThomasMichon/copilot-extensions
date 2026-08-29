@@ -106,7 +106,7 @@ def _run(
     environment["HOME"] = str(home)
     environment["COPILOT_PLUGIN_ROOT"] = str(aggregator)
     return subprocess.run(
-        [os.environ.get("PYTHON", sys.executable), str(SCRIPT)],
+        [os.environ.get("PYTHON") or sys.executable, str(SCRIPT)],
         input=json.dumps(
             {
                 "cwd": str(cwd or repo),
@@ -291,7 +291,7 @@ def test_untrusted_repository_settings_do_not_activate_plugins(
         / "zz-context-injection"
     )
     rerun = subprocess.run(
-        [os.environ.get("PYTHON", sys.executable), str(SCRIPT)],
+        [os.environ.get("PYTHON") or sys.executable, str(SCRIPT)],
         input=json.dumps({"cwd": str(repo), "source": "new", "sessionId": "s"}),
         text=True,
         capture_output=True,
@@ -372,7 +372,7 @@ def test_trusted_directory_marketplace_resolves_exact_payloads(
     )
 
     result = subprocess.run(
-        [os.environ.get("PYTHON", sys.executable), str(SCRIPT)],
+        [os.environ.get("PYTHON") or sys.executable, str(SCRIPT)],
         input=json.dumps({"cwd": str(repo), "source": "new", "sessionId": "s"}),
         text=True,
         capture_output=True,

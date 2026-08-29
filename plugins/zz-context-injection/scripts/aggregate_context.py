@@ -676,9 +676,12 @@ def main() -> int:
     except TimeoutError:
         for future in futures:
             future.cancel()
-        executor.shutdown(wait=False, cancel_futures=True)
         return _emit_empty("aggregate contributor deadline exceeded")
-    executor.shutdown(wait=True)
+    except Exception as exc:
+        _diagnose(f"aggregate contributor collection failed: {exc}")
+        return _emit_empty("aggregate contributor collection failed")
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     if not all(result.ok for result in outputs):
         return _emit_empty("one or more contributors failed; direct hooks retained")
     fragments: list[tuple[int, str, str]] = []
