@@ -48,6 +48,15 @@ _LINK_PY = re.compile(
     r"""(?<![\w.])\.?venv[\\/](?:bin[\\/]python(?:3(?:\.\d+)?)?|Scripts[\\/]python(?:w)?\.exe)""",
     re.IGNORECASE,
 )
+# Resolving a plugin's **console script** through the same link (e.g.
+# `$LINK_DIR/bin/agent-bridge`). Same defect as `_LINK_PY`, different spelling,
+# and the one that actually shipped: `activate --no-link` leaves no link at all,
+# so every such call is unreachable and the caller fails closed. Matches a
+# non-python executable directly under a venv link's `bin/`|`Scripts/`.
+_LINK_SCRIPT = re.compile(
+    r"""(?:(?<![\w.])\.?venv|\$\{?LINK_DIR\}?)[\\/](?:bin|Scripts)[\\/](?!python)[\w.-]+""",
+    re.IGNORECASE,
+)
 # A PATH python bound as a **launch** interpreter (never allowed) -- a launch
 # variable or an exec target set to a bare `python`/`python3`. This deliberately
 # does NOT flag bootstrap discovery (`py="$(command -v python3)"` to *build* the
@@ -141,6 +150,8 @@ def _violations(path: Path) -> list[tuple[int, str, str]]:
         report = line.strip()[:160]
         if _LINK_PY.search(code):
             found.append((n, "venv-link", report))
+        elif _LINK_SCRIPT.search(code):
+            found.append((n, "venv-link-script", report))
         elif _CROSS.search(code):
             found.append((n, "cross-plugin-venv", report))
         elif _PATH_PY.search(code):

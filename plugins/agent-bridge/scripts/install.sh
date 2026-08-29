@@ -292,6 +292,39 @@ _versioned_gc() {
     fi
 }
 
+_rt_python() {
+    # The versioned-slot interpreter, resolved exactly as the binstub, hooks and
+    # service launcher do -- via the deployed `bin/resolve-runtime.sh`
+    # (current-version marker -> last-known-good -> newest complete slot).
+    #
+    # `_versioned_activate` runs with `--no-link`, so there is NO `venv` symlink
+    # to resolve through: activate actively removes a stale one. Anything that
+    # reached for `$LINK_DIR/bin/agent-bridge` was therefore unreachable, and
+    # `do_start` failed on every install (#765 uniform-runtime-resolution).
+    #
+    # Prints the interpreter path; returns 1 when no runtime is installed, so
+    # callers degrade deliberately instead of binding a PATH python.
+    local resolver="$INSTALL_DIR/bin/resolve-runtime.sh"
+    local py=""
+    if [[ -f "$resolver" ]]; then
+        # Command substitution already subshells; sourcing cannot leak here.
+        py="$(AGENT_RT_ROOT="$INSTALL_DIR"; . "$resolver" >/dev/null 2>&1; printf '%s' "${AGENT_RT_PY:-}")"
+    fi
+    # Mid-install the resolver may not be deployed yet -- fall back to the slot
+    # this run just built.
+    [[ -n "$py" && -x "$py" ]] || py="$VENV_DIR/bin/python"
+    [[ -x "$py" ]] || return 1
+    printf '%s' "$py"
+}
+
+_bridge_cli() {
+    # Run the agent-bridge CLI out of the resolved slot. Mirrors the binstub's
+    # `exec "$AGENT_RT_PY" -m agent_bridge "$@"`.
+    local py
+    py="$(_rt_python)" || return 127
+    "$py" -m agent_bridge "$@"
+}
+
 _bootstrap_python() {
     # A python to run the stdlib-only versioned_runtime.py helper BEFORE the slot
     # venv exists (e.g. the pre-build toss). Prefers the current `venv` link's
@@ -438,10 +471,10 @@ _wait_port_free() {
 # indefinitely. Non-fatal -- the stop that follows is the backstop.
 _drain_service() {
     local timeout="${1:-120}"
-    # Drain the RUNNING daemon, resolved through the stable `venv` link.
-    [[ -x "$LINK_DIR/bin/agent-bridge" ]] || return 0
+    # Drain the RUNNING daemon, resolved through the versioned-slot marker.
+    _rt_python >/dev/null 2>&1 || return 0
     _step "Draining in-flight sessions (up to ${timeout}s)..."
-    if "$LINK_DIR/bin/agent-bridge" drain --timeout "$timeout" --force \
+    if _bridge_cli drain --timeout "$timeout" --force \
             > /dev/null 2>&1; then
         _ok "Drain window complete"
     else
@@ -1123,7 +1156,8 @@ do_start() {
         return 0
     fi
 
-    if [[ ! -x "$LINK_DIR/bin/agent-bridge" ]]; then
+    local rt_py
+    if ! rt_py="$(_rt_python)"; then
         _fail "agent-bridge not installed. Run: install.sh install"
         exit 1
     fi
@@ -1146,10 +1180,10 @@ do_start() {
         _warn "systemd start did not activate the service (rc=$systemd_start_rc) -- falling back to direct start"
     fi
 
-    # Direct start -- launch through the stable `venv` link. Close fd 8 (8>&-) so
+    # Direct start -- launch the resolved slot interpreter. Close fd 8 (8>&-) so
     # a daemon launched during do_install/do_update never inherits and holds the
     # install lock (ce#802).
-    nohup "$LINK_DIR/bin/agent-bridge" start > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
+    nohup "$rt_py" -m agent_bridge start > "$INSTALL_DIR/agent-bridge.log" 2>&1 8>&- &
     local pid=$!
     echo "$pid" > "$PID_FILE"
     sleep 2
@@ -1233,10 +1267,10 @@ do_status() {
         fi
     fi
 
-    # Install state -- the currently-active runtime (via the `venv` link).
-    if [[ -x "$LINK_DIR/bin/agent-bridge" ]]; then
+    # Install state -- the currently-active runtime (via the version marker).
+    if _rt_python >/dev/null 2>&1; then
         local version
-        version=$("$LINK_DIR/bin/agent-bridge" version 2>/dev/null || echo "unknown")
+        version=$(_bridge_cli version 2>/dev/null || echo "unknown")
         _ok "Installed: $version"
     else
         _step "Not installed"
@@ -1263,7 +1297,7 @@ do_status() {
     fi
 
     # Exit non-zero when not installed (used by module update orchestrator)
-    if [[ ! -x "$LINK_DIR/bin/agent-bridge" ]]; then
+    if ! _rt_python >/dev/null 2>&1; then
         exit 1
     fi
 }
@@ -1637,10 +1671,10 @@ do_update() {
     # Update deploy manifest
     _write_deploy_manifest
 
-    # Bring the new version into service. Launch through the stable `venv` link.
+    # Bring the new version into service, via the resolved slot interpreter.
     if [[ "$cutover" == true ]]; then
         _step "Zero-downtime cutover (agent-bridge deploy)..."
-        if "$LINK_DIR/bin/agent-bridge" deploy \
+        if _bridge_cli deploy \
                 --drain-timeout "${AGENT_BRIDGE_DRAIN_TIMEOUT:-300}"; then
             _ok "Cutover complete -- new daemon active, old retired"
         else

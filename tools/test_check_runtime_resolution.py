@@ -75,3 +75,59 @@ def test_excluded_helper_file_by_path_is_skipped(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert _kinds(p) == []
+
+
+def test_console_script_through_venv_link_is_flagged(tmp_path: Path) -> None:
+    # The shape that actually shipped: `activate --no-link` leaves no link, so a
+    # console script resolved through one is unreachable and the caller fails
+    # closed. The `$LINK_DIR` spelling is the one used by the installers.
+    p = tmp_path / "scripts" / "install.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        'nohup "$LINK_DIR/bin/agent-bridge" start > "$LOG" 2>&1 &\n',
+        encoding="utf-8",
+    )
+    assert _kinds(p) == ["venv-link-script"]
+
+
+def test_console_script_through_literal_venv_dir_is_flagged(tmp_path: Path) -> None:
+    p = tmp_path / "scripts" / "install.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text('"$_root/.venv/bin/session-sync" status || true\n', encoding="utf-8")
+    assert _kinds(p) == ["venv-link-script"]
+
+
+def test_slot_console_script_is_not_flagged(tmp_path: Path) -> None:
+    # A versioned slot path is the correct resolution and must stay clean.
+    p = tmp_path / "scripts" / "install.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text(
+        '"$INSTALL_DIR/versions/$SRC_VERSION/bin/agent-bridge" version\n',
+        encoding="utf-8",
+    )
+    assert _kinds(p) == []
+
+
+def test_link_dir_python_stays_venv_link_not_script(tmp_path: Path) -> None:
+    # `$LINK_DIR/bin/python` is bootstrap discovery, deliberately excluded from
+    # the console-script rule so the sibling installers are not mass-flagged.
+    p = tmp_path / "scripts" / "install.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text('if [[ -x "$LINK_DIR/bin/python" ]]; then :; fi\n', encoding="utf-8")
+    assert _kinds(p) == []
+
+
+def test_link_dir_substring_is_not_flagged(tmp_path: Path) -> None:
+    # `LINK_DIR` must be an expansion, not a substring of a longer identifier:
+    # `$SOME_LINK_DIR/bin/tool` is a different variable and not a venv link.
+    p = tmp_path / "scripts" / "install.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text('"$SOME_LINK_DIR/bin/tool" --version\n', encoding="utf-8")
+    assert _kinds(p) == []
+
+
+def test_braced_link_dir_expansion_is_flagged(tmp_path: Path) -> None:
+    p = tmp_path / "scripts" / "install.sh"
+    p.parent.mkdir(parents=True)
+    p.write_text('"${LINK_DIR}/bin/session-sync" status\n', encoding="utf-8")
+    assert _kinds(p) == ["venv-link-script"]
