@@ -18,10 +18,7 @@ function Write-ProtocolResponse([hashtable]$Response) {
     [Console]::Out.Flush()
 }
 
-$sharedRunspace = [RunspaceFactory]::CreateRunspace()
-$sharedRunspace.Open()
-try {
-    while ($null -ne ($line = [Console]::In.ReadLine())) {
+while ($null -ne ($line = [Console]::In.ReadLine())) {
         if ([string]::IsNullOrWhiteSpace($line)) {
             continue
         }
@@ -78,7 +75,6 @@ try {
         }
 
         $runner = [PowerShell]::Create()
-        $runner.Runspace = $sharedRunspace
         $errorWriter = New-Object IO.StringWriter
         $originalError = [Console]::Error
         try {
@@ -140,8 +136,4 @@ try {
                 )
             }
         }
-    }
-}
-finally {
-    $sharedRunspace.Dispose()
 }

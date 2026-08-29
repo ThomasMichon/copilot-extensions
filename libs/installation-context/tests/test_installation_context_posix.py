@@ -47,7 +47,7 @@ _PYTHON_RUNNER_MODULE = None
 
 
 class _PowerShellTestHost:
-    """Run script invocations serially inside one bounded PowerShell host."""
+    """Run each request in a fresh runspace inside one bounded PowerShell host."""
 
     def __init__(self) -> None:
         assert POWERSHELL is not None
