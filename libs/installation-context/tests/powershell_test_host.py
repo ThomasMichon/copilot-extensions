@@ -55,7 +55,7 @@ class PowerShellTestHost:
     def run(
         self,
         arguments: tuple[str, ...],
-        environment: dict[str, str] | None,
+        environment_overrides: dict[str, str] | None,
     ) -> subprocess.CompletedProcess[str]:
         assert self._process.stdin is not None
         assert self._process.stdout is not None
@@ -69,7 +69,7 @@ class PowerShellTestHost:
                     {
                         "id": request_id,
                         "arguments": arguments,
-                        "environment": environment or {},
+                        "environment": environment_overrides or {},
                     },
                     separators=(",", ":"),
                 )

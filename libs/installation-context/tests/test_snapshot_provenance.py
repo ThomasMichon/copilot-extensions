@@ -387,11 +387,6 @@ def _run(
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
-    if environment_overrides:
-        environment.update(environment_overrides)
     command = _command(
         runner,
         action,
@@ -420,6 +415,11 @@ def _run(
             environment_overrides,
         )
     else:
+        environment = os.environ.copy()
+        environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        environment.pop("COPILOT_PLUGIN_ROOT", None)
+        if environment_overrides:
+            environment.update(environment_overrides)
         result = subprocess.run(
             command,
             capture_output=True,
@@ -464,9 +464,6 @@ def _run_context_validate(
     layout: dict[str, Path | str],
 ) -> subprocess.CompletedProcess[str]:
     _, prefix, style = runner
-    environment = os.environ.copy()
-    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
-    environment.pop("COPILOT_PLUGIN_ROOT", None)
     arguments = (
         "validate",
         _flag(style, "context"),
@@ -488,6 +485,9 @@ def _run_context_validate(
                 LIB / "installation-context.ps1",
             )
         return _POWERSHELL_HOST.run(arguments, None)
+    environment = os.environ.copy()
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    environment.pop("COPILOT_PLUGIN_ROOT", None)
     return subprocess.run(
         [*prefix, *arguments],
         capture_output=True,
