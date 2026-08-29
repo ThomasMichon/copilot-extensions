@@ -194,6 +194,7 @@ SESSION_CONTEXT_MAX_TIMEOUT_SECONDS = 10
 SESSION_CONTEXT_MAX_BYTES = 65536
 AGGREGATE_AUTHORITY_NAME = "zz-context-injection"
 AGGREGATE_AUTHORITY_IDENTITY = "copilot-extensions/zz-context-injection"
+AGGREGATE_ENGINE_SOURCE = "zz-context-injection@copilot-extensions"
 SESSION_CONTEXT_ROLES = {
     "authority": "aggregate-authority",
     "contributor": "complete-declared-contributor",
@@ -699,6 +700,24 @@ def _session_context_declaration(
     return "complete", len(contributors)
 
 
+def _supported_aggregate_authority(
+    footprint: Path,
+    identity: str,
+) -> bool:
+    """Accept the official engine or an explicit thin tail adapter."""
+    if identity == AGGREGATE_AUTHORITY_IDENTITY:
+        return True
+    manifest = _load_json(footprint / "plugin.json")
+    if not manifest:
+        manifest = _load_json(footprint / ".claude-plugin" / "plugin.json")
+    authority = manifest.get("sessionContextAuthority")
+    return (
+        isinstance(authority, dict)
+        and authority.get("mode") == "tail-adapter"
+        and authority.get("engine") == AGGREGATE_ENGINE_SOURCE
+    )
+
+
 def scan_session_context(
     root: Path,
     plugin_sources: list[PluginSource],
@@ -713,6 +732,7 @@ def scan_session_context(
     authority_entries: list[SessionContextEntry] = []
     known_session_start: list[SessionContextEntry] = []
     unknown_entries: list[SessionContextEntry] = []
+    supported_authorities: set[str] = set()
     active_names = [source.plugin_name for source in plugin_sources]
 
     for source in plugin_sources:
@@ -720,6 +740,11 @@ def scan_session_context(
         session_start = _session_start_state(footprint)
         declaration, contributor_count = _session_context_declaration(footprint)
         is_authority = source.plugin_name == AGGREGATE_AUTHORITY_NAME
+        if is_authority and _supported_aggregate_authority(
+            footprint,
+            source.origin,
+        ):
+            supported_authorities.add(source.origin)
 
         if is_authority:
             role = SESSION_CONTEXT_ROLES["authority"]
@@ -775,7 +800,7 @@ def scan_session_context(
     elif len(authority_entries) == 1:
         authority = authority_entries[0]
         authority_complete = (
-            authority.identity == AGGREGATE_AUTHORITY_IDENTITY
+            authority.identity in supported_authorities
             and authority.session_start == "yes"
             and authority.declaration == "complete"
         )

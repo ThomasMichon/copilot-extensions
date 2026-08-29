@@ -1090,6 +1090,40 @@ def test_session_context_inventory_proves_one_final_authority(
     assert "scripts/emit-context" not in rendered
 
 
+def test_session_context_accepts_declared_tail_adapter(
+    tmp_path: Path, monkeypatch,
+):
+    _isolate_user_settings(tmp_path, monkeypatch)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    installed = tmp_path / "installed"
+    adapter = _session_plugin(
+        installed,
+        "aperture",
+        "zz-context-injection",
+    )
+    manifest_path = adapter / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["sessionContextAuthority"] = {
+        "mode": "tail-adapter",
+        "engine": "zz-context-injection@copilot-extensions",
+    }
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    _settings(
+        repo,
+        {"zz-context-injection@aperture": True},
+        {},
+    )
+    sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, sources, report)
+
+    assert inventory["authority_proven"] is True
+    assert inventory["disposition"] == "guaranteed-last-proven"
+    assert not report.findings
+
+
 def test_session_context_authority_must_be_lexically_final(
     tmp_path: Path, monkeypatch,
 ):
