@@ -81,6 +81,17 @@ def test_no_repo_writes_machine_role_only(_iso, monkeypatch):
     assert config.resolve_role() == "host"
 
 
+def test_noninteractive_setup_requires_explicit_choice(_iso, monkeypatch, capsys):
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: None)
+
+    rc = cmd_setup(_args())
+
+    assert rc == 2
+    payload = __import__("json").loads(capsys.readouterr().out)
+    assert payload["state"] == "setup_required"
+    assert config.configured_role() is None
+
+
 def test_designation_and_role_roundtrip(_iso):
     repo = _iso / "repo"
     repo.mkdir()

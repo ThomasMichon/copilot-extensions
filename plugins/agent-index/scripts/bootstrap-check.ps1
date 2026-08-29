@@ -101,25 +101,61 @@ try {
         $vl = Select-String -Path $pyproj -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $current = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
+    $configuredRole = $false
+    $envRole = if ($env:AGENT_INDEX_ROLE) { $env:AGENT_INDEX_ROLE.Trim().ToLowerInvariant() } else { '' }
+    if ($envRole -in @('host', 'client')) {
+        $configuredRole = $true
+    } else {
+        $configPath = Join-Path $InstallDir 'config.yaml'
+        if (Test-Path -LiteralPath $configPath -PathType Leaf) {
+            $match = Select-String -LiteralPath $configPath -Pattern '^\s*(?:role|engine)\s*:\s*["'']?([A-Za-z]+)' -ErrorAction SilentlyContinue |
+                Select-Object -First 1
+            if ($match -and $match.Matches[0].Groups[1].Value.ToLowerInvariant() -in @(
+                'host', 'client', 'engine', 'server', 'indexer', 'none', 'consumer'
+            )) {
+                $configuredRole = $true
+            }
+        }
+    }
     if ($contextSelected) {
         if ($deployed -eq $current) { exit 0 }
         Write-Host "[$name] selected context runtime $deployed -> $current; context-aware install is not active yet." -ForegroundColor DarkGray
         exit 0
     }
-    # "Provisioned" no longer implies a `.venv`: the marker runtime model (#581)
-    # publishes the active slot via a `current-version` marker with NO junction on
-    # Windows (RedirectionGuard), so a healthy current runtime has no `.venv` there.
-    # Treat a marker whose slot python exists as provisioned too -- otherwise a
-    # current runtime needlessly background-rebuilds every session.
-    $provisioned = Test-Path (Join-Path $InstallDir '.venv')
-    if (-not $provisioned) {
-        $cvMarker = Join-Path $InstallDir 'current-version'
-        if (Test-Path $cvMarker) {
-            $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
-            # ...and only when it names the CURRENT payload version: the marker is
-            # authoritative for the ACTIVE slot, so a stale/corrupt marker naming an
-            # older slot must NOT suppress reconcile and strand the wrong runtime.
-            if ($cv -and $cv -eq $current -and ((Test-Path (Join-Path $InstallDir "versions\$cv\Scripts\python.exe")) -or (Test-Path (Join-Path $InstallDir "versions/$cv/bin/python")))) { $provisioned = $true }
+    # Before role setup, session start may refresh the cheap stamp but must not
+    # build a runtime or choose/start a role-specific service.
+    if (-not $configuredRole) {
+        if ($deployed -ne $current) {
+            $stampInst = @("$PluginDir\scripts\init.ps1", "$PluginDir\scripts\install.ps1") |
+                Where-Object { (Test-Path $_) -and (Select-String -Path $_ -Pattern "'stamp'" -Quiet) } |
+                Select-Object -First 1
+            if ($stampInst -and (Test-LegacyMutationAllowed)) {
+                $pw = Get-Command pwsh -ErrorAction SilentlyContinue
+                $exe = if ($pw) { $pw.Source } else { 'powershell.exe' }
+                & $exe -NoProfile -ExecutionPolicy Bypass -File $stampInst stamp *> $null
+            }
+        }
+        exit 0
+    }
+
+    # A current slot is provisioned only when the canonical resolver selects
+    # that exact version and the package import succeeds.
+    $provisioned = $false
+    $cvMarker = Join-Path $InstallDir 'current-version'
+    if (Test-Path -LiteralPath $cvMarker -PathType Leaf) {
+        $cv = ('' + (Get-Content $cvMarker -Raw)).Trim()
+        if ($cv -and $cv -eq $current) {
+            $AgentRtPy = $null
+            $env:AGENT_RT_ROOT = $InstallDir
+            . (Join-Path $PSScriptRoot 'resolve-runtime.ps1')
+            $expectedPrefix = (Join-Path $InstallDir "versions\$current") + [IO.Path]::DirectorySeparatorChar
+            if ($AgentRtPy -and $AgentRtPy.StartsWith($expectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+                $previous = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                & $AgentRtPy -c 'import agent_index' *> $null
+                $provisioned = $LASTEXITCODE -eq 0
+                $ErrorActionPreference = $previous
+            }
         }
     }
     if ($provisioned -and $deployed -eq $current) { exit 0 }

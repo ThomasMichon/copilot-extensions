@@ -2,11 +2,10 @@
 # agent-index-solo/scenario.sh -- Tier-P (programmatic) F1 solo scenario.
 #
 # Installs ONLY agent-index on a fresh box and asserts its standalone
-# install/behave contract: payload, self-provisioned SERVICE runtime, login-shell
-# binstub with a real version, direct MCP tool registration, read-only agent-mcp
-# bridge config, and status/health reads. It deliberately does NOT require the
-# durable embedding-engine runtime (~/.agent-index/engine) or any model/index
-# build; empty/degraded read results are acceptable, crashes are not.
+# setup-gated lifecycle: no-runtime, stamped-only, partial-venv, complete/no-role,
+# configured-client, and configured-host states; then CLI/HTTP/MCP reads. It
+# deliberately does NOT require the durable embedding-engine runtime
+# (~/.agent-index/engine) or any model/index build.
 #
 # Distinct from agent-index-cutover, which validates zdd graceful service cutover.
 # Name-free / public F1. Env: CR_MARKETPLACE_REPO / CR_MARKETPLACE_NAME /
@@ -21,6 +20,13 @@ MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
 UV_INDEX="${CR_UV_INDEX:-}"
 PLUGIN="agent-index"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
+PAYLOAD_CMD="$INSTALLED_ROOT/$PLUGIN/bin/agent-index"
+MARKETPLACE_REPO_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MARKETPLACE_REPO")"
+if [ -d "$MARKETPLACE_REPO" ]; then
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": $MARKETPLACE_REPO_JSON } }"
+else
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": $MARKETPLACE_REPO_JSON } }"
+fi
 
 : "${CR_SCENARIO_NAME:=agent-index-solo}"
 export CR_SCENARIO_NAME
@@ -79,11 +85,15 @@ phase 1 "install ONLY $PLUGIN"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
-  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
+  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": { "$PLUGIN@$MARKETPLACE_NAME": true }
 }
 JSON
-capture "marketplace-add" -- copilot plugin marketplace add "$MARKETPLACE_REPO" || true
+if [ -d "$MARKETPLACE_REPO" ]; then
+    info "using directory marketplace: $MARKETPLACE_REPO"
+else
+    capture "marketplace-add" -- copilot plugin marketplace add "$MARKETPLACE_REPO" || true
+fi
 capture "install" -- copilot plugin install "$PLUGIN@$MARKETPLACE_NAME" || true
 if [ -d "$INSTALLED_ROOT/$PLUGIN" ]; then
     pass "$PLUGIN payload present on disk"
@@ -100,28 +110,98 @@ else
 fi
 
 # =========================================================================
-phase 2 "runtime provisions the service runtime"
+phase 2 "dormant, stamped, and partial runtimes stay non-runnable"
 _apply_uv_index_fixture
-# Host role gives this solo box the local service/runtime and direct MCP surface.
-# AGENT_INDEX_NO_ENGINE_DEPS is a guardrail: this scenario never needs torch/model deps.
-mkdir -p "$HOME/.agent-index"
-printf 'role: host\n' > "$HOME/.agent-index/config.yaml"
-export AGENT_INDEX_ROLE=host AGENT_INDEX_NO_ENGINE_DEPS=1
 mkdir -p "$HOME/ai-repo" && ( cd "$HOME/ai-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# ai' > README.md && git add -A && git commit -qm init )
+export AGENT_INDEX_NO_ENGINE_DEPS=1
+
+capture "status-absent" -- bash "$PAYLOAD_CMD" status || true
+if python3 - "$CR_LOGDIR/status-absent.log" <<'PY'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+data = json.loads(text[text.index("{"):])
+raise SystemExit(0 if data.get("state") == "setup_required" and data.get("runtime", {}).get("state") == "absent" else 1)
+PY
+then
+    pass "no-runtime status is structured setup_required and non-mutating"
+else
+    jam "index-config" "no-runtime status did not report setup_required/absent" "status must not provision or start agent-index before setup"
+fi
+if [ ! -d "$HOME/.agent-index/versions" ] && [ ! -f "$HOME/.agent-index/active.json" ]; then
+    pass "no-runtime status created no slot or service endpoint"
+else
+    jam "index-config" "no-runtime status mutated runtime/service state" "status must be read-only before setup"
+fi
+
 PLUGIN_ARG=()
 [ -d "$INSTALLED_ROOT/$PLUGIN" ] && PLUGIN_ARG=( --plugin-dir "$INSTALLED_ROOT/$PLUGIN" )
 ( cd "$HOME/ai-repo" && capture "session-first" -- copilot -p "Reply with the single word: ready." --allow-all-tools "${PLUGIN_ARG[@]}" ) || true
-sleep 5
-# The sessionStart hook should stamp the binstub; the explicit provision action is
-# the deterministic first-use fallback that builds the SERVICE runtime only.
-capture "provision" -- bash "$INSTALLED_ROOT/$PLUGIN/scripts/install.sh" provision || true
-if [ -d "$HOME/.agent-index/versions" ] || [ -x "$HOME/.agent-index/.venv/bin/python" ]; then
-    pass "service runtime provisioned (~/.agent-index/versions or .venv present)"
+capture "status-stamped" -- bash "$PAYLOAD_CMD" status || true
+if python3 - "$CR_LOGDIR/status-stamped.log" <<'PY'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+data = json.loads(text[text.index("{"):])
+raise SystemExit(0 if data.get("state") == "setup_required" and data.get("runtime", {}).get("state") == "stamped" else 1)
+PY
+then
+    pass "session hook stamps only; status remains setup_required"
+else
+    jam "index-config" "stamped runtime status was not explicit" "session start should stamp without provisioning"
+fi
+
+VERSION="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "$INSTALLED_ROOT/$PLUGIN/pyproject.toml" | head -n1)"
+mkdir -p "$HOME/.agent-index/versions/$VERSION/bin"
+cp "$(command -v python3)" "$HOME/.agent-index/versions/$VERSION/bin/python"
+printf '%s\n' "$VERSION" > "$HOME/.agent-index/current-version"
+rm -f "$HOME/.agent-index/versions/$VERSION/.install-complete.json"
+capture "status-partial" -- bash "$PAYLOAD_CMD" status || true
+if python3 - "$CR_LOGDIR/status-partial.log" <<'PY'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+data = json.loads(text[text.index("{"):])
+raise SystemExit(0 if data.get("runtime", {}).get("state") == "broken" else 1)
+PY
+then
+    pass "Python-shaped slot without completion marker is rejected as broken"
+else
+    jam "index-config" "partial slot was not rejected" "current-version must require a valid completion marker and import readiness"
+fi
+printf '{"version": "%s", "completed_at": "2026-01-01T00:00:00Z", "pid": 0}' "$VERSION" \
+    > "$HOME/.agent-index/versions/$VERSION/.install-complete.json"
+capture "status-unimportable" -- bash "$PAYLOAD_CMD" status || true
+if python3 - "$CR_LOGDIR/status-unimportable.log" <<'PY'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+data = json.loads(text[text.index("{"):])
+raise SystemExit(0 if data.get("runtime", {}).get("state") == "broken" else 1)
+PY
+then
+    pass "completed slot with failed agent_index import is rejected as broken"
+else
+    jam "index-config" "completion marker bypassed import readiness" "every runnable slot must pass both marker and import checks"
+fi
+set +e
+bash "$PAYLOAD_CMD" search "cold start" --json >"$CR_LOGDIR/search-before-setup.log" 2>&1
+SEARCH_RC=$?
+if [ "$SEARCH_RC" -eq 2 ] && grep -q '"state":"setup_required"' "$CR_LOGDIR/search-before-setup.log"; then
+    pass "first operational use refuses provisioning until setup intent"
+else
+    jam "index-config" "operational use bypassed setup gate (rc=$SEARCH_RC)" "unconfigured automation must receive structured setup_required"
+fi
+
+# =========================================================================
+phase 3 "explicit setup repairs and provisions the host runtime"
+capture "setup-host" -- bash "$PAYLOAD_CMD" setup --single --yes --repo "$HOME/ai-repo" --json || true
+CURRENT="$(cat "$HOME/.agent-index/current-version" 2>/dev/null | tr -d ' \t\r\n' || true)"
+SLOT="$HOME/.agent-index/versions/$CURRENT"
+if [ -n "$CURRENT" ] && [ -f "$SLOT/.install-complete.json" ] \
+   && [ -x "$SLOT/bin/python" ] && "$SLOT/bin/python" -c 'import agent_index' >/dev/null 2>&1; then
+    pass "explicit setup repaired the partial slot and published an importable completed runtime"
 else
     if [ -z "$UV_INDEX" ] && _log_has_toolchain_uv; then
-        jam "toolchain-uv" "service runtime not provisioned: uv could not reach its package index" "re-run with CR_UV_INDEX=<internal index-url>"
+        jam "toolchain-uv" "setup could not provision: uv could not reach its package index" "re-run with CR_UV_INDEX=<internal index-url>"
     else
-        jam "path-binstub" "service runtime NOT provisioned after session + installer provision" "binstub/provision should build ~/.agent-index/versions or ~/.agent-index/.venv"
+        jam "path-binstub" "setup did not publish a complete importable runtime" "setup should repair partial slots before activating them"
     fi
 fi
 if [ -x "$HOME/.local/bin/agent-index" ]; then
@@ -136,7 +216,7 @@ else
 fi
 
 # =========================================================================
-phase 3 "binstub on PATH + reports a REAL version"
+phase 4 "complete/no-role plus configured client/host states are explicit"
 if capture "which-binstub" -- bash -lc 'command -v agent-index'; then
     pass "agent-index resolves on a fresh login-shell PATH"
 else
@@ -152,8 +232,40 @@ else
     jam "path-binstub" "agent-index --version failed (see cr-logs/version-flag.log)" "the binstub must self-provision/exec successfully"
 fi
 
+if [ -f "$HOME/.agent-index/config.yaml" ]; then
+    mv "$HOME/.agent-index/config.yaml" "$HOME/.agent-index/config.yaml.saved"
+fi
+capture "status-complete-no-role" -- bash "$PAYLOAD_CMD" status || true
+if python3 - "$CR_LOGDIR/status-complete-no-role.log" <<'PY'
+import json, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+data = json.loads(text[text.index("{"):])
+raise SystemExit(0 if data.get("state") == "setup_required" and data.get("runtime", {}).get("state") == "ready" else 1)
+PY
+then
+    pass "complete runtime without a role remains dormant/setup_required"
+else
+    jam "index-config" "complete runtime without role was treated as configured" "runtime readiness must not imply role adoption"
+fi
+printf 'role: client\n' > "$HOME/.agent-index/config.yaml"
+capture "role-client" -- bash "$PAYLOAD_CMD" role --json || true
+if grep -q '"role": "client"' "$CR_LOGDIR/role-client.log"; then
+    pass "configured client role is explicit"
+else
+    jam "index-config" "configured client role was not reported" "role setup must distinguish client from dormant"
+fi
+if [ -f "$HOME/.agent-index/config.yaml.saved" ]; then
+    mv "$HOME/.agent-index/config.yaml.saved" "$HOME/.agent-index/config.yaml"
+fi
+capture "role-host" -- bash "$PAYLOAD_CMD" role --json || true
+if grep -q '"role": "host"' "$CR_LOGDIR/role-host.log"; then
+    pass "configured host role is explicit"
+else
+    jam "index-config" "configured host role was not reported" "role setup must distinguish host from dormant"
+fi
+
 # =========================================================================
-phase 4 "standalone read/status/health verbs degrade cleanly with no built index"
+phase 5 "standalone read/status/health verbs degrade cleanly with no built index"
 # Ensure the local service shell is running; this starts only the lightweight
 # service runtime. The durable engine/model remains optional and unbuilt.
 capture "service-ensure" -- bash "$INSTALLED_ROOT/$PLUGIN/scripts/install.sh" ensure || true

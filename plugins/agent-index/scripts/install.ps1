@@ -377,7 +377,21 @@ function Invoke-VersionedActivate {
         try { Invoke-Stop | Out-Null } catch {}
     }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
+    $py = $VenvPython
+    if (-not (Test-Path -LiteralPath $py -PathType Leaf)) {
+        Write-Fail "Refusing to activate runtime slot without its target interpreter: $py"
+        return $false
+    }
+    & $py $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Refusing to activate incomplete runtime slot versions/$SrcVersion"
+        return $false
+    }
+    & $py -c 'import agent_index' *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Refusing to activate runtime slot versions/$SrcVersion because agent_index is not importable"
+        return $false
+    }
     & $py $vr --root $InstallDir --link-name '.venv' activate $SrcVersion --no-link 2>&1 |
         ForEach-Object { Write-Host "  ...    $_" -ForegroundColor DarkGray }
     if ($LASTEXITCODE -ne 0) {
@@ -703,14 +717,9 @@ function Get-SignedBasePython {
     return $null
 }
 
-function Deploy-SelfProvisioningBinstub {
-    <# Deploy the agent-index CLI binstubs into ~/.local/bin, SELF-PROVISIONING
-       (#1393): fast-path the built versioned slot's python; if no slot is built
-       yet (a `stamp` deferred the venv), provision on first use by running the
-       slot-local snapshot's `scripts/install.ps1 provision`, then dispatch. Opt
-       out with AGENT_INDEX_NO_SELFPROVISION=1. Launches the slot python via -m
-       (never the SAC-blocked console-script trampoline, never *traversing* a
-       junction -- RedirectionGuard #637). #>
+function Deploy-SetupGatedBinstub {
+    <# Deploy a stable machine-global redirector to the payload-owned lifecycle
+       gate. The gate owns setup consent, runtime readiness, and provisioning. #>
     if (-not (Test-Path $LocalBin)) { New-Item -ItemType Directory -Path $LocalBin -Force | Out-Null }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -722,35 +731,21 @@ function Deploy-SelfProvisioningBinstub {
         $rSrc = Join-Path $PSScriptRoot $r
         if (Test-Path $rSrc) { Copy-Item $rSrc (Join-Path $binDir $r) -Force }
     }
+    $payloadDirMarker = Join-Path $InstallDir 'payload-dir'
+    [IO.File]::WriteAllText($payloadDirMarker, $probePayload, $utf8NoBom)
 
     $ps1Path = Join-Path $LocalBin 'agent-index.ps1'
     $ps1Content = @'
-$env:PYTHONUTF8 = '1'
 $_root = Join-Path $env:USERPROFILE '.agent-index'
-$_resolver = Join-Path $_root 'bin\resolve-runtime.ps1'
-function _Resolve-Py {
-    $AgentRtPy = $null
-    if (Test-Path -LiteralPath $_resolver) { $env:AGENT_RT_ROOT = $_root; . $_resolver }
-    return $AgentRtPy
-}
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_index @args; exit $LASTEXITCODE }
-if ($env:AGENT_INDEX_NO_SELFPROVISION) { [Console]::Error.WriteLine('[agent-index] runtime not provisioned (AGENT_INDEX_NO_SELFPROVISION set).'); exit 1 }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.WriteLine('[agent-index] cannot self-provision: snapshot installer not found. Re-enable the plugin, then retry.'); exit 127 }
-try { $_origin = ([IO.File]::ReadAllText((Join-Path $_root 'payload-origin'))).Trim() } catch { $_origin = '' }
-if ($_origin) { $env:COPILOT_PLUGIN_STAGED_FROM = $_origin }
-[Console]::Error.WriteLine('[agent-index] runtime not provisioned -- provisioning on first use (acquires uv + builds a venv; ~30-120s). Do not kill; extend your timeout.')
-[Console]::Error.WriteLine('::agent-provisioning:: plugin=agent-index eta_seconds=120 reason=first-use')
-$_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
-$_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
-& $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
-$_py = _Resolve-Py
-if ($_py) { & $_py -m agent_index @args; exit $LASTEXITCODE }
-[Console]::Error.WriteLine('[agent-index] provisioning did not yield a runtime. See the log above; retry, or run the snapshot installer manually.')
-exit 1
+$_gate = if ($_snap) { Join-Path $_snap 'scripts\runtime-gate.ps1' } else { '' }
+if (-not ($_gate -and (Test-Path -LiteralPath $_gate -PathType Leaf))) {
+    [Console]::Error.WriteLine('[agent-index] payload lifecycle gate not found. Re-enable the plugin, then retry.')
+    exit 127
+}
+& $_gate @args
+exit $LASTEXITCODE
 '@
     [System.IO.File]::WriteAllText($ps1Path, $ps1Content, $utf8NoBom)
 
@@ -768,7 +763,7 @@ if %ERRORLEVEL%==0 (pwsh -NoProfile -ExecutionPolicy Bypass -File "%_PS1%" %*) e
 exit /b %ERRORLEVEL%
 '@
     [System.IO.File]::WriteAllText($cmdPath, $cmdContent, $utf8NoBom)
-    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, self-provisioning)"
+    Write-Ok "Binstub: $ps1Path (+ .cmd fallback, setup-gated)"
 }
 
 function Install-Runtime {
@@ -794,6 +789,65 @@ function Install-Runtime {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     Write-Ok "Directories: $InstallDir"
+
+    # Detach an invalid active marker before any rebuild. If provisioning fails
+    # later, no success-shaped current-version pointer remains.
+    $activeMarker = Join-Path $InstallDir 'current-version'
+    $activeVersion = ''
+    try { $activeVersion = ([IO.File]::ReadAllText($activeMarker)).Trim() } catch {}
+    if ($VersionedRuntime -and $activeVersion) {
+        $activeDir = Join-Path (Join-Path $InstallDir 'versions') $activeVersion
+        $activePython = Join-Path $activeDir 'Scripts\python.exe'
+        $activeReady = $false
+        if (Test-Path -LiteralPath $activePython -PathType Leaf) {
+            & $activePython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $activeVersion *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & $activePython -c 'import agent_index' *> $null
+                $activeReady = $LASTEXITCODE -eq 0
+            }
+        }
+        if (-not $activeReady) {
+            try { Invoke-Stop | Out-Null } catch {}
+            Remove-Item -LiteralPath $activeMarker -Force -ErrorAction SilentlyContinue
+            $lkgPath = Join-Path $InstallDir 'last-known-good'
+            $lkgVersion = ''
+            try { $lkgVersion = ([IO.File]::ReadAllText($lkgPath)).Trim() } catch {}
+            if ($lkgVersion -ceq $activeVersion) {
+                Remove-Item -LiteralPath $lkgPath -Force -ErrorAction SilentlyContinue
+            }
+            Write-Warn "Detached invalid active runtime marker for versions/$activeVersion"
+        }
+    }
+
+    # A failed prior build may have left an interpreter-shaped target slot or,
+    # on older installers, even an active marker. A slot is reusable only when
+    # its completion marker is valid AND agent_index imports successfully.
+    if ($VersionedRuntime -and (Test-Path -LiteralPath $VenvDir -PathType Container)) {
+        $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
+        $slotReady = $false
+        if (Test-Path -LiteralPath $VenvPython -PathType Leaf) {
+            & $VenvPython $vr --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & $VenvPython -c 'import agent_index' *> $null
+                $slotReady = $LASTEXITCODE -eq 0
+            }
+        }
+        if (-not $slotReady -or $env:AGENT_INDEX_REBUILD_CURRENT -eq '1') {
+            $targetWasActive = $false
+            foreach ($markerName in @('current-version', 'last-known-good')) {
+                $markerPath = Join-Path $InstallDir $markerName
+                $markerVersion = ''
+                try { $markerVersion = ([IO.File]::ReadAllText($markerPath)).Trim() } catch {}
+                if ($markerVersion -ceq $SrcVersion) {
+                    if ($markerName -eq 'current-version') { $targetWasActive = $true }
+                    Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+                }
+            }
+            if ($targetWasActive) { try { Invoke-Stop | Out-Null } catch {} }
+            Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction Stop
+            Write-Warn "Removed runtime slot versions/$SrcVersion before a clean role-aware rebuild"
+        }
+    }
 
     # Rebuild an existing slot venv whose python.exe is a uv trampoline /
     # unsigned (not spawnable over a non-interactive SSH logon, and Smart App
@@ -895,7 +949,7 @@ function Install-Runtime {
     Remove-ConsoleTrampolines -VenvDir $VenvDir
     Write-Ok 'Package installed: agent-index'
 
-    Deploy-SelfProvisioningBinstub
+    Deploy-SetupGatedBinstub
 
     $prevVersion = ''
     if ($VersionedRuntime) {
@@ -910,6 +964,11 @@ function Install-Runtime {
             exit 1
         }
         Invoke-VersionedMarkComplete
+        & $VenvPython (Join-Path $PSScriptRoot 'versioned_runtime.py') --root $InstallDir --link-name '.venv' is-complete $SrcVersion *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "Runtime completion marker was not published for versions/$SrcVersion -- not activating"
+            exit 1
+        }
         if (-not (Invoke-VersionedActivate)) { exit 1 }
     }
 
@@ -1392,16 +1451,19 @@ if (Test-Path `$envFile) {
         }
     }
 }
-`$_venv = '$($LinkDir -replace "'","''")'
-`$_py = '$($LinkPython -replace "'","''")'
-# Resolve the .venv junction's target and launch the slot python DIRECTLY (never
-# traverse the junction; reading its target is allowed) -- RedirectionGuard #637.
-`$_root = Split-Path `$_venv
-if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
-`$_ver = ''
-try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
-`$_py = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver + '\Scripts\python.exe') } else { '' }
-if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) { `$_py = Get-ChildItem (Join-Path `$_root 'versions') -Directory -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { Join-Path `$_.FullName 'Scripts\python.exe' } | Where-Object { Test-Path -LiteralPath `$_ } | Select-Object -Last 1 }
+`$_root = '$($InstallDir -replace "'","''")'
+`$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
+`$AgentRtPy = `$null
+if (Test-Path -LiteralPath `$_resolver -PathType Leaf) {
+    `$env:AGENT_RT_ROOT = `$_root
+    . `$_resolver
+}
+`$_py = `$AgentRtPy
+if (`$_py) {
+    & `$_py -c 'import agent_index' *> `$null
+    if (`$LASTEXITCODE -ne 0) { `$_py = `$null }
+}
+if (-not `$_py) { [Console]::Error.WriteLine('[agent-index] no complete, importable runtime slot is available.'); exit 1 }
 & `$_py -m agent_index start
 exit `$LASTEXITCODE
 "@
@@ -1548,11 +1610,9 @@ function Invoke-ServiceCutover {
 
 function Invoke-Stamp {
     # Fast base install (#1393, snapshot slot model): copy the payload SOURCE into
-    # ~/.agent-index/snapshots/<ver>/, record markers, and deploy the self-
-    # provisioning binstub -- deferring the heavy venv build (and the durable torch
-    # engine) to first use. No venv, no uv; fits a sessionStart grace window and
-    # NEVER holds the marketplace payload open.
-    Write-Host ''; Write-Host '=== agent-index stamp (defer runtime to first use) ===' -ForegroundColor Cyan; Write-Host ''
+    # ~/.agent-index/snapshots/<ver>/, record markers, and deploy the setup-gated
+    # binstub -- deferring the venv and durable engine until explicit setup.
+    Write-Host ''; Write-Host '=== agent-index stamp (defer runtime to explicit setup) ===' -ForegroundColor Cyan; Write-Host ''
     if (-not $SrcVersion) { Write-Fail 'Cannot stamp: no version in pyproject.toml'; exit 1 }
     $stampHash = [BitConverter]::ToString(
         [Security.Cryptography.SHA256]::Create().ComputeHash(
@@ -1594,8 +1654,8 @@ function Invoke-Stamp {
     [System.IO.File]::WriteAllText($payloadDirMarker, $snapDir, $utf8NoBom)
     [System.IO.File]::WriteAllText((Join-Path $InstallDir 'stamped-version'), $SrcVersion, $utf8NoBom)
     Write-Ok "Snapshot: $snapDir"
-    Deploy-SelfProvisioningBinstub
-    Write-Ok 'Stamped: agent-index binstub on PATH; runtime provisions on first use.'
+    Deploy-SetupGatedBinstub
+    Write-Ok 'Stamped: agent-index binstub on PATH; runtime provisions after explicit setup.'
     } finally {
         if ($stampLockHeld) { [void]$stampMutex.ReleaseMutex() }
         $stampMutex.Dispose()
@@ -1603,8 +1663,8 @@ function Invoke-Stamp {
 }
 
 function Invoke-Status {
-    if (Test-Path $LinkPython) { & $LinkPython -m agent_index status }
-    else { Write-Skip "Runtime not installed: $InstallDir" }
+    & (Join-Path $PSScriptRoot 'runtime-gate.ps1') status
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
 function Invoke-Start {

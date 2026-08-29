@@ -65,17 +65,28 @@ shared. See `../../../docs/patterns/durable-vs-versioned-runtime.md`.
 The default lifecycle is user-mode and session-start-assisted:
 
 1. `bootstrap-check` stamps the installed payload if no runtime exists, putting a
-self-provisioning `agent-index` binstub on PATH.
-2. First binstub use runs `install.ps1|sh provision` from the stamped snapshot and
-builds the current versioned service slot.
-3. `ensure-service` runs on session start only when the current repository has
+setup-gated `agent-index` binstub on PATH. Before activation it never builds a
+runtime or starts a service.
+2. `agent-index status` is read-only before setup and reports a structured
+`setup_required` lifecycle state. Other operational commands are refused until
+the operator explicitly runs `agent-index setup --single` or
+`agent-index setup --indexer <machine> --ssh <alias>`.
+3. Setup provisions from the stamped snapshot, writes the selected role, then
+reconciles the role-specific runtime and service. Noninteractive setup requires
+an explicit role flag.
+4. `ensure-service` runs on session start only when the current repository has
 an explicit `indexer`/`indexers` designation. On a designated `host` it starts
 or recovers the user-mode service (and engine when provisioned); on a
 designated `client` or an unconfigured repository it exits without starting
 a daemon.
-4. `install update` performs an active/passive zdd service cutover when a live
+5. `install update` performs an active/passive zdd service cutover when a live
 service is healthy. `agent-index deploy --recover` runs breadcrumb recovery for
 an interrupted cutover.
+
+Every launch path requires both a valid `.install-complete.json` marker and a
+successful `import agent_index`. A partial or corrupt slot is never dispatched;
+explicit setup/provisioning removes the broken target slot and only publishes
+`current-version` after the rebuilt slot passes both checks.
 
 Scheduled tasks/systemd units are not the default persistence mechanism. They are
 an opt-in advanced tier via the installer `register-tasks` action. This follows

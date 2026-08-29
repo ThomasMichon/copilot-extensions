@@ -118,6 +118,44 @@ def test_payload_root_env_is_opt_in_and_preserves_defaults(tmp_path: Path) -> No
     assert "} finally {" in generated[powershell_path]
 
 
+def test_payload_dispatcher_delegates_both_platform_shims(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    scripts = manifest.parent / "scripts"
+    (scripts / "runtime-gate.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (scripts / "runtime-gate.ps1").write_text("# gate\n", encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["payloadDispatcher"] = {
+        "posix": "scripts/runtime-gate.sh",
+        "windows": "scripts/runtime-gate.ps1",
+    }
+    data["payloadRootEnv"] = "AGENT_EXAMPLE_PAYLOAD_ROOT"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    generated = generator.expected_files(manifest)
+
+    posix = generated[manifest.parent / "bin" / "agent-example"]
+    powershell = generated[manifest.parent / "bin" / "agent-example.ps1"]
+    assert 'exec "$_payload_root/scripts/runtime-gate.sh" "$@"' in posix
+    assert 'export AGENT_EXAMPLE_PAYLOAD_ROOT="$_payload_root"' in posix
+    assert "$_payloadDispatcher = Join-Path $_payloadRoot 'scripts\\runtime-gate.ps1'" in powershell
+    assert "$env:AGENT_EXAMPLE_PAYLOAD_ROOT = $_payloadRoot" in powershell
+    assert "& $_payloadDispatcher @args" in powershell
+    assert "_resolve_runtime" not in posix
+    assert "Resolve-PayloadRuntime" not in powershell
+
+
+def test_payload_dispatcher_requires_platform_parity(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    gate = manifest.parent / "scripts" / "runtime-gate.sh"
+    gate.write_text("#!/bin/sh\n", encoding="utf-8")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["payloadDispatcher"] = {"posix": "scripts/runtime-gate.sh"}
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must declare both"):
+        generator.load_manifest(manifest)
+
+
 def test_generates_multiple_commands_and_one_catalog(tmp_path: Path) -> None:
     manifest = _multi_manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []

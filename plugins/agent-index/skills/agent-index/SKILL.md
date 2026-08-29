@@ -15,11 +15,12 @@ service, or retrieval through its read CLI.
 
 ## Readiness
 
-- The plugin self-provisions only for a repository that has explicitly adopted
-  agent-index with `.agent-index/config.yaml`. Merely enabling the plugin leaves
-  it inactive. A configured session's hook stamps a self-provisioning payload
-  command when needed; the first command call provisions the runtime
-(`::agent-provisioning::`, usually ~30-120s). If the command is missing, the
+- A new session's hook stamps a setup-gated payload command when needed. Before
+role adoption, `status` reports structured `setup_required` state and no command
+provisions a runtime or starts a daemon. An operator explicitly chooses
+`setup --single` or `setup --indexer <machine> --ssh <alias>`; that setup call
+then provisions (`::agent-provisioning::`, usually ~30-120s). Automation must
+also pass `--yes` and an explicit role choice. If the command is missing, the
 session command catalog reports it as unavailable; surface that exact failure
 rather than searching `PATH` or improvising an install.
 - `<catalog argv[0]> status` is the first health check in a configured

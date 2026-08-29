@@ -45,6 +45,11 @@ Binding rules that make it real:
 - **One source of truth.** The three-tier order lives once (in the primitive and
   the shared shell resolver); a launch site copies the resolver, never the logic.
   `tools/check-runtime-resolution.py` guards against re-divergence.
+- **Completion is necessary; consumer readiness may be stricter.** The shared
+  resolver rejects slots without a valid completion marker. A consumer whose
+  launch contract includes an import/readiness probe must apply that probe to the
+  resolved candidate before dispatch and treat failure as unresolved. It must not
+  weaken or reimplement the three-tier ordering to add the probe.
 
 ### Gotchas this pattern encodes
 

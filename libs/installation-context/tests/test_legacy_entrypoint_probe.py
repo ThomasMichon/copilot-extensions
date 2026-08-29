@@ -465,6 +465,8 @@ def test_agent_index_status_does_not_create_legacy_stage(
     suffix = "sh" if runner == "posix" else "ps1"
     source = REPO / "plugins" / "agent-index" / "scripts" / f"install.{suffix}"
     shutil.copy2(source, scripts / source.name)
+    gate = REPO / "plugins" / "agent-index" / "scripts" / f"runtime-gate.{suffix}"
+    shutil.copy2(gate, scripts / gate.name)
     shutil.copy2(REPO / "plugins" / "agent-index" / "pyproject.toml", payload)
     if runner == "posix":
         command = ["bash", str(scripts / "install.sh"), "status"]
@@ -628,10 +630,12 @@ def test_exemplar_footprints_and_mutation_boundaries_are_complete() -> None:
         text = path.read_text(encoding="utf-8")
         if path.suffix == ".ps1":
             assert "$PSBoundParameters['InstallDir'] = $InstallDir" in text
-        else:
-            assert text.index('_probe="$_payload/scripts/installation-context/') < text.index(
-                '_lock="$_root/.provision.lock"'
-            )
+    index_gate_sh = (
+        REPO / "plugins" / "agent-index" / "scripts" / "runtime-gate.sh"
+    ).read_text(encoding="utf-8")
+    assert index_gate_sh.index('local probe="$PLUGIN_DIR/scripts/installation-context/') < (
+        index_gate_sh.index('_acquire_provision_lock ||')
+    )
     assert machines_sh.index(
         '_probe="$_payload/scripts/installation-context/'
     ) < machines_sh.index('_lock="$_root/.provision.lock"')

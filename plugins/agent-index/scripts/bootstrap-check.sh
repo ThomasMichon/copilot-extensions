@@ -108,22 +108,51 @@ if [ -f "$pyproj" ]; then
   v="$(grep -m1 -E '^[[:space:]]*version[[:space:]]*=' "$pyproj" | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/')"
   [ -n "$v" ] && current="$v"
 fi
+configured_role=""
+case "$(printf '%s' "${AGENT_INDEX_ROLE:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')" in
+  host|client) configured_role=1 ;;
+esac
+if [ -z "$configured_role" ] && [ -f "$InstallDir/config.yaml" ]; then
+  configured_value="$(sed -n 's/^[[:space:]]*\(role\|engine\)[[:space:]]*:[[:space:]]*["'\'']\?\([A-Za-z]*\)["'\'']\?.*/\2/p' "$InstallDir/config.yaml" | head -n1 | tr '[:upper:]' '[:lower:]')"
+  case "$configured_value" in host|client|engine|server|indexer|none|consumer) configured_role=1 ;; esac
+fi
 if [ "$ContextSelected" = 1 ]; then
   if [ "$deployed" = "$current" ]; then exit 0; fi
   echo "[$name] selected context runtime $deployed -> $current; context-aware install is not active yet." >&2
   exit 0
 fi
-# "Provisioned" no longer implies a .venv: the marker runtime model (#581) publishes
-# the active slot via a current-version marker (POSIX keeps a .venv symlink, but a
-# marker+slot is authoritative). Treat a marker whose slot python exists as
-# provisioned too, so a current runtime is a clean no-op, not a needless rebuild.
+# Before role setup, session start may refresh the cheap stamp but must not build
+# a runtime or choose/start a role-specific service.
+if [ -z "$configured_role" ]; then
+  if [ "$deployed" != "$current" ]; then
+    installer=""
+    for candidate in "$PluginDir/scripts/init.sh" "$PluginDir/scripts/install.sh"; do
+      if [ -f "$candidate" ] && grep -qE '^[[:space:]]*([[:alnum:]_-]+\|)*stamp(\|[[:alnum:]_-]+)*\)' "$candidate" 2>/dev/null; then installer="$candidate"; break; fi
+    done
+    if [ -n "$installer" ]; then
+      legacy_mutation_allowed || exit 0
+      bash "$installer" stamp >/dev/null 2>&1 || true
+    fi
+  fi
+  exit 0
+fi
+
+# A current slot is provisioned only when the canonical resolver selects that
+# exact version and the package import succeeds. A Python-shaped partial slot is
+# never readiness.
 provisioned=0
-[ -e "$InstallDir/.venv" ] && provisioned=1
-if [ "$provisioned" = 0 ] && [ -f "$InstallDir/current-version" ]; then
+if [ -f "$InstallDir/current-version" ]; then
   cv="$(tr -d '[:space:]' < "$InstallDir/current-version")"
-  # ...and only when it names the CURRENT payload version (the marker is authoritative
-  # for the active slot; a stale marker must not suppress reconcile).
-  if [ -n "$cv" ] && [ "$cv" = "$current" ] && { [ -x "$InstallDir/versions/$cv/bin/python" ] || [ -f "$InstallDir/versions/$cv/Scripts/python.exe" ]; }; then provisioned=1; fi
+  if [ -n "$cv" ] && [ "$cv" = "$current" ]; then
+    AGENT_RT_ROOT="$InstallDir"; AGENT_RT_PY=""
+    # shellcheck source=/dev/null
+    . "$ScriptDir/resolve-runtime.sh"
+    case "${AGENT_RT_PY:-}" in
+      "$InstallDir/versions/$current/"*)
+        "$AGENT_RT_PY" -c 'import agent_index' >/dev/null 2>&1 && provisioned=1
+        ;;
+    esac
+  fi
 fi
 if [ "$provisioned" = 1 ] && [ "$deployed" = "$current" ]; then exit 0; fi
 if [ -f "$PluginDir/scripts/init.sh" ]; then
