@@ -28,6 +28,8 @@ def test_machine_cores_from_machine_tier():
     assert machine_cores("premiumLinux") == 8
     assert machine_cores("standardLinux32gb") == 4
     assert machine_cores("largePremiumLinux") == 16
+    assert machine_cores("largePremiumLinux256gb") == 16
+    assert machine_cores("xLargePremiumLinux256gb") == 32
     assert machine_cores("basicLinux32gb") == 2
 
 
@@ -864,4 +866,3 @@ def test_picker_payload_safe_field_tristate():
     payload = picker_payload(members, budget)
     safe_by_id = {e["id"]: e["safe"] for e in payload["entries"]}
     assert safe_by_id == {"yes": "yes", "no": "no", "unk": "unknown"}
-
