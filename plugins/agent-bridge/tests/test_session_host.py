@@ -2194,15 +2194,109 @@ async def test_acp_adapter_auto_acks_frames():
 # --------------------------------------------------------------------------
 # launcher: survival adapter selection + real end-to-end via run_host
 # --------------------------------------------------------------------------
-def test_host_spawn_kwargs_per_os():
+def test_host_spawn_kwargs_per_os(monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     kw = launcher.host_spawn_kwargs()
+    import subprocess
     import sys
     if sys.platform == "win32":
         assert kw["creationflags"] & winjob.CREATE_BREAKAWAY_FROM_JOB
+        assert kw["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert not (kw["creationflags"] & subprocess.DETACHED_PROCESS)
         assert "start_new_session" not in kw
     else:
         assert kw["start_new_session"] is True
         assert "creationflags" not in kw
+
+
+def test_host_spawn_kwargs_stay_owned_when_contained(monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    kw = launcher.host_spawn_kwargs()
+    import subprocess
+    import sys
+    if sys.platform == "win32":
+        assert not (kw["creationflags"] & winjob.CREATE_BREAKAWAY_FROM_JOB)
+        assert kw["creationflags"] & subprocess.CREATE_NO_WINDOW
+        assert not (kw["creationflags"] & subprocess.DETACHED_PROCESS)
+        assert "start_new_session" not in kw
+    else:
+        assert kw == {}
+
+
+def test_apply_host_survival_skips_when_contained(monkeypatch):
+    import sys
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    called = False
+
+    if sys.platform == "win32":
+        def _record(*, allow_breakaway):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(winjob, "setup_kill_on_close_job", _record)
+    else:
+        def _record():
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(launcher.os, "setsid", _record)
+
+    launcher.apply_host_survival()
+    assert not called
+
+
+def test_containment_reaps_real_session_host_tree(tmp_path, capfd):
+    import sys
+    import time
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    sys.path.insert(0, str(repo))
+    from tools.plugin_test_containment import (
+        Limits,
+        isolated_environment,
+        run_contained,
+    )
+
+    pid_file = tmp_path / "session-host-tree.json"
+    state_dir = tmp_path / "host-state"
+    script = (
+        "import json,os,pathlib,sys,time;"
+        "from agent_bridge.session_host.launcher import launch_session_host;"
+        "h=launch_session_host("
+        "[sys.executable,'-c','import time;time.sleep(60)'],"
+        f"state_dir={str(state_dir)!r},ready_timeout=10);"
+        f"pathlib.Path({str(pid_file)!r}).write_text("
+        "json.dumps({'host':h.host_pid,'child':h.child_pid}),encoding='ascii');"
+        "root=pathlib.Path("
+        "os.environ['COPILOT_EXTENSIONS_TEST_SANDBOX']);"
+        "(root/'trigger.bin').write_bytes(b'x'*(2*1024*1024));"
+        "time.sleep(60)"
+    )
+    env = isolated_environment(os.environ, tmp_path / "sandbox")
+    rc = run_contained(
+        [sys.executable, "-c", script],
+        cwd=tmp_path,
+        env=env,
+        sandbox=tmp_path / "sandbox",
+        limits=Limits(
+            wall_seconds=20,
+            max_processes=16,
+            max_memory_mb=1024,
+            max_temp_mb=1,
+            poll_seconds=0.05,
+        ),
+    )
+
+    assert rc == 124
+    assert "temporary-storage limit exceeded" in capfd.readouterr().err
+    assert pid_file.is_file(), "session host did not report its process tree"
+    pids = json.loads(pid_file.read_text(encoding="ascii"))
+    deadline = time.monotonic() + 5
+    while any(osutil_pid_alive(pid) for pid in pids.values()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert all(not osutil_pid_alive(pid) for pid in pids.values())
 
 
 _STREAMER = (

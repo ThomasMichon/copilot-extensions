@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # "procutil") to prevent dependency-confusion; the import module is
 # ``agent_procutil``. Mirrors agent-config-migrate / agent-ssh-manager.
 name = "agent-procutil"
-version = "0.1.0-dev2"
+version = "0.1.0-dev4"
 description = "Shared Windows-headless / detached process-spawn kwargs for Copilot CLI plugins"
 readme = "README.md"
 license = "MIT"

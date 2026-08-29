@@ -35,16 +35,22 @@ python tools/run-plugin-tests.py agent-dispatch \
   --max-processes 32 --max-memory-mb 2048 --max-temp-mb 512
 ```
 
+Filtered (`-k`) and guard-only selections run as one contained sub-suite rather
+than repeatedly importing file groups that contain no selected tests.
+
 Tests may declare `@pytest.mark.portfolio_tier("T0" ... "T4")` and repeatable
 `@pytest.mark.effect(...)` markers. The injected policy rejects effects that do
 not belong in the declared tier. T3 clean-room and T4 end-to-end families are
 skipped unless the caller passes `--allow-explicit-tiers`; target-specific
 environment gates still apply.
 
-Deliberate daemon detachment (`CREATE_BREAKAWAY_FROM_JOB` on Windows or a new
-session/process group on POSIX) remains blocked from broad measurement until the
-shared spawn helper's contained-test policy lands and its adversarial proof
-passes.
+The shared `agent-procutil` spawn helper detects contained test runs and
+suppresses deliberate Windows Job breakaway and POSIX session detachment.
+Production daemon semantics remain unchanged outside the runner. Runtime
+survival adapters, including the Agent Bridge Session Host's in-process
+`setsid()` / Job setup, consult the same policy. An adversarial test launches a
+descendant through the detachment API and proves the containment owner still
+reaps it on timeout.
 
 Large test modules should be split by behavioral contract, not by arbitrary
 line count. Within each contract family, prefer one parameterized or

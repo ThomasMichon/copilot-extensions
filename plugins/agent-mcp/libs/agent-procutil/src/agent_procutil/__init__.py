@@ -16,6 +16,9 @@ exact creation flags) can't drift between copies:
 * :func:`detached_kwargs` -- fully detach a background child so it outlives its
   parent AND carries no console (so no window); optionally break away from a
   parent Job object.
+* :func:`windowless_daemon_kwargs` -- keep a Windows daemon in a
+  ``CREATE_NO_WINDOW`` host while optionally breaking away from an inherited
+  Job object; use this when its own children must inherit the windowless host.
 * :func:`windowless_python` -- select ``pythonw.exe`` for a detached Python
   daemon on Windows so the venv launcher cannot allocate a second console.
 
@@ -46,13 +49,25 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 _DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 _CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 _CREATE_BREAKAWAY_FROM_JOB = 0x01000000
+_CONTAINED_TEST_ENV = "COPILOT_EXTENSIONS_TEST_CONTAINED"
 
 __all__ = [
+    "contained_test_mode",
     "no_window_flags",
     "no_window_kwargs",
     "detached_kwargs",
+    "windowless_daemon_kwargs",
     "windowless_python",
 ]
+
+
+def contained_test_mode() -> bool:
+    """Whether the process is running beneath the repository test supervisor."""
+    return os.environ.get(_CONTAINED_TEST_ENV) == "1"
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
 
 
 def no_window_flags() -> int:
@@ -65,7 +80,7 @@ def no_window_flags() -> int:
 
     Off Windows this is ``0`` (a harmless no-op creationflags value).
     """
-    return _CREATE_NO_WINDOW if os.name == "nt" else 0
+    return _CREATE_NO_WINDOW if _is_windows() else 0
 
 
 def no_window_kwargs() -> dict:
@@ -75,7 +90,7 @@ def no_window_kwargs() -> dict:
     elsewhere, so it splats into a ``subprocess.run`` / ``Popen`` call while
     still allowing captured stdout/stderr over pipes (unlike a full detach).
     """
-    if os.name == "nt":
+    if _is_windows():
         return {"creationflags": _CREATE_NO_WINDOW}
     return {}
 
@@ -91,7 +106,7 @@ def windowless_python(executable: str | os.PathLike[str] | None = None) -> str:
     interpreter unchanged.
     """
     python = os.fspath(executable) if executable is not None else sys.executable
-    if os.name != "nt":
+    if not _is_windows():
         return python
     candidate = os.path.join(os.path.dirname(python), "pythonw.exe")
     return candidate if os.path.isfile(candidate) else python
@@ -108,11 +123,35 @@ def detached_kwargs(*, breakaway: bool = False) -> dict:
     daemon spawned from a session-start hook).
 
     On POSIX, ``start_new_session=True`` puts the child in its own session so a
-    parent exit / signal never reaps it.
+    parent exit / signal never reaps it. When
+    ``COPILOT_EXTENSIONS_TEST_CONTAINED=1``, Windows Job breakaway and POSIX
+    session detachment are suppressed so the test runner retains descendant
+    ownership.
     """
-    if os.name == "nt":
+    if _is_windows():
         flags = _DETACHED_PROCESS | _CREATE_NEW_PROCESS_GROUP
-        if breakaway:
+        if breakaway and not contained_test_mode():
             flags |= _CREATE_BREAKAWAY_FROM_JOB
         return {"creationflags": flags}
+    if contained_test_mode():
+        return {}
+    return {"start_new_session": True}
+
+
+def windowless_daemon_kwargs(*, breakaway: bool = False) -> dict:
+    """``Popen`` kwargs for a survivable daemon whose children stay windowless.
+
+    Windows uses ``CREATE_NO_WINDOW`` rather than ``DETACHED_PROCESS`` because
+    a console-subsystem child spawned by a detached process can allocate a new
+    visible console. POSIX uses the same new-session behavior as
+    :func:`detached_kwargs`. Contained tests suppress Job breakaway and POSIX
+    session detachment.
+    """
+    if _is_windows():
+        flags = _CREATE_NO_WINDOW
+        if breakaway and not contained_test_mode():
+            flags |= _CREATE_BREAKAWAY_FROM_JOB
+        return {"creationflags": flags}
+    if contained_test_mode():
+        return {}
     return {"start_new_session": True}
