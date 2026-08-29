@@ -331,6 +331,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_push.add_argument("--verbose", action="store_true", help="verbose output")
 
+    p_rescue = sub.add_parser(
+        "rescue-push",
+        help="validate and push provider-rescued session evidence",
+    )
+    p_rescue.add_argument(
+        "--rescue-root",
+        action="append",
+        required=True,
+        help="provider rescues/ root (repeatable)",
+    )
+    p_rescue.add_argument(
+        "--provider",
+        default="agent-containers",
+        choices=("agent-containers",),
+        help="rescue provider contract",
+    )
+    p_rescue.add_argument(
+        "--target-prefix",
+        default="container",
+        help="filesystem-safe venue namespace prefix",
+    )
+    p_rescue.add_argument("--dry-run", action="store_true", help="validate without pushing")
+    p_rescue.add_argument("--verbose", action="store_true", help="verbose output")
+
     sub.add_parser("status", help="show resolved sync configuration")
     sub.add_parser("doctor", help="check the target is reachable/usable")
 
@@ -370,6 +394,17 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "push":
             return run_push(
                 cfg, source=args.source, machine=args.machine, verbose=args.verbose
+            )
+        if args.command == "rescue-push":
+            from agent_logger.sync.rescue import run_rescue_push
+
+            return run_rescue_push(
+                cfg,
+                rescue_roots=args.rescue_root,
+                provider=args.provider,
+                target_prefix=args.target_prefix,
+                dry_run=args.dry_run,
+                verbose=args.verbose,
             )
         if args.command == "status":
             return do_status(cfg)
