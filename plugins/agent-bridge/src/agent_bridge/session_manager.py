@@ -1771,7 +1771,11 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 self._host_index.remove(r.session_id)
 
-    async def reattach_session_hosts(self) -> int:
+    async def reattach_session_hosts(
+        self,
+        *,
+        remote_recovery_timeout: float = 60.0,
+    ) -> int:
         """Reconnect to every surviving Session Host on startup (goal 3).
 
         After an agent-bridge restart, ``_rehydrate`` has marked host-backed
@@ -1793,7 +1797,22 @@ class SessionManager:
             return 0
         from .session_host.version_mux import HostDisposition, plan_host
 
-        recovered = await self._recover_remote_host_records()
+        loop = asyncio.get_running_loop()
+        startup_budget = max(0.0, float(remote_recovery_timeout))
+        deadline = loop.time() + startup_budget
+        startup_session_ids = {
+            session.session_id
+            for session in self._sessions.values()
+            if session.status not in {SessionStatus.ENDED, SessionStatus.FAILED}
+        }
+        recovery_budget = min(
+            startup_budget / 2,
+            max(0.0, deadline - loop.time()),
+        )
+        recovered = await self._recover_remote_host_records(
+            session_ids=startup_session_ids,
+            timeout_seconds=recovery_budget,
+        )
         if recovered:
             log.info(
                 "Recovered %d remote Session Host record(s) from far-side "
@@ -1804,6 +1823,16 @@ class SessionManager:
         reattached = 0
         now = time.time()
         for rec in self._live_host_records():
+            session = self._sessions.get(rec.session_id)
+            if (
+                session is not None
+                and session.status in {SessionStatus.ENDED, SessionStatus.FAILED}
+            ):
+                log.info(
+                    "Skipping startup reattach for terminal session %s (%s)",
+                    rec.session_id, session.status.value,
+                )
+                continue
             if (
                 rec.session_id in self._remote_recovery_skipped
                 or rec.session_id in self._remote_recovery_inconclusive
@@ -1811,6 +1840,13 @@ class SessionManager:
                 log.info(
                     "Skipping startup reattach for %s because its remote venue "
                     "could not be authoritatively inspected",
+                    rec.session_id,
+                )
+                continue
+            if deadline - loop.time() <= 0:
+                self._remote_recovery_inconclusive.add(rec.session_id)
+                log.warning(
+                    "Startup Session Host reattach budget exhausted before %s",
                     rec.session_id,
                 )
                 continue
@@ -1840,21 +1876,41 @@ class SessionManager:
                 self._reap_host_record(rec, "no adoptable session on reattach")
                 continue
 
-            if await self._reattach_one(
-                rec, session, new_status=SessionStatus.IDLE,
-                send_resume=getattr(rec, "resume_on_reattach", False),
-                # A failed remote attach may be a transient SSH/control-plane
-                # outage while the far-side host, child, and auth relay are
-                # still serving tools. Retain its record and relay ownership;
-                # only an authoritative far-side liveness probe may declare it
-                # dead. Local PIDs remain directly authoritative.
-                prune_on_fail=(
-                    getattr(rec, "boundary", "local") == "local"
-                    or not (getattr(rec, "extra", {}) or {}).get(
-                        "remote_authority_v2"
-                    )
-                ),
-            ):
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                self._remote_recovery_inconclusive.add(rec.session_id)
+                log.warning(
+                    "Startup Session Host reattach budget exhausted before %s",
+                    rec.session_id,
+                )
+                continue
+            try:
+                attached = await asyncio.wait_for(
+                    self._reattach_one(
+                        rec, session, new_status=SessionStatus.IDLE,
+                        send_resume=getattr(rec, "resume_on_reattach", False),
+                        # A failed remote attach may be a transient SSH/control-plane
+                        # outage while the far-side host, child, and auth relay are
+                        # still serving tools. Retain its record and relay ownership;
+                        # only an authoritative far-side liveness probe may declare it
+                        # dead. Local PIDs remain directly authoritative.
+                        prune_on_fail=(
+                            getattr(rec, "boundary", "local") == "local"
+                            or not (getattr(rec, "extra", {}) or {}).get(
+                                "remote_authority_v2"
+                            )
+                        ),
+                    ),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                self._remote_recovery_inconclusive.add(rec.session_id)
+                log.warning(
+                    "Startup Session Host reattach timed out for %s after %.1fs",
+                    rec.session_id, remaining,
+                )
+                continue
+            if attached:
                 reattached += 1
         if reattached:
             log.info("Reattached %d session(s) to surviving Session Hosts", reattached)
@@ -1865,6 +1921,7 @@ class SessionManager:
         *,
         allow_wake: bool = False,
         session_ids: set[str] | None = None,
+        timeout_seconds: float = 120.0,
     ) -> int:
         """Rebuild missing remote HostIndex rows from far-side records.
 
@@ -2001,7 +2058,7 @@ class SessionManager:
         tasks = list(task_entries)
         if not tasks:
             return 0
-        done, pending = await asyncio.wait(tasks, timeout=120.0)
+        done, pending = await asyncio.wait(tasks, timeout=timeout_seconds)
         for task in pending:
             task.cancel()
         if pending:
@@ -2009,8 +2066,8 @@ class SessionManager:
         if pending:
             log.warning(
                 "Remote Session Host authority recovery timed out with %d "
-                "remote venue group(s) still pending",
-                len(pending),
+                "remote venue group(s) still pending after %.1fs",
+                len(pending), timeout_seconds,
             )
             for task in pending:
                 for session, _existing in task_entries[task]:
@@ -2117,7 +2174,16 @@ class SessionManager:
                 local_port = await existing.refresh()
             else:
                 fwd = forward_from_endpoint(endpoint)
-                local_port = await fwd.establish()
+                try:
+                    local_port = await fwd.establish()
+                except asyncio.CancelledError:
+                    with contextlib.suppress(Exception):
+                        await fwd.cancel()
+                    raise
+                except Exception:
+                    with contextlib.suppress(Exception):
+                        await fwd.cancel()
+                    raise
                 self._forwards[rec.session_id] = fwd
             if (
                 getattr(rec, "port", None) != local_port
@@ -2129,6 +2195,8 @@ class SessionManager:
                 if self._host_index is not None and is_dataclass(rec):
                     self._host_index.register(rec)
             await self._ensure_relays_from_endpoint(rec.session_id, endpoint)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.warning(
                 "Failed to (re-)establish forward for session %s (boundary=%s)",
@@ -2170,6 +2238,13 @@ class SessionManager:
         for relay in relays:
             try:
                 await relay.start()
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
+                    await relay.stop()
+                for prior in started:
+                    with contextlib.suppress(Exception):
+                        await prior.stop()
+                raise
             except Exception:
                 log.warning(
                     "Failed to start credential relay supervisor for session %s; "
@@ -2611,6 +2686,21 @@ class SessionManager:
             with contextlib.suppress(Exception):
                 await old.shutdown()
 
+        sock = None
+        streams = None
+        client = None
+
+        async def _close_partial_reattach() -> None:
+            if client is not None:
+                with contextlib.suppress(Exception):
+                    await client.shutdown()
+            if streams is not None:
+                with contextlib.suppress(Exception):
+                    await streams.aclose()
+            if sock is not None:
+                with contextlib.suppress(Exception):
+                    await sock.close()
+
         try:
             await self._ensure_forward(rec)
             sock = await SessionHostClient.connect(port=rec.port)
@@ -2647,7 +2737,11 @@ class SessionManager:
                 "Reattached session %s to live Session Host (pid=%s, port=%s)",
                 rec.session_id, rec.host_pid, rec.port,
             )
+        except asyncio.CancelledError:
+            await _close_partial_reattach()
+            raise
         except Exception:
+            await _close_partial_reattach()
             log.warning(
                 "Failed to reattach session %s to host pid=%s%s",
                 rec.session_id, rec.host_pid,
@@ -5381,9 +5475,13 @@ class SessionManager:
             container.get("authoritative_identity_removed") is True
             or container.get("recreate_failed_without_host") is True
         )
+        cleanup_pending = (
+            session_id in self._container_lock_sessions
+            or container.get("launch_pending_session_id") == session_id
+        )
+        recovery_inconclusive = session_id in self._remote_recovery_inconclusive
         if (
-            container
-            and session_id in self._container_lock_sessions
+            (cleanup_pending or recovery_inconclusive)
             and self._host_index is not None
             and self._host_index.get(session_id) is None
             and not explicit_absence
@@ -5397,16 +5495,26 @@ class SessionManager:
             except Exception as exc:
                 self._remote_recovery_inconclusive.add(session_id)
                 raise RemoteHostRecoveryPendingError(
-                    "Container Session Host cleanup could not inspect remote "
-                    f"authority for {session_id}; retained target ownership"
+                    "Remote Session Host cleanup could not inspect authority "
+                    f"for {session_id}; retained session and remote ownership"
                 ) from exc
             if (
                 self._host_index.get(session_id) is None
                 and session_id in self._remote_recovery_inconclusive
             ):
                 raise RemoteHostRecoveryPendingError(
-                    "Container Session Host cleanup is inconclusive; retained "
-                    f"session {session_id} and target ownership"
+                    "Remote Session Host cleanup is inconclusive; retained "
+                    f"session {session_id} and remote ownership"
+                )
+            if (
+                self._host_index.get(session_id) is None
+                and session_id not in self._remote_recovery_inconclusive
+            ):
+                self._set_container_launch_pending(session_id, False)
+                container = (
+                    session.target.container
+                    if isinstance(session.target.container, dict)
+                    else {}
                 )
 
         await self._quiesce_session(session)
@@ -5457,6 +5565,7 @@ class SessionManager:
                     with contextlib.suppress(Exception):
                         from . import bridge_lock
                         bridge_lock.remove_sync(session_id)
+                    self._set_container_launch_pending(session_id, False)
                 else:
                     self._reap_host_record(rec, "session ended")
 
