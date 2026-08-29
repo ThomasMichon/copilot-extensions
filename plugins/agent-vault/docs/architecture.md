@@ -100,6 +100,9 @@ replacement or an authoritative live read can finalize them. Daemon responses
 carry credential generations so out-of-order completion cannot overwrite a
 newer cached value. Backend timeout or process loss is reconciled against
 KeePass when possible and otherwise remains fail-closed until a later live read.
+A mutation that waits more than 30 seconds for the daemon credential lock
+expires before touching KeePass, so a caller timeout cannot leave a queued write
+that commits later without an observer.
 
 `seal`/`unseal` use named 32-byte KEKs stored beside the config (`AGENT_VAULT_KEK_DIR` overrides). They require `cryptography` for AES-256-GCM. KEKs are independent of KeePass master passwords, so these commands work while the vault is locked.
 

@@ -322,6 +322,86 @@ def test_ambiguous_rotation_evicts_memory_when_live_read_fails(
     assert cache_key not in svc._credential_generations
 
 
+def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    writes = []
+    unlocks = []
+
+    class ObservedLock:
+        def __init__(self):
+            self.inner = threading.RLock()
+            self.rotator_attempted = threading.Event()
+            self.rotator_completed = threading.Event()
+
+        def acquire(self, *args, **kwargs):
+            is_rotator = threading.current_thread().name == "queued-rotation"
+            if is_rotator:
+                self.rotator_attempted.set()
+            acquired = self.inner.acquire(*args, **kwargs)
+            if is_rotator:
+                self.rotator_completed.set()
+            return acquired
+
+        def release(self):
+            self.inner.release()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            self.release()
+
+    class Backend:
+        @staticmethod
+        def edit_password(_kpdb, _entry, password):
+            writes.append(password)
+            return True, "updated"
+
+    monkeypatch.setattr(service, "get_cache", lambda: persistent)
+    svc = service.VaultService()
+    svc.cli = Backend()
+    observed_lock = ObservedLock()
+    svc._credential_lock = observed_lock
+    monkeypatch.setattr(
+        svc,
+        "ensure_unlocked",
+        lambda *_args, **_kwargs: unlocks.append(True) or True,
+    )
+    result = {}
+
+    def rotate():
+        result.update(svc._set_password(
+            "vault.kdbx",
+            "A/x",
+            "new",
+            "",
+            "test",
+            max_queue_seconds=0.01,
+        ))
+
+    with svc._credential_lock:
+        rotator = threading.Thread(
+            target=rotate,
+            name="queued-rotation",
+            daemon=True,
+        )
+        rotator.start()
+        assert observed_lock.rotator_attempted.wait(timeout=5)
+        assert observed_lock.rotator_completed.wait(timeout=5)
+    rotator.join(timeout=5)
+
+    assert not rotator.is_alive()
+    assert result == {
+        "ok": False,
+        "error": "Password mutation expired before the backend write",
+    }
+    assert unlocks == []
+    assert writes == []
+    assert persistent.get("A/x", "password") == "old"
+
+
 def test_cli_keeps_journal_after_ambiguous_transport(enabled_cache, monkeypatch, capsys):
     persistent = get_cache()
     assert persistent.put("A/x", "password", "old", 1)
