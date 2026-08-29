@@ -28,10 +28,17 @@ if (typeof leadFrom !== "function" || typeof buildCutoverSeed !== "function") {
 }
 
 const TASK = "T1abc";
-const WT = "wt-clean-room-0000";
+const WT = "clean-room-0000";
 const SID = "sid-0000-1111";
 const PANE = "%7";
-const known = { oldPane: PANE, worktree: WT, sessionId: SID };
+const WORKTREE_DIR = "/home/operator/wt-repo.worktrees/clean-room-0000";
+const known = {
+  oldPane: PANE,
+  worktree: WT,
+  worktreeDir: WORKTREE_DIR,
+  sessionId: SID,
+  muxSession: `wt-${WT}`,
+};
 
 const taskSeed = buildCutoverSeed("task", TASK, leadFrom("Fix the widget"), known);
 const taskNoPane = buildCutoverSeed("task", TASK, leadFrom("x"), { worktree: WT, sessionId: SID });
@@ -53,14 +60,18 @@ check(
   "task+known: seed does NOT invoke the consume_handoff extension tool",
 );
 const cAt = taskSeed.indexOf(`agent-dispatch consume ${TASK} --defer-complete`);
-const kAt = taskSeed.indexOf(`agent-worktrees conclude-session --worktree ${WT} --session ${SID} --state handed-off`);
+const kAt = taskSeed.indexOf(`agent-worktrees bind-session --worktree-id ${WT}`);
 const rAt = taskSeed.indexOf(`agent-worktrees handoff-cutover --retire-pane ${PANE} --successor-verified`);
 check(cAt >= 0, "task+known: carries `agent-dispatch consume --defer-complete`");
-check(kAt > cAt, "task+known: carries `conclude-session` after consume");
-check(rAt > kAt, "task+known: carries `handoff-cutover --retire-pane` after conclude");
+check(kAt > cAt, "task+known: carries `bind-session` after consume");
+check(rAt > kAt, "task+known: carries `handoff-cutover --retire-pane` after bind");
 check(
   taskSeed.includes(`--worktree-id ${WT} --session-id ${SID}`),
   "task+known: retire verb passes explicit --worktree-id/--session-id (cwd-independent)",
+);
+check(
+  taskSeed.includes(`--mux-session wt-${WT}`),
+  "task+known: retire verb validates the original mux identity",
 );
 check(!taskSeed.includes("\n"), "task+known: seed is a single line (rides copilot -i)");
 // eslint-disable-next-line no-control-regex

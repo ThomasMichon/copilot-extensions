@@ -28,6 +28,7 @@ const known = {
   worktree: WT,
   worktreeDir: WTDIR,
   sessionId: SID,
+  muxSession: `wt-${WT}`,
 };
 
 test("leadFrom: empty -> generic lead", () => {
@@ -93,6 +94,7 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
 
   assert.match(seed, new RegExp(`worktree ID ${WT}`));
   assert.ok(seed.includes(`intended cwd "${WTDIR}"`));
+  assert.ok(seed.includes(`--mux-session wt-${WT}`));
 
   // Retire verb passes the explicit worktree/session so it resolves from any cwd.
   assert.match(seed, new RegExp(`--worktree-id ${WT} --session-id ${SID}`));

@@ -16,8 +16,13 @@ import { join } from "node:path";
 import {
   encodeHandoffPayload, decodeHandoffPayload, buildSeedForStored,
   safePathSegment, quoteWinArg, agentWorktreesGet, handoffDirFor,
+  agentWorktreesGetResult, consumeFileHandoffOnce, writeJsonAtomic,
+  currentMuxSession,
   HANDOFF_META_PREFIX,
 } from "../extensions/context-handoff/handoff-core.mjs";
+import {
+  mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, utimesSync,
+} from "node:fs";
 import {
   AGENT_WORKTREES_QUERY_TIMEOUT_MS,
 } from "../extensions/context-handoff/cli-timeouts.mjs";
@@ -73,11 +78,12 @@ test("buildSeedForStored: file-backed -> tool-based consume_handoff seed", () =>
   const stored = {
     storage: "file",
     id: "handoff-sid1",
+    path: "C:\\state\\handoff-sid1.json",
     metadata: { title: "Fix the parser", oldPane: null, worktree: null, sessionId: "sid1" },
   };
   const seed = buildSeedForStored(stored, { retry: true });
   assert.match(seed, /consume_handoff tool/);
-  assert.match(seed, /"handoff_id":"handoff-sid1"/);
+  assert.match(seed, /"path":"C:\\\\state\\\\handoff-sid1.json"/);
 });
 
 test("buildSeedForStored: paste prompt (retry:false) omits the loading-race retry clause", () => {
@@ -102,6 +108,18 @@ test("quoteWinArg quotes only when needed", () => {
   assert.equal(quoteWinArg('a"b'), '"a""b"');
 });
 
+test("currentMuxSession resolves the predecessor pane identity", () => {
+  let invocation = null;
+  const result = currentMuxSession("%7", (bin, args, options) => {
+    invocation = { bin, args, options };
+    return "caller-session\n";
+  });
+  assert.equal(result, "caller-session");
+  assert.deepEqual(invocation.args, [
+    "display-message", "-p", "-t", "%7", "#{session_name}",
+  ]);
+});
+
 test("agentWorktreesGet allows slow startup-time identity queries", () => {
   let invocation = null;
   const value = agentWorktreesGet(
@@ -124,6 +142,160 @@ test("agentWorktreesGet allows slow startup-time identity queries", () => {
     },
   });
   assert.equal(AGENT_WORKTREES_QUERY_TIMEOUT_MS, 15_000);
+});
+
+test("agentWorktreesGetResult explains an empty resolver result", () => {
+  const result = agentWorktreesGetResult(
+    "worktree-state-dir",
+    "/repo",
+    "session-1",
+    () => "\n",
+  );
+  assert.equal(result.value, null);
+  assert.match(result.error, /returned an empty result/);
+  assert.match(result.error, /session-1/);
+});
+
+test("atomic write cleans its temporary file", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-atomic-"));
+  try {
+    const path = join(dir, "handoff.json");
+    writeJsonAtomic(path, { ok: true });
+    assert.deepEqual(JSON.parse(readFileSync(path, "utf-8")), { ok: true });
+    assert.deepEqual(readdirSync(dir), ["handoff.json"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("file handoff consumption is exactly once", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-consume-"));
+  try {
+    const path = join(dir, "handoff.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      id: "handoff-once",
+      consumed: false,
+      consumedAt: null,
+      promptText: "continue",
+    });
+    const first = consumeFileHandoffOnce("/repo", "successor", null, path);
+    const retry = consumeFileHandoffOnce("/repo", "successor", null, path);
+    const second = consumeFileHandoffOnce("/repo", "other", null, path);
+    assert.equal(first.ok, true);
+    assert.equal(first.record.consumedBySession, "successor");
+    assert.equal(retry.ok, true);
+    assert.equal(retry.resumedDelivery, true);
+    assert.equal(second.ok, false);
+    assert.equal(second.alreadyConsumed, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("file handoff consumption recovers a dead-owner lock", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-lock-"));
+  try {
+    const path = join(dir, "handoff.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      id: "handoff-lock",
+      consumed: false,
+      consumedAt: null,
+      promptText: "continue",
+    });
+    writeFileSync(`${path}.consume.lock`, JSON.stringify({ pid: 2147483647 }));
+    const consumed = consumeFileHandoffOnce("/repo", "successor", null, path);
+    assert.equal(consumed.ok, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("file handoff consumption does not steal a fresh incomplete lock", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-fresh-lock-"));
+  try {
+    const path = join(dir, "handoff.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      id: "handoff-fresh-lock",
+      consumed: false,
+      promptText: "continue",
+    });
+    writeFileSync(`${path}.consume.lock`, "");
+    const consumed = consumeFileHandoffOnce("/repo", "successor", null, path);
+    assert.equal(consumed.ok, false);
+    assert.equal(consumed.busy, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("file handoff consumption treats EPERM lock owners as alive", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-eperm-lock-"));
+  const originalKill = process.kill;
+  try {
+    const path = join(dir, "handoff.json");
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      id: "handoff-eperm-lock",
+      consumed: false,
+      promptText: "continue",
+    });
+    writeFileSync(`${path}.consume.lock`, JSON.stringify({ pid: 12345 }));
+    process.kill = () => {
+      const error = new Error("not permitted");
+      error.code = "EPERM";
+      throw error;
+    };
+    const consumed = consumeFileHandoffOnce("/repo", "successor", null, path);
+    assert.equal(consumed.ok, false);
+    assert.equal(consumed.busy, true);
+  } finally {
+    process.kill = originalKill;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("file handoff consumption recovers a stale incomplete lock", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-stale-lock-"));
+  try {
+    const path = join(dir, "handoff.json");
+    const lock = `${path}.consume.lock`;
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      id: "handoff-stale-lock",
+      consumed: false,
+      promptText: "continue",
+    });
+    writeFileSync(lock, "");
+    const stale = new Date(Date.now() - 60_000);
+    utimesSync(lock, stale, stale);
+    const consumed = consumeFileHandoffOnce("/repo", "successor", null, path);
+    assert.equal(consumed.ok, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("file handoff consumption recovers a dead recovery lock", () => {
+  const dir = mkdtempSync(join(process.cwd(), ".test-handoff-recovery-lock-"));
+  try {
+    const path = join(dir, "handoff.json");
+    const lock = `${path}.consume.lock`;
+    writeJsonAtomic(path, {
+      kind: "context-handoff",
+      id: "handoff-recovery-lock",
+      consumed: false,
+      promptText: "continue",
+    });
+    writeFileSync(lock, JSON.stringify({ pid: 2147483647 }));
+    writeFileSync(`${lock}.recover`, JSON.stringify({ pid: 2147483647 }));
+    const consumed = consumeFileHandoffOnce("/repo", "successor", null, path);
+    assert.equal(consumed.ok, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("handoffDirFor resolves only the state directory", () => {

@@ -21,8 +21,15 @@ source "${CR_LIB:-$_SELF_DIR/../../lib/clean-room-lib.sh}"
 
 MARKETPLACE_REPO="${CR_MARKETPLACE_REPO:-ThomasMichon/copilot-extensions}"
 MARKETPLACE_NAME="${CR_MARKETPLACE_NAME:-copilot-extensions}"
+UV_INDEX="${CR_UV_INDEX:-}"
 INSTALLED_ROOT="$HOME/.copilot/installed-plugins/$MARKETPLACE_NAME"
 TRIO=(agent-worktrees agent-dispatch context-handoff)
+MARKETPLACE_REPO_JSON="$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$MARKETPLACE_REPO")"
+if [ -d "$MARKETPLACE_REPO" ]; then
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"directory\", \"path\": $MARKETPLACE_REPO_JSON } }"
+else
+    MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": $MARKETPLACE_REPO_JSON } }"
+fi
 
 : "${CR_SCENARIO_NAME:=context-handoff-cutover}"
 export CR_SCENARIO_NAME
@@ -35,11 +42,34 @@ cr_meta "base" "fresh-standalone"
 # `agent-worktrees` / `agent-dispatch` invocations resolve throughout.
 export PATH="$HOME/.local/bin:$PATH"
 
+_apply_uv_index_fixture() {
+    [ -n "$UV_INDEX" ] || return 0
+    export UV_INDEX_URL="$UV_INDEX"
+    export UV_DEFAULT_INDEX="$UV_INDEX"
+    export UV_EXTRA_INDEX_URL="${UV_EXTRA_INDEX_URL:-$UV_INDEX}"
+    mkdir -p "$HOME/.config/uv"
+    cat > "$HOME/.config/uv/uv.toml" <<TOML
+# clean-room uv-index fixture (opt-in, CR_UV_INDEX)
+[[index]]
+url = "$UV_INDEX"
+default = true
+TOML
+    info "uv-index fixture applied"
+}
+
 _seed_module() {
     # Resolve the installed cutover-seed.mjs (payload path is marketplace-scoped).
     local p="$INSTALLED_ROOT/context-handoff/extensions/context-handoff/cutover-seed.mjs"
     [ -f "$p" ] && { printf '%s' "$p"; return 0; }
     p="$(ls "$HOME"/.copilot/installed-plugins/*/context-handoff/extensions/context-handoff/cutover-seed.mjs 2>/dev/null | head -n1)"
+    [ -n "$p" ] && [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+    return 1
+}
+
+_handoff_cli() {
+    local p="$INSTALLED_ROOT/context-handoff/extensions/context-handoff/handoff-cli.mjs"
+    [ -f "$p" ] && { printf '%s' "$p"; return 0; }
+    p="$(ls "$HOME"/.copilot/installed-plugins/*/context-handoff/extensions/context-handoff/handoff-cli.mjs 2>/dev/null | head -n1)"
     [ -n "$p" ] && [ -f "$p" ] && { printf '%s' "$p"; return 0; }
     return 1
 }
@@ -63,12 +93,14 @@ _installer_path() {  # <plugin>
 # resolves afterward.
 _ensure_binstub() {  # <plugin-binary>
     local bin="$1" installer=""
-    bash -lc "command -v $bin >/dev/null 2>&1" && return 0
+    if bash -lc "command -v $bin >/dev/null 2>&1"; then
+        bash -lc "$bin --version >/dev/null 2>&1" && return 0
+    fi
     installer="$(_installer_path "$bin" || true)"
     if [ -n "$installer" ]; then
         capture "provision-$bin" -- bash "$installer" provision || true
     fi
-    bash -lc "command -v $bin >/dev/null 2>&1"
+    bash -lc "command -v $bin >/dev/null 2>&1 && $bin --version >/dev/null 2>&1"
 }
 
 # =========================================================================
@@ -85,7 +117,7 @@ phase 1 "install the live-cutover trio"
 mkdir -p "$HOME/.copilot"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
-  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": { "source": { "source": "github", "repo": "$MARKETPLACE_REPO" } } },
+  "extraKnownMarketplaces": { "$MARKETPLACE_NAME": $MARKETPLACE_SOURCE },
   "enabledPlugins": {
     "agent-worktrees@$MARKETPLACE_NAME": true,
     "agent-dispatch@$MARKETPLACE_NAME": true,
@@ -109,6 +141,7 @@ done
 
 # =========================================================================
 phase 2 "runtimes provision on first session (venv + binstubs)"
+_apply_uv_index_fixture
 mkdir -p "$HOME/wt-repo" && ( cd "$HOME/wt-repo" && git init -q && git config user.email t@e && git config user.name t && echo '# wt' > README.md && git add -A && git commit -qm init )
 PLUGIN_ARGS=()
 for p in "${TRIO[@]}"; do
@@ -248,6 +281,95 @@ else
             fi
         fi
         tmux kill-session -t "$_sess" 2>/dev/null || true
+    fi
+fi
+
+# =========================================================================
+phase 6 "adopted anchor: no-coordinator file fallback and mux resolution"
+_handoff_cli_path="$(_handoff_cli || true)"
+if [ -z "$_handoff_cli_path" ]; then
+    jam "repo-config" "handoff-cli.mjs not found under the installed context-handoff payload" "the plugin should ship extensions/context-handoff/handoff-cli.mjs"
+elif ! bash -lc 'command -v agent-worktrees >/dev/null'; then
+    info "agent-worktrees binstub unavailable; adopted-anchor fallback check skipped"
+else
+    # Register the ordinary checkout as an adopted project. It remains the
+    # anchor (no linked worktree is created), which is the regression shape.
+    ( cd "$HOME/wt-repo" && capture "anchor-register" -- agent-worktrees register wt-repo ) || true
+    _anchor_state="$(cd "$HOME/wt-repo" && agent-worktrees get worktree-state-dir 2>/dev/null || true)"
+    if [ -z "$_anchor_state" ]; then
+        fail "adopted anchor did not resolve a machine-local handoff state directory"
+    elif [[ "$_anchor_state" == "$HOME/wt-repo"* ]]; then
+        fail "adopted-anchor state resolved inside the repository: $_anchor_state"
+    else
+        pass "adopted anchor resolves external state: $_anchor_state"
+        _save_json="$HOME/context-handoff-anchor-save.json"
+        rm -f "$_save_json"
+        (
+            cd "$HOME/wt-repo" &&
+            node "$_handoff_cli_path" save --no-task --json \
+                --session-id clean-room-anchor-predecessor \
+                --cwd "$HOME/wt-repo" \
+                --title "Anchor fallback" \
+                --prompt "continue the clean-room anchor handoff"
+        ) >"$_save_json" 2>"$CR_LOGDIR/anchor-save.stderr" || true
+        _handoff_path="$(node -e 'const fs=require("fs"); try { const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(x.path||""); } catch {}' "$_save_json")"
+        _handoff_seed="$(node -e 'const fs=require("fs"); try { const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); process.stdout.write(x.seed||""); } catch {}' "$_save_json")"
+        if [ -z "$_handoff_path" ] || [ ! -f "$_handoff_path" ]; then
+            fail "no-coordinator anchor save did not create a durable handoff (see $CR_LOGDIR/anchor-save.stderr)"
+        elif [[ "$_handoff_path" == "$HOME/wt-repo"* ]]; then
+            fail "handoff was written inside the repository: $_handoff_path"
+        elif [ "$(dirname "$_handoff_path")" != "$_anchor_state/handoff" ]; then
+            fail "handoff path did not use the state-first anchor namespace: $_handoff_path"
+        else
+            pass "no-coordinator anchor handoff is durable and state-first discoverable"
+            _seed_path="$(printf '%s' "$_handoff_seed" | sed -n 's/.*arguments {"path":"\([^"]*\)"}.*/\1/p' | sed 's/\\\\/\//g')"
+            if [ "$_seed_path" = "$_handoff_path" ]; then
+                pass "file-backed successor seed carries the exact durable path"
+            else
+                fail "file-backed successor seed did not carry the saved path"
+            fi
+            if capture "anchor-consume-first" -- node "$_handoff_cli_path" consume \
+                --json --session-id clean-room-anchor-successor --path "$_seed_path"; then
+                pass "anchor handoff consumed once through the seed's exact path"
+            else
+                fail "first anchor handoff consume failed"
+            fi
+            if capture "anchor-consume-second" -- node "$_handoff_cli_path" consume \
+                --json --session-id clean-room-anchor-replay --path "$_handoff_path"; then
+                fail "anchor handoff replay unexpectedly succeeded"
+            else
+                pass "anchor handoff rejects a second consume"
+            fi
+        fi
+
+        if command -v tmux >/dev/null 2>&1; then
+            _anchor_cutover="$HOME/context-handoff-anchor-cutover.json"
+            rm -f "$_anchor_cutover"
+            tmux kill-session -t cr-anchor-handoff 2>/dev/null || true
+            tmux new-session -d -s cr-anchor-handoff -c "$HOME/wt-repo" \
+                "pane=\$(tmux display-message -p '#{pane_id}'); agent-worktrees handoff-cutover --seed anchor-probe --old-pane \"\$pane\" --session-id clean-room-anchor-predecessor --dry-run --json > '$_anchor_cutover' 2>&1" \
+                2>>"$CR_LOGDIR/anchor-mux.log" || true
+            for _ in 1 2 3 4 5; do
+                [ -s "$_anchor_cutover" ] && break
+                sleep 1
+            done
+            if [ -s "$_anchor_cutover" ] \
+                && grep -q '"ok": true' "$_anchor_cutover" \
+                && grep -q '"session": "cr-anchor-handoff"' "$_anchor_cutover"; then
+                pass "anchor handoff resolves the caller-owned mux for successor cutover"
+            else
+                fail "anchor mux cutover resolution failed (see $_anchor_cutover and cr-logs/anchor-mux.log)"
+            fi
+            tmux kill-session -t cr-anchor-handoff 2>/dev/null || true
+        else
+            info "tmux unavailable; anchor mux resolution check skipped"
+        fi
+
+        rm -f "$_save_json" "$HOME/context-handoff-anchor-cutover.json"
+        if [ -n "${_handoff_path:-}" ]; then
+            rm -f "$_handoff_path" "$_handoff_path.consume.lock" \
+                "$_handoff_path.consume.lock.recover"
+        fi
     fi
 fi
 

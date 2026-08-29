@@ -126,6 +126,19 @@ class TestBuildMuxNewWindowArgv:
         ).decode("utf-8")
         assert decoded_receipt == str(receipt)
 
+    def test_explicit_mux_session_targets_adopted_anchor_session(self):
+        argv = sessions.build_mux_new_window_argv(
+            "@anchor",
+            "C:/repo",
+            ["pwsh.exe", "-File", "setup.ps1"],
+            None,
+            mux="psmux",
+            pane_wrapper="/does/not/exist",
+            session_name="caller-owned-session",
+        )
+        i = argv.index("-t")
+        assert argv[i + 1] == "caller-owned-session"
+
     def test_prompt_transport_fails_closed_without_wrapper(self):
         with pytest.raises(RuntimeError, match="pane wrapper is required"):
             sessions.build_mux_new_window_argv(
@@ -461,12 +474,24 @@ class TestMuxRetirePane:
 # â”€â”€ cmd_handoff_cutover control flow â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 def _ns(**kw):
     base = dict(seed=None, worktree_id=None, session_id=None, old_pane=None,
-                retire_pane=None, dry_run=False, copilot_args=[], recovery=False)
+                retire_pane=None, mux_session=None, require_mux_identity=False,
+                dry_run=False,
+                copilot_args=[], recovery=False)
     base.update(kw)
     return argparse.Namespace(**base)
 
 
 class TestCmdHandoffCutover:
+    def test_parser_accepts_retire_mux_identity(self):
+        args = m.build_parser().parse_args([
+            "handoff-cutover",
+            "--retire-pane", "%9",
+            "--require-mux-identity",
+            "--mux-session", "caller-session",
+        ])
+        assert args.mux_session == "caller-session"
+        assert args.require_mux_identity is True
+
     def test_retire_mode(self, monkeypatch, capfd):
         monkeypatch.setattr(sessions, "mux_retire_pane",
                             lambda p, **k: {"ok": True, "pane": p, "gone": True,
@@ -534,6 +559,94 @@ class TestCmdHandoffCutover:
         out = json.loads(capfd.readouterr().out)
         assert "copilot" not in out
 
+    def test_retire_mux_identity_mismatch_skips_unrelated_pane(
+        self, monkeypatch, capfd,
+    ):
+        monkeypatch.setattr(
+            sessions, "mux_session_for_pane",
+            lambda pane: "new-server-session",
+        )
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("must not retire a reused pane"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        reaped = {}
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid: reaped.update(session=sid) or {
+                "checked": True, "found": 1, "reaped": 1,
+                "survivors": 0, "pids": [7],
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(
+            retire_pane="%9",
+            mux_session="original-session",
+            session_id="old-sess",
+        ))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["method"] == "identity-mismatch-skip"
+        assert out["current_mux_session"] == "new-server-session"
+        assert reaped["session"] == "old-sess"
+
+    def test_retire_unresolved_mux_identity_requires_session_reap(
+        self, monkeypatch, capfd,
+    ):
+        monkeypatch.setattr(sessions, "mux_session_for_pane", lambda pane: None)
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("must not retire an unverified pane"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid: {
+                "checked": True, "found": 1, "reaped": 0,
+                "survivors": 1, "pids": [7],
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(
+            retire_pane="%9",
+            mux_session="original-session",
+            session_id="old-sess",
+        ))
+
+        assert rc == 1
+        out = json.loads(capfd.readouterr().out)
+        assert out["method"] == "identity-unresolved-skip"
+        assert out["copilot"]["survivors"] == 1
+
+    def test_retire_missing_mux_identity_reaps_without_signaling_pane(
+        self, monkeypatch, capfd,
+    ):
+        monkeypatch.setattr(
+            sessions, "mux_retire_pane",
+            lambda *a, **k: pytest.fail("must not retire without mux identity"),
+        )
+        monkeypatch.setattr(activity, "log_event", lambda *a, **k: None)
+        monkeypatch.setattr(
+            reclaim, "ensure_session_copilot_reaped",
+            lambda sid: {
+                "checked": True, "found": 1, "reaped": 1,
+                "survivors": 0, "pids": [7],
+            },
+        )
+
+        rc = m.cmd_handoff_cutover(_ns(
+            retire_pane="%9",
+            require_mux_identity=True,
+            session_id="old-sess",
+        ))
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["method"] == "identity-unavailable-skip"
+        assert out["copilot"]["reaped"] == 1
+
     def test_spawn_requires_seed(self, capfd):
         rc = m.cmd_handoff_cutover(_ns())
         assert rc == 1
@@ -599,6 +712,71 @@ class TestCmdHandoffCutover:
         out = capfd.readouterr().out
         assert rc == 2
         assert "could not resolve" in out and "session-id" in out
+
+    def test_spawn_adopted_anchor_opens_successor_in_current_mux(
+        self, monkeypatch, capfd, tmp_path,
+    ):
+        anchor = tmp_path / "repo"
+        anchor.mkdir()
+        monkeypatch.chdir(anchor)
+        monkeypatch.setattr(m, "_infer_worktree_id_from_cwd", lambda: None)
+        monkeypatch.setattr(m, "_cwd_is_inside_project", lambda p: True)
+        monkeypatch.setattr(
+            sessions, "current_mux_session",
+            lambda pane_id=None: "caller-session",
+        )
+        monkeypatch.setattr(
+            sessions, "has_mux_session_named",
+            lambda name: name == "caller-session",
+        )
+
+        config = type(
+            "_Cfg",
+            (),
+            {"default_repo": type("_Repo", (), {"anchor": str(anchor)})()},
+        )()
+        monkeypatch.setattr(m.cfg, "load_config", lambda: config)
+        monkeypatch.setattr(
+            m, "_preflight_launch", lambda c, a, w: m.LaunchPreflight())
+        monkeypatch.setattr(
+            m, "_build_launch_cmd", lambda c, a, wd, **k: ["copilot"])
+        monkeypatch.setattr(m, "_build_env", lambda p, s, work_dir=None: {})
+        monkeypatch.setattr(m, "_repo_session_env", lambda c, w: {})
+        captured = {}
+
+        def _new_window(wt, wd, cmd, env, **kwargs):
+            captured.update(
+                worktree=wt,
+                work_dir=wd,
+                cmd=cmd,
+                session_name=kwargs.get("session_name"),
+                initial_prompt=kwargs.get("initial_prompt"),
+            )
+            return {
+                "ok": True,
+                "new_pane": "%5",
+                "prompt_received": True,
+            }
+
+        monkeypatch.setattr(sessions, "mux_new_window", _new_window)
+        monkeypatch.setattr(m.activity, "log_event", lambda *a, **k: None)
+
+        rc = m.cmd_handoff_cutover(
+            _ns(seed="continue", old_pane="%4")
+        )
+
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert out["session"] == "caller-session"
+        assert out["old_pane"] == "%4"
+        assert out["new_pane"] == "%5"
+        assert captured == {
+            "worktree": "@anchor",
+            "work_dir": str(anchor),
+            "cmd": ["copilot"],
+            "session_name": "caller-session",
+            "initial_prompt": "continue",
+        }
 
     def test_spawn_dry_run_reports_plan_and_old_pane(
         self, monkeypatch, capfd, tmp_path,

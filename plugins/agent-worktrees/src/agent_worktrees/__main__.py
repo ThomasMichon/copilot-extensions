@@ -1663,7 +1663,38 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         raw_id = getattr(args, "worktree_id", None)
         wt_id = _resolve_worktree_id(raw_id) if raw_id else None
         session_id = getattr(args, "session_id", None)
-        result = sessions.mux_retire_pane(retire_pane)
+        expected_mux = getattr(args, "mux_session", None)
+        require_mux_identity = bool(
+            getattr(args, "require_mux_identity", False)
+        )
+        current_mux = (
+            sessions.mux_session_for_pane(retire_pane)
+            if expected_mux else None
+        )
+        if require_mux_identity and not expected_mux:
+            result = {
+                "ok": bool(session_id),
+                "pane": retire_pane,
+                "gone": True,
+                "method": "identity-unavailable-skip",
+                "expected_mux_session": None,
+                "current_mux_session": None,
+            }
+        elif expected_mux and current_mux != expected_mux:
+            result = {
+                "ok": bool(session_id),
+                "pane": retire_pane,
+                "gone": True,
+                "method": (
+                    "identity-mismatch-skip"
+                    if current_mux
+                    else "identity-unresolved-skip"
+                ),
+                "expected_mux_session": expected_mux,
+                "current_mux_session": current_mux,
+            }
+        else:
+            result = sessions.mux_retire_pane(retire_pane)
         # Pane death is NOT process death. A swallowed Ctrl-C or a hard kill-pane
         # can leave the OLD Copilot running as an orphan, which the mux later
         # restores as a reappearing pane -- a lingering parallel session after
@@ -1677,6 +1708,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             reap = reclaim.ensure_session_copilot_reaped(session_id)
             result["copilot"] = reap
         proc_ok = (not reap.get("checked")) or reap.get("survivors", 0) == 0
+        skipped_identity = result.get("method") == "identity-mismatch-skip"
         overall_ok = bool(result.get("ok")) and proc_ok
         result["ok"] = overall_ok
         activity.log_event(
@@ -1688,7 +1720,11 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
             successor_verified=bool(getattr(args, "successor_verified", False)),
             reason=getattr(args, "retire_reason", None),
             method=result.get("method"),
-            outcome="gone" if (result.get("gone") and proc_ok) else "left-running",
+            outcome=(
+                "identity-mismatch"
+                if skipped_identity
+                else "gone" if (result.get("gone") and proc_ok) else "left-running"
+            ),
             copilot_found=reap.get("found", 0),
             copilot_reaped=reap.get("reaped", 0),
             copilot_survivors=reap.get("survivors", 0),
@@ -1703,6 +1739,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
     raw_id = getattr(args, "worktree_id", None)
     session_id = getattr(args, "session_id", None)
+    config = None
     if raw_id:
         wt_id = _resolve_worktree_id(raw_id)
     else:
@@ -1723,39 +1760,74 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
                 except Exception:
                     wt_id = None
         if not wt_id:
-            return _json_error(
-                "could not resolve a worktree id from cwd; pass --worktree-id "
-                "(or --session-id for a bare-resumed session)",
-                exit_code=2,
-            )
+            try:
+                config = cfg.load_config()
+            except Exception as e:
+                return _json_error(
+                    "could not resolve a worktree or adopted anchor from cwd; "
+                    "pass --worktree-id (or --session-id for a bare-resumed "
+                    f"worktree session). Project resolution failed: {e}",
+                    exit_code=2,
+                )
+            if _cwd_is_inside_project(Path(config.default_repo.anchor)):
+                wt_id = tracking.ANCHOR_ID
+            else:
+                return _json_error(
+                    "could not resolve a worktree or adopted anchor from cwd; "
+                    "run from the intended checkout, pass --worktree-id, or pass "
+                    "--session-id for a bare-resumed worktree session",
+                    exit_code=2,
+                )
 
     # A live cutover needs a mux session to cut into. Without one, the caller
     # (extension) must fall back to the store-task-and-reply flow.
-    if not sessions.has_mux_session(wt_id):
-        return _json_error(f"no mux session wt-{wt_id}; not under mux", exit_code=3)
+    anchor_mode = wt_id == tracking.ANCHOR_ID
 
-    try:
-        config = cfg.load_config()
-    except Exception as e:
-        return _json_error(str(e))
+    mux_session = None
+    if anchor_mode:
+        if config is None:
+            try:
+                config = cfg.load_config()
+            except Exception as e:
+                return _json_error(str(e))
+        mux_session = sessions.current_mux_session(
+            getattr(args, "old_pane", None)
+        )
+        if not mux_session or not sessions.has_mux_session_named(mux_session):
+            return _json_error(
+                "adopted anchor is not inside a live mux session; the stored "
+                "handoff remains available for paste/resume",
+                exit_code=3,
+            )
+        work_dir = config.default_repo.anchor
+    else:
+        if not sessions.has_mux_session(wt_id):
+            return _json_error(
+                f"no mux session wt-{wt_id}; not under mux", exit_code=3
+            )
+        if config is None:
+            try:
+                config = cfg.load_config()
+            except Exception as e:
+                return _json_error(str(e))
+        yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            return _json_error(f"Worktree not found: {wt_id}")
+        record = tracking.load_record(yaml_path)
+        work_dir = record.worktree_path
 
-    yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-    if not yaml_path.exists():
-        return _json_error(f"Worktree not found: {wt_id}")
-    record = tracking.load_record(yaml_path)
-
-    launch_preflight = _preflight_launch(config, args, record.worktree_path)
+    launch_preflight = _preflight_launch(config, args, work_dir)
     if launch_preflight.error:
         return _json_error(launch_preflight.error, exit_code=3)
     launch_cmd = _build_launch_cmd(
         config,
         args,
-        record.worktree_path,
+        work_dir,
         preflight=launch_preflight,
     )
     env = _build_env(
-        None, _repo_session_env(config, record.worktree_path),
-        work_dir=record.worktree_path,
+        None, _repo_session_env(config, work_dir),
+        work_dir=work_dir,
     )
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
@@ -1770,25 +1842,30 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     # extension pin its own $TMUX_PANE explicitly.
     old_pane = (
         getattr(args, "old_pane", None)
-        or sessions.mux_copilot_pane(wt_id, session_id)
-        or sessions.mux_active_pane(wt_id)
+        or (
+            sessions.mux_active_pane_named(mux_session)
+            if anchor_mode and mux_session
+            else sessions.mux_copilot_pane(wt_id, session_id)
+        )
+        or (None if anchor_mode else sessions.mux_active_pane(wt_id))
     )
 
     if getattr(args, "dry_run", False):
         _json_output({
             "ok": True, "dry_run": True,
-            "session": sessions.mux_session_name(wt_id),
-            "old_pane": old_pane, "work_dir": record.worktree_path,
+            "session": mux_session or sessions.mux_session_name(wt_id),
+            "old_pane": old_pane, "work_dir": work_dir,
             "cmd": list(launch_cmd), "seed_len": len(seed),
         })
         return 0
 
     result = sessions.mux_new_window(
         wt_id,
-        record.worktree_path,
+        work_dir,
         launch_cmd,
         env,
         initial_prompt=seed,
+        session_name=mux_session,
     )
     if not result.get("ok"):
         return _json_error(
@@ -1811,7 +1888,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
     _json_output({
         "ok": True,
-        "session": sessions.mux_session_name(wt_id),
+        "session": mux_session or sessions.mux_session_name(wt_id),
         "old_pane": old_pane,
         "new_pane": new_pane,
         "seed_len": len(seed),
@@ -12669,7 +12746,7 @@ def cmd_machine_context(args: argparse.Namespace) -> int:
 _GET_KEYS: dict[str, str] = {
     "repo-dir":      "Anchor repo directory",
     "worktree-dir":  "Current worktree root (the worktree you are in; empty if not inside one)",
-    "worktree-state-dir": "Per-worktree state directory outside the repo checkout",
+    "worktree-state-dir": "Per-worktree or adopted-anchor state directory outside the repo checkout",
     "worktrees-root": "Parent directory that holds all worktrees (formerly 'worktree-dir')",
     "src-dir":       "Source root (parent of repos)",
     "config-dir":    "Per-project config directory (~/.{project})",
@@ -12833,11 +12910,21 @@ def cmd_get(args: argparse.Namespace) -> int:
                 session_wt_id = None
         wt_id = session_wt_id
     current_worktree = str(Path(repo.worktree_root) / wt_id) if wt_id else ""
+    state_scope_id = wt_id
+    if not state_scope_id and _cwd_is_inside_project(Path(repo.anchor)):
+        # Adopted anchors have no linked-worktree id, but still need a stable,
+        # machine-local state namespace for session continuity artifacts.  The
+        # reserved @anchor segment is a directory namespace here, not a claim
+        # that a worktree-class anchor is an editable worktree owner.
+        state_scope_id = tracking.ANCHOR_ID
 
     values = {
         "repo-dir":     repo.anchor,
         "worktree-dir": current_worktree,
-        "worktree-state-dir": str(cfg.project_dir() / "worktrees" / wt_id) if wt_id else "",
+        "worktree-state-dir": (
+            str(cfg.project_dir() / "worktrees" / state_scope_id)
+            if state_scope_id else ""
+        ),
         "worktrees-root": repo.worktree_root,
         "src-dir":      config.srcroot,
         "config-dir":   str(cfg.project_dir()),
@@ -16038,6 +16125,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Resumed session id -- authoritative worktree fallback "
                         "when cwd is HOME (bare resume); resolves the worktree "
                         "from the session registry")
+    p.add_argument("--mux-session", dest="mux_session", default=None,
+                   help="Retire mode: expected mux session containing the pane; "
+                        "a mismatch is treated as predecessor already gone")
+    p.add_argument("--require-mux-identity", action="store_true",
+                   help="Retire mode: never signal a pane unless --mux-session "
+                        "was recorded and still matches; reap by session id only")
     p.add_argument("--old-pane", dest="old_pane", default=None,
                    help="Explicit pane id to report as the old pane "
                         "(default: the session's active pane)")
