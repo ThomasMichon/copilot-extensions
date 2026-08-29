@@ -8,7 +8,7 @@
       "pure": true,
       "order": 120,
       "timeoutSeconds": 1,
-      "maxBytes": 384,
+      "maxBytes": 1024,
       "bash": ["scripts/focus-guidance.sh", "--aggregate"],
       "powershell": ["scripts/focus-guidance.ps1", "--aggregate"]
     },
