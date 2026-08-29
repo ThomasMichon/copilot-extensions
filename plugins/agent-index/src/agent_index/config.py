@@ -521,6 +521,8 @@ def client_url() -> str | None:
             if any(str(item.get("machine", "")).strip().lower() == me for item in indexers)
             else "client"
         )
+    elif root is not None:
+        return None
     else:
         role = resolve_role()
     if role == "client":
