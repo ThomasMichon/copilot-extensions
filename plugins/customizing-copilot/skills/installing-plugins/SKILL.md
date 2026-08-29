@@ -97,6 +97,13 @@ across machines.
 A repo's `.github/copilot/settings.json` is merged with the user
 `~/.copilot/settings.json`; `enabledPlugins` may live in either.
 
+> **`enabledPlugins` is not an ordering list.** It is an
+> enablement/precedence map for source-qualified plugin identities. JSON key
+> order must never be used to arrange hook execution or make one plugin the
+> winner. Relative plugin order is an implementation detail, not an
+> author-facing compatibility contract; see `authoring-skills`' hook ordering
+> guidance when several plugins emit the same output field.
+
 > **Session extensions vs. skills/payload — a scoping caveat.** Repo-scoped
 > `enabledPlugins` reliably governs a plugin's **payload** — its skills, hooks,
 > and agents — for sessions in that repo. A plugin's **session extension** (an
