@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-containers"
-version = "0.1.2-dev96"
+version = "0.1.2-dev97"
 description = "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver"
 readme = "README.md"
 license = "MIT"
@@ -14,6 +14,7 @@ authors = [
 ]
 dependencies = [
     "pyyaml>=6.0.3",
+    "paramiko>=4.0.0",
     "agent-ssh-manager",
     "agent-credential-relay",
     "agent-config-migrate",

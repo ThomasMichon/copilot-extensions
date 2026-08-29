@@ -34,10 +34,12 @@ and brokers exclusive *leases* so an effort can borrow one without two parallel
 worktrees driving the same container. Trusted containers are reached over
 OpenSSH, with `docker exec` used only as the local `ProxyCommand` bootstrap
 (Docker Desktop WSL2 backend), and run a Copilot ACP agent addressable via
-the bridge as `container:<name>` when that sibling runtime is installed. Restricted
-fleets retain their direct, deny-by-construction `docker exec` boundary and
-receive no SSH key. Without agent-bridge, the fleet/lease CLI still works; only
-bridge dispatch is absent.
+the bridge as `container:<name>` when that sibling runtime is installed.
+Restricted fleets retain their direct, deny-by-construction `docker exec`
+boundary and receive no SSH key. They may be published as named OpenSSH targets
+through a host-side stdio adapter; this adds no target port, key, sshd, host
+mount, credential relay, or network. Without agent-bridge, the fleet/lease CLI
+still works; only bridge dispatch is absent.
 
 ## Provision a fleet
 
@@ -172,6 +174,25 @@ for a trusted fleet that intentionally needs no host credential path.
 
 Those are the **trusted-profile** defaults. A restricted fleet launches only its
 explicit `acp_command` and forwards neither host credential path.
+
+For a named restricted OpenSSH target:
+
+```bash
+<catalog argv[0]> ssh-profile restricted-worker-1 --alias sandbox
+ssh sandbox "command"
+```
+
+`ssh-profile` fails unless the configured and observed profile is restricted,
+the container is running, the full live policy passes, and no destructive
+lifecycle hold is active. It delegates fragment rendering to agent-ssh and
+persists the normalized provider registry under the agent-containers state
+directory. The `ssh-stdio` ProxyCommand is an internal one-connection protocol
+adapter: it holds lifecycle admission for the whole SSH connection and always
+uses the fleet-owned `exec_user`, never the SSH username. Use
+`ssh-profile <name> --json` for read-only metadata inspection.
+The adapter is single-channel and intended for shell/exec use, not SFTP or VS
+Code Remote-SSH. PTY and targeted disconnect cleanup require compatible
+util-linux `script` and `setsid` helpers in the restricted image.
 
 ## Troubleshooting
 

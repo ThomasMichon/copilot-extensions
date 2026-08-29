@@ -1,0 +1,21 @@
+module: provider-exec
+kind: transport
+summary: SSH-compatible stdio reach through a venue provider's restricted exec boundary.
+# The provider command hosts the SSH wire protocol locally on ProxyCommand
+# stdio, then translates accepted session requests into its live-validated
+# provider exec boundary. The target runs no sshd, receives no authorized key,
+# and exposes no listening port.
+proxy_command: '"{proxy_binary}" ssh-stdio "{hostname}"'
+proxy_binary_default: agent-containers
+produces:
+  ssh_profile: true
+  keyed_by: machine-name
+inbound_ports: none
+topology:
+  default: per-machine
+  supported: [per-machine]
+capabilities:
+  install-client: false
+  emit-profile: true
+  verify: true
+  provision-server: false

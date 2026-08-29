@@ -60,7 +60,29 @@ Examples:
 - Cloudflare: `"{proxy_binary} access ssh --hostname {hostname}"`
 - (a dev-tunnel transport supplies its own equivalent)
 - `wsl`: `"wsl.exe -d {distro} -u {user} exec nc 127.0.0.1 {port}"` (bridges the last hop through WSL interop instead of TCP)
+- provider exec: `'"{proxy_binary}" ssh-stdio "{hostname}"'` (the external provider
+  hosts SSH protocol over child-process stdio and translates accepted requests
+  into its own execution boundary)
 - `direct`: omit `proxy_command` entirely -> plain SSH.
+
+A `ProxyCommand` transports SSH bytes; it does not replace the SSH protocol.
+Provider-exec transports must therefore present an SSH protocol endpoint on
+stdio even when the target itself has no sshd. A no-listener adapter is valid:
+the process may terminate with the one client connection and open no TCP or Unix
+socket outside that process. The provider remains responsible for live target
+lookup, readiness, posture validation, lifecycle admission, target-user
+selection, command execution, and exit-status/stderr fidelity. It must not let
+the SSH username select a more privileged execution identity.
+
+If an adapter accepts only one channel, its normalized machine options must
+disable OpenSSH multiplexing (`ControlMaster no`, `ControlPath none`, and
+`ControlPersist no`). Authentication and host-key options must match the actual
+adapter. For a local, ephemeral, stdio-only endpoint, a provider may accept
+OpenSSH's initial `none` authentication probe and use an ephemeral host key, but
+the emitted profile must prevent key, password, keyboard-interactive, and GSSAPI
+credential projection. Long-lived execution must hold the provider's lifecycle
+admission for the entire SSH connection, not merely perform a point-in-time
+readiness check.
 
 ## Topology
 

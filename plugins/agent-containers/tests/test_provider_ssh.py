@@ -1,0 +1,519 @@
+"""Tests for the restricted provider-exec SSH-compatible transport."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+from contextlib import contextmanager
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from agent_containers import provider_ssh
+from agent_containers.config import ContainersConfig, FleetConfig
+from agent_containers.resolver import LiveExecTarget
+
+
+def _target(*, profile: str = "restricted", user: str = "agent") -> LiveExecTarget:
+    config = ContainersConfig()
+    fleet = FleetConfig(
+        security_profile=profile,
+        exec_user=user,
+        workspace_folder="/workspace/repo",
+    )
+    return LiveExecTarget(
+        name="sandbox-1",
+        container_id="instance-123",
+        config=config,
+        fleet=fleet,
+        info=SimpleNamespace(name="sandbox-1"),
+        actual_profile=profile,
+        user=user,
+        workspace_folder="/workspace/repo",
+        acp_command="minimal-agent --stdio",
+    )
+
+
+def _venue(**overrides):
+    venue = {
+        "schema_version": 1,
+        "provider": "agent-containers",
+        "kind": "container",
+        "target_id": "container:sandbox-1",
+        "scope": "provider-instance",
+        "instance_id": "instance-123",
+        "fleet": "sandbox",
+        "workspace_folder": "/workspace/repo",
+        "security_profile": "restricted",
+        "configured_security_profile": "restricted",
+        "observed_security_profile": "restricted",
+        "effective_security_profile": "restricted",
+        "state": "running",
+        "ready": True,
+        "posture_verified": False,
+        "transport": "provider-exec",
+        "capabilities": {
+            "container_local_workspace": True,
+            "host_credentials": False,
+            "credential_relay": False,
+            "session_host": False,
+            "ssh_profile": True,
+        },
+        "lifecycle_hold": {
+            "state": "none",
+            "operation": None,
+            "reason": None,
+        },
+    }
+    venue.update(overrides)
+    return venue
+
+
+def test_command_request_uses_fleet_user_and_no_projection():
+    command = provider_ssh._command_for_request(
+        _target(user="sandbox-agent"),
+        provider_ssh.SessionRequest(
+            command="printf '%s' hello",
+            term=None,
+            width=80,
+            height=24,
+        ),
+    )
+
+    assert command[:3] == ["docker", "exec", "-i"]
+    assert command[3:6] == ["-u", "sandbox-agent", "instance-123"]
+    assert "-e" not in command
+    assert "--mount" not in command
+    assert "--network" not in command
+    assert "GH_TOKEN" not in " ".join(command)
+    assert "cd /workspace/repo" in command[-1]
+    assert "printf" in command[-1]
+
+
+def test_pty_request_uses_target_side_helper_with_initial_dimensions():
+    command = provider_ssh._command_for_request(
+        _target(),
+        provider_ssh.SessionRequest(
+            command=None,
+            term="xterm-256color",
+            width=132,
+            height=43,
+        ),
+        session_nonce="0123456789abcdef",
+    )
+
+    payload = command[-1]
+    assert "script -qefc true" in payload
+    assert "script -qefc" in payload
+    assert "stty rows 43 cols 132" in payload
+    assert "TERM=xterm-256color" in payload
+    assert "exec bash -l" in payload
+    assert "AGENT_CONTAINERS_SESSION_NONCE=0123456789abcdef" in payload
+    assert "setsid --wait" in payload
+    assert "-e" not in command
+
+
+def test_pty_request_uses_safe_defaults_when_client_reports_zero_dimensions():
+    command = provider_ssh._command_for_request(
+        _target(),
+        provider_ssh.SessionRequest(
+            command="true",
+            term="xterm",
+            width=0,
+            height=0,
+        ),
+        session_nonce="0123456789abcdef",
+    )
+
+    assert "stty rows 24 cols 80" in command[-1]
+
+
+def test_cleanup_targets_only_the_nonce_marked_process_group(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(provider_ssh.subprocess, "run", run)
+
+    provider_ssh._cleanup_target_session(_target(), "0123456789abcdef")
+
+    command = calls[0][0]
+    assert command[:6] == [
+        "docker",
+        "exec",
+        "-i",
+        "-u",
+        "agent",
+        "instance-123",
+    ]
+    payload = command[-1]
+    assert "AGENT_CONTAINERS_SESSION_NONCE=0123456789abcdef" in payload
+    assert "/proc/[0-9]*/environ" in payload
+    assert "kill_marked TERM" in payload
+    assert "kill_marked KILL" in payload
+    assert '[ "$3" = "$pid" ]' in payload
+
+
+def test_profile_spec_is_named_hardened_and_provider_owned(monkeypatch, tmp_path):
+    module = tmp_path / "module.yaml"
+    module.write_text("module: provider-exec\n", encoding="utf-8")
+    monkeypatch.setattr(provider_ssh, "provider_module_path", lambda: module)
+    monkeypatch.setattr(
+        provider_ssh,
+        "resolve_live_exec_target",
+        lambda name: _target(),
+    )
+
+    async def resolve_spec(_self, _name):
+        return {"venue": _venue()}
+
+    monkeypatch.setattr(
+        provider_ssh.ContainerResolver,
+        "resolve_spec",
+        resolve_spec,
+    )
+
+    result = provider_ssh.ssh_profile_spec("sandbox-1", "restricted-worker")
+
+    assert result["module"] == str(module)
+    assert result["venue"]["posture_verified"] is True
+    machine = result["registry"]["machines"][0]
+    assert machine["name"] == "restricted-worker"
+    assert machine["hostname"] == "sandbox-1"
+    assert machine["user"] == "agent"
+    assert machine["options"]["ControlMaster"] == "no"
+    assert machine["options"]["PubkeyAuthentication"] == "no"
+    assert machine["options"]["PasswordAuthentication"] == "no"
+    assert machine["options"]["UserKnownHostsFile"] in {"/dev/null", "NUL"}
+
+
+def test_emit_profile_persists_registry_and_delegates_to_agent_ssh(
+    monkeypatch,
+    tmp_path,
+):
+    spec = {
+        "module": str(tmp_path / "module.yaml"),
+        "registry": {
+            "transport": "provider-exec",
+            "proxy_command_binary": "/bin/agent-containers",
+            "machines": [{"name": "restricted-worker"}],
+        },
+    }
+    registry_path = tmp_path / "profile.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "transport": "provider-exec",
+                "proxy_command_binary": "/old/agent-containers",
+                "machines": [{"name": "existing-worker", "hostname": "sandbox-0"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls = []
+    monkeypatch.setattr(provider_ssh, "ssh_profile_spec", lambda *_args: spec)
+    monkeypatch.setattr(
+        provider_ssh,
+        "_profile_registry_path",
+        lambda: registry_path,
+    )
+    monkeypatch.setattr(
+        provider_ssh.shutil,
+        "which",
+        lambda name: f"/bin/{name}",
+    )
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(provider_ssh.subprocess, "run", run)
+
+    assert (
+        provider_ssh.emit_ssh_profile(
+            "sandbox-1",
+            "restricted-worker",
+            print_only=False,
+        )
+        == 0
+    )
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    assert registry["transport"] == "provider-exec"
+    assert registry["proxy_command_binary"] == "/bin/agent-containers"
+    assert [machine["name"] for machine in registry["machines"]] == [
+        "existing-worker",
+        "restricted-worker",
+    ]
+    assert calls[0][0] == [
+        "/bin/agent-ssh",
+        "emit-profile",
+        str(registry_path),
+        "--module",
+        spec["module"],
+    ]
+
+
+def test_emit_profile_fails_when_agent_ssh_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        provider_ssh,
+        "ssh_profile_spec",
+        lambda *_args: {
+            "module": "/module.yaml",
+            "registry": {
+                "transport": "provider-exec",
+                "proxy_command_binary": "/bin/agent-containers",
+                "machines": [{"name": "sandbox-1"}],
+            },
+        },
+    )
+    monkeypatch.setattr(
+        provider_ssh,
+        "_profile_registry_path",
+        lambda: Path("provider-profile.json"),
+    )
+    monkeypatch.setattr(provider_ssh, "atomic_write_json", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(provider_ssh.shutil, "which", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match="agent-ssh is required"):
+        provider_ssh.emit_ssh_profile("sandbox-1")
+
+
+def test_print_profile_does_not_invalidate_published_registry(monkeypatch, tmp_path):
+    registry_path = tmp_path / "provider-exec.json"
+    published = {
+        "transport": "provider-exec",
+        "proxy_command_binary": "/bin/agent-containers",
+        "machines": [{"name": "existing-worker", "hostname": "sandbox-0"}],
+    }
+    registry_path.write_text(json.dumps(published), encoding="utf-8")
+    monkeypatch.setattr(
+        provider_ssh,
+        "ssh_profile_spec",
+        lambda *_args: {
+            "module": str(tmp_path / "module.yaml"),
+            "registry": {
+                "transport": "provider-exec",
+                "proxy_command_binary": "/bin/agent-containers",
+                "machines": [{"name": "preview-worker", "hostname": "sandbox-1"}],
+            },
+        },
+    )
+    monkeypatch.setattr(provider_ssh, "_profile_registry_path", lambda: registry_path)
+    monkeypatch.setattr(
+        provider_ssh.shutil,
+        "which",
+        lambda name: f"/bin/{name}",
+    )
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(provider_ssh.subprocess, "run", run)
+
+    assert provider_ssh.emit_ssh_profile("sandbox-1", print_only=True) == 0
+    assert json.loads(registry_path.read_text(encoding="utf-8")) == published
+    assert calls[0][-1] == "--print"
+    assert Path(calls[0][2]) != registry_path
+    assert not Path(calls[0][2]).exists()
+
+
+def test_provider_server_rejects_forwarding_and_agent_projection():
+    paramiko = pytest.importorskip("paramiko")
+    server = provider_ssh._ProviderServer(paramiko)
+
+    assert (
+        server.check_channel_direct_tcpip_request(
+            1,
+            ("127.0.0.1", 1234),
+            ("example.invalid", 443),
+        )
+        == paramiko.OPEN_FAILED_ADMINISTRATIVELY_PROHIBITED
+    )
+    assert server.check_port_forward_request("127.0.0.1", 0) is False
+    assert server.check_channel_forward_agent_request(SimpleNamespace()) is False
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"ready": False}, "ready restricted"),
+        ({"state": "exited"}, "ready restricted"),
+        ({"effective_security_profile": "trusted"}, "ready restricted"),
+        ({"transport": "ssh"}, "ready restricted"),
+        ({"lifecycle_hold": {"state": "active"}}, "ready restricted"),
+        ({"instance_id": "replacement-456"}, "ready restricted"),
+    ],
+)
+def test_profile_spec_rejects_unready_or_nonrestricted_metadata(
+    monkeypatch,
+    tmp_path,
+    overrides,
+    message,
+):
+    module = tmp_path / "module.yaml"
+    module.write_text("module: provider-exec\n", encoding="utf-8")
+    monkeypatch.setattr(provider_ssh, "provider_module_path", lambda: module)
+    monkeypatch.setattr(
+        provider_ssh,
+        "resolve_live_exec_target",
+        lambda name: _target(),
+    )
+
+    async def resolve_spec(_self, _name):
+        return {"venue": _venue(**overrides)}
+
+    monkeypatch.setattr(
+        provider_ssh.ContainerResolver,
+        "resolve_spec",
+        resolve_spec,
+    )
+
+    with pytest.raises(RuntimeError, match=message):
+        provider_ssh.ssh_profile_spec("sandbox-1")
+
+
+def test_run_ssh_stdio_holds_session_admission_for_transport(monkeypatch):
+    events = []
+
+    @contextmanager
+    def admission(name):
+        events.append(("admit", name))
+        yield
+        events.append(("release", name))
+
+    monkeypatch.setattr(provider_ssh, "session_admission", admission)
+    monkeypatch.setattr(
+        provider_ssh,
+        "resolve_live_exec_target",
+        lambda name: events.append(("resolve", name)) or _target(),
+    )
+    monkeypatch.setattr(
+        provider_ssh,
+        "_serve_ssh",
+        lambda target, **kwargs: events.append(("serve", target.name)) or 0,
+    )
+    monkeypatch.setattr(
+        provider_ssh.sys,
+        "stdin",
+        SimpleNamespace(buffer=SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        provider_ssh.sys,
+        "stdout",
+        SimpleNamespace(buffer=SimpleNamespace()),
+    )
+
+    assert provider_ssh.run_ssh_stdio("sandbox-1") == 0
+    assert events == [
+        ("admit", "sandbox-1"),
+        ("resolve", "sandbox-1"),
+        ("serve", "sandbox-1"),
+        ("release", "sandbox-1"),
+    ]
+
+
+def test_run_ssh_stdio_reports_provider_hold_as_busy(monkeypatch, capsys):
+    @contextmanager
+    def admission(_name):
+        raise provider_ssh.ProviderAdmissionError("replacement in progress")
+        yield
+
+    monkeypatch.setattr(provider_ssh, "session_admission", admission)
+
+    assert provider_ssh.run_ssh_stdio("sandbox-1") == 75
+    assert "replacement in progress" in capsys.readouterr().err
+
+
+@pytest.mark.skipif(
+    shutil.which("ssh") is None or sys.platform == "win32",
+    reason="POSIX OpenSSH client unavailable",
+)
+def test_openssh_exec_round_trip_over_stdio_proxy(tmp_path):
+    pytest.importorskip("paramiko")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker = fake_bin / "docker"
+    docker.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -eu\n"
+        '[ "$1" = exec ]\n'
+        '[ "$2" = -i ]\n'
+        '[ "$3" = -u ]\n'
+        '[ "$4" = sandbox-agent ]\n'
+        '[ "$5" = instance-123 ]\n'
+        '[ "$6" = bash ]\n'
+        '[ "$7" = -c ]\n'
+        'exec bash -lc "$8"\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    helper = tmp_path / "proxy.py"
+    helper.write_text(
+        "import sys\n"
+        "from types import SimpleNamespace\n"
+        "from agent_containers import provider_ssh\n"
+        "target = SimpleNamespace(\n"
+        "    name='sandbox-1', container_id='instance-123', user='sandbox-agent',\n"
+        f"    workspace_folder={str(workspace)!r})\n"
+        "raise SystemExit(provider_ssh._serve_ssh(\n"
+        "    target, stdin=sys.stdin.buffer, stdout=sys.stdout.buffer))\n",
+        encoding="utf-8",
+    )
+    proxy = f"{shlex_quote(sys.executable)} {shlex_quote(str(helper))}"
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}{os.pathsep}{env.get('PATH', '')}"
+    proc = subprocess.run(
+        [
+            "ssh",
+            "-o",
+            f"ProxyCommand={proxy}",
+            "-o",
+            "ControlMaster=no",
+            "-o",
+            "ControlPath=none",
+            "-o",
+            "GSSAPIAuthentication=no",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-o",
+            "KbdInteractiveAuthentication=no",
+            "-o",
+            "LogLevel=ERROR",
+            "-o",
+            "PasswordAuthentication=no",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "ignored-user@provider-target",
+            "printf out; printf err >&2; exit 7",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+        env=env,
+    )
+
+    assert proc.returncode == 7, proc.stderr
+    assert proc.stdout == "out"
+    assert proc.stderr == "err"
+
+
+def shlex_quote(value: str) -> str:
+    """Quote a ProxyCommand token for the POSIX OpenSSH test environment."""
+    import shlex
+
+    return shlex.quote(value)

@@ -7,10 +7,12 @@ Manages a persistent fleet of local dev containers (Docker Desktop WSL2
 backend), brokers *advisory* exclusive leases so an effort can borrow a
 container without two parallel worktrees driving the same one, and lets
 agent-bridge dispatch a Copilot agent into a trusted container over OpenSSH when
-agent-bridge is installed. Docker remains the lifecycle/bootstrap boundary and
-the SSH `ProxyCommand`, so no container port is published. The CLI and binstub
-are owned by this plugin and work standalone; without agent-bridge only bridge
-addressing (`container:<name>`) is unavailable.
+agent-bridge is installed. Restricted containers can also be exposed as named
+OpenSSH targets through a host-side, stdio-only provider adapter that translates
+SSH session requests into the existing restricted `docker exec` boundary. No
+container port, key, or SSH daemon is added. The CLI and binstub are owned by
+this plugin and work standalone; without agent-bridge only bridge addressing
+(`container:<name>`) is unavailable.
 
 ## Usage path
 
@@ -55,7 +57,12 @@ addressing (`container:<name>`) is unavailable.
   environment values through stdin, never argv. Because the token is fetched
   inside the wrapper, it is **never** placed in the SpawnTarget that
   agent-bridge persists to its SQLite DB, nor in any log. Restricted fleets keep
-  the direct `docker exec` boundary and receive no SSH key projection.
+  the direct `docker exec` boundary and receive no SSH key projection. Their
+  venue metadata advertises `transport: provider-exec`; a named profile can be
+  published with `agent-containers ssh-profile <name> [--alias <alias>]`.
+  The resulting OpenSSH `ProxyCommand` runs `agent-containers ssh-stdio <name>`,
+  which hosts SSH protocol only for that child process's stdio lifetime and
+  opens no listener.
   `namespace-resolve` also returns a versioned `venue` block with a stable
   provider target id (`container:<name>`), the current Docker instance id,
   fleet/workspace identity, configured and effective trust posture, transport,
@@ -101,12 +108,16 @@ agent-containers leases              # show active leases
 agent-containers lifecycle-clear [name]
                                       # clear only expired/dead admission records
 agent-containers exec <name>         # run the ACP launch command (testing)
+agent-containers ssh-profile <name> [--alias <alias>]
+                                      # publish a named restricted SSH target
+agent-containers ssh-profile <name> --json
+                                      # inspect provider/profile metadata only
 agent-containers config-migrate      # stamp/migrate machine-local containers.yaml
 agent-containers version             # show version
 ```
 
-Bridge-facing commands (`namespace-*`, `relay-profile`) are implementation
-seams for agent-bridge and are not normally invoked by humans.
+Bridge-facing commands (`namespace-*`, `relay-profile`) and `ssh-stdio` are
+implementation seams and are not normally invoked by humans.
 
 ## Configuration
 
@@ -213,12 +224,24 @@ user, and ACP command. It has no parameters for a host token, credential relay,
 SSH projection, mount, network, or gateway, so the restricted path cannot gain
 those capabilities through an accidental caller flag.
 
+The optional restricted SSH profile does not change that authority boundary.
+The host-side adapter accepts one SSH session channel, ignores the client
+username for Docker-user selection, holds provider lifecycle admission for the
+full connection, and re-inspects the live restricted posture after admission.
+It disables OpenSSH connection multiplexing and credential authentication in
+the emitted profile. This slice supports ordinary shell/exec use, not
+multi-channel consumers such as SFTP or VS Code Remote-SSH. PTY requests use
+the target's util-linux `script` and `setsid` helpers with the initial terminal
+dimensions; a target without compatible helpers fails explicitly.
+
 Venue capability booleans report configured launch authority, not inferred
 runtime access: `host_credentials` and `credential_relay` come from the effective
 fleet credential policy; `session_host` is trusted-only; and
-`container_local_workspace` means the target has a concrete container workspace,
-not that it is safe to mount host files. Unknown future capability keys must be
-treated as unavailable by consumers.
+`ssh_profile` identifies an exact restricted provider-exec target; `ready`
+separately reports whether it can be entered now. `container_local_workspace`
+means the target has a concrete container workspace, not that it is safe to
+mount host files. Unknown future capability keys must be treated as unavailable
+by consumers.
 
 `environment` is an explicit **non-secret** key/value allowlist baked into the
 container. Restricted configuration rejects credential-shaped names (`*_TOKEN`,

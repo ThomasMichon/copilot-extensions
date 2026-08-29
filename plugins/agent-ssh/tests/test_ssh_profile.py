@@ -85,8 +85,9 @@ def test_chmod_windows_removes_owner_rights() -> None:
 
     ssh_profile._chmod(frag, 0o600)
 
-    acl = subprocess.run(
-        ["icacls", str(frag)], capture_output=True, text=True
+    icacls = Path(os.environ.get("SystemRoot", "C:\\Windows")) / "System32" / "icacls.exe"
+    acl = subprocess.run(  # noqa: S603 - controlled platform binary and test path
+        [str(icacls), str(frag)], capture_output=True, text=True
     ).stdout
     assert "S-1-3-4" not in acl  # OWNER RIGHTS SID
     assert "OWNER RIGHTS" not in acl
@@ -131,6 +132,36 @@ def test_wsl_transport_interop_proxycommand() -> None:
     assert "HostName" not in fragment
     assert "ProxyJump" not in fragment
     assert written_name(wsl) == "50-agent-ssh-wsl.conf"
+
+
+def test_provider_exec_recipe_uses_no_network_endpoint_or_key() -> None:
+    provider_exec = _load_example("provider-exec")
+    cfg = {
+        "transport": "provider-exec",
+        "proxy_command_binary": "/opt/provider-cli",
+        "machines": [
+            {
+                "name": "restricted-worker",
+                "hostname": "sandbox-1",
+                "user": "sandbox-agent",
+                "options": {
+                    "ControlMaster": "no",
+                    "PubkeyAuthentication": "no",
+                    "PasswordAuthentication": "no",
+                },
+            }
+        ],
+    }
+
+    fragment = ssh_profile.render_fragment(cfg, provider_exec)
+
+    assert "Host restricted-worker" in fragment
+    assert 'ProxyCommand "/opt/provider-cli" ssh-stdio "sandbox-1"' in fragment
+    assert "IdentityFile" not in fragment
+    assert "Port " not in fragment
+    assert "ControlMaster no" in fragment
+    assert "PubkeyAuthentication no" in fragment
+    assert "PasswordAuthentication no" in fragment
 
 
 def written_name(module: dict) -> str:

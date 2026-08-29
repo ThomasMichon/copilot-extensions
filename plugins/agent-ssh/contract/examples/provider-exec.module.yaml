@@ -1,0 +1,17 @@
+module: provider-exec
+kind: transport
+summary: SSH-compatible stdio reach through a provider-owned exec boundary.
+proxy_command: '"{proxy_binary}" ssh-stdio "{hostname}"'
+proxy_binary_default: provider-cli
+produces:
+  ssh_profile: true
+  keyed_by: machine-name
+inbound_ports: none
+topology:
+  default: per-machine
+  supported: [per-machine]
+capabilities:
+  install-client: false
+  emit-profile: true
+  verify: true
+  provision-server: false
