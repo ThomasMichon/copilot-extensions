@@ -434,7 +434,7 @@ def test_catalog_deduplicates_per_launch_and_reemits_on_resume(
     if os.name != "nt":
         marker_root_name += f"-{os.getuid()}"
     marker_root = tmp_path / "temp" / marker_root_name
-    marker_root.mkdir()
+    marker_root.mkdir(mode=0o700)
     for index in range(2050):
         (marker_root / f"stale-{index:04d}").touch()
     payload = '{"sessionId":"session with spaces \u96ea"}'
