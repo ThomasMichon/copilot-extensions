@@ -592,7 +592,15 @@ function Read-LockOwner([string]$OwnerPath) {
         $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
         Fail "UTF-8 BOM is not allowed in '$OwnerPath'."
     }
-    $text = $strictUtf8.GetString($bytes)
+    try {
+        $text = $strictUtf8.GetString($bytes)
+    }
+    catch [Text.DecoderFallbackException] {
+        Fail "Invalid UTF-8 in installation lock owner receipt '$OwnerPath'."
+    }
+    catch [ArgumentException] {
+        Fail "Invalid UTF-8 in installation lock owner receipt '$OwnerPath'."
+    }
     return Read-JsonText $text "installation lock owner receipt '$OwnerPath'"
 }
 
@@ -794,11 +802,33 @@ function Acquire-Lock(
     Fail "Installation lock '$Path' remained busy."
 }
 
+function Remove-LockArtifact([string]$Path, [string]$Label) {
+    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        try {
+            Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
+            return
+        }
+        catch [System.UnauthorizedAccessException] {
+            if ($stopwatch.Elapsed -ge [TimeSpan]::FromSeconds(1)) {
+                Fail "Cannot release installation lock ${Label} '$Path': $($_.Exception.Message)"
+            }
+            Start-Sleep -Milliseconds 10
+        }
+        catch [System.IO.IOException] {
+            if ($stopwatch.Elapsed -ge [TimeSpan]::FromSeconds(1)) {
+                Fail "Cannot release installation lock ${Label} '$Path': $($_.Exception.Message)"
+            }
+            Start-Sleep -Milliseconds 10
+        }
+    }
+}
+
 function Release-Lock {
     Assert-LockOwned
     $held = $script:HeldLocks[$script:HeldLocks.Count - 1]
-    Remove-Item -LiteralPath (Join-Path $held.path 'owner.json') -Force
-    Remove-Item -LiteralPath $held.path -Force
+    Remove-LockArtifact (Join-Path $held.path 'owner.json') 'owner receipt'
+    Remove-LockArtifact $held.path 'directory'
     Pop-HeldLock
 }
 

@@ -2579,3 +2579,23 @@ def test_concurrent_snapshot_publication_has_one_atomic_winner_and_retry(
     assert sum(payload["snapshotChanged"] is False for payload in payloads) == 1
     provenance = _provenance_path(layout)
     assert json.loads(provenance.read_text(encoding="utf-8"))["snapshot"]["id"] == "1.0.0"
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is unavailable")
+def test_powershell_lock_owner_invalid_utf8_is_classified(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    lock = (
+        Path(layout["durable"])
+        / "marketplaces"
+        / ".locks"
+        / f"{layout['marketplace_id']}.genesis"
+    )
+    lock.mkdir(parents=True)
+    (lock / "owner.json").write_bytes(b"\xff")
+    runner = next(candidate for candidate in RUNNERS if candidate[0] == "powershell")
+
+    result = _run(runner, "snapshot-stamp", layout, check=False)
+
+    assert result.returncode != 0
+    assert "invalid utf-8 in installation lock owner receipt" in result.stderr.lower()
+    assert "decoderfallbackexception" not in result.stderr.lower()
