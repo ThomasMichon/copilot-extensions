@@ -648,8 +648,10 @@ Write-Output $box1.Text
 def cmd_get(args):
     entry = args.entry
     field = args.field or "password"
+    cache_entry = config.normalize_entry(entry, config.resolve_context().group)
     refresh = getattr(args, "refresh", False)
     cache_only = getattr(args, "cache_only", False)
+    max_cache_age = getattr(args, "max_cache_age", None)
 
     from .cache import get_cache
 
@@ -658,7 +660,7 @@ def cmd_get(args):
     # Tier 0: the persistent on-disk cache. Consulted first unless --refresh,
     # and authoritatively (no daemon contact) when --cache-only.
     if cache.enabled and not refresh:
-        cached = cache.get(entry, field)
+        cached = cache.get(cache_entry, field, max_age_seconds=max_cache_age)
         if cached is not None:
             print(cached)
             return 0
@@ -670,14 +672,23 @@ def cmd_get(args):
         print("Error: could not start vault service", file=sys.stderr)
         return 1
 
-    request = {"action": "get", "entry": entry, "field": field}
+    request = {
+        "action": "get",
+        "entry": entry,
+        "field": field,
+        "refresh": refresh or max_cache_age is not None,
+    }
     if getattr(args, "prompt", False):
         request["allow_prompt"] = True
     resp = send_command(request, timeout=None)
     if resp and resp.get("ok"):
         value = resp["value"]
         if cache.enabled:
-            cache.put(entry, field, value)
+            generation = resp.get("generation")
+            if generation is None:
+                cache.put(cache_entry, field, value)
+            else:
+                cache.put(cache_entry, field, value, int(generation))
         print(value)
         return 0
 
@@ -897,17 +908,123 @@ def cmd_set_password(args):
             print("Error: no password provided", file=sys.stderr)
             return 1
 
-    resp = send_command({
-        "action": "set-password",
-        "entry": args.entry,
-        "password": password,
-    }, timeout=10.0)
-    if resp and resp.get("ok"):
-        print(resp.get("message", "Password updated"))
-        return 0
-    error = resp.get("error", "unknown") if resp else "service unreachable"
-    print(f"Error: {error}", file=sys.stderr)
-    return 1
+    from .cache import get_cache
+
+    persistent = get_cache()
+    cache_entry = config.normalize_entry(
+        args.entry,
+        config.resolve_context().group,
+    )
+    with persistent.replacement_lock():
+        pending = persistent.pending_replace(cache_entry, "password")
+        if pending is not None:
+            recovery = send_command({
+                "action": "get",
+                "entry": args.entry,
+                "field": "password",
+                "refresh": True,
+            }, timeout=None)
+            if (
+                not recovery
+                or not recovery.get("ok")
+                or not persistent.replace(
+                    cache_entry,
+                    "password",
+                    recovery["value"],
+                    int(recovery.get("generation", 0)),
+                )
+            ):
+                print(
+                    "Error: could not reconcile the caller's pending password rotation",
+                    file=sys.stderr,
+                )
+                return 2
+
+        operation = time.time_ns()
+        if (
+            persistent.enabled
+            and not persistent.begin_replace(
+                cache_entry,
+                "password",
+                password,
+                operation,
+            )
+        ):
+            print(
+                "Error: could not journal the caller's password rotation",
+                file=sys.stderr,
+            )
+            return 2
+
+        resp = send_command({
+            "action": "set-password",
+            "entry": args.entry,
+            "password": password,
+        }, timeout=None)
+        if resp and (resp.get("ok") or resp.get("committed")):
+            cache_updated = True
+            if persistent.enabled:
+                generation = resp.get("generation")
+                if generation is None:
+                    authoritative = send_command({
+                        "action": "get",
+                        "entry": args.entry,
+                        "field": "password",
+                        "refresh": True,
+                    }, timeout=None)
+                    cache_updated = bool(
+                        authoritative
+                        and authoritative.get("ok")
+                        and persistent.replace(
+                            cache_entry,
+                            "password",
+                            authoritative["value"],
+                            int(authoritative.get("generation", 0)),
+                        )
+                    )
+                else:
+                    cache_updated = persistent.complete_replace(
+                        cache_entry,
+                        "password",
+                        password,
+                        operation,
+                        int(generation),
+                    )
+            if not cache_updated:
+                print(
+                    "Error: password was updated, but the caller's offline cache "
+                    "could not be updated",
+                    file=sys.stderr,
+                )
+                return 2
+            if resp.get("ok"):
+                print(resp.get("message", "Password updated"))
+                return 0
+            print(
+                "Error: password was updated, but caching is incomplete: "
+                f"{resp.get('error', 'unknown cache failure')}",
+                file=sys.stderr,
+            )
+            return 2
+        if resp and persistent.enabled and not resp.get("cache_pending"):
+            rolled_back = persistent.rollback_replace(
+                cache_entry,
+                "password",
+                operation,
+            )
+            if (
+                not rolled_back
+                and persistent.pending_replace(cache_entry, "password") is not None
+            ):
+                print(
+                    "Error: password was not updated, but the caller cache remains "
+                    "in a recoverable pending state",
+                    file=sys.stderr,
+                )
+                return 2
+        error = resp.get("error", "unknown") if resp else "service unreachable"
+        print(f"Error: {error}", file=sys.stderr)
+        return 1
 
 
 def cmd_set_username(args):
@@ -1275,7 +1392,15 @@ def cmd_cache_populate(args):
             # Warm the persistent cache too, so the value survives daemon
             # restarts and answers later --cache-only reads.
             if not args.verify and cache.enabled and resp.get("value") is not None:
-                cache.put(entry, field, resp["value"])
+                cache_entry = config.normalize_entry(
+                    entry,
+                    config.resolve_context().group,
+                )
+                generation = resp.get("generation")
+                if generation is None:
+                    cache.put(cache_entry, field, resp["value"])
+                else:
+                    cache.put(cache_entry, field, resp["value"], int(generation))
         else:
             missing.append(f"{entry} [{field}]")
 
@@ -1481,6 +1606,8 @@ def main(argv: list[str] | None = None):
                         "(default: fail fast and ask you to run 'agent-vault unlock')")
     p.add_argument("--refresh", action="store_true",
                    help="Bypass the persistent cache and fetch from the live vault")
+    p.add_argument("--max-cache-age", type=int, default=None, dest="max_cache_age",
+                   help="Use the persistent cache only when it is at most this many seconds old")
     p.add_argument("--cache-only", action="store_true", dest="cache_only",
                    help="Read from the persistent cache only; never contact the service")
     p.set_defaults(func=cmd_get)

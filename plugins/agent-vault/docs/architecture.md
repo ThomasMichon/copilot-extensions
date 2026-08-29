@@ -94,6 +94,13 @@ The persistent cache (`src/agent_vault/cache.py`) is off unless `AGENT_VAULT_CAC
 
 The cache file lives under the configured cache dir, defaulting to a `cache` directory beside the global config. Its Fernet key is wrapped with `src/agent_vault/kek.py`: DPAPI per-user on Windows, `0600` raw wrapping on POSIX. This is a convenience layer for locked unattended reads, not a substitute for host security and disk encryption.
 
+Password replacement uses an encrypted pending journal plus a cross-process
+caller lock. Cache-through writes preserve pending journals; only the owning
+replacement or an authoritative live read can finalize them. Daemon responses
+carry credential generations so out-of-order completion cannot overwrite a
+newer cached value. Backend timeout or process loss is reconciled against
+KeePass when possible and otherwise remains fail-closed until a later live read.
+
 `seal`/`unseal` use named 32-byte KEKs stored beside the config (`AGENT_VAULT_KEK_DIR` overrides). They require `cryptography` for AES-256-GCM. KEKs are independent of KeePass master passwords, so these commands work while the vault is locked.
 
 ## Supervision and updates

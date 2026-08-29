@@ -8,6 +8,10 @@ import shutil
 import subprocess
 
 
+class PasswordMutationAmbiguous(RuntimeError):
+    """The password subprocess failed after its commit state became unknown."""
+
+
 class KeePassXCBackend:
     """keepassxc-cli backend - full access with master password."""
 
@@ -208,7 +212,7 @@ class KeePassXCBackend:
                 return True, "Password updated"
             return False, r.stderr.strip() or "keepassxc-cli edit failed"
         except Exception as e:
-            return False, str(e)
+            raise PasswordMutationAmbiguous(str(e)) from e
 
     def import_attachment(
         self,
