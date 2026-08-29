@@ -236,6 +236,39 @@ def test_installed_plugin_related_anchors_empty_when_root_absent(
     assert related.installed_plugin_related_anchors() == []
 
 
+def test_filesystem_plugin_scan_isolates_resolve_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "installed-plugins"
+    broken = _make_installed_plugin(
+        root,
+        "marketplace",
+        "broken-harness",
+        RelatedConfig(
+            related={"broken": RelatedEntry(name="broken", role="tooling")}
+        ),
+    )
+    healthy = _make_installed_plugin(
+        root,
+        "marketplace",
+        "healthy-harness",
+        RelatedConfig(
+            related={"healthy": RelatedEntry(name="healthy", role="tooling")}
+        ),
+    )
+    original = Path.resolve
+
+    def resolve(path: Path, *args, **kwargs):
+        if path == broken:
+            raise OSError("unreadable candidate")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", resolve)
+    assert related.installed_plugin_related_anchors(root=root) == [
+        str(healthy.resolve())
+    ]
+
+
 def test_plugin_related_anchors_use_effective_active_local_plugins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):

@@ -653,8 +653,11 @@ def _filesystem_plugin_related_anchors(base: Path) -> list[str]:
         try:
             for related_yaml in base.glob(pattern):
                 plugin_dir = related_yaml.parent.parent
-                if _has_plugin_manifest(plugin_dir):
-                    found.add(str(plugin_dir.resolve()))
+                try:
+                    if _has_plugin_manifest(plugin_dir):
+                        found.add(str(plugin_dir.resolve()))
+                except OSError:
+                    continue
         except OSError:
             continue
     return [
