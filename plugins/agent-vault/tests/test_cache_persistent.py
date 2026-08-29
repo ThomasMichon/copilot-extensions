@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -76,6 +76,27 @@ def test_get_rejects_non_object_record(enabled_cache, monkeypatch):
     )
 
     assert persistent.get("A/x", "password") is None
+
+
+def test_cache_paths_repair_non_object_entry_record(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    monkeypatch.setattr(
+        persistent,
+        "_read_store",
+        lambda: {"v": 1, "entries": {"A/x": "legacy"}},
+    )
+
+    assert persistent.get("A/x", "password") is None
+    assert persistent.pending_replace("A/x", "password") is None
+
+
+def test_put_repairs_non_object_field_record(enabled_cache):
+    persistent = get_cache()
+    store = {"v": 1, "entries": {"A/x": {"password": "legacy"}}}
+    assert persistent._write_store(store)
+
+    assert persistent.put("A/x", "password", "normalized", 1)
+    assert persistent.get("A/x", "password") == "normalized"
 
 
 def test_encrypted_on_disk(enabled_cache):
@@ -356,6 +377,8 @@ def test_cli_serializes_concurrent_rotations(enabled_cache, monkeypatch):
     persistent = get_cache()
     first_started = threading.Event()
     release_first = threading.Event()
+    second_lock_attempted = threading.Event()
+    second_rpc_started = threading.Event()
     requests = []
     results = []
 
@@ -365,6 +388,7 @@ def test_cli_serializes_concurrent_rotations(enabled_cache, monkeypatch):
             first_started.set()
             assert release_first.wait(timeout=5)
             return {"ok": True, "message": "first updated", "generation": 10}
+        second_rpc_started.set()
         return {"ok": True, "message": "second updated", "generation": 20}
 
     monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
@@ -375,21 +399,34 @@ def test_cli_serializes_concurrent_rotations(enabled_cache, monkeypatch):
         "resolve_context",
         lambda: SimpleNamespace(group=""),
     )
+    replacement_lock = persistent.replacement_lock
+
+    @contextlib.contextmanager
+    def observed_replacement_lock():
+        if threading.current_thread().name == "second-rotation":
+            second_lock_attempted.set()
+        with replacement_lock():
+            yield
+
+    monkeypatch.setattr(persistent, "replacement_lock", observed_replacement_lock)
     first = threading.Thread(
         target=lambda: results.append(
             cli.cmd_set_password(_Args(entry="A/x", password="first"))
-        )
+        ),
+        name="first-rotation",
     )
     second = threading.Thread(
         target=lambda: results.append(
             cli.cmd_set_password(_Args(entry="A/x", password="second"))
-        )
+        ),
+        name="second-rotation",
     )
 
     first.start()
     assert first_started.wait(timeout=5)
     second.start()
-    time.sleep(0.05)
+    assert second_lock_attempted.wait(timeout=5)
+    assert not second_rpc_started.wait(timeout=0.1)
     assert requests == ["first"]
     release_first.set()
     first.join(timeout=5)

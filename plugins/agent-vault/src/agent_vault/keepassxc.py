@@ -196,7 +196,11 @@ class KeePassXCBackend:
         entry_path: str,
         password: str,
     ) -> tuple[bool, str]:
-        """Update the password of an existing entry. Returns (success, message)."""
+        """Update an entry password.
+
+        Returns ``(success, message)`` for a definitive result and raises
+        :class:`PasswordMutationAmbiguous` when subprocess completion is unknown.
+        """
         if not self._cli_path or not self.has_password(kpdb):
             return False, "CLI not available or vault locked"
         stdin = self._master_pass[kpdb] + "\n" + password + "\n"

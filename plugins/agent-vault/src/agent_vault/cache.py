@@ -228,6 +228,28 @@ class PersistentCache:
 
     # -- public API --------------------------------------------------------
 
+    @staticmethod
+    def _field_record(store: dict, entry: str, field: str):
+        entries = store.get("entries")
+        if not isinstance(entries, dict):
+            return None
+        fields = entries.get(entry)
+        if not isinstance(fields, dict):
+            return None
+        return fields.get(field)
+
+    @staticmethod
+    def _fields_for_write(store: dict, entry: str) -> tuple[dict, dict]:
+        entries = store.get("entries")
+        if not isinstance(entries, dict):
+            entries = {}
+            store["entries"] = entries
+        fields = entries.get(entry)
+        if not isinstance(fields, dict):
+            fields = {}
+            entries[entry] = fields
+        return entries, fields
+
     def get(
         self,
         entry: str,
@@ -237,7 +259,7 @@ class PersistentCache:
         """Return a cached value, or ``None`` on miss / disabled cache."""
         if not self.enabled:
             return None
-        rec = self._read_store().get("entries", {}).get(entry, {}).get(field)
+        rec = self._field_record(self._read_store(), entry, field)
         if not isinstance(rec, dict) or "rotation" in rec:
             return None
         if max_age_seconds is not None:
@@ -261,16 +283,16 @@ class PersistentCache:
         try:
             with self._store_lock():
                 store = self._read_store()
-                entries = store.setdefault("entries", {})
-                current = entries.get(entry, {}).get(field)
-                if current is not None and "rotation" in current:
+                _, fields = self._fields_for_write(store, entry)
+                current = fields.get(field)
+                if isinstance(current, dict) and "rotation" in current:
                     return True
                 if (
-                    current is not None
+                    isinstance(current, dict)
                     and int(current.get("generation", 0)) > generation
                 ):
                     return True
-                entries.setdefault(entry, {})[field] = {
+                fields[field] = {
                     "value": value,
                     "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "cached_at_epoch": time.time(),
@@ -293,11 +315,11 @@ class PersistentCache:
         try:
             with self._store_lock():
                 store = self._read_store()
-                entries = store.setdefault("entries", {})
-                current = entries.get(entry, {}).get(field)
-                if current is not None and "rotation" in current:
+                _, fields = self._fields_for_write(store, entry)
+                current = fields.get(field)
+                if isinstance(current, dict) and "rotation" in current:
                     return False
-                entries.setdefault(entry, {})[field] = {
+                fields[field] = {
                     "rotation": {
                         "candidate": value,
                         "operation": operation,
@@ -312,7 +334,7 @@ class PersistentCache:
         """Return a pending replacement journal, if one exists."""
         if not self.enabled:
             return None
-        rec = self._read_store().get("entries", {}).get(entry, {}).get(field)
+        rec = self._field_record(self._read_store(), entry, field)
         if not isinstance(rec, dict):
             return None
         rotation = rec.get("rotation")
@@ -330,10 +352,12 @@ class PersistentCache:
         try:
             with self._store_lock():
                 store = self._read_store()
-                entries = store.get("entries", {})
-                current = entries.get(entry, {}).get(field)
+                entries = store.get("entries")
+                current = self._field_record(store, entry, field)
                 rotation = current.get("rotation") if isinstance(current, dict) else None
                 if (
+                    not isinstance(entries, dict)
+                    or
                     not isinstance(rotation, dict)
                     or int(rotation.get("operation", -1)) != operation
                 ):
@@ -363,18 +387,18 @@ class PersistentCache:
         try:
             with self._store_lock():
                 store = self._read_store()
-                entries = store.setdefault("entries", {})
-                current = entries.get(entry, {}).get(field)
+                _, fields = self._fields_for_write(store, entry)
+                current = fields.get(field)
                 rotation = current.get("rotation") if isinstance(current, dict) else None
                 if isinstance(rotation, dict):
                     if int(rotation.get("operation", -1)) != operation:
                         return False
                 elif (
-                    current is not None
+                    isinstance(current, dict)
                     and int(current.get("generation", 0)) > generation
                 ):
                     return True
-                entries.setdefault(entry, {})[field] = {
+                fields[field] = {
                     "value": value,
                     "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "cached_at_epoch": time.time(),
@@ -397,8 +421,8 @@ class PersistentCache:
         try:
             with self._store_lock():
                 store = self._read_store()
-                entries = store.setdefault("entries", {})
-                entries.setdefault(entry, {})[field] = {
+                _, fields = self._fields_for_write(store, entry)
+                fields[field] = {
                     "value": value,
                     "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                     "cached_at_epoch": time.time(),
@@ -415,14 +439,18 @@ class PersistentCache:
         try:
             with self._store_lock():
                 store = self._read_store()
-                entries = store.get("entries", {})
-                if entry not in entries:
+                entries = store.get("entries")
+                if not isinstance(entries, dict) or entry not in entries:
                     return False
+                fields = entries[entry]
+                if not isinstance(fields, dict):
+                    del entries[entry]
+                    return self._write_store_unlocked(store)
                 if field is None:
                     del entries[entry]
-                elif field in entries[entry]:
-                    del entries[entry][field]
-                    if not entries[entry]:
+                elif field in fields:
+                    del fields[field]
+                    if not fields:
                         del entries[entry]
                 else:
                     return False
@@ -443,10 +471,20 @@ class PersistentCache:
         """Return cache metadata (enabled, location, counts, staleness)."""
         store = self._read_store()
         entries = store.get("entries", {})
-        total_fields = sum(len(fields) for fields in entries.values())
+        if not isinstance(entries, dict):
+            entries = {}
+        total_fields = sum(
+            len(fields)
+            for fields in entries.values()
+            if isinstance(fields, dict)
+        )
         oldest = newest = None
         for fields in entries.values():
+            if not isinstance(fields, dict):
+                continue
             for rec in fields.values():
+                if not isinstance(rec, dict):
+                    continue
                 ts = rec.get("cached_at", "")
                 if ts:
                     if oldest is None or ts < oldest:
