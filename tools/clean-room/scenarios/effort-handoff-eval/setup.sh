@@ -56,11 +56,13 @@ for plugin in agent-worktrees agent-logger context-handoff efforts; do
     if capture "install-$plugin" -- copilot plugin install "$plugin@$MARKETPLACE_NAME"; then
         install_ok=1
     fi
-    if [ "$install_ok" = 1 ] && [ -d "$PAYLOAD_ROOT/$plugin" ]; then
-        ln -s "$PAYLOAD_ROOT/$plugin" "$EVAL_PLUGIN_ROOT/$plugin"
+    if [ "$install_ok" = 1 ] &&
+       [ -d "$PAYLOAD_ROOT/$plugin" ] &&
+       ln -s "$PAYLOAD_ROOT/$plugin" "$EVAL_PLUGIN_ROOT/$plugin"; then
         pass "$plugin payload present"
     else
-        jam "npm-registry" "$plugin payload NOT installed" "check marketplace source + npm feed"
+        jam "npm-registry" "$plugin payload NOT installed or linked" \
+            "check marketplace source, npm feed, and eval plugin directory"
     fi
 done
 

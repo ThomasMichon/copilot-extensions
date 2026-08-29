@@ -39,7 +39,9 @@ for event_path in pathlib.Path(sys.argv[1]).rglob("events.jsonl"):
         output = data.get("output") if isinstance(data, dict) else None
         context = output.get("additionalContext") if isinstance(output, dict) else None
         if (
-            event.get("type") == "hook.end"
+            isinstance(event, dict)
+            and isinstance(data, dict)
+            and event.get("type") == "hook.end"
             and data.get("hookType") == "sessionStart"
             and isinstance(context, str)
             and context.startswith("[owner: context-handoff@")
