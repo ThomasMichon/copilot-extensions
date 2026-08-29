@@ -12045,6 +12045,41 @@ def _update_registered_plugins() -> bool:
     """
     from . import reconcile
 
+    contexts = _registered_plugin_contexts()
+    if not contexts:
+        return True
+
+    output.header("Updating Registered Plugin Payloads")
+    refreshed: set[Path | None] = set()
+    for context in contexts.values():
+        if context not in refreshed:
+            _refresh_marketplace(reconcile.MARKETPLACE, cwd=context)
+            refreshed.add(context)
+
+    results: list[tuple[str, str]] = []
+    for name in sorted(contexts):
+        results.append(
+            (
+                name,
+                _update_one_plugin_payload(
+                    name, reconcile.MARKETPLACE, cwd=contexts[name]
+                ),
+            )
+        )
+
+    output.header("Plugin Payload Update Summary")
+    for name, status in results:
+        if status.startswith("OK"):
+            output.ok(name if status == "OK" else f"{name} ({status})")
+        else:
+            output.warn(f"{name}: {status}")
+    return all(status.startswith("OK") for _, status in results)
+
+
+def _registered_plugin_contexts() -> dict[str, Path | None]:
+    """Enabled plugins and the preferred context for marketplace operations."""
+    from . import reconcile
+
     contexts: dict[str, Path | None] = {}
 
     # Prefer the invoking checkout for plugins it declares. Linked worktrees are
@@ -12090,34 +12125,7 @@ def _update_registered_plugins() -> bool:
     except Exception as exc:
         output.warn(f"Could not read user-global enabled plugins: {exc}")
 
-    if not contexts:
-        return True
-
-    output.header("Updating Registered Plugin Payloads")
-    refreshed: set[Path | None] = set()
-    for context in contexts.values():
-        if context not in refreshed:
-            _refresh_marketplace(reconcile.MARKETPLACE, cwd=context)
-            refreshed.add(context)
-
-    results: list[tuple[str, str]] = []
-    for name in sorted(contexts):
-        results.append(
-            (
-                name,
-                _update_one_plugin_payload(
-                    name, reconcile.MARKETPLACE, cwd=contexts[name]
-                ),
-            )
-        )
-
-    output.header("Plugin Payload Update Summary")
-    for name, status in results:
-        if status.startswith("OK"):
-            output.ok(name if status == "OK" else f"{name} ({status})")
-        else:
-            output.warn(f"{name}: {status}")
-    return all(status.startswith("OK") for _, status in results)
+    return contexts
 
 
 def _module_names(plugin_dir: Path) -> set[str]:
@@ -12168,35 +12176,16 @@ def _reconcile_registered_runtimes(
       whose stamp lagged) is repaired. The installer force-reinstalls the
       package, so fresh bytes always land.
 
-    Best-effort and idempotent: a plugin's failure warns and continues; no
-    resolvable config (a generic install) is a silent no-op. Payload-only
+    Best-effort and idempotent: a plugin's failure warns and continues. The
+    enabled set is identical to payload refresh: invocation-scoped,
+    repository-scoped, and user-global plugins are all included. Payload-only
     plugins (``runtimeScope: none``) and the module/self runtimes are skipped.
     """
-    from . import reconcile
-
-    try:
-        config = cfg.load_config()
-    except Exception:
-        return
-    repos = config.repos or {}
-    if not repos:
-        return
-
     # skip_modules semantics mirror _update_modules: [] => skip all.
     if skip_modules is not None and len(skip_modules) == 0:
         return
 
-    names: set[str] = set()
-    seen_anchors: set[str] = set()
-    for repo in repos.values():
-        anchor = repo.anchor
-        if not anchor or anchor in seen_anchors:
-            continue
-        seen_anchors.add(anchor)
-        try:
-            names.update(reconcile.read_enabled_plugins(Path(anchor)))
-        except Exception:
-            continue
+    names = set(_registered_plugin_contexts())
 
     # Exclude runtimes handled elsewhere (module services + agent-worktrees) and
     # any explicitly skipped names.

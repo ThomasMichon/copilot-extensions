@@ -128,10 +128,12 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
     # below. (Requesting ``monkeypatch`` here pulled its teardown after
     # ``_reset_active_project``'s, which then called a still-patched
     # ``set_active_project`` and errored.)
+    saved_agent_home = os.environ.get("AGENT_HOME")
     saved_userprofile = os.environ.get("USERPROFILE")
     saved_home = os.environ.get("HOME")
     saved_path_home = pathlib.Path.__dict__.get("home")
 
+    os.environ["AGENT_HOME"] = str(fake_home)
     os.environ["USERPROFILE"] = str(fake_home)
     os.environ["HOME"] = str(fake_home)
     # ``repos.py`` and several helpers call ``Path.home()`` directly, so the env
@@ -147,7 +149,11 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
                 del pathlib.Path.home
             except AttributeError:
                 pass
-        for key, val in (("USERPROFILE", saved_userprofile), ("HOME", saved_home)):
+        for key, val in (
+            ("AGENT_HOME", saved_agent_home),
+            ("USERPROFILE", saved_userprofile),
+            ("HOME", saved_home),
+        ):
             if val is None:
                 os.environ.pop(key, None)
             else:
