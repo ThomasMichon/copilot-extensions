@@ -88,7 +88,9 @@ def _is_supervisor_runtime(process: WindowsProcess, install_dir: str | Path) -> 
     argv = _agent_dispatch_argv(process.command_line)
     if not argv:
         return False
-    return argv[0] == "supervise"
+    if argv[0] != "supervise":
+        return False
+    return len(argv) == 1 or argv[1] == "serve" or argv[1].startswith("-")
 
 
 def _is_materialized_supervisor_child(
@@ -126,7 +128,7 @@ def select_supervisor_generation_pids(
     processes: Iterable[WindowsProcess],
     install_dir: str | Path,
 ) -> list[int]:
-    """Select every wrapper/supervisor root and descendant, deepest first.
+    """Select every wrapper/supervisor root and descendant, roots first.
 
     Producer commands are supported standalone surfaces and are selected only
     when ancestry or their supervisor-owned materialized spec proves ownership.
@@ -164,7 +166,7 @@ def select_supervisor_generation_pids(
             current = records.get(current.parent_pid)
         return value
 
-    return sorted(selected, key=lambda pid: (depth(pid), pid), reverse=True)
+    return sorted(selected, key=lambda pid: (depth(pid), pid))
 
 
 def parse_windows_process_json(text: str) -> list[WindowsProcess]:
@@ -248,17 +250,27 @@ def retire_windows_supervisor_generations(
     result = SupervisorRetireResult()
     if (platform_name or os.name) != "nt":
         return result
-    try:
-        processes = list_processes()
-    except Exception as exc:
-        result.errors.append(f"process enumeration failed: {exc}")
-        return result
-    result.selected = select_supervisor_generation_pids(processes, install_dir)
-    for pid in result.selected:
-        if pid == os.getpid():
-            continue
-        if terminate(pid):
-            result.retired.append(pid)
-        else:
-            result.errors.append(f"terminate pid={pid} failed")
+    attempted: set[int] = set()
+    for _ in range(3):
+        try:
+            processes = list_processes()
+        except Exception as exc:
+            result.errors.append(f"process enumeration failed: {exc}")
+            break
+        selected = [
+            pid
+            for pid in select_supervisor_generation_pids(processes, install_dir)
+            if pid not in attempted
+        ]
+        if not selected:
+            break
+        result.selected.extend(selected)
+        for pid in selected:
+            attempted.add(pid)
+            if pid == os.getpid():
+                continue
+            if terminate(pid):
+                result.retired.append(pid)
+            else:
+                result.errors.append(f"terminate pid={pid} failed")
     return result

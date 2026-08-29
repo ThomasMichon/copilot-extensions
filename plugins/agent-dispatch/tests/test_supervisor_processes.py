@@ -103,7 +103,7 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
     selected = select_supervisor_generation_pids(processes, INSTALL_DIR)
 
     assert set(selected) == {100, 101, 102, 103, 104, 105, 200}
-    assert selected.index(105) < selected.index(103) < selected.index(102)
+    assert selected.index(102) < selected.index(103) < selected.index(105)
     assert 300 not in selected
     assert 301 not in selected
     assert 201 not in selected
@@ -162,6 +162,6 @@ def test_retirement_terminates_every_selected_generation():
     )
 
     assert result.ok
-    assert result.selected == [12, 11, 10]
-    assert result.retired == [12, 11, 10]
-    assert terminated == [12, 11, 10]
+    assert result.selected == [10, 11, 12]
+    assert result.retired == [10, 11, 12]
+    assert terminated == [10, 11, 12]

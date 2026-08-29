@@ -1170,7 +1170,13 @@ function Retire-SupervisorProcesses {
         foreach ($message in @($result.errors)) {
             if ($message) { Write-Warn "Supervisor generation retirement: $message" }
         }
-        if ($rc -eq 0) { return $retired }
+        $enumerationFailed = @($result.errors | Where-Object {
+            [string]$_ -like 'process enumeration failed:*'
+        }).Count -gt 0
+        # A partial termination failure is already classified precisely by the
+        # Python helper. Do not run a second, broader classifier over a changed
+        # process inventory; report the errors and keep its retired count.
+        if ($rc -eq 0 -or -not $enumerationFailed) { return $retired }
     } catch { }
     Write-Warn 'Full supervisor generation inventory failed; using native CIM supervisor-tree retirement'
     return (Retire-SupervisorProcessesFallback)
@@ -1211,7 +1217,7 @@ function Retire-SupervisorProcessesFallback {
                 $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
             )
             $isRegistrarChild = $underRoot -and (
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve|schedule\s+serve|webhook(?:\s|$))'
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve(?:\s|$)|schedule\s+serve(?:\s|$)|webhook(?:\s|$))'
             ) -and (
                 $cmd.Replace('"', '').IndexOf(
                     $supervisorRun,
@@ -1247,7 +1253,9 @@ function Retire-SupervisorProcessesFallback {
             $depth[$pid] = $value
         }
         $killed = 0
-        foreach ($pid in @($selected | Sort-Object { $depth[$_] } -Descending)) {
+        # Stop roots first so a still-live master cannot replace a child while
+        # the snapshot is being retired.
+        foreach ($pid in @($selected | Sort-Object { $depth[$_] })) {
             if ($pid -eq $PID) { continue }
             try {
                 Stop-Process -Id $pid -Force -ErrorAction Stop
