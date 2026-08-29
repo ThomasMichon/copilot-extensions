@@ -129,8 +129,20 @@ def resolve_session_dir(spec: str) -> Path:
     a session from a different worktree or repo.
     """
     p = Path(spec)
-    if p.is_absolute() and p.is_dir():
-        return p
+    if p.is_absolute():
+        if p.is_dir():
+            return p
+        if p.is_file() and any(
+            p.name.endswith(suffix) for suffix in sessions._ARCHIVE_SUFFIXES
+        ):
+            ref = sessions.SessionRef(
+                id=sessions._archive_stem(p),
+                kind="archive",
+                path=p,
+                store=p.parent,
+            )
+            if sessions.verify_archive(ref):
+                return sessions.materialize_path(ref)
 
     copilot = find_copilot_dir()
     state_root = copilot / SESSION_STATE_SUBDIR

@@ -33,7 +33,10 @@ or point the reference impl at a different root.
 
 from __future__ import annotations
 
+import json
+import os
 import sqlite3
+import stat
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -44,6 +47,16 @@ from pathlib import Path
 from agent_logger import sessions
 from agent_logger.segmenter.collate import read_workspace
 from agent_logger.sync.origin import read_origin_sidecar
+from agent_logger.sync.provenance import (
+    RESCUE_SNAPSHOT_PROVENANCE,
+    existing_real_directory,
+    existing_rescue_snapshot_path,
+    is_link_or_reparse,
+    open_regular_no_follow,
+    read_provenance,
+    read_provenance_file,
+    rescue_snapshot_path,
+)
 
 # The settle window: never claim a session whose synced state changed within
 # this many seconds (it may be mid-sync). ~10 minutes matches permanent-record.
@@ -367,71 +380,133 @@ class SyncedSessionSource(SessionSource):
         self.corpus_root = corpus_root
 
     def scan(self, *, now: datetime | None = None) -> list[DiscoveredSession]:
-        if not self.corpus_root.is_dir():
+        corpus_root = existing_real_directory(self.corpus_root)
+        if corpus_root is None:
             return []
         out: list[DiscoveredSession] = []
-        for machine_dir in sorted(self.corpus_root.iterdir()):
-            ss = machine_dir / "session-state"
-            if ss.is_dir():
-                for session_dir in sorted(ss.iterdir()):
-                    if not session_dir.is_dir():
+        for raw_machine_dir in sorted(corpus_root.iterdir()):
+            machine_dir = existing_real_directory(raw_machine_dir)
+            if machine_dir is None:
+                continue
+            generation = _machine_generation(machine_dir)
+            if generation is None or _has_active_replacement(machine_dir):
+                continue
+            machine_out: list[DiscoveredSession] = []
+            ss = existing_real_directory(machine_dir / "session-state")
+            if ss is not None:
+                for raw_session_dir in sorted(ss.iterdir()):
+                    session_dir = existing_real_directory(raw_session_dir)
+                    if session_dir is None:
                         continue
-                    discovered = self._discover(machine_dir.name, session_dir, now=now)
+                    discovered = self._discover(machine_dir, session_dir, now=now)
                     if discovered is not None:
-                        out.append(discovered)
+                        machine_out.append(discovered)
             # Cold sessions compacted into the sibling ``archived/`` tree. A live
             # dir of the same id shadows an archive (a compaction/reconcile
             # race), so ``iter_session_refs`` yields only the un-shadowed
             # archives here.
-            archived_store = machine_dir / "archived"
-            if archived_store.is_dir():
-                for ref in sessions.iter_session_refs(ss, archived_store):
+            archived_store = existing_real_directory(machine_dir / "archived")
+            if archived_store is not None:
+                live_store = ss or machine_dir / ".absent-session-state"
+                for ref in sessions.iter_session_refs(live_store, archived_store):
                     if ref.kind != "archive":
                         continue
+                    try:
+                        mode = ref.path.lstat().st_mode
+                    except OSError:
+                        continue
+                    if is_link_or_reparse(ref.path, mode):
+                        continue
                     discovered = self._discover_archived(
-                        machine_dir.name, ref, now=now
+                        machine_dir, ref, now=now
                     )
                     if discovered is not None:
-                        out.append(discovered)
+                        machine_out.append(discovered)
+            snapshots_root = existing_real_directory(
+                machine_dir / ".session-sync-rescue-captures"
+            )
+            if snapshots_root is not None:
+                for session_root_entry in sorted(snapshots_root.iterdir()):
+                    session_root = existing_real_directory(session_root_entry)
+                    if session_root is None:
+                        continue
+                    for snapshot_entry in sorted(session_root.iterdir()):
+                        snapshot = existing_real_directory(snapshot_entry)
+                        if snapshot is None:
+                            continue
+                        discovered = self._discover_rescue_snapshot(
+                            machine_dir,
+                            snapshot,
+                        )
+                        if discovered is not None:
+                            machine_out.append(discovered)
+            machine_out = list(
+                {
+                    session.ref.key: session
+                    for session in machine_out
+                }.values()
+            )
+            if (
+                not _has_active_replacement(machine_dir)
+                and _machine_generation(machine_dir) == generation
+            ):
+                out.extend(machine_out)
         return out
 
     def _discover_archived(
-        self, machine: str, ref: sessions.SessionRef, *, now: datetime | None
+        self, machine_dir: Path, ref: sessions.SessionRef, *, now: datetime | None
     ) -> DiscoveredSession | None:
-        seg = SegmentRef(ref.id, 0)
+        if not sessions.verify_archive(ref):
+            return None
+        provenance = read_provenance(machine_dir, ref.id)
+        seg = _segment_ref(machine_dir.name, ref.id, provenance)
         # I4: never re-file a journaled unit -- keyed on the same SegmentRef the
         # session had while live, so archiving never re-chronicles it.
         if self.is_journaled(seg):
             return None
+        content_path = _rescued_snapshot_or(
+            machine_dir,
+            ref.id,
+            provenance,
+            ref.path,
+        )
+        if content_path is None or (
+            _is_rescue_provenance(provenance)
+            and not _tree_is_real(content_path)
+        ):
+            return None
         # An archive is immutable and cold (>= the compaction age threshold), so
         # the file-mtime settle gate -- which exists to skip a mid-sync *live*
         # dir -- does not apply. Archives are inherently settled.
-        ws = sessions.read_workspace(ref)
-        has_origin = sessions.member_exists(ref, "origin.json")
-        origin = sessions.read_origin(ref) if has_origin else {}
-        source_repo = origin.get("source_repo") if origin else None
+        if _is_rescue_provenance(provenance):
+            ws = read_workspace(content_path)
+            origin = read_origin_sidecar(content_path)
+            has_origin = origin is not None
+        else:
+            ws = sessions.read_workspace(ref)
+            has_origin = sessions.member_exists(ref, "origin.json")
+            origin = sessions.read_origin(ref) if has_origin else {}
+        source_repo = (provenance or {}).get("source_repo") or (
+            origin.get("source_repo") if origin else None
+        )
         return DiscoveredSession(
             session_id=ref.id,
-            machine=machine,
-            session_path=ref.path,  # the <id>.tar.gz; the writer materializes it
+            machine=machine_dir.name,
+            session_path=content_path,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
             summary=(ws.get("summary") or None),
             created_at=(ws.get("created_at") or None),
             updated_at=(ws.get("updated_at") or None),
             source_repo=(source_repo or None),
-            origin_recorded=has_origin,
-            archived=True,
+            origin_recorded=has_origin or provenance is not None,
+            archived=not _is_rescue_provenance(provenance),
             ref=seg,
         )
 
     def _discover(
-        self, machine: str, session_dir: Path, *, now: datetime | None
+        self, machine_dir: Path, session_dir: Path, *, now: datetime | None
     ) -> DiscoveredSession | None:
-        ref = SegmentRef(session_dir.name, 0)
-        # I4: never re-file a journaled unit.
-        if self.is_journaled(ref):
-            return None
         # I4: never claim a mid-sync session.
         try:
             mtime = session_dir.stat().st_mtime
@@ -439,29 +514,200 @@ class SyncedSessionSource(SessionSource):
             return None
         if not self.is_settled(mtime, now=now):
             return None
-        ws = read_workspace(session_dir)
+        provenance = read_provenance(machine_dir, session_dir.name)
+        if _is_rescue_provenance(provenance):
+            return None
+        content_path = _rescued_snapshot_or(
+            machine_dir,
+            session_dir.name,
+            provenance,
+            session_dir,
+        )
+        if content_path is None or not _tree_is_real(content_path):
+            return None
+        ws = read_workspace(content_path)
         # Prefer the durable, worktree-safe recorded origin (origin.json) for
         # routing (derive-the-origin-never-guess); the raw workspace repository
         # remains as display metadata and a pre-backfill routing fallback.
-        origin = read_origin_sidecar(session_dir)
-        source_repo = origin.get("source_repo") if origin else None
+        origin = read_origin_sidecar(content_path)
+        ref = _segment_ref(machine_dir.name, session_dir.name, provenance)
+        # I4: never re-file the same local session or rescued capture.
+        if self.is_journaled(ref):
+            return None
+        source_repo = (provenance or {}).get("source_repo") or (
+            origin.get("source_repo") if origin else None
+        )
         return DiscoveredSession(
             session_id=session_dir.name,
-            machine=machine,
-            session_path=session_dir,
+            machine=machine_dir.name,
+            session_path=content_path,
             repository=(ws.get("repository") or None),
             branch=(ws.get("branch") or None),
             summary=(ws.get("summary") or None),
             created_at=(ws.get("created_at") or None),
             updated_at=(ws.get("updated_at") or None),
             source_repo=(source_repo or None),
-            origin_recorded=origin is not None,
+            origin_recorded=origin is not None or provenance is not None,
+            ref=ref,
+        )
+
+    def _discover_rescue_snapshot(
+        self,
+        machine_dir: Path,
+        snapshot: Path,
+    ) -> DiscoveredSession | None:
+        if not _tree_is_real(snapshot):
+            return None
+        metadata_path = snapshot / RESCUE_SNAPSHOT_PROVENANCE
+        try:
+            with open_regular_no_follow(metadata_path) as stream:
+                raw = json.load(stream)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        session_id = raw.get("session_id") if isinstance(raw, dict) else None
+        if not isinstance(session_id, str):
+            return None
+        provenance = read_provenance_file(metadata_path, session_id)
+        if not _is_rescue_provenance(provenance):
+            return None
+        capture_id = provenance.get("capture_id")
+        if (
+            not isinstance(capture_id, str)
+            or rescue_snapshot_path(machine_dir, session_id, capture_id) != snapshot
+        ):
+            return None
+        ref = _segment_ref(machine_dir.name, session_id, provenance)
+        if self.is_journaled(ref):
+            return None
+        ws = read_workspace(snapshot)
+        origin = read_origin_sidecar(snapshot)
+        source_repo = provenance.get("source_repo") or (
+            origin.get("source_repo") if origin else None
+        )
+        return DiscoveredSession(
+            session_id=session_id,
+            machine=machine_dir.name,
+            session_path=snapshot,
+            repository=(ws.get("repository") or None),
+            branch=(ws.get("branch") or None),
+            summary=(ws.get("summary") or None),
+            created_at=(ws.get("created_at") or None),
+            updated_at=(ws.get("updated_at") or None),
+            source_repo=(source_repo or None),
+            origin_recorded=True,
+            archived=False,
             ref=ref,
         )
 
 
 def _utcnow() -> str:
     return _utcnow_dt().isoformat()
+
+
+def _has_active_replacement(machine_dir: Path) -> bool:
+    """Fail closed while a filesystem target transaction is publishing."""
+    replacement_root = machine_dir / ".session-sync-replacement"
+    try:
+        mode = replacement_root.lstat().st_mode
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    if is_link_or_reparse(replacement_root, mode) or not stat.S_ISDIR(mode):
+        return True
+    try:
+        active = [
+            child.name
+            for child in replacement_root.iterdir()
+            if child.name.endswith(".active")
+        ]
+    except OSError:
+        return True
+    if not active:
+        return False
+    generation = _machine_generation(machine_dir)
+    return not (len(active) == 1 and generation == active[0])
+
+
+def _machine_generation(machine_dir: Path) -> str | None:
+    """Read the atomic filesystem-publish generation; ``None`` fails closed."""
+    path = machine_dir / ".session-sync-generation"
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return ""
+    except OSError:
+        return None
+    if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
+        return None
+    try:
+        value = path.read_text(encoding="ascii")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if (
+        not value
+        or len(value) > 128
+        or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for char in value)
+    ):
+        return None
+    return value
+
+
+def _segment_ref(
+    machine: str,
+    session_id: str,
+    provenance: dict | None,
+) -> SegmentRef:
+    """Use rescue capture lineage in the chronicler reservation identity."""
+    if provenance and provenance.get("provider") == "agent-containers":
+        capture_id = provenance.get("capture_id")
+        venue_id = provenance.get("venue_id")
+        if isinstance(capture_id, str) and isinstance(venue_id, str):
+            return SegmentRef(f"{venue_id}/{session_id}@{capture_id}", 0)
+    return SegmentRef(session_id, 0)
+
+
+def _tree_is_real(root: Path) -> bool:
+    """Reject links, reparse points, and special files anywhere in a session."""
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        try:
+            with os.scandir(directory) as entries:
+                for entry in entries:
+                    path = Path(entry.path)
+                    try:
+                        mode = path.lstat().st_mode
+                    except OSError:
+                        return False
+                    if is_link_or_reparse(path, mode):
+                        return False
+                    if stat.S_ISDIR(mode):
+                        pending.append(path)
+                    elif not stat.S_ISREG(mode):
+                        return False
+        except OSError:
+            return False
+    return True
+
+
+def _is_rescue_provenance(provenance: dict | None) -> bool:
+    return bool(provenance and provenance.get("provider") == "agent-containers")
+
+
+def _rescued_snapshot_or(
+    machine_dir: Path,
+    session_id: str,
+    provenance: dict | None,
+    fallback: Path,
+) -> Path | None:
+    """Resolve immutable rescued bytes, failing closed if they are unavailable."""
+    if not _is_rescue_provenance(provenance):
+        return fallback
+    capture_id = provenance.get("capture_id")
+    if not isinstance(capture_id, str):
+        return None
+    return existing_rescue_snapshot_path(machine_dir, session_id, capture_id)
 
 
 def _utcnow_dt() -> datetime:

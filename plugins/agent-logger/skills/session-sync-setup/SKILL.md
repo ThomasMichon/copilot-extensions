@@ -3,11 +3,13 @@ name: session-sync-setup
 description: >
   Configure agent-logger's session-sync target -- where raw Copilot session
   data is pushed (local dotfolder, OneDrive subfolder, SSH, or an rsync/HTTP
-  ingest sink). Use this skill when the user wants to set up, change, or
-  troubleshoot session syncing. Trigger phrases include: - 'set up session
-  sync' - 'sync my sessions' - 'change the sync target' - 'sync to OneDrive'
-  - 'sync sessions over SSH' - 'session-sync config' - 'where do my sessions
-  go'
+  ingest sink), plus validated provider rescues through a single-writer
+  compare-and-set local target. Use this skill when
+  the user wants to set up, change, or troubleshoot session syncing. Trigger
+  phrases include: - 'set up session sync' - 'sync my sessions' - 'ingest
+  rescued sessions' - 'rescue-push' - 'change the sync target' - 'sync to
+  OneDrive' - 'sync sessions over SSH' - 'session-sync config' - 'where do my
+  sessions go'
 ---
 
 # Session Sync Setup
@@ -138,6 +140,57 @@ manifest-ready result.
 `doctor` reports per-check `[ok]`/`[FAIL]` lines. For `onedrive`, a `FAIL`
 on "OneDrive root resolved" means no `OneDrive*` environment variable and no
 `~/OneDrive` -- set `sync.targets.onedrive.root` explicitly.
+
+## Provider rescue ingestion
+
+Use a configured single-writer `local` target to publish verified rescue
+captures that already exist in a provider-owned host state directory. Rescue
+publication rejects OneDrive replicas and push-only targets until they
+implement the same destination-side compare-and-set contract:
+
+```
+<agent-logger catalog "session-sync" argv[0]> rescue-push \
+  --rescue-root <provider-state>/rescues \
+  --provider agent-containers \
+  --target-prefix container \
+  --dry-run --verbose
+```
+
+The destination filesystem must honor advisory file locks across every writer
+that can publish to the same venue namespace. Use one writer or a genuinely
+shared filesystem with working locks; eventually-consistent replicas such as
+OneDrive are intentionally rejected for rescue publication.
+
+Repeat `--rescue-root` to scan more than one provider state root. Remove
+`--dry-run` to publish. Each accepted session lands under a stable flat venue
+key such as `container-worker-1`, not under an instance ID. The adapter validates
+the provider metadata contract and every selected member's size/hash, accepts
+only independently complete sessions from partial captures, rejects missing or
+invalid event streams (strict UTF-8, one JSON object per nonblank JSONL line),
+applies the normal exact allow/deny/fail-closed policy to
+provider-recorded repository assignment, and writes a generic
+`provenance/<session-id>.json` beside the canonical `session-state/` tree.
+Rescued `origin.json` is retained as `rescued-origin.json` evidence only; it
+never controls routing.
+
+The adapter keeps its idempotence checkpoint and short-lived projection under
+`$AGENT_LOGGER_HOME/rescue-sync/`. It does not modify the rescue store, restore a
+session, write into a container, or expose the provider tree directly to a
+target. A normal second run idempotently revalidates retained captures so it
+can repair destination loss; a late older capture cannot rewind the destination.
+Verbose output lists accepted/rejected entries,
+and the final line always reports explicit accepted, skipped, and rejected
+counts. Venue failures do not stop sibling venues, but any target failure keeps
+the final exit nonzero. The compact checkpoint preserves capture-ID tombstones
+and per-session high-water records across provider retention; it refuses an
+oversized rewrite before replacing its last readable state.
+
+Ordering is capture timestamp then capture ID. `--verbose` reports why an entry
+was older, revalidated, rejected, or accepted. To intentionally reset ordering,
+remove `$AGENT_LOGGER_HOME/rescue-sync/checkpoint.json`; this does not remove
+published evidence. Renaming a provider container creates a new venue identity
+under the current name-based contract. Rescue-venue destination pruning is not
+yet wired to `sync.retention_days`.
 
 ## Compaction (cold-session archival)
 

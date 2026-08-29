@@ -11,16 +11,28 @@ copy (size + mtime delta). They differ only in how the root is resolved:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import stat
 import time
+import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from agent_logger import sessions
 from agent_logger.sessions import SessionRef
+from agent_logger.sync.lock import sync_lock
 from agent_logger.sync.meta import write_sync_meta
+from agent_logger.sync.provenance import (
+    MAX_PROVENANCE_BYTES,
+    RESCUE_SNAPSHOT_PROVENANCE,
+    existing_rescue_snapshot_path,
+    is_link_or_reparse,
+    open_regular_no_follow,
+    rescue_snapshot_path,
+)
 from agent_logger.sync.targets.base import DoctorResult, PushResult, Target
 
 #: Files never copied to a destination (session lock sidecars, temp files).
@@ -33,6 +45,7 @@ _EXCLUDE_NAMES = frozenset({".lock"})
 _SESSION_INDEX_NAMES = frozenset(
     {"session-store.db", "session-store.db-wal", "session-store.db-shm"}
 )
+_MAX_TRANSACTION_MANIFEST_BYTES = 16 * 1024 * 1024
 
 
 def _unlink_replace_target(path: Path) -> None:
@@ -47,31 +60,1121 @@ def _unlink_replace_target(path: Path) -> None:
             raise
 
 
-def _copy_replace(src: Path, dst: Path) -> None:
-    """Copy ``src`` to ``dst`` after clearing any read-only destination."""
-    _unlink_replace_target(dst)
+def _fsync_directory(path: Path) -> None:
+    """Persist directory-entry changes where the platform exposes that barrier."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(path, flags)
     try:
-        shutil.copy2(src, dst)
-    except PermissionError:
-        # Some Windows/mounted-file-system combinations still fail while
-        # applying metadata. Fall back to content-first replacement and keep
-        # metadata best-effort so sync progress is not blocked.
-        _unlink_replace_target(dst)
-        shutil.copyfile(src, dst)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _durable_replace(source: Path, destination: Path) -> None:
+    """Rename with a durable directory-entry barrier."""
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        movefile_replace_existing = 0x00000001
+        movefile_write_through = 0x00000008
+        move_file = ctypes.WinDLL(
+            "kernel32",
+            use_last_error=True,
+        ).MoveFileExW
+        move_file.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+        ]
+        move_file.restype = wintypes.BOOL
+        if not move_file(
+            str(source),
+            str(destination),
+            movefile_replace_existing | movefile_write_through,
+        ):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return
+    source_parent = source.parent
+    destination_parent = destination.parent
+    os.replace(source, destination)
+    _fsync_directory(source_parent)
+    if destination_parent != source_parent:
+        _fsync_directory(destination_parent)
+
+
+def _write_bytes_fsync(path: Path, payload: bytes) -> None:
+    with path.open("xb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    _fsync_directory(path.parent)
+
+
+def _fsync_regular_file(path: Path) -> None:
+    """Flush one staged regular file through a write-capable safe handle."""
+    if os.name != "nt":
+        with open_regular_no_follow(path) as stream:
+            os.fsync(stream.fileno())
+        return
+
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    generic_write = 0x40000000
+    share_all = 0x00000001 | 0x00000002 | 0x00000004
+    open_existing = 3
+    file_attribute_normal = 0x00000080
+    file_attribute_directory = 0x00000010
+    file_attribute_reparse_point = 0x00000400
+    file_flag_open_reparse_point = 0x00200000
+    file_attribute_tag_info = 9
+
+    class FileAttributeTagInfo(ctypes.Structure):
+        _fields_ = [
+            ("FileAttributes", wintypes.DWORD),
+            ("ReparseTag", wintypes.DWORD),
+        ]
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    create_file = kernel32.CreateFileW
+    create_file.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.HANDLE,
+    ]
+    create_file.restype = wintypes.HANDLE
+    get_info = kernel32.GetFileInformationByHandleEx
+    get_info.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    ]
+    get_info.restype = wintypes.BOOL
+    close_handle = kernel32.CloseHandle
+
+    handle = create_file(
+        str(path),
+        generic_write,
+        share_all,
+        None,
+        open_existing,
+        file_attribute_normal | file_flag_open_reparse_point,
+        None,
+    )
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    info = FileAttributeTagInfo()
+    if not get_info(
+        handle,
+        file_attribute_tag_info,
+        ctypes.byref(info),
+        ctypes.sizeof(info),
+    ):
+        error = ctypes.WinError(ctypes.get_last_error())
+        close_handle(handle)
+        raise error
+    if info.FileAttributes & (
+        file_attribute_directory | file_attribute_reparse_point
+    ):
+        close_handle(handle)
+        raise OSError(f"cannot fsync unsafe staged path: {path}")
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_WRONLY)
+    except OSError:
+        close_handle(handle)
+        raise
+    with os.fdopen(fd, "wb", closefd=True) as stream:
+        os.fsync(stream.fileno())
+
+
+def _fsync_tree(root: Path) -> None:
+    """Persist every staged regular file before any publication rename."""
+    directories = [root]
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as children:
+            for child in children:
+                path = Path(child.path)
+                mode = path.lstat().st_mode
+                if is_link_or_reparse(path, mode):
+                    raise OSError(f"cannot fsync unsafe staged path: {path}")
+                if stat.S_ISDIR(mode):
+                    directories.append(path)
+                    pending.append(path)
+                elif stat.S_ISREG(mode):
+                    _fsync_regular_file(path)
+                else:
+                    raise OSError(f"cannot fsync special staged path: {path}")
+    for directory in reversed(directories):
+        _fsync_directory(directory)
+
+
+def _copy_replace(src: Path, dst: Path) -> None:
+    """Copy one regular source without following links."""
+    temporary = dst.with_name(f".{dst.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open_regular_no_follow(src) as source:
+            with temporary.open("xb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+                target.flush()
+                os.fsync(target.fileno())
         try:
-            shutil.copystat(src, dst)
+            shutil.copystat(src, temporary, follow_symlinks=False)
         except OSError:
             pass
+        _unlink_replace_target(dst)
+        _durable_replace(temporary, dst)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _needs_copy(src: Path, dst: Path) -> bool:
     """Copy if the destination is missing, a different size, or older."""
     try:
+        mode = dst.lstat().st_mode
+        if is_link_or_reparse(dst, mode) or not stat.S_ISREG(mode):
+            return True
         d = dst.stat()
     except OSError:
         return True
     s = src.stat()
     return s.st_size != d.st_size or s.st_mtime > d.st_mtime + 1e-6
+
+
+def _same_file_content(src: Path, dst: Path) -> bool:
+    """Compare selected files by content when timestamps cannot be trusted."""
+    try:
+        source_mode = src.lstat().st_mode
+        destination_mode = dst.lstat().st_mode
+        if (
+            is_link_or_reparse(src, source_mode)
+            or not stat.S_ISREG(source_mode)
+            or is_link_or_reparse(dst, destination_mode)
+            or not stat.S_ISREG(destination_mode)
+        ):
+            return False
+        source_stat = src.stat()
+        destination_stat = dst.stat()
+    except OSError:
+        return False
+    if source_stat.st_size != destination_stat.st_size:
+        return False
+
+    def digest(path: Path) -> bytes:
+        value = hashlib.sha256()
+        with open_regular_no_follow(path) as stream:
+            while chunk := stream.read(1024 * 1024):
+                value.update(chunk)
+        return value.digest()
+
+    try:
+        return digest(src) == digest(dst)
+    except OSError:
+        return False
+
+
+def _read_json_regular(path: Path) -> dict | None:
+    """Read one bounded regular JSON object without following links."""
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise OSError(f"cannot inspect lineage record {path}: {exc}") from exc
+    if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
+        raise OSError(f"lineage record is not a regular file: {path}")
+    try:
+        with open_regular_no_follow(path) as stream:
+            opened = os.fstat(stream.fileno())
+            if opened.st_size > MAX_PROVENANCE_BYTES:
+                raise OSError(f"lineage record is too large: {path}")
+            raw = stream.read(MAX_PROVENANCE_BYTES + 1)
+        if len(raw) > MAX_PROVENANCE_BYTES:
+            raise OSError(f"lineage record is too large: {path}")
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OSError(f"invalid lineage record {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise OSError(f"lineage record must be an object: {path}")
+    return payload
+
+
+def _lineage_from_provenance(
+    path: Path,
+    session_id: str,
+) -> tuple[tuple[float, str], str, dict] | None:
+    """Return rescue order, canonical fingerprint, and receipt fields."""
+    payload = _read_json_regular(path)
+    if payload is None or payload.get("provider") != "agent-containers":
+        return None
+    capture_id = payload.get("capture_id")
+    captured_at = payload.get("captured_at")
+    if (
+        payload.get("session_id") != session_id
+        or not isinstance(capture_id, str)
+        or not capture_id
+        or not isinstance(captured_at, str)
+    ):
+        raise OSError(f"invalid rescue lineage: {path}")
+    captured = _parse_iso(captured_at)
+    if captured is None:
+        raise OSError(f"invalid rescue capture timestamp: {path}")
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    fingerprint = hashlib.sha256(canonical).hexdigest()
+    receipt = {
+        "schema_version": 1,
+        "provider": "agent-containers",
+        "session_id": session_id,
+        "capture_id": capture_id,
+        "captured_at": captured_at,
+        "provenance_fingerprint": fingerprint,
+    }
+    return (captured.timestamp(), capture_id), fingerprint, receipt
+
+
+def _lineage_from_receipt(
+    path: Path,
+    session_id: str,
+) -> tuple[tuple[float, str], str] | None:
+    """Read the destination-side rescue high-water receipt."""
+    payload = _read_json_regular(path)
+    if payload is None:
+        return None
+    capture_id = payload.get("capture_id")
+    captured_at = payload.get("captured_at")
+    fingerprint = payload.get("provenance_fingerprint")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("provider") != "agent-containers"
+        or payload.get("session_id") != session_id
+        or not isinstance(capture_id, str)
+        or not capture_id
+        or not isinstance(captured_at, str)
+        or not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+    ):
+        raise OSError(f"invalid rescue high-water receipt: {path}")
+    captured = _parse_iso(captured_at)
+    if captured is None:
+        raise OSError(f"invalid rescue receipt timestamp: {path}")
+    return (captured.timestamp(), capture_id), fingerprint
+
+
+def _snapshot_matches_source(
+    source: Path,
+    source_provenance: Path,
+    snapshot: Path,
+) -> bool:
+    """Verify immutable snapshot bytes plus its capture provenance."""
+    source_files = _session_files(source, source=True)
+    destination_files = _session_files(snapshot, source=False)
+    snapshot_provenance = destination_files.pop(
+        Path(RESCUE_SNAPSHOT_PROVENANCE),
+        None,
+    )
+    if snapshot_provenance is None or source_files.keys() != destination_files.keys():
+        return False
+    return (
+        all(
+            _same_file_content(path, destination_files[relative])
+            for relative, path in source_files.items()
+        )
+        and _same_file_content(source_provenance, snapshot_provenance)
+    )
+
+
+def _ignore_session_entries(directory: str, names: list[str]) -> list[str]:
+    """Omit locks, links, and special files from selected session trees."""
+    ignored: list[str] = []
+    for name in names:
+        path = Path(directory) / name
+        try:
+            mode = path.lstat().st_mode
+        except OSError:
+            ignored.append(name)
+            continue
+        if (
+            name in _EXCLUDE_NAMES
+            or is_link_or_reparse(path, mode)
+            or not (stat.S_ISDIR(mode) or stat.S_ISREG(mode))
+        ):
+            ignored.append(name)
+    return ignored
+
+
+def _path_exists(path: Path) -> bool:
+    """Return true for normal paths and dangling symlinks."""
+    return path.exists() or path.is_symlink()
+
+
+def _anchored_path(path: Path) -> Path:
+    """Return an absolute lexical path without resolving links."""
+    return path.expanduser().absolute()
+
+
+def _ensure_real_directory(path: Path) -> Path:
+    """Create a directory only through real directory components."""
+    absolute = _anchored_path(path)
+    current = Path(absolute.anchor)
+    anchor_mode = current.lstat().st_mode
+    if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
+        raise OSError(f"destination directory is unsafe: {current}")
+    for part in absolute.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            current.mkdir()
+            mode = current.lstat().st_mode
+        if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
+            raise OSError(f"destination directory is unsafe: {current}")
+    return absolute
+
+
+def _existing_real_directory(path: Path) -> Path | None:
+    """Resolve an existing directory only through real directory components."""
+    absolute = _anchored_path(path)
+    current = Path(absolute.anchor)
+    try:
+        anchor_mode = current.lstat().st_mode
+    except FileNotFoundError:
+        return None
+    if is_link_or_reparse(current, anchor_mode) or not stat.S_ISDIR(anchor_mode):
+        raise OSError(f"destination directory is unsafe: {current}")
+    for part in absolute.parts[1:]:
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            return None
+        if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
+            raise OSError(f"destination directory is unsafe: {current}")
+    return absolute
+
+
+def _validate_relative_path(relative: Path) -> None:
+    """Reject POSIX and Windows absolute/rooted/traversing relative paths."""
+    windows = PureWindowsPath(str(relative))
+    posix = PurePosixPath(str(relative))
+    if (
+        relative.is_absolute()
+        or relative.anchor
+        or relative.drive
+        or windows.anchor
+        or windows.drive
+        or windows.root
+        or posix.is_absolute()
+        or ".." in relative.parts
+        or ".." in windows.parts
+        or ".." in posix.parts
+    ):
+        raise OSError(f"unsafe destination path: {relative}")
+
+
+def _ensure_relative_directory(root: Path, relative: Path) -> Path:
+    """Create a descendant directory chain without accepting symlinked leaves."""
+    _validate_relative_path(relative)
+    safe_root = _ensure_real_directory(root)
+    current = safe_root
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            current.mkdir()
+            mode = current.lstat().st_mode
+        if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
+            raise OSError(f"destination directory is unsafe: {current}")
+    try:
+        current.relative_to(safe_root)
+    except ValueError as exc:
+        raise OSError(f"unsafe destination path: {relative}") from exc
+    return current
+
+
+def _existing_relative_directory(root: Path, relative: Path) -> Path | None:
+    """Resolve an existing descendant directory without following symlink leaves."""
+    _validate_relative_path(relative)
+    safe_root = _existing_real_directory(root)
+    if safe_root is None:
+        return None
+    current = safe_root
+    for part in relative.parts:
+        if part in {"", "."}:
+            continue
+        current /= part
+        try:
+            mode = current.lstat().st_mode
+        except FileNotFoundError:
+            return None
+        if is_link_or_reparse(current, mode) or not stat.S_ISDIR(mode):
+            raise OSError(f"destination directory is unsafe: {current}")
+    try:
+        current.relative_to(safe_root)
+    except ValueError as exc:
+        raise OSError(f"unsafe destination path: {relative}") from exc
+    return current
+
+
+def _remove_path_checked(path: Path) -> None:
+    """Remove one file/link/tree, preserving cleanup failures."""
+    if not _path_exists(path):
+        return
+    mode = path.lstat().st_mode
+    if is_link_or_reparse(path, mode):
+        raise OSError(f"refusing to remove link or reparse point: {path}")
+    if not stat.S_ISDIR(mode):
+        _unlink_replace_target(path)
+        return
+    _remove_tree_checked(path)
+
+
+def _session_files(root: Path, *, source: bool) -> dict[Path, Path]:
+    """Return regular session members keyed by relative path."""
+    files: dict[Path, Path] = {}
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                relative = path.relative_to(root)
+                mode = path.lstat().st_mode
+                if is_link_or_reparse(path, mode):
+                    if source:
+                        continue
+                    raise OSError(f"unsafe session destination member: {path}")
+                if stat.S_ISDIR(mode):
+                    pending.append(path)
+                elif stat.S_ISREG(mode):
+                    if not source or path.name not in _EXCLUDE_NAMES:
+                        files[relative] = path
+                elif not source:
+                    raise OSError(f"unsafe session destination member: {path}")
+    return files
+
+
+def _session_needs_replace(source: Path, destination: Path) -> bool:
+    """Return whether the selected destination differs from the safe source tree."""
+    if (
+        destination.is_symlink()
+        or not destination.is_dir()
+        or source.is_symlink()
+        or not source.is_dir()
+    ):
+        return True
+    source_files = _session_files(source, source=True)
+    destination_files = _session_files(destination, source=False)
+    if source_files.keys() != destination_files.keys():
+        return True
+    return any(
+        destination_files[relative].is_symlink()
+        or not _same_file_content(path, destination_files[relative])
+        for relative, path in source_files.items()
+    )
+
+
+def _finish_transaction(transaction: Path) -> str | None:
+    """Mark completed transaction residue as sweepable, then remove it."""
+    if not transaction.exists():
+        return None
+    cleanup = transaction.with_name(f"{transaction.name}.cleanup")
+    try:
+        _durable_replace(transaction, cleanup)
+    except OSError as exc:
+        raise OSError(
+            f"cannot mark replacement complete; recovery retained at "
+            f"{transaction}: {exc}"
+        ) from exc
+    try:
+        _remove_tree_checked(cleanup)
+        _remove_tree_checked(cleanup.parent, allow_nonempty=True)
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
+def _sweep_completed_transactions(replacement_root: Path) -> list[str]:
+    """Remove only residue known to follow a completed publish or rollback."""
+    if not replacement_root.exists():
+        return []
+    mode = replacement_root.lstat().st_mode
+    if is_link_or_reparse(replacement_root, mode) or not stat.S_ISDIR(mode):
+        raise OSError(f"replacement root must be a directory: {replacement_root}")
+    active = [
+        child
+        for child in replacement_root.iterdir()
+        if child.name.endswith(".active")
+    ]
+    if active:
+        joined = ", ".join(str(path) for path in active)
+        raise OSError(f"incomplete replacement requires recovery: {joined}")
+    failures: list[str] = []
+    for child in replacement_root.iterdir():
+        if not child.name.endswith(".cleanup"):
+            continue
+        try:
+            _remove_path_checked(child)
+        except OSError as exc:
+            failures.append(str(exc))
+    _remove_tree_checked(replacement_root, allow_nonempty=True)
+    return failures
+
+
+def _write_transaction_manifest(
+    transaction: Path,
+    dest: Path,
+    items: list[tuple[Path, Path, Path]],
+) -> None:
+    payload = {
+        "schema_version": 1,
+        "items": [
+            {
+                "staged": str(staged.relative_to(transaction)),
+                "destination": str(destination.relative_to(dest)),
+                "backup": str(backup.relative_to(transaction)),
+                "had_destination": _path_exists(destination),
+                "destination_fingerprint": _path_fingerprint(destination),
+            }
+            for staged, destination, backup in items
+        ],
+    }
+    encoded = (json.dumps(payload, sort_keys=True) + "\n").encode()
+    if len(encoded) > _MAX_TRANSACTION_MANIFEST_BYTES:
+        raise OSError("replacement transaction manifest is too large")
+    manifest = transaction / "manifest.json"
+    temporary = transaction / f".manifest.{uuid.uuid4().hex}.tmp"
+    try:
+        _write_bytes_fsync(temporary, encoded)
+        _durable_replace(temporary, manifest)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _load_transaction_manifest(transaction: Path) -> list[dict] | None:
+    manifest = transaction / "manifest.json"
+    if not manifest.exists():
+        return None
+    with open_regular_no_follow(manifest) as stream:
+        raw = stream.read(_MAX_TRANSACTION_MANIFEST_BYTES + 1)
+    if len(raw) > _MAX_TRANSACTION_MANIFEST_BYTES:
+        raise OSError(f"replacement transaction manifest is too large: {manifest}")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OSError(f"invalid replacement transaction manifest: {manifest}") from exc
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != 1
+        or not isinstance(items, list)
+    ):
+        raise OSError(f"invalid replacement transaction manifest: {manifest}")
+    return items
+
+
+def _path_fingerprint(path: Path) -> str | None:
+    """Hash one regular file or directory tree without following links."""
+    if not _path_exists(path):
+        return None
+    mode = path.lstat().st_mode
+    if is_link_or_reparse(path, mode):
+        raise OSError(f"cannot fingerprint unsafe path: {path}")
+    digest = hashlib.sha256()
+    if stat.S_ISREG(mode):
+        digest.update(b"F\0")
+        with open_regular_no_follow(path) as stream:
+            while chunk := stream.read(1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
+    if not stat.S_ISDIR(mode):
+        raise OSError(f"cannot fingerprint special path: {path}")
+    entries: list[tuple[str, str, str | None]] = []
+    pending = [path]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as children:
+            for child in children:
+                child_path = Path(child.path)
+                relative = child_path.relative_to(path).as_posix()
+                child_mode = child_path.lstat().st_mode
+                if is_link_or_reparse(child_path, child_mode):
+                    raise OSError(f"cannot fingerprint unsafe path: {child_path}")
+                if stat.S_ISDIR(child_mode):
+                    entries.append(("D", relative, None))
+                    pending.append(child_path)
+                elif stat.S_ISREG(child_mode):
+                    file_digest = hashlib.sha256()
+                    with open_regular_no_follow(child_path) as stream:
+                        while chunk := stream.read(1024 * 1024):
+                            file_digest.update(chunk)
+                    entries.append(("F", relative, file_digest.hexdigest()))
+                else:
+                    raise OSError(f"cannot fingerprint special path: {child_path}")
+    for kind, relative, content_digest in sorted(entries):
+        digest.update(kind.encode())
+        digest.update(b"\0")
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        if content_digest is not None:
+            digest.update(content_digest.encode())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _read_generation(dest: Path) -> str | None:
+    path = dest / ".session-sync-generation"
+    if not path.exists():
+        return None
+    with open_regular_no_follow(path) as stream:
+        raw = stream.read(129)
+    try:
+        value = raw.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise OSError(f"invalid replacement generation: {path}") from exc
+    if (
+        not value
+        or len(value) > 128
+        or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for char in value)
+    ):
+        raise OSError(f"invalid replacement generation: {path}")
+    return value
+
+
+def _write_generation_epoch(dest: Path, value: str) -> None:
+    """Atomically advance the scanner epoch after a completed rollback."""
+    if (
+        not value
+        or len(value) > 128
+        or any(char not in "abcdefghijklmnopqrstuvwxyz0123456789._-" for char in value)
+    ):
+        raise OSError("invalid replacement generation value")
+    path = dest / ".session-sync-generation"
+    temporary = dest / f".session-sync-generation.{uuid.uuid4().hex}.tmp"
+    _write_bytes_fsync(temporary, value.encode("ascii"))
+    try:
+        _unlink_replace_target(path)
+        _durable_replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _recover_active_transactions(replacement_root: Path, dest: Path) -> None:
+    """Finalize committed transactions or roll incomplete ones back."""
+    for raw_transaction in sorted(replacement_root.iterdir()):
+        if not raw_transaction.name.endswith(".active"):
+            continue
+        transaction = _existing_relative_directory(
+            replacement_root,
+            Path(raw_transaction.name),
+        )
+        if transaction is None:
+            raise OSError(f"unsafe replacement transaction: {raw_transaction}")
+        manifest = _load_transaction_manifest(transaction)
+        if manifest is None:
+            # Publication never starts before the manifest is durable.
+            cleanup_error = _finish_transaction(transaction)
+            if cleanup_error:
+                raise OSError(cleanup_error)
+            continue
+        if _read_generation(dest) == transaction.name:
+            cleanup_error = _finish_transaction(transaction)
+            if cleanup_error:
+                raise OSError(cleanup_error)
+            continue
+        rollback_errors: list[str] = []
+        for item in reversed(manifest):
+            if not isinstance(item, dict):
+                rollback_errors.append("invalid transaction item")
+                continue
+            try:
+                destination_rel = Path(item["destination"])
+                backup_rel = Path(item["backup"])
+                _validate_relative_path(destination_rel)
+                _validate_relative_path(backup_rel)
+                if (
+                    not destination_rel.parts
+                    or destination_rel == Path(".")
+                    or not destination_rel.name
+                    or not backup_rel.parts
+                    or backup_rel == Path(".")
+                    or not backup_rel.name
+                ):
+                    raise OSError("transaction paths must be strict descendants")
+                destination_parent = _ensure_relative_directory(
+                    dest,
+                    destination_rel.parent,
+                )
+                destination = destination_parent / destination_rel.name
+                backup_parent = _existing_relative_directory(
+                    transaction,
+                    backup_rel.parent,
+                )
+                backup = (
+                    backup_parent / backup_rel.name
+                    if backup_parent is not None
+                    else transaction / backup_rel
+                )
+                if destination == dest or backup == transaction:
+                    raise OSError("transaction paths must be strict descendants")
+                had_destination = item.get("had_destination")
+                expected_fingerprint = item.get("destination_fingerprint")
+                if not isinstance(had_destination, bool):
+                    raise OSError("invalid transaction destination state")
+                if had_destination:
+                    backup_exists = backup_parent is not None and _path_exists(backup)
+                    if backup_exists:
+                        backup_mode = backup.lstat().st_mode
+                        if is_link_or_reparse(backup, backup_mode):
+                            raise OSError(f"unsafe rollback backup: {backup}")
+                        _remove_path_checked(destination)
+                        _durable_replace(backup, destination)
+                    elif (
+                        isinstance(expected_fingerprint, str)
+                        and _path_fingerprint(destination) == expected_fingerprint
+                    ):
+                        continue
+                    else:
+                        raise OSError(f"missing rollback backup: {backup}")
+                else:
+                    _remove_path_checked(destination)
+            except (KeyError, OSError, TypeError) as exc:
+                rollback_errors.append(str(exc))
+        if rollback_errors:
+            raise OSError(
+                f"replacement recovery incomplete at {transaction}: "
+                f"{'; '.join(rollback_errors)}"
+            )
+        _write_generation_epoch(dest, f"{transaction.name}.rolled-back")
+        cleanup_error = _finish_transaction(transaction)
+        if cleanup_error:
+            raise OSError(cleanup_error)
+
+
+def _replace_selected_sessions(
+    source: Path,
+    dest: Path,
+    include_sessions: set[str],
+) -> tuple[int, int, str | None]:
+    """Publish selected sessions and provenance as one rollback-capable batch."""
+    replacement_root = _ensure_relative_directory(
+        dest,
+        Path(".session-sync-replacement"),
+    )
+    _recover_active_transactions(replacement_root, dest)
+    stale_cleanup_errors = _sweep_completed_transactions(replacement_root)
+    transaction = replacement_root / f"{uuid.uuid4().hex}.active"
+    staged_root = _ensure_relative_directory(
+        replacement_root,
+        Path(transaction.name) / "new",
+    )
+    backup_root = transaction / "old"
+    items: list[tuple[Path, Path, Path]] = []
+    copied = 0
+    nbytes = 0
+    try:
+        for sid in sorted(include_sessions):
+            src_session = source / "session-state" / sid
+            session_item: tuple[Path, Path, Path] | None = None
+            snapshot_item: tuple[Path, Path, Path] | None = None
+            provenance_item: tuple[Path, Path, Path] | None = None
+            if (
+                src_session.is_dir()
+                and not src_session.is_symlink()
+                and _session_needs_replace(
+                    src_session,
+                    dest / "session-state" / sid,
+                )
+            ):
+                staged_session = staged_root / "session-state" / sid
+                staged_session.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(
+                    src_session,
+                    staged_session,
+                    symlinks=True,
+                    ignore=_ignore_session_entries,
+                )
+                for path in staged_session.rglob("*"):
+                    if path.is_symlink():
+                        path.unlink()
+                files = [
+                    path
+                    for path in staged_session.rglob("*")
+                    if path.is_file() and not path.is_symlink()
+                ]
+                copied += len(files)
+                nbytes += sum(path.stat().st_size for path in files)
+                session_item = (
+                    staged_session,
+                    dest / "session-state" / sid,
+                    backup_root / "session-state" / sid,
+                )
+
+            src_provenance = source / "provenance" / f"{sid}.json"
+            dst_provenance = dest / "provenance" / f"{sid}.json"
+            receipt_item: tuple[Path, Path, Path] | None = None
+            candidate_lineage = _lineage_from_provenance(src_provenance, sid)
+            if candidate_lineage is not None:
+                candidate_order, candidate_fingerprint, receipt_payload = (
+                    candidate_lineage
+                )
+                if not src_session.is_dir() or src_session.is_symlink():
+                    raise OSError(f"rescue session source is unavailable: {src_session}")
+                snapshot_dest = rescue_snapshot_path(
+                    dest,
+                    sid,
+                    receipt_payload["capture_id"],
+                )
+                if snapshot_dest.exists() or snapshot_dest.is_symlink():
+                    safe_snapshot = existing_rescue_snapshot_path(
+                        dest,
+                        sid,
+                        receipt_payload["capture_id"],
+                    )
+                    if safe_snapshot is None:
+                        raise OSError(
+                            f"unsafe immutable rescue snapshot path for {sid}"
+                        )
+                    if not _snapshot_matches_source(
+                        src_session,
+                        src_provenance,
+                        snapshot_dest,
+                    ):
+                        raise OSError(
+                            f"immutable rescue snapshot changed for {sid}"
+                        )
+                else:
+                    staged_snapshot = rescue_snapshot_path(
+                        staged_root,
+                        sid,
+                        receipt_payload["capture_id"],
+                    )
+                    staged_snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copytree(
+                        src_session,
+                        staged_snapshot,
+                        symlinks=True,
+                        ignore=_ignore_session_entries,
+                    )
+                    for path in staged_snapshot.rglob("*"):
+                        if path.is_symlink():
+                            path.unlink()
+                    shutil.copy2(
+                        src_provenance,
+                        staged_snapshot / RESCUE_SNAPSHOT_PROVENANCE,
+                    )
+                    snapshot_files = [
+                        path
+                        for path in staged_snapshot.rglob("*")
+                        if path.is_file() and not path.is_symlink()
+                    ]
+                    copied += len(snapshot_files)
+                    nbytes += sum(
+                        path.stat().st_size for path in snapshot_files
+                    )
+                    snapshot_item = (
+                        staged_snapshot,
+                        snapshot_dest,
+                        rescue_snapshot_path(
+                            backup_root,
+                            sid,
+                            receipt_payload["capture_id"],
+                        ),
+                    )
+                receipt_dest = (
+                    dest / ".session-sync-rescue-high-water" / f"{sid}.json"
+                )
+                receipt_root = _existing_relative_directory(
+                    dest,
+                    Path(".session-sync-rescue-high-water"),
+                )
+                destination_lineage = (
+                    _lineage_from_receipt(receipt_root / f"{sid}.json", sid)
+                    if receipt_root is not None
+                    else None
+                )
+                if destination_lineage is None:
+                    provenance_root = _existing_relative_directory(
+                        dest,
+                        Path("provenance"),
+                    )
+                    published_lineage = (
+                        _lineage_from_provenance(
+                            provenance_root / f"{sid}.json",
+                            sid,
+                        )
+                        if provenance_root is not None
+                        else None
+                    )
+                    if published_lineage is not None:
+                        destination_lineage = published_lineage[:2]
+                if destination_lineage is not None:
+                    destination_order, destination_fingerprint = destination_lineage
+                    if (
+                        candidate_order[1] == destination_order[1]
+                        and candidate_fingerprint != destination_fingerprint
+                    ):
+                        raise OSError(
+                            f"rescue capture identity changed at destination for {sid}"
+                        )
+                    if candidate_order < destination_order:
+                        raise OSError(
+                            f"refusing rescue rewind for {sid}: "
+                            f"{candidate_order[1]} < {destination_order[1]}"
+                        )
+                staged_receipt = (
+                    staged_root
+                    / ".session-sync-rescue-high-water"
+                    / f"{sid}.json"
+                )
+                staged_receipt.parent.mkdir(parents=True, exist_ok=True)
+                staged_receipt.write_text(
+                    json.dumps(receipt_payload, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+                if not _same_file_content(staged_receipt, receipt_dest):
+                    receipt_item = (
+                        staged_receipt,
+                        receipt_dest,
+                        backup_root
+                        / ".session-sync-rescue-high-water"
+                        / f"{sid}.json",
+                    )
+            if (
+                src_provenance.is_file()
+                and not src_provenance.is_symlink()
+                and not _same_file_content(src_provenance, dst_provenance)
+            ):
+                staged_provenance = staged_root / "provenance" / f"{sid}.json"
+                staged_provenance.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_provenance, staged_provenance)
+                copied += 1
+                nbytes += staged_provenance.stat().st_size
+                provenance_item = (
+                    staged_provenance,
+                    dst_provenance,
+                    backup_root / "provenance" / f"{sid}.json",
+                )
+            # Publish routing provenance before the matching session. A
+            # concurrent scanner can then see old data with new provenance,
+            # never new data with missing or stale routing authority.
+            if provenance_item is not None:
+                items.append(provenance_item)
+            if snapshot_item is not None:
+                items.append(snapshot_item)
+            if session_item is not None:
+                items.append(session_item)
+            if receipt_item is not None:
+                items.append(receipt_item)
+        if items:
+            staged_generation = staged_root / ".session-sync-generation"
+            staged_generation.parent.mkdir(parents=True, exist_ok=True)
+            staged_generation.write_text(transaction.name, encoding="ascii")
+            items.append(
+                (
+                    staged_generation,
+                    dest / ".session-sync-generation",
+                    backup_root / ".session-sync-generation",
+                )
+            )
+        _fsync_tree(staged_root)
+        _write_transaction_manifest(transaction, dest, items)
+    except OSError as staging_error:
+        try:
+            cleanup_error = _finish_transaction(transaction)
+        except OSError as cleanup_mark_error:
+            raise OSError(
+                f"{staging_error}; {cleanup_mark_error}"
+            ) from staging_error
+        if cleanup_error:
+            raise OSError(
+                f"{staging_error}; cleanup deferred: {cleanup_error}"
+            ) from staging_error
+        raise
+
+    published: list[tuple[Path, Path, bool]] = []
+    try:
+        for staged, destination, backup in items:
+            _ensure_relative_directory(
+                dest,
+                destination.parent.relative_to(dest),
+            )
+            had_destination = _path_exists(destination)
+            if had_destination:
+                _ensure_relative_directory(
+                    transaction,
+                    backup.parent.relative_to(transaction),
+                )
+                _durable_replace(destination, backup)
+            published.append((destination, backup, had_destination))
+            _durable_replace(staged, destination)
+    except OSError as publish_error:
+        rollback_errors: list[str] = []
+        for destination, backup, had_destination in reversed(published):
+            try:
+                _remove_path_checked(destination)
+                if had_destination and _path_exists(backup):
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    _durable_replace(backup, destination)
+                elif had_destination:
+                    raise OSError(f"missing rollback backup: {backup}")
+            except OSError as rollback_error:
+                rollback_errors.append(str(rollback_error))
+        if rollback_errors:
+            raise OSError(
+                f"{publish_error}; rollback incomplete; recovery retained at "
+                f"{transaction}: {'; '.join(rollback_errors)}"
+            ) from publish_error
+        try:
+            cleanup_error = _finish_transaction(transaction)
+        except OSError as cleanup_mark_error:
+            raise OSError(
+                f"{publish_error}; rollback completed; {cleanup_mark_error}"
+            ) from publish_error
+        if cleanup_error:
+            raise OSError(
+                f"{publish_error}; rollback completed; cleanup deferred: "
+                f"{cleanup_error}"
+            ) from publish_error
+        raise
+
+    cleanup_errors = stale_cleanup_errors
+    cleanup_warning = _finish_transaction(transaction)
+    if cleanup_warning:
+        cleanup_errors.append(cleanup_warning)
+    cleanup_warning = "; ".join(cleanup_errors) or None
+    return copied, nbytes, cleanup_warning
+
+
+def _remove_tree_checked(path: Path, *, allow_nonempty: bool = False) -> None:
+    """Remove read-only-aware replacement state; failure is a push failure."""
+    if not path.exists():
+        return
+    mode = path.lstat().st_mode
+    if is_link_or_reparse(path, mode) or not stat.S_ISDIR(mode):
+        raise OSError(f"refusing recursive removal of unsafe path: {path}")
+    if allow_nonempty:
+        try:
+            path.rmdir()
+        except OSError:
+            if any(path.iterdir()):
+                return
+            raise
+        return
+    if not sessions.force_rmtree(path) or path.exists():
+        raise OSError(f"cannot remove replacement state: {path}")
 
 
 def _parse_iso(ts: str) -> datetime | None:
@@ -136,10 +1239,11 @@ def _count_sessions(dest: Path) -> int:
 def _included(rel: Path, include_sessions: set[str] | None) -> bool:
     """Decide whether a relative source path is in scope.
 
-    session-sync archives *session* data only -- the ``session-state`` tree
-    plus the global ``session-store.db`` index -- never the rest of the source
-    (``~/.copilot``: binaries, installed plugins, OAuth/credential state,
-    encryption keys, settings).
+    session-sync archives *session* data only -- the ``session-state`` tree,
+    optional per-session ``provenance`` sidecars, plus the global
+    ``session-store.db`` index -- never the rest of the source (``~/.copilot``:
+    binaries, installed plugins, OAuth/credential state, encryption keys,
+    settings).
 
     With no allowlist, the whole ``session-state`` tree and the session-store.db
     index are included. With an allowlist, only ``session-state/<id>/`` for an
@@ -153,6 +1257,12 @@ def _included(rel: Path, include_sessions: set[str] | None) -> bool:
         if include_sessions is None:
             return True
         return len(parts) >= 2 and parts[1] in include_sessions
+    if parts[0] == "provenance":
+        if len(parts) != 2 or rel.suffix != ".json":
+            return False
+        if include_sessions is None:
+            return True
+        return rel.stem in include_sessions
     # Top-level session index: kept only when not filtering by repo.
     return (
         include_sessions is None
@@ -164,6 +1274,8 @@ def _included(rel: Path, include_sessions: set[str] | None) -> bool:
 class FilesystemTarget(Target):
     """Base for targets that publish to a local-or-mounted directory root."""
 
+    rescue_compare_and_set = True
+
     def _root(self) -> Path:  # pragma: no cover - abstract-ish
         raise NotImplementedError
 
@@ -172,23 +1284,64 @@ class FilesystemTarget(Target):
     ) -> PushResult:
         if not source.is_dir():
             return PushResult(ok=False, detail=f"source not found: {source}")
-        dest = self._root() / machine
         try:
-            dest.mkdir(parents=True, exist_ok=True)
+            root = self._root()
+            dest = _ensure_relative_directory(root, Path(machine))
         except OSError as exc:
-            return PushResult(ok=False, detail=f"cannot create {dest}: {exc}")
+            return PushResult(
+                ok=False,
+                detail=f"cannot create safe destination for {machine}: {exc}",
+            )
 
         copied = 0
         nbytes = 0
+        if include_sessions is not None:
+            lock_file = dest / ".session-sync-rescue.lock"
+            try:
+                with sync_lock(lock_file, timeout=30) as acquired:
+                    if not acquired:
+                        return PushResult(
+                            ok=False,
+                            detail=f"destination rescue lock is busy: {lock_file}",
+                        )
+                    copied, nbytes, cleanup_warning = _replace_selected_sessions(
+                        source,
+                        dest,
+                        include_sessions,
+                    )
+            except OSError as exc:
+                return PushResult(ok=False, detail=f"session replace failed: {exc}")
+            session_count = _count_sessions(dest)
+            write_sync_meta(dest, machine, self.name, "ok", session_count)
+            detail = f"-> {dest}"
+            if cleanup_warning:
+                detail += f" (replacement cleanup deferred: {cleanup_warning})"
+            return PushResult(
+                ok=True,
+                detail=detail,
+                file_count=copied,
+                byte_count=nbytes,
+            )
         for src_file in source.rglob("*"):
-            if src_file.is_dir() or src_file.name in _EXCLUDE_NAMES:
+            try:
+                mode = src_file.lstat().st_mode
+            except OSError as exc:
+                return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
+            if (
+                not stat.S_ISREG(mode)
+                or stat.S_ISLNK(mode)
+                or src_file.name in _EXCLUDE_NAMES
+            ):
                 continue
             rel = src_file.relative_to(source)
             if not _included(rel, include_sessions):
                 continue
             dst_file = dest / rel
+            try:
+                _ensure_relative_directory(dest, rel.parent)
+            except OSError as exc:
+                return PushResult(ok=False, detail=f"unsafe destination: {exc}")
             if _needs_copy(src_file, dst_file):
-                dst_file.parent.mkdir(parents=True, exist_ok=True)
                 try:
                     # Replace by unlink-then-copy, never truncate-in-place. A
                     # destination written read-only by another syncer (e.g. the
@@ -217,31 +1370,63 @@ class FilesystemTarget(Target):
     def prune(self, machine: str, retention_days: int | None) -> int:
         if not isinstance(retention_days, (int, float)) or retention_days <= 0:
             return 0
-        base = self._root() / machine / "session-state"
-        if not base.is_dir():
+        machine_root = _existing_relative_directory(self._root(), Path(machine))
+        if machine_root is None:
             return 0
+        base = _existing_relative_directory(machine_root, Path("session-state"))
+        if base is None:
+            return 0
+        provenance = _existing_relative_directory(
+            machine_root,
+            Path("provenance"),
+        )
+        high_water = _existing_relative_directory(
+            machine_root,
+            Path(".session-sync-rescue-high-water"),
+        )
+        snapshots = _existing_relative_directory(
+            machine_root,
+            Path(".session-sync-rescue-captures"),
+        )
         cutoff = time.time() - retention_days * 86400
         removed = 0
         for d in base.iterdir():
-            if not d.is_dir():
+            if d.is_symlink() or not d.is_dir():
                 continue
             newest = max(
-                (f.stat().st_mtime for f in d.rglob("*") if f.is_file()),
+                (
+                    f.stat().st_mtime
+                    for f in d.rglob("*")
+                    if f.is_file() and not f.is_symlink()
+                ),
                 default=d.stat().st_mtime,
             )
-            if newest < cutoff:
-                shutil.rmtree(d, ignore_errors=True)
+            if newest < cutoff and sessions.force_rmtree(d):
+                if provenance is not None:
+                    (provenance / f"{d.name}.json").unlink(missing_ok=True)
+                if high_water is not None:
+                    (high_water / f"{d.name}.json").unlink(missing_ok=True)
+                if snapshots is not None:
+                    snapshot_session = (
+                        snapshots / hashlib.sha256(d.name.encode()).hexdigest()
+                    )
+                    _remove_path_checked(snapshot_session)
                 removed += 1
         return removed
 
     def push_archives(self, archive_root: Path, machine: str) -> PushResult:
         if not archive_root.is_dir():
             return PushResult(ok=True, detail="no local archive store", file_count=0)
-        dest = self._root() / machine / "archived"
         try:
-            dest.mkdir(parents=True, exist_ok=True)
+            dest = _ensure_relative_directory(
+                self._root(),
+                Path(machine) / "archived",
+            )
         except OSError as exc:
-            return PushResult(ok=False, detail=f"cannot create {dest}: {exc}")
+            return PushResult(
+                ok=False,
+                detail=f"cannot create safe archive destination for {machine}: {exc}",
+            )
         copied = 0
         nbytes = 0
         for src_file in archive_root.iterdir():
@@ -259,10 +1444,12 @@ class FilesystemTarget(Target):
 
     def reconcile_hub(self, machine: str, *, dry_run: bool = False) -> int:
         """Remove uncompressed hub sessions whose verified archive has landed."""
-        base = self._root() / machine
-        archived = base / "archived"
-        state = base / "session-state"
-        if not archived.is_dir() or not state.is_dir():
+        base = _existing_relative_directory(self._root(), Path(machine))
+        if base is None:
+            return 0
+        archived = _existing_relative_directory(base, Path("archived"))
+        state = _existing_relative_directory(base, Path("session-state"))
+        if archived is None or state is None:
             return 0
         removed = 0
         for arc in archived.iterdir():
@@ -301,11 +1488,13 @@ class FilesystemTarget(Target):
         so a hub copy of a live, picker-visible session is never archived even
         if it is old.
         """
-        base = self._root() / machine
-        state = base / "session-state"
-        archived = base / "archived"
-        if not state.is_dir():
+        base = _existing_relative_directory(self._root(), Path(machine))
+        if base is None:
             return 0
+        state = _existing_relative_directory(base, Path("session-state"))
+        if state is None:
+            return 0
+        archived = _ensure_relative_directory(base, Path("archived"))
         now = datetime.now(timezone.utc)
         compacted = 0
         for d in state.iterdir():
@@ -378,6 +1567,7 @@ class OneDriveTarget(FilesystemTarget):
     """Publish to a subfolder under the resolved OneDrive root."""
 
     name = "onedrive"
+    rescue_compare_and_set = False
 
     def _root(self) -> Path:
         explicit = self.options.get("root")

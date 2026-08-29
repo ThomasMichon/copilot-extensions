@@ -93,6 +93,9 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
 - **agent-ssh:** transport rendering, managed OpenSSH fragment source identity,
   tri-state reconciliation, stale/duplicate quarantine, bounded warnings,
   report-only doctor parity, and reachability-vs-hygiene separation.
+- **agent-logger:** session segmentation and lookup, local/remote sync targets,
+  verified provider-rescue ingestion, generic provenance transport, compaction,
+  and background-chronicle source/sink orchestration.
 - **agent-worktrees:** a large suite covering worktree lifecycle, the
   status/tracking model, PR flow, and the Textual **Picker**.
 - **ai-attribution:** payload-only hook tests covering authoritative

@@ -49,18 +49,22 @@ def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
 
     session-sync archives session data only -- never the rest of the source
     (``~/.copilot``: binaries, installed plugins, OAuth/credential state,
-    encryption keys, settings).
+    encryption keys, settings). A canonical projection may also carry
+    per-session ``provenance/<id>.json`` sidecars.
 
-    With ``None`` (no repo allowlist) the whole ``session-state`` tree plus the
-    global ``session-store.db`` index is transferred and nothing else. With an
-    allowlist, only the named ``session-state/<id>`` trees are transferred and
-    the global session-store.db is excluded so other repos' sessions never leak
-    to the destination.
+    With ``None`` (no repo allowlist) the whole ``session-state`` and
+    ``provenance`` trees plus the global ``session-store.db`` index are
+    transferred and nothing else. With an allowlist, only the named
+    ``session-state/<id>`` trees and matching provenance sidecars are
+    transferred; the global session-store.db is excluded so other repos'
+    sessions never leak to the destination.
     """
     if include_sessions is None:
         return [
             "--include=session-state/",
             "--include=session-state/***",
+            "--include=provenance/",
+            "--include=provenance/*.json",
             "--include=session-store.db",
             "--include=session-store.db-wal",
             "--include=session-store.db-shm",
@@ -70,6 +74,9 @@ def rsync_session_filters(include_sessions: set[str] | None) -> list[str]:
     for sid in sorted(include_sessions):
         filters.append(f"--include=session-state/{sid}/")
         filters.append(f"--include=session-state/{sid}/***")
+    filters.append("--include=provenance/")
+    for sid in sorted(include_sessions):
+        filters.append(f"--include=provenance/{sid}.json")
     filters.append("--exclude=*")
     return filters
 
@@ -92,6 +99,8 @@ class Target(ABC):
 
     #: Registry name used in config (``sync.target``).
     name: str = "base"
+    #: Whether filtered rescue publication enforces destination-side ordering.
+    rescue_compare_and_set: bool = False
 
     def __init__(self, options: dict | None = None) -> None:
         self.options = options or {}
@@ -102,8 +111,9 @@ class Target(ABC):
     ) -> PushResult:
         """Publish *source* under the target's ``{machine}/`` subpath.
 
-        Only session data is published -- the ``session-state`` tree plus the
-        global ``session-store.db`` index -- never the rest of the source
+        Only session data is published -- the ``session-state`` tree, optional
+        per-session ``provenance/`` sidecars, plus the global
+        ``session-store.db`` index -- never the rest of the source
         (``~/.copilot``: binaries, installed plugins, OAuth/credential state,
         encryption keys, settings).
 
