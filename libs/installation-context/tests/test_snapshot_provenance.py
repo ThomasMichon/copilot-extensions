@@ -720,6 +720,15 @@ BEHAVIOR_EXEMPLAR_INSTALLERS = (
         if exemplar[0] == "agent-index"
     )
 )
+SECURITY_EXEMPLAR_INSTALLERS = (
+    EXEMPLAR_INSTALLERS
+    if EXHAUSTIVE_ADAPTERS
+    else tuple(
+        exemplar
+        for exemplar in EXEMPLAR_INSTALLERS
+        if exemplar[0] == "agent-index" or exemplar[2] == "long"
+    )
+)
 
 
 def _run_exemplar_slot_action(
@@ -1625,7 +1634,7 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
 
 @pytest.mark.parametrize(
     "exemplar",
-    BEHAVIOR_EXEMPLAR_INSTALLERS,
+    SECURITY_EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
 @pytest.mark.parametrize(
@@ -1674,7 +1683,7 @@ def test_exemplar_slot_actions_do_not_adopt_ambient_context(
 
 @pytest.mark.parametrize(
     "exemplar",
-    BEHAVIOR_EXEMPLAR_INSTALLERS,
+    SECURITY_EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
 @pytest.mark.parametrize("mismatch", ("root", "version"))
@@ -1718,7 +1727,7 @@ def test_exemplar_slot_actions_reject_foreign_snapshot_payload(
 
 @pytest.mark.parametrize(
     "exemplar",
-    BEHAVIOR_EXEMPLAR_INSTALLERS,
+    SECURITY_EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
 def test_exemplar_slot_actions_reject_spoofed_staging_payload_identity(

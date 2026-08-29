@@ -64,12 +64,13 @@ snapshot-provenance and installation-governance case corpora against the
 canonical Python implementation, preferring its importable API when a Python
 CLI process would duplicate the same contract. A smaller contract-focused set
 keeps Python CLI, POSIX shell, and PowerShell parity, interoperability,
-security-boundary, and atomicity coverage. Repeated exemplar behavior defaults
-to the installer with legacy-discovery support after every exemplar's
-delegation wiring is checked. Source-identity fixtures likewise run
-exhaustively in-process against the reference implementation and use
-representative vectors for external adapter parity instead of respawning every
-adapter for every fixture. Set
+security-boundary, and atomicity coverage. Every exemplar's delegation wiring
+is checked; repeated security behavior still spans both exemplar plugins and
+both shell styles, while low-risk staged-CWD behavior defaults to the installer
+with legacy-discovery support. Source-identity fixtures likewise run exhaustively
+in-process against the reference implementation and use representative vectors
+for external adapter parity instead of respawning every adapter for every
+fixture. Set
 `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` to restore the full CLI and
 exemplar cross-products when changing an adapter implementation:
 
