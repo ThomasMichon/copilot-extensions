@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import threading
-import time
 from types import SimpleNamespace
 
 import pytest
@@ -329,6 +328,31 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
     writes = []
     unlocks = []
 
+    class ObservedLock:
+        def __init__(self):
+            self.inner = threading.RLock()
+            self.rotator_attempted = threading.Event()
+            self.rotator_completed = threading.Event()
+
+        def acquire(self, *args, **kwargs):
+            is_rotator = threading.current_thread().name == "queued-rotation"
+            if is_rotator:
+                self.rotator_attempted.set()
+            acquired = self.inner.acquire(*args, **kwargs)
+            if is_rotator:
+                self.rotator_completed.set()
+            return acquired
+
+        def release(self):
+            self.inner.release()
+
+        def __enter__(self):
+            self.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            self.release()
+
     class Backend:
         @staticmethod
         def edit_password(_kpdb, _entry, password):
@@ -338,6 +362,8 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
     monkeypatch.setattr(service, "get_cache", lambda: persistent)
     svc = service.VaultService()
     svc.cli = Backend()
+    observed_lock = ObservedLock()
+    svc._credential_lock = observed_lock
     monkeypatch.setattr(
         svc,
         "ensure_unlocked",
@@ -356,9 +382,10 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
         ))
 
     with svc._credential_lock:
-        rotator = threading.Thread(target=rotate)
+        rotator = threading.Thread(target=rotate, name="queued-rotation")
         rotator.start()
-        time.sleep(0.05)
+        assert observed_lock.rotator_attempted.wait(timeout=5)
+        assert observed_lock.rotator_completed.wait(timeout=5)
     rotator.join(timeout=5)
 
     assert not rotator.is_alive()
