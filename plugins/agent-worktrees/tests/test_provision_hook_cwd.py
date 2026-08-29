@@ -1,4 +1,4 @@
-"""Provisioning hooks must not retain the installed plugin as their cwd."""
+"""Hook processes must not retain the replaceable plugin payload as their cwd."""
 
 from __future__ import annotations
 
@@ -9,19 +9,34 @@ from pathlib import Path
 _PLUGIN = Path(__file__).resolve().parents[1]
 
 
-def _provision_hook() -> dict[str, object]:
+def _hooks() -> list[dict[str, object]]:
     hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
-    return next(
+    return [
         hook
-        for hook in hooks["hooks"]["sessionStart"]
-        if "provision-check" in str(hook)
+        for entries in hooks["hooks"].values()
+        for hook in entries
+    ]
+
+
+def test_every_hook_leaves_payload_cwd_before_running_script():
+    for hook in _hooks():
+        powershell = str(hook["powershell"])
+        bash = str(hook["bash"])
+        assert "$env:USERPROFILE" in powershell
+        assert "-ErrorAction Stop" in powershell
+        assert powershell.index("Set-Location") < powershell.index("$s")
+        assert 'cd "$HOME"' in bash
+        assert bash.index("cd ") < bash.index("s=")
+
+
+def test_session_conduct_has_a_cold_start_budget():
+    hooks = json.loads((_PLUGIN / "hooks.json").read_text(encoding="utf-8"))
+    hook = next(
+        item
+        for item in hooks["hooks"]["sessionStart"]
+        if "session-conduct" in str(item)
     )
-
-
-def test_provision_hook_leaves_payload_cwd_before_running_script():
-    hook = _provision_hook()
-    assert "Set-Location -LiteralPath $HOME" in hook["powershell"]
-    assert 'cd "$HOME"' in hook["bash"]
+    assert hook["timeoutSec"] >= 30
 
 
 def test_detached_provision_worker_runs_from_home():
