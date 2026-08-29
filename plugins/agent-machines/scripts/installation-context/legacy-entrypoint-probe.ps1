@@ -51,11 +51,35 @@ function Get-ProfileHome {
             Where-Object { ($_ -split ':')[2] -eq $uid.Trim() } |
             Select-Object -First 1
     }
+    $home_path = ''
     $fields = @($entry -split ':')
-    if ($fields.Count -lt 6 -or -not $fields[5] -or -not [IO.Path]::IsPathRooted($fields[5])) {
-        throw 'cannot determine the current account home from the passwd database'
+    if ($fields.Count -ge 6 -and $fields[5]) {
+        $home_path = $fields[5]
     }
-    return (Resolve-Path -LiteralPath $fields[5]).Path
+    elseif (Get-Command dscl -ErrorAction SilentlyContinue) {
+        # macOS ships no `getent` and keeps ordinary accounts in
+        # DirectoryService, not /etc/passwd (system accounts only), so both
+        # lookups above miss for every normal user. `dscl` is the authoritative
+        # lookup there -- matching the sh probe and this library's Python
+        # implementation (`pwd.getpwuid()`).
+        $user = '' + (& id -un 2>$null)
+        if ($user.Trim()) {
+            # Keep the output as lines: `dscl -read` can emit more than one, and
+            # a single collapsed string would let `(.+)$` swallow whatever
+            # follows -- or miss the value entirely when it is not last.
+            $record = @(& dscl . -read "/Users/$($user.Trim())" NFSHomeDirectory 2>$null)
+            foreach ($line in $record) {
+                if ($line -match '^NFSHomeDirectory:\s*(.+?)\s*$') {
+                    $home_path = $Matches[1]
+                    break
+                }
+            }
+        }
+    }
+    if (-not $home_path -or -not [IO.Path]::IsPathRooted($home_path)) {
+        throw 'cannot determine the current account home from the account database (passwd or DirectoryService)'
+    }
+    return (Resolve-Path -LiteralPath $home_path).Path
 }
 
 if (-not [IO.Path]::IsPathRooted($PayloadRoot)) { Fail '-PayloadRoot must be absolute' }

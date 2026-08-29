@@ -48,7 +48,7 @@ json_string() {
 }
 
 resolve_profile_home() {
-    local uid passwd_entry="" home_path
+    local uid user passwd_entry="" home_path=""
     uid="$(id -u 2>/dev/null)" || fail "cannot determine the current account identity"
     if command -v getent >/dev/null 2>&1; then
         passwd_entry="$(getent passwd "$uid" 2>/dev/null || true)"
@@ -56,11 +56,29 @@ resolve_profile_home() {
     if [[ -z "$passwd_entry" && -r /etc/passwd ]]; then
         passwd_entry="$(LC_ALL=C awk -F: -v uid="$uid" '$3 == uid { print; exit }' /etc/passwd)"
     fi
-    [[ -n "$passwd_entry" ]] ||
-        fail "cannot determine the current account home from the passwd database"
-    home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
+    if [[ -n "$passwd_entry" ]]; then
+        home_path="$(printf '%s' "$passwd_entry" | LC_ALL=C cut -d: -f6)"
+    elif command -v dscl >/dev/null 2>&1; then
+        # macOS ships no `getent`, and keeps ordinary accounts in
+        # DirectoryService rather than /etc/passwd (which holds only system
+        # accounts) -- so both lookups above miss for every normal user and the
+        # probe used to fail outright. `dscl` is the authoritative lookup there,
+        # and is the shell equivalent of the `pwd.getpwuid()` this library's
+        # Python implementation already uses.
+        user="$(id -un 2>/dev/null || true)"
+        if [[ -n "$user" ]]; then
+            # `|| true` is load-bearing: the script runs under
+            # `set -euo pipefail`, so without it a non-zero dscl (e.g. no such
+            # account) would propagate out of the assignment and abort the
+            # script here, skipping the explicit diagnostic below.
+            home_path="$(dscl . -read "/Users/$user" NFSHomeDirectory 2>/dev/null |
+                LC_ALL=C awk '$1 == "NFSHomeDirectory:" { $1 = ""; sub(/^[[:space:]]+/, ""); print; exit }' || true)"
+        fi
+    fi
+    [[ -n "$home_path" ]] ||
+        fail "cannot determine the current account home from the account database (passwd or DirectoryService)"
     [[ "$home_path" == /* && -d "$home_path" ]] ||
-        fail "the passwd database home is unavailable"
+        fail "the resolved account home is unavailable: $home_path"
     (cd -P -- "$home_path" && pwd)
 }
 
