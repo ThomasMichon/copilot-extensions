@@ -12,6 +12,7 @@ import pytest
 LIB = Path(__file__).resolve().parents[1]
 REPO = Path(__file__).resolve().parents[3]
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+BASH = shutil.which("bash") if os.name != "nt" else None
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -154,8 +155,9 @@ def _run(
     bootstrap = payload / "scripts" / "installation-context"
     legacy_root = profile / ".agent-example"
     if runner == "posix":
+        assert BASH is not None
         command = [
-            "bash",
+            BASH,
             str(bootstrap / "legacy-entrypoint-probe.sh"),
             "--payload-root",
             str(payload),
@@ -198,7 +200,7 @@ def _run(
     )
 
 
-RUNNERS = ["posix"] + (["powershell"] if POWERSHELL else [])
+RUNNERS = (["posix"] if BASH else []) + (["powershell"] if POWERSHELL else [])
 
 
 @pytest.mark.parametrize("runner", RUNNERS)
