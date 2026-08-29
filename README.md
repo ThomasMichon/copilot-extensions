@@ -81,8 +81,8 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **ten are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
-`copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills), and
-`harness-knowledge` (skills), `ai-attribution` (hook + skill), and
+`copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills),
+`harness-knowledge` (skills), `ai-attribution` (hook + skill),
 `delegation-guidance` (hook + skill), and `zz-context-injection` (aggregation hook)
 need no install beyond enabling the plugin.
 Everything installs **from the marketplace** and runs

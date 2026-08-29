@@ -98,7 +98,7 @@ def test_contributor_commands_are_bounded_payload_scripts() -> None:
             assert contributor["pure"] is True
             assert type(contributor["order"]) is int
             assert type(contributor["timeoutSeconds"]) is int
-            assert 1 <= contributor["timeoutSeconds"] <= 15
+            assert 1 <= contributor["timeoutSeconds"] <= 10
             assert type(contributor["maxBytes"]) is int
             assert 1 <= contributor["maxBytes"] <= 64 * 1024
 
