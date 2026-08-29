@@ -91,14 +91,12 @@ def _is_supervisor_runtime(process: WindowsProcess, install_dir: str | Path) -> 
     return argv[0] == "supervise"
 
 
-def _is_superseded_producer(
-    process: WindowsProcess,
-    install_dir: str | Path,
-    current_version: str | None,
+def _is_materialized_supervisor_child(
+    process: WindowsProcess, install_dir: str | Path
 ) -> bool:
-    """True for an orphanable producer running from a non-current runtime slot."""
+    """True for a registrar child identified by its supervisor-owned spec path."""
 
-    if not current_version or not _under_install_root(process.executable, install_dir):
+    if not _under_install_root(process.executable, install_dir):
         return False
     argv = _agent_dispatch_argv(process.command_line)
     if not argv:
@@ -109,19 +107,11 @@ def _is_superseded_producer(
     )
     if not producer:
         return False
-    current_python = ntpath.normcase(
-        ntpath.abspath(
-            ntpath.join(
-                str(install_dir),
-                "versions",
-                current_version,
-                "Scripts",
-                "python.exe",
-            )
-        )
-    )
-    executable = ntpath.normcase(ntpath.abspath(process.executable.strip('"')))
-    return executable != current_python
+    spec_root = ntpath.normcase(
+        ntpath.abspath(ntpath.join(str(install_dir), "run", "supervisor"))
+    ).rstrip("\\") + "\\"
+    command_line = ntpath.normcase(process.command_line.replace('"', ""))
+    return spec_root in command_line
 
 
 def _is_supervisor_wrapper(process: WindowsProcess, install_dir: str | Path) -> bool:
@@ -135,15 +125,11 @@ def _is_supervisor_wrapper(process: WindowsProcess, install_dir: str | Path) -> 
 def select_supervisor_generation_pids(
     processes: Iterable[WindowsProcess],
     install_dir: str | Path,
-    *,
-    current_version: str | None = None,
 ) -> list[int]:
     """Select every wrapper/supervisor root and descendant, deepest first.
 
-    Producer commands are supported standalone surfaces. A current-slot producer
-    is therefore selected only when ancestry proves supervisor ownership, while a
-    non-current-slot producer is stale by definition and is selected even if its
-    former supervisor parent has already exited.
+    Producer commands are supported standalone surfaces and are selected only
+    when ancestry or their supervisor-owned materialized spec proves ownership.
     """
 
     records = {process.pid: process for process in processes if process.pid > 0}
@@ -156,7 +142,7 @@ def select_supervisor_generation_pids(
         for process in records.values()
         if _is_supervisor_wrapper(process, install_dir)
         or _is_supervisor_runtime(process, install_dir)
-        or _is_superseded_producer(process, install_dir, current_version)
+        or _is_materialized_supervisor_child(process, install_dir)
     }
     stack = list(selected)
     while stack:
@@ -256,7 +242,6 @@ def retire_windows_supervisor_generations(
     list_processes: Callable[[], list[WindowsProcess]] = iter_windows_processes,
     terminate: Callable[[int], bool] = terminate_process,
     platform_name: str | None = None,
-    current_version: str | None = None,
 ) -> SupervisorRetireResult:
     """Retire every installed supervisor wrapper/master/child generation."""
 
@@ -268,17 +253,7 @@ def retire_windows_supervisor_generations(
     except Exception as exc:
         result.errors.append(f"process enumeration failed: {exc}")
         return result
-    if current_version is None:
-        try:
-            current_version = (
-                Path(install_dir, "current-version").read_text(encoding="utf-8").strip()
-                or None
-            )
-        except OSError:
-            current_version = None
-    result.selected = select_supervisor_generation_pids(
-        processes, install_dir, current_version=current_version
-    )
+    result.selected = select_supervisor_generation_pids(processes, install_dir)
     for pid in result.selected:
         if pid == os.getpid():
             continue

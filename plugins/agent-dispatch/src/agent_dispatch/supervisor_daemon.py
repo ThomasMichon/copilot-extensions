@@ -148,6 +148,7 @@ class DesiredRegistrationSet:
     registrations: dict[str, dict] = field(default_factory=dict)
     deduplicated: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    replacements: dict[str, str] = field(default_factory=dict)
 
 
 def merge_registration_sources(
@@ -176,6 +177,7 @@ def merge_registration_sources(
             if _runtime_equivalence_fingerprint(direct_reg) == declared_fp:
                 result.registrations.pop(direct_id, None)
                 result.deduplicated.append(direct_id)
+                result.replacements[direct_id] = declared_reg["id"]
                 continue
             shared = sorted(declared_ids & _logical_ids(direct_reg))
             if shared:
@@ -531,6 +533,9 @@ class SupervisorDaemon:
         desired = merged.registrations
         for rid in self._overridden_off():
             desired.pop(rid, None)
+            replacement = merged.replacements.get(rid)
+            if replacement:
+                desired.pop(replacement, None)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired

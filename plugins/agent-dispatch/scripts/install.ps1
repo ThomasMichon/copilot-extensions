@@ -1170,7 +1170,7 @@ function Retire-SupervisorProcesses {
         foreach ($message in @($result.errors)) {
             if ($message) { Write-Warn "Supervisor generation retirement: $message" }
         }
-        if ($rc -eq 0 -or $retired -gt 0) { return $retired }
+        if ($rc -eq 0) { return $retired }
     } catch { }
     Write-Warn 'Full supervisor generation inventory failed; using native CIM supervisor-tree retirement'
     return (Retire-SupervisorProcessesFallback)
@@ -1179,24 +1179,15 @@ function Retire-SupervisorProcesses {
 function Retire-SupervisorProcessesFallback {
     <# Native fallback when no installed runtime can run the Python classifier.
        Select only supervise-service wrappers and `agent_dispatch supervise`
-       roots, superseded-slot producers, then their descendants. A standalone
-       producer on the current slot is preserved. #>
+       roots, registrar children carrying a supervisor-owned materialized spec,
+       then their descendants. Standalone producers are preserved. #>
     if ($env:OS -ne 'Windows_NT') { return 0 }
     try {
         $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
         $launcher = [IO.Path]::GetFullPath((Join-Path $InstallDir 'supervise-service.ps1'))
-        $currentPython = $null
-        try {
-            $marker = Join-Path $InstallDir 'current-version'
-            if (Test-Path -LiteralPath $marker) {
-                $current = ([IO.File]::ReadAllText($marker)).Trim()
-                if ($current) {
-                    $currentPython = [IO.Path]::GetFullPath(
-                        (Join-Path $InstallDir "versions\$current\Scripts\python.exe")
-                    )
-                }
-            }
-        } catch { }
+        $supervisorRun = (
+            [IO.Path]::GetFullPath((Join-Path $InstallDir 'run\supervisor')).TrimEnd('\') + '\'
+        )
         $selected = [System.Collections.Generic.HashSet[int]]::new()
         foreach ($row in $rows) {
             $cmd = [string]$row.CommandLine
@@ -1219,20 +1210,15 @@ function Retire-SupervisorProcessesFallback {
             $isSupervisor = $underRoot -and (
                 $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
             )
-            $isSupersededProducer = $false
-            if (
-                $currentPython -and
-                $underRoot -and
+            $isRegistrarChild = $underRoot -and (
                 $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve|schedule\s+serve|webhook(?:\s|$))'
-            ) {
-                try {
-                    $isSupersededProducer = $underRoot -and -not $exe.Equals(
-                        $currentPython,
-                        [StringComparison]::OrdinalIgnoreCase
-                    )
-                } catch { }
-            }
-            if ($isWrapper -or $isSupervisor -or $isSupersededProducer) {
+            ) -and (
+                $cmd.Replace('"', '').IndexOf(
+                    $supervisorRun,
+                    [StringComparison]::OrdinalIgnoreCase
+                ) -ge 0
+            )
+            if ($isWrapper -or $isSupervisor -or $isRegistrarChild) {
                 [void]$selected.Add([int]$row.ProcessId)
             }
         }

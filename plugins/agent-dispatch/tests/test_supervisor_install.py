@@ -447,6 +447,7 @@ class TestWindowsSupervisorInstall:
         assert "function Retire-SupervisorProcessesFallback" in helper
         assert "Get-CimInstance Win32_Process" in helper
         assert "Stop-Process -Id $pid" in helper
-        assert "$isSupersededProducer" in helper
-        assert "$currentPython" in helper
+        assert "$isRegistrarChild" in helper
+        assert "$supervisorRun" in helper
         assert "$isSupervisor = $underRoot -and (" in helper
+        assert "if ($rc -eq 0) { return $retired }" in helper

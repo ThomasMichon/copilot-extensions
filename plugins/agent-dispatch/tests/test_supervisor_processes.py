@@ -24,7 +24,6 @@ def _proc(pid, parent, executable, command_line):
 
 def test_selects_old_wrapper_master_children_and_descendants_across_slots():
     old_python = INSTALL_DIR + r"\versions\0.1.0-dev1\Scripts\python.exe"
-    older_python = INSTALL_DIR + r"\versions\0.1.0-dev0\Scripts\python.exe"
     current_python = INSTALL_DIR + r"\versions\0.1.0-dev2\Scripts\python.exe"
     launcher = INSTALL_DIR + r"\supervise-service.ps1"
     processes = [
@@ -58,13 +57,14 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
             old_python,
             rf'"{old_python}" -m agent_dispatch supervise --all-repos --label queue',
         ),
-        # The old master is already gone, but its autonomous producer still runs
-        # from a superseded slot and must be retired.
+        # The old master is gone, but the child still carries the materialized
+        # supervisor-owned spec path and must be retired.
         _proc(
             200,
             1,
-            older_python,
-            rf'"{older_python}" -m agent_dispatch schedule serve "schedule.json"',
+            old_python,
+            rf'"{old_python}" -m agent_dispatch schedule serve '
+            rf'"{INSTALL_DIR}\run\supervisor\scope\lane.schedule.json"',
         ),
         # A standalone producer on the current slot is a supported public surface
         # and must not be killed merely because it uses the installed runtime.
@@ -73,6 +73,14 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
             1,
             current_python,
             rf'"{current_python}" -m agent_dispatch emitter serve "current.json"',
+        ),
+        # Runtime age alone does not prove ownership: an older-slot standalone
+        # producer with an external config remains outside service reconciliation.
+        _proc(
+            202,
+            1,
+            old_python,
+            rf'"{old_python}" -m agent_dispatch emitter serve "standalone.json"',
         ),
         # A registered emitter's in-flight external command is a descendant and
         # must not survive the generation that owned it.
@@ -92,15 +100,14 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
         ),
     ]
 
-    selected = select_supervisor_generation_pids(
-        processes, INSTALL_DIR, current_version="0.1.0-dev2"
-    )
+    selected = select_supervisor_generation_pids(processes, INSTALL_DIR)
 
     assert set(selected) == {100, 101, 102, 103, 104, 105, 200}
     assert selected.index(105) < selected.index(103) < selected.index(102)
     assert 300 not in selected
     assert 301 not in selected
     assert 201 not in selected
+    assert 202 not in selected
 
 
 def test_parse_windows_process_inventory_accepts_single_or_array_payload():
@@ -152,7 +159,6 @@ def test_retirement_terminates_every_selected_generation():
         list_processes=lambda: processes,
         terminate=terminate,
         platform_name="nt",
-        current_version="0.1.0-dev2",
     )
 
     assert result.ok
