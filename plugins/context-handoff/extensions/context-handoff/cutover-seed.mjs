@@ -74,6 +74,8 @@ export function buildCutoverSeed(
     worktree = null,
     worktreeDir = null,
     sessionId = null,
+    path = null,
+    muxSession = null,
   } = {},
 ) {
   const retryClause = retry
@@ -101,8 +103,11 @@ export function buildCutoverSeed(
         `${id} --defer-complete && agent-worktrees bind-session --worktree-id ` +
         `${worktree} --handoff-token ${id} && agent-worktrees ` +
         `handoff-cutover --retire-pane ${oldPane} --successor-verified ` +
-        `--retire-reason handoff-consume --worktree-id ${worktree} --session-id ` +
-        `${sessionId} . The first command prints your full brief; the trailing ` +
+        `--retire-reason handoff-consume --require-mux-identity ` +
+        `--worktree-id ${worktree} --session-id ` +
+        `${sessionId}` +
+        (muxSession ? ` --mux-session ${muxSession}` : "") +
+        ` . The first command prints your full brief; the trailing ` +
         `JSON lines are bookkeeping. ${CONTINUATION_DIRECTIVE} For this deferred ` +
         `handoff task, completion of the predecessor's latest phase is not enough; ` +
         `ONLY when you reach the handoff's completion gate run: agent-dispatch ` +
@@ -121,9 +126,12 @@ export function buildCutoverSeed(
       `${id} .`
     );
   }
+  const consumeArgs = path
+    ? JSON.stringify({ path })
+    : JSON.stringify({ handoff_id: id });
   return (
     `${lead}. Call the context-handoff consume_handoff tool with ` +
-    `arguments {"handoff_id":"${id}"} to load this one-time file-backed ` +
+    `arguments ${consumeArgs} to load this one-time file-backed ` +
     `handoff and continue in place.${retryClause} ${CONTINUATION_DIRECTIVE}`
   );
 }

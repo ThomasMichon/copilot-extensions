@@ -36,7 +36,7 @@
 import { readFileSync } from "node:fs";
 import {
   storeHandoff, buildSeedForStored, runHandoffCutover,
-  readFileHandoff, markFileHandoffConsumed, decodeHandoffPayload,
+  consumeFileHandoffOnce, decodeHandoffPayload,
 } from "./handoff-core.mjs";
 
 function parseArgs(argv) {
@@ -101,10 +101,10 @@ function cmdStore(args, { cutover }) {
     promptText, sid, cwd, title: args.title || "",
     preferTask: !args["no-task"],
   });
-  if (!stored) {
+  if (!stored?.storage) {
     process.stderr.write(
-      "handoff-cli: could not store the handoff -- no resolvable worktree state dir. " +
-      "Run inside a worktree, or pass --cwd <worktree-path>.\n");
+      "handoff-cli: could not store the handoff. " +
+      `${stored?.error || "No safe machine-local state directory resolved."}\n`);
     process.exit(1);
   }
   const seed = buildSeedForStored(stored, { retry: true });
@@ -158,20 +158,17 @@ function cmdContinue(args) {
 function cmdConsume(args) {
   const cwd = args.cwd || process.cwd();
   const sid = resolveSid(args);
-  const found = readFileHandoff(cwd, sid, args["handoff-id"], args.path || null);
-  if (!found) {
-    process.stderr.write("handoff-cli consume: no file-backed handoff found (--handoff-id or --path)\n");
+  const consumed = consumeFileHandoffOnce(
+    cwd, sid, args["handoff-id"], args.path || null,
+  );
+  if (!consumed.ok) {
+    process.stderr.write(`handoff-cli consume: ${consumed.message}\n`);
     process.exit(1);
   }
-  if (found.record.consumed) {
-    process.stderr.write(`handoff-cli consume: handoff ${found.record.id} already consumed at ${found.record.consumedAt}.\n`);
-    process.exit(1);
-  }
-  markFileHandoffConsumed(found.path, found.record, sid);
-  const brief = found.record.promptText
-    || decodeHandoffPayload(found.record.payload || "").text
+  const brief = consumed.record.promptText
+    || decodeHandoffPayload(consumed.record.payload || "").text
     || "";
-  if (args.json) return emit({ ok: true, id: found.record.id, brief }, args);
+  if (args.json) return emit({ ok: true, id: consumed.record.id, brief }, args);
   process.stdout.write(brief.endsWith("\n") ? brief : brief + "\n");
 }
 

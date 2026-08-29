@@ -9,7 +9,7 @@
 // Integration points (all via observable session events -- the native runtime
 // removed SDK callback hooks, so no `hooks` object is passed to joinSession):
 // 1. generate_handoff_prompt tool -- on-demand structured handoff data
-// 2. save_handoff_prompt tool -- persist composed handoff to session folder
+// 2. save_handoff_prompt tool -- persist composed handoff to machine-local state
 // 3. session.usage_info event -- real-time context utilization monitoring
 // 4. tool.execution_start / _complete events -- track modified files + tools
 // 5. user.message event -- tracks turn count + first prompt (topic bias)
@@ -35,6 +35,8 @@ import {
   readFileSync,
   readdirSync,
   statSync,
+  openSync,
+  closeSync,
 } from "node:fs";
 import { execSync, execFileSync } from "node:child_process";
 import { join, basename } from "node:path";
@@ -192,16 +194,34 @@ function runCli(bin, args, opts = {}) {
 // fallback so a bare-resumed session (cwd=HOME) still resolves its worktree from
 // the session->worktree binding rather than the (HOME) cwd. See #4098.
 function agentWorktreesGet(key, cwd, sessionId) {
+  return agentWorktreesGetResult(key, cwd, sessionId).value;
+}
+
+function agentWorktreesGetResult(key, cwd, sessionId) {
+  const argv = ["get", key];
+  if (sessionId) argv.push("--session-id", sessionId);
   try {
-    const argv = ["get", key];
-    if (sessionId) argv.push("--session-id", sessionId);
     const out = runCli("agent-worktrees", argv, {
       cwd,
       timeout: AGENT_WORKTREES_QUERY_TIMEOUT_MS,
     }).trim();
-    return out || null;
-  } catch {
-    return null;
+    if (out) return { value: out, error: null };
+    return {
+      value: null,
+      error:
+        `agent-worktrees get ${key} returned an empty result for cwd ` +
+        `${cwd || process.cwd()}${sessionId ? ` and session ${sessionId}` : ""}`,
+    };
+  } catch (error) {
+    const detail = (
+      error?.stderr || error?.stdout || error?.message || String(error)
+    ).toString().trim();
+    return {
+      value: null,
+      error:
+        `agent-worktrees get ${key} failed` +
+        (detail ? `: ${detail}` : ""),
+    };
   }
 }
 
@@ -236,6 +256,28 @@ function currentPaneId() {
   return process.env.TMUX_PANE || process.env.PSMUX_PANE || null;
 }
 
+function currentMuxSession(pane = currentPaneId()) {
+  if (!pane) return null;
+  try {
+    return runCli(
+      process.platform === "win32" ? "psmux" : "tmux",
+      ["display-message", "-p", "-t", pane, "#{session_name}"],
+      { timeout: 5000 },
+    ).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
 function worktreeInfo(cwd, sid) {
   const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
   const worktree = wtDir ? basename(wtDir) : null;
@@ -258,6 +300,7 @@ function makeHandoffMetadata({ sid, cwd, title, storage, taskId = null }) {
     worktree,
     worktreeDir: wtDir,
     oldPane: currentPaneId(),
+    muxSession: currentMuxSession(),
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -294,23 +337,45 @@ function handoffDirFor(cwd, sid) {
 
 function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
+    renameSync(tmp, path);
+  } finally {
+    try { unlinkSync(tmp); } catch { /* renamed or never created */ }
+  }
 }
 
 function saveFileHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
-  if (!dir) return null;
-  mkdirSync(dir, { recursive: true });
+  if (!dir) {
+    const resolution = agentWorktreesGetResult(
+      "worktree-state-dir", cwd, sid,
+    );
+    return {
+      error:
+        `${resolution.error}. Run \`agent-worktrees get worktree-state-dir ` +
+        `${sid ? `--session-id ${safePathSegment(sid)}` : ""}\` from the ` +
+        "intended adopted checkout and verify it reports a machine-local path.",
+    };
+  }
   const path = join(dir, `${metadata.id}.json`);
-  writeJsonAtomic(path, {
-    ...metadata,
-    consumed: false,
-    consumedAt: null,
-    promptText,
-  });
-  return { path, id: metadata.id, metadata };
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeJsonAtomic(path, {
+        ...metadata,
+        consumed: false,
+        consumedAt: null,
+        promptText,
+    });
+    return { path, id: metadata.id, metadata };
+  } catch (error) {
+    return {
+        error:
+          `resolved handoff state directory ${dir}, but the atomic write failed: ` +
+          `${error?.message || String(error)}`,
+    };
+  }
 }
 
 function readFileHandoff(cwd, sid, handoffId, explicitPath = null) {
@@ -422,6 +487,8 @@ function retireCutoverPane(cwd, pane, metadata = {}) {
     ];
     if (metadata.worktree) argv.push("--worktree-id", metadata.worktree);
     if (metadata.sessionId) argv.push("--session-id", metadata.sessionId);
+    argv.push("--require-mux-identity");
+    if (metadata.muxSession) argv.push("--mux-session", metadata.muxSession);
     const out = runCli("agent-worktrees", argv, {
       cwd,
       timeout: 30000,
@@ -563,7 +630,7 @@ function abandonSupersededHandoffs(cwd, worktree, keepId) {
 // pinned to `worktree`). Returns the task object, or null if none / no CLI.
 function findHandoffTask(cwd, worktree) {
   const tasks = agentDispatchJson(
-    ["list", "--status", "proposed", "--label", "handoff"],
+    ["list", "--status", "proposed,queued", "--label", "handoff"],
     cwd,
   );
   if (!Array.isArray(tasks)) return null;
@@ -642,13 +709,17 @@ function retireAfterConsume(cwd, metadata, sid, handoffToken) {
   return result;
 }
 
-function consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete = false) {
+function consumeDispatchHandoffTask(
+  cwd, taskId, sid, deferComplete = false, { deferRetire = false } = {},
+) {
   const before = decodeHandoffPayload(readTaskPayloadRaw(cwd, taskId));
   try {
     const consumed = runAgentDispatchConsume(cwd, taskId, deferComplete);
     const decoded = decodeHandoffPayload(consumed);
     const metadata = decoded.metadata || before.metadata || {};
-    const retire = retireAfterConsume(cwd, metadata, sid, taskId);
+    const retire = deferRetire
+      ? { retired: false, retireResult: null, concluded: false }
+      : retireAfterConsume(cwd, metadata, sid, taskId);
     return {
       ok: true,
       id: taskId,
@@ -670,32 +741,169 @@ function consumeDispatchHandoffTask(cwd, taskId, sid, deferComplete = false) {
   }
 }
 
-function consumeFileHandoff(cwd, sid, handoffId, explicitPath = null) {
+function consumeFileHandoff(
+  cwd, sid, handoffId, explicitPath = null, { deferRetire = false } = {},
+) {
   const found = readFileHandoff(cwd, sid, handoffId, explicitPath);
   if (!found) {
     return { ok: false, message: "File-backed handoff was not found." };
   }
-  const { path, record } = found;
-  if (record.consumed) {
-    return {
-      ok: false,
-      alreadyConsumed: true,
-      id: record.id,
-      message:
-        `Handoff ${record.id || path} was already consumed at ` +
-        `${record.consumedAt || "an unknown time"}. Do not replay it.`,
-    };
+  const { path } = found;
+  const lockPath = `${path}.consume.lock`;
+  let lockFd = null;
+  for (let attempt = 0; attempt < 2 && lockFd === null; attempt++) {
+    try {
+      lockFd = openSync(lockPath, "wx");
+      writeFileSync(lockFd, JSON.stringify({
+        pid: process.pid, sessionId: sid || null, createdAt: new Date().toISOString(),
+      }), "utf-8");
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        if (lockFd !== null) {
+          try { closeSync(lockFd); } catch { /* best-effort */ }
+          lockFd = null;
+        }
+        try { unlinkSync(lockPath); } catch { /* nothing to clean */ }
+        return {
+          ok: false,
+          message: `Could not lock file-backed handoff for consumption: ${error.message}`,
+        };
+      }
+      let ownerPid = null;
+      let lockAgeMs = 0;
+      try {
+        ownerPid = JSON.parse(readFileSync(lockPath, "utf-8")).pid;
+      } catch { /* incomplete lock from a crashed writer */ }
+      try {
+        lockAgeMs = Date.now() - statSync(lockPath).mtimeMs;
+      } catch { /* lock vanished or cannot be inspected */ }
+      let ownerAlive = false;
+      if (Number.isInteger(ownerPid) && ownerPid > 0) {
+        ownerAlive = processAlive(ownerPid);
+      }
+      const safeToReclaim = Number.isInteger(ownerPid)
+        ? !ownerAlive
+        : lockAgeMs >= 30_000;
+      if (safeToReclaim && attempt === 0) {
+        const recoveryPath = `${lockPath}.recover`;
+        let recoveryFd = null;
+        for (let recoveryAttempt = 0; recoveryAttempt < 2 && recoveryFd === null; recoveryAttempt++) {
+          try {
+            recoveryFd = openSync(recoveryPath, "wx");
+            writeFileSync(recoveryFd, JSON.stringify({
+              pid: process.pid, createdAt: new Date().toISOString(),
+            }), "utf-8");
+          } catch (recoveryError) {
+            if (recoveryError?.code !== "EEXIST") break;
+            let recoveryPid = null;
+            let recoveryAgeMs = 0;
+            try {
+              recoveryPid = JSON.parse(readFileSync(recoveryPath, "utf-8")).pid;
+            } catch { /* incomplete recovery lock */ }
+            try {
+              recoveryAgeMs = Date.now() - statSync(recoveryPath).mtimeMs;
+            } catch { /* vanished */ }
+            let recoveryAlive = false;
+            if (Number.isInteger(recoveryPid) && recoveryPid > 0) {
+              recoveryAlive = processAlive(recoveryPid);
+            }
+            const recoveryStale = Number.isInteger(recoveryPid)
+              ? !recoveryAlive
+              : recoveryAgeMs >= 30_000;
+            if (recoveryStale && recoveryAttempt === 0) {
+              try { unlinkSync(recoveryPath); } catch { /* raced another recovery */ }
+              continue;
+            }
+            break;
+          }
+        }
+        if (recoveryFd === null) {
+          return {
+            ok: false,
+            message:
+              `Handoff ${found.record.id || path} recovery is already active.`,
+          };
+        }
+        try {
+          let currentPid = null;
+          let currentAgeMs = 0;
+          try {
+            currentPid = JSON.parse(readFileSync(lockPath, "utf-8")).pid;
+          } catch { /* incomplete lock */ }
+          try {
+            currentAgeMs = Date.now() - statSync(lockPath).mtimeMs;
+          } catch { /* already gone */ }
+          let currentAlive = false;
+          if (Number.isInteger(currentPid) && currentPid > 0) {
+            currentAlive = processAlive(currentPid);
+          }
+          const stillStale = Number.isInteger(currentPid)
+            ? !currentAlive
+            : currentAgeMs >= 30_000;
+          if (stillStale) {
+            try { unlinkSync(lockPath); } catch { /* already gone */ }
+          }
+        } finally {
+          try { closeSync(recoveryFd); } catch { /* best-effort */ }
+          try { unlinkSync(recoveryPath); } catch { /* already gone */ }
+        }
+        continue;
+      }
+      return {
+        ok: false,
+        message:
+          `Handoff ${found.record.id || path} is already being consumed. ` +
+          "Do not replay it; retry only after the active consumer finishes.",
+      };
+    }
   }
-  const consumed = markFileHandoffConsumed(path, record, sid);
-  const retire = retireAfterConsume(cwd, consumed, sid, consumed.id);
-  return {
-    ok: true,
-    id: consumed.id,
-    path,
-    payload: String(consumed.promptText || "").trim(),
-    metadata: consumed,
-    retire,
-  };
+  try {
+    const current = readFileHandoff(cwd, sid, handoffId, path);
+    if (!current) {
+      return { ok: false, message: "File-backed handoff disappeared before consumption." };
+    }
+    const { record } = current;
+    if (record.consumed) {
+      if (sid && record.consumedBySession === sid) {
+        const retire = deferRetire
+          ? { retired: false, retireResult: null, concluded: false }
+          : retireAfterConsume(cwd, record, sid, record.id);
+        return {
+          ok: true,
+          id: record.id,
+          path,
+          payload: String(record.promptText || "").trim(),
+          metadata: record,
+          retire,
+        };
+      }
+      return {
+        ok: false,
+        alreadyConsumed: true,
+        id: record.id,
+        message:
+          `Handoff ${record.id || path} was already consumed at ` +
+          `${record.consumedAt || "an unknown time"}. Do not replay it.`,
+      };
+    }
+    const consumed = markFileHandoffConsumed(path, record, sid);
+    const retire = deferRetire
+      ? { retired: false, retireResult: null, concluded: false }
+      : retireAfterConsume(cwd, consumed, sid, consumed.id);
+    return {
+      ok: true,
+      id: consumed.id,
+      path,
+      payload: String(consumed.promptText || "").trim(),
+      metadata: consumed,
+      retire,
+    };
+  } finally {
+    if (lockFd !== null) {
+      try { closeSync(lockFd); } catch { /* best-effort */ }
+    }
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
+  }
 }
 
 function formatConsumeResult(result, { deferComplete = false } = {}) {
@@ -751,7 +959,10 @@ function findHandoffFile(cwd, sid) {
     let mtime;
     try {
       record = JSON.parse(readFileSync(path, "utf-8"));
-      if (record.consumed) continue;
+      if (
+        record.consumed
+        && (!sid || record.consumedBySession !== sid)
+      ) continue;
       mtime = statSync(path).mtimeMs;
     } catch {
       continue;
@@ -1061,6 +1272,7 @@ const session = await joinSession({
               worktree: stored?.metadata?.worktree,
               worktreeDir: stored?.metadata?.worktreeDir,
               sessionId: sid,
+              muxSession: stored?.metadata?.muxSession,
             });
             // Mirror the handoff into the worktree record (record-first recovery).
             noteHandoffInRecord(cwd, sid, taskId, title);
@@ -1084,15 +1296,20 @@ const session = await joinSession({
 
         if (!seed) {
           const fileStored = saveFileHandoff(text, sid, cwd, title);
-          if (!fileStored) {
+          if (!fileStored?.path) {
             return (
               "Cannot save handoff: no agent-dispatch coordinator was reachable " +
-              "and no agent-worktrees worktree state directory could be resolved. " +
-              "Nothing was written."
+              "and the file fallback resolver failed. Nothing was written. " +
+              (fileStored?.error || "No safe machine-local state directory resolved.")
             );
           }
-          seed = buildCutoverSeed("file", fileStored.id, lead, { retry: false });
-          cutoverSeed = buildCutoverSeed("file", fileStored.id, lead);
+          seed = buildCutoverSeed("file", fileStored.id, lead, {
+            retry: false,
+            path: fileStored.path,
+          });
+          cutoverSeed = buildCutoverSeed("file", fileStored.id, lead, {
+            path: fileStored.path,
+          });
           // Mirror the handoff into the worktree record (record-first recovery).
           noteHandoffInRecord(cwd, sid, fileStored.id, title);
           storedMsg = (
@@ -1290,6 +1507,7 @@ const session = await joinSession({
         // EXACT cutover seed via the shared builder -- no regeneration.
         let kind = null;
         let id = null;
+        let filePath = null;
         let lead = leadFrom("");
         const wtDir = agentWorktreesGet("worktree-dir", cwd, sid);
         const worktree = wtDir ? basename(wtDir) : null;
@@ -1306,6 +1524,7 @@ const session = await joinSession({
           if (file?.record?.id) {
             kind = "file";
             id = file.record.id;
+            filePath = file.path;
             lead = leadFrom(file.record.title || "");
           }
         }
@@ -1327,8 +1546,9 @@ const session = await joinSession({
                 worktree,
                 worktreeDir: wtDir,
                 sessionId: sid,
+                muxSession: currentMuxSession(),
               }
-            : {},
+            : { path: filePath },
         );
         const result = runHandoffCutover(cwd, seed, sid);
         if (!result || !result.ok) {
@@ -1427,20 +1647,44 @@ const session = await joinSession({
           if (worktree) {
             const task = findHandoffTask(cwd, worktree);
             if (task) {
-              const consumed = consumeDispatchHandoffTask(cwd, task.id, sid, false);
-              const body = consumed?.payload || task.prompt || "";
-              if (consumed?.ok && body) {
+              const consumed = consumeDispatchHandoffTask(
+                cwd, task.id, sid, true, { deferRetire: true },
+              );
+              const body = consumed?.payload || "";
+              if (!consumed?.ok || !body) {
+                await session.log(
+                  `Found handoff task ${task.id.slice(0, 8)} but could not claim ` +
+                    "and load it. Nothing was injected or retired.",
+                  { level: "warning" },
+                );
+                return;
+              }
+              try {
                 await session.send({
                   prompt: buildResumePrompt(body, "agent-dispatch task"),
                   displayPrompt: `Resuming handoff ${task.id.slice(0, 8)} from agent-dispatch`,
                 });
+              } catch (error) {
+                try {
+                  runCli("agent-dispatch", [
+                    "yield", task.id, "--note",
+                    "handoff prompt injection failed; returning baton for retry",
+                  ], { cwd, timeout: 15000 });
+                } catch { /* task remains visibly held for recovery */ }
+                await session.log(
+                  `Claimed handoff task ${task.id.slice(0, 8)}, but prompt ` +
+                    "injection failed. The predecessor was not retired; the " +
+                    "baton was returned for retry when possible.",
+                  { level: "warning" },
+                );
                 return;
               }
-              await session.log(
-                `Found handoff task ${task.id.slice(0, 8)} but could not consume it ` +
-                  `(it may have been claimed by another session). Nothing injected.`,
-                { level: "warning" },
-              );
+              try {
+                runCli("agent-dispatch", ["complete", task.id], {
+                  cwd, timeout: 15000,
+                });
+              } catch { /* payload was delivered; task cleanup is recoverable */ }
+              retireAfterConsume(cwd, consumed.metadata, sid, task.id);
               return;
             }
           }
@@ -1449,7 +1693,9 @@ const session = await joinSession({
         // Fallback: the newest worktree-state handoff file for this worktree.
         const file = findHandoffFile(cwd, sid);
         if (file) {
-          const consumed = consumeFileHandoff(cwd, sid, file.record.id, file.path);
+          const consumed = consumeFileHandoff(
+            cwd, sid, file.record.id, file.path, { deferRetire: true },
+          );
           if (!consumed?.ok) {
             await session.log(
               consumed?.message || "Found a handoff file but could not consume it.",
@@ -1461,6 +1707,7 @@ const session = await joinSession({
             prompt: buildResumePrompt(consumed.payload, `file ${file.path}`),
             displayPrompt: `Resuming handoff ${consumed.id || basename(file.path)}`,
           });
+          retireAfterConsume(cwd, consumed.metadata, sid, consumed.id);
           return;
         }
 

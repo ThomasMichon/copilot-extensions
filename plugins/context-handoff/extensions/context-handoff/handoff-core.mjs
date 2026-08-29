@@ -18,6 +18,7 @@
 
 import {
   writeFileSync, readFileSync, existsSync, mkdirSync, renameSync, unlinkSync,
+  openSync, closeSync, statSync,
 } from "node:fs";
 import { join, basename } from "node:path";
 import { execSync, execFileSync } from "node:child_process";
@@ -61,16 +62,36 @@ export function agentDispatchAvailable() {
 // passed binding-first so a bare-resumed session (cwd=HOME) still resolves its
 // worktree from the session->worktree binding rather than the HOME cwd.
 export function agentWorktreesGet(key, cwd, sessionId, execute = runCli) {
+  return agentWorktreesGetResult(key, cwd, sessionId, execute).value;
+}
+
+export function agentWorktreesGetResult(
+  key, cwd, sessionId, execute = runCli,
+) {
+  const argv = ["get", key];
+  if (sessionId) argv.push("--session-id", sessionId);
   try {
-    const argv = ["get", key];
-    if (sessionId) argv.push("--session-id", sessionId);
     const out = execute("agent-worktrees", argv, {
       cwd,
       timeout: AGENT_WORKTREES_QUERY_TIMEOUT_MS,
     }).trim();
-    return out || null;
-  } catch {
-    return null;
+    if (out) return { value: out, error: null };
+    return {
+      value: null,
+      error:
+        `agent-worktrees get ${key} returned an empty result for cwd ` +
+        `${cwd || process.cwd()}${sessionId ? ` and session ${sessionId}` : ""}`,
+    };
+  } catch (error) {
+    const detail = (
+      error?.stderr || error?.stdout || error?.message || String(error)
+    ).toString().trim();
+    return {
+      value: null,
+      error:
+        `agent-worktrees get ${key} failed` +
+        (detail ? `: ${detail}` : ""),
+    };
   }
 }
 
@@ -82,6 +103,28 @@ export function safePathSegment(value) {
 
 export function currentPaneId() {
   return process.env.TMUX_PANE || process.env.PSMUX_PANE || null;
+}
+
+export function currentMuxSession(pane = currentPaneId(), execute = runCli) {
+  if (!pane) return null;
+  try {
+    return execute(
+      process.platform === "win32" ? "psmux" : "tmux",
+      ["display-message", "-p", "-t", pane, "#{session_name}"],
+      { timeout: 5000 },
+    ).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
 }
 
 export function worktreeInfo(cwd, sid) {
@@ -106,6 +149,7 @@ export function makeHandoffMetadata({ sid, cwd, title, storage, taskId = null })
     worktree,
     worktreeDir: wtDir,
     oldPane: currentPaneId(),
+    muxSession: currentMuxSession(),
     stateDir,
     createdAt: new Date().toISOString(),
   };
@@ -142,19 +186,43 @@ export function handoffDirFor(cwd, sid, get = agentWorktreesGet) {
 
 export function writeJsonAtomic(path, value) {
   const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, JSON.stringify(value, null, 2), "utf-8");
+    renameSync(tmp, path);
+  } finally {
+    try { unlinkSync(tmp); } catch { /* renamed or never created */ }
+  }
 }
 
 // --- file-backed store ----------------------------------------------------
 export function saveFileHandoff(promptText, sid, cwd, title) {
   const metadata = makeHandoffMetadata({ sid, cwd, title, storage: "file" });
   const dir = metadata.stateDir ? join(metadata.stateDir, "handoff") : null;
-  if (!dir) return null;
-  mkdirSync(dir, { recursive: true });
+  if (!dir) {
+    const resolution = agentWorktreesGetResult(
+      "worktree-state-dir", cwd, sid,
+    );
+    return {
+      error:
+        `${resolution.error}. Run \`agent-worktrees get worktree-state-dir ` +
+        `${sid ? `--session-id ${safePathSegment(sid)}` : ""}\` from the ` +
+        "intended adopted checkout and verify it reports a machine-local path.",
+    };
+  }
   const path = join(dir, `${metadata.id}.json`);
-  writeJsonAtomic(path, { ...metadata, consumed: false, consumedAt: null, promptText });
-  return { path, id: metadata.id, metadata };
+  try {
+    mkdirSync(dir, { recursive: true });
+    writeJsonAtomic(path, {
+        ...metadata, consumed: false, consumedAt: null, promptText,
+    });
+    return { path, id: metadata.id, metadata };
+  } catch (error) {
+    return {
+        error:
+          `resolved handoff state directory ${dir}, but the atomic write failed: ` +
+          `${error?.message || String(error)}`,
+    };
+  }
 }
 
 export function readFileHandoff(cwd, sid, handoffId, explicitPath = null) {
@@ -179,6 +247,158 @@ export function markFileHandoffConsumed(path, record, sid) {
   };
   writeJsonAtomic(path, consumed);
   return consumed;
+}
+
+export function consumeFileHandoffOnce(
+  cwd, sid, handoffId, explicitPath = null,
+) {
+  const found = readFileHandoff(cwd, sid, handoffId, explicitPath);
+  if (!found) {
+    return { ok: false, message: "File-backed handoff was not found." };
+  }
+  const lockPath = `${found.path}.consume.lock`;
+  let lockFd = null;
+  for (let attempt = 0; attempt < 2 && lockFd === null; attempt++) {
+    try {
+      lockFd = openSync(lockPath, "wx");
+      writeFileSync(lockFd, JSON.stringify({
+        pid: process.pid, sessionId: sid || null, createdAt: new Date().toISOString(),
+      }), "utf-8");
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        if (lockFd !== null) {
+          try { closeSync(lockFd); } catch { /* best-effort */ }
+          lockFd = null;
+        }
+        try { unlinkSync(lockPath); } catch { /* nothing to clean */ }
+        return {
+          ok: false,
+          message: `Could not lock file-backed handoff for consumption: ${error.message}`,
+        };
+      }
+      let ownerPid = null;
+      let lockAgeMs = 0;
+      try {
+        ownerPid = JSON.parse(readFileSync(lockPath, "utf-8")).pid;
+      } catch { /* incomplete lock from a crashed writer */ }
+      try {
+        lockAgeMs = Date.now() - statSync(lockPath).mtimeMs;
+      } catch { /* lock vanished or cannot be inspected */ }
+      let ownerAlive = false;
+      if (Number.isInteger(ownerPid) && ownerPid > 0) {
+        ownerAlive = processAlive(ownerPid);
+      }
+      const safeToReclaim = Number.isInteger(ownerPid)
+        ? !ownerAlive
+        : lockAgeMs >= 30_000;
+      if (safeToReclaim && attempt === 0) {
+        const recoveryPath = `${lockPath}.recover`;
+        let recoveryFd = null;
+        for (let recoveryAttempt = 0; recoveryAttempt < 2 && recoveryFd === null; recoveryAttempt++) {
+          try {
+            recoveryFd = openSync(recoveryPath, "wx");
+            writeFileSync(recoveryFd, JSON.stringify({
+              pid: process.pid, createdAt: new Date().toISOString(),
+            }), "utf-8");
+          } catch (recoveryError) {
+            if (recoveryError?.code !== "EEXIST") break;
+            let recoveryPid = null;
+            let recoveryAgeMs = 0;
+            try {
+              recoveryPid = JSON.parse(readFileSync(recoveryPath, "utf-8")).pid;
+            } catch { /* incomplete recovery lock */ }
+            try {
+              recoveryAgeMs = Date.now() - statSync(recoveryPath).mtimeMs;
+            } catch { /* vanished */ }
+            let recoveryAlive = false;
+            if (Number.isInteger(recoveryPid) && recoveryPid > 0) {
+              recoveryAlive = processAlive(recoveryPid);
+            }
+            const recoveryStale = Number.isInteger(recoveryPid)
+              ? !recoveryAlive
+              : recoveryAgeMs >= 30_000;
+            if (recoveryStale && recoveryAttempt === 0) {
+              try { unlinkSync(recoveryPath); } catch { /* raced another recovery */ }
+              continue;
+            }
+            break;
+          }
+        }
+        if (recoveryFd === null) {
+          return {
+            ok: false,
+            busy: true,
+            message:
+              `Handoff ${found.record.id || found.path} recovery is already active.`,
+          };
+        }
+        try {
+          let currentPid = null;
+          let currentAgeMs = 0;
+          try {
+            currentPid = JSON.parse(readFileSync(lockPath, "utf-8")).pid;
+          } catch { /* incomplete lock */ }
+          try {
+            currentAgeMs = Date.now() - statSync(lockPath).mtimeMs;
+          } catch { /* already gone */ }
+          let currentAlive = false;
+          if (Number.isInteger(currentPid) && currentPid > 0) {
+            currentAlive = processAlive(currentPid);
+          }
+          const stillStale = Number.isInteger(currentPid)
+            ? !currentAlive
+            : currentAgeMs >= 30_000;
+          if (stillStale) {
+            try { unlinkSync(lockPath); } catch { /* already gone */ }
+          }
+        } finally {
+          try { closeSync(recoveryFd); } catch { /* best-effort */ }
+          try { unlinkSync(recoveryPath); } catch { /* already gone */ }
+        }
+        continue;
+      }
+      return {
+        ok: false,
+        busy: true,
+        message:
+          `Handoff ${found.record.id || found.path} is already being consumed. ` +
+          "Do not replay it; retry only after the active consumer finishes.",
+      };
+    }
+  }
+  try {
+    const current = readFileHandoff(cwd, sid, handoffId, found.path);
+    if (!current) {
+      return { ok: false, message: "File-backed handoff disappeared before consumption." };
+    }
+    if (current.record.consumed) {
+      if (sid && current.record.consumedBySession === sid) {
+        return {
+          ok: true,
+          resumedDelivery: true,
+          path: current.path,
+          record: current.record,
+        };
+      }
+      return {
+        ok: false,
+        alreadyConsumed: true,
+        id: current.record.id,
+        message:
+          `Handoff ${current.record.id || current.path} was already consumed at ` +
+          `${current.record.consumedAt || "an unknown time"}. Do not replay it.`,
+      };
+    }
+    const record = markFileHandoffConsumed(
+      current.path, current.record, sid,
+    );
+    return { ok: true, path: current.path, record };
+  } finally {
+    if (lockFd !== null) {
+      try { closeSync(lockFd); } catch { /* best-effort */ }
+    }
+    try { unlinkSync(lockPath); } catch { /* already gone */ }
+  }
 }
 
 // --- agent-dispatch task store --------------------------------------------
@@ -277,7 +497,7 @@ export function runHandoffCutover(cwd, seed, sessionId) {
 // coordinator is reachable, else a one-time worktree-state file. Mirrors the
 // extension's save_handoff_prompt store selection. Returns:
 //   { storage: "agent-dispatch"|"file", id, taskId?, path?, metadata }
-// or null when neither store could be written (no resolvable worktree).
+// On failure returns a storage:null result with the resolver/write diagnostic.
 export function storeHandoff({ promptText, sid, cwd, title, preferTask = true }) {
   if (preferTask && agentDispatchAvailable()) {
     const task = dispatchHandoff(promptText, sid, cwd, title);
@@ -287,7 +507,9 @@ export function storeHandoff({ promptText, sid, cwd, title, preferTask = true })
     }
   }
   const file = saveFileHandoff(promptText, sid, cwd, title);
-  if (!file) return null;
+  if (!file?.path) {
+    return { storage: null, id: null, metadata: null, error: file?.error || "unknown file-store failure" };
+  }
   noteHandoffInRecord(cwd, sid, file.id, title);
   return { storage: "file", id: file.id, path: file.path, metadata: file.metadata };
 }
@@ -305,6 +527,8 @@ export function buildSeedForStored(stored, { retry = true } = {}) {
     worktree: md.worktree || null,
     worktreeDir: md.worktreeDir || null,
     sessionId: md.sessionId || null,
+    path: stored.path || null,
+    muxSession: md.muxSession || null,
   });
 }
 
@@ -313,7 +537,14 @@ export function buildSeedForStored(stored, { retry = true } = {}) {
 // Returns { stored, seed, pastePrompt, cutover? }.
 export function saveAndCutover({ promptText, sid, cwd, title, preferTask = true, cutover = true }) {
   const stored = storeHandoff({ promptText, sid, cwd, title, preferTask });
-  if (!stored) return { stored: null, seed: null, pastePrompt: null };
+  if (!stored?.storage) {
+    return {
+      stored: null,
+      seed: null,
+      pastePrompt: null,
+      error: stored?.error || "No safe handoff store resolved.",
+    };
+  }
   const seed = buildSeedForStored(stored, { retry: true });
   const pastePrompt = buildSeedForStored(stored, { retry: false });
   const result = { stored, seed, pastePrompt };

@@ -368,6 +368,26 @@ def test_get_worktree_dir_empty_at_anchor(adopted_repo, active_myproj, monkeypat
     assert out == ""
 
 
+def test_get_worktree_state_dir_uses_machine_local_anchor_scope(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    """An adopted anchor gets stable machine-local state without becoming a
+    linked worktree or writing continuity artifacts into the checkout."""
+    anchor, _wt_root, _wt_path, _wt_id, _conf = adopted_repo
+    project_dir = tmp_path / "machine-state" / "myproj"
+    monkeypatch.setattr(cfg, "project_dir", lambda *a, **k: project_dir)
+    monkeypatch.chdir(anchor)
+
+    rc = m.cmd_get(types.SimpleNamespace(
+        key="worktree-state-dir", session_id=None,
+    ))
+    out = capsys.readouterr().out.strip()
+
+    assert rc == 0
+    assert Path(out) == project_dir / "worktrees" / "@anchor"
+    assert not Path(out).is_relative_to(anchor)
+
+
 def test_get_worktree_dir_empty_outside_repo(adopted_repo, active_myproj, monkeypatch, tmp_path, capsys):
     """Outside any managed repo/worktree `get worktree-dir` is empty."""
     outside = tmp_path / "outside"
@@ -377,6 +397,19 @@ def test_get_worktree_dir_empty_outside_repo(adopted_repo, active_myproj, monkey
     out = capsys.readouterr().out.strip()
     assert rc == 0
     assert out == ""
+
+
+def test_get_worktree_state_dir_empty_outside_repo(
+    adopted_repo, active_myproj, monkeypatch, tmp_path, capsys,
+):
+    outside = tmp_path / "outside-state"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+    rc = m.cmd_get(types.SimpleNamespace(
+        key="worktree-state-dir", session_id=None,
+    ))
+    assert rc == 0
+    assert capsys.readouterr().out.strip() == ""
 
 
 def test_get_worktree_dir_binding_first_from_session(
