@@ -64,7 +64,8 @@ _MACHINE_CORES = {
     "premiumLinux": 8,
     "largePremiumLinux": 16,
     "xLargePremiumLinux": 32,
-    "largePremiumLinux256gb": 32,
+    "largePremiumLinux256gb": 16,
+    "xLargePremiumLinux256gb": 32,
 }
 
 _CORE_RE = re.compile(r"(\d+)\s*[-\s]?core", re.IGNORECASE)
