@@ -267,6 +267,91 @@ def test_daemon_merges_store_and_declared_sources():
     assert set(summary.started) == {"store-lane", "declared:local:general"}
 
 
+def test_equivalent_declaration_supersedes_direct_registration():
+    launcher = FakeLauncher()
+    decl = _decl("general", labels=["general"])
+    declared = declaration_to_registration(decl, machine="host-a")
+    direct_spec = {
+        key: value
+        for key, value in declared["spec"].items()
+        if key not in {
+            "heartbeat",
+            "reactive",
+            "reactive_interval",
+            "headless_agent",
+        }
+    }
+    direct = {
+        **declared,
+        "id": "general",
+        "spec": direct_spec,
+        "source": "direct",
+    }
+    daemon = SupervisorDaemon(
+        FakeClient([direct]), "host-a", launcher=launcher, clock=Clock(),
+        declared_source=lambda: [decl],
+    )
+
+    summary = daemon.reconcile_once()
+
+    assert summary.started == ["declared:local:general"]
+    assert summary.deduplicated == ["general"]
+    assert summary.conflicts == []
+    assert summary.running == ["declared:local:general"]
+
+
+def test_equivalent_direct_registration_migrates_reversibly():
+    launcher = FakeLauncher()
+    decl = _decl("general", labels=["general"])
+    declared = declaration_to_registration(decl, machine="host-a")
+    direct = {**declared, "id": "general", "source": "direct"}
+    declarations: list = []
+    daemon = SupervisorDaemon(
+        FakeClient([direct]), "host-a", launcher=launcher, clock=Clock(),
+        declared_source=lambda: declarations,
+    )
+    assert daemon.reconcile_once().started == ["general"]
+
+    declarations.append(decl)
+    migrated = daemon.reconcile_once()
+    assert migrated.stopped == ["general"]
+    assert migrated.started == ["declared:local:general"]
+    assert migrated.running == ["declared:local:general"]
+
+    declarations.clear()
+    restored = daemon.reconcile_once()
+    assert restored.stopped == ["declared:local:general"]
+    assert restored.started == ["general"]
+    assert restored.running == ["general"]
+
+
+def test_conflicting_direct_and_declared_specs_are_preserved_with_diagnostic(caplog):
+    launcher = FakeLauncher()
+    decl = _decl("general", concurrency=2)
+    declared = declaration_to_registration(decl, machine="host-a")
+    direct = {
+        **declared,
+        "id": "general",
+        "logical_id": "general",
+        "spec": {**declared["spec"], "max_concurrent": 1},
+        "source": "direct",
+    }
+    daemon = SupervisorDaemon(
+        FakeClient([direct]), "host-a", launcher=launcher, clock=Clock(),
+        declared_source=lambda: [decl],
+    )
+
+    with caplog.at_level("WARNING", logger="agent-dispatch.supervisor-daemon"):
+        summary = daemon.reconcile_once()
+
+    assert set(summary.started) == {"general", "declared:local:general"}
+    assert summary.deduplicated == []
+    assert summary.conflicts == [
+        "general <> declared:local:general (logical unit 'general'; specs differ)"
+    ]
+    assert "preserving both" in caplog.text
+
+
 def test_daemon_without_declared_source_is_store_only():
     launcher = FakeLauncher()
     daemon = SupervisorDaemon(FakeClient([]), "host-a", launcher=launcher, clock=Clock())

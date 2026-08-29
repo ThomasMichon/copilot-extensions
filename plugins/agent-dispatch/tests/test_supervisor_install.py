@@ -395,11 +395,21 @@ class TestWindowsSupervisorInstall:
         by killing the detached daemon and restarting the task onto the new slot."""
         text = _ps1_text()
         assert "function Restart-SupervisorTaskInPlace" in text
-        # The in-place refresh cycles the daemon: kill the conhost-detached process
-        # (#3602), then restart the existing task.
+        # The install pass retires every detached generation once, then restarts
+        # each existing task without killing sibling profiles mid-reconcile.
+        assert "function Retire-SupervisorProcesses" in text
+        install_idx = text.index("function Install-SupervisorTask {")
+        install_body = text[install_idx : text.index("\n}\n", install_idx)]
+        assert install_body.index("Invoke-SupervisorsStop") < install_body.index(
+            "Retire-SupervisorProcesses"
+        )
+        assert install_body.index("Retire-SupervisorProcesses") < install_body.index(
+            "Install-SupervisorTaskInstance"
+        )
         idx = text.index("function Restart-SupervisorTaskInPlace")
         body = text[idx : text.index("\nfunction ", idx + 1)]
-        assert "Stop-DispatchProcess -Subcommand supervise" in body
+        assert "Stop-DispatchProcess -Subcommand supervise" not in body
+        assert "Retire-SupervisorProcesses" not in body
         assert "Start-ScheduledTask -TaskName $Name" in body
         # Install-SupervisorTaskInstance short-circuits to the in-place restart when
         # non-elevated and the task already exists (never re-registering on update).
@@ -410,3 +420,33 @@ class TestWindowsSupervisorInstall:
             "not attempt a re-registration that needs elevation"
         )
         assert "Restart-SupervisorTaskInPlace -Name $Name" in instbody
+
+    def test_interactive_update_retires_wrapper_master_and_children_once(self):
+        text = _ps1_text()
+        helper = text[
+            text.index("function Retire-SupervisorProcesses") :
+            text.index("\nfunction ", text.index("function Retire-SupervisorProcesses") + 1)
+        ]
+        assert "_retire-supervisors --install-dir $InstallDir" in helper
+        assert "result.retired" in helper
+
+        interactive = text[
+            text.index("function Install-SupervisorLogonAutostart") :
+            text.index("\nfunction ", text.index("function Install-SupervisorLogonAutostart") + 1)
+        ]
+        assert "Stop-DispatchProcess -Subcommand supervise" not in interactive
+        assert "Retire-SupervisorProcesses" not in interactive
+
+    def test_retirement_uses_current_marker_and_complete_native_fallback(self):
+        text = _ps1_text()
+        helper = text[
+            text.index("function Retire-SupervisorProcesses") :
+            text.index("\nfunction Confirm-CoordinatorRunning")
+        ]
+        assert "current-version" in helper
+        assert "function Retire-SupervisorProcessesFallback" in helper
+        assert "Get-CimInstance Win32_Process" in helper
+        assert "Stop-Process -Id $pid" in helper
+        assert "$isSupersededProducer" in helper
+        assert "$currentPython" in helper
+        assert "$isSupervisor = $underRoot -and (" in helper

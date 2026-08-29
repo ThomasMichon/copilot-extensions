@@ -205,6 +205,13 @@ set against the registry on every tick.
   or paused (`terminate` its subprocess); **revive** one whose subprocess crashed,
   gated by a restart backoff and bounded by `max_restarts` (a crash-looping unit
   is left stopped and surfaced, never retried forever).
+- **Migrate direct registrations into declarations without double-running.** When
+  a repo declaration and a store-backed direct registration have the same
+  effective `kind`+`spec`, the declaration is the one live child and the direct
+  row stays dormant. Removing the declaration restores the direct row, making
+  migration reversible. If the two entries share a logical id but their specs
+  differ, both remain live and the daemon emits an explicit conflict diagnostic;
+  it never silently chooses one of two distinct intents.
 - **Isolation.** Each unit is its own child, so one busy or failing unit never
   blocks its siblings or the master.
 - **Kinds.** Every registration kind is a runtime the daemon drives in its own
@@ -657,6 +664,14 @@ whether each supervisor is active/enabled or inert because labels are absent. A
 WSL guest or client-only host (`--no-service`) installs none and removes stale
 supervisors; `--no-supervisor` opts a full host out of all supervisors while
 leaving the coordinator installed.
+
+On Windows, `install`/`update` stops the service-manager roots and inventories
+the detached process tree before starting the current launchers. It retires
+every prior `conhost`/PowerShell wrapper, supervisor master or direct loop,
+registrar child (lane, evaluator, schedule, emitter), and descendant across all
+installed runtime slots. The retirement runs once before the primary/profile
+reconcile, so an old generation cannot keep producing after a version update and
+starting one profile cannot tear down a sibling started moments earlier.
 
 Example multi-label supervisor profile (`~/.agent-dispatch/supervisors/review.env`):
 

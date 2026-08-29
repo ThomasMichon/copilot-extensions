@@ -675,6 +675,22 @@ def _resolve_bind_host_resilient(
     raise last_err  # type: ignore[misc]  # loop ran >=1 time, so last_err is set
 
 
+def _cmd_retire_supervisors(args: argparse.Namespace) -> int:
+    """Internal Windows installer seam: retire every supervisor generation."""
+
+    from .supervisor_processes import retire_windows_supervisor_generations
+
+    result = retire_windows_supervisor_generations(args.install_dir)
+    payload = {
+        "ok": result.ok,
+        "selected": result.selected,
+        "retired": result.retired,
+        "errors": result.errors,
+    }
+    _emit(payload)
+    return 0 if result.ok else 1
+
+
 def _cmd_create(args: argparse.Namespace) -> int:
     repo = _scope_repo(args)
     if not repo:
@@ -3353,6 +3369,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--recover", action="store_true")
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=_cmd_cutover)
+
+    # Internal Windows service-generation retirement seam (installer-driven).
+    p = sub.add_parser("_retire-supervisors", help=argparse.SUPPRESS)
+    p.add_argument("--install-dir", required=True)
+    p.set_defaults(func=_cmd_retire_supervisors)
 
     create_parent = _create_args_parent()
     p = sub.add_parser(
