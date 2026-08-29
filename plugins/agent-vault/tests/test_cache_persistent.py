@@ -67,6 +67,17 @@ def test_put_get_roundtrip(enabled_cache):
     assert PersistentCache().get("Aperture/HA", "password") == "portal-gun"
 
 
+def test_get_rejects_non_object_record(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    monkeypatch.setattr(
+        persistent,
+        "_read_store",
+        lambda: {"v": 1, "entries": {"A/x": {"password": "legacy"}}},
+    )
+
+    assert persistent.get("A/x", "password") is None
+
+
 def test_encrypted_on_disk(enabled_cache):
     c = get_cache()
     c.put("Aperture/HA", "password", "portal-gun")
@@ -185,7 +196,7 @@ def test_legacy_read_cannot_overwrite_pending_rotation(
     monkeypatch.setattr(
         cli.config,
         "resolve_context",
-        lambda: SimpleNamespace(group=None),
+        lambda: SimpleNamespace(group=""),
     )
 
     assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 0
@@ -299,13 +310,46 @@ def test_cli_keeps_journal_after_ambiguous_transport(enabled_cache, monkeypatch,
     monkeypatch.setattr(
         cli.config,
         "resolve_context",
-        lambda: SimpleNamespace(group=None),
+        lambda: SimpleNamespace(group=""),
     )
 
     assert cli.cmd_set_password(_Args(entry="A/x", password="new")) == 1
     assert "service unreachable" in capsys.readouterr().err
     assert persistent.get("A/x", "password") is None
     assert persistent.pending_replace("A/x", "password") is not None
+
+
+def test_cli_password_rotation_uses_bounded_rpc_timeouts(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    persistent = get_cache()
+    calls = []
+
+    def send(request, timeout):
+        calls.append((request["action"], timeout))
+        if request["action"] == "get":
+            return {"ok": True, "value": "old", "generation": 1}
+        return {"ok": True, "message": "updated", "generation": 2}
+
+    assert persistent.put("A/x", "password", "old", 1)
+    assert persistent.begin_replace("A/x", "password", "interrupted", 10)
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "_ensure_unlocked_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", send)
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+
+    assert cli.cmd_set_password(_Args(entry="A/x", password="new")) == 0
+    assert capsys.readouterr().out == "updated\n"
+    assert calls == [
+        ("get", cli.PASSWORD_MUTATION_TIMEOUT),
+        ("set-password", cli.PASSWORD_MUTATION_TIMEOUT),
+    ]
 
 
 def test_cli_serializes_concurrent_rotations(enabled_cache, monkeypatch):
@@ -329,7 +373,7 @@ def test_cli_serializes_concurrent_rotations(enabled_cache, monkeypatch):
     monkeypatch.setattr(
         cli.config,
         "resolve_context",
-        lambda: SimpleNamespace(group=None),
+        lambda: SimpleNamespace(group=""),
     )
     first = threading.Thread(
         target=lambda: results.append(

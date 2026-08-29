@@ -238,7 +238,7 @@ class PersistentCache:
         if not self.enabled:
             return None
         rec = self._read_store().get("entries", {}).get(entry, {}).get(field)
-        if rec is None or "rotation" in rec:
+        if not isinstance(rec, dict) or "rotation" in rec:
             return None
         if max_age_seconds is not None:
             cached_epoch = rec.get("cached_at_epoch")

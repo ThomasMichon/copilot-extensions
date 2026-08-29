@@ -30,6 +30,7 @@ def _detect_wsl() -> bool:
 
 
 IS_WSL = _detect_wsl()
+PASSWORD_MUTATION_TIMEOUT = 30.0
 
 
 def _in_ssh_session() -> bool:
@@ -923,7 +924,7 @@ def cmd_set_password(args):
                 "entry": args.entry,
                 "field": "password",
                 "refresh": True,
-            }, timeout=None)
+            }, timeout=PASSWORD_MUTATION_TIMEOUT)
             if (
                 not recovery
                 or not recovery.get("ok")
@@ -960,7 +961,7 @@ def cmd_set_password(args):
             "action": "set-password",
             "entry": args.entry,
             "password": password,
-        }, timeout=None)
+        }, timeout=PASSWORD_MUTATION_TIMEOUT)
         if resp and (resp.get("ok") or resp.get("committed")):
             cache_updated = True
             if persistent.enabled:
@@ -971,7 +972,7 @@ def cmd_set_password(args):
                         "entry": args.entry,
                         "field": "password",
                         "refresh": True,
-                    }, timeout=None)
+                    }, timeout=PASSWORD_MUTATION_TIMEOUT)
                     cache_updated = bool(
                         authoritative
                         and authoritative.get("ok")
