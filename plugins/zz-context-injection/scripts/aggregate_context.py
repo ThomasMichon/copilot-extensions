@@ -255,6 +255,11 @@ def _directory_plugin(
         raw_plugin_root = metadata.get("pluginRoot")
         if isinstance(raw_plugin_root, str) and raw_plugin_root.strip():
             plugin_root = manifest_root / raw_plugin_root
+    try:
+        plugin_root = plugin_root.resolve(strict=True)
+        plugin_root.relative_to(root)
+    except (OSError, ValueError):
+        return None
     entries = manifest.get("plugins")
     if not isinstance(entries, list):
         return None
@@ -263,7 +268,7 @@ def _directory_plugin(
         return None
     try:
         candidate = (plugin_root / matches[0]["source"]).resolve(strict=True)
-        candidate.relative_to(root)
+        candidate.relative_to(plugin_root)
     except (OSError, ValueError):
         return None
     plugin_manifest = _load_json(candidate / "plugin.json")

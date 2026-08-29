@@ -415,6 +415,11 @@ def _directory_marketplace_plugin(
         configured_root = metadata.get("pluginRoot")
         if isinstance(configured_root, str) and configured_root.strip():
             plugin_root = manifest_root / configured_root
+    try:
+        plugin_root = plugin_root.resolve(strict=True)
+        plugin_root.relative_to(root)
+    except (OSError, ValueError):
+        return None
     entries = manifest.get("plugins")
     if not isinstance(entries, list):
         return None
@@ -429,7 +434,7 @@ def _directory_marketplace_plugin(
         return None
     try:
         footprint = (plugin_root / plugin_source).resolve(strict=True)
-        footprint.relative_to(root)
+        footprint.relative_to(plugin_root)
     except (OSError, ValueError):
         return None
     manifest_data = _load_json_optional(footprint / "plugin.json")
@@ -747,7 +752,7 @@ def scan_session_context(
                 "session-context-ordering",
                 f"<plugin:{authority.identity}>",
                 f"`{authority.identity}` is `{authority.role}` but is not "
-                "lexically after every active plugin identity",
+                "lexically after every active plugin name",
             )
         incomplete = [
             entry for entry in known_session_start
