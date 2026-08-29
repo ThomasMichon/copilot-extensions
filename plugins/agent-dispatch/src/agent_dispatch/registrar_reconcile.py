@@ -101,6 +101,7 @@ def declaration_to_registration(
     )
     return {
         "id": declared_registration_id(decl),
+        "logical_id": decl.name,
         "kind": kind,
         "spec": declaration_to_spec(decl),
         "machine": machine,

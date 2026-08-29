@@ -327,7 +327,7 @@ function Invoke-VersionedActivate {
     if ((Test-Path $legacyVenv) -and -not (Test-VenvIsLink $legacyVenv)) {
         Write-Step 'Releasing legacy .venv for versioned migration (stopping coordinator + supervisor)...'
         try { Stop-DispatchProcess -Subcommand serve | Out-Null } catch {}
-        try { Stop-DispatchProcess -Subcommand supervise | Out-Null } catch {}
+        try { Retire-SupervisorProcesses | Out-Null } catch {}
     }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = if (Test-Path $VenvPython) { $VenvPython } else { $LinkPython }
@@ -1133,6 +1133,140 @@ function Stop-DispatchProcess {
     return $killed
 }
 
+function Retire-SupervisorProcesses {
+    <# Retire every Windows supervisor service generation: the conhost/PowerShell
+       wrapper, the singleton master or direct lane, each registrar child
+       (schedule/emitter/evaluator/lane), and descendants.  Scheduled Tasks and
+       HKCU Run do not own these detached trees, so killing only
+       `agent_dispatch supervise` leaves autonomous children from old runtime
+       slots alive after an update.  The freshly-installed runtime provides the
+       pure, unit-tested process classifier; this installer owns when to invoke
+       it. Returns the count retired. #>
+    if ($env:OS -ne 'Windows_NT') { return 0 }
+    $py = $null
+    try {
+        $marker = Join-Path $InstallDir 'current-version'
+        if (Test-Path -LiteralPath $marker) {
+            $current = ([IO.File]::ReadAllText($marker)).Trim()
+            if ($current) {
+                $candidate = Join-Path $InstallDir "versions\$current\Scripts\python.exe"
+                if (Test-Path -LiteralPath $candidate) { $py = $candidate }
+            }
+        }
+    } catch { }
+    if (-not $py -and (Test-Path $VenvPython)) { $py = $VenvPython }
+    if (-not $py -and (Test-Path $LinkPython)) { $py = $LinkPython }
+    if (-not $py) {
+        return (Retire-SupervisorProcessesFallback)
+    }
+    $prevEAP = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $raw = & $py -m agent_dispatch _retire-supervisors --install-dir $InstallDir 2>&1 | Out-String
+    $rc = $LASTEXITCODE
+    $ErrorActionPreference = $prevEAP
+    try {
+        $result = $raw | ConvertFrom-Json
+        $retired = @($result.retired).Count
+        foreach ($message in @($result.errors)) {
+            if ($message) { Write-Warn "Supervisor generation retirement: $message" }
+        }
+        if ($rc -eq 0 -or $retired -gt 0) { return $retired }
+    } catch { }
+    Write-Warn 'Full supervisor generation inventory failed; using native CIM supervisor-tree retirement'
+    return (Retire-SupervisorProcessesFallback)
+}
+
+function Retire-SupervisorProcessesFallback {
+    <# Native fallback when no installed runtime can run the Python classifier.
+       Select only supervise-service wrappers and `agent_dispatch supervise`
+       roots, superseded-slot producers, then their descendants. A standalone
+       producer on the current slot is preserved. #>
+    if ($env:OS -ne 'Windows_NT') { return 0 }
+    try {
+        $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $launcher = [IO.Path]::GetFullPath((Join-Path $InstallDir 'supervise-service.ps1'))
+        $currentPython = $null
+        try {
+            $marker = Join-Path $InstallDir 'current-version'
+            if (Test-Path -LiteralPath $marker) {
+                $current = ([IO.File]::ReadAllText($marker)).Trim()
+                if ($current) {
+                    $currentPython = [IO.Path]::GetFullPath(
+                        (Join-Path $InstallDir "versions\$current\Scripts\python.exe")
+                    )
+                }
+            }
+        } catch { }
+        $selected = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($row in $rows) {
+            $cmd = [string]$row.CommandLine
+            if (-not $cmd) { continue }
+            $isWrapper = $cmd.Replace('"', '').IndexOf(
+                $launcher,
+                [StringComparison]::OrdinalIgnoreCase
+            ) -ge 0
+            $isSupervisor = $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
+            $isSupersededProducer = $false
+            if (
+                $currentPython -and
+                $row.ExecutablePath -and
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve|schedule\s+serve|webhook(?:\s|$))'
+            ) {
+                try {
+                    $exe = [IO.Path]::GetFullPath([string]$row.ExecutablePath)
+                    $underRoot = $exe.StartsWith(
+                        ([IO.Path]::GetFullPath($InstallDir).TrimEnd('\') + '\'),
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                    $isSupersededProducer = $underRoot -and -not $exe.Equals(
+                        $currentPython,
+                        [StringComparison]::OrdinalIgnoreCase
+                    )
+                } catch { }
+            }
+            if ($isWrapper -or $isSupervisor -or $isSupersededProducer) {
+                [void]$selected.Add([int]$row.ProcessId)
+            }
+        }
+        $changed = $true
+        while ($changed) {
+            $changed = $false
+            foreach ($row in $rows) {
+                if (
+                    $selected.Contains([int]$row.ParentProcessId) -and
+                    $selected.Add([int]$row.ProcessId)
+                ) {
+                    $changed = $true
+                }
+            }
+        }
+        $depth = @{}
+        foreach ($pid in $selected) {
+            $value = 0
+            $cursor = $rows | Where-Object ProcessId -eq $pid | Select-Object -First 1
+            $seen = [System.Collections.Generic.HashSet[int]]::new()
+            while ($cursor -and $selected.Contains([int]$cursor.ParentProcessId)) {
+                if (-not $seen.Add([int]$cursor.ParentProcessId)) { break }
+                $value++
+                $cursor = $rows | Where-Object ProcessId -eq $cursor.ParentProcessId | Select-Object -First 1
+            }
+            $depth[$pid] = $value
+        }
+        $killed = 0
+        foreach ($pid in @($selected | Sort-Object { $depth[$_] } -Descending)) {
+            if ($pid -eq $PID) { continue }
+            try {
+                Stop-Process -Id $pid -Force -ErrorAction Stop
+                $killed++
+            } catch { }
+        }
+        return $killed
+    } catch {
+        Write-Warn "Native supervisor generation retirement failed: $_"
+        return (Stop-DispatchProcess -Subcommand supervise)
+    }
+}
+
 function Confirm-CoordinatorRunning {
     # After a start/update, verify a coordinator actually answers AND runs the
     # just-installed build -- catching the "reports success but the old detached
@@ -1725,13 +1859,10 @@ function Install-SupervisorLogonAutostart {
         [Parameter(Mandatory)][string]$EnvFile
     )
     $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`""
-    # Register-once + restart-on-update also applies here (#689): on an update a
-    # supervisor is already running from the old slot, so terminate it first --
-    # else Start-Process spawns a second launcher and the new daemon stands down on
-    # the single-instance lease (leaving the OLD build live). Killing by command
-    # line handles the conhost --headless detachment (#3602).
-    $stopped = Stop-DispatchProcess -Subcommand supervise
-    if ($stopped -gt 0) { Write-Step "Stopped $stopped old supervisor process(es) before restart" }
+    # Install-SupervisorTask retires every prior wrapper/master/child generation
+    # ONCE before reconciling all primary/profile launchers. Do not repeat a
+    # process-wide stop here: doing so would kill siblings started earlier in the
+    # same profile pass.
     try {
         Start-Process -FilePath 'conhost.exe' -ArgumentList $taskArgs -WindowStyle Hidden | Out-Null
     } catch {
@@ -1950,9 +2081,10 @@ function Restart-SupervisorTaskInPlace {
        task DEFINITION never changes across updates -- only the launcher content +
        the active slot do. Re-registering would need elevation; restarting does
        not. The conhost --headless launcher detaches the daemon from the task's
-       tracked tree (#3602), so Stop-ScheduledTask alone won't kill it: terminate
-       the detached `-m agent_dispatch supervise` processes by command line, reset
-       the task, then Start it so the launcher re-runs on the new slot. #>
+       tracked tree. Install-SupervisorTask therefore retires the full
+       detached wrapper/master/child inventory once before it reconciles every
+       primary/profile task; this per-task helper only resets and starts its own
+       registration so sibling profiles are not killed mid-pass. #>
     param(
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)][string]$EnvFile,
@@ -1961,12 +2093,11 @@ function Restart-SupervisorTaskInPlace {
     )
     if ($Mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
         Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
-        $stopped = Stop-DispatchProcess -Subcommand supervise
         Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
         Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-        Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; stopped $stopped old process(es), restarted onto the new build -- no re-register, no elevation)"
+        Write-Ok "$DisplayName refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
     } else {
-        Stop-DispatchProcess -Subcommand supervise | Out-Null
+        Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
         Disable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
         Write-Ok "$DisplayName INERT (no opt-in label; task disabled)"
     }
@@ -2067,6 +2198,15 @@ function Install-SupervisorTask {
     # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
     # host out; -NoService (client-only) skips it too. Remove stale primary and
     # profile tasks in either case so a host that became client-only stops supervising.
+    if ($env:OS -eq 'Windows_NT') {
+        # Stop service-manager roots first so restart-on-failure cannot race the
+        # inventory reap, then retire all detached generations exactly once.
+        Invoke-SupervisorsStop
+        $retired = Retire-SupervisorProcesses
+        if ($retired -gt 0) {
+            Write-Step "Retired $retired prior supervisor wrapper/master/child process(es)"
+        }
+    }
     if ($NoSupervisor -or $NoService) {
         Remove-AllSupervisorTasks
         Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
@@ -2132,14 +2272,12 @@ function Invoke-SupervisorsStart {
 
 function Invoke-SupervisorsStop {
     if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return }
-    if (Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
-    }
-    foreach ($profile in @(Get-SupervisorProfileFiles)) {
-        $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
-        if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
-            Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-        }
+    $tasks = @()
+    $primary = Get-ScheduledTask -TaskName $SupervisorTaskName -ErrorAction SilentlyContinue
+    if ($primary) { $tasks += $primary }
+    $tasks += @(Get-ScheduledTask -TaskName "$SupervisorTaskName-*" -ErrorAction SilentlyContinue)
+    foreach ($task in $tasks) {
+        Stop-ScheduledTask -TaskName $task.TaskName -ErrorAction SilentlyContinue
     }
 }
 
@@ -2284,9 +2422,11 @@ function Invoke-CoordinatorCutover {
        Runs the zdd cutover IN-PROCESS from the freshly-built NEW slot python:
        spawn the new coordinator PASSIVE on a fresh port -> health-gate -> flip the
        routing table -> drain the OLD coordinator at the safe point (between task
-       claims) -> retire it. In-flight work is never killed; the supervisor +
-       spawned workers OUTLIVE the swap and re-adopt the new coordinator via the
-       durable queue DB + routing table (so they are deliberately NOT stopped).
+       claims) -> retire it. In-flight task workers are never killed; they outlive
+       the swap and re-adopt the new coordinator via the durable queue DB +
+       routing table. The supervisor service is reconciled separately after the
+       coordinator cutover so stale wrapper/master/child generations cannot keep
+       autonomous units alive.
        Returns $true when the cutover brought up the new coordinator (so the
        caller skips a normal task-start), $false to fall back to a normal start. #>
     $py = if (Test-Path $VenvPython) { $VenvPython } elseif (Test-Path $LinkPython) { $LinkPython } else { $null }
@@ -2321,11 +2461,12 @@ function Invoke-Update {
     # slot WITHOUT stopping the running daemon; now, if a live coordinator is
     # serving the old slot, stand the new slot up passive, flip the routing table,
     # drain the old coordinator at its safe cutover point (between task claims),
-    # and retire it -- in-process, automatic, no operator step. The supervisor and
-    # spawned workers are deliberately LEFT RUNNING: they outlive the coordinator
-    # swap and re-adopt the new coordinator via the durable SQLite queue DB + the
-    # routing table (they run detached). Falls back to a normal start only when no
-    # live coordinator exists to cut over from, or the cutover cannot run.
+    # and retire it -- in-process, automatic, no operator step. Spawned task
+    # workers outlive the coordinator swap. Install-SupervisorTask then retires
+    # every prior supervisor service generation and starts exactly the configured
+    # current generation, preventing old autonomous emitters/lanes from surviving
+    # a runtime update. Falls back to a normal start only when no live coordinator
+    # exists to cut over from, or the cutover cannot run.
     if (-not $NoService) {
         $didCutover = $false
         if (Test-CoordinatorHealthy) {
@@ -2382,7 +2523,7 @@ function Invoke-Stop {
     # Task AND terminate the detached process -- Stop-ScheduledTask alone leaves the
     # `conhost --headless`-detached python alive (#3602).
     Invoke-SupervisorsStop
-    $killedSup = Stop-DispatchProcess -Subcommand supervise
+    $killedSup = Retire-SupervisorProcesses
     if ($killedSup -gt 0) { Write-Ok "Embody supervisor stopped ($killedSup process(es))" }
 
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -2425,6 +2566,9 @@ function Invoke-Status {
 
 function Invoke-Uninstall {
     Write-Host ''; Write-Host '=== agent-dispatch uninstall ===' -ForegroundColor Cyan; Write-Host ''
+    Invoke-SupervisorsStop
+    $retired = Retire-SupervisorProcesses
+    if ($retired -gt 0) { Write-Ok "Embody supervisor stopped ($retired process(es))" }
     Remove-AllSupervisorTasks
     Write-Ok 'Embody supervisor tasks removed'
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
