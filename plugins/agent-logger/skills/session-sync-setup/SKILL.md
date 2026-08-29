@@ -149,7 +149,7 @@ publication rejects OneDrive replicas and push-only targets until they
 implement the same destination-side compare-and-set contract:
 
 ```
-<agent-logger catalog "session-sync" argv[0]> rescue-push \
+<agent-logger catalog "session-sync" argv prefix> rescue-push \
   --rescue-root <provider-state>/rescues \
   --provider agent-containers \
   --target-prefix container \
