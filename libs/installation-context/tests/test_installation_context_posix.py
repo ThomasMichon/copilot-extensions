@@ -17,7 +17,14 @@ LIB = Path(__file__).resolve().parents[1]
 PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
 FIXTURES = LIB / "fixtures" / "source-identities.json"
-POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+POWERSHELL_HOSTS = list(
+    dict.fromkeys(
+        host
+        for host in (shutil.which("pwsh"), shutil.which("powershell"))
+        if host is not None
+    )
+)
+POWERSHELL = POWERSHELL_HOSTS[0] if POWERSHELL_HOSTS else None
 POWERSHELL_COMMAND = (
     (
         str(POWERSHELL),
@@ -34,6 +41,24 @@ RUNNERS = (
 )
 PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
+EXHAUSTIVE_ADAPTERS = (
+    os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
+)
+POWERSHELL_VECTOR_HOSTS = (
+    POWERSHELL_HOSTS if EXHAUSTIVE_ADAPTERS else POWERSHELL_HOSTS[:1]
+)
+ADAPTER_VECTOR_NAMES = {
+    "github",
+    "git-url-with-username",
+    "percent-encoded-git-url",
+    "git-zero-padded-default-port",
+    "opaque-escapes",
+    "git-expanded-ipv6",
+    "git-backslash",
+    "git-dot-segments",
+    "git-fragment-host-injection",
+    "null-ref",
+}
 
 
 @pytest.mark.parametrize(
@@ -84,6 +109,28 @@ def _load_python_module():
 
 def _vectors() -> list[dict[str, object]]:
     return json.loads(FIXTURES.read_text(encoding="utf-8"))["vectors"]
+
+
+def _adapter_vectors() -> list[dict[str, object]]:
+    if EXHAUSTIVE_ADAPTERS:
+        return _vectors()
+    return [
+        vector
+        for vector in _vectors()
+        if str(vector["name"]) in ADAPTER_VECTOR_NAMES
+    ]
+
+
+def _assert_source_identity(
+    actual: dict[str, object],
+    vector: dict[str, object],
+) -> None:
+    assert actual["kind"] == vector["normalized"]["kind"]
+    assert actual["canonical"] == vector["normalized"]["canonical"]
+    assert actual["ref"] == vector["normalized"]["ref"]
+    assert actual["record"] == vector["record"]
+    assert actual["sha256"] == vector["sha256"]
+    assert actual["marketplaceId"] == vector["marketplaceId"]
 
 
 def _run(
@@ -626,28 +673,15 @@ def test_validate_rejects_generation_above_portable_maximum(
     assert "exceeds the portable signed 64-bit maximum" in result.stderr
 
 
-@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
-def test_source_identity_matches_portable_vectors(
-    runner_name: str,
-    command: tuple[str, ...],
-) -> None:
-    del runner_name
+def test_python_source_identity_matches_portable_vectors() -> None:
+    module = _load_python_module()
     for vector in _vectors():
-        result = _run(
-            command,
-            "source-id",
-            "--source-json",
-            json.dumps(vector["descriptor"], separators=(",", ":")),
-            "--marketplace-key",
-            vector["marketplaceKey"],
+        normalized = module.normalize_source(vector["descriptor"])
+        actual = module.source_identity(
+            normalized,
+            str(vector["marketplaceKey"]),
         )
-        actual = json.loads(result.stdout)
-        assert actual["kind"] == vector["normalized"]["kind"]
-        assert actual["canonical"] == vector["normalized"]["canonical"]
-        assert actual["ref"] == vector["normalized"]["ref"]
-        assert actual["record"] == vector["record"]
-        assert actual["sha256"] == vector["sha256"]
-        assert actual["marketplaceId"] == vector["marketplaceId"]
+        _assert_source_identity(actual, vector)
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
@@ -668,29 +702,49 @@ def test_source_identity_rejects_unused_case_colliding_properties(
     assert result.returncode != 0
 
 
-@pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
-def test_all_implementations_match_the_full_source_vector_corpus() -> None:
-    assert POWERSHELL_COMMAND is not None
-    for vector in _vectors():
-        commands_and_flags = [
-            (POWERSHELL_COMMAND, "-SourceJson", "-MarketplaceKey"),
-            *[
-                (command, "--source-json", "--marketplace-key")
-                for _, command in RUNNERS
-            ],
-        ]
-        outputs = []
-        for command, source_flag, key_flag in commands_and_flags:
-            result = _run(
-                command,
-                "source-id",
-                source_flag,
-                json.dumps(vector["descriptor"], separators=(",", ":")),
-                key_flag,
-                vector["marketplaceKey"],
-            )
-            outputs.append(json.loads(result.stdout))
-        assert outputs[0] == outputs[1] == outputs[2]
+@pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+def test_python_and_posix_match_adapter_source_vectors(
+    runner_name: str,
+    command: tuple[str, ...],
+) -> None:
+    del runner_name
+    vectors = _adapter_vectors()
+    if not EXHAUSTIVE_ADAPTERS:
+        assert {str(vector["name"]) for vector in vectors} == ADAPTER_VECTOR_NAMES
+    for vector in vectors:
+        result = _run(
+            command,
+            "source-id",
+            "--source-json",
+            json.dumps(vector["descriptor"], separators=(",", ":")),
+            "--marketplace-key",
+            vector["marketplaceKey"],
+        )
+        _assert_source_identity(json.loads(result.stdout), vector)
+
+
+@pytest.mark.parametrize("powershell_host", POWERSHELL_VECTOR_HOSTS or [None])
+def test_powershell_matches_adapter_source_vectors(
+    powershell_host: str | None,
+) -> None:
+    if powershell_host is None:
+        pytest.skip("PowerShell is not installed")
+    command = (
+        powershell_host,
+        "-NoProfile",
+        "-File",
+        str(LIB / "installation-context.ps1"),
+    )
+    for vector in _adapter_vectors():
+        result = _run(
+            command,
+            "source-id",
+            "-SourceJson",
+            json.dumps(vector["descriptor"], separators=(",", ":")),
+            "-MarketplaceKey",
+            vector["marketplaceKey"],
+        )
+        _assert_source_identity(json.loads(result.stdout), vector)
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)

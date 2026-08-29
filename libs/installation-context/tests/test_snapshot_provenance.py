@@ -23,7 +23,7 @@ POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 FIXTURES = LIB / "fixtures" / "source-identities.json"
 Runner = tuple[str, tuple[str, ...], str]
 
-RUNNERS: tuple[Runner, ...] = (
+ALL_RUNNERS: tuple[Runner, ...] = (
     ("python", (sys.executable, str(PYTHON_SCRIPT)), "long"),
     ("posix", (str(POSIX_SCRIPT),), "long"),
     *(
@@ -43,6 +43,40 @@ RUNNERS: tuple[Runner, ...] = (
         else ()
     ),
 )
+PARITY_RUNNERS = ALL_RUNNERS
+EXHAUSTIVE_ADAPTERS = (
+    os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
+)
+REFERENCE_RUNNERS = (
+    ALL_RUNNERS
+    if EXHAUSTIVE_ADAPTERS
+    else ALL_RUNNERS[:1]
+)
+
+
+def _interoperability_pairs() -> tuple[object, ...]:
+    if EXHAUSTIVE_ADAPTERS:
+        pairs = [
+            (producer, consumer)
+            for producer in ALL_RUNNERS
+            for consumer in ALL_RUNNERS
+        ]
+    else:
+        reference = ALL_RUNNERS[0]
+        pairs = [(reference, reference)]
+        for adapter in ALL_RUNNERS[1:]:
+            pairs.extend(((reference, adapter), (adapter, reference)))
+    return tuple(
+        pytest.param(
+            producer,
+            consumer,
+            id=f"from-{producer[0]}-to-{consumer[0]}",
+        )
+        for producer, consumer in pairs
+    )
+
+
+INTEROPERABILITY_PAIRS = _interoperability_pairs()
 
 
 def _load_python_module() -> Any:
@@ -319,7 +353,7 @@ def _stamp_with_python(
     *,
     snapshot_id: str = "1.0.0",
 ) -> dict[str, object]:
-    return json.loads(_run(RUNNERS[0], "snapshot-stamp", layout, snapshot_id=snapshot_id).stdout)
+    return json.loads(_run(REFERENCE_RUNNERS[0], "snapshot-stamp", layout, snapshot_id=snapshot_id).stdout)
 
 
 def _provenance_path(
@@ -751,7 +785,7 @@ def test_exemplar_slot_actions_reject_spoofed_staging_payload_identity(
     assert not (Path(layout["plugin_root"]) / "versions").exists()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_snapshot_stamp_and_validate_are_idempotent_and_cell_local(
     runner: Runner,
     tmp_path: Path,
@@ -805,7 +839,7 @@ def test_importable_python_snapshot_api_matches_cli(tmp_path: Path) -> None:
     assert validated["provenance"] == stamped["provenance"]
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_actions_publish_validate_and_reuse_without_activation(
     runner: Runner,
     tmp_path: Path,
@@ -874,7 +908,7 @@ def test_runtime_slot_actions_publish_validate_and_reuse_without_activation(
     assert all(not path.exists() for path in activation_paths)
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_new_publication_requires_current_snapshot(
     runner: Runner,
     tmp_path: Path,
@@ -893,7 +927,7 @@ def test_runtime_slot_new_publication_requires_current_snapshot(
     assert not (Path(layout["plugin_root"]) / "versions").exists()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_owned_runtime_slot_survives_receipt_advance_and_rejects_regression(
     runner: Runner,
     tmp_path: Path,
@@ -930,7 +964,7 @@ def test_owned_runtime_slot_survives_receipt_advance_and_rejects_regression(
     assert "Current receipt generation predates the owned runtime slot" in rejected.stderr
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("marker_kind", ["missing", "malformed"])
 def test_runtime_slot_preserves_markerless_or_malformed_existing_slot(
     runner: Runner,
@@ -962,7 +996,7 @@ def test_runtime_slot_preserves_markerless_or_malformed_existing_slot(
     assert _tree_snapshot(slot) == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_rejects_copied_cross_plugin_ownership(
     runner: Runner,
     tmp_path: Path,
@@ -985,7 +1019,7 @@ def test_runtime_slot_rejects_copied_cross_plugin_ownership(
     assert copied_marker.read_bytes() == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("malformed_generation", [True, 1.0, "1"])
 def test_runtime_slot_validation_rejects_noninteger_ownership_generations(
     runner: Runner,
@@ -1006,7 +1040,7 @@ def test_runtime_slot_validation_rejects_noninteger_ownership_generations(
     assert "runtime slot ownership namespace generation" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_validation_rejects_unknown_ownership_fields(
     runner: Runner,
     tmp_path: Path,
@@ -1030,8 +1064,10 @@ def test_runtime_slot_validation_rejects_unknown_ownership_fields(
     assert expected in result.stderr
 
 
-@pytest.mark.parametrize("producer", RUNNERS, ids=lambda runner: f"from-{runner[0]}")
-@pytest.mark.parametrize("consumer", RUNNERS, ids=lambda runner: f"to-{runner[0]}")
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    INTEROPERABILITY_PAIRS,
+)
 def test_runtime_slot_ownership_interoperates_across_runners(
     producer: Runner,
     consumer: Runner,
@@ -1047,7 +1083,7 @@ def test_runtime_slot_ownership_interoperates_across_runners(
     assert validated["reason"] == "runtime-slot-ownership-valid"
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_rejects_snapshot_provenance_tampering(
     runner: Runner,
     tmp_path: Path,
@@ -1069,7 +1105,7 @@ def test_runtime_slot_rejects_snapshot_provenance_tampering(
 def test_posix_slot_publication_failure_releases_owned_empty_reservation(
     tmp_path: Path,
 ) -> None:
-    posix = next(runner for runner in RUNNERS if runner[0] == "posix")
+    posix = next(runner for runner in ALL_RUNNERS if runner[0] == "posix")
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     fake_bin = tmp_path / "fake-bin"
@@ -1096,7 +1132,7 @@ def test_posix_slot_publication_failure_releases_owned_empty_reservation(
 def test_posix_slot_digest_failure_releases_owned_empty_reservation(
     tmp_path: Path,
 ) -> None:
-    posix = next(runner for runner in RUNNERS if runner[0] == "posix")
+    posix = next(runner for runner in ALL_RUNNERS if runner[0] == "posix")
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
     real_sha256sum = shutil.which("sha256sum")
@@ -1126,7 +1162,7 @@ def test_posix_slot_digest_failure_releases_owned_empty_reservation(
     assert json.loads(_run_slot(posix, "slot-provision", layout).stdout)["slotChanged"]
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_validation_uses_canonical_path_equality(
     runner: Runner,
     tmp_path: Path,
@@ -1145,7 +1181,7 @@ def test_runtime_slot_validation_uses_canonical_path_equality(
     assert result["reason"] == "runtime-slot-ownership-valid"
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_supports_nested_versions_root(
     runner: Runner,
     tmp_path: Path,
@@ -1164,7 +1200,7 @@ def test_runtime_slot_supports_nested_versions_root(
     )
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("file_component", ["versions", "runtime"])
 def test_runtime_slot_rejects_file_in_versions_root_chain(
     runner: Runner,
@@ -1190,7 +1226,7 @@ def test_runtime_slot_rejects_file_in_versions_root_chain(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("linked_path", ["versions", "slot"])
 def test_runtime_slot_rejects_linked_path_components(
     runner: Runner,
@@ -1216,7 +1252,7 @@ def test_runtime_slot_rejects_linked_path_components(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_rejects_linked_ownership_marker(
     runner: Runner,
     tmp_path: Path,
@@ -1235,7 +1271,7 @@ def test_runtime_slot_rejects_linked_ownership_marker(
     assert target.read_text(encoding="utf-8") == "{}\n"
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     "runtime_version",
     [
@@ -1270,7 +1306,7 @@ def test_runtime_slot_rejects_nonportable_runtime_versions(
     assert "runtime version" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_serializes_concurrent_publishers(
     runner: Runner,
     tmp_path: Path,
@@ -1370,7 +1406,7 @@ def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
     assert all(not path.exists() for path in activation_paths)
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_actions_bind_expected_snapshot_payload_identity(
     runner: Runner,
     tmp_path: Path,
@@ -1425,7 +1461,7 @@ def test_runtime_slot_actions_bind_expected_snapshot_payload_identity(
     assert "Expected snapshot payload version" in wrong_version.stderr
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("flag_name", "message"),
     (
@@ -1466,7 +1502,7 @@ def test_slot_actions_reject_explicit_empty_payload_expectations(
     assert message in result.stderr
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     "flag_name",
     ("expected-payload-root", "expected-payload-version"),
@@ -1980,7 +2016,7 @@ def test_python_snapshot_leaf_name_defends_when_link_detection_degrades(
         )
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_original_payload_replacement_does_not_make_stage_path_identity(
     runner: Runner,
     tmp_path: Path,
@@ -1994,7 +2030,7 @@ def test_original_payload_replacement_does_not_make_stage_path_identity(
     assert validated["payload"]["root"] == str(Path(layout["payload"]).resolve())
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("path", "replacement", "message"),
     [
@@ -2036,7 +2072,7 @@ def test_snapshot_identity_mismatches_fail_closed(
     assert _tree_snapshot(Path(layout["durable"])) == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("field", "replacement", "message"),
     (
@@ -2064,7 +2100,7 @@ def test_snapshot_container_fields_require_json_objects(
     assert message in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("content", "message"),
     [
@@ -2105,7 +2141,7 @@ def test_malformed_snapshot_sidecars_are_rejected_without_replacement(
     assert provenance.read_bytes() == content
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     "snapshot_id",
     (
@@ -2137,7 +2173,7 @@ def test_snapshot_path_attacks_are_rejected_without_mutation(
     assert _tree_snapshot(Path(layout["durable"])) == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("materialization", ("missing", "empty"))
 def test_snapshot_stamp_requires_preexisting_materialized_content(
     runner: Runner,
@@ -2155,7 +2191,7 @@ def test_snapshot_stamp_requires_preexisting_materialized_content(
     assert not _provenance_path(layout).exists()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_snapshot_validation_rejects_sidecar_only_snapshot(
     runner: Runner,
     tmp_path: Path,
@@ -2168,7 +2204,7 @@ def test_snapshot_validation_rejects_sidecar_only_snapshot(
     assert "materialized" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_stale_receipt_generation_rejects_republication_without_overwrite(
     runner: Runner,
@@ -2189,7 +2225,7 @@ def test_stale_receipt_generation_rejects_republication_without_overwrite(
     assert provenance.read_bytes() == original
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 @pytest.mark.parametrize("state", ("inactive", "orphaned"))
 def test_inactive_or_orphaned_receipts_reject_snapshot_validation(
@@ -2209,7 +2245,7 @@ def test_inactive_or_orphaned_receipts_reject_snapshot_validation(
     assert "active namespace and install receipts" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     "created_at",
     ("not-a-time", "2026-02-30T00:00:00Z", "2026-01-01T00:00:00+00:00"),
@@ -2230,7 +2266,7 @@ def test_snapshot_created_at_must_be_exact_valid_utc_timestamp(
     assert "createdat" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("target_kind", ("cell", "plugin"))
 def test_copied_cross_cell_or_cross_plugin_sidecar_is_rejected(
     runner: Runner,
@@ -2254,7 +2290,7 @@ def test_copied_cross_cell_or_cross_plugin_sidecar_is_rejected(
     )
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", REFERENCE_RUNNERS, ids=lambda runner: runner[0])
 def test_rewritten_foreign_sidecar_still_fails_receipt_anchoring(
     runner: Runner,
     tmp_path: Path,
@@ -2281,7 +2317,7 @@ def test_rewritten_foreign_sidecar_still_fails_receipt_anchoring(
     assert "namespace receipt" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_plugin_root_symlink_cannot_escape_the_cell(
     runner: Runner,
     tmp_path: Path,
@@ -2301,7 +2337,7 @@ def test_plugin_root_symlink_cannot_escape_the_cell(
     assert _tree_snapshot(outside) == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("component", "label"),
     (
@@ -2338,7 +2374,7 @@ def test_context_validation_rejects_linked_physical_ownership_chain(
     assert _tree_snapshot(outside) == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("receipt_name", ("namespace", "install"))
 def test_context_validation_rejects_linked_receipt_files(
     runner: Runner,
@@ -2360,7 +2396,7 @@ def test_context_validation_rejects_linked_receipt_files(
     assert outside.read_bytes() == original
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_snapshot_root_symlink_cannot_escape_the_plugin(
     runner: Runner,
     tmp_path: Path,
@@ -2380,7 +2416,7 @@ def test_snapshot_root_symlink_cannot_escape_the_plugin(
     assert _tree_snapshot(outside) == before
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_snapshot_sidecar_symlink_is_rejected_without_touching_target(
     runner: Runner,
     tmp_path: Path,
@@ -2427,7 +2463,7 @@ def test_powershell_rejects_non_decimal_int64_generation_arguments(
     }
     generations[argument] = value
     result = _run(
-        next(runner for runner in RUNNERS if runner[0] == "powershell"),
+        next(runner for runner in ALL_RUNNERS if runner[0] == "powershell"),
         "snapshot-stamp",
         layout,
         check=False,
@@ -2437,7 +2473,7 @@ def test_powershell_rejects_non_decimal_int64_generation_arguments(
     assert message in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("value", "message"),
     (
@@ -2467,7 +2503,7 @@ def test_generation_arguments_reject_non_ascii_decimal_or_overflow(
     assert message in result.stderr.lower()
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_generation_arguments_normalize_leading_zeroes(
     runner: Runner,
     tmp_path: Path,
@@ -2485,7 +2521,7 @@ def test_generation_arguments_normalize_leading_zeroes(
     assert result["reason"] == "snapshot-provenance-published"
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_concurrent_snapshot_publication_has_one_atomic_winner_and_retry(
     runner: Runner,
     tmp_path: Path,

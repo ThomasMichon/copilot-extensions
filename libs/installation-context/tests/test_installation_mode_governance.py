@@ -19,6 +19,24 @@ POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 SOURCE_FIXTURES = LIB / "fixtures" / "source-identities.json"
 GOVERNANCE_FIXTURES = LIB / "fixtures" / "installation-mode-governance.json"
 PLUGIN_ID = "agent-example"
+ALL_RUNNERS = [
+    "python",
+    "posix",
+    pytest.param(
+        "powershell",
+        marks=pytest.mark.skipif(
+            POWERSHELL is None, reason="PowerShell is not installed"
+        ),
+    ),
+]
+EXHAUSTIVE_ADAPTERS = (
+    os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
+)
+REFERENCE_RUNNERS = (
+    ALL_RUNNERS
+    if EXHAUSTIVE_ADAPTERS
+    else ["python"]
+)
 
 
 def _load_module():
@@ -643,16 +661,7 @@ def test_python_api_rejects_non_string_mapping_keys_with_domain_error(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 @pytest.mark.parametrize(
     ("entry_name", "action", "expected_status", "expected_returncode"),
@@ -696,16 +705,7 @@ def test_non_file_governance_evidence_fails_closed_across_runners(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_unactivated_context_receipt_is_not_reported_as_activation(
     tmp_path: Path, runner: str
@@ -728,16 +728,7 @@ def test_unactivated_context_receipt_is_not_reported_as_activation(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_dangling_plugin_maintenance_marker_fails_closed(
     tmp_path: Path, runner: str
@@ -764,16 +755,7 @@ def test_dangling_plugin_maintenance_marker_fails_closed(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_revalidation_preserves_namespaced_desired_mode_across_runners(
     tmp_path: Path, runner: str
@@ -805,16 +787,7 @@ def test_revalidation_preserves_namespaced_desired_mode_across_runners(
 @pytest.mark.skipif(os.name == "nt", reason="Windows paths cannot contain newlines")
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_namespaced_paths_with_newlines_round_trip_across_runners(
     tmp_path: Path, runner: str
@@ -838,16 +811,7 @@ def test_namespaced_paths_with_newlines_round_trip_across_runners(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_empty_wsl_identity_is_foreign_across_runners(
     tmp_path: Path, runner: str
@@ -872,16 +836,7 @@ def test_empty_wsl_identity_is_foreign_across_runners(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_missing_context_is_structured_across_runners(
     tmp_path: Path, runner: str
@@ -1026,16 +981,7 @@ def test_maintenance_precedence_and_stale_sidecar(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_status_and_probe_cli_parity_and_read_only(
     tmp_path: Path, runner: str
@@ -1085,16 +1031,7 @@ def test_status_and_probe_cli_parity_and_read_only(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_policy_precedence_evidence_matches_across_runners(
     tmp_path: Path, runner: str
@@ -1105,6 +1042,7 @@ def test_policy_precedence_evidence_matches_across_runners(
     marketplace_id = str(layout["marketplace_id"])
     cases = [
         (
+            "default",
             {
                 "schema": "copilot-extensions.installation-mode",
                 "version": 1,
@@ -1112,6 +1050,7 @@ def test_policy_precedence_evidence_matches_across_runners(
             ("valid", "default", False, "policy-injected-non-authoritative"),
         ),
         (
+            "global",
             {
                 "schema": "copilot-extensions.installation-mode",
                 "version": 1,
@@ -1120,6 +1059,7 @@ def test_policy_precedence_evidence_matches_across_runners(
             ("valid", "global", True, "policy-injected-non-authoritative"),
         ),
         (
+            "marketplace",
             {
                 "schema": "copilot-extensions.installation-mode",
                 "version": 1,
@@ -1131,6 +1071,7 @@ def test_policy_precedence_evidence_matches_across_runners(
             ("valid", "marketplace", False, "policy-injected-non-authoritative"),
         ),
         (
+            "plugin",
             {
                 "schema": "copilot-extensions.installation-mode",
                 "version": 1,
@@ -1147,6 +1088,7 @@ def test_policy_precedence_evidence_matches_across_runners(
             ("valid", "plugin", True, "policy-injected-non-authoritative"),
         ),
         (
+            "unsupported-version",
             {
                 "schema": "copilot-extensions.installation-mode",
                 "version": 2,
@@ -1155,6 +1097,7 @@ def test_policy_precedence_evidence_matches_across_runners(
             ("unsupported", "default", None, "policy-version-unsupported"),
         ),
         (
+            "invalid",
             {
                 "schema": "copilot-extensions.installation-mode",
                 "version": 1,
@@ -1163,8 +1106,14 @@ def test_policy_precedence_evidence_matches_across_runners(
             ("invalid", "default", None, "policy-invalid"),
         ),
     ]
-    for index, (document, expected) in enumerate(cases):
-        policy = tmp_path / f"policy-{index}.json"
+    if runner != "python" and not EXHAUSTIVE_ADAPTERS:
+        cases = [
+            case
+            for case in cases
+            if case[0] in {"default", "unsupported-version", "invalid"}
+        ]
+    for name, document, expected in cases:
+        policy = tmp_path / f"policy-{name}.json"
         _write_json(policy, document)
         result = _run(
             runner,
@@ -1187,16 +1136,7 @@ def test_policy_precedence_evidence_matches_across_runners(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_active_namespaced_cli_is_visible_and_probe_refuses(
     tmp_path: Path, runner: str
@@ -1241,16 +1181,7 @@ def test_active_namespaced_cli_is_visible_and_probe_refuses(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_malformed_invocation_probe_is_exit_one(tmp_path: Path, runner: str) -> None:
     layout = _cell_layout(tmp_path)
@@ -1265,16 +1196,7 @@ def test_malformed_invocation_probe_is_exit_one(tmp_path: Path, runner: str) -> 
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_probe_input_requires_checked_at_and_one_source(
     tmp_path: Path, runner: str
@@ -1320,16 +1242,7 @@ def test_probe_input_requires_checked_at_and_one_source(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_expected_on_disk_corruption_is_structured(
     tmp_path: Path, runner: str
@@ -1466,16 +1379,7 @@ def test_expected_on_disk_corruption_is_structured(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_invalid_context_is_structured_not_invocation_failure(
     tmp_path: Path, runner: str
@@ -1510,16 +1414,7 @@ def test_invalid_context_is_structured_not_invocation_failure(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_activation_cas_publishes_exact_environment_receipt(
     tmp_path: Path, runner: str
@@ -1564,16 +1459,7 @@ def test_activation_cas_publishes_exact_environment_receipt(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 @pytest.mark.parametrize(
     ("expected_marketplace_id", "expected_plugin_id"),
@@ -1615,16 +1501,7 @@ def test_activation_cas_rejects_invalid_expected_identity_before_locking(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_activation_cas_requires_absolute_legacy_root(
     tmp_path: Path, runner: str
@@ -1647,16 +1524,7 @@ def test_activation_cas_requires_absolute_legacy_root(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 @pytest.mark.parametrize("context_value", [None, ""])
 def test_activation_cas_requires_explicit_context_argument(
@@ -1688,16 +1556,7 @@ def test_activation_cas_requires_explicit_context_argument(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_activation_cas_rejects_each_stale_generation_without_publication(
     tmp_path: Path, runner: str
@@ -1762,16 +1621,7 @@ def test_activation_cas_rejects_each_stale_generation_without_publication(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_concurrent_activation_cas_has_one_atomic_winner(
     tmp_path: Path, runner: str
@@ -1832,16 +1682,7 @@ def test_concurrent_activation_cas_has_one_atomic_winner(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_foreign_windows_wsl_and_posix_activation_receipts_fail_closed(
     tmp_path: Path, runner: str
@@ -1872,6 +1713,8 @@ def test_foreign_windows_wsl_and_posix_activation_receipts_fail_closed(
         for environment in foreign_environments
         if environment != current
     ]
+    if runner != "python" and not EXHAUSTIVE_ADAPTERS:
+        foreign_environments = foreign_environments[:1]
     for environment in foreign_environments:
         _activation(layout, environment=environment)
         result = _run(
@@ -1892,16 +1735,7 @@ def test_foreign_windows_wsl_and_posix_activation_receipts_fail_closed(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_activation_cas_never_overwrites_foreign_environment_receipt(
     tmp_path: Path, runner: str
@@ -1937,16 +1771,7 @@ def test_activation_cas_never_overwrites_foreign_environment_receipt(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 @pytest.mark.parametrize(
     "home_real_path",
@@ -1981,16 +1806,7 @@ def test_activation_cas_never_overwrites_invalid_windows_network_path_receipt(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_activation_cas_never_overwrites_malformed_receipt(
     tmp_path: Path, runner: str
@@ -2017,16 +1833,7 @@ def test_activation_cas_never_overwrites_malformed_receipt(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 @pytest.mark.parametrize("receipt_name", ["namespace", "install"])
 def test_activation_cas_requires_active_context_receipts(
@@ -2047,16 +1854,7 @@ def test_activation_cas_requires_active_context_receipts(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_activation_cas_refuses_generation_overflow_without_replacement(
     tmp_path: Path, runner: str
@@ -2085,16 +1883,7 @@ def test_activation_cas_refuses_generation_overflow_without_replacement(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_activation_generation_and_environment_classification_match(
     tmp_path: Path, runner: str
@@ -2140,16 +1929,7 @@ def test_activation_generation_and_environment_classification_match(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_deactivated_activation_pins_legacy_diagnostically(
     tmp_path: Path, runner: str
@@ -2192,16 +1972,7 @@ def test_deactivated_activation_pins_legacy_diagnostically(
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    ALL_RUNNERS,
 )
 def test_valid_other_cell_tombstone_blocks_legacy_probe(
     tmp_path: Path, runner: str
@@ -2269,16 +2040,7 @@ def test_provenance_blocked_retains_trustworthy_plugin_id(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize(
     "runner",
-    [
-        "python",
-        "posix",
-        pytest.param(
-            "powershell",
-            marks=pytest.mark.skipif(
-                POWERSHELL is None, reason="PowerShell is not installed"
-            ),
-        ),
-    ],
+    REFERENCE_RUNNERS,
 )
 def test_provenance_blocked_cli_retains_plugin_id(
     tmp_path: Path, runner: str

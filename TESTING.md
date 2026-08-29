@@ -58,6 +58,22 @@ scenario-style test that validates several related observable features over
 many process-launching micro-tests that repeat the same setup and failure
 boundary.
 
+The installation-context foundation follows a reference-versus-adapter model
+for its most expensive matrices. The default suite exercises the complete
+snapshot-provenance and installation-governance case corpora against the
+canonical Python implementation, while a smaller contract-focused set keeps
+Python, POSIX shell, and PowerShell parity, interoperability, security-boundary,
+and atomicity coverage. Source-identity fixtures likewise run exhaustively
+in-process against the reference implementation and use representative vectors
+for external adapter parity instead of respawning every adapter for every
+fixture. Set `INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` to restore the full
+cross-product when changing an adapter implementation:
+
+```bash
+INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
+  python -m pytest -q libs/installation-context/tests
+```
+
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are
 marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
