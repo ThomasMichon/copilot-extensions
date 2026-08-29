@@ -303,7 +303,8 @@ def _build_active_paths(
     mux_sessions = sessions._list_mux_sessions()
     if mux_sessions is not None:
         for rec in records:
-            if rec.worktree_path and f"wt-{rec.worktree_id}" in mux_sessions:
+            if rec.worktree_path and sessions.mux_session_name(
+                    rec.worktree_id) in mux_sessions:
                 active.add(_normalize_path(rec.worktree_path))
     else:
         # Batch list unavailable (mux missing or blocked): prefer the #4057
@@ -1775,7 +1776,8 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
     if getattr(args, "dry_run", False):
         _json_output({
-            "ok": True, "dry_run": True, "session": f"wt-{wt_id}",
+            "ok": True, "dry_run": True,
+            "session": sessions.mux_session_name(wt_id),
             "old_pane": old_pane, "work_dir": record.worktree_path,
             "cmd": list(launch_cmd), "seed_len": len(seed),
         })
@@ -1809,7 +1811,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
 
     _json_output({
         "ok": True,
-        "session": f"wt-{wt_id}",
+        "session": sessions.mux_session_name(wt_id),
         "old_pane": old_pane,
         "new_pane": new_pane,
         "seed_len": len(seed),
@@ -1902,7 +1904,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
         )
         _json_output({
             "ok": True, "dry_run": True, "worktree_id": wt_id,
-            "session": f"wt-{wt_id}", "work_dir": work_dir,
+            "session": sessions.mux_session_name(wt_id), "work_dir": work_dir,
             "would": "resume" if already else "create",
             "cmd": list(launch_cmd), "seed_len": len(seed) if seed else 0,
         })
@@ -1910,7 +1912,8 @@ def cmd_embody(args: argparse.Namespace) -> int:
 
     if already:
         _json_output({
-            "ok": True, "worktree_id": wt_id, "session": f"wt-{wt_id}",
+            "ok": True, "worktree_id": wt_id,
+            "session": sessions.mux_session_name(wt_id),
             "work_dir": work_dir, "created": False, "resumed": True,
             "new_pane": (
                 sessions.mux_copilot_pane(wt_id)
@@ -1965,7 +1968,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
     _json_output({
         "ok": True,
         "worktree_id": wt_id,
-        "session": f"wt-{wt_id}",
+        "session": sessions.mux_session_name(wt_id),
         "work_dir": work_dir,
         "created": True,
         "resumed": False,
@@ -5953,6 +5956,37 @@ def _activate_project_for_path(path: str | None, *, force: bool = False) -> None
         cfg.set_active_project(None)
 
 
+def _resolve_mux_worktree_id(candidate: str | None) -> str | None:
+    """Map a worktree id recovered from a mux session back to the tracked id.
+
+    ``mux_session_name`` maps ``.`` -> ``_``, so an id derived from a live
+    session name can be the sanitized form -- which matches no ``<id>.yaml`` and
+    makes :func:`_activate_project_for_worktree_id` fail closed, silently
+    dropping the sessionStart binding for a dotted worktree id.
+
+    Compare *session names* across the bounded adopted-project registry, which
+    matches the exact and sanitized spellings alike (``mux_session_name`` is
+    idempotent). Ambiguity fails closed, as in the sibling resolver.
+    """
+    if not candidate:
+        return None
+    target = sessions.mux_session_name(candidate)
+    try:
+        projects = (inst.read_projects_registry().get("projects") or {}).keys()
+    except Exception:
+        return None
+    matches: set[str] = set()
+    for project in projects:
+        try:
+            entries = (cfg.project_dir(str(project)) / "worktrees").glob("*.yaml")
+            for entry in entries:
+                if sessions.mux_session_name(entry.stem) == target:
+                    matches.add(entry.stem)
+        except Exception:
+            continue
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
 def _activate_project_for_worktree_id(worktree_id: str | None) -> str | None:
     """Activate the unique adopted project that owns ``worktree_id``.
 
@@ -6067,7 +6101,7 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
 
     if not worktree_id:
         return False
-    sess = f"wt-{worktree_id}"
+    sess = sessions.mux_session_name(worktree_id)
     try:
         mux = "psmux" if shutil.which("psmux") else (
             "tmux" if shutil.which("tmux") else None)
@@ -8526,13 +8560,20 @@ def reap_orphan_mux_sessions(*, dry_run: bool = False,
         rec.worktree_id: rec for rec in tracking.list_records(tracking_path)
     }
 
+    # One reverse map, not a scan per session: the sweep is O(sessions x
+    # records) otherwise.
+    by_session = sessions.mux_session_index(by_id)
+
     reaped: list[str] = []
     skipped: list[dict] = []
     errors: list[dict] = []
     for name, attached in all_sessions.items():
         if not name.startswith("wt-"):
             continue
-        wt_id = name[len("wt-"):]
+        # Resolve against the tracked ids: `mux_session_name` maps `.` -> `_`,
+        # so stripping the prefix would miss a dotted id's record and read as
+        # "untracked" below -- which reaps a live, tracked session.
+        wt_id = sessions.worktree_id_from_mux_session(name, index=by_session)
         if only_id is not None and wt_id != only_id:
             continue
         if attached and attached > 0:
@@ -9006,7 +9047,7 @@ def sweep_managed_worktrees(*, dry_run: bool = False,
     active_paths = _build_active_paths(managed, session_ctx)
 
     for rec in managed:
-        name = f"wt-{rec.worktree_id}"
+        name = sessions.mux_session_name(rec.worktree_id)
         has_live_mux = name in mux
         attached = bool(mux.get(name))
         norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
@@ -9135,7 +9176,7 @@ def sweep_finished_session_worktrees(*, dry_run: bool = False,
     # so the finalization lock is taken only when there is real work.
     candidates: list[tuple[tracking.WorktreeRecord, git_ops.WorktreeStateInfo, str]] = []
     for rec in records:
-        name = f"wt-{rec.worktree_id}"
+        name = sessions.mux_session_name(rec.worktree_id)
         norm = _normalize_path(rec.worktree_path) if rec.worktree_path else ""
         # Live guards: a bound session, or a live/attached mux, is never touched.
         if norm and norm in session_ctx.active_sessions:
@@ -17129,15 +17170,21 @@ def cmd_register_session(args: argparse.Namespace) -> int:
             mux_binding = None
     if not wt_id and mux_binding:
         candidate = mux_binding.get("worktree_id")
+        candidate = _resolve_mux_worktree_id(candidate) or candidate
         if candidate and _activate_project_for_worktree_id(candidate):
             wt_id = candidate
     if not wt_id:
         return 0  # cwd isn't a tracked worktree (base repo / unrelated dir)
     if not cfg.active_project():
         _activate_project_for_worktree_id(wt_id)
+    # Compare session names: the binding's id may be the sanitized spelling of
+    # the same worktree, and an inequality here silently drops the recovered
+    # pane/pid.
     recovered_mux = (
         mux_binding
-        if mux_binding and mux_binding.get("worktree_id") == wt_id
+        if mux_binding
+        and sessions.mux_session_name(mux_binding.get("worktree_id") or "")
+        == sessions.mux_session_name(wt_id)
         else None
     )
     if recovered_mux:

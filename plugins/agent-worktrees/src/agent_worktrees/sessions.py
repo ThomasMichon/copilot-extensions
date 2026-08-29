@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import platform
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1252,6 +1253,63 @@ def verify_worktree_active(record) -> "LiveVerdict":
     )
 
 
+def mux_session_name(worktree_id: str) -> str:
+    """Multiplexer session name for a worktree, safe to use as a target spec.
+
+    Both tmux and psmux parse ``.`` in a target as the ``window.pane``
+    separator, so a worktree id containing a dot produces a session that can be
+    *created* but never addressed again::
+
+        $ tmux new-session -d -s wt-host.local-linux-20260828-113232-c3c7   # ok
+        $ tmux has-session -t '=wt-host.local-linux-20260828-113232-c3c7'
+        can't find window: wt-host
+
+    Worktree ids embed the machine name, and a machine keyed by its raw
+    hostname is routinely dotted (every default macOS box is ``<name>.local``),
+    so the launcher created a session and then failed every subsequent
+    ``has-session`` / ``attach-session`` / ``set-option`` against it. The ``=``
+    exact-match prefix does not help: the target is split on ``.`` before the
+    session name is matched.
+
+    Map ``.`` to ``_``. This is a no-op for the dot-free ids that most machines
+    already produce, so it does not orphan their running sessions.
+    """
+    return "wt-" + (worktree_id or "base").replace(".", "_")
+
+
+def mux_session_index(known_ids: Iterable[str]) -> dict[str, str]:
+    """Map mux session name -> worktree id, for O(1) repeated resolution.
+
+    Build once and pass as ``index=`` when resolving many sessions; otherwise a
+    per-session scan over every known id is O(sessions x records).
+    """
+    return {mux_session_name(wt_id): wt_id for wt_id in known_ids}
+
+
+def worktree_id_from_mux_session(
+    session_name: str,
+    known_ids: Iterable[str] = (),
+    *,
+    index: dict[str, str] | None = None,
+) -> str:
+    """Inverse of :func:`mux_session_name` -- session name -> worktree id.
+
+    The ``.`` -> ``_`` mapping is **lossy**, so stripping the ``wt-`` prefix does
+    not recover a dotted id. Resolve against *known_ids* (ids we already hold,
+    e.g. from the tracking records) and only fall back to the stripped name,
+    which stays correct for the dot-free ids most machines produce.
+
+    Callers that use the result as a record key MUST pass *known_ids* (or a
+    prebuilt *index*): a lookup miss can be read as "untracked" and a tracked
+    session reaped.
+    """
+    if not session_name.startswith("wt-"):
+        return ""
+    if index is None:
+        index = mux_session_index(known_ids)
+    return index.get(session_name) or session_name[len("wt-"):]
+
+
 def has_mux_session(worktree_id: str) -> bool:
     """Check if a multiplexer session exists for a worktree (without killing it).
 
@@ -1261,7 +1319,7 @@ def has_mux_session(worktree_id: str) -> bool:
     """
     import subprocess
 
-    sess_name = f"wt-{worktree_id}"
+    sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
         cmd = ["psmux", "has-session", "-t", sess_name]
     else:
@@ -1357,7 +1415,7 @@ def mux_status_many(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     all_sessions = _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
-            sess_name = f"wt-{wt_id}"
+            sess_name = mux_session_name(wt_id)
             if sess_name in all_sessions:
                 result[wt_id] = MuxInfo(exists=True, clients=all_sessions[sess_name])
             else:
@@ -1381,7 +1439,7 @@ def kill_tmux_session(worktree_id: str) -> bool:
     """
     import subprocess
 
-    sess_name = f"wt-{worktree_id}"
+    sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
         cmd = ["psmux", "kill-session", "-t", sess_name]
     else:
@@ -1412,7 +1470,7 @@ def _mux_send_keys(worktree_id: str, keys: str) -> bool:
     """
     import subprocess
 
-    sess_name = f"wt-{worktree_id}"
+    sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
         cmd = ["psmux", "send-keys", "-t", sess_name, keys]
     else:
@@ -1587,7 +1645,7 @@ def _mux_bin(mux: str | None = None) -> str:
 def _mux_session_target(worktree_id: str, mux_bin: str) -> str:
     """Session target string. tmux uses the ``=`` exact-match prefix; psmux
     does not support it (rejected as an unknown session)."""
-    sess = f"wt-{worktree_id}"
+    sess = mux_session_name(worktree_id)
     return sess if mux_bin == "psmux" else f"={sess}"
 
 
@@ -1744,7 +1802,7 @@ def build_mux_new_session_argv(
     """
     mux_bin = _mux_bin(mux)
     is_tmux = mux_bin != "psmux"
-    sess = f"wt-{worktree_id}"
+    sess = mux_session_name(worktree_id)
 
     argv = [mux_bin, "new-session", "-d", "-s", sess, "-P", "-F", "#{pane_id}"]
     if work_dir:
@@ -1777,7 +1835,7 @@ def mux_new_session(
     """
     import subprocess
 
-    sess = f"wt-{worktree_id}"
+    sess = mux_session_name(worktree_id)
     try:
         argv = build_mux_new_session_argv(
             worktree_id, work_dir, cmd, env, mux=mux,
@@ -2112,7 +2170,7 @@ def mux_binding_for_session(
                 continue
             key = (session_name, pane_id, pane_pid, copilot_pid)
             matches[key] = {
-                "worktree_id": session_name[3:],
+                "worktree_id": worktree_id_from_mux_session(session_name),
                 "session_name": session_name,
                 "pane_id": pane_id,
                 "pane_pid": pane_pid,

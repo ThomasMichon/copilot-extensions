@@ -227,13 +227,14 @@ class ResidentSessionReconciler:
             and time.monotonic() - self._live_mux_at <= self.mux_max_age
         )
         if mux_fresh:
-            live = f"wt-{record.worktree_id}" in self._live_mux
+            live = sessions.mux_session_name(record.worktree_id) in self._live_mux
             tracking.stamp_mux_live(
                 record.worktree_id, live, refresh=live, sync=True)
             result["mux"] = 1
             if live and self.register_monitor_session is not None:
                 if self.register_monitor_session(
-                    f"wt-{record.worktree_id}", record.worktree_path
+                    sessions.mux_session_name(record.worktree_id),
+                    record.worktree_path,
                 ):
                     result["registered_mux"] = 1
         return result

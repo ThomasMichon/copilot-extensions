@@ -610,6 +610,9 @@ function Test-AwJoiningLiveSession {
         }
     } catch {}
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
+    # `.` is the window/pane separator in a mux target -- keep in sync with
+    # `sessions.mux_session_name` (and the bash launcher).
+    $wtId = $wtId -replace '\.', '_'
     try {
         $null = & $bin has-session -t "wt-$wtId" 2>&1
         return ($LASTEXITCODE -eq 0)
@@ -1043,6 +1046,9 @@ function Invoke-AwPsmuxPassthroughSafe {
 }
 if (-not $noMux) {
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
+    # `.` is the window/pane separator in a mux target -- keep in sync with
+    # `sessions.mux_session_name` (and the bash launcher).
+    $wtId = $wtId -replace '\.', '_'
     $sessName = "wt-$wtId"
     Write-SetupLog "psmux: looking for session $sessName"
 
