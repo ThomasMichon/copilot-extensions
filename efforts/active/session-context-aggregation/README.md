@@ -192,8 +192,8 @@ The detailed investigation and proposed architecture are in
   standalone fallback.
 - [ ] Extend `customizing-copilot:reviewing-customizations` to inventory the
   declared session-context role without executing hooks and report a blocking
-  finding when more than one direct session-start context emitter can coexist
-  in the configured plugin stack.
+  finding when a configured stack can emit different non-empty session-start
+  context results rather than one byte-identical brokered aggregate.
 - [ ] Make consumer enablement explicit because current Copilot plugin manifests
   do not enforce transitive dependency installation.
 - [ ] Replace direct producer commands only after the brokered wrapper and its

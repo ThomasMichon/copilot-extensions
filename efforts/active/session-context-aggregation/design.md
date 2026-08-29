@@ -202,10 +202,13 @@ other side effects remain independent and return `{}`.
 without executing hooks. It reads the versioned contributor declaration and
 the configured plugin stack, classifies session-start entries as aggregator,
 migrated wrapper, known legacy direct emitter, or unknown, and reports a
-blocking finding when multiple direct emitters can coexist without a compatible
-aggregator contract. An unknown output remains a warning rather than being
-assumed safe. The scanner reports identities and roles only, never hook
-commands or emitted context.
+blocking finding when more than one possible non-empty result is not proven to
+be the byte-identical output of one compatible broker. Thus a legacy direct
+emitter alongside a non-empty aggregate remains blocking during partial
+migration; an aggregator and its migrated wrappers are permitted only because
+they return the same brokered aggregate. An unknown output remains a warning
+rather than being assumed safe. The scanner reports identities and roles only,
+never hook commands or emitted context.
 
 This creates version-skew states:
 
