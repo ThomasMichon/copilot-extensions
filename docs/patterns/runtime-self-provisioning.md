@@ -77,6 +77,21 @@ agent-worktrees *is* present, its `provision-check` may reconcile the whole enab
 set at launch — a nice convenience. But no plugin may **require** it: remove
 agent-worktrees and every plugin still provisions itself through layers 1–3.
 
+### Explicit-setup runtimes
+
+A runtime whose provisioning depends on an operator-owned role choice must not
+silently choose that role merely to satisfy the general enablement invariant.
+For these plugins, enablement performs only the cheap stamp and publishes a
+structured `setup_required` state. Status/readiness stay non-mutating; automation
+must pass an explicit setup choice, while an interactive `setup` command may
+prompt. The setup command itself is the first-use consent signal and may then
+provision the selected role. `agent-index` is the exemplar because host versus
+client determines whether service and model dependencies belong on the machine.
+
+The generated payload shim may delegate to a payload-owned lifecycle gate for
+this policy. The dispatcher remains attributable to the same payload and must
+retain the ordinary resolver, locking, governed-feed, and failure semantics.
+
 ## Rationale
 
 The invariant is about the *user's* experience — "your only action is enabling" —

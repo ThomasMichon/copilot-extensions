@@ -37,18 +37,59 @@ def _emit_error(exc: BaseException) -> int:
     return 1
 
 
+def _setup_required_payload(*, runtime_state: str = "ready") -> dict[str, Any]:
+    return {
+        "schema": "agent-index.lifecycle",
+        "schema_version": 1,
+        "version": __version__,
+        "plugin": "agent-index",
+        "state": "setup_required",
+        "setup_required": True,
+        "configured": False,
+        "role": None,
+        "running": False,
+        "runtime": {"state": runtime_state},
+        "setup": {
+            "interactive": "agent-index setup",
+            "noninteractive": [
+                "agent-index setup --single --yes",
+                "agent-index setup --indexer <machine> --ssh <alias> --yes",
+            ],
+        },
+    }
+
+
 def _status_payload() -> dict[str, Any]:
+    from . import transport
+
+    role, _indexer = transport.plan_route()
+    if role == "unconfigured":
+        return _setup_required_payload()
     url = client_url()
     if not url:
         return {
+            "schema": "agent-index.lifecycle",
+            "schema_version": 1,
+            "state": "not_running",
+            "setup_required": False,
+            "configured": True,
+            "role": role,
             "running": False,
             "plugin": "agent-index",
             "version": __version__,
+            "runtime": {"state": "ready"},
             "index": {"chunks": None, "available": None, "unreachable": True},
         }
     try:
         with httpx.Client(timeout=10.0) as client:
             payload = client.get(f"{url}/status").json()
+        payload["schema"] = "agent-index.lifecycle"
+        payload["schema_version"] = 1
+        payload["state"] = "ready"
+        payload["setup_required"] = False
+        payload["configured"] = True
+        payload["role"] = role
+        payload["runtime"] = {"state": "ready"}
         payload["running"] = True
         payload["endpoint"] = url
         return payload
@@ -56,9 +97,16 @@ def _status_payload() -> dict[str, Any]:
         # Failing to reach the service is "unknown," not an empty index:
         # never fabricate chunks:0 here (dotfiles issue #1531).
         return {
+            "schema": "agent-index.lifecycle",
+            "schema_version": 1,
+            "state": "unreachable",
+            "setup_required": False,
+            "configured": True,
+            "role": role,
             "running": False,
             "plugin": "agent-index",
             "version": __version__,
+            "runtime": {"state": "ready"},
             "error": str(exc),
             "endpoint": url,
             "index": {"chunks": None, "available": None, "unreachable": True},
@@ -124,7 +172,13 @@ def cmd_role(args: argparse.Namespace) -> int:
 
     role, _indexer = plan_route()
     if getattr(args, "json", False):
-        return _emit({"role": role})
+        return _emit(
+            {
+                "role": None if role == "unconfigured" else role,
+                "state": "setup_required" if role == "unconfigured" else "ready",
+                "setup_required": role == "unconfigured",
+            }
+        )
     print(role)
     return 0
 
@@ -253,7 +307,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
                         f"SSH alias clients use to reach '{indexer}' (blank to skip): "
                     ).strip() or None)
         else:
-            single = True  # non-interactive default: full local stack on this box
+            payload = _setup_required_payload()
+            payload["error"] = (
+                "Non-interactive setup requires an explicit role choice: pass "
+                "`--single` or `--indexer <machine>`."
+            )
+            _emit(payload)
+            return 2
 
     if single:
         indexer = this
@@ -824,6 +884,10 @@ def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
     if sub is None:
         sub, raw = "status", ["status"]
+    if sub == "status":
+        role, _indexer = transport.plan_route()
+        if role == "unconfigured":
+            return int(args.func(args))
     if sub in transport.DELEGABLE:
         rc = transport.maybe_delegate(sub, raw)
         if rc is not None:

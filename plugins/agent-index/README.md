@@ -25,22 +25,26 @@ to search from the sessionStart scope-binding hook's `additionalContext`.
 - **Engine split**: the light service runtime is torch-free by default; embedding
 runs through a durable engine daemon at `127.0.0.1:8421` unless an operator opts
 into another engine mode.
-- **Lifecycle hooks**: session-start hooks stamp/self-provision the binstub,
-ensure the host-side user-mode daemon is healthy, and emit configured scope
+- **Lifecycle hooks**: session-start hooks stamp the setup-gated binstub, ensure
+an already-configured host-side daemon is healthy, and emit configured scope
 binding when the current repo has `.agent-index/config.yaml` `corpus.sources`.
 
 ## Minimal setup
 
 1. Enable the plugin from the `copilot-extensions` marketplace.
 2. Start a new Copilot session. The `sessionStart` hook performs a fast **stamp**
-when needed and installs a self-provisioning `agent-index` binstub under
-`~/.local/bin`.
-3. First CLI use may provision the runtime (`::agent-provisioning::`, usually
-~30-120s). Let it finish.
-4. Pick a role:
+when needed and installs a setup-gated `agent-index` binstub under
+`~/.local/bin`. `agent-index status` is safe here: it reports
+`state: setup_required` without installing a runtime or starting a service.
+3. Pick a role explicitly:
    - single-machine/local indexer: `agent-index setup --single`
    - remote indexer: run `agent-index setup --indexer <machine> --ssh <alias>`
      from the repo; clients route read commands to that host over SSH.
+   In automation, add `--yes`; omitting both `--single` and `--indexer` is an
+   error rather than silently choosing a role.
+4. The setup command provisions the light runtime, writes the selected role, and
+reconciles the role-specific runtime/service. Provisioning emits
+`::agent-provisioning::` and may take ~30-120s.
 
 A machine whose resolved role is `client` runs no local indexer daemon. A host
 runs the local service and, when provisioned, the durable engine daemon.
@@ -98,7 +102,8 @@ safe to prefer `agent-index search` for (and how to invoke it).
 ## Troubleshooting quick checks
 
 - `agent-index status` — service reachability, version, chunk count, sources,
-and indexing state.
+and indexing state. Before setup it returns a structured, non-mutating
+`setup_required` result.
 - `agent-index role` — whether this machine is acting as `host` or `client`.
 - `agent-index engine status` — durable engine health, PID, endpoint, and venv.
 - `agent-index deploy --recover` — recover an interrupted zdd cutover.

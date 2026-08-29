@@ -3,9 +3,9 @@
 set -eu
 
 export PYTHONUTF8=1
-_command="agent-index"
+_command="@@COMMAND@@"
 _self_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
-_payload_root="$(CDPATH= cd -- "$_self_dir/.." && pwd -P)"
+_payload_root="$(CDPATH= cd -- "$_self_dir/@@PAYLOAD_UP@@" && pwd -P)"
 
 if [ -n "${COPILOT_PLUGIN_ROOT:-}" ]; then
     _context_root="$(CDPATH= cd -- "$COPILOT_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
@@ -31,4 +31,4 @@ case "$PWD/" in
         ;;
 esac
 
-exec "$_payload_root/scripts/runtime-gate.sh" "$@"
+@@PAYLOAD_DISPATCH_POSIX@@

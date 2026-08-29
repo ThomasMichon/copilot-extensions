@@ -6,6 +6,10 @@
   "runtimeRoot": ".agent-index",
   "noSelfProvisionEnv": "AGENT_INDEX_NO_SELFPROVISION",
   "purpose": "Search and operate the semantic index",
+  "payloadDispatcher": {
+    "posix": "scripts/runtime-gate.sh",
+    "windows": "scripts/runtime-gate.ps1"
+  },
   "installation": {
     "legacyFootprint": {
       "paths": [

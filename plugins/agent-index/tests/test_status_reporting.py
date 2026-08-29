@@ -127,6 +127,8 @@ def test_absent_content_table_is_measured_empty(monkeypatch, tmp_path) -> None:
 
 
 def test_status_payload_unreachable_reports_unknown(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setattr("agent_index.transport.plan_route", lambda: ("host", None))
     monkeypatch.setattr(cli, "client_url", lambda: "http://127.0.0.1:9")
 
     class _FailingClient:
@@ -150,9 +152,13 @@ def test_status_payload_unreachable_reports_unknown(monkeypatch) -> None:
     assert payload["index"]["chunks"] is None  # never a fabricated 0
     assert payload["index"]["available"] is None
     assert payload["index"]["unreachable"] is True
+    assert payload["schema"] == "agent-index.lifecycle"
+    assert payload["runtime"]["state"] == "ready"
 
 
 def test_status_payload_no_endpoint_reports_unknown(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setattr("agent_index.transport.plan_route", lambda: ("host", None))
     monkeypatch.setattr(cli, "client_url", lambda: "")
 
     payload = cli._status_payload()
@@ -160,3 +166,19 @@ def test_status_payload_no_endpoint_reports_unknown(monkeypatch) -> None:
     assert payload["running"] is False
     assert payload["index"]["chunks"] is None
     assert payload["index"]["unreachable"] is True
+    assert payload["schema"] == "agent-index.lifecycle"
+    assert payload["runtime"]["state"] == "ready"
+
+
+def test_status_payload_without_role_is_setup_required(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("AGENT_INDEX_ROLE", raising=False)
+    monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+
+    payload = cli._status_payload()
+
+    assert payload["state"] == "setup_required"
+    assert payload["setup_required"] is True
+    assert payload["role"] is None
+    assert payload["running"] is False
+    assert payload["schema_version"] == 1
+    assert payload["version"] == cli.__version__
