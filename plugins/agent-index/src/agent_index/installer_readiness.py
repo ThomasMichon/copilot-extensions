@@ -35,6 +35,34 @@ def _result(state: str, detail: str) -> dict[str, Any]:
     }
 
 
+def unconfigured() -> dict[str, Any]:
+    """Return satisfied readiness for a delivered but inactive plugin."""
+    return _result(
+        "configuration-empty",
+        "agent-index is installed but not configured for the current repository. "
+        "No service was started or probed.",
+    )
+
+
+def client_configured() -> dict[str, Any]:
+    """Return satisfied readiness for an explicitly routed client."""
+    return _result(
+        "ready",
+        "agent-index is configured as a client. Retrieval routes to the "
+        "repository's designated indexer; no local service is required.",
+    )
+
+
+def client_transport_missing() -> dict[str, Any]:
+    """Return satisfied-empty readiness for an incomplete client designation."""
+    return _result(
+        "configuration-empty",
+        "agent-index designates a remote indexer for the current repository, "
+        "but no SSH alias or endpoint is configured. No local service was "
+        "started or probed.",
+    )
+
+
 def _read_mapping(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     if not path.exists():
         return None, None

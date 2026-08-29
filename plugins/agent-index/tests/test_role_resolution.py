@@ -2,7 +2,7 @@
 
 Role is pure configuration -- the plugin encodes no machine names (effort
 agent-index-engine-daemon). Precedence: AGENT_INDEX_ROLE env, then the
-machine-local config file's role:/engine: scalar, else client.
+machine-local config file's role:/engine: scalar, else unconfigured.
 """
 
 from __future__ import annotations
@@ -21,8 +21,8 @@ def _clean_env(monkeypatch, tmp_path):
     return tmp_path
 
 
-def test_default_role_is_client(_clean_env):
-    assert config.resolve_role() == "client"
+def test_default_role_is_unconfigured(_clean_env):
+    assert config.resolve_role() == "unconfigured"
 
 
 def test_env_overrides_config(monkeypatch, _clean_env):
@@ -39,7 +39,7 @@ def test_env_role_normalized(monkeypatch, _clean_env, value):
 
 def test_invalid_env_falls_through_to_default(monkeypatch, _clean_env):
     monkeypatch.setenv("AGENT_INDEX_ROLE", "banana")
-    assert config.resolve_role() == "client"
+    assert config.resolve_role() == "unconfigured"
 
 
 def test_config_role_host(_clean_env):
@@ -72,6 +72,6 @@ def test_explicit_config_path_override(monkeypatch, tmp_path):
     assert config.resolve_role() == "host"
 
 
-def test_missing_config_file_is_client(_clean_env):
+def test_missing_config_file_is_unconfigured(_clean_env):
     assert not (_clean_env / "config.yaml").exists()
-    assert config.resolve_role() == "client"
+    assert config.resolve_role() == "unconfigured"

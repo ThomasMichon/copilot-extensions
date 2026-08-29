@@ -19,24 +19,24 @@ try {
     # Only act on a box where agent-index is actually deployed.
     if (-not (Test-Path (Join-Path $InstallDir 'deploy-manifest.json'))) { exit 0 }
 
-    # A client runs NO local indexer daemon -- its MCP/CLI route to the designated
-    # host's service over SSH -- so there is nothing to keep alive here. Skip fast
-    # (no background install.ps1 spawn) on any non-host. Mirrors config.resolve_role
-    # precedence: a VALID AGENT_INDEX_ROLE env (host/client) wins; otherwise the
-    # config.yaml role:/engine: scalar; else client. An unrecognized env value is
-    # ignored (falls through), never treated as a role.
-    $role = ''
-    $envRole = if ($env:AGENT_INDEX_ROLE) { ($env:AGENT_INDEX_ROLE).Trim().ToLower() } else { '' }
-    if ($envRole -in @('host', 'client')) {
-        $role = $envRole
+    # Session start is repository-scoped activation. Merely enabling the plugin
+    # must not start a machine-global daemon in an unrelated repository.
+    $repoRoot = (& git rev-parse --show-toplevel 2>$null).Trim()
+    if (-not $repoRoot) { exit 0 }
+    $repoConfig = Join-Path $repoRoot '.agent-index\config.yaml'
+    if (-not (Test-Path -LiteralPath $repoConfig -PathType Leaf)) { exit 0 }
+    $me = if ($env:AGENT_INDEX_MACHINE) {
+        $env:AGENT_INDEX_MACHINE.Trim().ToLower()
     } else {
-        $cfg = Join-Path $InstallDir 'config.yaml'
-        if (Test-Path $cfg) {
-            $rm = Select-String -Path $cfg -Pattern '^\s*(?:role|engine)\s*:\s*"?([A-Za-z]+)"?' -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($rm) { $role = $rm.Matches[0].Groups[1].Value.ToLower() }
-        }
+        [Environment]::MachineName.Trim().ToLower()
     }
-    if ($role -notin @('host', 'engine', 'server', 'indexer')) { exit 0 }
+    $python = Get-Command python.exe -ErrorAction SilentlyContinue
+    if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
+    if (-not $python) { exit 0 }
+    $resolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
+    $role = (& $python.Source $resolver --config $repoConfig --machine $me 2>$null |
+        Select-Object -Last 1)
+    if (("$role").Trim().ToLower() -ne 'host') { exit 0 }
 
     # Fast health probe on the LIVE routing endpoint (active.json ephemeral port);
     # a stale active.json pointing at a dead pid correctly reads as unhealthy.

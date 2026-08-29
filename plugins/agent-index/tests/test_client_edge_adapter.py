@@ -7,6 +7,8 @@ from agent_index import config
 
 def test_client_url_prefers_routing(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: None)
     monkeypatch.setattr(
         "zdd.routing.read_active_endpoint",
         lambda _dir: SimpleNamespace(base_url="http://127.0.0.1:4567"),
@@ -17,6 +19,8 @@ def test_client_url_prefers_routing(monkeypatch, tmp_path) -> None:
 
 def test_client_url_falls_back_to_rendezvous(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: None)
     monkeypatch.setattr("zdd.routing.read_active_endpoint", lambda _dir: None)
     monkeypatch.setattr(
         config,
@@ -29,6 +33,8 @@ def test_client_url_falls_back_to_rendezvous(monkeypatch, tmp_path) -> None:
 
 def test_client_url_returns_none_without_routing_or_rendezvous(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("AGENT_INDEX_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("AGENT_INDEX_ROLE", "host")
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: None)
     monkeypatch.setattr("zdd.routing.read_active_endpoint", lambda _dir: None)
     monkeypatch.setattr(config, "discovered_endpoint", lambda: None)
 
