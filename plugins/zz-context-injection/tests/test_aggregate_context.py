@@ -78,6 +78,7 @@ def _run(
     cwd: Path | None = None,
     marketplace: str = "copilot-extensions",
     authority: str | None = None,
+    include_official_engine: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     home = tmp_path / "home"
     repo = tmp_path / "repo"
@@ -95,6 +96,16 @@ def _run(
             f"{name}@{marketplace}": True for name, _ in plugins
         },
     }
+    if include_official_engine:
+        settings["extraKnownMarketplaces"]["copilot-extensions"] = {
+            "source": {
+                "source": "github",
+                "repo": "ThomasMichon/copilot-extensions",
+            }
+        }
+        settings["enabledPlugins"][
+            "zz-context-injection@copilot-extensions"
+        ] = True
     (home / ".copilot").mkdir(parents=True, exist_ok=True)
     (home / ".copilot" / "settings.json").write_text(
         json.dumps(settings), encoding="utf-8"
@@ -106,6 +117,15 @@ def _run(
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(source, target)
+    if include_official_engine:
+        official = (
+            home
+            / ".copilot"
+            / "installed-plugins"
+            / "copilot-extensions"
+            / "zz-context-injection"
+        )
+        shutil.copytree(PLUGIN, official)
     aggregator = installed / "zz-context-injection"
     environment = os.environ.copy()
     environment["HOME"] = str(home)
@@ -451,9 +471,21 @@ def test_source_qualified_tail_adapter_can_own_final_slot(
         [("a-policy", policy), ("zz-context-injection", adapter)],
         marketplace="aperture",
         authority="zz-context-injection@aperture",
+        include_official_engine=True,
     )
 
     assert "POLICY" in json.loads(result.stdout)["additionalContext"]
+
+
+def test_engine_contract_is_versioned() -> None:
+    manifest = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))
+    contract = json.loads(
+        (PLUGIN / manifest["sessionContextEngine"]).read_text(encoding="utf-8")
+    )
+    assert contract == {
+        "schema": "copilot-extensions.context-injection-engine",
+        "version": 1,
+    }
 
 
 def test_malformed_authority_override_fails_closed_with_diagnostic(
