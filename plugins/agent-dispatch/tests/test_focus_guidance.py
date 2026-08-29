@@ -159,15 +159,15 @@ def _run(
     hook: Path,
     payload_repo: Path,
     tool_path: Path,
-    *,
+    *args: str,
     payload: str | bytes | None = None,
     process_cwd: Path | None = None,
     env_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[bytes]:
     if hook.suffix == ".ps1":
-        command = [_powershell(), "-NoProfile", "-File", str(hook)]
+        command = [_powershell(), "-NoProfile", "-File", str(hook), *args]
     else:
-        command = [shutil.which("bash"), str(hook)]
+        command = [shutil.which("bash"), str(hook), *args]
     assert all(command)
     return subprocess.run(
         command,
@@ -241,6 +241,23 @@ def test_enabled_opt_in_emits_exact_bounded_owned_kernel(tmp_path: Path) -> None
         assert "normal update cadence still applies" in kernel
     if len(results) == 2:
         assert results[1].stdout == results[0].stdout
+
+
+def test_aggregate_mode_is_compact_and_keeps_focus_invariants(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path / "repo")
+    tools = _tool_path(tmp_path / "bin")
+    results = [_run(hook, repo, tools, "--aggregate") for hook in _hooks()]
+    contexts = [json.loads(result.stdout)["additionalContext"] for result in results]
+    for context in contexts:
+        assert context.startswith(f"[owner: agent-dispatch@{VERSION}]\n")
+        assert "`worktree-status`" in context
+        assert "`focus --list`" in context
+        assert "Agent-worktrees status remains authoritative" in context
+        assert "`agent-dispatch:pick-and-claim` skill" in context
+        assert len(context.encode("utf-8")) <= 384
+    assert len(set(contexts)) == 1
 
 
 def test_owner_marker_is_derived_from_adjacent_manifest(tmp_path: Path) -> None:

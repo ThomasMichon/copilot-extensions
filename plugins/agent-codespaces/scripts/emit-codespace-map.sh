@@ -22,4 +22,4 @@ done
 SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/emit_codespace_map.py"
 [[ -f "$SCRIPT" ]] || emit_empty
 
-PYTHONPATH="" "$PY" "$SCRIPT" 2>/dev/null || emit_empty
+PYTHONPATH="" "$PY" "$SCRIPT" "$@" 2>/dev/null || emit_empty

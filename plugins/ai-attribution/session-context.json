@@ -1,0 +1,16 @@
+{
+  "schema": "copilot-extensions.session-context-contributors",
+  "version": 1,
+  "complete": true,
+  "contributors": [
+    {
+      "id": "publication-policy",
+      "pure": true,
+      "order": 100,
+      "timeoutSeconds": 1,
+      "maxBytes": 544,
+      "bash": ["scripts/emit-policy.sh", "--aggregate"],
+      "powershell": ["scripts/emit-policy.ps1", "--aggregate"]
+    }
+  ]
+}

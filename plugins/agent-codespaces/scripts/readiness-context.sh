@@ -16,9 +16,25 @@
 # self-locating: byte-identical across the agent-* runtime plugins.
 set -uo pipefail
 
+aggregate=0
+[[ "${1:-}" == "--aggregate" ]] && aggregate=1
+
 # JSON-encode a plain string (backslashes, quotes, newlines) and emit the object.
 jstr() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; printf '"%s"' "$s"; }
-emit() { printf '{"additionalContext": %s}' "$(jstr "$1")"; exit 0; }
+emit() {
+  local msg="$1"
+  if (( aggregate )); then
+    if [[ "$msg" == *"NOT READY"* ]]; then
+      msg="[owner: $name@$version]
+$name is NOT READY; restart to provision it and do not use it until it reports READY. Use the \`agent-codespaces\` skill for setup details."
+    else
+      msg="[owner: $name@$version]
+$name is READY; invoke its exact session-catalog command. Use the \`agent-codespaces\` skill for lifecycle details."
+    fi
+  fi
+  printf '{"additionalContext": %s}' "$(jstr "$msg")"
+  exit 0
+}
 
 ScriptDir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PluginDir="$(cd "$ScriptDir/.." && pwd)"
@@ -27,6 +43,11 @@ name=""
 [ -n "$py" ] && name="$("$py" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("name",""))' "$PluginDir/plugin.json" 2>/dev/null)"
 [ -n "$name" ] || name="$(basename "$PluginDir")"   # fallback: dir name
 [ -n "$name" ] || exit 0
+version="$(
+  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*$/\1/p' "$PluginDir/plugin.json" |
+    head -n 1
+)"
+[ -n "$version" ] || version="unknown"
 
 InstallDir="$HOME/.$name"
 Binstub="$HOME/.local/bin/$name"

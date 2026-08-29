@@ -25,6 +25,9 @@ Checks (all stdlib, no dependencies):
                             (not an env-var / placeholder) in a scanned file.
   6. raw IPs             -- an ssh/scp/rsync command targets a raw IPv4 literal
                             instead of a configured alias.
+  7. session context     -- with `--from-settings`, active session-start plugins
+                            are classified by declared aggregation role and
+                            unsafe multi-output stacks are rejected statically.
 
 Usage:
     scan-customizations.py [REPO_ROOT] [--json] [--strict]
@@ -185,6 +188,18 @@ ADDITIONAL_CONTEXT_EVENTS = {
     "notification",
     "subagentstart",
 }
+SESSION_CONTEXT_SCHEMA = "copilot-extensions.session-context-contributors"
+SESSION_CONTEXT_VERSION = 1
+SESSION_CONTEXT_MAX_TIMEOUT_SECONDS = 10
+SESSION_CONTEXT_MAX_BYTES = 65536
+AGGREGATE_AUTHORITY_NAME = "zz-context-injection"
+AGGREGATE_AUTHORITY_IDENTITY = "copilot-extensions/zz-context-injection"
+SESSION_CONTEXT_ROLES = {
+    "authority": "aggregate-authority",
+    "contributor": "complete-declared-contributor",
+    "side_effect": "complete-declared-side-effect-only",
+    "legacy": "legacy-direct-or-unknown",
+}
 
 
 @dataclass
@@ -218,17 +233,72 @@ class PluginSource:
         """Return the plugin directory containing skills, agents, and hooks."""
         return self.skills_root.parent
 
+    @property
+    def plugin_name(self) -> str:
+        """Return the unqualified plugin name from the loaded identity."""
+        return self.origin.rsplit("/", 1)[-1]
+
+    @property
+    def marketplace(self) -> str:
+        """Return the marketplace qualifier from the loaded identity."""
+        return self.origin.rsplit("/", 1)[0] if "/" in self.origin else ""
+
+
+def _load_json_optional(path: Path) -> dict | None:
+    """Load a JSON object, distinguishing an empty object from failure."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
+
 
 def _load_json(path: Path) -> dict:
     """Best-effort JSON load (settings/manifests); returns {} on any problem."""
+    data = _load_json_optional(path)
+    if data is None:
+        return {}
+    return data
+
+
+def _load_jsonc(path: Path) -> dict:
+    """Best-effort load for Copilot's leading-comment config.json."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        text = path.read_text(encoding="utf-8", errors="replace")
+        body = "\n".join(
+            line for line in text.splitlines()
+            if not line.lstrip().startswith("//")
+        )
+        data = json.loads(body)
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
-def _merged_settings(repo_root: Path) -> tuple[dict, dict]:
+def _repo_is_trusted(repo_root: Path, home: Path) -> bool:
+    """Match Copilot's exact persisted-folder trust boundary."""
+    data = _load_jsonc(home / ".copilot" / "config.json")
+    folders = data.get("trustedFolders")
+    if not isinstance(folders, list):
+        return False
+    resolved = repo_root.resolve()
+    for value in folders:
+        if not isinstance(value, str):
+            continue
+        try:
+            if Path(value).expanduser().resolve(strict=True) == resolved:
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def _merged_settings(
+    repo_root: Path,
+    home: Path | None = None,
+    *,
+    require_trust: bool = False,
+) -> tuple[dict[str, bool], dict[str, tuple[dict, Path]]]:
     """Merge the settings that decide a repo's *loaded* plugin set.
 
     Reads the repo's committed ``.github/copilot/settings.json`` (and the
@@ -237,16 +307,23 @@ def _merged_settings(repo_root: Path) -> tuple[dict, dict]:
     precedence over user settings for a marketplace of the same name. Plugin
     booleans use last-layer-wins semantics, including explicit ``false``.
     """
-    layers = [
-        Path.home() / ".copilot" / "settings.json",
-        repo_root / ".claude" / "settings.json",
-        repo_root / ".claude" / "settings.local.json",
-        repo_root / ".github" / "copilot" / "settings.json",
-        repo_root / ".github" / "copilot" / "settings.local.json",
-    ]
+    selected_home = home or Path.home()
+    layers = [(selected_home / ".copilot" / "settings.json", selected_home)]
+    if not require_trust or _repo_is_trusted(repo_root, selected_home):
+        layers.extend(
+            (
+                (repo_root / ".claude" / "settings.json", repo_root),
+                (repo_root / ".claude" / "settings.local.json", repo_root),
+                (repo_root / ".github" / "copilot" / "settings.json", repo_root),
+                (
+                    repo_root / ".github" / "copilot" / "settings.local.json",
+                    repo_root,
+                ),
+            )
+        )
     enabled: dict[str, bool] = {}
-    marketplaces: dict[str, dict] = {}
-    for p in layers:                       # later layers win (repo over user)
+    marketplaces: dict[str, tuple[dict, Path]] = {}
+    for p, base in layers:                 # later layers win (repo over user)
         data = _load_json(p)
         ep = data.get("enabledPlugins")
         if isinstance(ep, dict):
@@ -257,7 +334,7 @@ def _merged_settings(repo_root: Path) -> tuple[dict, dict]:
         if isinstance(mk, dict):
             for k, v in mk.items():
                 if isinstance(v, dict):
-                    marketplaces[str(k)] = v
+                    marketplaces[str(k)] = (v, base)
     return enabled, marketplaces
 
 
@@ -327,8 +404,97 @@ def _has_reviewable_payload(footprint: Path) -> bool:
     )
 
 
+def _marketplace_manifest(root: Path) -> tuple[dict, Path] | None:
+    """Load a supported marketplace manifest and its plugin-root base."""
+    for relative in (
+        Path(".github/plugin/marketplace.json"),
+        Path(".claude-plugin/marketplace.json"),
+    ):
+        path = root / relative
+        data = _load_json_optional(path)
+        if data is not None:
+            manifest_root = (
+                path.parent.parent.parent
+                if relative.parts[0] == ".github"
+                else path.parent.parent
+            )
+            return data, manifest_root
+    return None
+
+
+def _directory_marketplace_plugin(
+    marketplace: str,
+    name: str,
+    declaration: dict,
+    base: Path,
+) -> Path | None:
+    """Resolve one directory-marketplace entry with runtime-equivalent checks."""
+    source = declaration.get("source")
+    if not isinstance(source, dict):
+        return None
+    if str(source.get("source", "")).strip().lower() != "directory":
+        return None
+    raw_path = source.get("path")
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        return None
+    configured = Path(raw_path).expanduser()
+    root = configured if configured.is_absolute() else base / configured
+    try:
+        root = root.resolve(strict=True)
+    except OSError:
+        return None
+    loaded = _marketplace_manifest(root)
+    if loaded is None:
+        return None
+    manifest, manifest_root = loaded
+    if manifest.get("name") != marketplace:
+        return None
+    plugin_root = manifest_root
+    metadata = manifest.get("metadata")
+    if isinstance(metadata, dict):
+        configured_root = metadata.get("pluginRoot")
+        if isinstance(configured_root, str) and configured_root.strip():
+            plugin_root = manifest_root / configured_root
+    try:
+        plugin_root = plugin_root.resolve(strict=True)
+        plugin_root.relative_to(root)
+    except (OSError, ValueError):
+        return None
+    entries = manifest.get("plugins")
+    if not isinstance(entries, list):
+        return None
+    matches = [
+        entry for entry in entries
+        if isinstance(entry, dict) and entry.get("name") == name
+    ]
+    if len(matches) != 1:
+        return None
+    plugin_source = matches[0].get("source")
+    if not isinstance(plugin_source, str) or not plugin_source.strip():
+        return None
+    try:
+        footprint = (plugin_root / plugin_source).resolve(strict=True)
+        footprint.relative_to(plugin_root)
+    except (OSError, ValueError):
+        return None
+    manifest_data = _load_json_optional(footprint / "plugin.json")
+    if manifest_data is None:
+        manifest_data = _load_json_optional(
+            footprint / ".claude-plugin" / "plugin.json"
+        )
+    return (
+        footprint
+        if manifest_data is not None and manifest_data.get("name") == name
+        else None
+    )
+
+
 def assemble_enabled_plugins(
-    repo_root: Path, installed_root: Path | None = None,
+    repo_root: Path,
+    installed_root: Path | None = None,
+    *,
+    home: Path | None = None,
+    require_trust: bool = False,
 ) -> list[PluginSource]:
     """Assemble the plugin set *actually loaded for this repo* into review scope.
 
@@ -337,12 +503,18 @@ def assemble_enabled_plugins(
     enabled ``<name>@<marketplace>`` mapped to its skills footprint (an in-repo
     ``directory`` marketplace path, else the installed-plugins tree) and
     classified ``controlled`` (in-repo) vs external (with an upstream ``source``).
-    Plugins with any reviewable payload (skills, agents, or hooks) are returned.
-    Never raises.
+    Every enabled plugin is returned. Missing or unreadable external payloads
+    remain in the result so the session-context inventory can report that their
+    output is unknown instead of silently treating them as absent. Never raises.
     """
+    selected_home = home or Path.home()
     if installed_root is None:
-        installed_root = Path.home() / ".copilot" / "installed-plugins"
-    enabled, marketplaces = _merged_settings(repo_root)
+        installed_root = selected_home / ".copilot" / "installed-plugins"
+    enabled, marketplaces = _merged_settings(
+        repo_root,
+        home,
+        require_trust=require_trust,
+    )
     out: list[PluginSource] = []
     for key in sorted(enabled):
         if not enabled[key]:
@@ -353,20 +525,20 @@ def assemble_enabled_plugins(
         if not name:
             continue
         origin = f"{mkt}/{name}" if mkt else name
-        src = (marketplaces.get(mkt) or {}).get("source") or {}
+        declaration, base = marketplaces.get(mkt, ({}, repo_root))
+        src = declaration.get("source") or {}
         src_kind = str(src.get("source", "")).strip().lower() if isinstance(src, dict) else ""
 
-        if src_kind == "directory":
-            # An in-repo local marketplace (e.g. ./.ai): the repo owns it.
-            rel = str(src.get("path", "")).strip() if isinstance(src, dict) else ""
-            base = (repo_root / rel).resolve() if rel else repo_root
-            footprint = base / name
+        footprint = _directory_marketplace_plugin(
+            mkt, name, declaration, base
+        )
+        if footprint is not None:
             try:
                 controlled = repo_root.resolve() in footprint.parents or footprint == repo_root.resolve()
             except Exception:
                 controlled = False
             skills_root = footprint / "skills"
-            source_url = ""  # in-repo; fixable here
+            source_url = "" if controlled else _plugin_repo_url(footprint)
         else:
             # github / other marketplace -> the vendored installed payload.
             footprint = installed_root / mkt / name if mkt else installed_root / name
@@ -378,12 +550,11 @@ def assemble_enabled_plugins(
             if not source_url:
                 source_url = _plugin_repo_url(footprint)
 
-        if _has_reviewable_payload(footprint):
-            out.append(PluginSource(
-                skills_root=skills_root, origin=origin,
-                controlled=controlled, source=source_url,
-                version=_plugin_version(footprint),
-            ))
+        out.append(PluginSource(
+            skills_root=skills_root, origin=origin,
+            controlled=controlled, source=source_url,
+            version=_plugin_version(footprint),
+        ))
     return out
 
 
@@ -398,6 +569,307 @@ class Report:
     @property
     def blocking(self) -> int:
         return sum(1 for f in self.findings if f.severity == BLOCKING)
+
+
+@dataclass(frozen=True)
+class SessionContextEntry:
+    """Identity-and-role-only inventory for one active plugin."""
+
+    identity: str
+    plugin_name: str
+    role: str
+    session_start: str
+    declaration: str
+    possible_non_empty: str
+
+
+def _editable_plugin_footprint(root: Path, source: PluginSource) -> Path:
+    """Prefer editable suite source over an installed copy of the same plugin."""
+    if source.marketplace != "copilot-extensions":
+        return source.payload_root
+    candidate = root / "plugins" / source.plugin_name
+    manifest = _load_json(candidate / "plugin.json")
+    if candidate.is_dir() and manifest.get("name") == source.plugin_name:
+        return candidate
+    return source.payload_root
+
+
+def _session_start_state(footprint: Path) -> str:
+    """Return yes/no/unknown without inspecting or executing hook commands."""
+    if not footprint.is_dir():
+        return "unknown"
+    manifest_data: dict = {}
+    for manifest in (
+        footprint / "plugin.json",
+        footprint / ".claude-plugin" / "plugin.json",
+    ):
+        manifest_data = _load_json(manifest)
+        if manifest_data:
+            break
+    if not manifest_data:
+        return "unknown"
+    hook_files = _plugin_hook_files(footprint)
+    if not hook_files:
+        return "unknown" if manifest_data.get("hooks") else "no"
+    has_command_hook = False
+    for path in sorted(hook_files):
+        data = _load_json(path)
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            return "unknown"
+        entries = hooks.get("sessionStart", hooks.get("SessionStart", []))
+        if not isinstance(entries, list):
+            return "unknown"
+        for entry in entries:
+            if not isinstance(entry, dict):
+                return "unknown"
+            hook_type = re.sub(
+                r"[^a-z]", "", str(entry.get("type", "command")).lower()
+            )
+            if hook_type != "prompt":
+                has_command_hook = True
+    return "yes" if has_command_hook else "no"
+
+
+def _session_context_declaration(
+    footprint: Path,
+) -> tuple[str, int]:
+    """Return declaration state and contributor count without exposing commands."""
+    manifest = _load_json(footprint / "plugin.json")
+    if not manifest:
+        manifest = _load_json(footprint / ".claude-plugin" / "plugin.json")
+    configured = manifest.get("sessionContext")
+    if not isinstance(configured, str) or not configured.strip():
+        return "missing", 0
+    try:
+        payload_root = footprint.resolve()
+        path = (footprint / configured).resolve(strict=True)
+        path.relative_to(payload_root)
+    except (OSError, ValueError):
+        return "incomplete", 0
+    declaration = _load_json(path)
+    if (
+        declaration.get("schema") != SESSION_CONTEXT_SCHEMA
+        or declaration.get("version") != SESSION_CONTEXT_VERSION
+        or declaration.get("complete") is not True
+    ):
+        return "incomplete", 0
+    contributors = declaration.get("contributors")
+    if not isinstance(contributors, list):
+        return "incomplete", 0
+    seen: set[str] = set()
+    for contributor in contributors:
+        if not isinstance(contributor, dict):
+            return "incomplete", 0
+        contributor_id = contributor.get("id")
+        order = contributor.get("order", 500)
+        timeout = contributor.get("timeoutSeconds", 5)
+        max_bytes = contributor.get("maxBytes", 8192)
+        if (
+            not isinstance(contributor_id, str)
+            or not contributor_id.strip()
+            or contributor_id in seen
+            or contributor.get("pure") is not True
+            or not isinstance(order, int)
+            or not isinstance(timeout, int)
+            or not 1 <= timeout <= SESSION_CONTEXT_MAX_TIMEOUT_SECONDS
+            or not isinstance(max_bytes, int)
+            or not 1 <= max_bytes <= SESSION_CONTEXT_MAX_BYTES
+        ):
+            return "incomplete", 0
+        seen.add(contributor_id)
+        for platform, suffix in (("bash", ".sh"), ("powershell", ".ps1")):
+            argv = contributor.get(platform)
+            if (
+                not isinstance(argv, list)
+                or not argv
+                or not all(isinstance(part, str) and part for part in argv)
+            ):
+                return "incomplete", 0
+            relative = Path(argv[0])
+            if relative.is_absolute():
+                return "incomplete", 0
+            try:
+                command = (payload_root / relative).resolve(strict=True)
+                command.relative_to(payload_root)
+            except (OSError, ValueError):
+                return "incomplete", 0
+            if command.suffix.lower() != suffix or not command.is_file():
+                return "incomplete", 0
+    return "complete", len(contributors)
+
+
+def scan_session_context(
+    root: Path,
+    plugin_sources: list[PluginSource],
+    report: Report,
+) -> dict:
+    """Inventory and statically enforce session-start context composition.
+
+    This reads manifests and hook registrations only. It never executes hooks
+    and never includes hook commands or emitted context in its result.
+    """
+    entries: list[SessionContextEntry] = []
+    authority_entries: list[SessionContextEntry] = []
+    known_session_start: list[SessionContextEntry] = []
+    unknown_entries: list[SessionContextEntry] = []
+    active_names = [source.plugin_name for source in plugin_sources]
+
+    for source in plugin_sources:
+        footprint = _editable_plugin_footprint(root, source)
+        session_start = _session_start_state(footprint)
+        declaration, contributor_count = _session_context_declaration(footprint)
+        is_authority = source.plugin_name == AGGREGATE_AUTHORITY_NAME
+
+        if is_authority:
+            role = SESSION_CONTEXT_ROLES["authority"]
+            possible_non_empty = "yes" if session_start == "yes" else "unknown"
+        elif declaration == "complete" and contributor_count:
+            role = SESSION_CONTEXT_ROLES["contributor"]
+            possible_non_empty = "yes"
+        elif declaration == "complete":
+            role = SESSION_CONTEXT_ROLES["side_effect"]
+            possible_non_empty = "no"
+        else:
+            role = SESSION_CONTEXT_ROLES["legacy"]
+            possible_non_empty = "unknown"
+
+        entry = SessionContextEntry(
+            identity=source.origin,
+            plugin_name=source.plugin_name,
+            role=role,
+            session_start=session_start,
+            declaration=declaration,
+            possible_non_empty=possible_non_empty,
+        )
+        if session_start != "no" or is_authority:
+            entries.append(entry)
+        if is_authority:
+            authority_entries.append(entry)
+        if session_start == "yes":
+            known_session_start.append(entry)
+        elif session_start == "unknown":
+            unknown_entries.append(entry)
+            severity = WARNING if not source.controlled else BLOCKING
+            report.add(
+                severity,
+                "session-context-unknown",
+                f"<plugin:{entry.identity}>",
+                f"`{entry.identity}` is `{entry.role}`; the scanner cannot "
+                "establish whether it emits session-start context",
+            )
+
+    authority_known_safe = False
+    authority_proven = False
+    if len(authority_entries) > 1:
+        identities = ", ".join(
+            sorted(entry.identity for entry in authority_entries)
+        )
+        report.add(
+            BLOCKING,
+            "session-context-authority",
+            "<plugin-stack>",
+            "multiple aggregate authorities are active: "
+            f"{identities}",
+        )
+    elif len(authority_entries) == 1:
+        authority = authority_entries[0]
+        authority_complete = (
+            authority.identity == AGGREGATE_AUTHORITY_IDENTITY
+            and authority.session_start == "yes"
+            and authority.declaration == "complete"
+        )
+        if not authority_complete:
+            report.add(
+                BLOCKING,
+                "session-context-authority",
+                f"<plugin:{authority.identity}>",
+                f"`{authority.identity}` is `{authority.role}` but is not a "
+                "complete source-qualified session-start authority",
+            )
+        later_names = sorted(
+            name for name in active_names
+            if name > authority.plugin_name
+        )
+        if later_names:
+            report.add(
+                BLOCKING,
+                "session-context-ordering",
+                f"<plugin:{authority.identity}>",
+                f"`{authority.identity}` is `{authority.role}` but is not "
+                "lexically after every active plugin name",
+            )
+        incomplete = [
+            entry for entry in known_session_start
+            if entry.declaration != "complete"
+        ]
+        if incomplete:
+            identities = ", ".join(
+                sorted(
+                    f"{entry.identity} ({entry.role})"
+                    for entry in incomplete
+                )
+            )
+            report.add(
+                BLOCKING,
+                "session-context-declaration",
+                "<plugin-stack>",
+                "aggregate activation is unsafe because known session-start "
+                f"plugins are not complete-declared: {identities}",
+            )
+        authority_known_safe = (
+            authority_complete
+            and not later_names
+            and not incomplete
+            and len(authority_entries) == 1
+        )
+        authority_proven = authority_known_safe and not unknown_entries
+
+    possible_outputs = [
+        entry for entry in known_session_start
+        if entry.role != SESSION_CONTEXT_ROLES["side_effect"]
+    ]
+    if len(possible_outputs) > 1 and not authority_known_safe:
+        identities = ", ".join(
+            sorted(
+                f"{entry.identity} ({entry.role})"
+                for entry in possible_outputs
+            )
+        )
+        report.add(
+            BLOCKING,
+            "session-context-collision",
+            "<plugin-stack>",
+            "multiple possible non-empty session-start outputs are not "
+            "superseded by one proven final aggregate authority or proven "
+            f"byte-identical broker output: {identities}",
+        )
+
+    if authority_proven:
+        disposition = "guaranteed-last-proven"
+    elif authority_entries and not authority_known_safe:
+        disposition = "unsafe-aggregate-authority"
+    elif unknown_entries:
+        disposition = "indeterminate-stand-down"
+    elif len(possible_outputs) > 1:
+        disposition = "unsafe-multiple-output"
+    else:
+        disposition = "direct-or-side-effect-only"
+
+    return {
+        "disposition": disposition,
+        "authority_proven": authority_proven,
+        "plugins": [
+            {
+                "identity": entry.identity,
+                "role": entry.role,
+                "session_start": entry.session_start,
+                "declaration": entry.declaration,
+                "possible_non_empty": entry.possible_non_empty,
+            }
+            for entry in sorted(entries, key=lambda item: item.identity)
+        ],
+    }
 
 
 def split_frontmatter(text: str) -> tuple[str, str] | None:
@@ -1248,6 +1720,13 @@ def _print_context_budget(budget: dict) -> None:
           "not additionalContext-capable")
 
 
+def _print_session_context(inventory: dict) -> None:
+    """Print the identity-and-role-only session-context inventory."""
+    print(f"\nSession context: {inventory['disposition']}")
+    for entry in inventory["plugins"]:
+        print(f"  {entry['identity']}: {entry['role']}")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -1277,7 +1756,7 @@ def main(argv: list[str] | None = None) -> int:
 
     sources: list[PluginSource] = []
     if args.from_settings:
-        sources += assemble_enabled_plugins(root)
+        sources += assemble_enabled_plugins(root, require_trust=True)
 
     plugin_dirs = list(args.include_plugins)
     if args.include_installed:
@@ -1291,6 +1770,11 @@ def main(argv: list[str] | None = None) -> int:
                   file=sys.stderr)
 
     report = run(root, sources)
+    session_context = (
+        scan_session_context(root, sources, report)
+        if args.from_settings
+        else None
+    )
     budget = build_context_budget(root, sources) if args.context_budget else None
 
     if args.json:
@@ -1300,6 +1784,8 @@ def main(argv: list[str] | None = None) -> int:
             "total": len(report.findings),
             "findings": [asdict(f) for f in report.findings],
         }
+        if session_context is not None:
+            payload["session_context"] = session_context
         if budget is not None:
             payload["context_budget"] = budget
         print(json.dumps(payload, indent=2))
@@ -1313,6 +1799,8 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"[{tag}] {f.check}: {f.path}\n        {f.message}")
             print(f"\n{report.blocking} blocking, "
                   f"{len(report.findings) - report.blocking} warning(s)")
+        if session_context is not None:
+            _print_session_context(session_context)
         if budget is not None:
             _print_context_budget(budget)
 

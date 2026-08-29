@@ -65,9 +65,12 @@ Detailed mechanics stay in an on-demand skill or a dedicated file named by a
 backtick faux-link so the agent can read it when needed. This preserves the
 skill boundary and avoids Markdown auto-loading from always-on instructions.
 
-All hooks share the aggregate 10 KB `additionalContext` cap. Treat that cap as a
-shared budget, not a per-plugin allowance. Each plugin should minimize its
-kernel and make its contribution attributable.
+Treat injected context as a shared budget, not a per-plugin allowance. The
+documented 10 KB join cap applies to multiple `postToolUse` results, not to
+`sessionStart`; command-hook stdout is bounded at 10 MiB per invocation, and a
+Copilot CLI 1.0.82-1 probe delivered a 20 KB startup context end-to-end. A
+session-start aggregator should still define a smaller intentional product
+budget, minimize each kernel, and make every contribution attributable.
 
 ### Discover configuration without executing it
 

@@ -9,18 +9,124 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
-$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
-$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
-if (-not $python) { exit 0 }
-
-$wt_id = $env:WORKTREE_ID
-
 # Read the hook payload from stdin (only when redirected, so a manual run
 # in an interactive console does not block on ReadToEnd).
 $payload = ''
 if ([Console]::IsInputRedirected) {
     try { $payload = [Console]::In.ReadToEnd() } catch { }
 }
+$ContextOnly = $args -contains '--context-only'
+$ProducerVersion = ''
+if ($env:COPILOT_PLUGIN_ROOT) {
+    $Manifest = Join-Path $env:COPILOT_PLUGIN_ROOT 'plugin.json'
+    try {
+        $ProducerVersion = [string](
+            (Get-Content -Raw -LiteralPath $Manifest | ConvertFrom-Json).version
+        )
+    } catch { }
+}
+if (-not $ProducerVersion) {
+    try {
+        $ProducerVersion = (
+            Get-Content -Raw -LiteralPath (
+                Join-Path $env:USERPROFILE '.agent-worktrees\current-version'
+            )
+        ).Trim()
+    } catch { }
+}
+
+function Get-LaunchKey([string]$InputPayload, [string]$Version) {
+    if (-not $InputPayload -or -not $Version) { return '' }
+    try {
+        $Data = $InputPayload | ConvertFrom-Json
+        $SessionId = [string]$Data.sessionId
+        $Cwd = [string]$Data.cwd
+        $Source = [string]$Data.source
+        $Timestamp = $Data.timestamp
+        if (-not $SessionId -or -not $Cwd -or
+            -not [IO.Path]::IsPathRooted($Cwd) -or
+            $Timestamp -is [bool] -or
+            $Timestamp -isnot [ValueType]) {
+            return ''
+        }
+        $IdentityPython = Get-Command python -ErrorAction SilentlyContinue
+        if (-not $IdentityPython) {
+            $IdentityPython = Get-Command py -ErrorAction SilentlyContinue
+        }
+        $CanonicalCwd = if ($IdentityPython) {
+            (
+                & $IdentityPython.Source -c (
+                    'import os,sys;print(os.path.realpath(sys.argv[1]),end="")'
+                ) $Cwd 2>$null
+            ).Trim()
+        } elseif (Test-Path -LiteralPath $Cwd -PathType Container) {
+            (Resolve-Path -LiteralPath $Cwd).Path
+        } else {
+            [IO.Path]::GetFullPath($Cwd)
+        }
+        if (-not $CanonicalCwd) { return '' }
+        $TimestampText = [Convert]::ToString(
+            $Timestamp,
+            [Globalization.CultureInfo]::InvariantCulture
+        )
+        if (-not $TimestampText) { return '' }
+        $Identity = @(
+            $SessionId, $CanonicalCwd, $Source, $Version, $TimestampText
+        ) | ConvertTo-Json -Compress
+        $Sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            return -join (
+                $Sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($Identity)) |
+                    ForEach-Object { $_.ToString('x2') }
+            )
+        } finally {
+            $Sha.Dispose()
+        }
+    } catch {
+        return ''
+    }
+}
+$LaunchKey = Get-LaunchKey $payload $ProducerVersion
+$ContextDir = Join-Path $env:USERPROFILE '.agent-worktrees\.session-context'
+$ContextFile = $null
+if ($LaunchKey) {
+    $ContextFile = Join-Path $ContextDir "register-session-$LaunchKey.json"
+}
+
+function Publish-Context([string]$Output) {
+    if (-not $ContextOnly -and $LaunchKey -and $ContextFile) {
+        New-Item -ItemType Directory -Path $ContextDir -Force | Out-Null
+        $State = @{
+            launchKey = $LaunchKey
+            output = $Output
+        } | ConvertTo-Json -Compress
+        Set-Content -LiteralPath $ContextFile -Value $State -Encoding UTF8
+    }
+    [Console]::Out.Write($Output)
+}
+
+if ($ContextOnly) {
+    if (-not $LaunchKey -or -not $ContextFile -or
+        -not (Test-Path -LiteralPath $ContextFile -PathType Leaf)) {
+        Publish-Context '{}'
+        exit 0
+    }
+    try {
+        $State = Get-Content -Raw -LiteralPath $ContextFile | ConvertFrom-Json
+        if ([string]$State.launchKey -ceq $LaunchKey -and $State.output) {
+            Publish-Context ([string]$State.output)
+            exit 0
+        }
+    } catch { }
+    Publish-Context '{}'
+    exit 0
+}
+
+$_r = Join-Path $env:USERPROFILE '.agent-worktrees\bin\resolve-runtime.ps1'
+$python = if (Test-Path -LiteralPath $_r) { . $_r; $AwPy } else { $null }
+if (-not $python) { Publish-Context '{}'; exit 0 }
+
+$wt_id = $env:WORKTREE_ID
 
 $env:PYTHONPATH = ''  # package is installed in the venv (no lib/ shadow)
 $cmdArgs = @('-m', 'agent_worktrees', 'register-session', '--stdin', '--emit-context')
@@ -51,7 +157,7 @@ if ($registrationJson) {
     } catch { }
 }
 if (-not $registrationContext) {
-    [Console]::Out.Write('{}')
+    Publish-Context '{}'
     exit 0
 }
 
@@ -70,11 +176,11 @@ if (-not $contexts.Contains($registrationContext)) {
     $contexts.Add($registrationContext)
 }
 if ($contexts.Count -gt 0) {
-    [Console]::Out.Write((@{
+    Publish-Context ((@{
         additionalContext = $contexts -join "`n`n"
     } | ConvertTo-Json -Compress))
+    exit 0
 } else {
-    [Console]::Out.Write('{}')
+    Publish-Context '{}'
+    exit 0
 }
-
-exit 0

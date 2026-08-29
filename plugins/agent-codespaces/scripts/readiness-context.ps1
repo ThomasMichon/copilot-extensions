@@ -15,8 +15,16 @@ reports), so it is pure PowerShell + stdlib python (only to read plugin.json's
 name), never the plugin's venv. Generic + self-locating; parity with the .sh.
 #>
 $ErrorActionPreference = 'SilentlyContinue'
+$Aggregate = $args -contains '--aggregate'
 
 function Emit([string]$msg) {
+  if ($Aggregate) {
+    if ($msg.Contains('NOT READY')) {
+      $msg = "[owner: $name@$version]`n$name is NOT READY; restart to provision it and do not use it until it reports READY. Use the ``agent-codespaces`` skill for setup details."
+    } else {
+      $msg = "[owner: $name@$version]`n$name is READY; invoke its exact session-catalog command. Use the ``agent-codespaces`` skill for lifecycle details."
+    }
+  }
   $obj = @{ additionalContext = $msg } | ConvertTo-Json -Compress
   [Console]::Out.Write($obj); exit 0
 }
@@ -32,6 +40,11 @@ if ($py) { $name = (& $py.Source -c 'import json,sys;print(json.load(open(sys.ar
 if (-not $name) { $name = Split-Path -Leaf $PluginDir }
 if (-not $name) { exit 0 }
 $name = $name.Trim()
+$version = 'unknown'
+try {
+  $version = [string]((Get-Content -Raw -LiteralPath "$PluginDir/plugin.json" | ConvertFrom-Json).version)
+} catch {}
+if (-not $version) { $version = 'unknown' }
 
 $InstallDir = Join-Path $HOME ".$name"
 $Binstub    = Join-Path $HOME ".local/bin/$name"

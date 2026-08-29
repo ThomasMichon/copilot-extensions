@@ -33,7 +33,11 @@ if (-not $project) { Emit-Empty }
 
 # --- collect dynamic conduct; one Python assembler owns ordering + budget ---
 $defn = ((& $python -m agent_worktrees state-root --conduct 2>$null | Out-String).Trim()).Replace("`r`n", "`n").Replace("`r", "`n")
-$related = ((& $python -m agent_worktrees --project $project related --conduct 2>$null | Out-String).Trim()).Replace("`r`n", "`n").Replace("`r", "`n")
+$aggregate = $args -contains '--aggregate'
+$related = ''
+if (-not $aggregate) {
+    $related = ((& $python -m agent_worktrees --project $project related --conduct 2>$null | Out-String).Trim()).Replace("`r`n", "`n").Replace("`r", "`n")
+}
 $dir = Join-Path $env:USERPROFILE '.agent-worktrees\bin\conduct'
 
 # Dynamic: the worktree's own recent-history recovery digest (record-first
@@ -43,5 +47,9 @@ $digest = ((& $python -m agent_worktrees history-digest 2>$null | Out-String).Tr
 $env:AW_CONDUCT_DEFINITION = $defn
 $env:AW_CONDUCT_RELATED = $related
 $env:AW_CONDUCT_HISTORY = $digest
-& $python -m agent_worktrees.conduct $dir
+if ($aggregate) {
+    & $python -m agent_worktrees.conduct $dir --aggregate
+} else {
+    & $python -m agent_worktrees.conduct $dir
+}
 exit 0

@@ -110,12 +110,12 @@ else:
     return home, conduct_dir
 
 
-def _run(script: Path, home: Path, shell: str) -> str:
+def _run(script: Path, home: Path, shell: str, *args: str) -> str:
     env = os.environ.copy()
     env.update({"HOME": str(home), "USERPROFILE": str(home)})
     is_bash = Path(shell).name.lower() in {"bash", "bash.exe"}
-    command = [shell, str(script)] if is_bash else [
-        shell, "-NoProfile", "-File", str(script)
+    command = [shell, str(script), *args] if is_bash else [
+        shell, "-NoProfile", "-File", str(script), *args
     ]
     result = subprocess.run(
         command,
@@ -237,6 +237,52 @@ def test_bash_and_powershell_hooks_have_identical_payloads(tmp_path):
         _require_shell(_powershell(), "PowerShell"),
     )
     assert ps_output == bash_output
+
+
+@pytest.mark.skipif(
+    os.name == "nt" or _bash() is None,
+    reason="POSIX conduct fixtures require a POSIX host",
+)
+def test_aggregate_mode_is_compact_and_keeps_binding_invariants(tmp_path):
+    definition, related, history, _home, _ = _stress_hook_fixture(tmp_path)
+    history += (
+        "\n\nActive effort: `efforts/active/example/README.md`; participant "
+        "`Driver`; slice `Phase 2`. Load that effort first."
+        "\n\nWorktree succession: the current head session is abc123 (active). "
+        "If that is not you, coordinate rather than starting parallel work."
+    )
+    home, _ = _prepare_hook_home(
+        tmp_path / "aggregate",
+        definition=definition,
+        related=related,
+        history=history,
+    )
+    output = _run(
+        _SCRIPTS / "session-conduct.sh",
+        home,
+        _require_shell(_bash(), "Bash"),
+        "--aggregate",
+    )
+    context = json.loads(output)["additionalContext"]
+
+    assert context.startswith("[owner: agent-worktrees@")
+    assert definition[:80] in context
+    assert "active-effort assignment" in context
+    assert "succession head as authoritative" in context
+    assert "`agent-worktrees status` is the disposition source" in context
+    assert "`agent-worktrees:worktree`" in context
+    assert "Active effort:" in context
+    assert "Worktree succession:" in context
+    assert len(context.encode("utf-8")) <= c.AGGREGATE_MAX_CONTEXT_BYTES
+
+    powershell = _powershell()
+    if powershell:
+        assert _run(
+            _SCRIPTS / "session-conduct.ps1",
+            home,
+            powershell,
+            "--aggregate",
+        ) == output
 
 
 def test_related_is_omitted_only_after_history(tmp_path):

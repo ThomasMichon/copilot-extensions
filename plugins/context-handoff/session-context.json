@@ -1,0 +1,16 @@
+{
+  "schema": "copilot-extensions.session-context-contributors",
+  "version": 1,
+  "complete": true,
+  "contributors": [
+    {
+      "id": "continuity-guidance",
+      "pure": true,
+      "order": 110,
+      "timeoutSeconds": 1,
+      "maxBytes": 448,
+      "bash": ["scripts/emit-guidance.sh", "--aggregate"],
+      "powershell": ["scripts/emit-guidance.ps1", "--aggregate"]
+    }
+  ]
+}

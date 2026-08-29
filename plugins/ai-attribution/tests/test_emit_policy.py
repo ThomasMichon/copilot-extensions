@@ -68,7 +68,7 @@ def _run(
     hook: Path,
     cwd: Path,
     home: Path,
-    *,
+    *args: str,
     payload: str | None = None,
     payload_cwd: Path | None = None,
     process_cwd: Path | None = None,
@@ -77,9 +77,9 @@ def _run(
     if hook.suffix == ".ps1":
         powershell = _powershell_command()
         assert powershell
-        command = [powershell, "-NoProfile", "-File", str(hook)]
+        command = [powershell, "-NoProfile", "-File", str(hook), *args]
     else:
-        command = ["bash", str(hook)]
+        command = ["bash", str(hook), *args]
     environment = _environment(home, **extra)
     environment["GIT_CEILING_DIRECTORIES"] = str(cwd.parent)
     if payload is None:
@@ -206,7 +206,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev2] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev3] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -253,7 +253,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev2]"
+            "[owner: ai-attribution@0.1.0-dev3]"
         )
 
 
@@ -382,7 +382,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev2]"
+                "[owner: ai-attribution@0.1.0-dev3]"
             )
         else:
             assert result.stdout == "{}"
@@ -973,6 +973,25 @@ def test_exact_json_output_and_kernel_size(tmp_path: Path) -> None:
     assert len(context.encode("utf-8")) <= 2200
     assert result.stdout.count("\n") == 0
     assert context.count("Target-repo contribution guide:") == 4
+
+
+def test_aggregate_mode_is_compact_and_preserves_publication_safety(
+    tmp_path: Path,
+) -> None:
+    repo = _git_repo(tmp_path / "repo")
+    results = [
+        _run(hook, repo, tmp_path / hook.suffix.removeprefix("."), "--aggregate")
+        for hook in _parity_hooks()
+    ]
+    contexts = [_context(result) for result in results]
+    for context in contexts:
+        assert context.startswith("[owner: ai-attribution@")
+        assert "classify audience and repository ownership" in context
+        assert "ownership hints are not proof" in context
+        assert "must be persona-neutral and scrub credentials" in context
+        assert "Use the `ai-attribution` skill" in context
+        assert len(context.encode("utf-8")) <= 544
+    assert len(set(contexts)) == 1
 
 
 @pytest.mark.skipif(
