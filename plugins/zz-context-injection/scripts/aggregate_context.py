@@ -121,7 +121,39 @@ def _repo_is_trusted(repo: Path) -> bool:
 def _has_unlisted_staged_plugins() -> bool:
     """Detect explicit plugin staging that settings reconstruction cannot see."""
     if os.name == "nt":
-        return bool(os.environ.get("COPILOT_CONTEXT_STAGED_PLUGINS", "unknown"))
+        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        if not powershell:
+            return True
+        script = """
+param([int]$ProcessId)
+$current = $ProcessId
+for ($i = 0; $i -lt 8 -and $current -gt 0; $i++) {
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId=$current" `
+        -ErrorAction Stop
+    if ($process.CommandLine) {
+        [Console]::Out.WriteLine($process.CommandLine)
+    }
+    $current = [int]$process.ParentProcessId
+}
+"""
+        try:
+            result = subprocess.run(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-Command",
+                    script,
+                    "-ProcessId",
+                    str(os.getppid()),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return True
+        return "--plugin-dir" in result.stdout
     pid = os.getppid()
     for _ in range(8):
         if pid <= 1:
