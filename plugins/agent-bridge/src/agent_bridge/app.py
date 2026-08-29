@@ -169,18 +169,28 @@ async def lifespan(app: FastAPI):
     app.state.session_manager = mgr
 
     # Reattach to any Session Hosts that survived a prior frontend restart
-    # (goal 3), instead of leaving those sessions STOPPED. Best-effort: a
-    # reattach failure must never block daemon startup.
-    try:
-        n = await mgr.reattach_session_hosts()
-        if n:
-            logging.getLogger("agent-bridge").info(
-                "Reattached %d session(s) to surviving Session Hosts", n
+    # (goal 3), instead of leaving those sessions STOPPED. Best-effort and, per
+    # its own contract, it MUST NOT block daemon startup -- yet awaiting it here
+    # did: a *slow* far-side authority recovery (an unreachable remote venue can
+    # stall reattach for the whole remote-recovery budget, ~30s) delayed serving
+    # and could push startup past the self-watchdog grace (#166), triggering a
+    # reap/restart flap and a stale active.json (dotfiles #1932 / the upstream
+    # flapping report). Run it as a background task so the daemon serves
+    # immediately; surviving sessions reattach concurrently, moments after
+    # startup. The task is cancelled on shutdown.
+    async def _reattach_session_hosts_bg() -> None:
+        try:
+            n = await mgr.reattach_session_hosts()
+            if n:
+                logging.getLogger("agent-bridge").info(
+                    "Reattached %d session(s) to surviving Session Hosts", n
+                )
+        except Exception:
+            logging.getLogger("agent-bridge").warning(
+                "Session-Host reattach on startup failed", exc_info=True
             )
-    except Exception:
-        logging.getLogger("agent-bridge").warning(
-            "Session-Host reattach on startup failed", exc_info=True
-        )
+
+    reattach_task = asyncio.create_task(_reattach_session_hosts_bg())
 
     # Load topology profiles + auto-discover local agents. Always a resolver
     # (empty when there is no topology) so declarative namespace providers
@@ -576,6 +586,11 @@ async def lifespan(app: FastAPI):
     heartbeat_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await heartbeat_task
+
+    # Shutdown: stop the background Session-Host reattach if still in flight
+    reattach_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reattach_task
 
     # Shutdown: stop the periodic GC sweep
     if gc_task is not None:
