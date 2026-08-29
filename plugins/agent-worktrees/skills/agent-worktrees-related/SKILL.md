@@ -24,9 +24,9 @@ description: >
 
 # Agent Worktrees -- Related Repos
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for
-every shell operation below. Replace `<agent-worktrees catalog argv[0]>` with
-that raw path, quote it at each shell call site, and never search `PATH`.
+Use the exact `argv` prefix from the agent-worktrees session command catalog for
+every shell operation below. Replace `<agent-worktrees catalog argv prefix>` with
+that prefix with each element quoted for the current shell, and never search `PATH`.
 
 A **control-plane** repo (e.g. a dotfiles/harness repo) coordinates work across
 several OTHER repos. This skill manages the **directional, per-project** index
@@ -35,7 +35,7 @@ at `<repo>/.agent-worktrees/related.yaml`, with a plain-markdown narrative per
 related repo under `<repo>/.agent-worktrees/related/<name>.md`.
 
 It complements (does **not** duplicate) the **global** repos registry
-(`<agent-worktrees catalog argv[0]> repos`,
+(`<agent-worktrees catalog argv prefix> repos`,
 `~/.agent-worktrees/repos.yaml`): related entries are
 **keyed by global-registry names** and add only **relationship** (role,
 summary, doc), **locus** (where to work), and **delegate** (how to hand off).
@@ -136,7 +136,7 @@ grafted related index (installed plugins, harness, and knowledge overlay). The
 always-on output is intentionally bounded: registered repositories are
 discovered through the active project's repository tooling; the conduct output
 itself shows the directional-entry count, while
-`<agent-worktrees catalog argv[0]> related list` enumerates those entries. It then gives the
+`<agent-worktrees catalog argv prefix> related list` enumerates those entries. It then gives the
 cross-repo safety kernel and fully qualified `show`, `resolve`, and `doctor`
 commands instead of emitting the full roster every session.
 
@@ -204,7 +204,7 @@ A linked name should exist in the **global** registry (`repos add <name> ...`);
 `related add` scaffolds `related/<name>.md` -- a short narrative *from this
 repo's POV*: why the repo matters here, how to make a change, and its rules.
 The template bakes in the **never-hardcode-a-path** rule (resolve checkouts with
-`<agent-worktrees catalog argv[0]> repos find <name>`). Fill in the TODO sections; the docs are
+`<agent-worktrees catalog argv prefix> repos find <name>`). Fill in the TODO sections; the docs are
 committed alongside `related.yaml`.
 
 ## Common workflows

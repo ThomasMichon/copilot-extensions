@@ -3,7 +3,7 @@
 Commands in this design that launch the persistent supervisor, scheduler, or
 remote worker are explicit management boundaries and intentionally use the
 global compatibility wrappers. Interactive task operations should instead use
-the exact `argv[0]` from the agent-dispatch session command catalog.
+the exact `argv prefix` from the agent-dispatch session command catalog.
 
 Status: **in progress** — the spawn-reservation primitive, the supervisor loop
 (spawn-at-most-once), the liveness-gated lease heartbeat, **confirmed-gone

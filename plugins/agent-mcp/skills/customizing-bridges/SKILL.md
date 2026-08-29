@@ -16,9 +16,9 @@ description: >-
 
 # customizing-bridges
 
-Use the exact `argv[0]` from the agent-mcp session command catalog for every
-shell operation in this skill. Replace `<agent-mcp catalog argv[0]>` with that
-path; in PowerShell invoke it as `& "<agent-mcp catalog argv[0]>" <args>`.
+Use the exact `argv` prefix from the agent-mcp session command catalog for every
+shell operation in this skill. Replace `<agent-mcp catalog argv prefix>` with that
+path; in PowerShell invoke it as `<agent-mcp catalog argv prefix> <args>`.
 Never search `PATH` for a same-named command. If session-start hooks did not
 publish the catalog, use the compatibility readiness path from the
 **`agent-mcp`** skill before continuing.
@@ -47,7 +47,7 @@ The overlay filename is keyed by the config's **id**: its explicit top-level
 | `ado.mcp.yaml` | `ado` | `~/.agent-mcp/overrides/ado.yaml` |
 | named bridge `foo.yaml` | `foo` | `~/.agent-mcp/overrides/foo.yaml` |
 
-`<agent-mcp catalog argv[0]> status` lists the known named + plugin-shipped
+`<agent-mcp catalog argv prefix> status` lists the known named + plugin-shipped
 bridges and their config paths. `AGENT_MCP_HOME` (default `~/.agent-mcp`)
 relocates the whole tree.
 
@@ -104,7 +104,7 @@ headers:
 ## 3. Verify + apply
 
 - **Validate the merged result:**
-  `<agent-mcp catalog argv[0]> validate <name-or-config>` loads through the same
+  `<agent-mcp catalog argv prefix> validate <name-or-config>` loads through the same
   overlay merge, so it schema-checks the *effective* config.
 - **Restart the consumer:** the bridge re-reads config on launch, so start a new
   session / re-invoke the sub-agent for the overlay to take effect.

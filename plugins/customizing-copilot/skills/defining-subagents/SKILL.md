@@ -24,10 +24,10 @@ description: >
 
 # Defining Sub-Agents
 
-Use the exact `argv[0]` from the agent-mcp session command catalog for MCP
-fallback operations below. Replace `<agent-mcp catalog argv[0]>` with the raw
-path and quote it at the shell call site on POSIX; in PowerShell invoke it as
-`& "<agent-mcp catalog argv[0]>" <args>`.
+Use the exact `argv` prefix from the agent-mcp session command catalog for MCP
+fallback operations below. Replace `<agent-mcp catalog argv prefix>` with the raw
+prefix, quote each element at the shell call site, and invoke the rendered prefix as
+`<agent-mcp catalog argv prefix> <args>`.
 
 Custom agents are specialized profiles Copilot can delegate to. Each runs in its
 own subagent process with a separate context window. They are for **delegation**
@@ -196,7 +196,7 @@ fallback behavior:
 2. **Same-bridge CLI fallback.** After a catalog/load failure, use the existing
    materialized fleet named by the agent. Re-materialize when the expected stub
    is missing or `manifest.json.generated_by` differs from
-   `<agent-mcp catalog argv[0]> --version`;
+   `<agent-mcp catalog argv prefix> --version`;
    config/schema drift needs a deploy-owned digest. Probe a read-only stub with
    `--no-serve` and verify identity/capability before acting. If both surfaces
    fail, report both errors and stop. This fallback does not bypass an auth
@@ -292,10 +292,10 @@ from the CLI, no JSON-RPC by hand. `<bridge>` is the bridge's **registered name 
 the exact config path** the frontmatter uses — e.g. the `--config <path>` the
 `mcp-servers` block passes, given positionally:
 
-- **`<agent-mcp catalog argv[0]> call <bridge> <tool> '<arguments-json>'`** — one-shot: invoke a
+- **`<agent-mcp catalog argv prefix> call <bridge> <tool> '<arguments-json>'`** — one-shot: invoke a
   single upstream tool and print the result (pipeable; also reads the args JSON on
   stdin).
-- **`<agent-mcp catalog argv[0]> materialize <bridge>`** — project the whole `tools/list` catalog
+- **`<agent-mcp catalog argv prefix> materialize <bridge>`** — project the whole `tools/list` catalog
   into a discoverable CLI stub fleet under `~/.agent-mcp/materialized/<server>/`
   (each stub forwards through the legacy global `agent-mcp call` management <!-- marketplace-isolation: allow materialized-stub-management -->
   wrapper, so tools are invocable by name and pipe

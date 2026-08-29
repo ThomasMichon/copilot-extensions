@@ -36,7 +36,7 @@ Run the prep tool to detect machine, generate a cutoff, render the output
 path, layer any repo-local organization config, and create the log directory:
 
 ```
-<agent-logger catalog "prepare-session-log" argv[0]> --json --title "<Title>" --session "<Session ID>"
+<agent-logger catalog "prepare-session-log" argv prefix> --json --title "<Title>" --session "<Session ID>"
 ```
 
 Pass the session ID from the session context (omit `--session` to
@@ -93,7 +93,7 @@ explicit error. Do not silently fall back when validation fails.
 > configurable root: set the **user-level** `log.root` (in
 > `~/.agent-logger/config.yaml`, which may be absolute) to the bound
 > **knowledge** repo's logs directory — resolvable on this machine with
-> `<agent-worktrees catalog argv[0]> state-root` (append `/logs`). The harness setup flow writes
+> `<agent-worktrees catalog argv prefix> state-root` (append `/logs`). The harness setup flow writes
 > this per machine; the repo-local `.agent-logger.yaml` `root` stays relative
 > (it can only point inside the launch repo, so it cannot cross into the
 > knowledge repo). For a non-stateless repo, the default `repo_root/logs` is
@@ -135,12 +135,12 @@ is thorough or should receive an append-only supplement.
 Spawn the **session-log-writer** agent (`agent_type:
 "agent-logger:session-log-writer"`) synchronously. Resolve command ids
 `collate-session` and `read-session-digest` from this session's agent-logger
-catalog and include their exact `argv[0]` values with the manifest path:
+catalog and include their exact `argv` prefix values with the manifest path:
 
 ```text
 Manifest: <manifest-path>
-collate_argv0: <agent-logger catalog "collate-session" argv[0]>
-digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
+collate_argv0: <agent-logger catalog "collate-session" argv prefix>
+digest_argv0: <agent-logger catalog "read-session-digest" argv prefix>
 ```
 
 The writer must forward the exact digest-reader path into every explore

@@ -69,9 +69,9 @@ focus) in the prompt, e.g.:
 Ramp into the dormant session for worktree <SUFFIX> [on machine <NAME>].
 [Optionally: session <UUID>.]
 Focus: <what to resume, if the operator said>.
-ramp_argv0: <agent-logger catalog "ramp-up-session" argv[0]>
-digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
-[effort_argv0: <agent-worktrees catalog argv[0]>, for a local worktree when available]
+ramp_argv0: <agent-logger catalog "ramp-up-session" argv prefix>
+digest_argv0: <agent-logger catalog "read-session-digest" argv prefix>
+[effort_argv0: <agent-worktrees catalog argv prefix>, for a local worktree when available]
 Return the bounded Ramp-Up Briefing.
 ```
 
@@ -96,12 +96,12 @@ can make, surface it; otherwise proceed.
 ## Effort-backed takeover is effort-first
 
 For a local worktree, when agent-worktrees is available, resolve its exact
-session-catalog `argv[0]`
+session-catalog `argv prefix`
 and pass it to the sub-agent as `effort_argv0`. After the base worktree/session
 metadata is known, the sub-agent runs:
 
 ```
-<agent-worktrees catalog argv[0]> effort-focus show --json
+<agent-worktrees catalog argv prefix> effort-focus show --json
 ```
 
 from the resolved worktree. A valid open binding makes the cited effort README
@@ -135,8 +135,8 @@ If the operator hasn't said which worktree, ask.
 ### 2. List candidates (optional but recommended)
 
 ```
-<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --list
-<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --machine <name> --list
+<agent-logger catalog "ramp-up-session" argv prefix> <suffix> --list
+<agent-logger catalog "ramp-up-session" argv prefix> <suffix> --machine <name> --list
 ```
 
 A bare suffix is hunted down in the local session store by matching worktree
@@ -154,10 +154,10 @@ Ramp up the most recent session (omit `--list`), or a specific one with
 `--session <id>`:
 
 ```
-<agent-logger catalog "ramp-up-session" argv[0]> <suffix>
-<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --machine <name>
-<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --session <id>
-<agent-logger catalog "ramp-up-session" argv[0]> <suffix> --tail-turns 10
+<agent-logger catalog "ramp-up-session" argv prefix> <suffix>
+<agent-logger catalog "ramp-up-session" argv prefix> <suffix> --machine <name>
+<agent-logger catalog "ramp-up-session" argv prefix> <suffix> --session <id>
+<agent-logger catalog "ramp-up-session" argv prefix> <suffix> --tail-turns 10
 ```
 
 The brief contains:
@@ -173,7 +173,7 @@ Read the whole brief. It is your situational handoff.
 
 ### 4. Resolve active effort before going deeper
 
-When the agent-worktrees command is available, run its catalog `argv[0]`
+When the agent-worktrees command is available, run its catalog `argv prefix`
 `effort-focus show --json` from the resolved worktree. Use the effort-backed
 path only when `active_effort.active` is `true`. If it returns a valid
 open binding, read the cited effort README and use it for the durable objective
@@ -186,10 +186,10 @@ The full transcript was collated ephemerally. Read more with the existing
 digest reader (no deployment-specific paths, temp-store aware):
 
 ```
-<agent-logger catalog "read-session-digest" argv[0]> <id> context
-<agent-logger catalog "read-session-digest" argv[0]> <id> list
-<agent-logger catalog "read-session-digest" argv[0]> <id> segment <N>
-<agent-logger catalog "read-session-digest" argv[0]> <id> grep --pattern <regex>
+<agent-logger catalog "read-session-digest" argv prefix> <id> context
+<agent-logger catalog "read-session-digest" argv prefix> <id> list
+<agent-logger catalog "read-session-digest" argv prefix> <id> segment <N>
+<agent-logger catalog "read-session-digest" argv prefix> <id> grep --pattern <regex>
 ```
 
 Use `grep` to find the last decision, an error, a file path, or the task the

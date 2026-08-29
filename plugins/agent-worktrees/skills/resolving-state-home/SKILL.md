@@ -13,7 +13,7 @@ description: |-
 
 # Resolving the state home
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for all
+Use the exact `argv prefix` from the agent-worktrees session command catalog for all
 commands below.
 
 `agent-worktrees` owns the state split natively. A stateless harness contains

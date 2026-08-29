@@ -26,7 +26,6 @@ def test_payload_manifest_describes_agent_dispatch_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
         "purpose": "Coordinate queued agent work and task lifecycles",
         "installer": "install",
-        "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
     }
 
@@ -61,8 +60,9 @@ def test_session_catalog_hook_is_payload_root_aware_and_fail_open() -> None:
     powershell_catalog = (
         PLUGIN / "scripts" / "emit-command-catalog.ps1"
     ).read_text(encoding="utf-8")
-    assert r"bin\agent-dispatch.cmd" in powershell_catalog
-    assert "shell = 'cmd'" in powershell_catalog
+    assert r'"relativePath":"bin\\agent-dispatch.ps1"' in powershell_catalog
+    assert "$catalogShim = 'powershell'" in powershell_catalog
+    assert "'-File'," in powershell_catalog
 
 
 def test_out_of_session_boundaries_remain_explicit() -> None:

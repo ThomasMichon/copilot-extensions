@@ -23,7 +23,7 @@ description: >
 
 # Validating in the clean room
 
-Use the exact `argv[0]` for `session-sync` from the agent-logger session
+Use the exact `argv prefix` for `session-sync` from the agent-logger session
 command catalog when interpreting the standalone logger scenario below.
 
 The clean room is a disposable **fresh machine** (a Docker box with a stock

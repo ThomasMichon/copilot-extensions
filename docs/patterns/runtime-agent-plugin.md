@@ -191,11 +191,12 @@ Every runtime plugin wires two independent `sessionStart` command hooks:
 }
 ```
 
-The bootstrap hook prepares only this plugin. The catalog hook emits structured
-entries for every command declared by this payload:
+The bootstrap hook prepares only this plugin. The catalog hook emits structured entries for every command declared by this
+payload and atomically suppresses an identical block after its first emission
+for the same session:
 
 ```text
-id · argv · shell · purpose · availability=ready|unavailable
+id · argv prefix · shell · purpose · availability=ready|unavailable
 ```
 
 Both hooks prefer the
@@ -217,15 +218,16 @@ ownership fails closed in both eras; it never falls through to `PATH`.
 ## 5. Write skills against logical commands
 
 An operational skill begins by binding its logical command to the session
-catalog:
+catalog. It appends arguments to the advertised `argv` prefix without joining,
+re-parsing, or replacing prefix elements:
 
 ```text
-Use the exact argv[0] from the agent-example session command catalog.
-Replace <agent-example catalog argv[0]> below with that path.
-Never search PATH for a same-named command.
+Use the exact argv prefix from the agent-example session command catalog.
+Append each argument as a distinct value.
+Never substitute a global or PATH binstub for any prefix element.
 ```
 
-Examples then use `<agent-example catalog argv[0]>`, or state once that leading
+Examples then use `<agent-example catalog argv prefix>`, or state once that leading
 `agent-example` tokens are logical and must be replaced. A no-hook fallback may
 use the host's plugin-management surface to select an explicit
 `plugin@marketplace` payload, then invoke that payload's generated shim directly.

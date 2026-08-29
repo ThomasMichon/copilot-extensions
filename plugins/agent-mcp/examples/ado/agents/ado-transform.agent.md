@@ -19,16 +19,16 @@ are reshaped server-side to only the key fields.
 
 ## MCP Readiness
 
-Resolve `<agent-mcp catalog argv[0]>` from the session command catalog. If the
+Resolve `<agent-mcp catalog argv prefix>` from the session command catalog. If the
 catalog entry is absent, invoke exactly the bare startup command declared in
 this agent's `mcp-servers.command` as an explicit compatibility fallback; do
 not hand-locate or substitute another payload. In that branch, use the bare
 startup command wherever the instructions below show
-`<agent-mcp catalog argv[0]>`.
+`<agent-mcp catalog argv prefix>`.
 
 Probe `search_workitem` with an explicit arguments source. If the catalog did
 not load, preserve the error and use the existing `ado-transform` materialized
-fleet; if absent, run `<agent-mcp catalog argv[0]> materialize` on
+fleet; if absent, run `<agent-mcp catalog argv prefix> materialize` on
 `examples/ado/transform.mcp.yaml` with `--server-name ado-transform`. Probe the
 raw read tool with `--no-serve` plus
 `--arguments` (POSIX) or `--request-file` (Windows); transforms are not applied

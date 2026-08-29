@@ -55,7 +55,7 @@ def test_powershell_catalog_declares_same_schema_and_command() -> None:
         encoding="utf-8"
     )
     assert "copilot-extensions.session-command-catalog" in source
-    assert "bin\\agent-index.ps1" in source
+    assert r'"relativePath":"bin\\agent-index.ps1"' in source
     assert "COPILOT_PLUGIN_ROOT" in source
 
 
@@ -82,7 +82,15 @@ def test_powershell_catalog_uses_exact_payload_command() -> None:
     assert match
     catalog = json.loads(match.group(1))
     command = catalog["commands"][0]
-    assert command["argv"] == [str(PLUGIN / "bin" / "agent-index.ps1")]
+    assert Path(command["argv"][0]).is_absolute()
+    assert command["argv"][1:5] == [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+    ]
+    assert command["argv"][-1] == str(PLUGIN / "bin" / "agent-index.ps1")
+    assert command["shell"] == "direct"
     assert command["availability"] == "ready"
 
 

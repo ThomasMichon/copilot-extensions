@@ -1,8 +1,8 @@
 # Agent messages — recognizing and answering peer traffic
 
-Use the exact `argv[0]` from the agent-bridge session command catalog for the
+Use the exact `argv` prefix from the agent-bridge session command catalog for the
 interactive `send` operations below. Replace
-`<agent-bridge catalog argv[0]>` with that path and never search `PATH`.
+`<agent-bridge catalog argv prefix>` with its shell-ready rendering and never search `PATH`.
 
 The fabric can deliver a message **into a live interactive session** (yours, or a
 peer's) via agent-bridge. When that happens, the message arrives as a normal user
@@ -46,7 +46,7 @@ turn** and prints its assistant output — the reply is just the receiver's
 protocol to learn:
 
 ```bash
-<agent-bridge catalog argv[0]> send <worktree-handle> "what's the status of the rebase?"
+<agent-bridge catalog argv prefix> send <worktree-handle> "what's the status of the rebase?"
 # [>] Delivered to live session <id> (message 12, from you)
 # [<] Reply from <id>:
 # rebase is done; tests pass. pushing now.
@@ -72,7 +72,7 @@ mid-work status aside). Send back to the `reply-to` address with the **same verb
 you use for any agent** — no special tool:
 
 ```bash
-<agent-bridge catalog argv[0]> send <reply-to> "your reply text"
+<agent-bridge catalog argv prefix> send <reply-to> "your reply text"
 ```
 
 The payload-local `send` operation recognizes that `<reply-to>` is a live interactive session

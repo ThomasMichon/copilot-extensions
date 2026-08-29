@@ -69,6 +69,29 @@ def _multi_manifest(tmp_path: Path) -> Path:
     return path
 
 
+def _extract_catalog(stdout: str) -> dict:
+    outer = json.loads(stdout)
+    match = re.search(r"```json\n(.*?)\n```", outer["additionalContext"], re.S)
+    assert match
+    return json.loads(match.group(1))
+
+
+def _write_capture_module(root: Path, module: str) -> None:
+    package = root
+    for part in module.split("."):
+        package /= part
+        package.mkdir(exist_ok=True)
+        (package / "__init__.py").touch()
+    (package / "__main__.py").write_text(
+        "import json\n"
+        "import sys\n"
+        "print(json.dumps("
+        "{'args': sys.argv[1:], 'stdin': sys.stdin.read()}, "
+        "ensure_ascii=False))\n",
+        encoding="utf-8",
+    )
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -208,8 +231,8 @@ def test_manifest_can_select_cmd_for_windows_catalog(tmp_path: Path) -> None:
     generated = generator.expected_files(manifest)
     catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.ps1"]
     cmd = generated[manifest.parent / "bin" / "agent-example.cmd"]
-    assert r"bin\agent-example.cmd" in catalog
-    assert "shell = 'cmd'" in catalog
+    assert r'"relativePath":"bin\\agent-example.cmd"' in catalog
+    assert "$catalogShim = 'cmd'" in catalog
     assert r'where.exe" pwsh 2^>nul' in cmd
     assert 'set "_PSHOST=%%I"' in cmd
     assert r"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" in cmd
@@ -309,17 +332,240 @@ def test_powershell_catalog_emits_every_command_id(tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    outer = json.loads(result.stdout)
-    match = re.search(r"```json\n(.*?)\n```", outer["additionalContext"], re.S)
-    assert match
-    catalog = json.loads(match.group(1))
+    catalog = _extract_catalog(result.stdout)
     assert catalog["plugin"] == "agent-example"
     assert [command["id"] for command in catalog["commands"]] == [
         "agent-example",
         "example-helper",
     ]
-    assert all(command["argv"][0].endswith(".ps1") for command in catalog["commands"])
+    assert all(command["argv"][-1].endswith(".ps1") for command in catalog["commands"])
+    assert all(Path(command["argv"][0]).is_absolute() for command in catalog["commands"])
+    assert all(command["argv"][1:5] == [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+    ] for command in catalog["commands"])
     assert all(command["availability"] == "ready" for command in catalog["commands"])
+
+
+def test_catalog_deduplicates_identical_session_blocks(tmp_path: Path) -> None:
+    manifest = _multi_manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    (manifest.parent / "plugin.json").write_text(
+        '{"name":"agent-example"}\n', encoding="utf-8"
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "COPILOT_PLUGIN_ROOT": str(manifest.parent),
+            "HOME": str(tmp_path / "home"),
+            "USERPROFILE": str(tmp_path / "home"),
+            "TMP": str(tmp_path / "temp"),
+            "TEMP": str(tmp_path / "temp"),
+            "TMPDIR": str(tmp_path / "temp"),
+        }
+    )
+    (tmp_path / "temp").mkdir()
+    payload = '{"sessionId":"session with spaces \u96ea"}'
+    if os.name == "nt":
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            pytest.skip("pwsh is not installed")
+        command = [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(manifest.parent / "scripts" / "emit-command-catalog.ps1"),
+        ]
+    else:
+        command = [
+            str(manifest.parent / "scripts" / "emit-command-catalog.sh")
+        ]
+
+    first = subprocess.run(
+        command,
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    second = subprocess.run(
+        command,
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    third = subprocess.run(
+        command,
+        input='{"sessionId":"different-session"}',
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert _extract_catalog(first.stdout)["plugin"] == "agent-example"
+    assert json.loads(second.stdout) == {}
+    assert _extract_catalog(third.stdout)["plugin"] == "agent-example"
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    sorted((REPO / "plugins").glob("agent-*/payload-invocation.json")),
+    ids=lambda path: path.parent.name,
+)
+def test_every_advertised_entrypoint_round_trips_exact_arguments(
+    manifest: Path,
+    tmp_path: Path,
+) -> None:
+    source = generator.load_manifest(manifest)
+    plugin = tmp_path / "payload space \u96ea" / manifest.parent.name
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    staged_manifest = plugin / "payload-invocation.json"
+    staged_manifest.write_text(manifest.read_text(encoding="utf-8"), encoding="utf-8")
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": source["plugin"]}), encoding="utf-8"
+    )
+    installer = str(source["installer"])
+    (scripts / f"{installer}.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+    (scripts / f"{installer}.ps1").write_text(
+        "# generated fixture\n", encoding="utf-8"
+    )
+    python_path = str(Path(sys.executable).resolve())
+    (scripts / "resolve-runtime.sh").write_text(
+        f"AGENT_RT_PY={json.dumps(python_path)}\n", encoding="utf-8"
+    )
+    escaped_python = python_path.replace("'", "''")
+    (scripts / "resolve-runtime.ps1").write_text(
+        f"$AgentRtPy = '{escaped_python}'\n", encoding="utf-8"
+    )
+    generator.process_manifest(staged_manifest, check=False)
+
+    modules = tmp_path / "modules"
+    modules.mkdir(exist_ok=True)
+    for command_spec in source["commands"]:
+        _write_capture_module(modules, str(command_spec["module"]))
+
+    home = tmp_path / "home"
+    home.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "COPILOT_PLUGIN_ROOT": str(plugin),
+            "COPILOT_PROJECT_DIR": str(tmp_path),
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "PYTHONPATH": str(modules),
+            "PYTHONUTF8": "1",
+        }
+    )
+    if os.name == "nt":
+        pwsh = shutil.which("pwsh")
+        if not pwsh:
+            pytest.skip("pwsh is not installed")
+        catalog_command = [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(scripts / "emit-command-catalog.ps1"),
+        ]
+    else:
+        catalog_command = [str(scripts / "emit-command-catalog.sh")]
+    emitted = subprocess.run(
+        catalog_command,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    catalog = _extract_catalog(emitted.stdout)
+    expected_ids = {
+        str(command_spec["command"]) for command_spec in source["commands"]
+    }
+    assert {command["id"] for command in catalog["commands"]} == expected_ids
+
+    edge_args = [
+        "two words",
+        'embedded"quote',
+        "unicode-\u96ea",
+        "",
+        "$&|;<>*?(){}[]!^%",
+    ]
+    stdin = "stdin with spaces, quotes, and unicode \u96ea"
+    for command in catalog["commands"]:
+        prefix = command["argv"]
+        assert command["availability"] == "ready"
+        entrypoint = Path(prefix[-1])
+        assert entrypoint.is_absolute()
+        assert entrypoint.resolve().is_relative_to(plugin.resolve())
+        if os.name == "nt":
+            assert Path(prefix[0]).is_absolute()
+            assert prefix[1:5] == [
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+            ]
+            invoke = [*prefix, *edge_args]
+        else:
+            invoke = [*prefix, *edge_args]
+        result = subprocess.run(
+            invoke,
+            input=stdin,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        captured = json.loads(result.stdout)
+        assert captured["args"] == edge_args
+        assert captured["stdin"] == stdin
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility test")
+def test_windows_powershell_51_catalog_refuses_lossy_direct_invocation(
+    tmp_path: Path,
+) -> None:
+    legacy_host = Path(
+        os.environ.get("SystemRoot", r"C:\Windows")
+    ) / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    if not legacy_host.is_file():
+        pytest.skip("Windows PowerShell 5.1 is unavailable")
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    (manifest.parent / "plugin.json").write_text(
+        '{"name":"agent-example"}\n', encoding="utf-8"
+    )
+    env = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": str(manifest.parent),
+    }
+    result = subprocess.run(
+        [
+            str(legacy_host),
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(manifest.parent / "scripts" / "emit-command-catalog.ps1"),
+        ],
+        input="",
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    command = _extract_catalog(result.stdout)["commands"][0]
+    assert command["availability"] == "unavailable"
+    assert command["shell"] == "powershell"
+    assert command["argv"] == [
+        str(manifest.parent / "bin" / "agent-example.ps1")
+    ]
 
 
 def test_check_detects_drift(tmp_path: Path) -> None:
@@ -431,7 +677,7 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
     generated = generator.expected_files(manifest)
     assert manifest.parent / "bin" / "payload" / "agent-example" in generated
     catalog = generated[manifest.parent / "scripts" / "emit-command-catalog.sh"]
-    assert 'command_path="$self_root/bin/payload/agent-example"' in catalog
+    assert '"relativePath":"bin/payload/agent-example"' in catalog
 
 
 @pytest.mark.parametrize(
@@ -441,6 +687,7 @@ def test_manifest_supports_nested_payload_output(tmp_path: Path) -> None:
         "agent-codespaces",
         "agent-containers",
         "agent-dispatch",
+        "agent-index",
         "agent-logger",
         "agent-machines",
         "agent-mcp",
@@ -477,20 +724,28 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
 
 def test_skill_catalog_references_name_payload_adopters() -> None:
     reference = re.compile(
-        r'<(agent-[a-z0-9-]+) catalog(?: "([a-z][a-z0-9-]*)")? argv\[0\]>'
+        r'<(agent-[a-z0-9-]+) catalog(?: "([a-z][a-z0-9-]*)")? argv prefix>'
     )
     references: dict[str, dict[str, list[Path]]] = {}
-    capability_paths = [
+    capability_paths = sorted({
         *(REPO / "plugins").glob("*/skills/**/*.md"),
         *(REPO / "plugins").glob("*/agents/**/*.md"),
-    ]
+        *(REPO / "plugins").glob("*/extensions/**/*.mjs"),
+        *(REPO / "plugins").glob("*/scripts/*.sh"),
+        *(REPO / "plugins").glob("*/scripts/*.ps1"),
+    })
+    stale_references = []
     for skill in capability_paths:
-        for plugin, command in reference.findall(skill.read_text(encoding="utf-8")):
+        text = skill.read_text(encoding="utf-8")
+        if re.search(r"catalog[^\n`]*argv\[0\]|<[^>]*argv\[0\]>", text):
+            stale_references.append(skill.relative_to(REPO))
+        for plugin, command in reference.findall(text):
             command_id = command or plugin
             references.setdefault(plugin, {}).setdefault(command_id, []).append(
                 skill.relative_to(REPO)
             )
 
+    assert stale_references == []
     missing = {
         plugin: paths
         for plugin, paths in references.items()

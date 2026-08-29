@@ -24,11 +24,11 @@ description: >
 
 # Envisioning
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for
+Use the exact `argv` prefix from the agent-worktrees session command catalog for
 the state-root operation below. Replace
-`<agent-worktrees catalog argv[0]>` with the raw path and quote it at the shell
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at the shell
 call site on POSIX; in PowerShell invoke it as
-`& "<agent-worktrees catalog argv[0]>" <args>`.
+`<agent-worktrees catalog argv prefix> <args>`.
 
 A **vision** is a persistent, self-consistent statement of what a system,
 service, tool, or product is *ultimately meant to be*: its purpose, its
@@ -173,7 +173,7 @@ a stateless harness sets implicitly. In that case, visions split by subject.
 Resolve the **state root** first:
 
 ```
-<agent-worktrees catalog argv[0]> state-root --json    # source/repo/stateless/requires_external/bound
+<agent-worktrees catalog argv prefix> state-root --json    # source/repo/stateless/requires_external/bound
 ```
 
 - A vision **about the harness's own build-out** (how the shareable harness/tool

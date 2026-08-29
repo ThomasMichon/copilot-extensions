@@ -14,47 +14,128 @@ context_root="$(cd "$context_root" 2>/dev/null && pwd -P)" || {
     exit 0
 }
 
-command_path="$self_root/bin/agent-vault"
 installer_path="$self_root/scripts/install.sh"
-availability="unavailable"
-[ -x "$command_path" ] && [ -f "$installer_path" ] && availability="ready"
+command_specs='[{"id":"agent-vault","relativePath":"bin/agent-vault","purpose":"Fetch and manage machine-local vault credentials"}]'
+hook_input=""
+[ -t 0 ] || hook_input="$(cat)"
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || {
     printf '%s\n' '{}'
     exit 0
 }
 
-if output="$(COMMAND_PATH="$command_path" AVAILABILITY="$availability" "$py" <<'PY'
+if ! SELF_ROOT="$self_root" INSTALLER_PATH="$installer_path" COMMAND_SPECS="$command_specs" HOOK_INPUT="$hook_input" "$py" <<'PY'
+import hashlib
 import json
 import os
+import stat
+import sys
+import tempfile
+
+installer_ready = os.path.isfile(os.environ["INSTALLER_PATH"])
+commands = []
+for spec in json.loads(os.environ["COMMAND_SPECS"]):
+    command_path = os.path.join(
+        os.environ["SELF_ROOT"], *spec["relativePath"].split("/")
+    )
+    commands.append(
+        {
+            "id": spec["id"],
+            "argv": [command_path],
+            "shell": "direct",
+            "purpose": spec["purpose"],
+            "availability": (
+                "ready"
+                if installer_ready
+                and os.path.isfile(command_path)
+                and os.access(command_path, os.X_OK)
+                else "unavailable"
+            ),
+        }
+    )
 
 catalog = {
     "schema": "copilot-extensions.session-command-catalog",
     "version": 1,
     "plugin": "agent-vault",
     "payload": {"provenance": "payload-local"},
-    "commands": [
-        {
-            "id": "agent-vault",
-            "argv": [os.environ["COMMAND_PATH"]],
-            "shell": "direct",
-            "purpose": "Fetch and manage machine-local vault credentials",
-            "availability": os.environ["AVAILABILITY"],
-        }
-    ],
+    "commands": commands,
 }
+catalog_json = json.dumps(catalog, sort_keys=True)
 context = (
     "## agent-vault session command catalog\n\n"
-    "Invoke the exact `argv` below. Do not search `PATH` or substitute a "
-    "same-named command from another payload.\n\n"
+    "Select a command by `id` and append arguments to its exact `argv` prefix. "
+    "Quote each prefix element separately when rendering a shell command; "
+    "prepend `&` in PowerShell. "
+    "Never substitute a global or `PATH` binstub for any prefix element.\n\n"
     "```json\n"
-    + json.dumps(catalog, sort_keys=True)
+    + catalog_json
     + "\n```"
 )
-print(json.dumps({"additionalContext": context}))
+envelope = json.dumps({"additionalContext": context}) + "\n"
+
+session_id = ""
+raw_hook_input = os.environ.get("HOOK_INPUT", "")
+if raw_hook_input:
+    try:
+        hook = json.loads(raw_hook_input)
+        candidate = hook.get("sessionId") or hook.get("session_id")
+        if isinstance(candidate, str):
+            session_id = candidate
+    except (AttributeError, json.JSONDecodeError) as error:
+        print(
+            f"[agent-vault] invalid sessionStart payload; "
+            f"catalog deduplication disabled: {error}",
+            file=sys.stderr,
+        )
+
+marker_path = ""
+if session_id:
+    marker_key = hashlib.sha256(
+        (session_id + "\0" + catalog_json).encode("utf-8")
+    ).hexdigest()
+    uid = getattr(os, "getuid", lambda: "user")()
+    marker_root = os.path.join(
+        tempfile.gettempdir(),
+        f"copilot-extensions-session-command-catalog-{uid}",
+    )
+    marker_path = os.path.join(marker_root, marker_key)
+    try:
+        os.makedirs(marker_root, mode=0o700, exist_ok=True)
+        marker_root_stat = os.stat(marker_root)
+        if (
+            hasattr(os, "getuid")
+            and marker_root_stat.st_uid != os.getuid()
+        ) or stat.S_IMODE(marker_root_stat.st_mode) & 0o077:
+            raise PermissionError(
+                f"unsafe marker directory ownership or mode: {marker_root}"
+            )
+        descriptor = os.open(
+            marker_path,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        os.close(descriptor)
+    except FileExistsError:
+        os.write(1, b"{}\n")
+        raise SystemExit(0)
+    except OSError as error:
+        marker_path = ""
+        print(
+            f"[agent-vault] catalog deduplication unavailable: {error}",
+            file=sys.stderr,
+        )
+
+try:
+    os.write(1, envelope.encode("utf-8"))
+except OSError:
+    if marker_path:
+        try:
+            os.unlink(marker_path)
+        except OSError:
+            pass
+    raise
 PY
-)"; then
-    printf '%s\n' "$output"
-else
+then
     printf '%s\n' '{}'
 fi

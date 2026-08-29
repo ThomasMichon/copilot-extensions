@@ -180,6 +180,13 @@ def test_exact_adoption_config_emits_bounded_owned_policy(tmp_path: Path) -> Non
     assert len(set(contexts)) == 1
 
 
+def test_setup_fallback_owner_matches_plugin_version() -> None:
+    version = json.loads(PLUGIN_MANIFEST.read_text(encoding="utf-8"))["version"]
+    setup = SETUP_SKILL.read_text(encoding="utf-8")
+
+    assert f"[owner: efforts@{version}]" in setup
+
+
 def test_read_only_probe_reports_exact_compatible_capability(tmp_path: Path) -> None:
     repo = _repo(
         tmp_path / "repo",

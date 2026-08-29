@@ -22,12 +22,12 @@ description: >
 
 # Copilot Extensions Setup
 
-Use the exact `argv[0]` from each plugin's session command catalog for
+Use the exact `argv` prefix from each plugin's session command catalog for
 interactive checks and configuration below. Replace the
-`<agent-worktrees catalog argv[0]>`, `<agent-bridge catalog argv[0]>`,
-`<agent-codespaces catalog argv[0]>`, `<agent-containers catalog argv[0]>`,
-and `<agent-mcp catalog argv[0]>` placeholders with their published paths.
-Substitute each raw path, then quote it at its shell call site.
+`<agent-worktrees catalog argv prefix>`, `<agent-bridge catalog argv prefix>`,
+`<agent-codespaces catalog argv prefix>`, `<agent-containers catalog argv prefix>`,
+and `<agent-mcp catalog argv prefix>` placeholders with their published paths.
+Render each prefix with every element quoted for the current shell.
 Installer, service, and unified-update commands explicitly labeled as
 management boundaries remain literal global-wrapper invocations.
 
@@ -294,7 +294,7 @@ rosters, and `terminal_profiles` selection in config. They are written to
 
 ```bash
 {repo-name}              # launches worktree picker
-<agent-worktrees catalog argv[0]> status   # shows adopted repo
+<agent-worktrees catalog argv prefix> status   # shows adopted repo
 ```
 
 ---
@@ -366,8 +366,8 @@ plugin-owned versions.
 ### Verify
 
 ```bash
-<agent-bridge catalog argv[0]> version
-<agent-bridge catalog argv[0]> status
+<agent-bridge catalog argv prefix> version
+<agent-bridge catalog argv prefix> status
 ```
 
 ### Other Actions
@@ -397,11 +397,11 @@ profile** in `~/.agent-bridge/config.yaml` pointing to the same
 
 ```bash
 # Auto-discovers machines.yaml (the roster is derived from it)
-<agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile multi-machine system
+<agent-bridge catalog argv prefix> config adopt --repo /path/to/repo --profile multi-machine system
 
 # Verify
-<agent-bridge catalog argv[0]> config show
-<agent-bridge catalog argv[0]> config validate
+<agent-bridge catalog argv prefix> config show
+<agent-bridge catalog argv prefix> config validate
 ```
 
 ### Auto-Discovery Paths
@@ -429,7 +429,7 @@ guide the user interactively through:
 ### Explicit Paths
 
 ```bash
-<agent-bridge catalog argv[0]> config adopt \
+<agent-bridge catalog argv prefix> config adopt \
   --repo /path/to/repo --profile multi-machine system \
   --machines-yaml /custom/machines.yaml \
   --agents-config /custom/agents.json
@@ -438,8 +438,8 @@ guide the user interactively through:
 ### Multiple Repos
 
 ```bash
-<agent-bridge catalog argv[0]> config adopt --repo ~/src/my-project --profile my-project
-<agent-bridge catalog argv[0]> config adopt --repo ~/src/dotfiles --profile dotfiles
+<agent-bridge catalog argv prefix> config adopt --repo ~/src/my-project --profile my-project
+<agent-bridge catalog argv prefix> config adopt --repo ~/src/dotfiles --profile dotfiles
 ```
 
 ### After Adopt
@@ -454,14 +454,14 @@ agent-bridge service restart # marketplace-isolation: allow service-management
 systemctl --user restart agent-bridge.service
 
 # Then verify
-<agent-bridge catalog argv[0]> machines
-<agent-bridge catalog argv[0]> agents
+<agent-bridge catalog argv prefix> machines
+<agent-bridge catalog argv prefix> agents
 ```
 
 ### Remove a Profile
 
 ```bash
-<agent-bridge catalog argv[0]> config remove my-profile
+<agent-bridge catalog argv prefix> config remove my-profile
 ```
 
 ---
@@ -497,12 +497,11 @@ copilot plugin install agent-bridge@copilot-extensions
 #    -> pulls in agent-codespaces + agent-containers for the
 #       codespace: / container: resolvers
 # 4. Wire topology
-<agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile my-control-harness
+<agent-bridge catalog argv prefix> config adopt --repo /path/to/repo --profile my-control-harness
 
 # 5. Install agent-codespaces runtime      (optional-plugins-setup.md §5)
 # 6. Adopt the repo for codespaces         (optional-plugins-setup.md §6)
-cs='<agent-codespaces catalog argv[0]>'
-cd /path/to/repo && "$cs" config adopt
+cd /path/to/repo && <agent-codespaces catalog argv prefix> config adopt
 
 # 7. Install agent-containers runtime      (optional-plugins-setup.md §7)
 # 8. (optional) Install agent-mcp runtime  (optional-plugins-setup.md §8)
@@ -511,10 +510,10 @@ cd /path/to/repo && "$cs" config adopt
 agent-bridge start  # marketplace-isolation: allow service-management
 
 # 10. Verify everything
-<agent-worktrees catalog argv[0]> --version && <agent-worktrees catalog argv[0]> status
-<agent-bridge catalog argv[0]> version && <agent-bridge catalog argv[0]> machines && <agent-bridge catalog argv[0]> agents
-<agent-codespaces catalog argv[0]> version && <agent-codespaces catalog argv[0]> status
-<agent-containers catalog argv[0]> version && <agent-containers catalog argv[0]> fleet
+<agent-worktrees catalog argv prefix> --version && <agent-worktrees catalog argv prefix> status
+<agent-bridge catalog argv prefix> version && <agent-bridge catalog argv prefix> machines && <agent-bridge catalog argv prefix> agents
+<agent-codespaces catalog argv prefix> version && <agent-codespaces catalog argv prefix> status
+<agent-containers catalog argv prefix> version && <agent-containers catalog argv prefix> fleet
 # agent-mcp status   # if installed
 ```
 

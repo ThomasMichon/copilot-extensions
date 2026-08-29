@@ -34,7 +34,7 @@ The caller passes, in its prompt:
   session for the worktree is used).
 - an optional **focus** — what the operator cares about resuming, if given.
 - **effort_argv0** — the optional exact agent-worktrees session-catalog
-  `argv[0]` for a local worktree. Never search `PATH` for it. Do not use a local
+  `argv prefix` for a local worktree. Never search `PATH` for it. Do not use a local
   path for a remote worktree.
 
 ## Budget — this is the whole point
@@ -58,7 +58,7 @@ session catalog. Refuse to run if either is absent. Never search `PATH` or
 invoke a legacy venv module.
 
 ```
-<ramp-up-session argv[0] from caller> <suffix> [--machine <name>] [--session <id>] --tail-turns 10
+<ramp-up-session argv prefix from caller> <suffix> [--machine <name>] [--session <id>] --tail-turns 10
 ```
 
 This prints the session **metadata** (including the resolved worktree path), the
@@ -94,7 +94,7 @@ or review, material decisions not yet journaled, blockers, and required
 confirmations. If the effort plus git state explains the takeover, skip deeper
 transcript reads entirely.
 
-For a remote worktree, do not send the caller's local catalog path over SSH.
+For a remote worktree, do not send the caller's local catalog prefix over SSH.
 Unless the caller explicitly supplies an exact remote agent-worktrees command,
 continue with standalone reconstruction. The same fallback applies when the
 binding is absent, stale, closed, or unavailable.
@@ -104,9 +104,9 @@ binding is absent, stale, closed, or unavailable.
 Use the existing digest reader against the session id. Be surgical:
 
 ```
-<read-session-digest argv[0] from caller> <id> list
-<read-session-digest argv[0] from caller> <id> grep --pattern <regex>
-<read-session-digest argv[0] from caller> <id> segment <N>
+<read-session-digest argv prefix from caller> <id> list
+<read-session-digest argv prefix from caller> <id> grep --pattern <regex>
+<read-session-digest argv prefix from caller> <id> segment <N>
 ```
 
 Good greps: the task/goal, `error|fail|blocked`, an effort/issue/PR reference, a

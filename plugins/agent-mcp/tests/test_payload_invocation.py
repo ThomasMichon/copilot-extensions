@@ -26,7 +26,6 @@ def test_payload_manifest_describes_agent_mcp_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_MCP_NO_SELFPROVISION",
         "purpose": "Wrap authenticate and materialize MCP servers",
         "installer": "init",
-        "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
     }
     posix = (PLUGIN / "bin" / "agent-mcp").read_text(encoding="utf-8")
@@ -55,8 +54,9 @@ def test_session_catalog_hook_is_payload_root_aware() -> None:
     powershell_catalog = (
         PLUGIN / "scripts" / "emit-command-catalog.ps1"
     ).read_text(encoding="utf-8")
-    assert r"bin\agent-mcp.cmd" in powershell_catalog
-    assert "shell = 'cmd'" in powershell_catalog
+    assert r'"relativePath":"bin\\agent-mcp.ps1"' in powershell_catalog
+    assert "$catalogShim = 'powershell'" in powershell_catalog
+    assert "'-File'," in powershell_catalog
 
 
 def test_static_mcp_server_commands_remain_explicit_startup_boundaries() -> None:

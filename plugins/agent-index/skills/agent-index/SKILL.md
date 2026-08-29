@@ -23,11 +23,11 @@ then provisions (`::agent-provisioning::`, usually ~30-120s). Automation must
 also pass `--yes` and an explicit role choice. If the command is missing, the
 session command catalog reports it as unavailable; surface that exact failure
 rather than searching `PATH` or improvising an install.
-- `<catalog argv[0]> status` is the first health check in a configured
+- `<catalog argv prefix> status` is the first health check in a configured
   repository. It reports service reachability,
 version, index availability, total chunks, per-source coverage, and indexing
 state.
-- `<catalog argv[0]> role` reports `host` (local daemon), `client` (read commands
+- `<catalog argv prefix> role` reports `host` (local daemon), `client` (read commands
   route to the designated indexer over SSH), or `unconfigured`.
 
 ## Retrieval path
@@ -37,32 +37,32 @@ exact `argv` in its session command catalog** — there is no sub-agent, MCP-too
 wrapper, or ambient command lookup. Append the arguments shown below to the
 catalog `argv`. The read subcommands:
 
-- `<catalog argv[0]> search "<query>" [--source S] [--language L] [--repo R] [--limit N] --json`
+- `<catalog argv prefix> search "<query>" [--source S] [--language L] [--repo R] [--limit N] --json`
   — meaning + lexical hybrid search. Use for conceptual/code/doc searches when
   exact tokens are unknown. Each hit has `chunk_id`, `source`, `file_path`,
   `line_start`/`line_end`, `content`.
-- `<catalog argv[0]> similar <chunk_id> [--source S] [--limit N]` — pivot from a
+- `<catalog argv prefix> similar <chunk_id> [--source S] [--limit N]` — pivot from a
   returned hit into related material.
-- `<catalog argv[0]> clusters [--source S] [--bucket B] [--exact-dupes-only] [--limit N]`
+- `<catalog argv prefix> clusters [--source S] [--bucket B] [--exact-dupes-only] [--limit N]`
   — list near-duplicate clusters.
-- `<catalog argv[0]> status` — health and coverage map; probe this before relying on
+- `<catalog argv prefix> status` — health and coverage map; probe this before relying on
   results.
 
-Reindexing is **not** a retrieval action: `<catalog argv[0]> index` is an
+Reindexing is **not** a retrieval action: `<catalog argv prefix> index` is an
 operator/runtime step, never an agent side effect.
 
 ## CLI/operator path
 
 Use the CLI directly when operating the runtime:
 
-- Setup/routing: `<catalog argv[0]> setup --single`, `<catalog argv[0]> setup
-  --indexer <machine> --ssh <alias>`, `<catalog argv[0]> role`,
-  `<catalog argv[0]> capability --json`.
-- Service: `<catalog argv[0]> start`, `<catalog argv[0]> stop`,
-  `<catalog argv[0]> status`, `<catalog argv[0]> deploy --recover`.
-- Index refresh: `<catalog argv[0]> index [--source S] [--full]`. Incremental is the
+- Setup/routing: `<catalog argv prefix> setup --single`, `<catalog argv prefix> setup
+  --indexer <machine> --ssh <alias>`, `<catalog argv prefix> role`,
+  `<catalog argv prefix> capability --json`.
+- Service: `<catalog argv prefix> start`, `<catalog argv prefix> stop`,
+  `<catalog argv prefix> status`, `<catalog argv prefix> deploy --recover`.
+- Index refresh: `<catalog argv prefix> index [--source S] [--full]`. Incremental is the
 default; `--full` is explicit.
-- Engine daemon: `<catalog argv[0]> engine status|start|stop|run`.
+- Engine daemon: `<catalog argv prefix> engine status|start|stop|run`.
 
 ## Scope and fallback
 
@@ -78,13 +78,13 @@ clearly scoped, pass `source` or `repo` rather than doing an unscoped search.
 
 ## Troubleshooting
 
-- Service down on a host: run/check `<catalog argv[0]> status`; session-start
+- Service down on a host: run/check `<catalog argv prefix> status`; session-start
 `ensure-service` should start the user-mode daemon in the background.
 - Client cannot search: run inside a repo with `.agent-index/config.yaml`
 `indexer.ssh` or set `AGENT_INDEX_REPO`; the CLI read transport needs a project
 to choose the SSH target.
-- Engine issues: `<catalog argv[0]> engine status` shows durable engine health, PID,
+- Engine issues: `<catalog argv prefix> engine status` shows durable engine health, PID,
 endpoint, and venv provisioning state.
-- Interrupted cutover: `<catalog argv[0]> deploy --recover`.
+- Interrupted cutover: `<catalog argv prefix> deploy --recover`.
 
 Architecture details live in `plugins/agent-index/docs/architecture.md`.

@@ -13,9 +13,9 @@ surrounding agent, its domain-service ownership, bounded execution contract,
 `## MCP Readiness` section, and anti-self-delegation guard with
 **`customizing-copilot:defining-subagents`**.
 
-Use the exact `argv[0]` from the agent-mcp session command catalog for every
-shell operation below. Replace `<agent-mcp catalog argv[0]>` with that path;
-in PowerShell invoke it as `& "<agent-mcp catalog argv[0]>" <args>`. Never
+Use the exact `argv` prefix from the agent-mcp session command catalog for every
+shell operation below. Replace `<agent-mcp catalog argv prefix>` with its shell-ready rendering;
+in PowerShell invoke it as `<agent-mcp catalog argv prefix> <args>`. Never
 search `PATH` for a same-named command. If session-start hooks did not publish
 the catalog, use the compatibility readiness path from the **`agent-mcp`**
 skill before continuing.
@@ -94,7 +94,7 @@ POSIX:
 
 ```bash
 ROOT="$(git rev-parse --show-toplevel)"
-<agent-mcp catalog argv[0]> materialize \
+<agent-mcp catalog argv prefix> materialize \
   "$ROOT/.github/agents/service.mcp.yaml" \
   --server-name service
 
@@ -107,7 +107,7 @@ PowerShell:
 
 ```powershell
 $root = git rev-parse --show-toplevel
-& "<agent-mcp catalog argv[0]>" materialize `
+<agent-mcp catalog argv prefix> materialize `
   "$root\.github\agents\service.mcp.yaml" `
   --server-name service `
   --windows
@@ -165,7 +165,7 @@ resident daemon keeps one warm session per bridge identity, reducing npm/uvx
 launch and protocol negotiation cost:
 
 ```bash
-<agent-mcp catalog argv[0]> serve
+<agent-mcp catalog argv prefix> serve
 ```
 
 Warmth is an optimization, not the default for identity-sensitive fallback.
@@ -199,7 +199,7 @@ deploy step that:
 
 At agent runtime, a fleet is definitely stale when its expected stub is missing
 or `manifest.json.generated_by` differs from
-`<agent-mcp catalog argv[0]> --version`. Detecting bridge
+`<agent-mcp catalog argv prefix> --version`. Detecting bridge
 config/schema/overlay drift requires the deploy-owned effective-config digest
 above;
 agent-mcp's base manifest does not currently record one.

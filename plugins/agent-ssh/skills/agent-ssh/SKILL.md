@@ -47,31 +47,31 @@ plugins and register against the same contract.
 
 ## What lives here
 
-- **SSH-profile emitter** (`<catalog argv[0]> emit-profile`) -- renders `Host <name>`
+- **SSH-profile emitter** (`<catalog argv prefix> emit-profile`) -- renders `Host <name>`
   blocks from a normalized registry. The ProxyCommand recipe comes from the
   transport's `module.yaml`, not from hardcoded transport logic.
 - **Coexistence layout** -- a single managed `Include ~/.ssh/config.d/*` plus a
   per-transport drop-in `50-agent-ssh-<module>.conf`. Each transport owns only
   its own fragment.
-- **Managed-fragment hygiene** (`<catalog argv[0]> doctor`) -- audits only the
+- **Managed-fragment hygiene** (`<catalog argv prefix> doctor`) -- audits only the
   managed fragment namespace against the current registry/module sources, isolates
   malformed or stale peers, and gives exhaustive human/JSON report-only cleanup
   guidance without touching unrelated OpenSSH files.
-- **Reachability verification** (`<catalog argv[0]> verify`) -- probes the active SSH
+- **Reachability verification** (`<catalog argv prefix> verify`) -- probes the active SSH
   profile by machine name and exits non-zero on missing names or unreachable
   aliases.
 - **Transport-provider contract** (`contract/`) -- schemas and public exemplars
   for provider plugins.
-- **Live introspection** (`<catalog argv[0]> explore`) -- read-only SSH probe of a
+- **Live introspection** (`<catalog argv prefix> explore`) -- read-only SSH probe of a
   reachable target's fabric runtimes, repos, and derived agents.
-- **Mesh status** (`<catalog argv[0]> mesh-status`) -- render the calling repo's SSH
+- **Mesh status** (`<catalog argv prefix> mesh-status`) -- render the calling repo's SSH
   machine mesh from its `machines.yaml` (per-host role, reachability, aliases).
   Config-driven and read-only; no probe.
 
 ## Emit a profile
 
 ```bash
-<catalog argv[0]> emit-profile registry.yaml --module transport/module.yaml
+<catalog argv prefix> emit-profile registry.yaml --module transport/module.yaml
 ```
 
 Use `--print` to inspect the fragment without writing it. Use `--config-d` and
@@ -82,7 +82,7 @@ those sources and operational commands use them as current authority.
 ## Audit managed fragments
 
 ```bash
-<catalog argv[0]> doctor [--json]
+<catalog argv prefix> doctor [--json]
 ```
 
 Doctor is exhaustive and report-only. It identifies the exact managed entry,
@@ -93,7 +93,7 @@ bounded, deduplicated warning set. Legacy fragments remain active with a
 ## Verify reachability
 
 ```bash
-<catalog argv[0]> verify --timeout 8 machine-a machine-b
+<catalog argv prefix> verify --timeout 8 machine-a machine-b
 ```
 
 A failure is fail-safe: the host is not considered reachable until the probe
@@ -119,7 +119,7 @@ and troubleshooting skills shipped by this plugin.
 ## Explore a machine
 
 ```bash
-<catalog argv[0]> explore <ssh-target> [--json] [--timeout 10]
+<catalog argv prefix> explore <ssh-target> [--json] [--timeout 10]
 ```
 
 Introspects a **reachable** target over SSH and reports, by convention, what the
@@ -140,7 +140,7 @@ PowerShell-host probe is a follow-on.
 ## Show the machine mesh
 
 ```bash
-<catalog argv[0]> mesh-status [--path machines.yaml] [--json] [--summary]
+<catalog argv prefix> mesh-status [--path machines.yaml] [--json] [--summary]
 ```
 
 Renders the **calling repo's** SSH machine mesh from its `machines.yaml` — for
@@ -150,7 +150,7 @@ each machine: `display_name`, `role`, `environment`, declared reachability
 `machines.yaml` from the current git repo (or `--path`) and says nothing when the
 repo ships none, so one repo's mesh never leaks into another. **Read-only** — it
 parses config, it does not probe; `ssh.ready` is the operator's declared state,
-so use `<catalog argv[0]> verify <alias>` to probe a host live.
+so use `<catalog argv prefix> verify <alias>` to probe a host live.
 
 A cwd-gated `sessionStart` hook (`scripts/emit-mesh-pointer.*`) emits only a
 **succinct pointer** to this command when the repo has a `machines.yaml`, rather
@@ -164,6 +164,6 @@ Ship a `module.yaml` conforming to `contract/module.schema.json`. Provide a
 profile, manages the managed Include, and verifies reachability.
 
 `entrypoints` in a transport module are metadata for installers/orchestrators;
-`<catalog argv[0]> emit-profile` and `<catalog argv[0]> verify` do not run transport setup
+`<catalog argv prefix> emit-profile` and `<catalog argv prefix> verify` do not run transport setup
 scripts. Use the relevant transport skill (`setting-up-ssh-host`,
 `setting-up-ssh-client`, or provider-owned docs) for install/provision steps.

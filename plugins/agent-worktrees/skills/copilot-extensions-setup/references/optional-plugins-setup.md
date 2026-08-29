@@ -1,9 +1,9 @@
 # Optional Plugins Setup -- Codespaces, Containers, MCP
 
-Use the exact `argv[0]` from each plugin's session command catalog for
+Use the exact `argv` prefix from each plugin's session command catalog for
 interactive checks and configuration below. Replace
-`<agent-bridge catalog argv[0]>`, `<agent-codespaces catalog argv[0]>`,
-`<agent-containers catalog argv[0]>`, and `<agent-mcp catalog argv[0]>` with
+`<agent-bridge catalog argv prefix>`, `<agent-codespaces catalog argv prefix>`,
+`<agent-containers catalog argv prefix>`, and `<agent-mcp catalog argv prefix>` with
 their raw published paths, quoting each at its shell call site. Installer and
 service launchers remain explicit
 management boundaries.
@@ -39,8 +39,8 @@ bash "$ac_dir/scripts/init.sh"
 ### Verify
 
 ```bash
-<agent-codespaces catalog argv[0]> version
-<agent-codespaces catalog argv[0]> status      # shows runtime, gh CLI, ssh
+<agent-codespaces catalog argv prefix> version
+<agent-codespaces catalog argv prefix> status      # shows runtime, gh CLI, ssh
 ```
 
 `gh` must be authenticated (`gh auth login`) for CodeSpace operations.
@@ -58,15 +58,15 @@ provision hooks). Run **from inside the repo**.
 
 ```bash
 cd /path/to/repo
-<agent-codespaces catalog argv[0]> config init       # scaffold .agent-codespaces/config.yaml (+ auto-adopt)
-<agent-codespaces catalog argv[0]> config validate
-<agent-codespaces catalog argv[0]> config show
+<agent-codespaces catalog argv prefix> config init       # scaffold .agent-codespaces/config.yaml (+ auto-adopt)
+<agent-codespaces catalog argv prefix> config validate
+<agent-codespaces catalog argv prefix> config show
 ```
 
 For a convention-matching repo, skip the above entirely — see the
 `agent-codespaces:codespaces-setup` skill for when supplementary config is warranted and its
 format. A legacy repo-root `codespaces.yaml` is still read (relocate it with
-`<agent-codespaces catalog argv[0]> config migrate`).
+`<agent-codespaces catalog argv prefix> config migrate`).
 
 ### Verify relay + bridge integration
 
@@ -77,14 +77,14 @@ the bridge service imports it as a sibling and **auto-registers the live
 
 ```bash
 # CodeSpaces should already appear here -- no `bridge register` required.
-<agent-bridge catalog argv[0]> agents          # look for codespace:<name> entries
+<agent-bridge catalog argv prefix> agents          # look for codespace:<name> entries
 ```
 
 If the payload-local `agents` output shows no codespace entries and the bridge install
 WARNED about a missing sibling, re-run the agent-bridge installer **after** the
 the CodeSpaces plugin is installed (section 0) so the service venv picks up
 the `agent_codespaces` package.
-(`<agent-codespaces catalog argv[0]> bridge register` exists but
+(`<agent-codespaces catalog argv prefix> bridge register` exists but
 only POSTs a static `cs-*` snapshot with a TTL — it is optional and superseded
 by the resolver; see the `agent-codespaces:codespaces-lifecycle` skill.)
 
@@ -124,8 +124,8 @@ bash "$an_dir/scripts/init.sh"
 ### Verify
 
 ```bash
-<agent-containers catalog argv[0]> version
-<agent-containers catalog argv[0]> fleet       # lists local dev containers + lease status
+<agent-containers catalog argv prefix> version
+<agent-containers catalog argv prefix> fleet       # lists local dev containers + lease status
 ```
 
 Docker (Docker Desktop WSL2 backend) must be running for fleet operations.
@@ -169,9 +169,9 @@ You create `~/.agent-mcp/bridges/<name>.yaml` config files yourself (or pass
 ### Verify
 
 ```bash
-<agent-mcp catalog argv[0]> status            # prerequisites + available bridges
+<agent-mcp catalog argv prefix> status            # prerequisites + available bridges
 ```
 
 Define a bridge under `~/.agent-mcp/bridges/<name>.yaml` (or pass `--config`),
-then validate it with `<agent-mcp catalog argv[0]> validate <name>`. See the `agent-mcp:agent-mcp` skill for
+then validate it with `<agent-mcp catalog argv prefix> validate <name>`. See the `agent-mcp:agent-mcp` skill for
 the config format and how to wire it into an agent's `mcp-servers`.

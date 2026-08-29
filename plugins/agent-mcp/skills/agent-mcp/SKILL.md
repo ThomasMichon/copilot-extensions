@@ -14,12 +14,12 @@ description: >-
 # agent-mcp
 
 > **Before you start — use the payload-local session command.**
-> The agent-mcp session command catalog supplies an exact `argv[0]` owned by
+> The agent-mcp session command catalog supplies an exact `argv` prefix owned by
 > this plugin payload. For every shell invocation below, replace
-> `<agent-mcp catalog argv[0]>` with that exact path; do not search `PATH` or
+> `<agent-mcp catalog argv prefix>` with that exact path; do not search `PATH` or
 > substitute a same-named command from another payload. In PowerShell, invoke
-> it as `& "<agent-mcp catalog argv[0]>" <args>` so paths containing spaces stay
-> one command token. The shim provisions its own runtime on first use and works
+> it as `<agent-mcp catalog argv prefix> <args>` so paths containing spaces stay
+> one argument. The shim provisions its own runtime on first use and works
 > without agent-worktrees. If the catalog is unavailable because the host did
 > not run session-start hooks, use the
 > compatibility readiness path only after resolving exactly one installed
@@ -108,7 +108,7 @@ tools: { allow: ["repo_*", "wit_*"], deny: [] }    # optional upstream filter
 ```
 
 Validate before wiring:
-`<agent-mcp catalog argv[0]> validate .github/agents/ado.mcp.yaml`.
+`<agent-mcp catalog argv prefix> validate .github/agents/ado.mcp.yaml`.
 
 > **MCP 2.x (dual-era).** agent-mcp speaks both the **modern** stateless
 > revision (`2026-07-28`+ — per-request `_meta`, no `initialize`/session,
@@ -146,7 +146,7 @@ The literal `mcp-servers.command` is an explicit startup compatibility
 boundary. Repository-committed agent frontmatter must stay machine-portable,
 has no plugin-root interpolation contract, and may be launched before or
 independently of session command-catalog context. It therefore cannot consume
-`<agent-mcp catalog argv[0]>`. Keep it literal until the host offers a
+`<agent-mcp catalog argv prefix>`. Keep it literal until the host offers a
 plugin-root-capable MCP launcher contract.
 
 **3. Verify end-to-end** by invoking the sub-agent and having it call an upstream
@@ -161,7 +161,7 @@ surfaces fail. Decorator-only restrictions are not applied by the CLI path, and
 frontmatter-only env is not inherited. Use an existing fleet first;
 re-materialize when the expected stub is absent or
 `manifest.json.generated_by` differs from
-`<agent-mcp catalog argv[0]> --version` (config drift needs a deploy-owned
+`<agent-mcp catalog argv prefix> --version` (config drift needs a deploy-owned
 digest). Use `--no-serve` for identity-sensitive fallback calls. The
 bridge-specific platform commands, failure matrix, warmth guidance, and
 drift contract live in
@@ -347,22 +347,22 @@ reliable default.
 ## Commands
 
 ```
-<agent-mcp catalog argv[0]> bridge --config FILE    # run an in-repo bridge
-<agent-mcp catalog argv[0]> bridge <name>           # run a named bridge
-<agent-mcp catalog argv[0]> validate <name|FILE>    # parse + schema-check
-<agent-mcp catalog argv[0]> status                  # prerequisites + bridges
-<agent-mcp catalog argv[0]> call <bridge> <tool> [JSON]
-<agent-mcp catalog argv[0]> materialize <bridge>
-<agent-mcp catalog argv[0]> serve [--socket PATH]
+<agent-mcp catalog argv prefix> bridge --config FILE    # run an in-repo bridge
+<agent-mcp catalog argv prefix> bridge <name>           # run a named bridge
+<agent-mcp catalog argv prefix> validate <name|FILE>    # parse + schema-check
+<agent-mcp catalog argv prefix> status                  # prerequisites + bridges
+<agent-mcp catalog argv prefix> call <bridge> <tool> [JSON]
+<agent-mcp catalog argv prefix> materialize <bridge>
+<agent-mcp catalog argv prefix> serve [--socket PATH]
 ```
 
 ## Troubleshooting checklist
 
-- Start with `<agent-mcp catalog argv[0]> validate <name-or-config>`; it loads
+- Start with `<agent-mcp catalog argv prefix> validate <name-or-config>`; it loads
   the same in-repo, named, plugin-shipped, and machine-overlay config path as
   `bridge`/`call`, but does not contact the upstream or credential source.
 - Reproduce outside Copilot with
-  `<agent-mcp catalog argv[0]> --log-level debug call <bridge> <tool>
+  `<agent-mcp catalog argv prefix> --log-level debug call <bridge> <tool>
   '<arguments-json>'`. A `server/discover` rejection in `auto` is normal for a
   legacy server; set `server.protocol: legacy` to skip that probe.
 - Separate runtime provisioning from bridge config: catalog `availability`
@@ -392,9 +392,9 @@ of speaking JSON-RPC.
 
   ```sh
   # POSIX. On Windows, put structured arguments in a request file.
-  <agent-mcp catalog argv[0]> call gitea list_issues '{"owner":"me","repo":"x"}'
-  echo '{"owner":"me","repo":"x"}' | <agent-mcp catalog argv[0]> call gitea list_issues
-  <agent-mcp catalog argv[0]> call gitea create_issue --request-file req.json
+  <agent-mcp catalog argv prefix> call gitea list_issues '{"owner":"me","repo":"x"}'
+  echo '{"owner":"me","repo":"x"}' | <agent-mcp catalog argv prefix> call gitea list_issues
+  <agent-mcp catalog argv prefix> call gitea create_issue --request-file req.json
   ```
 
   The Windows catalog intentionally names the payload `.cmd` so stdio reaches
@@ -422,7 +422,7 @@ of speaking JSON-RPC.
   cell; do not treat this fallback as cross-cell-safe.
 
   ```sh
-  <agent-mcp catalog argv[0]> materialize gitea
+  <agent-mcp catalog argv prefix> materialize gitea
   list_issues '{"owner":"me","repo":"x"}' | jq '.[].number'
   ```
 

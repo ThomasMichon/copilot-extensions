@@ -35,16 +35,16 @@ unavailable, surface that failure rather than improvising an install.
 
 1. **Doctor** the package layout:
    ```
-   <catalog argv[0]> doctor
+   <catalog argv prefix> doctor
    ```
    Reports canonical, legacy, mixed, malformed, unavailable, and absent layouts.
    For a legacy repo, preview migration with
-   `<catalog argv[0]> migrate --repo <name-or-path>` and apply only after
+   `<catalog argv prefix> migrate --repo <name-or-path>` and apply only after
    reviewing the byte-preserving move plan.
 
 2. **Discover** what applies here:
    ```
-   <catalog argv[0]> discover
+   <catalog argv prefix> discover
    ```
    Lists the registered repos that carry gated requirement packages for this
    machine. The candidate set is `~/.agent-worktrees/projects.yaml`; paths are
@@ -52,22 +52,22 @@ unavailable, surface that failure rather than improvising an install.
 
 3. **Plan** (read-only) -- the managed surfaces and a content drift key:
    ```
-   <catalog argv[0]> plan
+   <catalog argv prefix> plan
    ```
 
 4. **Validate** -- detect cross-package conflicts before applying:
    ```
-   <catalog argv[0]> validate
+   <catalog argv prefix> validate
    ```
    Scalar `enforce` disagreements and bootstrap-floor violations are errors; the
    validator reports, it does not auto-arbitrate. Fix conflicting packages.
 
 5. **Restore** -- deliberate + reviewable (dry-run is the default):
    ```
-   <catalog argv[0]> restore                       # DRY-RUN: what would change and why
-   <catalog argv[0]> restore --only ssh            # preview one section
-   <catalog argv[0]> restore --only ssh --apply    # apply just that section
-   <catalog argv[0]> restore --apply               # apply everything
+   <catalog argv prefix> restore                       # DRY-RUN: what would change and why
+   <catalog argv prefix> restore --only ssh            # preview one section
+   <catalog argv prefix> restore --only ssh --apply    # apply just that section
+   <catalog argv prefix> restore --apply               # apply everything
    ```
    Restore previews by default; `--apply` makes changes; `--only` scopes to named
    surfaces/modules so you review and apply section by section. Surfaces back up

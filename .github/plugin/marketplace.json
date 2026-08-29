@@ -24,7 +24,7 @@
     {
       "name": "agent-codespaces",
       "description": "GitHub Codespaces lifecycle management, SSH transport, credential relay, and agent-bridge provider integration",
-      "version": "0.4.0-dev92",
+      "version": "0.4.0-dev93",
       "source": "plugins/agent-codespaces"
     },
     {
@@ -36,7 +36,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.0-dev83",
+      "version": "0.2.0-dev84",
       "source": "plugins/agent-mcp"
     },
     {
@@ -60,19 +60,19 @@
     {
       "name": "efforts",
       "description": "Efforts planning system - comprehensive planning folders with explicit repository adoption, a read-only target capability probe, a README-as-shared-contract, a static completion-gate fallback, and a staged session policy producer; ships the planning-efforts and efforts-setup skills",
-      "version": "0.1.0-dev17",
+      "version": "0.1.0-dev18",
       "source": "plugins/efforts"
     },
     {
       "name": "visions",
       "description": "Visions system - persistent, in-place-revised north-star documents stating what a system/service/tool/product is ultimately meant to be (purpose + concepts + expected features + expected behaviors); intent-level, not a specification; efforts are carved from the vision-vs-reality delta. Ships the envisioning and visions-setup skills",
-      "version": "0.1.0-dev18",
+      "version": "0.1.0-dev19",
       "source": "plugins/visions"
     },
     {
       "name": "customizing-copilot",
       "description": "Customize and extend the Copilot CLI - authoring skills, defining sub-agents, registering MCP servers, installing plugins, building an agent control-harness, reviewing customizations, and authoring <repo>-harness plugins - with the per-skill folder conventions and Agent Skills best practices; ships the authoring-skills, defining-subagents, registering-mcp-servers, installing-plugins, building-harnesses, reviewing-customizations, and authoring-harness-plugins skills",
-      "version": "0.1.0-dev41",
+      "version": "0.1.0-dev42",
       "source": "plugins/customizing-copilot"
     },
     {
@@ -84,13 +84,13 @@
     {
       "name": "agent-vault",
       "description": "Local KeePassXC-backed secret store for Copilot CLI agents. A machine-local service caches the KeePass master password with a TTL and auto-prompts on lock; a CLI fetches API keys, SSH keys, and account credentials on demand and manages entries (get/has/search/list/show/add/set-password/set-username/remove/move/import-key/export-key) without hardcoding, committing, or exporting them. Destructive edits are scoped to the configured vault group unless forced. Includes a SUDO_ASKPASS helper for sudo -A, a git-credential helper that delegates allowlisted HTTPS hosts to Git Credential Manager, an envelope-KEK seal/unseal facility (DPAPI-wrapped on Windows) for encrypting a consumer's own token cache at rest, and an opt-in encrypted persistent cache that serves reads across restarts and while the vault is locked.",
-      "version": "0.1.0-dev71",
+      "version": "0.1.0-dev72",
       "source": "plugins/agent-vault"
     },
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable contribution, diagnosis, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev27",
+      "version": "0.1.0-dev28",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -114,7 +114,7 @@
     {
       "name": "harness-knowledge",
       "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: after cloning the harness, ask for (or create) the knowledge repo, register both, and write the machine-local knowledge_repo pointer so agent-worktrees can resolve state and paired worktrees natively. Ships the binding-knowledge setup skill.",
-      "version": "0.1.0-dev14",
+      "version": "0.1.0-dev15",
       "source": "plugins/harness-knowledge"
     },
     {

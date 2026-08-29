@@ -22,7 +22,7 @@ never substitute a same-named command found through `PATH`.
 
 ## 1. Identify candidates
 
-Start from `<agent-codespaces catalog argv[0]> list --json`, lifecycle reclaim state, and any
+Start from `<agent-codespaces catalog argv prefix> list --json`, lifecycle reclaim state, and any
 resource explicitly named by the user. A completed label or a `recovered` /
 `prunable` marker is a candidate hint, not permission to delete.
 
@@ -64,17 +64,17 @@ continuing.
 
 Prefer lazy reclaim:
 
-1. `<agent-codespaces catalog argv[0]> finalize <name>` to preserve and stop the resource.
+1. `<agent-codespaces catalog argv prefix> finalize <name>` to preserve and stop the resource.
 2. Archive the associated effort in the user's state repo after its work and PR
    conditions are satisfied.
 3. Mark it reclaimable:
-   `<agent-codespaces catalog argv[0]> mark <name> prunable --reason "<verified reason>"`.
-4. Preview or run `<agent-codespaces catalog argv[0]> prune` according to the user's request.
+   `<agent-codespaces catalog argv prefix> mark <name> prunable --reason "<verified reason>"`.
+4. Preview or run `<agent-codespaces catalog argv prefix> prune` according to the user's request.
 
 For confirmed eager deletion, use:
 
 ```bash
-<agent-codespaces catalog argv[0]> finalize <name> --delete
+<agent-codespaces catalog argv prefix> finalize <name> --delete
 ```
 
 Do not bypass a lifecycle refusal here. Diagnose through
@@ -82,7 +82,7 @@ Do not bypass a lifecycle refusal here. Diagnose through
 `recovering-codespaces`.
 
 When the effort records `**Container:**`, also run
-`<agent-containers catalog argv[0]> release <effort-slug>` and reconcile that binding through
+`<agent-containers catalog argv prefix> release <effort-slug>` and reconcile that binding through
 `borrowing-containers`. CodeSpace lease release follows
 `borrowing-codespaces` and the lifecycle command's documented behavior.
 

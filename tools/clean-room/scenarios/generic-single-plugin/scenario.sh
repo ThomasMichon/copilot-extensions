@@ -148,6 +148,54 @@ done
 pass "$PRIMARY_PLUGIN installed standalone (companions compose opportunistically, are not auto-pulled)"
 info "installed-plugins dir: $(ls -1 "$INSTALLED_ROOT" 2>/dev/null | tr '\n' ' ' || echo '(none)')"
 
+# Prove the installed payload's generic catalog contract without relying on an
+# ambient binstub. The same session ID must emit once, while the advertised
+# POSIX argv prefix must be absolute and contained by this exact payload.
+_catalog_emitter="$INSTALLED_ROOT/$PRIMARY_PLUGIN/scripts/emit-command-catalog.sh"
+_catalog_session="clean-room-$$"
+_catalog_first="$CR_LOGDIR/command-catalog-first.json"
+_catalog_second="$CR_LOGDIR/command-catalog-second.json"
+_catalog_tmp="$CR_LOGDIR/command-catalog-markers"
+if [ -f "$_catalog_emitter" ]; then
+    mkdir -p "$_catalog_tmp"
+    printf '{"sessionId":"%s"}' "$_catalog_session" |
+        TMPDIR="$_catalog_tmp" \
+        COPILOT_PLUGIN_ROOT="$INSTALLED_ROOT/$PRIMARY_PLUGIN" \
+        bash "$_catalog_emitter" >"$_catalog_first"
+    printf '{"sessionId":"%s"}' "$_catalog_session" |
+        TMPDIR="$_catalog_tmp" \
+        COPILOT_PLUGIN_ROOT="$INSTALLED_ROOT/$PRIMARY_PLUGIN" \
+        bash "$_catalog_emitter" >"$_catalog_second"
+    if python3 - "$_catalog_first" "$_catalog_second" "$INSTALLED_ROOT/$PRIMARY_PLUGIN" <<'PY'
+import json
+import os
+import re
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    first = json.load(stream)
+with open(sys.argv[2], encoding="utf-8") as stream:
+    second = json.load(stream)
+payload = os.path.realpath(sys.argv[3])
+match = re.search(r"```json\n(.*?)\n```", first["additionalContext"], re.S)
+assert match
+catalog = json.loads(match.group(1))
+assert catalog["commands"]
+for command in catalog["commands"]:
+    prefix = command["argv"]
+    assert prefix and os.path.isabs(prefix[0])
+    assert os.path.commonpath((payload, os.path.realpath(prefix[0]))) == payload
+assert second == {}
+PY
+    then
+        pass "$PRIMARY_PLUGIN emits one payload-contained command catalog per session"
+    else
+        fail "$PRIMARY_PLUGIN command catalog is duplicated or escapes its installed payload"
+    fi
+else
+    fail "$PRIMARY_PLUGIN payload has no session command catalog emitter"
+fi
+
 # =========================================================================
 phase 3 "first session stamps binstub; first use provisions runtime"
 # Firing a session runs the plugins' sessionStart hooks. The hook must perform

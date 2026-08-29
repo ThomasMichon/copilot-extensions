@@ -224,11 +224,11 @@ the repository's configured account for each command instead of changing the
 machine-global active `gh` account:
 
 ```bash
-<agent-worktrees catalog argv[0]> repos account-for ThomasMichon/copilot-extensions
-<agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- api user --jq .login
-<agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- issue list \
+<agent-worktrees catalog argv prefix> repos account-for ThomasMichon/copilot-extensions
+<agent-worktrees catalog argv prefix> repos gh ThomasMichon/copilot-extensions -- api user --jq .login
+<agent-worktrees catalog argv prefix> repos gh ThomasMichon/copilot-extensions -- issue list \
   --repo ThomasMichon/copilot-extensions --state open --search "<generic subject>"
-<agent-worktrees catalog argv[0]> repos gh ThomasMichon/copilot-extensions -- issue create \
+<agent-worktrees catalog argv prefix> repos gh ThomasMichon/copilot-extensions -- issue create \
   --repo ThomasMichon/copilot-extensions --title "<generic title>" --body "<public-safe body>"
 ```
 

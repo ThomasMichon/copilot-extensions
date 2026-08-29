@@ -59,9 +59,17 @@ def test_powershell_catalog_uses_nested_payload_command() -> None:
     )
     envelope = json.loads(result.stdout)
     command = _catalog(envelope["additionalContext"])["commands"][0]
-    assert command["argv"] == [
-        str(PLUGIN / "bin" / "payload" / "agent-worktrees.ps1")
+    assert Path(command["argv"][0]).is_absolute()
+    assert command["argv"][1:5] == [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
     ]
+    assert command["argv"][-1] == str(
+        PLUGIN / "bin" / "payload" / "agent-worktrees.ps1"
+    )
+    assert command["shell"] == "direct"
     assert command["availability"] == "ready"
 
 

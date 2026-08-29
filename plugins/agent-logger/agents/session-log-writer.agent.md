@@ -92,10 +92,10 @@ The caller passes a **manifest file path** in its prompt. Read it with the
   command, or invoke a legacy venv interpreter.
 - **Collate from the manifest's `session_path`.** Example:
   ```
-  <collate-session argv[0] from caller> <session_path> --nas --segment-size 80000
+  <collate-session argv prefix from caller> <session_path> --nas --segment-size 80000
   ```
 - **Read collated data with**
-  `<read-session-digest argv[0] from caller> <session-id> ...`.
+  `<read-session-digest argv prefix from caller> <session-id> ...`.
 - **Remain read-only.** Custom sub-agents may be governed by a higher-priority
   no-file-output policy. Render complete artifacts and return them to the caller;
   do not attempt `create`, `edit`, `apply_patch`, or shell-based file writes.
@@ -110,7 +110,7 @@ Do NOT use the task tool to spawn another `session-log-writer` agent.
 
 For each session, run:
 ```
-<collate-session argv[0] from caller> <session_path> --nas --segment-size 80000
+<collate-session argv prefix from caller> <session_path> --nas --segment-size 80000
 ```
 If collation fails (missing events, corrupt data), skip the session and note
 the failure.
@@ -137,7 +137,7 @@ include a short failure entry rather than inventing details.
 
 ### 3. Read session data
 
-- `<read-session-digest argv[0] from caller> <session-id> context`
+- `<read-session-digest argv prefix from caller> <session-id> context`
   -- metadata, checkpoints,
   stats, segment inventory.
 - **Always** summarize a session's segments through an **explore** sub-agent

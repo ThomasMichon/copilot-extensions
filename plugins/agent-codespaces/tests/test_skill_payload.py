@@ -50,7 +50,7 @@ def test_provider_management_boundary_stays_explicit():
 
     assert "registered **management entry point**" in text
     assert "Session command catalogs do not replace this provider/supervisor boundary" in normalized
-    assert "<agent-bridge catalog argv[0]> send codespace:" in text
+    assert "<agent-bridge catalog argv prefix> send codespace:" in text
     assert "marketplace-isolation: allow agent-bridge-management" not in text
 
 
@@ -69,10 +69,10 @@ def test_cleaning_codespaces_skill_contract():
     assert "explicit confirmation" in lowered
     assert "optional repository export hook" in lowered
     assert "user's state repo" in lowered
-    assert "<agent-codespaces catalog argv[0]> finalize <name> --delete" in text
-    assert "<agent-codespaces catalog argv[0]> mark <name> prunable" in text
-    assert "<agent-codespaces catalog argv[0]> prune" in text
-    assert "<agent-containers catalog argv[0]> release <effort-slug>" in text
+    assert "<agent-codespaces catalog argv prefix> finalize <name> --delete" in text
+    assert "<agent-codespaces catalog argv prefix> mark <name> prunable" in text
+    assert "<agent-codespaces catalog argv prefix> prune" in text
+    assert "<agent-containers catalog argv prefix> release <effort-slug>" in text
     assert "never substitute a same-named command" in lowered
 
     assert not any(term in lowered for term in FORBIDDEN)
@@ -101,7 +101,7 @@ def test_recovering_codespaces_skill_contract():
         "phase 7: restore",
     ):
         assert phase in lowered
-    assert "<agent-codespaces catalog argv[0]> delete <name> --force" in text
+    assert "<agent-codespaces catalog argv prefix> delete <name> --force" in text
     assert "never substitute a same-named command" in lowered
     assert "<owner/repo>" in text
     assert "configured source-control provider" in lowered

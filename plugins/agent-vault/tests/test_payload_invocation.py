@@ -26,7 +26,6 @@ def test_payload_manifest_describes_agent_vault_runtime() -> None:
         "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
         "purpose": "Fetch and manage machine-local vault credentials",
         "installer": "install",
-        "windowsCatalogShim": "cmd",
         "provisionMode": "direct",
     }
 
@@ -56,8 +55,9 @@ def test_session_catalog_hook_is_payload_root_aware_and_fail_open() -> None:
     powershell_catalog = (
         PLUGIN / "scripts" / "emit-command-catalog.ps1"
     ).read_text(encoding="utf-8")
-    assert r"bin\agent-vault.cmd" in powershell_catalog
-    assert "shell = 'cmd'" in powershell_catalog
+    assert r'"relativePath":"bin\\agent-vault.ps1"' in powershell_catalog
+    assert "$catalogShim = 'powershell'" in powershell_catalog
+    assert "'-File'," in powershell_catalog
 
 
 def test_out_of_session_boundaries_remain_explicit() -> None:

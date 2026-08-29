@@ -24,10 +24,10 @@ description: >
 
 Use installer paths below for install, update, supervision, status, and
 uninstall: those are explicit management boundaries that run outside session
-command context. For runtime CLI checks, use the exact `argv[0]` from the
+command context. For runtime CLI checks, use the exact `argv` prefix from the
 plugin's session command catalog. Replace
-`<agent-vault catalog argv[0]>` with that path; in PowerShell invoke it as
-`& "<agent-vault catalog argv[0]>" <args>`.
+`<agent-vault catalog argv prefix>` with its shell-ready rendering; in PowerShell invoke it as
+`<agent-vault catalog argv prefix> <args>`.
 
 `agent-vault` is a runtime plugin: a Python package/venv, binstub(s), and an
 optional always-on local daemon. It is also **standalone**: setup does not depend
@@ -150,9 +150,9 @@ There is no `doctor` subcommand today. Use installer status plus these runtime
 checks:
 
 ```bash
-<agent-vault catalog argv[0]> which --json
-<agent-vault catalog argv[0]> ping
-<agent-vault catalog argv[0]> cache-status --json
+<agent-vault catalog argv prefix> which --json
+<agent-vault catalog argv prefix> ping
+<agent-vault catalog argv prefix> cache-status --json
 ```
 
 Common findings:
@@ -172,14 +172,14 @@ After install/stamp, configure the database before reading entries:
 
 ```powershell
 $env:KPDB = "C:\Users\you\Secrets\vault.kdbx"
-& "<agent-vault catalog argv[0]>" which
-& "<agent-vault catalog argv[0]>" unlock
+<agent-vault catalog argv prefix> which
+<agent-vault catalog argv prefix> unlock
 ```
 
 ```bash
 export KPDB="$HOME/Secrets/vault.kdbx"
-<agent-vault catalog argv[0]> which
-<agent-vault catalog argv[0]> unlock
+<agent-vault catalog argv prefix> which
+<agent-vault catalog argv prefix> unlock
 ```
 
 For multi-vault setup, use the payload-local `vault add` and

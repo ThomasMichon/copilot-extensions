@@ -125,16 +125,16 @@ Repo-local config cannot change `sync:` targets; those remain in
 `closing_remark` are accepted under `log:`. Invalid YAML, unknown
 fields/placeholders, unsupported schema versions, unsafe paths, and invalid
 timezones fail explicitly. Run
-`<agent-logger catalog "agent-logger" argv[0]> organization` to inspect the
+`<agent-logger catalog "agent-logger" argv prefix> organization` to inspect the
 manifest-ready result.
 
 ## Verify
 
 ```
-<agent-logger catalog "session-sync" argv[0]> status
-<agent-logger catalog "session-sync" argv[0]> doctor
-<agent-logger catalog "session-sync" argv[0]> run --dry-run --verbose
-<agent-logger catalog "session-sync" argv[0]> run --prune
+<agent-logger catalog "session-sync" argv prefix> status
+<agent-logger catalog "session-sync" argv prefix> doctor
+<agent-logger catalog "session-sync" argv prefix> run --dry-run --verbose
+<agent-logger catalog "session-sync" argv prefix> run --prune
 ```
 
 `doctor` reports per-check `[ok]`/`[FAIL]` lines. For `onedrive`, a `FAIL`
@@ -229,9 +229,9 @@ uncompressed tree. **When `compact.enabled`, the scheduled session-sync `run`
 performs the whole lifecycle itself** (no separate command needed):
 
 ```
-<agent-logger catalog "session-sync" argv[0]> run
-<agent-logger catalog "session-sync" argv[0]> compact
-<agent-logger catalog "session-sync" argv[0]> compact-hub
+<agent-logger catalog "session-sync" argv prefix> run
+<agent-logger catalog "session-sync" argv prefix> compact
+<agent-logger catalog "session-sync" argv prefix> compact-hub
 ```
 
 Both `compact`/`compact-hub` remain for manual/`--dry-run` use, but the deployed
@@ -244,14 +244,14 @@ never race the scheduled push. Add `--dry-run` to preview.
 ## Troubleshoot
 
 - **Runtime not ready:** run
-  `<agent-logger catalog "agent-logger" argv[0]> version` and keep the exact
+  `<agent-logger catalog "agent-logger" argv prefix> version` and keep the exact
   self-provisioning error if it fails. The plugin owns uv acquisition on
   Linux/WSL; on Windows, a missing signed Python may be reported by the
   installer.
 - **Target unreachable:** run
-  `<agent-logger catalog "session-sync" argv[0]> doctor`; fix the first `[FAIL]`
+  `<agent-logger catalog "session-sync" argv prefix> doctor`; fix the first `[FAIL]`
   before retrying
-  `<agent-logger catalog "session-sync" argv[0]> run --dry-run --verbose`.
+  `<agent-logger catalog "session-sync" argv prefix> run --dry-run --verbose`.
 - **Scheduled sync not firing:** use the plugin installer status command first:
   `pwsh -File plugins\agent-logger\scripts\install.ps1 status` or
   `bash plugins/agent-logger/scripts/install.sh status`. On Windows the task is

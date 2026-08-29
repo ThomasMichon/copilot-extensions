@@ -21,11 +21,11 @@ description: >
 
 # Planning Efforts
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for
+Use the exact `argv` prefix from the agent-worktrees session command catalog for
 state-root and worktree operations below. Replace
-`<agent-worktrees catalog argv[0]>` with the raw path and quote it at each
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at each
 shell call site on POSIX; in PowerShell invoke it as
-`& "<agent-worktrees catalog argv[0]>" <args>`.
+`<agent-worktrees catalog argv prefix> <args>`.
 
 An **effort** is a planning folder under `efforts/` representing a stretch of
 work. It is the workspace *around* tracked work — deliberately not named
@@ -47,7 +47,7 @@ registered as an agent-worktrees harness. If `agent-worktrees` is installed,
 ask it whether this repo redirects personal state to a bound knowledge repo:
 
 ```bash
-<agent-worktrees catalog argv[0]> state-root        # optional; prints the effort home when available
+<agent-worktrees catalog argv prefix> state-root        # optional; prints the effort home when available
 ```
 
 - **Command unavailable** → use the current repo root as the effort home.
@@ -57,7 +57,7 @@ ask it whether this repo redirects personal state to a bound knowledge repo:
 - **Non-zero exit** → if the repo requires an external state root, stop and bind
   the knowledge repo first; otherwise use the current repo root.
 
-`<agent-worktrees catalog argv[0]> state-root --json` gives the full resolution (`source`, `repo`,
+`<agent-worktrees catalog argv prefix> state-root --json` gives the full resolution (`source`, `repo`,
 `stateless`, `requires_external`, `bound`) when you need to explain where the
 effort landed. All `efforts/` paths below are relative to the resolved effort
 home.
@@ -82,18 +82,18 @@ If no addendum exists, the effort home has not adopted efforts yet — use the
 
 The efforts plugin remains standalone, but an agent-worktrees-managed worktree
 can durably bind its current objective to one canonical effort. Use the exact
-`argv[0]` from the agent-worktrees session command catalog for every
+`argv prefix` from the agent-worktrees session command catalog for every
 `effort-focus` operation below. Replace
-`<agent-worktrees catalog argv[0]>` with that raw path and quote it at the shell
-call site on POSIX; in PowerShell invoke it as
-`& "<agent-worktrees catalog argv[0]>" <args>`.
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting
+each element separately. In PowerShell invoke it as
+`<agent-worktrees catalog argv prefix> <args>`.
 
 After the effort's Participants/Coordination and Plan/Validation Plan are filled
 in, use the participant exactly as its table label and the slice exactly as its
 Plan heading:
 
 ```
-<agent-worktrees catalog argv[0]> effort-focus bind efforts/active/<slug>/README.md \
+<agent-worktrees catalog argv prefix> effort-focus bind efforts/active/<slug>/README.md \
   --participant "<declared participant>" \
   --slice "<declared phase or slice>"
 ```
@@ -104,7 +104,7 @@ Plan heading:
   unbound. Never invent a participant/slice merely to satisfy the command, and
   never hand-edit the worktree record.
 - **A binding already exists** → inspect it with
-  `<agent-worktrees catalog argv[0]> effort-focus show --json`. Reuse it when it
+  `<agent-worktrees catalog argv prefix> effort-focus show --json`. Reuse it when it
   names this objective; pass
   `--replace` only when the effort records an explicit replacement or slice
   transition.
@@ -204,7 +204,7 @@ gate before executing:
    approves; auto-merge merges it.
 3. **Sync forward** — pull the worktree onto the merged (squashed) default branch
    so execution builds *on top of* the reviewed plan. In an agent-worktrees repo,
-   use `<agent-worktrees catalog argv[0]> git sync` (see the
+   use `<agent-worktrees catalog argv prefix> git sync` (see the
    `agent-worktrees:git-collaboration` skill); otherwise
    use the repo's normal pull-forward command. Then begin executing the Plan.
 
@@ -318,7 +318,7 @@ change that realizes it.
 1. Pull latest so the Journal is current, then **read the README** — Status,
    Plan checklists, Blockers, and the latest Journal entries.
 2. When agent-worktrees is available, inspect
-   `<agent-worktrees catalog argv[0]> effort-focus show --json` and bind this
+   `<agent-worktrees catalog argv prefix> effort-focus show --json` and bind this
    effort/slice if it is not already the worktree's active focus.
 3. Pick up from the last incomplete checklist item / Journal entry. The README
    is self-contained by design — a fresh agent session resumes from the file.
@@ -345,12 +345,12 @@ change that realizes it.
    *what happened*, not living documentation.
 7. Land the archive change through the repo's normal review and merge gate.
 8. From the still-bound managed worktree, release with
-   `<agent-worktrees catalog argv[0]> effort-focus release --completed`, then
+   `<agent-worktrees catalog argv prefix> effort-focus release --completed`, then
    finalize the worktree. The command verifies `Status: Done` and every resolved
    Plan/Validation Plan checkbox on the effort README, whether it is still at the
    active path or already at the standard flat or by-repo dated archive path. If
    responsibility moves instead, name the receiving tracked objective with
-   `<agent-worktrees catalog argv[0]> effort-focus release --transfer
+   `<agent-worktrees catalog argv prefix> effort-focus release --transfer
    "<issue/effort>"`.
 
 ## Anti-patterns

@@ -50,6 +50,24 @@ def _runtime_agent_plugins() -> list[tuple[str, Path, dict]]:
     return plugins
 
 
+def test_runtime_catalog_discovery_covers_harness_inventory() -> None:
+    discovered = {name for name, _plugin, _manifest in _runtime_agent_plugins()}
+    required = {
+        "agent-worktrees",
+        "agent-machines",
+        "agent-codespaces",
+        "agent-dispatch",
+        "agent-mcp",
+        "agent-index",
+        "agent-bridge",
+        "agent-containers",
+        "agent-vault",
+        "agent-logger",
+        "agent-ssh",
+    }
+    assert required <= discovered
+
+
 def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> None:
     marketplace = json.loads(
         (REPO / ".github" / "plugin" / "marketplace.json").read_text(

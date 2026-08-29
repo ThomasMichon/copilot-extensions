@@ -34,14 +34,14 @@ plain unless repository organization config supplies optional voice seams.
 
 For a single current session, prefer the `log-session` skill. For automated,
 scheduled fleet processing, use a host-owned chronicle runner around
-`<agent-logger catalog "agent-logger" argv[0]> chronicle tick`.
+`<agent-logger catalog "agent-logger" argv prefix> chronicle tick`.
 
 ## Procedure
 
 ### 1. Load repository organization
 
 From the target repository/worktree root, run
-`<agent-logger catalog "agent-logger" argv[0]> organization`.
+`<agent-logger catalog "agent-logger" argv prefix> organization`.
 Use the returned `manifest` object for output location, naming/template, note
 marker, and optional voice seams. Invalid config is an explicit error.
 
@@ -98,7 +98,7 @@ Full example: [`references/manifest.json`](references/manifest.json). Shape:
 ```
 
 Copy those fields exactly from
-`<agent-logger catalog "agent-logger" argv[0]> organization`.
+`<agent-logger catalog "agent-logger" argv prefix> organization`.
 
 Cap the batch to a sensible size (e.g. 1-2 substantial sessions or one compact
 day) so both the agent's context and the returned full-content bundle remain
@@ -113,8 +113,8 @@ catalog and include the same keys required by the writer:
 
 ```text
 Manifest: <manifest-path>
-collate_argv0: <agent-logger catalog "collate-session" argv[0]>
-digest_argv0: <agent-logger catalog "read-session-digest" argv[0]>
+collate_argv0: <agent-logger catalog "collate-session" argv prefix>
+digest_argv0: <agent-logger catalog "read-session-digest" argv prefix>
 ```
 
 Require the writer to forward `digest_argv0` into every explore sub-agent

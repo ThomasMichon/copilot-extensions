@@ -174,7 +174,7 @@ separation is what lets one plugin serve many repos and many executor plugins.
 2. **Plan** — fill in Context, Plan, and Validation Plan. File sub-issues for
    discrete tracked work and link them. Once the README declares the exact
    participant table label and Plan heading, a managed worktree may bind with
-   `<agent-worktrees catalog argv[0]> effort-focus bind <repo-relative README>
+   `<agent-worktrees catalog argv prefix> effort-focus bind <repo-relative README>
    --participant <declared> --slice <declared>`. A missing command/untracked
    worktree degrades to the standalone lifecycle. A validation refusal means the
    declaration is absent or mismatched: correct the real plan or remain unbound;
@@ -199,7 +199,7 @@ separation is what lets one plugin serve many repos and many executor plugins.
    propose-before-you-do: PR the not-yet-done plan first, make the external
    changes after it clears, then report completion as a separate delta.
    A resumed managed worktree first inspects
-   `<agent-worktrees catalog argv[0]> effort-focus show --json` and binds its
+   `<agent-worktrees catalog argv prefix> effort-focus show --json` and binds its
    declared slice if necessary. An open binding derives the existing
    worktree `follow_up` cleanup gate and effort summary; it is not a second
    responsibility flag. Context handoff while bound links the effort README and
@@ -216,11 +216,11 @@ separation is what lets one plugin serve many repos and many executor plugins.
    by-repo dated archive path, write a closing Journal entry, update the active
    index, promote durable truth, and land that archive change through the repo's
    review/merge gate. Then release the still-bound managed worktree with
-   `<agent-worktrees catalog argv[0]> effort-focus release --completed`; silent
+   `<agent-worktrees catalog argv prefix> effort-focus release --completed`; silent
    release is refused and the command verifies `Status: Done` plus every
    resolved Plan/Validation Plan checkbox at either the active or standard dated
    archive path. If responsibility moves instead, use
-   `<agent-worktrees catalog argv[0]> effort-focus release --transfer "<tracked
+   `<agent-worktrees catalog argv prefix> effort-focus release --transfer "<tracked
    objective>"`.
 
 ### Worktree-local active focus

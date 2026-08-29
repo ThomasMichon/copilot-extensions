@@ -16,15 +16,21 @@ context_root="$(cd "$context_root" 2>/dev/null && pwd -P)" || {
 
 installer_path="$self_root/scripts/install.sh"
 command_specs='[{"id":"agent-logger","relativePath":"bin/agent-logger","purpose":"Inspect agent logger configuration and chronicle state"},{"id":"collate-session","relativePath":"bin/collate-session","purpose":"Collate one Copilot session into digest segments"},{"id":"read-session-digest","relativePath":"bin/read-session-digest","purpose":"Read collated session digest data"},{"id":"prepare-session-log","relativePath":"bin/prepare-session-log","purpose":"Prepare one session log manifest and output path"},{"id":"ramp-up-session","relativePath":"bin/ramp-up-session","purpose":"Build a bounded takeover briefing for a dormant session"},{"id":"session-sync","relativePath":"bin/session-sync","purpose":"Sync archive and compact Copilot session data"}]'
+hook_input=""
+[ -t 0 ] || hook_input="$(cat)"
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || {
     printf '%s\n' '{}'
     exit 0
 }
 
-if output="$(SELF_ROOT="$self_root" INSTALLER_PATH="$installer_path" COMMAND_SPECS="$command_specs" "$py" <<'PY'
+if ! SELF_ROOT="$self_root" INSTALLER_PATH="$installer_path" COMMAND_SPECS="$command_specs" HOOK_INPUT="$hook_input" "$py" <<'PY'
+import hashlib
 import json
 import os
+import stat
+import sys
+import tempfile
 
 installer_ready = os.path.isfile(os.environ["INSTALLER_PATH"])
 commands = []
@@ -55,19 +61,81 @@ catalog = {
     "payload": {"provenance": "payload-local"},
     "commands": commands,
 }
+catalog_json = json.dumps(catalog, sort_keys=True)
 context = (
     "## agent-logger session command catalog\n\n"
-    "Select the command by `id` and invoke its exact `argv`. "
-    "Do not search `PATH` or substitute a "
-    "same-named command from another payload.\n\n"
+    "Select a command by `id` and append arguments to its exact `argv` prefix. "
+    "Quote each prefix element separately when rendering a shell command; "
+    "prepend `&` in PowerShell. "
+    "Never substitute a global or `PATH` binstub for any prefix element.\n\n"
     "```json\n"
-    + json.dumps(catalog, sort_keys=True)
+    + catalog_json
     + "\n```"
 )
-print(json.dumps({"additionalContext": context}))
+envelope = json.dumps({"additionalContext": context}) + "\n"
+
+session_id = ""
+raw_hook_input = os.environ.get("HOOK_INPUT", "")
+if raw_hook_input:
+    try:
+        hook = json.loads(raw_hook_input)
+        candidate = hook.get("sessionId") or hook.get("session_id")
+        if isinstance(candidate, str):
+            session_id = candidate
+    except (AttributeError, json.JSONDecodeError) as error:
+        print(
+            f"[agent-logger] invalid sessionStart payload; "
+            f"catalog deduplication disabled: {error}",
+            file=sys.stderr,
+        )
+
+marker_path = ""
+if session_id:
+    marker_key = hashlib.sha256(
+        (session_id + "\0" + catalog_json).encode("utf-8")
+    ).hexdigest()
+    uid = getattr(os, "getuid", lambda: "user")()
+    marker_root = os.path.join(
+        tempfile.gettempdir(),
+        f"copilot-extensions-session-command-catalog-{uid}",
+    )
+    marker_path = os.path.join(marker_root, marker_key)
+    try:
+        os.makedirs(marker_root, mode=0o700, exist_ok=True)
+        marker_root_stat = os.stat(marker_root)
+        if (
+            hasattr(os, "getuid")
+            and marker_root_stat.st_uid != os.getuid()
+        ) or stat.S_IMODE(marker_root_stat.st_mode) & 0o077:
+            raise PermissionError(
+                f"unsafe marker directory ownership or mode: {marker_root}"
+            )
+        descriptor = os.open(
+            marker_path,
+            os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+            0o600,
+        )
+        os.close(descriptor)
+    except FileExistsError:
+        os.write(1, b"{}\n")
+        raise SystemExit(0)
+    except OSError as error:
+        marker_path = ""
+        print(
+            f"[agent-logger] catalog deduplication unavailable: {error}",
+            file=sys.stderr,
+        )
+
+try:
+    os.write(1, envelope.encode("utf-8"))
+except OSError:
+    if marker_path:
+        try:
+            os.unlink(marker_path)
+        except OSError:
+            pass
+    raise
 PY
-)"; then
-    printf '%s\n' "$output"
-else
+then
     printf '%s\n' '{}'
 fi

@@ -9,19 +9,45 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
     exit 0
 }
 
+$catalogShim = 'powershell'
+$hostPath = ''
+if ($catalogShim -eq 'powershell' -and $PSVersionTable.PSEdition -eq 'Core') {
+    try { $hostPath = (Get-Process -Id $PID).Path } catch {}
+    if (-not ($hostPath -and [IO.Path]::IsPathRooted($hostPath))) {
+        $hostPath = ''
+    }
+}
 $installerPath = Join-Path $selfRoot 'scripts\install.ps1'
 $specs = '[{"id":"agent-logger","relativePath":"bin\\agent-logger.ps1","purpose":"Inspect agent logger configuration and chronicle state"},{"id":"collate-session","relativePath":"bin\\collate-session.ps1","purpose":"Collate one Copilot session into digest segments"},{"id":"read-session-digest","relativePath":"bin\\read-session-digest.ps1","purpose":"Read collated session digest data"},{"id":"prepare-session-log","relativePath":"bin\\prepare-session-log.ps1","purpose":"Prepare one session log manifest and output path"},{"id":"ramp-up-session","relativePath":"bin\\ramp-up-session.ps1","purpose":"Build a bounded takeover briefing for a dormant session"},{"id":"session-sync","relativePath":"bin\\session-sync.ps1","purpose":"Sync archive and compact Copilot session data"}]' | ConvertFrom-Json
 $commands = @(
     foreach ($spec in @($specs)) {
         $commandPath = Join-Path $selfRoot ([string]$spec.relativePath)
+        $entrypointReady = Test-Path -LiteralPath $commandPath
+        $argv = if ($catalogShim -eq 'powershell' -and $hostPath) {
+            @(
+                $hostPath,
+                '-NoProfile',
+                '-ExecutionPolicy',
+                'Bypass',
+                '-File',
+                $commandPath
+            )
+        } else {
+            @($commandPath)
+        }
         $availability = if (
-            (Test-Path -LiteralPath $commandPath) -and
-            (Test-Path -LiteralPath $installerPath)
+            $entrypointReady -and
+            (Test-Path -LiteralPath $installerPath) -and
+            ($catalogShim -ne 'powershell' -or $hostPath)
         ) { 'ready' } else { 'unavailable' }
         [ordered]@{
             id = [string]$spec.id
-            argv = @($commandPath)
-            shell = 'direct'
+            argv = [object[]]@($argv)
+            shell = if ($catalogShim -eq 'powershell') {
+                if ($hostPath) { 'direct' } else { 'powershell' }
+            } else {
+                'direct'
+            }
             purpose = [string]$spec.purpose
             availability = $availability
         }
@@ -39,11 +65,91 @@ $fence = '```'
 $context = @(
     '## agent-logger session command catalog'
     ''
-    'Select the command by `id` and invoke its exact `argv`. Do not search `PATH` or substitute a same-named command from another payload.'
+    'Select a command by `id` and append arguments to its exact `argv` prefix. Quote each prefix element separately when rendering a shell command; prepend `&` in PowerShell. Never substitute a global or `PATH` binstub for any prefix element.'
     ''
     "${fence}json"
     $catalogJson
     $fence
 ) -join "`n"
-Write-Output (@{ additionalContext = $context } | ConvertTo-Json -Compress -Depth 3)
+$envelope = @{ additionalContext = $context } | ConvertTo-Json -Compress -Depth 3
+
+$sessionId = ''
+if ([Console]::IsInputRedirected) {
+    $hookInput = [Console]::In.ReadToEnd()
+    if ($hookInput) {
+        try {
+            $hookPayload = $hookInput | ConvertFrom-Json
+            if ($hookPayload.sessionId -is [string]) {
+                $sessionId = $hookPayload.sessionId
+            } elseif ($hookPayload.session_id -is [string]) {
+                $sessionId = $hookPayload.session_id
+            }
+        } catch {
+            [Console]::Error.WriteLine(
+                '[agent-logger] invalid sessionStart payload; catalog deduplication disabled: ' +
+                $_.Exception.Message
+            )
+        }
+    }
+}
+
+$markerPath = ''
+if ($sessionId) {
+    $hashAlgorithm = [Security.Cryptography.SHA256]::Create()
+    try {
+        $markerBytes = [Text.Encoding]::UTF8.GetBytes(
+            $sessionId + [char]0 + $catalogJson
+        )
+        $markerKey = [BitConverter]::ToString(
+            $hashAlgorithm.ComputeHash($markerBytes)
+        ).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $hashAlgorithm.Dispose()
+    }
+    $markerBase = if (
+        $env:OS -eq 'Windows_NT' -or
+        (Get-Variable IsWindows -ErrorAction SilentlyContinue).Value
+    ) {
+        [IO.Path]::GetTempPath()
+    } else {
+        Join-Path $HOME '.cache'
+    }
+    $markerRoot = Join-Path $markerBase 'copilot-extensions-session-command-catalog'
+    $markerPath = Join-Path $markerRoot $markerKey
+    try {
+        [void][IO.Directory]::CreateDirectory($markerRoot)
+        $marker = [IO.File]::Open(
+            $markerPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None
+        )
+        $marker.Dispose()
+    } catch [IO.IOException] {
+        if (Test-Path -LiteralPath $markerPath) {
+            [Console]::Out.WriteLine('{}')
+            exit 0
+        }
+        $markerPath = ''
+        [Console]::Error.WriteLine(
+            '[agent-logger] catalog deduplication unavailable: ' +
+            $_.Exception.Message
+        )
+    } catch {
+        $markerPath = ''
+        [Console]::Error.WriteLine(
+            '[agent-logger] catalog deduplication unavailable: ' +
+            $_.Exception.Message
+        )
+    }
+}
+
+try {
+    [Console]::Out.WriteLine($envelope)
+} catch {
+    if ($markerPath) {
+        Remove-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
+    }
+    exit 0
+}
 exit 0

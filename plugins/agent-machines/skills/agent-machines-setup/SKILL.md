@@ -57,7 +57,7 @@ scripts/init.sh          # Linux / WSL / macOS
 Verify:
 
 ```
-<catalog argv[0]> version                    # inside an agent session
+<catalog argv prefix> version                    # inside an agent session
 <management-binstub-path> version            # outside a session
 ```
 
@@ -109,19 +109,19 @@ plugins (`agent-worktrees`, `agent-machines`); if a package manages
 `extraKnownMarketplaces`, include the bootstrap-critical `copilot-extensions`
 marketplace or the validator errors.
 
-Run `<catalog argv[0]> validate` after authoring to catch conflicts.
+Run `<catalog argv prefix> validate` after authoring to catch conflicts.
 
 ## Diagnose and migrate package layout
 
-Run `<catalog argv[0]> doctor` to inspect every adopted repo for canonical,
+Run `<catalog argv prefix> doctor` to inspect every adopted repo for canonical,
 legacy, mixed, malformed, unavailable, or absent package layouts. Use
 `--repo <name-or-path>` to scope it and `--json` for structured output.
 
 For a legacy-only repo:
 
 ```
-<catalog argv[0]> migrate --repo <name-or-path>          # dry-run
-<catalog argv[0]> migrate --repo <name-or-path> --apply  # move files
+<catalog argv prefix> migrate --repo <name-or-path>          # dry-run
+<catalog argv prefix> migrate --repo <name-or-path> --apply  # move files
 ```
 
 Migration preserves package bytes and gates, placing YAML in

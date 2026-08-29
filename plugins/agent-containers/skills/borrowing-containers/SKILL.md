@@ -17,9 +17,9 @@ integration. Read and follow that skill rather than reproducing those mechanics
 here.
 
 Use the exact `argv` from the agent-containers session command catalog for
-container operations. For dispatch, use the exact `argv[0]` from the session
+container operations. For dispatch, use the exact `argv` prefix from the session
 command catalog for agent-bridge and replace
-`<agent-bridge catalog argv[0]>` below with that path. Append the arguments
+`<agent-bridge catalog argv prefix>` below with its shell-ready rendering. Append the arguments
 shown below; never substitute a same-named plugin command found through `PATH`.
 
 ## State contract
@@ -32,7 +32,7 @@ state in the plugin or product checkout.
 The effort slug is the lease holder. Borrow with:
 
 ```bash
-<agent-containers catalog argv[0]> borrow <effort-slug>
+<agent-containers catalog argv prefix> borrow <effort-slug>
 ```
 
 Record the printed container name under the effort's existing metadata in its
@@ -52,7 +52,7 @@ Dispatch through the bridge's container resolver, not by entering the container
 directly:
 
 ```bash
-<agent-bridge catalog argv[0]> send container:<name> "<task>"
+<agent-bridge catalog argv prefix> send container:<name> "<task>"
 ```
 
 Follow the `agent-bridge` skill for session and follow-up mechanics. Follow
@@ -62,7 +62,7 @@ Follow the `agent-bridge` skill for session and follow-up mechanics. Follow
 
 During effort completion or archival:
 
-1. Release by effort slug: `<agent-containers catalog argv[0]> release <effort-slug>`.
+1. Release by effort slug: `<agent-containers catalog argv prefix> release <effort-slug>`.
 2. Remove the active `**Container:**` binding or annotate it as released in the
    archived effort.
 3. Archive the effort in the user's state repo using that repo's effort
@@ -73,7 +73,7 @@ so a stale lease can be reconciled through `containers-fleet`.
 
 ## Status mapping
 
-Use `<agent-containers catalog argv[0]> leases` and map each row's effort holder back to the active
+Use `<agent-containers catalog argv prefix> leases` and map each row's effort holder back to the active
 effort slug in the user's state repo. Report:
 
 - effort slug → container name for active mappings;

@@ -183,12 +183,12 @@ try {
     $Kernel = "[owner: agent-dispatch@$PluginVersion]" + [char]10 +
         'Before choosing or starting new work, use the agent-dispatch session ' +
         "command catalog's exact " +
-        '`argv[0]` with `worktree-status`; resume or claim work explicitly ' +
+        '`argv prefix` with `worktree-status`; resume or claim work explicitly ' +
         'targeted at this worktree before self-selecting unless it conflicts ' +
         'with the operator''s current request. Before starting work likely to ' +
         'overlap another worktree, use the ' +
         "agent-dispatch session command catalog's exact " +
-        '`argv[0]` with ' +
+        '`argv prefix` with ' +
         '`focus --list`. At the start of substantial operator-led ' +
         'or task-less work, and when its direction changes, advertise it early ' +
         'with that same command plus `focus "<one-line subject>"`; this is shorthand for ' +

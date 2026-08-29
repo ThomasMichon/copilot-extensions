@@ -59,8 +59,8 @@ pwsh -File .\transports\dtssh\deploy\emit-registry.ps1 `
   -MachinesYaml <path-to-machines.yaml> `
   -OutFile .\dtssh-registry.yaml
 
-<catalog argv[0]> emit-profile .\dtssh-registry.yaml --module .\transports\dtssh\module.yaml
-<catalog argv[0]> verify dt-<host>
+<catalog argv prefix> emit-profile .\dtssh-registry.yaml --module .\transports\dtssh\module.yaml
+<catalog argv prefix> verify dt-<host>
 ```
 
 `emit-registry` runs `dtssh discover -q` and `dtssh list`, maps configured

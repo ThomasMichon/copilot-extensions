@@ -21,10 +21,10 @@ description: >
 
 # Pick-and-Claim — dedup-safe open-ended self-dispatch
 
-Use the exact `argv[0]` from the agent-dispatch session command catalog for
-every dispatch operation below. Replace `<agent-dispatch catalog argv[0]>`
-with that path; never search `PATH` for a same-named command. In PowerShell,
-invoke it as `& "<agent-dispatch catalog argv[0]>" <args>`. If the catalog is
+Use the exact `argv` prefix from the agent-dispatch session command catalog for
+every dispatch operation below. Replace `<agent-dispatch catalog argv prefix>`
+with its shell-ready rendering; never search `PATH` for a same-named command. In PowerShell,
+invoke it as `<agent-dispatch catalog argv prefix> <args>`. If the catalog is
 missing, follow the single-installed-payload fallback in the `agent-dispatch`
 skill and fail on ambiguity.
 
@@ -40,7 +40,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
 ## The protocol
 
 1. **Honor assigned work first.** Run
-   `<agent-dispatch catalog argv[0]> worktree-status` before choosing a new
+   `<agent-dispatch catalog argv prefix> worktree-status` before choosing a new
    subject. Resume or claim a task explicitly targeted at this worktree before
    self-selecting unrelated work, unless the operator's current request
    conflicts with it.
@@ -50,7 +50,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    - A **semantic search** over your work corpus / issue tracker, if one is
      available (it catches differently-worded duplicates that a substring match
      misses).
-   - `<agent-dispatch catalog argv[0]> list --status queued,claimed,started,suspended` — what is already
+   - `<agent-dispatch catalog argv prefix> list --status queued,claimed,started,suspended` — what is already
      grabbed on the queue.
    - Active worktree **charters** (if the coordination layer exposes them, e.g.
      `agent-worktrees list --json`) — do not pick what another agent is already <!-- marketplace-isolation: allow agent-worktrees-management -->
@@ -65,7 +65,7 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    to subject *X*, claim it in one race-free call:
 
    ```bash
-   <agent-dispatch catalog argv[0]> create "<what you're tackling>" \
+   <agent-dispatch catalog argv prefix> create "<what you're tackling>" \
      --dedup-key "<subject-id>" --claim
    ```
 
@@ -84,15 +84,15 @@ what makes your pick *stick uniquely*. Do both — sweep, then claim.
    then `claim`, but `--claim` is the clean primitive.)
 
 5. **Work it, then close the loop.**
-   `<agent-dispatch catalog argv[0]> progress <id> …` at phase boundaries;
-   `<agent-dispatch catalog argv[0]> complete <id> --result-ref <ref>` when done. If the
+   `<agent-dispatch catalog argv prefix> progress <id> …` at phase boundaries;
+   `<agent-dispatch catalog argv prefix> complete <id> --result-ref <ref>` when done. If the
    pick is an *objective* rather than a single step, make it a **durable goal**
    (`create … --goal "<objective>" --done-criteria "<when done>"`) and **loop
    toward it** — work a unit, record a progress beat, re-check the done-criteria,
    repeat — so a replacement resumes from the recorded progress rather than
    restarting (see the **`agent-dispatch`** skill § *Goal-loop tasks*). If you
    must drop it:
-   `<agent-dispatch catalog argv[0]> yield <id> --exclude-self worktree` (append a "not
+   `<agent-dispatch catalog argv prefix> yield <id> --exclude-self worktree` (append a "not
    me" so you are not re-offered it), or `abandon --duplicate-of <ref>` if it turns
    out to be a duplicate.
 
@@ -125,7 +125,7 @@ Only when no row exists, carry the same canonical identity through the first
 work episode:
 
 ```bash
-<agent-dispatch catalog argv[0]> create "Fix owner/repo#42: concise title" \
+<agent-dispatch catalog argv prefix> create "Fix owner/repo#42: concise title" \
   --prompt "Work https://github.com/owner/repo/issues/42 end-to-end ..." \
   --source github-issue \
   --origin-ref issue/owner/repo#42 \
@@ -162,5 +162,5 @@ such as `issue:owner/repo#42:reopen:<event-id>`.
   from live agent-bridge conversation. For generic task decomposition and the
   decision to delegate at all, use
   **`delegation-guidance:delegating-work`**.
-- `<agent-dispatch catalog argv[0]> create --help` — the `--claim`, `--dedup-key`, `--require`, and
+- `<agent-dispatch catalog argv prefix> create --help` — the `--claim`, `--dedup-key`, `--require`, and
   `--exclude` flags.

@@ -24,11 +24,11 @@ description: >
 
 # Binding a stateless harness to its knowledge repo (harness-first)
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for
+Use the exact `argv` prefix from the agent-worktrees session command catalog for
 state and repository operations below. Replace
-`<agent-worktrees catalog argv[0]>` with the raw path and quote it at each
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at each
 shell call site on POSIX; in PowerShell invoke it as
-`& "<agent-worktrees catalog argv[0]>" <args>`.
+`<agent-worktrees catalog argv prefix> <args>`.
 
 A **stateless harness** is a shareable/forkable control plane that holds the
 *intelligence* (instructions, config, skills, sub-agents) but **no personal
@@ -44,7 +44,7 @@ config, never committed into the harness.
 ## When to run
 
 - Right after cloning/forking a stateless harness on a new machine.
-- When `<agent-worktrees catalog argv[0]> state-root` reports the harness **requires an external
+- When `<agent-worktrees catalog argv prefix> state-root` reports the harness **requires an external
   state root but none is bound**.
 - To re-point the harness at a different knowledge repo.
 
@@ -53,7 +53,7 @@ config, never committed into the harness.
 Confirm the launch repo is a stateless harness:
 
 ```
-<agent-worktrees catalog argv[0]> state-root --json
+<agent-worktrees catalog argv prefix> state-root --json
 ```
 
 If `requires_external` is `true` and `bound` is `false` (or `state_root` is
@@ -111,7 +111,7 @@ the implicit target of `gh issue` commands.
 So the state-root resolver can find the knowledge checkout by name:
 
 ```
-<agent-worktrees catalog argv[0]> repos add <knowledge-name> "<knowledge-path>" --class worktree
+<agent-worktrees catalog argv prefix> repos add <knowledge-name> "<knowledge-path>" --class worktree
 ```
 
 (The harness itself is normally already registered from its own adoption. If not,
@@ -209,7 +209,7 @@ exact managed values are tracked so stale entries can be retired safely.
 ## 4. Verify
 
 ```
-<agent-worktrees catalog argv[0]> state-root --json
+<agent-worktrees catalog argv prefix> state-root --json
 ```
 
 Expect `requires_external: true`, `bound: true`, and `state_root` pointing at the
@@ -218,7 +218,7 @@ knowledge anchor. Then launch or create a harness worktree through
 worktree. Confirm from the harness worktree:
 
 ```
-<agent-worktrees catalog argv[0]> state-root --pair --json
+<agent-worktrees catalog argv prefix> state-root --pair --json
 ```
 
 Expect `paired: true` and a `sibling` with `role: knowledge`, `kind: worktree`,

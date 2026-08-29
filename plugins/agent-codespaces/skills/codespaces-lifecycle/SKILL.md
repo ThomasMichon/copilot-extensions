@@ -27,9 +27,9 @@ first-time setup and config changes, see the `codespaces-setup` skill.
 
 Use the exact `argv` from the agent-codespaces session command catalog for
 CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
-worktree claims. For bridge dispatch, use the exact `argv[0]` from the
+worktree claims. For bridge dispatch, use the exact `argv` prefix from the
 session command catalog for agent-bridge and replace
-`<agent-bridge catalog argv[0]>` below with that path. Never substitute a
+`<agent-bridge catalog argv prefix>` below with its shell-ready rendering. Never substitute a
 same-named plugin command through ambient PATH. The payload-local commands
 self-provision on first use. Full detail:
 `codespaces-setup` § *Readiness*.
@@ -47,25 +47,25 @@ bare name that collides with another agent makes the bridge **balk** and list
 the candidates.
 
 ```bash
-<agent-bridge catalog argv[0]> send codespace:my-feature-branch "<prompt>"
-<agent-bridge catalog argv[0]> send my-feature-branch "<prompt>"
-<agent-bridge catalog argv[0]> send codespace:my-feature-branch-7qv4rv "..."
+<agent-bridge catalog argv prefix> send codespace:my-feature-branch "<prompt>"
+<agent-bridge catalog argv prefix> send my-feature-branch "<prompt>"
+<agent-bridge catalog argv prefix> send codespace:my-feature-branch-7qv4rv "..."
 ```
 
 ### Agent-Bridge CLI
 
 | Command | Purpose |
 |---------|---------|
-| `<agent-bridge catalog argv[0]> agents` | List all available agents (local + codespace) |
-| `<agent-bridge catalog argv[0]> send codespace:<name> "<prompt>"` | Start a new session (blocks until turn completes) |
-| `<agent-bridge catalog argv[0]> send <session-id> "<prompt>"` | Send follow-up prompt on existing session |
-| `<agent-bridge catalog argv[0]> send --no-wait <target> "<prompt>"` | Deliberate fire-and-forget — returns a session ID without attaching to its feed |
-| `<agent-bridge catalog argv[0]> wait <session-id>` | Block until current turn completes |
-| `<agent-bridge catalog argv[0]> sessions` | List all sessions with status |
-| `<agent-bridge catalog argv[0]> sessions --status idle` | List sessions ready for follow-up |
-| `<agent-bridge catalog argv[0]> stop <session-id>` | Pause session (preserves state for resume) |
-| `<agent-bridge catalog argv[0]> resume <session-id>` | Resume a stopped session |
-| `<agent-bridge catalog argv[0]> end <session-id>` | End and clean up session |
+| `<agent-bridge catalog argv prefix> agents` | List all available agents (local + codespace) |
+| `<agent-bridge catalog argv prefix> send codespace:<name> "<prompt>"` | Start a new session (blocks until turn completes) |
+| `<agent-bridge catalog argv prefix> send <session-id> "<prompt>"` | Send follow-up prompt on existing session |
+| `<agent-bridge catalog argv prefix> send --no-wait <target> "<prompt>"` | Deliberate fire-and-forget — returns a session ID without attaching to its feed |
+| `<agent-bridge catalog argv prefix> wait <session-id>` | Block until current turn completes |
+| `<agent-bridge catalog argv prefix> sessions` | List all sessions with status |
+| `<agent-bridge catalog argv prefix> sessions --status idle` | List sessions ready for follow-up |
+| `<agent-bridge catalog argv prefix> stop <session-id>` | Pause session (preserves state for resume) |
+| `<agent-bridge catalog argv prefix> resume <session-id>` | Resume a stopped session |
+| `<agent-bridge catalog argv prefix> end <session-id>` | End and clean up session |
 
 ### Sync pattern (default — recommended for interactive use)
 
@@ -73,7 +73,7 @@ The payload-local `send` operation blocks until the turn completes.
 Use when you need the result before continuing.
 
 ```
-powershell(command: '& "<agent-bridge catalog argv[0]>" send "codespace:<name>" "<prompt>"', initial_wait: 120)
+powershell(command: '<agent-bridge catalog argv prefix> send "codespace:<name>" "<prompt>"', initial_wait: 120)
 ```
 
 ### Long-running interactive work
@@ -84,7 +84,7 @@ thoughts and tools into a low-noise live feed and emits liveness markers during
 quiet tool calls.
 
 ```
-powershell(command: '& "<agent-bridge catalog argv[0]>" send "codespace:<name>" "<prompt>"', initial_wait: 300)
+powershell(command: '<agent-bridge catalog argv prefix> send "codespace:<name>" "<prompt>"', initial_wait: 300)
 ```
 
 If the outer tool runner backgrounds the still-running command after its
@@ -99,10 +99,10 @@ completion notification, and the remote feed accumulates unread until a caller
 attaches to it.
 
 ```
-powershell(command: '& "<agent-bridge catalog argv[0]>" send --no-wait "codespace:<name>" "<prompt>"')
+powershell(command: '<agent-bridge catalog argv prefix> send --no-wait "codespace:<name>" "<prompt>"')
 # Capture the returned session ID.
-powershell(command: '& "<agent-bridge catalog argv[0]>" read <session-id>', initial_wait: 300)
-# `<agent-bridge catalog argv[0]> wait <session-id>` is also valid when only the current turn matters.
+powershell(command: '<agent-bridge catalog argv prefix> read <session-id>', initial_wait: 300)
+# `<agent-bridge catalog argv prefix> wait <session-id>` is also valid when only the current turn matters.
 ```
 
 Do not end the host turn with only "implementation is running" when the result
@@ -116,13 +116,13 @@ Sessions are persistent. After the first `send` creates a session, send
 follow-ups using the session ID:
 
 ```bash
-<agent-bridge catalog argv[0]> send "codespace:<name>" "Research the auth module"
+<agent-bridge catalog argv prefix> send "codespace:<name>" "Research the auth module"
 # → Session abc123-def (keen-river) created
 
-<agent-bridge catalog argv[0]> send abc123-def "Now implement the changes"
+<agent-bridge catalog argv prefix> send abc123-def "Now implement the changes"
 # → [response]
 
-<agent-bridge catalog argv[0]> end abc123-def
+<agent-bridge catalog argv prefix> end abc123-def
 ```
 
 ### Startup and Shutdown Behavior
@@ -134,15 +134,15 @@ follow-ups using the session ID:
 - **Pool pressure:** the catalog command's `create` action consults the pool planner before
   spending another box: it prefers reusing a suitable idle CodeSpace and refuses
   over-budget creates unless `--force-create` is passed. Inspect with
-  `<agent-codespaces catalog argv[0]> pool` or preflight with
-  `<agent-codespaces catalog argv[0]> allocate <repo>`.
+  `<agent-codespaces catalog argv prefix> pool` or preflight with
+  `<agent-codespaces catalog argv prefix> allocate <repo>`.
 
 ### Exclusive control: claim + cross-harness fence
 
 A CodeSpace is fronted by a single bridge, so `agent-codespaces` takes an
 **exclusive, worktree-keyed claim** on connect (`ssh --effort` / `claim`): a
 host-local **L1** lock plus an atomic cross-machine **L2** Git-ref lease
-(`<agent-worktrees catalog argv[0]> lease`, the same-harness authority) — a live claim on another
+(`<agent-worktrees catalog argv prefix> lease`, the same-harness authority) — a live claim on another
 machine raises `[BUSY]`/`ClaimConflict` (take over with `--force-claim`). On top,
 a **cross-harness fence** reads a lockfile inside the CodeSpace (`~/.agent-lease`)
 and **refuses** the connect if a *foreign harness* holds it (the seam the
@@ -171,8 +171,8 @@ the bridge connection instead.
 > session). Genuine drops are now rare but still possible (a CodeSpace idle
 > timeout, a network partition). Long jobs should still be **idempotent** and
 > **push early and often**, and you can **resume on drop**
-> (`<agent-bridge catalog argv[0]> end <sid>` →
-> `<agent-bridge catalog argv[0]> create …`).
+> (`<agent-bridge catalog argv prefix> end <sid>` →
+> `<agent-bridge catalog argv prefix> create …`).
 > See the agent-bridge
 > skill's *Dispatching Long Autonomous Work* flow.
 
@@ -184,47 +184,47 @@ the bridge connection instead.
 
 ```bash
 # Interactive SSH session (with credential relay tunnel)
-<agent-codespaces catalog argv[0]> ssh <codespace-name>
+<agent-codespaces catalog argv prefix> ssh <codespace-name>
 
 # Run a command and return output
-<agent-codespaces catalog argv[0]> ssh <codespace-name> --remote-cmd "ls -la"
+<agent-codespaces catalog argv prefix> ssh <codespace-name> --remote-cmd "ls -la"
 
 # Structured stdio for agent-bridge transport
-<agent-codespaces catalog argv[0]> ssh <codespace-name> --stdio --remote-cmd "copilot --acp --stdio"
+<agent-codespaces catalog argv prefix> ssh <codespace-name> --stdio --remote-cmd "copilot --acp --stdio"
 
 # Skip credential relay tunnel setup
-<agent-codespaces catalog argv[0]> ssh <codespace-name> --no-relay
+<agent-codespaces catalog argv prefix> ssh <codespace-name> --no-relay
 ```
 
 ## Listing and Status
 
 ```bash
-<agent-codespaces catalog argv[0]> list
-<agent-codespaces catalog argv[0]> list --json
-<agent-codespaces catalog argv[0]> pool
-<agent-codespaces catalog argv[0]> pool --json
-<agent-codespaces catalog argv[0]> allocate <owner/repo> --json
-<agent-codespaces catalog argv[0]> status
-<agent-codespaces catalog argv[0]> doctor
-<agent-codespaces catalog argv[0]> version
+<agent-codespaces catalog argv prefix> list
+<agent-codespaces catalog argv prefix> list --json
+<agent-codespaces catalog argv prefix> pool
+<agent-codespaces catalog argv prefix> pool --json
+<agent-codespaces catalog argv prefix> allocate <owner/repo> --json
+<agent-codespaces catalog argv prefix> status
+<agent-codespaces catalog argv prefix> doctor
+<agent-codespaces catalog argv prefix> version
 ```
 
 ## Creating and Deleting
 
 ```bash
 # Create a CodeSpace on a repo + run on_create provisioning from config
-<agent-codespaces catalog argv[0]> create <owner/repo>
-<agent-codespaces catalog argv[0]> create <owner/repo> --branch <branch> --display-name <name>
-<agent-codespaces catalog argv[0]> create <owner/repo> --devcontainer-path .devcontainer/devcontainer.json
-<agent-codespaces catalog argv[0]> create <owner/repo> --force-create
-<agent-codespaces catalog argv[0]> create <owner/repo> --no-wait
+<agent-codespaces catalog argv prefix> create <owner/repo>
+<agent-codespaces catalog argv prefix> create <owner/repo> --branch <branch> --display-name <name>
+<agent-codespaces catalog argv prefix> create <owner/repo> --devcontainer-path .devcontainer/devcontainer.json
+<agent-codespaces catalog argv prefix> create <owner/repo> --force-create
+<agent-codespaces catalog argv prefix> create <owner/repo> --no-wait
 
-<agent-codespaces catalog argv[0]> delete <codespace-name>
-<agent-codespaces catalog argv[0]> delete <codespace-name> --no-sync
+<agent-codespaces catalog argv prefix> delete <codespace-name>
+<agent-codespaces catalog argv prefix> delete <codespace-name> --no-sync
 
 # Remove stale local state (orphaned SSH configs, ControlMaster sockets)
-<agent-codespaces catalog argv[0]> cleanup
-<agent-codespaces catalog argv[0]> cleanup --dry-run
+<agent-codespaces catalog argv prefix> cleanup
+<agent-codespaces catalog argv prefix> cleanup --dry-run
 ```
 
 CodeSpace creation uses `gh codespace create` with defaults by convention
@@ -244,11 +244,11 @@ Only the `session-state` tree and the
 
 ```bash
 # Recover sessions, stop the CodeSpace, and mark it recovered/reusable
-<agent-codespaces catalog argv[0]> finalize <codespace-name>
+<agent-codespaces catalog argv prefix> finalize <codespace-name>
 
 # Recover sessions, require a fresh off-box-safety verdict, then delete
-<agent-codespaces catalog argv[0]> verify <codespace-name>
-<agent-codespaces catalog argv[0]> finalize <codespace-name> --delete
+<agent-codespaces catalog argv prefix> verify <codespace-name>
+<agent-codespaces catalog argv prefix> finalize <codespace-name> --delete
 ```
 
 Plain `finalize` is the preserve path: it recovers Copilot session-state, stops
@@ -257,7 +257,7 @@ releases the borrow so the box can be reused later. It does **not** delete.
 
 `finalize --delete` is the destructive path. It first checks the no-SSH
 `codespace-clean` beacon; if safety is unknown, run
-`<agent-codespaces catalog argv[0]> verify <name>` to SSH-probe git cleanliness
+`<agent-codespaces catalog argv prefix> verify <name>` to SSH-probe git cleanliness
 and publish a fresh verdict, then retry.
 It also refuses deletion after failed session recovery unless `--force` is
 explicitly supplied.
@@ -266,8 +266,8 @@ explicitly supplied.
 > unknown/dirty off-box safety (`verify` or push/settle the work), a
 > still-booting CodeSpace, or an SSH/relay hiccup. For a genuinely unrecoverable
 > CodeSpace, deletion is break-glass:
-> `<agent-codespaces catalog argv[0]> finalize <name> --delete --force` or
-> `<agent-codespaces catalog argv[0]> delete <name> --force --no-sync`.
+> `<agent-codespaces catalog argv prefix> finalize <name> --delete --force` or
+> `<agent-codespaces catalog argv prefix> delete <name> --force --no-sync`.
 
 `delete` also runs recovery automatically as a **best-effort pre-delete hook**
 (skip with `--no-sync`); unlike `finalize --delete`, it does not gate on
@@ -303,8 +303,8 @@ explicit start needed).
 
 ```bash
 # Recover sessions, then gracefully stop (preserve for later resume)
-<agent-codespaces catalog argv[0]> stop <codespace-name>
-<agent-codespaces catalog argv[0]> stop <codespace-name> --no-sync
+<agent-codespaces catalog argv prefix> stop <codespace-name>
+<agent-codespaces catalog argv prefix> stop <codespace-name> --no-sync
 ```
 
 Unlike `finalize --delete`, a failed pre-stop recovery does **not** block the
@@ -318,21 +318,21 @@ Never use a bare `gh codespace stop` — it bypasses the session-recovery hook.
 
 Use the catalog command's `ssh` action to pull latest:
 ```bash
-<agent-codespaces catalog argv[0]> ssh <name> --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull origin main && bash install.sh"
+<agent-codespaces catalog argv prefix> ssh <name> --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull origin main && bash install.sh"
 ```
 
 If credential relay isn't active, pass the token via `--remote-cmd`:
 ```bash
 token=$(gh auth token)
-<agent-codespaces catalog argv[0]> ssh <name> --no-relay --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull https://x-access-token:${token}@github.com/<user>/dotfiles.git main"
+<agent-codespaces catalog argv prefix> ssh <name> --no-relay --remote-cmd "cd /workspaces/.codespaces/.persistedshare/dotfiles && git pull https://x-access-token:${token}@github.com/<user>/dotfiles.git main"
 ```
 
 ### Fresh clone (when .git is missing or corrupted)
 
 ```bash
 token=$(gh auth token)
-<agent-codespaces catalog argv[0]> ssh <name> --no-relay --remote-cmd "rm -rf /workspaces/.codespaces/.persistedshare/dotfiles && git clone https://x-access-token:${token}@github.com/<user>/dotfiles.git /workspaces/.codespaces/.persistedshare/dotfiles"
-<agent-codespaces catalog argv[0]> ssh <name> --no-relay --remote-cmd "bash /workspaces/.codespaces/.persistedshare/dotfiles/install.sh"
+<agent-codespaces catalog argv prefix> ssh <name> --no-relay --remote-cmd "rm -rf /workspaces/.codespaces/.persistedshare/dotfiles && git clone https://x-access-token:${token}@github.com/<user>/dotfiles.git /workspaces/.codespaces/.persistedshare/dotfiles"
+<agent-codespaces catalog argv prefix> ssh <name> --no-relay --remote-cmd "bash /workspaces/.codespaces/.persistedshare/dotfiles/install.sh"
 ```
 
 > **Do NOT use `tar` or `git archive` pipes** to sync dotfiles. They
@@ -386,7 +386,7 @@ manifest there and registers the `codespace:` **namespace resolver**, driving
 the provider over a process boundary. That resolver lists and resolves your
 CodeSpaces **live** (via `gh codespace list`) on demand — so
 the payload-local `agents` output shows them and
-`<agent-bridge catalog argv[0]> send codespace:<name>` works immediately,
+`<agent-bridge catalog argv prefix> send codespace:<name>` works immediately,
 with no expiry, including newly-created CodeSpaces.
 
 Because discovery is declarative (a dropped manifest carrying an absolute
@@ -408,13 +408,13 @@ by agent-codespaces.
 ## Troubleshooting
 
 - **SSH hangs** -- test with
-  `<agent-codespaces catalog argv[0]> ssh <name> --remote-cmd "echo ok" --no-relay`.
+  `<agent-codespaces catalog argv prefix> ssh <name> --remote-cmd "echo ok" --no-relay`.
   If that works, check credential relay. If it doesn't, verify
-  `<agent-codespaces catalog argv[0]> doctor` / `gh auth status` is authenticated.
+  `<agent-codespaces catalog argv prefix> doctor` / `gh auth status` is authenticated.
 - **Bridge connection fails** -- the bridge auto-starts Shutdown
   CodeSpaces and retries SSH (up to ~180 s). If it still fails, try
-  `<agent-codespaces catalog argv[0]> ssh <name> --remote-cmd "echo ok" --no-relay`.
-  Check `<agent-bridge catalog argv[0]> status` and
+  `<agent-codespaces catalog argv prefix> ssh <name> --remote-cmd "echo ok" --no-relay`.
+  Check `<agent-bridge catalog argv prefix> status` and
   `~/.agent-bridge/agent-bridge-err.log`.
 - **No `codespace:` targets** -- provider registration still uses the explicit
   management binstub, not the session catalog. If that binstub is missing,
@@ -431,7 +431,7 @@ by agent-codespaces.
 - **Quota exceeded** -- creating or connecting to a CodeSpace (a Shutdown one
   boots on connect) returns HTTP 400 "too many codespaces running" once the
   concurrently-running cap is hit.
-  `<agent-codespaces catalog argv[0]> stop <name>` idle
+  `<agent-codespaces catalog argv prefix> stop <name>` idle
   CodeSpaces first (preserves them), then retry.
 - **"gh CLI not found"** -- install from https://cli.github.com/
 - **WSL credential slowness** -- first GCM call through PowerShell

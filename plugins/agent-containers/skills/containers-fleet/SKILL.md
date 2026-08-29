@@ -14,9 +14,9 @@ description: >-
 > The runtime works standalone. In an agent session, invoke the exact `argv`
 > from the agent-containers session command catalog; the payload-local command
 > provisions on first use. Do not search `PATH` or substitute a same-named
-> command from another payload. For bridge dispatch, use the exact `argv[0]`
+> command from another payload. For bridge dispatch, use the exact `argv` prefix
 > from the agent-bridge session command catalog and replace
-> `<agent-bridge catalog argv[0]>` below with that path. Outside an agent
+> `<agent-bridge catalog argv prefix>` below with its shell-ready rendering. Outside an agent
 > session, stamp a management binstub from an explicitly chosen payload:
 >
 > - Windows:
@@ -46,8 +46,8 @@ still works; only bridge dispatch is absent.
 Define the fleet in `containers.yaml`, then:
 
 ```bash
-<catalog argv[0]> up myrepo --count 3      # create/top-up to 3 warm containers
-<catalog argv[0]> fleet                   # list members + lease status
+<catalog argv prefix> up myrepo --count 3      # create/top-up to 3 warm containers
+<catalog argv prefix> fleet                   # list members + lease status
 ```
 
 Containers are kept warm (stopped, not destroyed). `down` stops them, `start`
@@ -141,22 +141,22 @@ contains them; machine-readable output reports names only.
 ## Borrow / release (effort owns a container)
 
 ```bash
-<catalog argv[0]> borrow my-effort    # prints the leased container name
+<catalog argv prefix> borrow my-effort    # prints the leased container name
 # ... dispatch work to container:<printed-name> ...
-<catalog argv[0]> release my-effort   # free it when done
+<catalog argv prefix> release my-effort   # free it when done
 ```
 
 Leases are **advisory** and persist across processes until `release` or TTL
 (default 24h). `borrow` will not hand out a container already leased to another
 effort; re-borrowing for the same effort is idempotent.
-Use `<catalog argv[0]> leases` to inspect active leases. Release by either effort
+Use `<catalog argv prefix> leases` to inspect active leases. Release by either effort
 name or container name; a missing target returns non-zero so callers can notice
 cleanup drift.
 
 ## Dispatch work
 
 ```bash
-<agent-bridge catalog argv[0]> send container:myrepo-1 "run the unit tests in packages/foo"
+<agent-bridge catalog argv prefix> send container:myrepo-1 "run the unit tests in packages/foo"
 ```
 
 The provider manifest in `~/.agent-bridge/providers.d/agent-containers.json`
@@ -196,14 +196,14 @@ util-linux `script` and `setsid` helpers in the restricted image.
 
 ## Troubleshooting
 
-- `<catalog argv[0]> version` — payload/runtime health.
-- `<catalog argv[0]> fleet --json` — Docker reachability + fleet discovery.
-- `<catalog argv[0]> leases` / `<catalog argv[0]> release <target>` — stale lease
+- `<catalog argv prefix> version` — payload/runtime health.
+- `<catalog argv prefix> fleet --json` — Docker reachability + fleet discovery.
+- `<catalog argv prefix> leases` / `<catalog argv prefix> release <target>` — stale lease
   inspection and cleanup. Leases are advisory and TTL-reclaimed.
-- `<catalog argv[0]> namespace-list` — bridge-facing provider CLI health. If
+- `<catalog argv prefix> namespace-list` — bridge-facing provider CLI health. If
   bridge dispatch cannot see containers, check that the provider manifest exists
   under `~/.agent-bridge/providers.d/` and points at the absolute binstub.
-- `<catalog argv[0]> config-migrate` — migrate/stamp only the machine-local
+- `<catalog argv prefix> config-migrate` — migrate/stamp only the machine-local
   `~/.agent-containers/containers.yaml`; repo/cwd configs are never rewritten.
 
 There is no `doctor` action today.

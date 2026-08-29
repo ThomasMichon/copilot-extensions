@@ -262,7 +262,7 @@ async function flushEvents() {
 // wrapper mirrors the runtime's own system markers (<system_reminder> /
 // <system_notification>) so a cooperating agent parses it as authoritative
 // structure: it can tell peer traffic from operator input, see who sent it, and
-// reply with the agent-bridge session catalog's exact argv[0] plus
+// reply with the agent-bridge session catalog's exact argv prefix plus
 // `send <reply-to> "..."`.
 // Attribute values are escaped; the body is left literal (trusted single-
 // operator mesh) for readability.
@@ -281,7 +281,7 @@ const KIND_GUIDANCE = {
   notify: "This is a NOTIFY (informational). No reply or new work is expected; " +
     "acknowledge only if useful.",
   "status-check": "This is a STATUS-CHECK. Answer tersely using the exact " +
-    "argv[0] from the agent-bridge session command catalog with " +
+    "argv prefix from the agent-bridge session command catalog with " +
     "`send <reply-to> \"...\"`; do NOT treat it as new work or start a task.",
 };
 

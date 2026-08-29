@@ -694,3 +694,19 @@ See [`design.md`](design.md).
 - Normal stamp, provision, install, bootstrap, and service behavior remains
   legacy and unchanged. Build completion, operative cutover, rollback,
   repair/release, uninstall, and dual-cell proof remain separate slices.
+
+### 2026-08-28 — Session catalog transport hardening
+
+- Unified single- and multi-command catalog generation on one cross-platform
+  emitter shape for all runtime `agent-*` plugins.
+- Added atomic session-scoped duplicate suppression while preserving fail-open
+  behavior for missing or malformed hook input and unredirected stdin.
+- Made Windows catalogs advertise a directly executable absolute PowerShell 7
+  host prefix plus the payload-local shim. Windows PowerShell 5.1 reports the
+  entry unavailable rather than corrupting empty, quoted, Unicode, or
+  metacharacter-bearing arguments.
+- Migrated every shipped catalog consumer from the obsolete `argv[0]`
+  convention to the full `argv` prefix and added roster-wide rejection of stale
+  guidance.
+- Added all-command argument/stdin round-trip coverage, payload-containment and
+  discovery guards, and a generic clean-room catalog assertion.

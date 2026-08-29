@@ -29,11 +29,11 @@ description: >
 
 # Context Handoff
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for
+Use the exact `argv` prefix from the agent-worktrees session command catalog for
 worktree-state and cutover operations executed in the current session. Replace
-`<agent-worktrees catalog argv[0]>` with the raw path and quote it at the shell
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at the shell
 call site on POSIX; in PowerShell use
-`& "<agent-worktrees catalog argv[0]>" <args>`. Generated successor
+`<agent-worktrees catalog argv prefix> <args>`. Generated successor
 first-action commands remain literal global
 wrappers because they run before the successor receives session catalog
 context.
@@ -69,7 +69,7 @@ leg.
 - The successfully bound successor is the rightful head of the relay. Once
   cutover starts, the predecessor may preserve the baton or help diagnose a
   failed pickup, but must not continue making competing worktree changes.
-  Confirm the role with `<agent-worktrees catalog argv[0]> session-role --json`
+  Confirm the role with `<agent-worktrees catalog argv prefix> session-role --json`
   when that capability is available; a superseded session assists the head.
 - Re-read the **Original Request**, **Continuing Objective**, ordered
   **Successor Work Roster**, and their cited effort/issue/source of truth.
@@ -146,7 +146,7 @@ recovery.
 ### Steps (default = live cutover)
 
 1. **Inspect active effort focus when agent-worktrees is available.** From the
-   intended worktree, run `<agent-worktrees catalog argv[0]> effort-focus show
+   intended worktree, run `<agent-worktrees catalog argv prefix> effort-focus show
    --json` (or add the known `--worktree-id` when the session cwd is elsewhere).
    Select the compact effort-backed template only when
    `active_effort.active` is `true`. A missing command, unavailable worktree,
@@ -257,9 +257,9 @@ global agent-dispatch query or cross-session search. The current worktree's
 the agent-worktrees state is the authoritative first stop:
 
 1. Resolve the local state directory with
-   `<agent-worktrees catalog argv[0]> get worktree-state-dir`. If the session resumed with a CWD
+   `<agent-worktrees catalog argv prefix> get worktree-state-dir`. If the session resumed with a CWD
    outside its worktree, retry with the current session id:
-   `<agent-worktrees catalog argv[0]> get worktree-state-dir --session-id <session-id>`.
+   `<agent-worktrees catalog argv prefix> get worktree-state-dir --session-id <session-id>`.
    From an adopted anchor this resolves the stable machine-local `@anchor`
    namespace, so a restarted session can perform the same state-first sweep
    without enumerating global Copilot session history.
@@ -269,7 +269,7 @@ the agent-worktrees state is the authoritative first stop:
    merely read or replay `promptText`, because the tool owns one-time
    consumption and predecessor retirement.
 3. If no unconsumed file exists, read the worktree-local pointer history with
-   `<agent-worktrees catalog argv[0]> status --history --json --limit 20` (pass
+   `<agent-worktrees catalog argv prefix> status --history --json --limit 20` (pass
    `--worktree-id <id>` when CWD cannot resolve it). Walk newest-first for a
    `kind: "handoff"` entry. If it names `handoff task <id>`, call
    `consume_handoff` with that exact `task_id`.

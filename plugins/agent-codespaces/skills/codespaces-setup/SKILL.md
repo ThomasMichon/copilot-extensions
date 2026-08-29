@@ -24,9 +24,9 @@ operations (SSH, listing, bridge), see the `codespaces-lifecycle` skill.
 
 Use the exact `argv` from the agent-codespaces session command catalog for
 CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
-related-repo management. For dispatch, use the exact `argv[0]` from the
+related-repo management. For dispatch, use the exact `argv` prefix from the
 session command catalog for agent-bridge and replace
-`<agent-bridge catalog argv[0]>` below with that path. Append the arguments
+`<agent-bridge catalog argv prefix>` below with its shell-ready rendering. Append the arguments
 shown below; never substitute a same-named plugin command found through `PATH`.
 
 ## Readiness — agent-codespaces provisions its own runtime (standalone)
@@ -75,9 +75,9 @@ So for a repo whose CodeSpaces match convention, there is **nothing to
 configure**:
 
 ```bash
-<agent-codespaces catalog argv[0]> create <your-org>/<standard-repo>
-<agent-codespaces catalog argv[0]> doctor
-<agent-bridge catalog argv[0]> send codespace:<name> "<task>"
+<agent-codespaces catalog argv prefix> create <your-org>/<standard-repo>
+<agent-codespaces catalog argv prefix> doctor
+<agent-bridge catalog argv prefix> send codespace:<name> "<task>"
 ```
 
 Add config **only** when a repo deviates from convention. The rest of this skill
@@ -92,7 +92,7 @@ is about that supplementary config.
   ```
   Without the `codespace` scope, CodeSpace operations fail with
   `HTTP 403 ... needs the "codespace" scope`.
-  `<agent-codespaces catalog argv[0]> doctor` checks
+  `<agent-codespaces catalog argv prefix> doctor` checks
   the ambient account and any mapped accounts and prints the exact remedy.
 - **agent-bridge** (optional sibling) -- needed for `codespace:<name>`
   dispatch and for the managed host credential relay. The agent-codespaces
@@ -125,7 +125,7 @@ From inside the repo:
 
 ```bash
 cd /path/to/your/repo
-<agent-codespaces catalog argv[0]> config init
+<agent-codespaces catalog argv prefix> config init
 ```
 
 `config init`:
@@ -142,7 +142,7 @@ file it writes is safe to delete.
 **Or author it by hand:** copy the annotated example,
 [`references/config.yaml`](references/config.yaml), to
 `.agent-codespaces/config.yaml` and adapt. Then run
-`<agent-codespaces catalog argv[0]> config adopt`.
+`<agent-codespaces catalog argv prefix> config adopt`.
 
 > **Auto-discovery.** Running any `agent-codespaces` command *inside* a repo that
 > carries `.agent-codespaces/config.yaml` picks it up automatically -- adoption
@@ -155,7 +155,7 @@ back-compat fallback. Relocate it to the canonical location:
 
 ```bash
 cd /path/to/your/repo
-<agent-codespaces catalog argv[0]> config migrate
+<agent-codespaces catalog argv prefix> config migrate
 ```
 
 Adoption is unaffected (the manifest tracks the repo root, not the file). Commit
@@ -192,7 +192,7 @@ update the account dotfiles repo:
 
 1. Link it as a related repo (see the `agent-worktrees:agent-worktrees-related` skill):
    ```bash
-   <agent-worktrees catalog argv[0]> related add <your-user>/dotfiles --role tooling \
+   <agent-worktrees catalog argv prefix> related add <your-user>/dotfiles --role tooling \
      --summary "Account dotfiles repo cloned into every CodeSpace; hosts install.sh." \
      --delegate none
    ```
@@ -223,8 +223,8 @@ defaults:
 ### 5. Validate
 
 ```bash
-<agent-codespaces catalog argv[0]> config validate
-<agent-codespaces catalog argv[0]> config show
+<agent-codespaces catalog argv prefix> config validate
+<agent-codespaces catalog argv prefix> config show
 ```
 
 ## Config Reference
@@ -369,7 +369,7 @@ Multiple repos can be adopted; config merges in memory:
 
 The plugin ships a `sessionStart` hook that injects a brief
 `additionalContext` map of the repos **delegated to CodeSpaces** -- derived from
-`<agent-worktrees catalog argv[0]> related list` (entries with
+`<agent-worktrees catalog argv prefix> related list` (entries with
 `delegate: agent-codespaces`) -- so
 every session knows which repos have no local checkout and must be worked via a
 CodeSpace. Nothing to configure; it emits nothing outside a managed project or
@@ -378,12 +378,12 @@ when no repo is CodeSpace-delegated.
 ## CLI Reference
 
 ```bash
-<agent-codespaces catalog argv[0]> config init
-<agent-codespaces catalog argv[0]> config adopt
-<agent-codespaces catalog argv[0]> config migrate
-<agent-codespaces catalog argv[0]> config show
-<agent-codespaces catalog argv[0]> config validate
-<agent-codespaces catalog argv[0]> doctor
+<agent-codespaces catalog argv prefix> config init
+<agent-codespaces catalog argv prefix> config adopt
+<agent-codespaces catalog argv prefix> config migrate
+<agent-codespaces catalog argv prefix> config show
+<agent-codespaces catalog argv prefix> config validate
+<agent-codespaces catalog argv prefix> doctor
 ```
 
 ## Troubleshooting
@@ -391,13 +391,13 @@ when no repo is CodeSpace-delegated.
 - **"No CodeSpace config found"** -- expected for a convention repo; only add a
   file when you need supplementary config.
 - **`gh` missing or auth/scope wrong** -- run
-  `<agent-codespaces catalog argv[0]> doctor`; it
+  `<agent-codespaces catalog argv prefix> doctor`; it
   reports missing `gh`, unauthenticated accounts, or a missing `codespace` scope
   with the exact `gh auth ...` command to run.
 - **No agent-bridge** -- setup is still valid. You lose `codespace:<name>`
   dispatch and the managed credential relay, but the catalog command's
   `list` / `create` actions and
-  `<agent-codespaces catalog argv[0]> ssh --no-relay --remote-cmd "echo ok"`
+  `<agent-codespaces catalog argv prefix> ssh --no-relay --remote-cmd "echo ok"`
   still diagnose
   CodeSpace reachability.
 - **Headless `create` prompts/hangs** -- the repo ships >1 devcontainer; pin

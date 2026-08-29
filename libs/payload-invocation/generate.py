@@ -260,6 +260,7 @@ def render(
         "INSTALLER": str(data["installer"]),
         "WINDOWS_CATALOG_SUFFIX": windows_catalog_suffix,
         "WINDOWS_CATALOG_SHELL": windows_catalog_shell,
+        "WINDOWS_CATALOG_SHIM": str(data["windowsCatalogShim"]),
         "WINDOWS_CMD_HOST_BLOCK": windows_cmd_host_block,
         "PROVISION_POSIX": provision_posix,
         "PROVISION_POWERSHELL": provision_powershell,
@@ -373,15 +374,14 @@ def expected_files(manifest: Path) -> dict[Path, str]:
                 data,
                 command=command,
             )
-    catalog_prefix = "catalog-multi" if data["multiCommandManifest"] else "catalog"
     catalog_outputs = (
         (
             manifest.parent / "scripts" / "emit-command-catalog.sh",
-            f"{catalog_prefix}-posix.tmpl",
+            "catalog-posix.tmpl",
         ),
         (
             manifest.parent / "scripts" / "emit-command-catalog.ps1",
-            f"{catalog_prefix}-powershell.tmpl",
+            "catalog-powershell.tmpl",
         ),
     )
     protected_paths.update(path for path, _template in catalog_outputs)

@@ -15,11 +15,11 @@ description: >
 
 # Troubleshooting agent-bridge CodeSpace dispatch
 
-Use the exact `argv[0]` from the agent-bridge session command catalog for every
+Use the exact `argv` prefix from the agent-bridge session command catalog for every
 interactive bridge operation below. Replace
-`<agent-bridge catalog argv[0]>` with that path; never search `PATH` for a
+`<agent-bridge catalog argv prefix>` with its shell-ready rendering; never search `PATH` for a
 same-named command. In PowerShell, invoke it as
-`& "<agent-bridge catalog argv[0]>" <args>`. Commands explicitly labeled as
+`<agent-bridge catalog argv prefix> <args>`. Commands explicitly labeled as
 service or provider management boundaries remain literal global-wrapper
 invocations. If the catalog is missing, follow the single-installed-payload
 fallback in the `agent-bridge` skill and fail on ambiguity.
@@ -29,7 +29,7 @@ session, disturbing unrelated work, or erasing the evidence. Two distinct
 failure modes -- jump to the matching section:
 
 - **ACP resume-hang** --
-  `<agent-bridge catalog argv[0]> send codespace:<name>` (or any `resume`)
+  `<agent-bridge catalog argv prefix> send codespace:<name>` (or any `resume`)
   against a **stopped multi-turn** session stalls in `[starting]` and never
   becomes usable. -> *Is this the resume-hang?* below.
 - **Credential-relay flap** -- the dispatched agent authors + commits work fine,
@@ -57,8 +57,8 @@ during a plugin update is normal transport recovery, not a wedged-session
 signature. Preserve the session and continue in place:
 
 ```bash
-<agent-bridge catalog argv[0]> peek <session>                  # when its current state is unclear
-<agent-bridge catalog argv[0]> send <session> "<next prompt>"  # resumes the same persisted session
+<agent-bridge catalog argv prefix> peek <session>                  # when its current state is unclear
+<agent-bridge catalog argv prefix> send <session> "<next prompt>"  # resumes the same persisted session
 ```
 
 Do not `end` + `create`, start a replacement session, or restart the daemon.
@@ -114,8 +114,8 @@ Only when the operator explicitly authorizes dropping prior-turn context, a
 wedged/stopped ACP session can be ended and recreated:
 
 ```bash
-<agent-bridge catalog argv[0]> end <session>            # tears down the wedged session (bridge-side)
-<agent-bridge catalog argv[0]> create <target> ...      # fresh session-host -> reliably reaches [idle]
+<agent-bridge catalog argv prefix> end <session>            # tears down the wedged session (bridge-side)
+<agent-bridge catalog argv prefix> create <target> ...      # fresh session-host -> reliably reaches [idle]
 ```
 
 This trades prior-turn context for a new start; it is not a harmless diagnostic.
@@ -125,14 +125,14 @@ independently on the CodeSpace (that's what `peek` reads -- see below).
 
 ## Decide BEFORE resuming -- payload-local `peek`
 
-`<agent-bridge catalog argv[0]> peek <session|agent>` gives a **Copilot-free** reuse verdict +
+`<agent-bridge catalog argv prefix> peek <session|agent>` gives a **Copilot-free** reuse verdict +
 context snapshot **without launching `copilot --acp`** (the thing that stalls).
 It reads the target session's `events.jsonl` directly over SSH and distills
 lifecycle/health, the recent message tail, a tool-call summary, and usage.
 
 ```bash
-<agent-bridge catalog argv[0]> peek <session>            # human-readable snapshot + verdict
-<agent-bridge catalog argv[0]> peek <session> --json     # machine-ingestible
+<agent-bridge catalog argv prefix> peek <session>            # human-readable snapshot + verdict
+<agent-bridge catalog argv prefix> peek <session> --json     # machine-ingestible
 ```
 
 A **`risky -- resumed without clean shutdown`** verdict is the resume-stall
@@ -225,8 +225,8 @@ when the operator confirms the work is durably committed and authorizes context
 loss should you end and recreate:
 
 ```bash
-<agent-bridge catalog argv[0]> end <session>            # frees the CodeSpace claim + stops the flapping monitor
-<agent-bridge catalog argv[0]> send codespace:<name> "<low-context task>"   # fresh session binds a stable reverse-forward
+<agent-bridge catalog argv prefix> end <session>            # frees the CodeSpace claim + stops the flapping monitor
+<agent-bridge catalog argv prefix> send codespace:<name> "<low-context task>"   # fresh session binds a stable reverse-forward
 ```
 
 A **fresh** session resolves the host relay port from the current serving daemon

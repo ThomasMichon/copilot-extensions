@@ -27,13 +27,13 @@ description: >
 # agent-dispatch -- Agent Task Queue + Coordinator
 
 > **Before you start — use the payload-local session command.**
-> The agent-dispatch session command catalog supplies an exact `argv[0]` owned
-> by this plugin payload. Replace `<agent-dispatch catalog argv[0]>` in
-> interactive dispatch operations below with that path; never search `PATH` or
+> The agent-dispatch session command catalog supplies an exact `argv` prefix owned
+> by this plugin payload. Replace `<agent-dispatch catalog argv prefix>` in
+> interactive dispatch operations below with its shell-ready rendering; never search `PATH` or
 > substitute a same-named command from another payload. Commands explicitly
 > labeled as management boundaries remain literal global-wrapper invocations.
-> In PowerShell, invoke the catalog path as
-> `& "<agent-dispatch catalog argv[0]>" <args>`. The payload shim provisions
+> In PowerShell, invoke the catalog prefix as
+> `<agent-dispatch catalog argv prefix> <args>`. The payload shim provisions
 > its own runtime on first use and works without agent-worktrees. The first call
 > may take ~30–120s (watch for `::agent-provisioning::`); let it finish and
 > surface any exact provisioning failure instead of improvising a toolchain
@@ -104,7 +104,7 @@ discovers the local coordinator through the zdd routing table /
 `http://127.0.0.1:9847`. Add `AGENT_DISPATCH_TOKEN` if it requires bearer auth.
 
 ```bash
-<agent-dispatch catalog argv[0]> health          # confirm a coordinator is reachable first
+<agent-dispatch catalog argv prefix> health          # confirm a coordinator is reachable first
 ```
 
 - **Lone dev box:** run a loopback coordinator locally:
@@ -129,9 +129,9 @@ client picks per command:
   and `AGENT_DISPATCH_SHARED_TOKEN` for its bearer (independent of the local
   token — the two authenticate separately).
 - Add `--shared` to any client verb to target it:
-  `<agent-dispatch catalog argv[0]> --shared create …`,
-  `<agent-dispatch catalog argv[0]> --shared list`,
-  `<agent-dispatch catalog argv[0]> --shared claim …`, and
+  `<agent-dispatch catalog argv prefix> --shared create …`,
+  `<agent-dispatch catalog argv prefix> --shared list`,
+  `<agent-dispatch catalog argv prefix> --shared claim …`, and
   `agent-dispatch --shared supervise --pool …`. <!-- marketplace-isolation: allow supervisor-management -->
   Omit `--shared` for the local
   coordinator. An explicit `--url` always overrides both.
@@ -154,8 +154,8 @@ current directory** by delegating to `agent-worktrees` (the same way git finds
 its repo). So from inside your worktree you pass **no** identity flags:
 
 ```bash
-<agent-dispatch catalog argv[0]> worktree-status     # my inbox: tasks targeted at + owned by me
-<agent-dispatch catalog argv[0]> claim               # lease an eligible task; owner is auto-stamped
+<agent-dispatch catalog argv prefix> worktree-status     # my inbox: tasks targeted at + owned by me
+<agent-dispatch catalog argv prefix> claim               # lease an eligible task; owner is auto-stamped
 ```
 
 **Inbox before invention.** At session start and before choosing new work, run
@@ -183,9 +183,9 @@ tasks. Like identity, the lane is **auto-resolved from your CWD** (via
 so you pass nothing:
 
 ```bash
-<agent-dispatch catalog argv[0]> create "..."      # lane auto-stamped from the calling repo
-<agent-dispatch catalog argv[0]> sweep             # dedup corpus for THIS repo only
-<agent-dispatch catalog argv[0]> list --status queued
+<agent-dispatch catalog argv prefix> create "..."      # lane auto-stamped from the calling repo
+<agent-dispatch catalog argv prefix> sweep             # dedup corpus for THIS repo only
+<agent-dispatch catalog argv prefix> list --status queued
 ```
 
 - **Cross-repo *code* work stays in the producing lane.** If a `webapp`
@@ -275,7 +275,7 @@ started -> suspended -> started                              (resume; same owner
   long-running live worker is never disturbed and a momentary bridge blip
   (verdict *unknown*) leaves the task alone. The coordinator runs GC on a timer
   (`AGENT_DISPATCH_GC_INTERVAL`, default 60s);
-  `<agent-dispatch catalog argv[0]> recover` forces a
+  `<agent-dispatch catalog argv prefix> recover` forces a
   pass on demand. (There is **no** lease TTL: recovery is reconciled against live
   workers, not a clock.)
 
@@ -291,12 +291,12 @@ prompt** -- enough for a sweeping agent to judge duplication without extra
 context. The coordinator also backstops with a unique `dedup_key`.
 
 ```bash
-<agent-dispatch catalog argv[0]> sweep       # the dedup corpus: every non-abandoned
+<agent-dispatch catalog argv prefix> sweep       # the dedup corpus: every non-abandoned
                                              #   task (proposed/queued/claimed/started/suspended/
                                              #   completed), newest first -- read these,
                                              #   then explore/verify before creating
-<agent-dispatch catalog argv[0]> find "narration track"        # quick substring probe over title/prompt
-<agent-dispatch catalog argv[0]> list --status queued,started  # filter by status (comma-separate for several),
+<agent-dispatch catalog argv prefix> find "narration track"        # quick substring probe over title/prompt
+<agent-dispatch catalog argv prefix> list --status queued,started  # filter by status (comma-separate for several),
                                              #   --target-machine/--target-repo/--label
 ```
 
@@ -309,7 +309,7 @@ context. The coordinator also backstops with a unique `dedup_key`.
 ### 2. Create a task
 
 ```bash
-<agent-dispatch catalog argv[0]> create "Add narration track" \
+<agent-dispatch catalog argv prefix> create "Add narration track" \
   --prompt "segment 42 needs a narration pass" \
   --require logger \                 # hard selector: only a worker advertising 'logger' can claim
   --exclude machine:flaky-box \      # hard anti-selector: that machine can NOT claim
@@ -333,7 +333,7 @@ worktree; stop if another live owner holds it. Only when no task exists, create
 the first work episode with the issue identity for both provenance and dedup:
 
 ```bash
-<agent-dispatch catalog argv[0]> create "Fix owner/repo#42: concise title" \
+<agent-dispatch catalog argv prefix> create "Fix owner/repo#42: concise title" \
   --prompt "Work https://github.com/owner/repo/issues/42 end-to-end ..." \
   --source github-issue \
   --origin-ref issue/owner/repo#42 \
@@ -350,7 +350,7 @@ needs an explicit deterministic episode suffix derived from its reopen event,
 for example `issue:owner/repo#42:reopen:<event-id>`.
 
 To assign work across machines, use a shared coordinator
-(`<argv[0]> --shared create ... --target-machine <m>`) or remote embodiment
+(`<argv prefix> --shared create ... --target-machine <m>`) or remote embodiment
 (`--target-machine <m> --spawn --spawn-backend embody`). A bare
 `--target-machine` against a local coordinator does not deliver an inbox item
 to the other machine. When machines use separate coordinators and neither
@@ -366,7 +366,7 @@ machine/worktree/repo**. A task is claimable only when every `--require` token i
 present in the worker's set **and** no `--exclude` token is. Excludes are hard
 anti-affinity (unlike soft `--affinity`, which only orders). A declining worker
 can **append its own "not me"** on the way back to the queue with
-`<agent-dispatch catalog argv[0]> yield <id> --exclude-self {worktree,machine}`
+`<agent-dispatch catalog argv prefix> yield <id> --exclude-self {worktree,machine}`
 (or `--exclude <token>`);
 because excludes only grow, the candidate set shrinks monotonically to a taker or
 to unclaimable.
@@ -397,7 +397,7 @@ a single mechanical step; a plain one-shot prompt (no goal) is the exception, fo
 genuinely atomic work.
 
 ```bash
-<agent-dispatch catalog argv[0]> create "Drive PR #128 to ready" \
+<agent-dispatch catalog argv prefix> create "Drive PR #128 to ready" \
   --prompt "review, address feedback, and land the auth-hardening PR" \
   --goal "PR #128 is approved and merged" \
   --done-criteria "review approved, CI green, merged to master"
@@ -408,7 +408,7 @@ genuinely atomic work.
   them for a one-shot task.
 - A worker treats a goal-bearing task as something to **pursue in a loop**: do one
   unit of work → record a **progress beat**
-  (`<agent-dispatch catalog argv[0]> progress <id> …`,
+  (`<agent-dispatch catalog argv prefix> progress <id> …`,
   which *appends* to the task's durable `progress_log`) → re-check the
   done-criteria → repeat until they are genuinely met. Dispatched **autopilot**
   bodies (`embody` / fleet seeds) run exactly this loop; the seed prompt spells it
@@ -450,7 +450,7 @@ The coordinator only owns the queue; anything that *creates* tasks is a
   `origin_ref=pr/<n>`, lane from the payload's repo remote) and
   `POST /webhook/telemetry` (a **firing** alert -> remediation task,
   `source=telemetry`). Deterministic `dedup_key`s make redelivery safe.
-- **`<agent-dispatch catalog argv[0]> evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
+- **`<agent-dispatch catalog argv prefix> evaluate --spec <cfg>`** -- the *evaluator*: pipe one task
   lifecycle event (stdin or `--event-file`) through a declarative rule set that
   decides what happens next (emit a follow-up task, or nothing). Hook-like; the
   judgment half of emitters-and-evaluators. `--dry-run` prints decisions only.
@@ -470,9 +470,9 @@ kickable: no standing service, emitter, or evaluator is required -- just a
 coordinator + a worker body.
 
 ```bash
-<agent-dispatch catalog argv[0]> recipes list                                   # available recipes + params
-<agent-dispatch catalog argv[0]> recipes render reviewer --param repo=o/n --param pr=42   # inspect the fields
-<agent-dispatch catalog argv[0]> recipes kick reviewer --param repo=o/n --param pr=42 --repo o/n --spawn
+<agent-dispatch catalog argv prefix> recipes list                                   # available recipes + params
+<agent-dispatch catalog argv prefix> recipes render reviewer --param repo=o/n --param pr=42   # inspect the fields
+<agent-dispatch catalog argv prefix> recipes kick reviewer --param repo=o/n --param pr=42 --repo o/n --spawn
 ```
 
 `kick` reuses `create` (lane resolution, dedup, `--spawn`/`--spawn-backend`;
@@ -489,7 +489,7 @@ and let a pool slot claim it -- no `--spawn` needed.
 
 ```bash
 # a persistent pool watches one label, e.g. AGENT_DISPATCH_SUPERVISE_LABELS=general
-<agent-dispatch catalog argv[0]> recipes kick goal-driven \
+<agent-dispatch catalog argv prefix> recipes kick goal-driven \
   --param goal="fix the flaky retry in the uploader" --param repos=o/n \
   --label general        # a 'general'-pool slot claims + drives it to a PR
 ```
@@ -499,7 +499,7 @@ scoped to a dedicated label (`general`) is a clean **positive opt-in**: it never
 picks up system tasks that carry their own labels (reviews, scheduled sweeps).
 
 **Driving the loop** --
-`<agent-dispatch catalog argv[0]> recipes drive <name> --signal <s>` maps a
+`<agent-dispatch catalog argv prefix> recipes drive <name> --signal <s>` maps a
 recipe + what-just-happened to the next action: **work** (start / a `suspend_on`
 event), **suspend** (`work-done`/`idle` -> hibernate the wait), or **resolve**
 (`merged`/`abandoned` -> drive-to-resolution). `--execute` runs the suspend leg
@@ -514,14 +514,14 @@ verifies clean; abandoning **unwinds to base** and reconciles the source. Run it
 on your **own** worktree:
 
 ```bash
-<agent-dispatch catalog argv[0]> resolve --outcome landed                                  # verify clean
-<agent-dispatch catalog argv[0]> resolve --outcome abandoned --base main --source o/n#42   # preview the unwind
-<agent-dispatch catalog argv[0]> resolve --outcome abandoned --base main --execute         # perform it (destructive)
+<agent-dispatch catalog argv prefix> resolve --outcome landed                                  # verify clean
+<agent-dispatch catalog argv prefix> resolve --outcome abandoned --base main --source o/n#42   # preview the unwind
+<agent-dispatch catalog argv prefix> resolve --outcome abandoned --base main --execute         # perform it (destructive)
 ```
 
 Planning is pure and prints by default; `--execute` performs the (destructive)
 unwind and a failed reset stops rather than pressing on.
-`<agent-dispatch catalog argv[0]> abandon --resolve` surfaces the same plan
+`<agent-dispatch catalog argv prefix> abandon --resolve` surfaces the same plan
 alongside the abandon. See the plugin README
 (**Drive the worktree to resolution**) and `visions/plugins/agent-dispatch`
 (§*drive-the-worktree-to-resolution*).
@@ -533,8 +533,8 @@ session. Hand the wait to `run`: it executes the blocking command and, when it
 resolves, resumes the worktree-affinitied worker via an agent-bridge nudge.
 
 ```bash
-<agent-dispatch catalog argv[0]> run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
-<agent-dispatch catalog argv[0]> run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
+<agent-dispatch catalog argv prefix> run --resume <machine/worktree> --task <id> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
+<agent-dispatch catalog argv prefix> run --detach --resume <machine/worktree> -- agent-worktrees pr-watch 42 # marketplace-isolation: allow agent-worktrees-management
 ```
 
 Everything after `--` is the wait command. `--detach` runs it as a fully detached,
@@ -546,17 +546,17 @@ README (**Hibernate the wait**) and `visions/plugins/agent-dispatch`
 ### 3. Claim, work, finish
 
 ```bash
-<agent-dispatch catalog argv[0]> claim --capability logger     # atomically leases one eligible task
+<agent-dispatch catalog argv prefix> claim --capability logger     # atomically leases one eligible task
 # note the returned task id + owner, then:
-<agent-dispatch catalog argv[0]> start    <id> <owner>
-<agent-dispatch catalog argv[0]> heartbeat <id> <owner>        # optional: refresh the last-seen beat
-<agent-dispatch catalog argv[0]> complete <id> <owner> --result-ref pr/123
+<agent-dispatch catalog argv prefix> start    <id> <owner>
+<agent-dispatch catalog argv prefix> heartbeat <id> <owner>        # optional: refresh the last-seen beat
+<agent-dispatch catalog argv prefix> complete <id> <owner> --result-ref pr/123
 ```
 
 > **Owner is optional on `claim`/`start`/`complete`/`yield`/`progress`.** Omit it
 > and the coordinator resolves your **worktree identity** (`<machine>/<worktree>`)
 > from the CWD -- so an embodied/taken-over worker can drive its whole lifecycle
-> (`<agent-dispatch catalog argv[0]> claim --task <id>` → `start <id>` →
+> (`<agent-dispatch catalog argv prefix> claim --task <id>` → `start <id>` →
 > `complete <id>`) without
 > ever typing an owner. This keeps the task's owner equal to its worktree, which
 > is what lets live-session tracking join a CLI-embodied task to its session (the
@@ -566,9 +566,9 @@ Report progress toward the goal so callers/operator watch the fleet at a glance
 (this also refreshes the last-seen beat):
 
 ```bash
-<agent-dispatch catalog argv[0]> progress <id> --phase implementing --summary "wired the verb; tests green"
-<agent-dispatch catalog argv[0]> progress <id> --phase "PR open" --summary "opened the PR" --pr pr/2601
-<agent-dispatch catalog argv[0]> progress <id> --summary "stuck on a flaky test" --blocker "CI timeout"
+<agent-dispatch catalog argv prefix> progress <id> --phase implementing --summary "wired the verb; tests green"
+<agent-dispatch catalog argv prefix> progress <id> --phase "PR open" --summary "opened the PR" --pr pr/2601
+<agent-dispatch catalog argv prefix> progress <id> --summary "stuck on a flaky test" --blocker "CI timeout"
 ```
 
 Set **this worktree's current focus** (for an operator or task-less worktree —
@@ -576,9 +576,9 @@ the cockpit shows what each worktree is working on). Post it when you *start
 substantial work* and *change direction*, never on a timer:
 
 ```bash
-<agent-dispatch catalog argv[0]> focus "driving live-session-messaging Phase 8 (multi-machine dispatch)"
-<agent-dispatch catalog argv[0]> focus            # show this worktree's current focus
-<agent-dispatch catalog argv[0]> focus --list     # every worktree's focus (this machine)
+<agent-dispatch catalog argv prefix> focus "driving live-session-messaging Phase 8 (multi-machine dispatch)"
+<agent-dispatch catalog argv prefix> focus            # show this worktree's current focus
+<agent-dispatch catalog argv prefix> focus --list     # every worktree's focus (this machine)
 ```
 
 > `focus` resolves `machine/worktree` from the CWD (no id to type). It **is**
@@ -604,7 +604,7 @@ substantial work* and *change direction*, never on a timer:
 Recoverable snag -> return it for a later cycle (keep the note!):
 
 ```bash
-<agent-dispatch catalog argv[0]> yield <id> <owner> --note "blocked on merge conflict; retry next cycle"
+<agent-dispatch catalog argv prefix> yield <id> <owner> --note "blocked on merge conflict; retry next cycle"
 ```
 
 Discard a duplicate / dropped task (needs permission):
@@ -612,9 +612,9 @@ Discard a duplicate / dropped task (needs permission):
 ```bash
 # a duplicate is self-justifying -- --duplicate-of implies permission and
 # records the dedup reference in the audit trail (never a silent drop):
-<agent-dispatch catalog argv[0]> abandon <id> --duplicate-of pr/123     # or task-id / issue ref
+<agent-dispatch catalog argv prefix> abandon <id> --duplicate-of pr/123     # or task-id / issue ref
 # any other discard still asserts permission explicitly:
-<agent-dispatch catalog argv[0]> abandon <id> --worker-id <owner> --permit --reason "dropped priority"
+<agent-dispatch catalog argv prefix> abandon <id> --worker-id <owner> --permit --reason "dropped priority"
 ```
 
 ### Evaluate before committing (the contract-net window)
@@ -629,11 +629,11 @@ an evaluator is reclaimed only if its worker is confirmed gone (liveness GC), an
 available.
 
 ```bash
-<agent-dispatch catalog argv[0]> claim --task <id> --evaluation    # win a short exclusive eval window
-# ...assess: dup-check (<agent-dispatch catalog argv[0]> list / sweep), feasibility, is-this-for-me...
-<agent-dispatch catalog argv[0]> start   <id>                      # ACCEPT -> commit to doing the work
-<agent-dispatch catalog argv[0]> yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
-<agent-dispatch catalog argv[0]> abandon <id> --duplicate-of <ref>                                # DUPLICATE
+<agent-dispatch catalog argv prefix> claim --task <id> --evaluation    # win a short exclusive eval window
+# ...assess: dup-check (<agent-dispatch catalog argv prefix> list / sweep), feasibility, is-this-for-me...
+<agent-dispatch catalog argv prefix> start   <id>                      # ACCEPT -> commit to doing the work
+<agent-dispatch catalog argv prefix> yield   <id> --exclude-self worktree --note "not my capability"  # DECLINE
+<agent-dispatch catalog argv prefix> abandon <id> --duplicate-of <ref>                                # DUPLICATE
 ```
 
 Three ways out of the window: **accept** (`start`), **decline** (`yield
@@ -646,12 +646,12 @@ to `machine` only when the mismatch is machine-wide.
 ### Inspect
 
 ```bash
-<agent-dispatch catalog argv[0]> show    <id>       # full task record
-<agent-dispatch catalog argv[0]> events  <id>       # append-only audit trail of every transition
-<agent-dispatch catalog argv[0]> payload <id>       # resolved payload (inline or blob); --raw prints content only
-<agent-dispatch catalog argv[0]> consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
-<agent-dispatch catalog argv[0]> consume <id> --defer-complete  # TAKEOVER pickup: approve->claim->start + print brief, NO complete
-<agent-dispatch catalog argv[0]> watch              # stream task.* events (SSE) as JSON lines
+<agent-dispatch catalog argv prefix> show    <id>       # full task record
+<agent-dispatch catalog argv prefix> events  <id>       # append-only audit trail of every transition
+<agent-dispatch catalog argv prefix> payload <id>       # resolved payload (inline or blob); --raw prints content only
+<agent-dispatch catalog argv prefix> consume <id>       # resume-and-consume: drive to completed (idempotent) + print payload
+<agent-dispatch catalog argv prefix> consume <id> --defer-complete  # TAKEOVER pickup: approve->claim->start + print brief, NO complete
+<agent-dispatch catalog argv prefix> watch              # stream task.* events (SSE) as JSON lines
 ```
 
 > **`show`/`list` overlay live-session status for a CLI-embodied task.** A
@@ -682,7 +682,7 @@ to `machine` only when the mismatch is machine-wide.
 >   (take ownership, mark in-progress) + print the brief, but do **not**
 >   complete. This is the **takeover** pickup for a *dispatched / embodied
 >   successor*: it loads the brief, works the task, and runs
->   `<agent-dispatch catalog argv[0]> complete <id>` **explicitly** only when
+>   `<agent-dispatch catalog argv prefix> complete <id>` **explicitly** only when
 >   it judges the goal reached -- so
 >   `completed` means *the work is done*, not *the baton was handed over*.
 >
@@ -716,11 +716,11 @@ to `machine` only when the mismatch is machine-wide.
 
 ```bash
 # Headless agent-bridge ACP worker (default backend)
-<agent-dispatch catalog argv[0]> create "Summarize the PR" --require review --spawn              # managed (waits)
-<agent-dispatch catalog argv[0]> create "Summarize the PR" --spawn --spawn-agent task-worker --async  # fire-and-forget
+<agent-dispatch catalog argv prefix> create "Summarize the PR" --require review --spawn              # managed (waits)
+<agent-dispatch catalog argv prefix> create "Summarize the PR" --spawn --spawn-agent task-worker --async  # fire-and-forget
 
 # CLI-backed AUTOPILOT session -- "dispatch an agent to do X"
-<agent-dispatch catalog argv[0]> create "Refactor the auth module" \
+<agent-dispatch catalog argv prefix> create "Refactor the auth module" \
   --prompt "extract JWT handling into src/auth/ …" \
   --spawn --spawn-backend embody
 ```
@@ -772,7 +772,7 @@ headless supervisor persistently, put the watched labels in
 
 > **Cross-machine dispatch (Phase 8, SSH-push).** Add `--target-machine <Y>` to an
 > `embody` spawn to dispatch **on another machine**:
-> `<agent-dispatch catalog argv[0]> create <task> --target-machine
+> `<agent-dispatch catalog argv prefix> create <task> --target-machine
 > emancipation-cube --spawn --spawn-backend embody`. Because
 > agent-dispatch is per-host (each machine owns a loopback coordinator + local
 > embody), the whole create+embody is run **on Y** over the SSH mesh (Y's
@@ -786,8 +786,8 @@ headless supervisor persistently, put the watched labels in
 
 > **Peer-queue browse (Phase 8 8c).** Add `--machine <Y>` to `list` or `inbox`
 > to read **Y's own queue** over the SSH mesh instead of the local coordinator:
-> `<agent-dispatch catalog argv[0]> list --machine emancipation-cube --status started` /
-> `<agent-dispatch catalog argv[0]> inbox --machine emancipation-cube`. When `Y`
+> `<agent-dispatch catalog argv prefix> list --machine emancipation-cube --status started` /
+> `<agent-dispatch catalog argv prefix> inbox --machine emancipation-cube`. When `Y`
 > is a remote peer, the read command is run **on Y**
 > (`ssh Y agent-dispatch …`), <!-- marketplace-isolation: allow remote-management -->
 > so it reads Y's loopback
@@ -805,7 +805,7 @@ queued for any worker to claim. agent-dispatch stays fully usable standalone.
 
 ## MCP tools instead of the CLI
 
-`<agent-dispatch catalog argv[0]> mcp` runs a local **stdio MCP server** exposing the same
+`<agent-dispatch catalog argv prefix> mcp` runs a local **stdio MCP server** exposing the same
 operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_sweep`,
 `dispatch_claim`, `dispatch_start`, `dispatch_complete`, `dispatch_payload`,
 `dispatch_worktree_status`, ...). It resolves your `machine`/`worktree` identity

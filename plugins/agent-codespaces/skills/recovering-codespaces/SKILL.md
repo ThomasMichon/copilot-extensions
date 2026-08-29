@@ -82,7 +82,7 @@ When normal finalization cannot operate on a proven-corrupt resource and the
 audit gates passed:
 
 ```bash
-<agent-codespaces catalog argv[0]> delete <name> --force
+<agent-codespaces catalog argv prefix> delete <name> --force
 ```
 
 Use the lifecycle's normal finalize/delete path whenever it remains available.

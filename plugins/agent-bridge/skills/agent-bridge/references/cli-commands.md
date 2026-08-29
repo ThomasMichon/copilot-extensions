@@ -1,8 +1,8 @@
 # Agent-Bridge CLI Command Reference
 
-Use the exact `argv[0]` from the agent-bridge session command catalog for
+Use the exact `argv` prefix from the agent-bridge session command catalog for
 interactive bridge operations in this reference. Replace
-`<agent-bridge catalog argv[0]>` with that path and never search `PATH`.
+`<agent-bridge catalog argv prefix>` with its shell-ready rendering and never search `PATH`.
 Commands labeled as service, deployment, provider, or elevated management
 boundaries remain literal global-wrapper invocations.
 
@@ -12,7 +12,7 @@ patterns. All commands connect to the local agent-bridge HTTP API; the service
 must be running (the `start` management operation).
 
 `agent-bridge` is a logical command name throughout this reference. Replace each
-leading token with the exact `argv[0]` from the agent-bridge session command
+leading token with the exact `argv` prefix from the agent-bridge session command
 catalog; never resolve it through ambient `PATH`.
 
 ## Contents
@@ -31,10 +31,10 @@ be running (the `start` management operation) for client commands to work.
 ### List Available Agents
 
 ```bash
-<agent-bridge catalog argv[0]> agents
-<agent-bridge catalog argv[0]> agents --json
-<agent-bridge catalog argv[0]> --project <repo> agents
-<agent-bridge catalog argv[0]> agents --all-projects
+<agent-bridge catalog argv prefix> agents
+<agent-bridge catalog argv prefix> agents --json
+<agent-bridge catalog argv prefix> --project <repo> agents
+<agent-bridge catalog argv prefix> agents --all-projects
 ```
 
 Shows all registered agents from the topology config (name, type, host,
@@ -43,10 +43,10 @@ spawnable status).
 ### List Machines
 
 ```bash
-<agent-bridge catalog argv[0]> machines
-<agent-bridge catalog argv[0]> machines --json
-<agent-bridge catalog argv[0]> --project <repo> machines
-<agent-bridge catalog argv[0]> machines --all-projects
+<agent-bridge catalog argv prefix> machines
+<agent-bridge catalog argv prefix> machines --json
+<agent-bridge catalog argv prefix> --project <repo> machines
+<agent-bridge catalog argv prefix> machines --all-projects
 ```
 
 `agents` and `machines` infer their project from CWD. Top-level `--project`
@@ -66,27 +66,27 @@ details.
 ```bash
 # Reuse this caller's session for the agent (resumes it if stopped),
 # or start one if none exists, then send a prompt (streams response)
-<agent-bridge catalog argv[0]> send <agent-name> "your prompt here"
+<agent-bridge catalog argv prefix> send <agent-name> "your prompt here"
 
 # Send to a specific existing session
-<agent-bridge catalog argv[0]> send <session-id> "follow-up prompt"
+<agent-bridge catalog argv prefix> send <session-id> "follow-up prompt"
 
 # Fire-and-forget (don't wait for response)
-<agent-bridge catalog argv[0]> send <agent-name> "do this" --no-wait
+<agent-bridge catalog argv prefix> send <agent-name> "do this" --no-wait
 
 # Multi-line / quote-heavy prompt: read it from a file (or '-' for stdin) so it
 # never transits the shell's argv (avoids PowerShell mangling a prompt at the
 # first embedded double-quote). Mutually exclusive with the positional prompt.
-<agent-bridge catalog argv[0]> send <agent-name> --prompt-file ./dispatch.md
-Get-Content ./dispatch.md | & "<agent-bridge catalog argv[0]>" send <agent-name> --prompt-file -
+<agent-bridge catalog argv prefix> send <agent-name> --prompt-file ./dispatch.md
+Get-Content ./dispatch.md | <agent-bridge catalog argv prefix> send <agent-name> --prompt-file -
 
 # Deliver INTO a live interactive session (human-attached), attributed and
 # answerable -- routes to the message queue, not an ACP turn. The receiver
-# replies with `<agent-bridge catalog argv[0]> send <reply-to> "..."`.
-<agent-bridge catalog argv[0]> send <live-session-id> "message body"
-<agent-bridge catalog argv[0]> send <live-session-id> "msg" --from "reviewer@example-host" --reply-to <my-session-id>
+# replies with `<agent-bridge catalog argv prefix> send <reply-to> "..."`.
+<agent-bridge catalog argv prefix> send <live-session-id> "message body"
+<agent-bridge catalog argv prefix> send <live-session-id> "msg" --from "reviewer@example-host" --reply-to <my-session-id>
 # Durable producers pass a stable key so retries return the original message id.
-<agent-bridge catalog argv[0]> send <live-session-id> "wake" --no-wait --idempotency-key wake:example:1
+<agent-bridge catalog argv prefix> send <live-session-id> "wake" --no-wait --idempotency-key wake:example:1
 ```
 
 `send` auto-detects whether the target is an agent name, a bridge-owned session
@@ -111,14 +111,14 @@ blocks, and tool call summaries.
 
 ```bash
 # Force a brand-new session for an agent (no reuse)
-<agent-bridge catalog argv[0]> create <agent-name>
+<agent-bridge catalog argv prefix> create <agent-name>
 
 # ...and send a first prompt in one step
-<agent-bridge catalog argv[0]> create <agent-name> "your first prompt"
+<agent-bridge catalog argv prefix> create <agent-name> "your first prompt"
 
 # ...or read the first prompt from a file (or '-' for stdin) -- robust for
 # multi-line / quote-heavy dispatch prompts (no argv mangling)
-<agent-bridge catalog argv[0]> create <agent-name> --prompt-file ./dispatch.md --no-wait
+<agent-bridge catalog argv prefix> create <agent-name> --prompt-file ./dispatch.md --no-wait
 ```
 
 `create` always spawns a fresh session, bypassing caller reuse. For agents
@@ -127,8 +127,8 @@ checkout — `create` **refuses** if a session already exists rather than
 silently latching onto it, and tells you to end the existing one first:
 
 ```bash
-<agent-bridge catalog argv[0]> end <existing-session-id>   # free the CodeSpace
-<agent-bridge catalog argv[0]> create <agent-name> "..."   # then start clean
+<agent-bridge catalog argv prefix> end <existing-session-id>   # free the CodeSpace
+<agent-bridge catalog argv prefix> create <agent-name> "..."   # then start clean
 ```
 
 ### Choosing send vs create — check for an outstanding session first
@@ -137,8 +137,8 @@ Before dispatching work to an agent, **check whether it already has a
 session and whether that session's state is relevant to the work**:
 
 ```bash
-<agent-bridge catalog argv[0]> sessions          # is there a session for this agent/caller?
-<agent-bridge catalog argv[0]> session-usage <session-id>   # how full is its context?
+<agent-bridge catalog argv prefix> sessions          # is there a session for this agent/caller?
+<agent-bridge catalog argv prefix> session-usage <session-id>   # how full is its context?
 ```
 
 - **Relevant & healthy** (same effort, context well under ~70%) → `send`
@@ -148,7 +148,7 @@ session and whether that session's state is relevant to the work**:
   resume) — just `send` again and it continues.
 - **Stale / unrelated / context-heavy** (different effort, near the context
   limit, or known-bad state) →
-  `<agent-bridge catalog argv[0]> end <session-id>` then the payload-local
+  `<agent-bridge catalog argv prefix> end <session-id>` then the payload-local
   `create` operation for a clean start.
 
 `send` is the safe default; it reuses/resumes and drains a stale cancel after
@@ -160,22 +160,22 @@ be discarded (or the cancel signature *persists* across sends). See the
 
 ```bash
 # List all sessions (includes CONTEXT column showing usage %)
-<agent-bridge catalog argv[0]> sessions
-<agent-bridge catalog argv[0]> sessions --status idle
+<agent-bridge catalog argv prefix> sessions
+<agent-bridge catalog argv prefix> sessions --status idle
 
 # Check context window usage for a session
-<agent-bridge catalog argv[0]> session-usage <session-id>
+<agent-bridge catalog argv prefix> session-usage <session-id>
 
 # Compact one-screen status: state, in-flight tool + elapsed, and how far
 # behind your delivery cursor is (head/acked) -- without dumping the feed.
-<agent-bridge catalog argv[0]> status <session-id>
-<agent-bridge catalog argv[0]> status <session-id> --steps 5   # also show the last 5 collapsed steps
+<agent-bridge catalog argv prefix> status <session-id>
+<agent-bridge catalog argv prefix> status <session-id> --steps 5   # also show the last 5 collapsed steps
 
 # Wait for a running session's current turn
-<agent-bridge catalog argv[0]> wait <session-id>
+<agent-bridge catalog argv prefix> wait <session-id>
 
 # Stop a session (preserves state for resume)
-<agent-bridge catalog argv[0]> stop <session-id>
+<agent-bridge catalog argv prefix> stop <session-id>
 
 # Resume a stopped session -- or load/take-over a worktree by handle.
 # The target may be an owned ACP session id OR a worktree handle. If it is a
@@ -183,15 +183,15 @@ be discarded (or the cancel signature *persists* across sends). See the
 # worktree is loaded as a fresh owned session -- a dormant worktree is just a
 # note. If a *live* interactive CLI still holds the worktree, resume refuses
 # (break-glass); stop that CLI first, then re-run with --force to take it over.
-<agent-bridge catalog argv[0]> resume <session-id|worktree-handle>
-<agent-bridge catalog argv[0]> resume <worktree-handle> --force   # affirmative take-over
+<agent-bridge catalog argv prefix> resume <session-id|worktree-handle>
+<agent-bridge catalog argv prefix> resume <worktree-handle> --force   # affirmative take-over
 
 # End a session (full cleanup)
-<agent-bridge catalog argv[0]> end <session-id>
+<agent-bridge catalog argv prefix> end <session-id>
 
 # Garbage-collect aged terminal/disconnected sessions + compact the DB.
 # Runs automatically (startup + periodic sweep); this forces it on demand.
-<agent-bridge catalog argv[0]> gc
+<agent-bridge catalog argv prefix> gc
 ```
 
 ### Service Control
@@ -238,10 +238,10 @@ agent-bridge start # marketplace-isolation: allow service-management
 agent-bridge start --port 9280 --bind 127.0.0.1 # pin a fixed port (default is dynamic) -- marketplace-isolation: allow service-management
 
 # Health check (also shows the bound URL)
-<agent-bridge catalog argv[0]> status
+<agent-bridge catalog argv prefix> status
 
 # Version
-<agent-bridge catalog argv[0]> version
+<agent-bridge catalog argv prefix> version
 ```
 
 ### Remote Venue Parity Acceptance
@@ -256,13 +256,13 @@ credential endpoint is hardcoded.
 
 ```bash
 # Baseline cwd + repo-local capability + same-child reattach
-<agent-bridge catalog argv[0]> parity container:example-1 \
+<agent-bridge catalog argv prefix> parity container:example-1 \
   --expect-workspace /workspaces/example-web \
   --expect-capability example-local-skill
 
 # Add credential-consumer checks. Values are captured privately; JSON contains
 # booleans only, never tokens or helper output.
-<agent-bridge catalog argv[0]> parity container:example-1 \
+<agent-bridge catalog argv prefix> parity container:example-1 \
   --expect-workspace /workspaces/example-web \
   --auth \
   --ado-url https://example.visualstudio.com/Project/_git/repo \
@@ -270,7 +270,7 @@ credential endpoint is hardcoded.
   --json
 
 # Narrow no-regression smoke against an explicitly chosen idle CodeSpace.
-<agent-bridge catalog argv[0]> parity codespace:example-codespace \
+<agent-bridge catalog argv prefix> parity codespace:example-codespace \
   --expect-workspace /workspaces/example-web \
   --expect-capability example-local-skill
 ```
@@ -351,7 +351,7 @@ agent-worktrees register <Project> --base-repo --elevated # marketplace-isolatio
 After that, **just send to it by its bare name** -- no special prefix:
 
 ```bash
-<agent-bridge catalog argv[0]> send <Project> "do the elevated work"
+<agent-bridge catalog argv prefix> send <Project> "do the elevated work"
 ```
 
 The (non-elevated) primary daemon cannot spawn an elevated Copilot directly, so
@@ -393,17 +393,17 @@ agent-bridge elevated stop --deregister # marketplace-isolation: allow elevated-
 
 ```bash
 # Show current config
-<agent-bridge catalog argv[0]> config show
-<agent-bridge catalog argv[0]> config show --json
+<agent-bridge catalog argv prefix> config show
+<agent-bridge catalog argv prefix> config show --json
 
 # Add/update a topology profile for a repo
-<agent-bridge catalog argv[0]> config adopt --repo /path/to/repo --profile multi-machine system
+<agent-bridge catalog argv prefix> config adopt --repo /path/to/repo --profile multi-machine system
 
 # Remove a topology profile
-<agent-bridge catalog argv[0]> config remove my-profile
+<agent-bridge catalog argv prefix> config remove my-profile
 
 # Validate config (checks file paths, topology completeness)
-<agent-bridge catalog argv[0]> config validate
+<agent-bridge catalog argv prefix> config validate
 ```
 
 For first-time setup, see the `agent-worktrees:copilot-extensions-setup` skill. For

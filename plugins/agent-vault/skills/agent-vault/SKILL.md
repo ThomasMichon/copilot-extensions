@@ -34,10 +34,10 @@ registration, a broker, a tunnel, a container, or a remote core.
 
 ## Readiness
 
-Use the exact `argv[0]` from the agent-vault session command catalog for every
-shell operation in this skill. Replace `<agent-vault catalog argv[0]>` with that
+Use the exact `argv` prefix from the agent-vault session command catalog for every
+shell operation in this skill. Replace `<agent-vault catalog argv prefix>` with that
 path; in PowerShell invoke it as
-`& "<agent-vault catalog argv[0]>" <args>`. Never search `PATH` for a
+`<agent-vault catalog argv prefix> <args>`. Never search `PATH` for a
 same-named command. The payload shim may self-provision on first use and print
 `::agent-provisioning::` (~30-120s); let that finish.
 
@@ -70,10 +70,10 @@ $env:VAULT_GROUP = "Personal"      # optional
 Multiple named vaults:
 
 ```bash
-<agent-vault catalog argv[0]> vault add Personal --kpdb ~/Personal.kdbx --group Personal
-<agent-vault catalog argv[0]> vault add Work --kpdb ~/Work.kdbx --group Work
-<agent-vault catalog argv[0]> vault set-default Personal
-<agent-vault catalog argv[0]> vault list
+<agent-vault catalog argv prefix> vault add Personal --kpdb ~/Personal.kdbx --group Personal
+<agent-vault catalog argv prefix> vault add Work --kpdb ~/Work.kdbx --group Work
+<agent-vault catalog argv prefix> vault set-default Personal
+<agent-vault catalog argv prefix> vault list
 ```
 
 Repo-local selector (`.agent-vault.json` at or above the repo root):
@@ -87,8 +87,8 @@ Precedence per call: env vars (`AGENT_VAULT`, `KPDB`, `VAULT_GROUP`,
 defaults. Check the resolved values with:
 
 ```bash
-<agent-vault catalog argv[0]> which
-<agent-vault catalog argv[0]> which --json
+<agent-vault catalog argv prefix> which
+<agent-vault catalog argv prefix> which --json
 ```
 
 Prerequisite: KeePassXC with `keepassxc-cli` on PATH, or the standard Windows
@@ -101,38 +101,37 @@ lived shell environment.
 
 ```bash
 # Good: command substitution limits lifetime to this command.
-vault_cmd='<agent-vault catalog argv[0]>'
-curl -H "Authorization: Bearer $("$vault_cmd" get 'API/OpenAI')" https://example.invalid/
+curl -H "Authorization: Bearer $(<agent-vault catalog argv prefix> get 'API/Example')" https://example.invalid/
 
 # Avoid: exported values linger and leak to children.
-export OPENAI_KEY="$("$vault_cmd" get 'API/OpenAI')"
+export EXAMPLE_KEY="$(<agent-vault catalog argv prefix> get 'API/Example')"
 ```
 
 ## Common CLI verbs
 
 ```bash
-<agent-vault catalog argv[0]> ping
-<agent-vault catalog argv[0]> unlock
-<agent-vault catalog argv[0]> unlock --terminal
-<agent-vault catalog argv[0]> get "API/OpenAI"
-<agent-vault catalog argv[0]> get "API/OpenAI" username
-<agent-vault catalog argv[0]> has "API/OpenAI"
-<agent-vault catalog argv[0]> search OpenAI
-<agent-vault catalog argv[0]> list Personal -R -f
-<agent-vault catalog argv[0]> show "API/OpenAI" -s
-<agent-vault catalog argv[0]> add "API/OpenAI" --username alice
-<agent-vault catalog argv[0]> set-password "API/OpenAI"
-<agent-vault catalog argv[0]> set-username "API/OpenAI" alice
-<agent-vault catalog argv[0]> remove "API/OpenAI" -f
-<agent-vault catalog argv[0]> move "API/OpenAI" Archive -f
-<agent-vault catalog argv[0]> lock
+<agent-vault catalog argv prefix> ping
+<agent-vault catalog argv prefix> unlock
+<agent-vault catalog argv prefix> unlock --terminal
+<agent-vault catalog argv prefix> get "API/OpenAI"
+<agent-vault catalog argv prefix> get "API/OpenAI" username
+<agent-vault catalog argv prefix> has "API/OpenAI"
+<agent-vault catalog argv prefix> search OpenAI
+<agent-vault catalog argv prefix> list Personal -R -f
+<agent-vault catalog argv prefix> show "API/OpenAI" -s
+<agent-vault catalog argv prefix> add "API/OpenAI" --username alice
+<agent-vault catalog argv prefix> set-password "API/OpenAI"
+<agent-vault catalog argv prefix> set-username "API/OpenAI" alice
+<agent-vault catalog argv prefix> remove "API/OpenAI" -f
+<agent-vault catalog argv prefix> move "API/OpenAI" Archive -f
+<agent-vault catalog argv prefix> lock
 ```
 
 ### SSH keys
 
 ```bash
-<agent-vault catalog argv[0]> import-key "SSH/deploy" ~/.ssh/id_ed25519
-<agent-vault catalog argv[0]> export-key "SSH/deploy" ~/.ssh id_ed25519
+<agent-vault catalog argv prefix> import-key "SSH/deploy" ~/.ssh/id_ed25519
+<agent-vault catalog argv prefix> export-key "SSH/deploy" ~/.ssh id_ed25519
 ```
 
 `import-key` requires the public key beside the private key (`.pub`).
@@ -162,11 +161,11 @@ unattended job needs previously fetched values while the vault is locked.
 
 ```bash
 export AGENT_VAULT_CACHE=1
-<agent-vault catalog argv[0]> cache-populate --entry API/OpenAI --prompt
-<agent-vault catalog argv[0]> cache-status
-<agent-vault catalog argv[0]> cache-verify --entry API/OpenAI
-<agent-vault catalog argv[0]> get API/OpenAI --cache-only
-<agent-vault catalog argv[0]> cache-clear
+<agent-vault catalog argv prefix> cache-populate --entry API/OpenAI --prompt
+<agent-vault catalog argv prefix> cache-status
+<agent-vault catalog argv prefix> cache-verify --entry API/OpenAI
+<agent-vault catalog argv prefix> get API/OpenAI --cache-only
+<agent-vault catalog argv prefix> cache-clear
 ```
 
 `cache-verify` exits `2` if any requested entry is missing. The cache requires
@@ -180,9 +179,9 @@ per user on Windows; `0600` file on POSIX) and are independent of the KeePass
 master password, so `seal`/`unseal` work while locked.
 
 ```bash
-printf '%s' "$TOKEN" | <agent-vault catalog argv[0]> seal spark > token.sealed
-<agent-vault catalog argv[0]> unseal spark --in token.sealed
-<agent-vault catalog argv[0]> kek-list
+printf '%s' "$TOKEN" | <agent-vault catalog argv prefix> seal spark > token.sealed
+<agent-vault catalog argv prefix> unseal spark --in token.sealed
+<agent-vault catalog argv prefix> kek-list
 ```
 
 On Windows the catalog names the payload `.cmd` so stdin reaches `seal`.
@@ -221,9 +220,9 @@ holds your sudo password.
 There is no `doctor` command today. Use:
 
 ```bash
-<agent-vault catalog argv[0]> which --json
-<agent-vault catalog argv[0]> ping
-<agent-vault catalog argv[0]> cache-status --json
+<agent-vault catalog argv prefix> which --json
+<agent-vault catalog argv prefix> ping
+<agent-vault catalog argv prefix> cache-status --json
 bash plugins/agent-vault/scripts/install.sh status
 ```
 

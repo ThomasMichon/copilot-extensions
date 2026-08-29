@@ -83,14 +83,14 @@ md = (
     "append the arguments below (no sub-agent, no MCP tool, no PATH lookup). It covers:\n\n"
     + rows + "\n\n"
     "**How to search:**\n"
-    "- `<catalog argv[0]> search \"<natural-language or code query>\" [--source <name>] "
+    "- `<catalog argv prefix> search \"<natural-language or code query>\" [--source <name>] "
     "[--language <lang>] [--repo <repo>] [--limit N] --json` \u2014 ranked hits; each has "
     "`chunk_id`, `source`, `file_path`, `line_start`/`line_end`, `content`.\n"
-    "- `<catalog argv[0]> similar <chunk_id> [--source <name>] [--limit N]` \u2014 pivot "
+    "- `<catalog argv prefix> similar <chunk_id> [--source <name>] [--limit N]` \u2014 pivot "
     "'more like this' from a hit.\n"
-    "- `<catalog argv[0]> clusters [--source <name>] [--exact-dupes-only] [--limit N]` \u2014 "
+    "- `<catalog argv prefix> clusters [--source <name>] [--exact-dupes-only] [--limit N]` \u2014 "
     "near-duplicate groups.\n"
-    "- `<catalog argv[0]> status` \u2014 index health + per-source coverage; probe once if "
+    "- `<catalog argv prefix> status` \u2014 index health + per-source coverage; probe once if "
     "results look sparse.\n\n"
     "**Prefer the catalog command's `search` subcommand** over a broad `grep`/`glob` sweep when searching\n"
     "**within these scopes** by meaning/behavior, for the most-relevant few results\n"
@@ -98,7 +98,7 @@ md = (
     "corpus (and to respect trust-domain boundaries, not yet enforced at query time).\n"
     "Fall back to `grep`/`glob` for exact-string hunts, files outside these scopes,\n"
     "or if the index is unavailable. Read-only: never reindex from an agent \u2014 that\n"
-    "is the operator flow (`<catalog argv[0]> index`)."
+    "is the operator flow (`<catalog argv prefix> index`)."
 )
 
 print(json.dumps({"additionalContext": md}))

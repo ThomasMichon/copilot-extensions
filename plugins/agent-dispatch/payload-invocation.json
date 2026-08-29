@@ -7,6 +7,5 @@
   "noSelfProvisionEnv": "AGENT_DISPATCH_NO_SELFPROVISION",
   "purpose": "Coordinate queued agent work and task lifecycles",
   "installer": "install",
-  "windowsCatalogShim": "cmd",
   "provisionMode": "direct"
 }

@@ -7,6 +7,5 @@
   "noSelfProvisionEnv": "AGENT_BRIDGE_NO_SELFPROVISION",
   "purpose": "Communicate with persistent agent sessions",
   "installer": "install",
-  "windowsCatalogShim": "cmd",
   "provisionMode": "direct"
 }

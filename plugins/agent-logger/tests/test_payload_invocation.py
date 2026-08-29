@@ -55,7 +55,7 @@ def test_agent_capabilities_use_command_specific_catalog_entries() -> None:
     text = _capability_text()
 
     for command in EXPECTED_COMMANDS:
-        assert f'<agent-logger catalog "{command}" argv[0]>' in text
+        assert f'<agent-logger catalog "{command}" argv prefix>' in text
     assert "installed-plugins/*/agent-logger" not in text
     assert "~/.agent-logger/.venv" not in text
     assert "Ensure `agent-logger` is on PATH" not in text

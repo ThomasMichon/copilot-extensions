@@ -22,11 +22,11 @@ VERSION = json.loads((PLUGIN / "plugin.json").read_text(encoding="utf-8"))["vers
 KERNEL = (
     f"[owner: agent-dispatch@{VERSION}]\n"
     "Before choosing or starting new work, use the agent-dispatch session "
-    "command catalog's exact `argv[0]` with `worktree-status`; resume or claim "
+    "command catalog's exact `argv prefix` with `worktree-status`; resume or claim "
     "work explicitly targeted at this worktree before self-selecting unless it "
     "conflicts with the operator's current request. Before starting work likely "
     "to overlap another worktree, use the "
-    "agent-dispatch session command catalog's exact `argv[0]` with "
+    "agent-dispatch session command catalog's exact `argv prefix` with "
     "`focus --list`. At the start of substantial operator-led or "
     "task-less work, and when its direction changes, advertise it early with "
     "that same command plus `focus \"<one-line subject>\"`; this is shorthand for writing "
@@ -233,7 +233,7 @@ def test_enabled_opt_in_emits_exact_bounded_owned_kernel(tmp_path: Path) -> None
         assert "resume or claim work explicitly targeted" in kernel
         assert (
             "Before starting work likely to overlap another worktree, use the "
-            "agent-dispatch session command catalog's exact `argv[0]` with "
+            "agent-dispatch session command catalog's exact `argv prefix` with "
             "`focus --list`."
         ) in kernel
         assert "advertise it early" in kernel

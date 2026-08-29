@@ -70,10 +70,10 @@ the arguments below (no sub-agent, no MCP tool, no PATH lookup). It covers:
 $rows
 
 **How to search:**
-- ``<catalog argv[0]> search "<natural-language or code query>" [--source <name>] [--language <lang>] [--repo <repo>] [--limit N] --json`` — ranked hits; each has ``chunk_id``, ``source``, ``file_path``, ``line_start``/``line_end``, ``content``.
-- ``<catalog argv[0]> similar <chunk_id> [--source <name>] [--limit N]`` — pivot 'more like this' from a hit.
-- ``<catalog argv[0]> clusters [--source <name>] [--exact-dupes-only] [--limit N]`` — near-duplicate groups.
-- ``<catalog argv[0]> status`` — index health + per-source coverage; probe once if results look sparse.
+- ``<catalog argv prefix> search "<natural-language or code query>" [--source <name>] [--language <lang>] [--repo <repo>] [--limit N] --json`` — ranked hits; each has ``chunk_id``, ``source``, ``file_path``, ``line_start``/``line_end``, ``content``.
+- ``<catalog argv prefix> similar <chunk_id> [--source <name>] [--limit N]`` — pivot 'more like this' from a hit.
+- ``<catalog argv prefix> clusters [--source <name>] [--exact-dupes-only] [--limit N]`` — near-duplicate groups.
+- ``<catalog argv prefix> status`` — index health + per-source coverage; probe once if results look sparse.
 
 **Prefer the catalog command's ``search`` subcommand** over a broad ``grep``/``glob`` sweep when
 searching **within these scopes** by meaning/behavior, for the most-relevant few
@@ -81,7 +81,7 @@ results across a large corpus, or to pivot from a hit. Pass ``--source`` to scop
 to one corpus (and to respect trust-domain boundaries, not yet enforced at query
 time). Fall back to ``grep``/``glob`` for exact-string hunts, files outside these
 scopes, or if the index is unavailable. Read-only: never reindex from an agent --
-that is the operator flow (``<catalog argv[0]> index``).
+that is the operator flow (``<catalog argv prefix> index``).
 "@
 
 Write-Output (@{ additionalContext = $md } | ConvertTo-Json -Compress -Depth 3)

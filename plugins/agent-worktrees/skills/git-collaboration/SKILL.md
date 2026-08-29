@@ -25,9 +25,9 @@ description: >
 
 # Git Collaboration
 
-Use the exact `argv[0]` from the agent-worktrees session command catalog for
-every worktree helper below. Replace `<agent-worktrees catalog argv[0]>` with
-that raw path, quote it at each shell call site, and never search `PATH`.
+Use the exact `argv` prefix from the agent-worktrees session command catalog for
+every worktree helper below. Replace `<agent-worktrees catalog argv prefix>` with
+that prefix with each element quoted for the current shell, and never search `PATH`.
 
 This skill covers the **git collaboration flows** that sit *below* the high-level
 sign-off flow (`push-changes` / `create-pr` / `finalize`, owned by the
@@ -59,9 +59,9 @@ use plain git.
 | `status`, `log`, `diff`, `show`, `branch -v` | **plain git** | read-only inspection; no shared state |
 | `add`, `commit`, `restore`, `stash`, local `switch`, `rebase -i` **on your own worktree branch** | **plain git** | local history; disposable until it lands |
 | `fetch` | **plain git** | read-only; updates remote-tracking refs only |
-| Advance the worktree onto the merged default ("pull forward") | helper: `<agent-worktrees catalog argv[0]> git sync` | wraps fetch + rebase; drops squash-merged commits without losing local work |
-| Create / update / push a **shared** feature branch | helper: `<agent-worktrees catalog argv[0]> git feature-branch ...` | wraps create + ff + push; a real remote branch many agents build on |
-| Merge a delegate's slice into the shared feature branch | helper: `<agent-worktrees catalog argv[0]> git merge-to-feature ...` | wraps rebase + ff + push; must be **ff-only** (no two-parent nodes) |
+| Advance the worktree onto the merged default ("pull forward") | helper: `<agent-worktrees catalog argv prefix> git sync` | wraps fetch + rebase; drops squash-merged commits without losing local work |
+| Create / update / push a **shared** feature branch | helper: `<agent-worktrees catalog argv prefix> git feature-branch ...` | wraps create + ff + push; a real remote branch many agents build on |
+| Merge a delegate's slice into the shared feature branch | helper: `<agent-worktrees catalog argv prefix> git merge-to-feature ...` | wraps rebase + ff + push; must be **ff-only** (no two-parent nodes) |
 | Push to the remote **default** branch / open a PR | flow: `push-changes` * `create-pr` * `finalize` | the lifecycle/sign-off flow (see the `worktree` skill) |
 | Bare `git push` of a `worktree/*` branch | **forbidden** | `worktree/*` refs must never reach the remote |
 | Manual merge to the default branch | **forbidden** | breaks linear, one-commit-per-worktree history -- use `finalize` |
@@ -83,7 +83,7 @@ default and stack new work on top -- **do not** start a fresh worktree.
 not an optional cleanup. As soon as you confirm the merge, pull forward.
 
 **`pr-status` confirms the merge and tells you to do it.**
-`<agent-worktrees catalog argv[0]> pr-status` reconciles the active PR against
+`<agent-worktrees catalog argv prefix> pr-status` reconciles the active PR against
 the provider, so a PR merged
 externally (e.g. via the `auto-merge` label) reports `state: merged` rather than
 a stale `open`. When it has landed and the worktree is not yet on top of the
@@ -99,7 +99,7 @@ git fetch origin && git rebase origin/<default>     # the manual flow
 The turn-key helper does exactly that, plus the guards:
 
 ```
-<agent-worktrees catalog argv[0]> git sync          # the helper
+<agent-worktrees catalog argv prefix> git sync          # the helper
 ```
 
 `sync` fetches the remote and rebases the worktree branch onto
@@ -123,10 +123,10 @@ a shareable URL or ongoing pushes — before inviting review, so the fast
 auto-merge path can't land it while you are still working:
 
 ```
-<agent-worktrees catalog argv[0]> create-pr --draft
+<agent-worktrees catalog argv prefix> create-pr --draft
 # ...address feedback locally...
-<agent-worktrees catalog argv[0]> push-changes
-<agent-worktrees catalog argv[0]> pr-ready
+<agent-worktrees catalog argv prefix> push-changes
+<agent-worktrees catalog argv prefix> pr-ready
 ```
 
 `create-pr --draft` opens the PR in the provider's native draft state (a `WIP:`
@@ -154,15 +154,15 @@ When several agents collaborate on one effort over a single branch:
 1. **Host** drafts the effort and gets it reviewed/approved (the effort PR).
 2. **Host** creates and pushes the shared feature branch:
    ```
-   <agent-worktrees catalog argv[0]> git feature-branch <name> --push
+   <agent-worktrees catalog argv prefix> git feature-branch <name> --push
    ```
 3. Each **delegate** syncs to the branch, completes its assigned section, commits
    on the branch, writes back its slice of the effort README, then ff-merges its
    work into the shared branch:
    ```
-   <agent-worktrees catalog argv[0]> git feature-branch <name> --sync   # pull the branch forward
+   <agent-worktrees catalog argv prefix> git feature-branch <name> --sync   # pull the branch forward
    # ...do the work, commit...
-   <agent-worktrees catalog argv[0]> git merge-to-feature <name>        # ff-only handoff
+   <agent-worktrees catalog argv prefix> git merge-to-feature <name>        # ff-only handoff
    ```
 4. **Host** syncs forward from its side as delegates land slices, and -- when
    coordination is done -- ensures its local branch matches the shared branch and
