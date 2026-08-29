@@ -12,7 +12,38 @@ import pytest
 LIB = Path(__file__).resolve().parents[1]
 REPO = Path(__file__).resolve().parents[3]
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
-BASH = shutil.which("bash") if os.name != "nt" else None
+
+
+def _find_supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    command = shutil.which("bash")
+    if command is None:
+        return None
+    version = subprocess.run(
+        [
+            command,
+            "--noprofile",
+            "--norc",
+            "-c",
+            'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=5,
+    )
+    if version.returncode != 0:
+        return None
+    try:
+        major, minor = (int(part) for part in version.stdout.split(".", 1))
+    except ValueError:
+        return None
+    return command if (major, minor) >= (4, 4) else None
+
+
+BASH = _find_supported_bash()
 
 
 def _write_json(path: Path, value: object) -> None:

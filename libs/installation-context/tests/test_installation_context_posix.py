@@ -35,10 +35,41 @@ POWERSHELL_COMMAND = (
     if POWERSHELL is not None
     else None
 )
-BASH = shutil.which("bash") if os.name != "nt" else None
+
+
+def _find_supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    command = shutil.which("bash")
+    if command is None:
+        return None
+    version = subprocess.run(
+        [
+            command,
+            "--noprofile",
+            "--norc",
+            "-c",
+            'printf "%s.%s" "${BASH_VERSINFO[0]}" "${BASH_VERSINFO[1]}"',
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=5,
+    )
+    if version.returncode != 0:
+        return None
+    try:
+        major, minor = (int(part) for part in version.stdout.split(".", 1))
+    except ValueError:
+        return None
+    return command if (major, minor) >= (4, 4) else None
+
+
+BASH = _find_supported_bash()
 RUNNERS = (
     ("python", (sys.executable, str(PYTHON_SCRIPT))),
-    *((("posix", (str(POSIX_SCRIPT),)),) if BASH else ()),
+    *((("posix", (BASH, str(POSIX_SCRIPT))),) if BASH else ()),
 )
 PYTHON_COMMAND = RUNNERS[0][1]
 LOCK_HOST = socket.gethostname().split(".", 1)[0].casefold()
@@ -896,7 +927,7 @@ def test_posix_source_identity_matches_portable_vectors() -> None:
     assert BASH is not None
     for vector in _vectors():
         result = _run(
-            (str(POSIX_SCRIPT),),
+            (BASH, str(POSIX_SCRIPT)),
             "source-id",
             "--source-json",
             json.dumps(vector["descriptor"], separators=(",", ":")),
