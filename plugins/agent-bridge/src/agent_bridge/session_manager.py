@@ -1895,7 +1895,7 @@ class SessionManager:
                     ),
                     timeout=remaining,
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 self._remote_recovery_inconclusive.add(rec.session_id)
                 log.warning(
                     "Startup Session Host reattach timed out for %s after %.1fs",
@@ -5485,16 +5485,16 @@ class SessionManager:
             except Exception as exc:
                 self._remote_recovery_inconclusive.add(session_id)
                 raise RemoteHostRecoveryPendingError(
-                    "Container Session Host cleanup could not inspect remote "
-                    f"authority for {session_id}; retained target ownership"
+                    "Remote Session Host cleanup could not inspect authority "
+                    f"for {session_id}; retained session and remote ownership"
                 ) from exc
             if (
                 self._host_index.get(session_id) is None
                 and session_id in self._remote_recovery_inconclusive
             ):
                 raise RemoteHostRecoveryPendingError(
-                    "Container Session Host cleanup is inconclusive; retained "
-                    f"session {session_id} and target ownership"
+                    "Remote Session Host cleanup is inconclusive; retained "
+                    f"session {session_id} and remote ownership"
                 )
             if (
                 self._host_index.get(session_id) is None
