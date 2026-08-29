@@ -594,6 +594,47 @@ def test_python_lock_release_does_not_mask_mutation_failure(tmp_path: Path) -> N
                 raise RuntimeError("primary mutation failure")
 
 
+def test_python_lock_release_gives_each_windows_operation_a_retry_window(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_python_module()
+    lock = module._DirectoryLock(
+        tmp_path / "lock",
+        kind="genesis",
+        marketplace_id="example--0123456789abcdef",
+    )
+    lock.acquire()
+    original_unlink = Path.unlink
+    original_rmdir = Path.rmdir
+    attempts = {"unlink": 0, "rmdir": 0}
+    moments = iter((0.0, 0.6, 0.9, 1.0, 1.5))
+
+    def flaky_unlink(path: Path, *args: object, **kwargs: object) -> None:
+        if path == lock.owner_path:
+            attempts["unlink"] += 1
+            if attempts["unlink"] < 3:
+                raise PermissionError("owner receipt is temporarily busy")
+        original_unlink(path, *args, **kwargs)
+
+    def flaky_rmdir(path: Path) -> None:
+        if path == lock.path:
+            attempts["rmdir"] += 1
+            if attempts["rmdir"] < 2:
+                raise PermissionError("lock directory is temporarily busy")
+        original_rmdir(path)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+    monkeypatch.setattr(Path, "rmdir", flaky_rmdir)
+    monkeypatch.setattr(module.time, "monotonic", lambda: next(moments))
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+
+    lock.release()
+
+    assert attempts == {"unlink": 3, "rmdir": 2}
+    assert not lock.path.exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows process semantics are required")
 def test_windows_pid_liveness_probe_does_not_signal_the_process() -> None:
     module = _load_python_module()
@@ -999,6 +1040,7 @@ def test_unicode_json_input_and_output_are_utf8(
         {"source": "github", "url": "HTTPS://GITHUB.COM/Example/Repo.git"},
         {"source": "directory", "stableId": "portable-marketplace"},
         {"source": "opaque", "id": "urn:example:caf\u00e9"},
+        {"source": "git", "url": "https://example.com/a$b&c/repo.git"},
     ],
 )
 def test_python_and_posix_source_normalization_matches_powershell(

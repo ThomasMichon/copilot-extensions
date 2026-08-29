@@ -489,6 +489,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                 if time.monotonic() >= deadline:
                     _fail(f"Cannot release installation lock '{self.path}': {error}")
                 time.sleep(LOCK_POLL_SECONDS)
+        deadline = time.monotonic() + 1.0
         while True:
             try:
                 self.path.rmdir()

@@ -1011,7 +1011,7 @@ function Normalize-GitPath([string]$Path) {
 }
 
 function ConvertTo-PortableGitPath([string]$Path) {
-    $safe = "/-._~!$&'()*+,;=:@%[]"
+    $safe = '/-._~!$&''()*+,;=:@%[]'
     $encoded = New-Object Text.StringBuilder
     foreach ($value in [Text.Encoding]::UTF8.GetBytes($Path.Replace('\', '/'))) {
         $character = [char]$value
