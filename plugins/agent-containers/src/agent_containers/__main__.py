@@ -10,6 +10,8 @@ Subcommands:
   release <target>      Release a lease (by container or effort name)
   leases                Show active leases
   exec <name>           Run the ACP launch command through the venue transport
+  ssh-stdio <name>      Serve restricted SSH protocol over provider stdio
+  ssh-profile <name>    Emit a named restricted provider SSH profile
   version               Show version
 """
 
@@ -39,6 +41,7 @@ from .config import (
 from .resolver import (
     build_restricted_spawn_command,
     host_gh_token,
+    resolve_live_exec_target,
 )
 from .ssh_transport import (
     build_remote_command,
@@ -136,6 +139,31 @@ def main(argv: list[str] | None = None) -> int:
     exec_p.add_argument(
         "--force", action="store_true",
         help="Terminate a live SSH holder and take over this trusted container",
+    )
+    ssh_stdio_p = sub.add_parser(
+        "ssh-stdio",
+        help="Serve an SSH-compatible restricted provider target over stdio",
+    )
+    ssh_stdio_p.add_argument("name", help="Restricted container name")
+    ssh_profile_p = sub.add_parser(
+        "ssh-profile",
+        help="Emit a named agent-ssh profile for a restricted target",
+    )
+    ssh_profile_p.add_argument("name", help="Restricted container name")
+    ssh_profile_p.add_argument(
+        "--alias",
+        help="SSH Host alias (defaults to the provider target name)",
+    )
+    profile_output = ssh_profile_p.add_mutually_exclusive_group()
+    profile_output.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the provider profile specification without publishing it",
+    )
+    profile_output.add_argument(
+        "--print",
+        action="store_true",
+        help="Render the OpenSSH fragment through agent-ssh without writing it",
     )
 
     host_prepare = sub.add_parser(
@@ -242,6 +270,21 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_lifecycle_clear(args)
         if args.command == "exec":
             return _cmd_exec(args)
+        if args.command == "ssh-stdio":
+            from .provider_ssh import run_ssh_stdio
+
+            return run_ssh_stdio(args.name)
+        if args.command == "ssh-profile":
+            from .provider_ssh import emit_ssh_profile, ssh_profile_spec
+
+            if args.json:
+                print(json.dumps(ssh_profile_spec(args.name, args.alias), indent=2))
+                return 0
+            return emit_ssh_profile(
+                args.name,
+                args.alias,
+                print_only=args.print,
+            )
         if args.command == "session-host-prepare":
             return _cmd_session_host_prepare(args)
         if args.command == "session-host-state":
@@ -345,6 +388,8 @@ def _cmd_session_host_prepare(args: argparse.Namespace) -> int:
     from ._invoke import module_argv
     from .container_shims import (
         deploy as deploy_shims,
+    )
+    from .container_shims import (
         git_credential_environment,
     )
     from .relay_provider import token_for
@@ -845,65 +890,24 @@ def _cmd_exec(args: argparse.Namespace) -> int:
     and the child because inherited pipes are unreliable under
     ``CREATE_NO_WINDOW`` on Windows.
     """
-    from .lifecycle import get_container, inspect_container, restricted_policy_errors
+    target = resolve_live_exec_target(args.name, config=load_config())
 
-    config = load_config()
-    try:
-        info = get_container(config, args.name)
-    except RuntimeError as exc:
-        raise RuntimeError(
-            f"Container lookup failed for '{args.name}'; refusing dispatch: {exc}"
-        ) from exc
-    if info is None:
-        raise RuntimeError(
-            f"Container '{args.name}' is not a discovered fleet member; "
-            "refusing dispatch"
-        )
-    inspected = inspect_container(args.name)
-    actual_profile = (
-        (inspected.get("Config") or {}).get("Labels") or {}
-    ).get(SECURITY_PROFILE_LABEL)
-    fleet = config.fleets.get(info.fleet or "") if info and info.fleet else None
-    if fleet is None:
-        raise RuntimeError(
-            f"Container '{args.name}' has no matching fleet configuration; "
-            "refusing dispatch"
-        )
-    if actual_profile not in {TRUSTED_PROFILE, RESTRICTED_PROFILE}:
-        raise RuntimeError(
-            f"Container '{args.name}' has unsupported live security profile "
-            f"{actual_profile!r}; refusing dispatch"
-        )
-    if fleet.security_profile != actual_profile:
-        raise RuntimeError(
-            f"Container '{args.name}' security profile does not match its fleet "
-            f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
-            "refusing dispatch"
-        )
-    if fleet and fleet.restricted:
-        workspace = fleet.workspace_folder or config.workspace_folder
-        user = fleet.exec_user or config.exec_user
-        posture_errors = restricted_policy_errors(
-            info,
-            fleet,
-            workspace_folder=workspace,
-            exec_user=user,
-        )
-        if posture_errors:
-            raise RuntimeError(
-                f"Container '{args.name}' does not satisfy the restricted "
-                f"security policy: {'; '.join(posture_errors)}"
-            )
-    user = (fleet.exec_user if fleet else None) or config.exec_user
-    acp_command = config.acp_command_for(fleet)
-
-    if actual_profile == RESTRICTED_PROFILE:
+    if target.actual_profile == RESTRICTED_PROFILE:
         from .lease import ProviderAdmissionError, session_admission
 
         try:
             with session_admission(args.name):
+                # Re-read after admission so a provider hold cannot win between
+                # the initial posture check and the protected launch.
+                target = resolve_live_exec_target(args.name, config=load_config())
                 return _launch_container_agent(
-                    args, config, fleet, actual_profile, user, acp_command
+                    args,
+                    target.config,
+                    target.fleet,
+                    target.actual_profile,
+                    target.user,
+                    target.acp_command,
+                    container_id=target.container_id,
                 )
         except ProviderAdmissionError as busy:
             print(str(busy), file=sys.stderr)
@@ -920,7 +924,12 @@ def _cmd_exec(args: argparse.Namespace) -> int:
         return _BUSY_EXIT
     try:
         return _launch_container_agent(
-            args, config, fleet, actual_profile, user, acp_command
+            args,
+            target.config,
+            target.fleet,
+            target.actual_profile,
+            target.user,
+            target.acp_command,
         )
     finally:
         target_lock.release()
@@ -933,11 +942,13 @@ def _launch_container_agent(
     actual_profile: str,
     user: str,
     acp_command: str,
+    *,
+    container_id: str | None = None,
 ) -> int:
     """Launch through the trust-profiled transport while holding its lock."""
     if actual_profile == RESTRICTED_PROFILE:
         spawn_cmd = build_restricted_spawn_command(
-            args.name,
+            container_id or args.name,
             user,
             acp_command,
         )
@@ -971,6 +982,8 @@ def _launch_container_agent(
     if relay_enabled:
         from .container_shims import (
             deploy as deploy_shims,
+        )
+        from .container_shims import (
             git_credential_environment,
         )
         from .relay_provider import token_for

@@ -194,12 +194,13 @@ def test_resolve_spec_exposes_workspace_folder_and_profile(monkeypatch):
         "state": "running",
         "ready": True,
         "posture_verified": False,
-        "transport": "docker-exec",
+        "transport": "provider-exec",
         "capabilities": {
             "container_local_workspace": True,
             "host_credentials": False,
             "credential_relay": False,
             "session_host": False,
+            "ssh_profile": True,
         },
         "lifecycle_hold": {
             "state": "none",
@@ -285,7 +286,7 @@ def test_actual_restricted_label_never_projects_session_host_ssh(monkeypatch):
     assert "container" not in spec
     assert spec["venue"]["security_profile"] == "restricted"
     assert spec["venue"]["effective_security_profile"] == "restricted"
-    assert spec["venue"]["transport"] == "docker-exec"
+    assert spec["venue"]["transport"] == "provider-exec"
     assert spec["venue"]["ready"] is False
     assert spec["venue"]["capabilities"]["host_credentials"] is False
     assert spec["venue"]["capabilities"]["credential_relay"] is False
@@ -423,7 +424,7 @@ def test_resolve_spec_configured_restricted_mismatch_fails_closed(monkeypatch):
     assert venue["observed_security_profile"] == "trusted"
     assert venue["security_profile"] == "restricted"
     assert venue["effective_security_profile"] == "restricted"
-    assert venue["transport"] == "docker-exec"
+    assert venue["transport"] == "provider-exec"
     assert venue["ready"] is False
     assert venue["capabilities"]["host_credentials"] is False
     assert venue["capabilities"]["credential_relay"] is False
@@ -455,7 +456,7 @@ def test_resolve_spec_unknown_observed_profile_fails_closed(monkeypatch):
     assert venue["observed_security_profile"] == "unexpected"
     assert venue["security_profile"] == "restricted"
     assert venue["ready"] is False
-    assert venue["transport"] == "docker-exec"
+    assert venue["transport"] == "provider-exec"
     assert venue["capabilities"]["host_credentials"] is False
     assert venue["capabilities"]["credential_relay"] is False
 

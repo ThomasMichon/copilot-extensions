@@ -29,8 +29,8 @@
     },
     {
       "name": "agent-containers",
-      "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted-fleet OpenSSH transport",
-      "version": "0.1.2-dev96",
+      "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver with trusted OpenSSH and restricted provider-exec transport",
+      "version": "0.1.2-dev97",
       "source": "plugins/agent-containers"
     },
     {
@@ -42,7 +42,7 @@
     {
       "name": "agent-ssh",
       "description": "SSH connectivity layer for the agent fabric: emit and verify machine-name SSH profiles from a normalized registry, and define the public transport-provider contract for pluggable direct or tunnel transports.",
-      "version": "0.1.0-dev57",
+      "version": "0.1.0-dev58",
       "source": "plugins/agent-ssh"
     },
     {
