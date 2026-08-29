@@ -5,6 +5,7 @@
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
   "hooks": "hooks.json",
+  "sessionContext": "session-context.json",
   "author": {
     "name": "Thomas Michon"
   },

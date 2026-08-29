@@ -3,6 +3,7 @@
   "description": "Local Docker dev-container fleet management, lease broker, and agent-bridge container: namespace resolver -- trusted OpenSSH dispatch plus restricted provider-exec SSH profiles",
   "version": "0.1.2-dev97",
   "hooks": "hooks.json",
+  "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
   "author": {

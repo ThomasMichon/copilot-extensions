@@ -1,0 +1,34 @@
+{
+  "schema": "copilot-extensions.session-context-contributors",
+  "version": 1,
+  "complete": true,
+  "contributors": [
+    {
+      "id": "runtime-readiness",
+      "pure": true,
+      "order": 200,
+      "timeoutSeconds": 1,
+      "maxBytes": 192,
+      "bash": ["scripts/readiness-context.sh", "--aggregate"],
+      "powershell": ["scripts/readiness-context.ps1", "--aggregate"]
+    },
+    {
+      "id": "command-catalog",
+      "pure": true,
+      "order": 400,
+      "timeoutSeconds": 1,
+      "maxBytes": 4096,
+      "bash": ["scripts/emit-command-catalog.sh"],
+      "powershell": ["scripts/emit-command-catalog.ps1"]
+    },
+    {
+      "id": "codespace-map",
+      "pure": true,
+      "order": 500,
+      "timeoutSeconds": 2,
+      "maxBytes": 384,
+      "bash": ["scripts/emit-codespace-map.sh", "--aggregate"],
+      "powershell": ["scripts/emit-codespace-map.ps1", "--aggregate"]
+    }
+  ]
+}

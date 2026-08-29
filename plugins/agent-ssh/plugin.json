@@ -4,6 +4,7 @@
   "version": "0.1.0-dev58",
   "runtimeScope": "none",
   "hooks": "hooks.json",
+  "sessionContext": "session-context.json",
   "author": {
     "name": "Thomas Michon"
   },

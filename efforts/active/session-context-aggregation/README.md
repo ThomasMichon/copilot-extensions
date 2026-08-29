@@ -23,6 +23,12 @@ Deliver every suite-migrated plugin contributor's attributable session context
 as one deterministic, bounded aggregate, without depending on the host to
 preserve several different `additionalContext` results.
 
+The coordinator is also the suite's durable composition layer after the host
+bug is fixed: plugins own their rules and command definitions, while
+`zz-context-injection` owns the shared declaration schema, active-stack
+discovery, ordering, provenance, budget admission, and compact rendering of
+repeated structures such as command glossaries.
+
 The workaround must remain safe during partial rollout. A migrated producer
 retains its standalone direct path and additionally publishes a pure context
 contributor. If the host provides a supported, testable way to guarantee one
@@ -307,3 +313,32 @@ See [`design.md`](design.md).
   `context-injection` hook re-runs pure contributors and supersedes them with
   the aggregate. The byte-identical broker remains the compatibility design
   when no such guarantee can be established.
+- Live Copilot CLI 1.0.82-1 probes with three synthetic `--plugin-dir` payloads
+  showed hook execution follows argument order and the final non-empty result
+  wins. Three trusted repository-settings probes with different
+  `enabledPlugins` insertion orders all executed by plugin name
+  (`a-first`, `m-middle`, `z-last`), including across two marketplaces; the
+  lexically final plugin won.
+- Verified the fail-open seam on the same host: when the final plugin emitted
+  `{}`, the preceding non-empty context remained model-visible. A late
+  aggregator can therefore stand down without erasing direct producer output.
+- Confirmed repository folder trust is exact-path rather than inherited from a
+  trusted parent worktree: an ignored nested test repository's settings were
+  not loaded. The aggregator must independently reject untrusted repository
+  settings rather than assuming parent trust.
+- Began the rollout scaffold as `zz-context-injection`: exact
+  source-qualified authority, lexical-final verification, complete-declaration
+  gate, pure contributor execution, intentional byte/time admission, and conservative
+  stand-down. The scaffold remains inert on existing stacks until producer
+  declarations land.
+- Corrected the initial budget premise: the official 10 KB join cap is stated
+  for `postToolUse`, not `sessionStart`. Copilot CLI 1.0.82-1 delivered a
+  synthetic 20 KB startup context including an end marker. The coordinator now
+  uses an intentional 64 KB product budget beneath the host's 10 MiB hook-output
+  guard; compaction remains valuable for context efficiency, not host
+  correctness.
+- Confirmed the coordinator should remain useful beyond the compatibility
+  workaround as the suite-wide efficient composition system for plugin-owned
+  rules and command glossaries. Producers remain authoritative for content;
+  the coordinator deduplicates shared framing and renders one attributable,
+  budgeted aggregate.

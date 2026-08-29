@@ -41,18 +41,21 @@ def _run(
     )
 
 
-def _run_bash(*, plugin_root: Path | None = PLUGIN) -> subprocess.CompletedProcess[str]:
-    return _run(["bash", str(BASH_PRODUCER)], plugin_root=plugin_root)
+def _run_bash(
+    *args: str,
+    plugin_root: Path | None = PLUGIN,
+) -> subprocess.CompletedProcess[str]:
+    return _run(["bash", str(BASH_PRODUCER), *args], plugin_root=plugin_root)
 
 
 def _run_powershell(
-    *,
+    *args: str,
     plugin_root: Path | None = PLUGIN,
 ) -> subprocess.CompletedProcess[str]:
     powershell = _powershell()
     assert powershell
     return _run(
-        [powershell, "-NoProfile", "-File", str(POWERSHELL_PRODUCER)],
+        [powershell, "-NoProfile", "-File", str(POWERSHELL_PRODUCER), *args],
         plugin_root=plugin_root,
     )
 
@@ -119,6 +122,28 @@ def test_bash_preserves_adjacent_agent_worktrees_command_catalog() -> None:
     assert catalog["payload"] == {"provenance": "adjacent-compatibility"}
     assert catalog["commands"][0]["argv"] == [str(command)]
     assert catalog["commands"][0]["availability"] == "ready"
+
+
+def test_bash_own_only_mode_excludes_adjacent_catalog() -> None:
+    context = _context(_run_bash("--own-only"))
+    assert context.startswith("[owner: context-handoff@")
+    assert "agent-worktrees session command catalog" not in context
+    assert len(context.encode("utf-8")) < 2048
+
+    if _powershell():
+        assert _context(_run_powershell("--own-only")) == context
+
+
+def test_aggregate_mode_is_owned_compact_and_cross_platform() -> None:
+    context = _context(_run_bash("--aggregate"))
+    assert context.startswith("[owner: context-handoff@")
+    assert "handoff is progress, never completion" in context
+    assert "predecessor stops competing" in context
+    assert "Use the `context-handoff` skill" in context
+    assert len(context.encode("utf-8")) <= 448
+
+    if _powershell():
+        assert _context(_run_powershell("--aggregate")) == context
 
 
 def test_bash_reports_incomplete_adjacent_payload_as_unavailable(
