@@ -51,7 +51,7 @@ def _validate_mcp_structured_result(value: Any) -> StructuredResult:
 
 
 McpStructuredResult = Annotated[
-    str,
+    StructuredResult,
     PlainValidator(_validate_mcp_structured_result),
     WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "array"}]}),
 ]
@@ -506,9 +506,11 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
 
         Omit ``result`` for no structured result; explicit JSON null is invalid.
         """
+        if result is not None:
+            result = _validate_mcp_structured_result(result)
         return _mutate(
             lambda: queue.complete_with_outcome(
-                task_id, worker_id, result_ref=result_ref, result=result  # type: ignore[arg-type]
+                task_id, worker_id, result_ref=result_ref, result=result
             ),
             None,
         )

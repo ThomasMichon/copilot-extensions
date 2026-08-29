@@ -561,7 +561,8 @@ stdin; one leading UTF-8 BOM is accepted on every input path). The canonical
 UTF-8 encoding is capped at 64 KiB and is committed atomically with
 `status=completed`, `result_ref`, and the stable completing identity; invalid
 input is HTTP 400, oversized input is HTTP 413, and both leave the task
-non-terminal. JSON null, scalars, and double-encoded JSON strings are rejected.
+non-terminal. JSON null and scalars are rejected. MCP callers should pass a
+decoded object or array; the MCP SDK may normalize a JSON-encoded object string.
 `show` retains the full decoded value; bulk `list`/`find`/`sweep`/`inbox` rows
 expose only `has_result`. Retrieve the value with `result <id>`,
 `GET /tasks/<id>/result`, or `dispatch_result`. SSE events likewise carry only

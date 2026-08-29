@@ -39,7 +39,7 @@ def _validate_mcp_structured_result(value: Any) -> StructuredResult:
 
 
 McpStructuredResult = Annotated[
-    str,
+    StructuredResult,
     PlainValidator(_validate_mcp_structured_result),
     WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "array"}]}),
 ]
@@ -388,12 +388,14 @@ class DispatchTools:
         result: McpStructuredResult = None,  # type: ignore[assignment]
     ) -> dict:
         """Complete a task with an optional JSON object/array result."""
+        if result is not None:
+            result = _validate_mcp_structured_result(result)
         with self._client_factory() as c:
             return c.complete(
                 task_id,
                 worker_id,
                 result_ref=result_ref,
-                result=result,  # type: ignore[arg-type]
+                result=result,
             )
 
     def abandon(

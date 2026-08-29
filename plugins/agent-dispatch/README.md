@@ -702,7 +702,8 @@ coordinator validates strict structured JSON, caps its canonical UTF-8 encoding
 at 64 KiB, and commits the result, `result_ref`, terminal status, and stable
 completing identity in one SQLite transaction. Invalid input returns HTTP 400,
 oversized input returns HTTP 413, and both leave the task non-terminal. JSON
-null, scalars, and double-encoded JSON strings are rejected.
+null and scalars are rejected. MCP clients should send a decoded object or array;
+the MCP SDK may normalize a JSON-encoded object string before tool invocation.
 
 `show` keeps the decoded `result`. Bulk `list`/`find`/`sweep`/`inbox` rows omit
 the potentially large value and expose `has_result`; retrieve it with

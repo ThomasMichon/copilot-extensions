@@ -216,8 +216,7 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
     assert types.count("task.result_recorded") == 1
 
 
-@pytest.mark.parametrize("result", [None, '{"ok":true}'])
-def test_mcp_complete_rejects_null_and_double_encoded_result(coord, result):
+def test_mcp_complete_rejects_null_result(coord):
     import asyncio
 
     client = DispatchClient(coord)
@@ -232,13 +231,37 @@ def test_mcp_complete_rejects_null_and_double_encoded_result(coord, result):
             {
                 "task_id": task["id"],
                 "worker_id": owner,
-                "result": result,
+                "result": None,
             },
         )
     )
 
     assert response.is_error
     assert client.get(task["id"])["status"] == Status.STARTED
+
+
+def test_mcp_complete_normalizes_json_object_string(coord):
+    import asyncio
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+
+    response = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_complete",
+            {
+                "task_id": task["id"],
+                "worker_id": owner,
+                "result": '{"ok":true}',
+            },
+        )
+    )
+
+    assert not response.is_error
+    assert client.result(task["id"])["result"] == {"ok": True}
 
 
 def test_mcp_events_reach_rest_sse(coord):
