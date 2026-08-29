@@ -2484,6 +2484,16 @@ def test_runtime_slot_actions_bind_expected_snapshot_payload_identity(
             expected_payload_root=expected_root,
             expected_payload_version="1.0.0",
         )
+        accepted = json.loads(
+            _run_slot(
+                runner,
+                "slot-provision",
+                layout,
+                expected_payload_root=expected_root,
+                expected_payload_version="1.0.0",
+            ).stdout
+        )
+        assert accepted["slotChanged"] is False
         versions_before = _tree_snapshot(versions)
         wrong_version = _run_slot(
             runner,
