@@ -292,10 +292,11 @@ plugin-owned ambient policy from its owner.
 
 Shell commands that run at agent lifecycle points. The `preToolUse` hook can
 **block** tool execution -- the primary mechanism for guardrails and policy
-enforcement. Config lives in `.github/hooks/*.json` at the repository root, user-level
-`~/.copilot/hooks/*.json` (or `%USERPROFILE%\.copilot\hooks\*.json` on Windows),
-inline `hooks` blocks in Copilot settings, and plugin-declared `hooks.json`.
-Cloud agent reads only `.github/hooks/*.json` from the cloned repository.
+enforcement. Config lives in policy, user-level `~/.copilot/hooks/*.json` (or
+`%USERPROFILE%\.copilot\hooks\*.json` on Windows), repository/project
+`.github/hooks/*.json`, inline `hooks` blocks in Copilot settings, and
+plugin-declared `hooks.json`. Cloud agent reads only `.github/hooks/*.json` from
+the cloned repository.
 
 ### Config format
 
@@ -352,7 +353,12 @@ text or a slash command.
 > `postToolUse` hooks' `additionalContext` values are joined with a double
 > newline and capped at 10 KB. `sessionStart` has no documented 10 KB cap; the
 > command-hook output envelope is bounded at 10 MiB, but startup context should
-> still use an intentional, much smaller budget.
+> still use an intentional, much smaller budget. Output composition is
+> event/field-specific: all matching hooks running does not imply that duplicate
+> output fields survive. See
+> [`references/session-context-aggregation.md`](references/session-context-aggregation.md)
+> for the ordering contract and the open `sessionStart`/`subagentStart`
+> `additionalContext` work.
 
 > **Hooks are reactive -- they can't originate or schedule a turn.** Every hook
 > fires in response to activity the session is already producing. The only hook
@@ -370,9 +376,15 @@ text or a slash command.
 
 A plugin ships hooks in a **`hooks.json`** (or `hooks/hooks.json`) at the root of
 its install dir, same `{ "version": 1, "hooks": { ... } }` format as a repo's
-`.github/hooks/*.json`. The runtime **combines** hooks from all sources (policy,
-repo, user, plugins); when an event appears in several sources every entry runs.
-Two consequences shape how a plugin author writes them:
+`.github/hooks/*.json`. The runtime collects matching hooks by supported source
+tier -- **policy -> user -> repository/project -> plugins** -- and every
+matching entry runs. Entries within one event array retain authored order.
+Relative order among plugins is not alphabetical and is not an author-facing
+priority contract. `enabledPlugins` is an enablement/precedence map, not a hook
+queue; its JSON key order must never arrange a winner. Full ordering and output
+composition guidance is in
+[`references/session-context-aggregation.md`](references/session-context-aggregation.md).
+Two further consequences shape how a plugin author writes hooks:
 
 - **A plugin hook fires for every session the plugin loads into** -- there is no
   per-repo `matcher` on `sessionStart`. A repo-scoped plugin's hooks fire only in
@@ -417,14 +429,17 @@ interactive sessions only -- not resume, not `-p`), the `additionalContext`
 mechanism also applies on **resume**, so it can carry the always-on guidance an
 instructions file used to.
 
-#### Affected-host aggregation rule
+#### Start-hook composition rule
 
-Some hosts retain only one non-empty result from all plugin `sessionStart`
-hooks. Suite plugins retain direct output as backup and may declare only pure
-contributors through `plugin.json` `sessionContext` -> versioned
-`session-context.json`. Exactly one source-qualified `zz-context-injection`
-authority may supersede them after proving it is final; unknown, incomplete, or
-multiply-authoritative stacks stand down, and side-effect-only hooks stay direct; see [`references/session-context-aggregation.md`](references/session-context-aggregation.md).
+Do not make a plugin last by name, `enabledPlugins` key position, marketplace
+order, or observed inventory. Plugin authors cannot safely rely on running last,
+and harness owners must not use ambient plugin order as arbitration. For
+`sessionStart` and `subagentStart` `additionalContext`, use runtime-defined
+merge semantics when available or one attributable composition owner whose
+design does not depend on a last-writer race. The current bug and unshipped
+implementation work, plus the suite's inspectable contributor declaration, are
+documented in
+[`references/session-context-aggregation.md`](references/session-context-aggregation.md).
 
 Hook payload/output shape:
 
@@ -493,7 +508,8 @@ design rationale remains in the copilot-extensions repository's
   include `toolResult`.
 - **Output:** a single JSON object on stdout. Decision/injection events read it
   -- `preToolUse` (`permissionDecision`/`modifiedArgs`), `postToolUse` /
-  `postToolUseFailure` / `notification` / `sessionStart` (`additionalContext`),
+  `postToolUseFailure` / `notification` / `sessionStart` / `subagentStart`
+  (`additionalContext`),
   `permissionRequest` (`behavior`), `agentStop` (`decision`). Emit **exactly
   one** final JSON object (progress lines `{"type":"progress",...}` are stripped
   first; two decision objects concatenate into invalid JSON and are ignored).

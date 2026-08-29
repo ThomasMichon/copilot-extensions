@@ -267,10 +267,12 @@ skill wins." You engineer it, with four levers:
    clause tells the model when to defer. Broad, imperative triggers ("ALWAYS
    invoke on ANY edit") are an anti-pattern: they shadow narrower peers — don't
    author them, and be wary of enabling plugins that do.
-2. **Your `enabledPlugins` set is the real precedence knob.** The surest way a
-   competing skill doesn't win is to **not enable it** — or to enable it only
-   where it's wanted. Curate deliberately; don't blanket-enable a broad-trigger
-   catalog globally.
+2. **Your `enabledPlugins` set is the availability/precedence knob.** The
+   surest way a competing skill doesn't win is to **not enable it** — or to
+   enable it only where it's wanted. Curate deliberately; don't blanket-enable
+   a broad-trigger catalog globally. The map's JSON key order has no priority
+   meaning and must never be used to arrange plugin hooks or output winners;
+   see `authoring-skills`' hook ordering guidance.
 3. **Scope by settings layer.** Settings compose additively across **user → repo →
    workspace** (`~/.copilot/settings.json`, a repo's `.github/copilot/settings.json`,
    a workspace file). Keep your always-on harness skills at **user** scope so
