@@ -991,6 +991,386 @@ async def test_startup_recovery_does_not_wake_stopped_codespace(
 
 
 @pytest.mark.asyncio
+async def test_startup_reattach_skips_failed_remote_session(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.status = SessionStatus.FAILED
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    ))
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: pytest.fail(
+            "terminal failed sessions must not build a remote startup probe"
+        ),
+    )
+    attach = AsyncMock()
+    monkeypatch.setattr(session_manager, "_reattach_one", attach)
+
+    assert await session_manager.reattach_session_hosts() == 0
+    attach.assert_not_awaited()
+    assert session_manager._host_index.get("s1") is not None
+
+
+@pytest.mark.asyncio
+async def test_explicit_recovery_can_inspect_failed_remote_session(
+    session_manager,
+    monkeypatch,
+):
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.status = SessionStatus.FAILED
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    recovered = HostRecord(
+        session_id="s1",
+        port=0,
+        host_pid=111,
+        child_pid=222,
+        nonce="nonce",
+        boundary="codespace",
+        endpoint={"kind": "codespace"},
+        extra={"remote_authority_v2": True},
+    )
+
+    class FakeSpawner:
+        async def can_inspect_without_wake(self):
+            return True
+
+        async def recover_record(self, session_id):
+            assert session_id == "s1"
+            return recovered
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: FakeSpawner(),
+    )
+
+    assert await session_manager._recover_remote_host_records() == 1
+    assert session_manager._host_index.get("s1") == recovered
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_timeout_is_bounded_below_watchdog(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+
+    class SlowSpawner:
+        async def can_inspect_without_wake(self):
+            await asyncio.sleep(60)
+            return True
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.codespace_transport.build_codespace_spawner",
+        lambda *args, **kwargs: SlowSpawner(),
+    )
+
+    started = asyncio.get_running_loop().time()
+    assert await session_manager._recover_remote_host_records(
+        timeout_seconds=0.01,
+    ) == 0
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < 0.5
+    assert "s1" in session_manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_timeout_covers_attach_work(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+    import os
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(type="command")
+    session = Session("s1", "one", target, "local")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=os.getpid(),
+        child_pid=os.getpid(),
+        nonce="nonce",
+        boundary="local",
+        endpoint={"kind": "local"},
+    ))
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        AsyncMock(return_value=0),
+    )
+
+    async def slow_attach(*_args, **_kwargs):
+        await asyncio.sleep(60)
+        return True
+
+    monkeypatch.setattr(session_manager, "_reattach_one", slow_attach)
+
+    started = asyncio.get_running_loop().time()
+    assert await session_manager.reattach_session_hosts(
+        remote_recovery_timeout=0.02,
+    ) == 0
+    elapsed = asyncio.get_running_loop().time() - started
+
+    assert elapsed < 0.5
+    assert "s1" in session_manager._remote_recovery_inconclusive
+
+
+@pytest.mark.asyncio
+async def test_reattach_cancellation_closes_partial_transport(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    closed = {"sock": False, "streams": False, "client": False}
+
+    class FakeSock:
+        async def attach(self, *_args, **_kwargs):
+            return None
+
+        async def close(self):
+            closed["sock"] = True
+
+    class FakeStreams:
+        reader = object()
+        writer = object()
+        on_transport_lost = None
+
+        async def aclose(self):
+            closed["streams"] = True
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.session_host_client = None
+
+        def mark_transport_lost(self):
+            pass
+
+        async def start_streams(self, *_args, **_kwargs):
+            await asyncio.sleep(60)
+
+        async def shutdown(self):
+            closed["client"] = True
+
+    sock = FakeSock()
+    streams = FakeStreams()
+    monkeypatch.setattr(
+        "agent_bridge.session_host.client.SessionHostClient.connect",
+        AsyncMock(return_value=sock),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_host.acp_adapter.open_acp_streams",
+        AsyncMock(return_value=streams),
+    )
+    monkeypatch.setattr(
+        "agent_bridge.session_manager.AcpClient",
+        FakeClient,
+    )
+    monkeypatch.setattr(session_manager, "_ensure_forward", AsyncMock())
+
+    session = Session("s1", "one", SpawnTarget(type="command"), "local")
+    session.acp_session_id = "acp-1"
+    task = asyncio.create_task(
+        session_manager._reattach_one(
+            SimpleNamespace(
+                session_id="s1",
+                port=1234,
+                host_pid=111,
+                child_pid=222,
+                nonce="nonce",
+            ),
+            session,
+            new_status=session.status,
+        )
+    )
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert closed == {"sock": True, "streams": True, "client": True}
+
+
+@pytest.mark.asyncio
+async def test_new_forward_cancellation_stops_untracked_process(
+    session_manager,
+    monkeypatch,
+):
+    import asyncio
+    from types import SimpleNamespace
+
+    cancelled = False
+
+    class SlowForward:
+        async def establish(self):
+            await asyncio.sleep(60)
+
+        async def cancel(self):
+            nonlocal cancelled
+            cancelled = True
+
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.forward_from_endpoint",
+        lambda _endpoint: SlowForward(),
+    )
+    rec = SimpleNamespace(
+        session_id="s1",
+        boundary="codespace",
+        endpoint={"kind": "codespace", "host": "example"},
+    )
+
+    task = asyncio.create_task(session_manager._ensure_forward(rec))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert cancelled is True
+    assert "s1" not in session_manager._forwards
+
+
+@pytest.mark.asyncio
+async def test_end_failed_launch_pending_recovers_after_restart(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_manager import (
+        RemoteHostRecoveryPendingError,
+        Session,
+    )
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        container={
+            "name": "container-one",
+            "launch_pending_session_id": "s1",
+        },
+    )
+    session = Session("s1", "one", target, "container:one")
+    session.status = SessionStatus.FAILED
+    session_manager._sessions["s1"] = session
+
+    async def inconclusive_recovery(**_kwargs):
+        session_manager._remote_recovery_inconclusive.add("s1")
+        return 0
+
+    recover = AsyncMock(side_effect=inconclusive_recovery)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        recover,
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError):
+        await session_manager.end_session("s1", force=True)
+
+    recover.assert_awaited_once()
+    assert session_manager._sessions["s1"] is session
+    assert session.target.container["launch_pending_session_id"] == "s1"
+
+
+@pytest.mark.asyncio
+async def test_end_inconclusive_remote_session_requires_authority(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from agent_bridge.session_manager import (
+        RemoteHostRecoveryPendingError,
+        Session,
+    )
+    from agent_bridge.transport import SpawnTarget
+
+    target = SpawnTarget(
+        type="command",
+        codespace={"name": "cs-one", "repo": "org/repo"},
+    )
+    session = Session("s1", "one", target, "codespace:cs-one")
+    session.acp_session_id = "acp-1"
+    session_manager._sessions["s1"] = session
+    session_manager._remote_recovery_inconclusive.add("s1")
+
+    async def inconclusive_recovery(**_kwargs):
+        session_manager._remote_recovery_inconclusive.add("s1")
+        return 0
+
+    recover = AsyncMock(side_effect=inconclusive_recovery)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        recover,
+    )
+
+    with pytest.raises(RemoteHostRecoveryPendingError):
+        await session_manager.end_session("s1", force=True)
+
+    recover.assert_awaited_once()
+    assert session_manager._sessions["s1"] is session
+
+
+@pytest.mark.asyncio
 async def test_startup_reattach_skips_existing_stopped_codespace_record(
     session_manager,
     monkeypatch,
