@@ -382,7 +382,11 @@ def test_queued_rotation_expires_before_backend_write(enabled_cache, monkeypatch
         ))
 
     with svc._credential_lock:
-        rotator = threading.Thread(target=rotate, name="queued-rotation")
+        rotator = threading.Thread(
+            target=rotate,
+            name="queued-rotation",
+            daemon=True,
+        )
         rotator.start()
         assert observed_lock.rotator_attempted.wait(timeout=5)
         assert observed_lock.rotator_completed.wait(timeout=5)
