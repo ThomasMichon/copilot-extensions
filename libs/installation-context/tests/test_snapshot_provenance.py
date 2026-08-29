@@ -465,7 +465,13 @@ def _stamp_with_python(
     *,
     snapshot_id: str = "1.0.0",
 ) -> dict[str, object]:
-    return json.loads(_run(REFERENCE_RUNNERS[0], "snapshot-stamp", layout, snapshot_id=snapshot_id).stdout)
+    result = _run(
+        REFERENCE_RUNNERS[0],
+        "snapshot-stamp",
+        layout,
+        snapshot_id=snapshot_id,
+    )
+    return json.loads(result.stdout)
 
 
 def _provenance_path(
@@ -751,7 +757,7 @@ def _run_exemplar_slot_action(
     include_context: bool = True,
     environment_overrides: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    _, prefix, style = exemplar
+    _, _prefix, style = exemplar
     command_prefix, installed_plugin, home = _installed_exemplar(exemplar, tmp_path)
     environment = os.environ.copy()
     environment["HOME"] = str(home)
@@ -2559,7 +2565,7 @@ def test_slot_actions_reject_explicit_empty_payload_expectations(
 ) -> None:
     layout = _receipt_layout(tmp_path)
     _stamp_with_python(layout)
-    _, prefix, style = runner
+    _, _prefix, style = runner
     command = _command(runner, "slot-provision", layout)
     command.extend([_flag(style, flag_name), empty_value])
     environment = os.environ.copy()
@@ -4998,29 +5004,29 @@ def test_snapshot_container_fields_require_json_objects(
     ("runner", "content", "message"),
     _runner_case_matrix(
         (
-        ("invalid-json", b"{", "invalid json"),
-        (
-            "duplicate-key",
-            b'{"schema":"copilot-extensions.snapshot-provenance",'
-            b'"schema":"copilot-extensions.snapshot-provenance","version":1}',
-            "duplicate",
-        ),
-        (
-            "bom",
-            b"\xef\xbb\xbf"
-            b'{"schema":"copilot-extensions.snapshot-provenance","version":1}',
-            "invalid",
-        ),
-        (
-            "string-version",
-            b'{"schema":"copilot-extensions.snapshot-provenance","version":"1"}',
-            "version",
-        ),
-        (
-            "unsupported-version",
-            b'{"schema":"copilot-extensions.snapshot-provenance","version":2}',
-            "version",
-        ),
+            ("invalid-json", b"{", "invalid json"),
+            (
+                "duplicate-key",
+                b'{"schema":"copilot-extensions.snapshot-provenance",'
+                b'"schema":"copilot-extensions.snapshot-provenance","version":1}',
+                "duplicate",
+            ),
+            (
+                "bom",
+                b"\xef\xbb\xbf"
+                b'{"schema":"copilot-extensions.snapshot-provenance","version":1}',
+                "invalid",
+            ),
+            (
+                "string-version",
+                b'{"schema":"copilot-extensions.snapshot-provenance","version":"1"}',
+                "version",
+            ),
+            (
+                "unsupported-version",
+                b'{"schema":"copilot-extensions.snapshot-provenance","version":2}',
+                "version",
+            ),
         ),
         {"invalid-json", "duplicate-key", "bom"},
     ),
