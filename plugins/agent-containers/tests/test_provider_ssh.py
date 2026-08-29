@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -158,6 +159,58 @@ def test_cleanup_targets_only_the_nonce_marked_process_group(monkeypatch):
     assert "kill_marked TERM" in payload
     assert "kill_marked KILL" in payload
     assert '[ "$3" = "$pid" ]' in payload
+
+
+def test_inactive_transport_triggers_target_cleanup(monkeypatch):
+    class Process:
+        def __init__(self):
+            self.stdin = io.BytesIO()
+            self.stdout = io.BytesIO()
+            self.stderr = io.BytesIO()
+            self.returncode = None
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+    class Channel:
+        closed = False
+
+        def recv(self, _size):
+            return b""
+
+        def get_transport(self):
+            return SimpleNamespace(is_active=lambda: False)
+
+        def send_exit_status(self, _status):
+            return None
+
+    process = Process()
+    cleaned = []
+    monkeypatch.setattr(provider_ssh.subprocess, "Popen", lambda *_a, **_k: process)
+    monkeypatch.setattr(
+        provider_ssh,
+        "_cleanup_target_session",
+        lambda target, nonce: cleaned.append((target.name, nonce)),
+    )
+    monkeypatch.setattr(provider_ssh, "_FORCED_EXIT_SECONDS", 0)
+    monkeypatch.setattr(provider_ssh, "_CHANNEL_POLL_SECONDS", 0)
+
+    rc = provider_ssh._run_channel(
+        _target(),
+        provider_ssh.SessionRequest(command="sleep 19", term=None, width=80, height=24),
+        Channel(),
+    )
+
+    assert rc == -15
+    assert len(cleaned) == 1
+    assert cleaned[0][0] == "sandbox-1"
+    assert len(cleaned[0][1]) == 32
 
 
 def test_profile_spec_is_named_hardened_and_provider_owned(monkeypatch, tmp_path):

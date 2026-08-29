@@ -542,6 +542,13 @@ def _cleanup_target_session(target: LiveExecTarget, session_nonce: str) -> None:
         )
 
 
+def _channel_disconnected(channel) -> bool:
+    if channel.closed:
+        return True
+    transport = channel.get_transport()
+    return transport is None or not transport.is_active()
+
+
 def _run_channel(target: LiveExecTarget, request: SessionRequest, channel) -> int:
     session_nonce = secrets.token_hex(16)
     command = _command_for_request(
@@ -615,7 +622,7 @@ def _run_channel(target: LiveExecTarget, request: SessionRequest, channel) -> in
                 disconnected = True
                 terminate_target()
                 break
-            if channel.closed:
+            if _channel_disconnected(channel):
                 disconnected = True
                 disconnected_at = disconnected_at or time.monotonic()
                 if time.monotonic() - disconnected_at >= _FORCED_EXIT_SECONDS:
