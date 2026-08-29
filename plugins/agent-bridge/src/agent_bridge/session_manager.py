@@ -1843,8 +1843,7 @@ class SessionManager:
                     rec.session_id,
                 )
                 continue
-            remaining = deadline - loop.time()
-            if remaining <= 0:
+            if deadline - loop.time() <= 0:
                 self._remote_recovery_inconclusive.add(rec.session_id)
                 log.warning(
                     "Startup Session Host reattach budget exhausted before %s",
@@ -1877,6 +1876,14 @@ class SessionManager:
                 self._reap_host_record(rec, "no adoptable session on reattach")
                 continue
 
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                self._remote_recovery_inconclusive.add(rec.session_id)
+                log.warning(
+                    "Startup Session Host reattach budget exhausted before %s",
+                    rec.session_id,
+                )
+                continue
             try:
                 attached = await asyncio.wait_for(
                     self._reattach_one(
