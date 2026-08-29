@@ -54,7 +54,7 @@
     {
       "name": "context-handoff",
       "description": "Context window monitoring and session handoff - a session-start continuity kernel plus a Copilot CLI extension that tracks token utilization, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover",
-      "version": "0.1.0-dev51",
+      "version": "0.1.0-dev52",
       "source": "plugins/context-handoff"
     },
     {
@@ -78,7 +78,7 @@
     {
       "name": "agent-dispatch",
       "description": "Portable durable agent task-loop + per-host coordinator: a single-writer SQLite work queue (eight-state model with owner-preserving suspension, capability-gated atomic claim, affinity routing, liveness-reconciled recovery) so agents coordinate without push latency or an account per agent.",
-      "version": "0.1.0-dev234",
+      "version": "0.1.0-dev235",
       "source": "plugins/agent-dispatch"
     },
     {
@@ -120,13 +120,13 @@
     {
       "name": "ai-attribution",
       "description": "Ambient publication and AI-attribution safety for git repositories, with portable operator policy, host-qualified local remote hints, an idempotent setup skill, and an on-demand publication workflow. Payload-only: dependency-free Bash and PowerShell session-start hooks plus skills.",
-      "version": "0.1.0-dev3",
+      "version": "0.1.0-dev4",
       "source": "plugins/ai-attribution"
     },
     {
       "name": "delegation-guidance",
       "description": "Coordinator-first task routing for Copilot CLI. A concise session-start kernel encourages early delegation of broad separable research, comparisons, evaluations, domain-tool work, and disjoint bulk edits while keeping synthesis, integration, cohesive implementation, and completion with the coordinating agent. Ships the delegating-work skill.",
-      "version": "0.1.0-dev2",
+      "version": "0.1.0-dev3",
       "source": "plugins/delegation-guidance"
     },
     {

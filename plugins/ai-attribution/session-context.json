@@ -8,7 +8,7 @@
       "pure": true,
       "order": 100,
       "timeoutSeconds": 1,
-      "maxBytes": 544,
+      "maxBytes": 1024,
       "bash": ["scripts/emit-policy.sh", "--aggregate"],
       "powershell": ["scripts/emit-policy.ps1", "--aggregate"]
     }
