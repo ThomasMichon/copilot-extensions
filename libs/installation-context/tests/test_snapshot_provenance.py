@@ -386,6 +386,7 @@ def _run(
     expect_current_absent: bool = False,
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
+    direct: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     command = _command(
         runner,
@@ -400,7 +401,7 @@ def _run(
         expected_current_version=expected_current_version,
         expect_current_absent=expect_current_absent,
     )
-    if runner[0] == "powershell":
+    if runner[0] == "powershell" and not direct:
         global _POWERSHELL_HOST
         if _POWERSHELL_HOST is None:
             assert POWERSHELL is not None
@@ -446,6 +447,7 @@ def _run_slot(
     expected_payload_version: str | None = None,
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
+    direct: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return _run(
         runner,
@@ -456,6 +458,7 @@ def _run_slot(
         expected_payload_version=expected_payload_version,
         environment_overrides=environment_overrides,
         check=check,
+        direct=direct,
     )
 
 
@@ -2365,7 +2368,12 @@ def test_runtime_slot_serializes_concurrent_publishers(
     with ThreadPoolExecutor(max_workers=2) as executor:
         completed = list(
             executor.map(
-                lambda _: _run_slot(runner, "slot-provision", layout),
+                lambda _: _run_slot(
+                    runner,
+                    "slot-provision",
+                    layout,
+                    direct=True,
+                ),
                 range(2),
             )
         )
@@ -2374,6 +2382,7 @@ def test_runtime_slot_serializes_concurrent_publishers(
     assert sorted(result["slotChanged"] for result in results) == [False, True]
     assert len({result["ownership"] for result in results}) == 1
     assert Path(results[0]["ownership"]).is_file()
+
 
 def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
     tmp_path: Path,
