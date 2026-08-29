@@ -22,24 +22,24 @@ import pytest
 # suite with a module-level ImportError.
 pytest.importorskip("textual", reason="textual not installed (optional TUI dep)")
 
-from agent_worktrees.picker_tui import derive, new_picker_enabled  # noqa: E402
-from agent_worktrees.picker_tui import capture as pcap  # noqa: E402
-from agent_worktrees.picker_tui.engine import (  # noqa: E402
+from worktree_manager.production_picker.picker_tui import derive, new_picker_enabled  # noqa: E402
+from worktree_manager.production_picker.picker_tui import capture as pcap  # noqa: E402
+from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
     PickerApp,
     PickerScreen,
 )
-from agent_worktrees.picker_tui.selection import ListSelection  # noqa: E402
+from worktree_manager.production_picker.picker_tui.selection import ListSelection  # noqa: E402
 
 
 def _quit_modal_open(scr):
     """True when the F4 QuitConfirmScreen modal is on the app's screen stack."""
-    from agent_worktrees.picker_tui.engine import QuitConfirmScreen
+    from worktree_manager.production_picker.picker_tui.engine import QuitConfirmScreen
     return any(isinstance(s, QuitConfirmScreen) for s in scr.app.screen_stack)
 
 
 def _prof_modal(scr):
     """The F4 ProfConfirmScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import ProfConfirmScreen
+    from worktree_manager.production_picker.picker_tui.engine import ProfConfirmScreen
     for s in scr.app.screen_stack:
         if isinstance(s, ProfConfirmScreen):
             return s
@@ -53,7 +53,7 @@ def _prof_modal_open(scr):
 
 def _task_menu(scr):
     """The F4 TaskMenuScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import TaskMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import TaskMenuScreen
     for s in scr.app.screen_stack:
         if isinstance(s, TaskMenuScreen):
             return s
@@ -67,7 +67,7 @@ def _task_menu_open(scr):
 
 def _cfg_menu(scr):
     """The F4 CfgMenuScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import CfgMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import CfgMenuScreen
     for s in scr.app.screen_stack:
         if isinstance(s, CfgMenuScreen):
             return s
@@ -81,7 +81,7 @@ def _cfg_menu_open(scr):
 
 def _maint_menu(scr):
     """The F4 MaintMenuScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import MaintMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import MaintMenuScreen
     for s in scr.app.screen_stack:
         if isinstance(s, MaintMenuScreen):
             return s
@@ -95,7 +95,7 @@ def _maint_menu_open(scr):
 
 def _sub_menu(scr):
     """The F4 SubMenuScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
     for s in scr.app.screen_stack:
         if isinstance(s, SubMenuScreen):
             return s
@@ -109,7 +109,7 @@ def _sub_menu_open(scr):
 
 def _scope_dlg(scr):
     """The F4 ScopeDlgScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import ScopeDlgScreen
+    from worktree_manager.production_picker.picker_tui.engine import ScopeDlgScreen
     for s in scr.app.screen_stack:
         if isinstance(s, ScopeDlgScreen):
             return s
@@ -123,7 +123,7 @@ def _scope_dlg_open(scr):
 
 def _progress_screen(scr):
     """The F4 ProgressScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import ProgressScreen
+    from worktree_manager.production_picker.picker_tui.engine import ProgressScreen
     for s in scr.app.screen_stack:
         if isinstance(s, ProgressScreen):
             return s
@@ -137,7 +137,7 @@ def _progress_open(scr):
 
 def _msgview_screen(scr):
     """The F4 MsgViewScreen instance on the app's screen stack, or None."""
-    from agent_worktrees.picker_tui.engine import MsgViewScreen
+    from worktree_manager.production_picker.picker_tui.engine import MsgViewScreen
     for s in scr.app.screen_stack:
         if isinstance(s, MsgViewScreen):
             return s
@@ -474,7 +474,7 @@ def test_worktrees_view_component_renders_body():
     (``("BTN", 0)``) and one ``("L", i)`` stop per worktree with grouped sections
     pinned. The multi-select state (``wt_sel`` / ``wt_anchor``) deliberately
     stays on the engine (threads through the shared focus/dispatch machinery)."""
-    from agent_worktrees.picker_tui.engine import WorktreesView
+    from worktree_manager.production_picker.picker_tui.engine import WorktreesView
     src = _maint_source()
 
     async def run():
@@ -1917,7 +1917,7 @@ def test_profiles_apply_confirm_cancel_is_noop():
 def _profiles_source_unavailable():
     """Profiles fixture where the Emancipation-Cube host column fails to load, as an
     old/unreachable remote does over SSH (#1370)."""
-    from agent_worktrees.picker_tui import profiles_io
+    from worktree_manager.production_picker.picker_tui import profiles_io
     src = _profiles_source()
     inner = src.load_profile_column
 
@@ -1976,7 +1976,7 @@ def test_profiles_view_component_renders_body():
     methods are gone; (b) the Profiles pivot's body rows (the ``("PR", i)``
     target stops + the ``("BTN", 0)`` Apply row) are emitted -- i.e. build_body
     routes through the component and it produces the grid."""
-    from agent_worktrees.picker_tui.engine import ProfilesView
+    from worktree_manager.production_picker.picker_tui.engine import ProfilesView
     src = _profiles_source()
 
     async def run():
@@ -2027,8 +2027,8 @@ def test_maintenance_view_component_renders_body():
     through the component, which emits the select-all / group-header / data-row
     stops and the Cleanup/Sync button row -- with the group sections still
     pinned (the component opens them via ``add(new_section=...)``)."""
-    from agent_worktrees.picker_tui import engine as eng_mod
-    from agent_worktrees.picker_tui.engine import MaintenanceView
+    from worktree_manager.production_picker.picker_tui import engine as eng_mod
+    from worktree_manager.production_picker.picker_tui.engine import MaintenanceView
     src = _maint_source()
 
     async def run():
@@ -2171,8 +2171,8 @@ def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
     import io
     import sys
 
-    import agent_worktrees.picker_tui as pkg
-    from agent_worktrees.picker_tui import engine as eng
+    import worktree_manager.production_picker.picker_tui as pkg
+    from worktree_manager.production_picker.picker_tui import engine as eng
 
     seen = {}
 
@@ -2207,8 +2207,8 @@ def test_run_tui_picker_no_redirect_in_real_terminal(monkeypatch):
     import io
     import sys
 
-    import agent_worktrees.picker_tui as pkg
-    from agent_worktrees.picker_tui import engine as eng
+    import worktree_manager.production_picker.picker_tui as pkg
+    from worktree_manager.production_picker.picker_tui import engine as eng
 
     seen = {}
 
@@ -2239,8 +2239,8 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
     import pytest
 
     from agent_worktrees import config as cfg
-    import agent_worktrees.picker_tui as pkg
-    from agent_worktrees.picker_tui import engine as eng
+    import worktree_manager.production_picker.picker_tui as pkg
+    from worktree_manager.production_picker.picker_tui import engine as eng
 
     monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
 
@@ -2272,7 +2272,7 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
 def test_picker_crash_log_prunes_to_newest(monkeypatch, tmp_path):
     """The crash-log writer keeps only the newest 25 logs so they never grow
     unbounded."""
-    import agent_worktrees.picker_tui as pkg
+    import worktree_manager.production_picker.picker_tui as pkg
 
     logs_dir = tmp_path / "logs"
     logs_dir.mkdir()
@@ -2384,7 +2384,7 @@ def test_reconcile_prs_counts_terminal_transitions(monkeypatch):
     those that moved to a terminal state, skipping no-PR / already-terminal."""
     from pathlib import Path
 
-    from agent_worktrees.picker_tui import data_local
+    from worktree_manager.production_picker.picker_tui import data_local
 
     class FakePR:
         def __init__(self, number, state):
@@ -2473,7 +2473,7 @@ def test_picker_background_pr_reconcile_no_change_no_reload():
 def test_maybe_repoll_gating(monkeypatch):
     """#1421: _maybe_repoll fires once per interval, and is suppressed on the
     Profiles tab, during a progress dialog, and when POLL_SECS <= 0."""
-    from agent_worktrees.picker_tui import engine as eng
+    from worktree_manager.production_picker.picker_tui import engine as eng
 
     class FakeLoader:
         def __init__(self):
@@ -2692,7 +2692,7 @@ def test_tui_live_multi_machine():
 
 def test_live_loader_classify_fallback(monkeypatch):
     """A remote that rejects --classify is retried without it (older remotes)."""
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     calls = []
 
@@ -2872,7 +2872,7 @@ def test_submenu_nomux_offered_for_resume_and_open():
     toggle row is offered for a stopped worktree's Resume, not just Open. A menu
     with no launch verb (or only Bare resume, which implies a mux-in-HOME) does
     not carry it. Construction-only, so it is deterministic (no pilot)."""
-    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
 
     rec = {"raw": {"id": "wtX"}, "id4": "wtX", "title": "t"}
     # Open present -> offered (unchanged behaviour).
@@ -2963,9 +2963,9 @@ def test_submenu_offers_messages_only_with_a_session():
 def test_msgview_local_load_populates_and_closes(monkeypatch):
     """Enter on 'Messages' loads the worktree's latest-session tail in-process
     (local target) into the viewer overlay, and Esc closes it."""
-    import agent_worktrees.config as _cfg
-    import agent_worktrees.sessions as _sessions
-    import agent_worktrees.tracking as _tracking
+    from worktree_manager.production_picker import config as _cfg
+    from worktree_manager.production_picker import sessions as _sessions
+    from worktree_manager.production_picker import tracking as _tracking
 
     monkeypatch.setattr(_cfg, "tracking_dir", lambda: __import__("pathlib").Path("."))
     monkeypatch.setattr(
@@ -3038,7 +3038,7 @@ def test_submenu_stop_starts_single_item_restart_run(monkeypatch):
     """Enter on 'Stop' launches a one-item op=restart progress run through the
     real maintenance executor path (not a mock note)."""
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", "1")
-    from agent_worktrees.picker_tui import maintenance as mnt
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
 
     started = {}
 
@@ -3112,7 +3112,7 @@ def test_new_worktree_decision_exits():
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
-            from agent_worktrees.picker_tui.engine import FocusGroup
+            from worktree_manager.production_picker.picker_tui.engine import FocusGroup
             # optmenu opens focused on the Create button group (native focus).
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
             assert all(not o["on"] for o in dlg._dlg["opts"])
@@ -3248,7 +3248,7 @@ def test_scope_dialog_uses_native_selectionlist_and_focusgroup():
     ``section``/``idx``/``bidx`` over a static ``Panel``. Tab moves between the
     two. Palette pinned to ``$surface`` (regression guard for the dark-blue
     modal)."""
-    from agent_worktrees.picker_tui.engine import FocusGroup
+    from worktree_manager.production_picker.picker_tui.engine import FocusGroup
     from textual.widgets import SelectionList
     src = _maint_source()
 
@@ -3287,7 +3287,7 @@ def _drain(ex, timeout=3.0):
 
 
 def test_maintenance_executor_cleanup_states():
-    from agent_worktrees.picker_tui import maintenance as mnt
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
 
     def boom():
         raise RuntimeError("kaboom")
@@ -3308,7 +3308,7 @@ def test_maintenance_executor_cleanup_states():
 
 
 def test_maintenance_executor_sync_uptodate_is_success():
-    from agent_worktrees.picker_tui import maintenance as mnt
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
 
     tasks = [
         ("a", lambda: {"updated": True, "reason": "updated", "behind": 2}),
@@ -3326,7 +3326,7 @@ def test_maintenance_executor_sync_uptodate_is_success():
 def test_maintenance_executor_restart_states():
     """restart maps on the primitive's ``ok``: a graceful/hard/none stop is
     success; a failed hard-kill is a failed item."""
-    from agent_worktrees.picker_tui import maintenance as mnt
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
 
     tasks = [
         ("a", lambda: {"had_session": True, "method": "graceful", "ok": True}),
@@ -3346,7 +3346,7 @@ def test_maintenance_executor_restart_states():
 def test_make_task_local_restart_calls_primitive(monkeypatch):
     """A local restart task routes to sessions.restart_worktree_copilot with
     the worktree id -- not the cleanup/sync helpers."""
-    from agent_worktrees.picker_tui import maintenance as mnt
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
     from agent_worktrees import sessions
 
     seen = {}
@@ -3370,7 +3370,7 @@ def test_make_task_local_restart_calls_primitive(monkeypatch):
 def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
     """Beyond-clean cleanup requires an extra confirm, then runs the executor."""
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", "1")
-    from agent_worktrees.picker_tui import maintenance as mnt
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
 
     started = {}
 
@@ -3450,7 +3450,7 @@ def test_live_loader_spawn_tracks_and_unregisters():
     tracked process behind once it completes."""
     import sys
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     loader = data_ssh.LiveLoader(sources=[])
     proc = loader._spawn([sys.executable, "-c", "print('hi')"], timeout=15)
@@ -3466,7 +3466,7 @@ def test_live_loader_spawn_after_cancel_raises():
 
     import pytest
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     loader = data_ssh.LiveLoader(sources=[])
     loader.cancel()
@@ -3480,7 +3480,7 @@ def test_live_loader_cancel_kills_inflight_prefetch():
     import threading
     import time
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     loader = data_ssh.LiveLoader(sources=[])
     result = {}
@@ -3515,8 +3515,8 @@ def test_live_loader_cancel_kills_inflight_prefetch():
 
 def test_screen_on_unmount_cancels_loader():
     """The picker's teardown hook cancels the loader (no orphaned prefetch)."""
-    from agent_worktrees.picker_tui import data_local
-    from agent_worktrees.picker_tui.engine import PickerScreen
+    from worktree_manager.production_picker.picker_tui import data_local
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     screen = PickerScreen(data_local, live=True)
     cancelled = {"v": False}
@@ -3533,7 +3533,7 @@ def test_screen_on_unmount_cancels_loader():
 def test_update_indicator_focus_glyph_and_refresh():
     """The launcher-stage update state drives the version glyph, the focusable
     refresh stop, and the refresh decision (#1430)."""
-    from agent_worktrees.picker_tui.engine import PickerScreen
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     src = _fixture_source()
     s = PickerScreen(src, live=False)
@@ -3576,7 +3576,7 @@ def test_update_icon_is_its_own_region_not_the_pivots():
     zone 'V' and double-highlighted. Focusing the update icon ("UPD", 0) must
     leave the pivot row rendered exactly as when it is unfocused, and only the
     pivot stop ("V", 0) may light the pivots."""
-    from agent_worktrees.picker_tui.engine import PickerScreen
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     s = PickerScreen(_fixture_source(), live=False)
     s.setup()
@@ -3700,7 +3700,7 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     Regression guard for the freeze where a slow local load held the event-loop
     thread inside on_mount -> no paint, no arrow keys -- until every source
     (including the SSH fan-out) had resolved."""
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     sentinel = [{"id4": "abcd", "machine": "anomalous-potato", "env": "Win"}]
     gate = threading.Event()
@@ -3736,7 +3736,7 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
 def test_live_loader_reload_local_refetches(monkeypatch):
     """reload() re-fetches the local source on a thread so a post-maintenance
     refresh streams back in without blocking the UI (#1421 live re-render)."""
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     # The local loader is two-phase (fast classify=False, then full
     # classify=True), so a single load event calls data_local.load more than
@@ -3769,7 +3769,7 @@ def test_live_loader_local_two_phase_fast_then_fill(monkeypatch):
     """Local tab shows fast provisional rows first (classify=False), then swaps
     in the authoritative git-classified rows (classify=True) -- the perf fix so
     a slow/stalled git classification never blocks the whole tab."""
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     fast_gate = threading.Event()
     full_gate = threading.Event()
@@ -3856,7 +3856,7 @@ def test_nf_compose_is_the_sole_path(monkeypatch):
     PickerScreen always composes its segment/region widgets, regardless of the
     now-ignored env, and the ``_nf_enabled`` attribute is gone. (``render()``
     survives only as the deterministic capture seam -- see capture.py.)"""
-    from agent_worktrees.picker_tui.engine import _PickerSegment
+    from worktree_manager.production_picker.picker_tui.engine import _PickerSegment
     src = _fixture_source()
 
     async def _composes():
@@ -3881,7 +3881,7 @@ def test_nf_compose_skeleton_mounts_identical_segments(monkeypatch):
     widgets (header split into title + pivots; body split into fixed chrome +
     scrolling data). At the top of an unscrolled list the composed tree is
     byte-identical to ``render()``."""
-    from agent_worktrees.picker_tui.engine import (
+    from worktree_manager.production_picker.picker_tui.engine import (
         _PickerBodyData, _PickerButtons, _PickerMachine, _PickerSegment)
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _fixture_source()
@@ -3926,7 +3926,7 @@ def test_nf_focus_bridge_tab_moves_between_regions(monkeypatch):
     """NF3 (#88): with the toggle on, the chrome + data regions are focusable
     widgets. Native Tab cycles through them via ``region_heads``, and native
     focus stays mirrored onto whatever region ``sel`` names (the focus bridge)."""
-    from agent_worktrees.picker_tui.engine import _FocusRegion
+    from worktree_manager.production_picker.picker_tui.engine import _FocusRegion
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NF", "1")
     src = _fixture_source()
 
@@ -3963,7 +3963,7 @@ def test_nf_focus_bridge_tab_moves_between_regions(monkeypatch):
 def test_nf_pointer_click_selects_data_row(monkeypatch):
     """NF4 (#88): clicking a data row in the compose tree points sel at that row
     (pointer parity the manual model never had), and focuses the data region."""
-    from agent_worktrees.picker_tui.engine import _PickerBodyData
+    from worktree_manager.production_picker.picker_tui.engine import _PickerBodyData
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _fixture_source()
 
@@ -3999,7 +3999,7 @@ def test_nf_pointer_click_selects_data_row(monkeypatch):
 def test_nf_pointer_double_click_opens_row(monkeypatch):
     """NF4 (#88): double-clicking a worktree row activates it (opens the submenu)
     -- the pointer parallel to Enter."""
-    from agent_worktrees.picker_tui.engine import _PickerBodyData, SubMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import _PickerBodyData, SubMenuScreen
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _fixture_source()
 
@@ -4030,7 +4030,7 @@ def test_size_mb_handles_non_hex_id():
     here), but the compose/NF path renders the maintenance size counter eagerly
     over *any* id (test fixtures use non-hex ids like 'cl00'), so a bad parse
     would crash the toggle-ON maintenance pivot."""
-    from agent_worktrees.picker_tui.engine import _size_mb
+    from worktree_manager.production_picker.picker_tui.engine import _size_mb
     # Hex ids keep the exact historical value (120 + int(id,16) % 300).
     assert _size_mb({"id4": "aaaa"}) == 120 + (0xAAAA % 300)
     assert _size_mb({"id4": "00ff"}) == 120 + (0x00FF % 300)
@@ -4048,7 +4048,7 @@ def test_nf_maintenance_pivot_renders_under_toggle(monkeypatch):
     size counter through the compose/segment path without raising -- the native
     path that the flip makes the default. Guards the ``_size_mb`` hardening end
     to end (the fixture uses non-hex ids)."""
-    from agent_worktrees.picker_tui.engine import _PickerBodyData
+    from worktree_manager.production_picker.picker_tui.engine import _PickerBodyData
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "0")
     src = _maint_source()
 
@@ -4079,7 +4079,7 @@ def test_native_list_body_mounts_and_navigates(monkeypatch):
     Tab lands focus on it, and native up/down move the cursor -- mirrored into the
     engine's `sel` (the swappable native-list slice; default OFF keeps the
     text-line body)."""
-    from agent_worktrees.picker_tui.engine import _PickerNativeData
+    from worktree_manager.production_picker.picker_tui.engine import _PickerNativeData
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     src = _fixture_source()
 
@@ -4122,7 +4122,7 @@ def test_native_list_multiselect_and_activation(monkeypatch):
     multi-select + activation (routed through on_key for non-navigation keys):
     Space toggles the focused row's multi-select, Shift+Down range-selects, and
     Enter activates the row (opens its submenu)."""
-    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     src = _fixture_source()
 
@@ -4166,7 +4166,7 @@ def test_native_list_default_with_opt_out(monkeypatch):
     """NF5-5 (#88): the native OptionList body is now the **default**; setting
     ``AGENT_WORKTREES_PICKER_NATIVE_LIST`` to a falsey value opts back to the
     text-line ``_PickerBodyData`` (the rollback hatch)."""
-    from agent_worktrees.picker_tui.engine import (
+    from worktree_manager.production_picker.picker_tui.engine import (
         _PickerBodyData, _PickerNativeData)
     src = _fixture_source()
 
@@ -4193,7 +4193,7 @@ def test_native_list_maintenance_grid_parity(monkeypatch):
     Maintenance pivot too (group sections + the select-all/data-row structure),
     not just Worktrees -- both bodies derive from the same `_build_data_vrows`
     source, so the swap stays a drop-in across pivots."""
-    from agent_worktrees.picker_tui import capture as _pcap
+    from worktree_manager.production_picker.picker_tui import capture as _pcap
 
     async def to_maint(scr, pilot):
         scr.machine_idx = scr.local_index()
@@ -4221,8 +4221,8 @@ def test_native_list_sticky_header(monkeypatch):
     import datetime
     import types
 
-    from agent_worktrees.picker_tui import derive
-    from agent_worktrees.picker_tui.engine import _PickerStickyHeader
+    from worktree_manager.production_picker.picker_tui import derive
+    from worktree_manager.production_picker.picker_tui.engine import _PickerStickyHeader
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
 
     def _tall_src():
@@ -4278,8 +4278,8 @@ def test_native_list_sticky_no_reflow_flicker(monkeypatch):
     import datetime
     import types
 
-    from agent_worktrees.picker_tui import derive
-    from agent_worktrees.picker_tui.engine import _PickerStickyHeader
+    from worktree_manager.production_picker.picker_tui import derive
+    from worktree_manager.production_picker.picker_tui.engine import _PickerStickyHeader
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
 
     def _multi_section_src():
@@ -4369,7 +4369,7 @@ def test_native_list_no_rowwrap_and_incremental_repaint(monkeypatch):
 
     from rich.text import Text as _Text
 
-    from agent_worktrees.picker_tui import derive
+    from worktree_manager.production_picker.picker_tui import derive
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     # Freeze the 0.1s pulse tick: ``pulse`` is part of the native-list signature
     # (it drives the live ● indicator), so a tick coinciding with a keypress
@@ -4466,7 +4466,7 @@ def test_native_list_checkbox_click_toggles(monkeypatch):
     row toggles its multi-select *without* activating it; clicking the row body
     activates (opens the submenu). The mouse multi-select the always-visible
     checkbox affords."""
-    from agent_worktrees.picker_tui.engine import SubMenuScreen
+    from worktree_manager.production_picker.picker_tui.engine import SubMenuScreen
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_NATIVE_LIST", "1")
     src = _fixture_source()
 
@@ -4712,8 +4712,8 @@ def test_banner_version_tracks_build_info(monkeypatch):
     Regression for the banner that silently froze at ``1.5.3-dev69`` while the
     package shipped dev97: a stale constant must not be able to reappear.
     """
-    from agent_worktrees import _build_info
-    from agent_worktrees.picker_tui import engine
+    from worktree_manager.production_picker import _build_info
+    from worktree_manager.production_picker.picker_tui import engine
 
     monkeypatch.setitem(_build_info.BUILD_INFO, "version", "9.9.9-devTEST")
     assert engine._resolve_version() == "9.9.9-devTEST"
@@ -4722,8 +4722,8 @@ def test_banner_version_tracks_build_info(monkeypatch):
 def test_banner_version_falls_back_when_build_info_blank(monkeypatch):
     """With no build-info version, fall back to installed metadata / ``dev`` --
     never the old frozen ``1.5.3-dev69`` literal."""
-    from agent_worktrees import _build_info
-    from agent_worktrees.picker_tui import engine
+    from worktree_manager.production_picker import _build_info
+    from worktree_manager.production_picker.picker_tui import engine
 
     monkeypatch.setattr(_build_info, "BUILD_INFO", {}, raising=False)
     v = engine._resolve_version()
@@ -4740,7 +4740,7 @@ def test_run_detaches_console_stdin(monkeypatch):
     """
     import subprocess
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     seen = {}
 
@@ -4758,7 +4758,7 @@ def test_live_loader_spawn_detaches_console_stdin(monkeypatch):
     stdin so a backgrounded ssh load can't swallow keyboard input."""
     import subprocess
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     seen = {}
 
@@ -4785,7 +4785,7 @@ def test_maintenance_ssh_detaches_console_stdin(monkeypatch):
     detach stdin too (same input-theft class as the load fan-out)."""
     import subprocess
 
-    from agent_worktrees.picker_tui import maintenance
+    from worktree_manager.production_picker.picker_tui import maintenance
 
     seen = {}
 
@@ -4831,7 +4831,7 @@ def test_run_spawns_ssh_off_console_on_windows(monkeypatch):
     failing ssh can't clear the console VT-input mode and break arrows (#148)."""
     import subprocess
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     seen = {}
 
@@ -4853,7 +4853,7 @@ def test_run_no_creationflags_on_posix(monkeypatch):
     """On POSIX ``_run`` passes no Windows creationflags (would error)."""
     import subprocess
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     seen = {}
 
@@ -4876,7 +4876,7 @@ def test_spawn_spawns_ssh_off_console_on_windows(monkeypatch):
     alongside the existing CREATE_NEW_PROCESS_GROUP."""
     import subprocess
 
-    from agent_worktrees.picker_tui import data_ssh
+    from worktree_manager.production_picker.picker_tui import data_ssh
 
     seen = {}
 
@@ -4907,7 +4907,7 @@ def test_maintenance_ssh_off_console_on_windows(monkeypatch):
     """Remote Maintenance ssh ops must also run off our console on Windows."""
     import subprocess
 
-    from agent_worktrees.picker_tui import maintenance
+    from worktree_manager.production_picker.picker_tui import maintenance
 
     seen = {}
 
@@ -4984,7 +4984,7 @@ def _seed_fake_tasks(scr, rows):
 
 
 def test_registered_pivot_inserted_between_worktrees_and_maintenance(tmp_path, monkeypatch):
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5007,7 +5007,7 @@ def test_registered_pivot_inserted_between_worktrees_and_maintenance(tmp_path, m
 
 
 def test_registered_pivot_lists_and_navigates(tmp_path, monkeypatch):
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5058,7 +5058,7 @@ def test_registered_pivot_groups_by_status_group(tmp_path, monkeypatch):
     task moves from Blocked to Started rather than vanishing."""
     import json as _json
 
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5117,8 +5117,8 @@ def test_tasks_view_component_renders_body(tmp_path, monkeypatch):
     sections pinned and renders the task titles. The read-only task data +
     pivot context stay on the engine (the pivot is background-loaded, no editable
     state to move)."""
-    from agent_worktrees.picker_tui import pivots as pivots_mod
-    from agent_worktrees.picker_tui.engine import TasksView
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import TasksView
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5203,7 +5203,7 @@ def test_registered_pivot_columns_and_summary_render(tmp_path, monkeypatch):
     """D1: a pivot declaring ``columns`` renders a table (column header + one row
     per entry across the declared columns) and its ``summary`` template renders a
     header line filled from the provider's summary dict."""
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5253,7 +5253,7 @@ def test_registered_pivot_banner_renders(tmp_path, monkeypatch):
     prominent alert line rendered above the list -- shown even when the entry
     list is EMPTY (the missing-``codespace``-scope case, where the pivot would
     otherwise look like an opaque empty tab)."""
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5293,7 +5293,7 @@ def test_banner_line_helper_levels():
     and maps ``banner_level`` to an icon (⚠ warn / ✗ error / ℹ info)."""
     # Resolve the render component that owns _banner_line regardless of its
     # exact class name (it lives beside _summary_line).
-    import agent_worktrees.picker_tui.engine as eng_mod
+    import worktree_manager.production_picker.picker_tui.engine as eng_mod
     holder = None
     for obj in vars(eng_mod).values():
         if isinstance(obj, type) and hasattr(obj, "_banner_line") and hasattr(obj, "_summary_line"):
@@ -5318,8 +5318,8 @@ def test_screenshot_pivot_selection_and_wait(tmp_path, monkeypatch):
     import json as _json
     import sys as _sys
 
-    from agent_worktrees.picker_tui import capture as _cap
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import capture as _cap
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5364,7 +5364,7 @@ def test_registered_pivot_account_scope_and_subtitle(tmp_path, monkeypatch):
     """An account-scoped columns pivot with a subtitle field: the header counts
     items ('N codespaces', not 'on <machine>') and each row gets a dim second
     metadata line from the subtitle field."""
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5416,7 +5416,7 @@ def test_registered_pivot_account_scope_and_subtitle(tmp_path, monkeypatch):
 
 
 def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch):
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5468,7 +5468,7 @@ def test_registered_pivot_action_menu_runs_and_invalidates(tmp_path, monkeypatch
 def test_progress_action_stream_key_closes_and_cancels():
     """D4 unit: _key_progress on an action-stream run closes a finished run and
     cancels a running one (invoking the recorded cancel callback)."""
-    from agent_worktrees.picker_tui import engine as eng_mod
+    from worktree_manager.production_picker.picker_tui import engine as eng_mod
 
     scr = eng_mod.PickerScreen.__new__(eng_mod.PickerScreen)
     scr.debug = ""
@@ -5499,7 +5499,7 @@ def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypat
     into the live ProgressScreen (action-stream kind), reaching done."""
     import json
     import sys
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     script = tmp_path / "recycle.py"
     script.write_text(
@@ -5538,7 +5538,7 @@ def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypat
             await pilot.pause()
             reg = scr._reg_pivot()
             # A real runtime (not the _FakeRuntime) so run_action_stream exists.
-            from agent_worktrees.picker_tui import tasks as tasks_mod
+            from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
             scr._pivot_runtimes[reg.name] = tasks_mod.RegisteredPivotRuntime(reg)
 
             # Run the progress action; it routes to the action-stream modal.
@@ -5566,7 +5566,7 @@ def test_registered_pivot_conditional_actions_filter_by_when(tmp_path, monkeypat
     """D3: a pivot action's `when` gate hides the verb for rows that don't match
     and shows it for rows that do -- so the sub-menu is row-specific."""
     import json
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5655,8 +5655,8 @@ def test_steering_card_and_form_actions_gate_and_drive(tmp_path, monkeypatch):
     appear only on an awaiting-steer row; activating them opens the native card
     detail / elicitation modals; submitting the form runs the substituted steer
     argv via the runtime (no verdict path)."""
-    from agent_worktrees.picker_tui import pivots as pivots_mod
-    from agent_worktrees.picker_tui.engine import (
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
         PivotCardScreen,
         PivotFormScreen,
         _AutoExpandTextArea,
@@ -5749,8 +5749,8 @@ def test_steer_submit_is_offloaded_off_the_render_flow(tmp_path, monkeypatch):
     worker finish and apply on the loop."""
     import threading
 
-    from agent_worktrees.picker_tui import pivots as pivots_mod
-    from agent_worktrees.picker_tui.engine import (
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import (
         PivotFormScreen,
         _AutoExpandTextArea,
     )
@@ -5830,9 +5830,9 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
     gate clears the loading state and the verbs are refined."""
     import threading
 
-    from agent_worktrees import config as _cfg
-    from agent_worktrees import sessions as _sessions
-    from agent_worktrees import tracking as _tracking
+    from worktree_manager.production_picker import config as _cfg
+    from worktree_manager.production_picker import sessions as _sessions
+    from worktree_manager.production_picker import tracking as _tracking
 
     src = _fixture_source()
     wt_id = "anomalous-potato-win-20260627-aaaa"
@@ -5888,9 +5888,9 @@ def test_actions_menu_liveness_verify_is_offloaded(tmp_path, monkeypatch):
 
 def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatch):
     """A slow menu probe may finish after Resume has detached the picker screen."""
-    from agent_worktrees import config as _cfg
-    from agent_worktrees import sessions as _sessions
-    from agent_worktrees import tracking as _tracking
+    from worktree_manager.production_picker import config as _cfg
+    from worktree_manager.production_picker import sessions as _sessions
+    from worktree_manager.production_picker import tracking as _tracking
 
     src = _verb_fixture_source()
     wt_id = "anomalous-potato-win-20260627-stop"
@@ -5956,7 +5956,7 @@ def test_actions_worker_finishes_quietly_after_resume_exits(tmp_path, monkeypatc
 
 
 def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -5996,7 +5996,7 @@ def test_registered_pivot_switch_pivot_cycles_left_rail(tmp_path, monkeypatch):
 
 def test_worktree_action_matches_when_filter():
     """`when` gates a contributed worktree action to matching records."""
-    from agent_worktrees.picker_tui import pivots
+    from worktree_manager.production_picker.picker_tui import pivots
 
     def act(when):
         return pivots.WorktreeAction(key="k", label="L", run=("x",),
@@ -6026,7 +6026,7 @@ def test_contributed_worktree_action_in_submenu_and_runs(tmp_path, monkeypatch):
     """A manifest with only `worktree_actions` (no list pivot) augments a
     worktree's Enter sub-menu; `when` filters; Enter runs it with a substituted
     context and never shadows a built-in verb (#B)."""
-    from agent_worktrees.picker_tui import tasks
+    from worktree_manager.production_picker.picker_tui import tasks
 
     pv = tmp_path / "pivots"
     _write_wt_actions(pv, [
@@ -6096,7 +6096,7 @@ def test_contributed_config_section_in_cfgmenu_and_runs(tmp_path, monkeypatch):
     """A manifest with only `config_sections` (no list pivot) augments the ⚙
     Configuration menu after built-in Profiles; Enter runs it with a substituted
     context and never displaces Profiles (#B slice 2)."""
-    from agent_worktrees.picker_tui import tasks
+    from worktree_manager.production_picker.picker_tui import tasks
 
     pv = tmp_path / "pivots"
     _write_config_sections(pv, [
@@ -6174,7 +6174,7 @@ def test_palette_no_stray_shade_literals():
     literals can't silently creep back in."""
     from pathlib import Path
 
-    from agent_worktrees.picker_tui import engine
+    from worktree_manager.production_picker.picker_tui import engine
 
     routed = ("grey70", "grey78", "grey62", "grey54")
     offenders = []
@@ -6232,7 +6232,7 @@ def test_manual_overlay_seam_is_retired():
 def test_canonical_key_folds_framework_aliases():
     """Item F2 (#88): framework key-name aliases fold to one canonical token;
     unaliased keys pass through unchanged."""
-    from agent_worktrees.picker_tui.engine import canonical_key
+    from worktree_manager.production_picker.picker_tui.engine import canonical_key
 
     assert canonical_key("left_square_bracket") == "["
     assert canonical_key("right_square_bracket") == "]"
@@ -6523,7 +6523,7 @@ def test_msgview_overlay_lists_full_session_ids_and_titles():
             # The viewer is a native MsgViewScreen now (#88 F4): its panel
             # renders the engine-owned msgview state. Inspect the panel text
             # directly (PickerScreen.render no longer draws the overlay).
-            from agent_worktrees.picker_tui.engine import MsgViewScreen
+            from worktree_manager.production_picker.picker_tui.engine import MsgViewScreen
             out = MsgViewScreen(scr)._panel().renderable.plain
             # Full ids are present (untruncated) for terminal copy.
             assert full_head in out
@@ -6599,7 +6599,7 @@ def test_registered_pivot_grouped_columns_and_task_correlation(tmp_path, monkeyp
     worktree's title (the TASK column) via the Picker's worktree records."""
     import json as _json
 
-    from agent_worktrees.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
 
     d = tmp_path / "pivots"
     d.mkdir()
@@ -6649,7 +6649,7 @@ def test_registered_pivot_grouped_columns_and_task_correlation(tmp_path, monkeyp
 
 
 def test_palette_style_reuses_worktree_state_palette():
-    from agent_worktrees.picker_tui.engine import (
+    from worktree_manager.production_picker.picker_tui.engine import (
         C_STATE,
         _palette_style,
     )
@@ -6669,8 +6669,8 @@ def test_codespaces_state_column_is_colour_coded(tmp_path, monkeypatch):
     palette (a RUNNING cell carries the ACTIVE colour in the ANSI capture)."""
     import json as _json
 
-    from agent_worktrees.picker_tui import pivots as pivots_mod
-    from agent_worktrees.picker_tui.engine import C_STATE
+    from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine import C_STATE
 
     d = tmp_path / "pivots"
     d.mkdir()

@@ -1,5 +1,4 @@
-// Rasterize a picker capture SVG to PNG -- the standing NF A/B / demo render
-// flow (agent-worktrees #88).
+// Rasterize a Worktree Manager Picker capture SVG to PNG.
 //
 // WHY THIS EXISTS (do not "simplify" by swapping the font): the picker's capture
 // SVG is emitted by Rich, which positions every glyph at an x-coordinate computed
@@ -14,6 +13,7 @@ import { Resvg } from '@resvg/resvg-js';
 import fs from 'node:fs';
 import path from 'node:path';
 import https from 'node:https';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -25,20 +25,23 @@ const FONTS = {
     'https://cdnjs.cloudflare.com/ajax/libs/firacode/6.2.0/ttf/FiraCode-Bold.ttf',
 };
 
-function download(url, dest) {
-  return new Promise((resolve, reject) => {
-    const f = fs.createWriteStream(dest);
-    https
-      .get(url, (res) => {
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode} for ${url}`));
-          return;
-        }
-        res.pipe(f);
-        f.on('finish', () => f.close(resolve));
-      })
-      .on('error', reject);
-  });
+async function download(url, dest) {
+  const temp = `${dest}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    const res = await new Promise((resolve, reject) => {
+      const request = https.get(url, resolve);
+      request.on('error', reject);
+    });
+    if (res.statusCode !== 200) {
+      res.resume();
+      throw new Error(`HTTP ${res.statusCode} for ${url}`);
+    }
+    await pipeline(res, fs.createWriteStream(temp, { flags: 'wx' }));
+    fs.renameSync(temp, dest);
+  } catch (error) {
+    fs.rmSync(temp, { force: true });
+    throw error;
+  }
 }
 
 async function ensureFonts() {
@@ -46,6 +49,9 @@ async function ensureFonts() {
   const files = [];
   for (const [name, url] of Object.entries(FONTS)) {
     const p = path.join(FONT_DIR, name);
+    if (fs.existsSync(p) && fs.statSync(p).size < 10000) {
+      fs.rmSync(p, { force: true });
+    }
     if (!fs.existsSync(p)) {
       process.stderr.write(`picker-snapshot: fetching ${name}...\n`);
       await download(url, p);

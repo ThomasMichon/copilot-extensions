@@ -19,7 +19,7 @@ pytest.importorskip("textual", reason="textual not installed (optional TUI dep)"
 from textual.widgets import Markdown, RadioButton, RadioSet, SelectionList  # noqa: E402
 from textual.app import App  # noqa: E402
 
-from agent_worktrees.picker_tui.engine import (  # noqa: E402
+from worktree_manager.production_picker.picker_tui.engine import (  # noqa: E402
     PivotCardScreen,
     PivotFormScreen,
     _AutoExpandTextArea,
@@ -425,7 +425,7 @@ def test_form_save_preserves_hidden_conditional_text(monkeypatch, tmp_path):
 
 def test_button_row_confirm_via_row(monkeypatch, tmp_path):
     _drafts(monkeypatch, tmp_path)
-    from agent_worktrees.picker_tui.engine import SteerButtonRow
+    from worktree_manager.production_picker.picker_tui.engine import SteerButtonRow
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-btn")
     app = _Host(scr)
@@ -651,7 +651,7 @@ def test_last_field_enter_focuses_confirm(monkeypatch, tmp_path):
     scr = PivotFormScreen(_card(), [{"name": "feedback", "type": "textarea"}],
                           "Steer", task_id="t-last")
     app = _Host(scr)
-    from agent_worktrees.picker_tui.engine import SteerButtonRow
+    from worktree_manager.production_picker.picker_tui.engine import SteerButtonRow
 
     async def run():
         async with app.run_test(size=(120, 45)) as pilot:

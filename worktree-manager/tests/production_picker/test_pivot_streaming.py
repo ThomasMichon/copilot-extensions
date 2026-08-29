@@ -11,7 +11,7 @@ from __future__ import annotations
 import sys
 import time
 
-from agent_worktrees.picker_tui import pivots, tasks
+from worktree_manager.production_picker.picker_tui import pivots, tasks
 
 # A self-contained fake provider. ``sys.argv[1]`` selects the behaviour; the
 # runtime appends ``--stream`` when the pivot opts into streaming, so each mode

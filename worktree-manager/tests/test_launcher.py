@@ -87,6 +87,36 @@ def test_none_action_composes_to_noop_with_exit_code():
     assert launcher.execute(le) == 7
 
 
+def test_remote_action_composes_to_ssh_handoff():
+    plan = _exec_plan(
+        action="remote",
+        cmd=[],
+        work_dir=None,
+        worktree_id=None,
+        raw={
+            "ssh_alias": "example-wsl",
+            "remote_command": "dotfiles --worktree-id wt-1",
+        },
+    )
+    le = launcher.compose_launch(plan, _fake_mux())
+    assert le.kind == "exec"
+    assert le.argv == [
+        "ssh",
+        "-t",
+        "example-wsl",
+        "dotfiles --worktree-id wt-1",
+    ]
+    assert le.muxed is False
+    assert le.session is None
+
+
+def test_remote_action_without_target_is_invalid():
+    plan = _exec_plan(action="remote", cmd=[], raw={})
+    le = launcher.compose_launch(plan)
+    assert le.kind == "invalid"
+    assert launcher.execute(le) == 1
+
+
 def test_execute_runs_argv_and_returns_code():
     plan = _exec_plan(cmd=[sys.executable, "-c", "import sys; sys.exit(3)"],
                       work_dir=None, no_mux=True, env={})

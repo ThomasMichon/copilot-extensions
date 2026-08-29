@@ -15,17 +15,18 @@ shipped runtime; the reusable core lives in ``picker_tui.capture`` +
 Examples
 --------
     # From a directory of `<project> list --json --classify` dumps:
-    python tools/picker-shot.py --from-dir ./dumps --view all --out hero.png
+    python worktree-manager/scripts/picker-shot.py --from-dir ./dumps --view all --out hero.png
 
     # Live across the roster (SSH), local-only render, raw (no obscure):
-    python tools/picker-shot.py --project my-project --gather --raw --out shot.svg
+    python worktree-manager/scripts/picker-shot.py --project my-project --gather --raw --out shot.svg
 
     # Animated walkthrough (pivots -> selection -> menu) as a GIF:
-    python tools/picker-shot.py --from-dir ./dumps --animate --out demo.gif
+    python worktree-manager/scripts/picker-shot.py --from-dir ./dumps --animate --out demo.gif
 """
 from __future__ import annotations
 
 import argparse
+import binascii
 import glob
 import json
 import os
@@ -33,15 +34,21 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import zlib
 
-# Make the plugin importable when run from a checkout without an install.
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_SRC = os.path.join(_ROOT, "plugins", "agent-worktrees", "src")
-if os.path.isdir(_SRC) and _SRC not in sys.path:
-    sys.path.insert(0, _SRC)
+# Make the Manager and its temporary engine compatibility source importable
+# when run from a checkout without an install.
+_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_MANAGER_SRC = os.path.join(_ROOT, "worktree-manager", "src")
+_ENGINE_SRC = os.path.join(_ROOT, "plugins", "agent-worktrees", "src")
+for _source in (_MANAGER_SRC, _ENGINE_SRC):
+    if os.path.isdir(_source) and _source not in sys.path:
+        sys.path.insert(0, _source)
+os.environ.setdefault("WORKTREE_MANAGER_AGENT_WORKTREES_SRC", _ENGINE_SRC)
+os.environ.setdefault("WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE", "1")
 
-from agent_worktrees.picker_tui import capture as pcap  # noqa: E402
-from agent_worktrees.picker_tui import obscure as pobs  # noqa: E402
+from worktree_manager.production_picker.picker_tui import capture as pcap  # noqa: E402
+from worktree_manager.production_picker.picker_tui import obscure as pobs  # noqa: E402
 
 _ENV = {"windows": "Win", "wsl": "WSL", "linux": "Linux", "win": "Win"}
 _BROWSERS = ["msedge", "chrome", "google-chrome", "chromium", "chromium-browser"]
@@ -137,6 +144,18 @@ def find_browser() -> str | None:
     return None
 
 
+def _resvg_command() -> list[str] | None:
+    """Bundled deterministic SVG rasterizer, when its npm dependency is ready."""
+    node = shutil.which("node")
+    script = os.path.join(_ROOT, "worktree-manager", "scripts",
+                          "picker-snapshot", "svg2png.mjs")
+    package = os.path.join(os.path.dirname(script), "node_modules",
+                           "@resvg", "resvg-js")
+    if node and os.path.isfile(script) and os.path.isdir(package):
+        return [node, script]
+    return None
+
+
 def _viewbox(svg: str) -> tuple[int, int]:
     import re
     m = re.search(r'viewBox="0 0 ([0-9.]+) ([0-9.]+)"', svg)
@@ -145,9 +164,46 @@ def _viewbox(svg: str) -> tuple[int, int]:
     return (int(float(m.group(1))), int(float(m.group(2))))
 
 
-def svg_to_png(svg: str, out_png: str, browser: str, scale: int = 2) -> None:
+def svg_to_png(
+    svg: str,
+    out_png: str,
+    browser: str | None,
+    scale: int = 2,
+) -> None:
     w, h = _viewbox(svg)
     w2, h2 = w * scale, h * scale
+    resvg = _resvg_command()
+    if resvg:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".svg", delete=False, encoding="utf-8"
+        ) as fh:
+            fh.write(svg)
+            svg_path = fh.name
+        try:
+            proc = subprocess.run(
+                [*resvg, svg_path, out_png, str(scale)],
+                capture_output=True,
+                text=True,
+                timeout=90,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("Resvg PNG render timed out") from exc
+        finally:
+            os.unlink(svg_path)
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            raise RuntimeError(
+                f"Resvg PNG render failed (exit {proc.returncode}): "
+                f"{detail or 'no output'}"
+            )
+        _validate_png(out_png, expected_size=(w2, h2))
+        return
+
+    if not browser:
+        raise RuntimeError(
+            "PNG rendering requires `npm install` in scripts/picker-snapshot "
+            "or a Chromium-family browser"
+        )
     sized = svg.replace('<svg class="rich-terminal"',
                         f'<svg class="rich-terminal" width="{w2}" height="{h2}"')
     html = ("<!doctype html><html><head><meta charset='utf-8'>"
@@ -155,13 +211,92 @@ def svg_to_png(svg: str, out_png: str, browser: str, scale: int = 2) -> None:
             "overflow:hidden}</style></head><body>" + sized + "</body></html>")
     with tempfile.TemporaryDirectory() as td:
         wrap = os.path.join(td, "wrap.html")
+        profile = os.path.join(td, "browser-profile")
         with open(wrap, "w", encoding="utf-8") as fh:
             fh.write(html)
-        subprocess.run(
-            [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
-             "--virtual-time-budget=3000", f"--screenshot={out_png}",
-             f"--window-size={w2},{h2}", "file:///" + wrap.replace("\\", "/")],
-            capture_output=True, timeout=90)
+        try:
+            proc = subprocess.run(
+                [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars",
+                 "--no-first-run", f"--user-data-dir={profile}",
+                 "--virtual-time-budget=3000", f"--screenshot={out_png}",
+                 f"--window-size={w2},{h2}",
+                 "file:///" + wrap.replace("\\", "/")],
+                capture_output=True, text=True, timeout=90)
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("browser PNG render timed out") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()
+        raise RuntimeError(
+            f"browser PNG render failed (exit {proc.returncode}): "
+            f"{detail or 'no output'}"
+        )
+    _validate_png(out_png, expected_size=(w2, h2))
+
+
+def _validate_png(path: str, *, expected_size: tuple[int, int]) -> None:
+    """Validate PNG chunks, dimensions, CRCs, and decompressed pixel payload."""
+    try:
+        content = open(path, "rb").read()
+    except OSError as exc:
+        raise RuntimeError(f"PNG renderer did not create {path}: {exc}") from exc
+    if len(content) < 57 or content[:8] != b"\x89PNG\r\n\x1a\n":
+        raise RuntimeError(f"PNG renderer produced an invalid PNG: {path}")
+
+    offset = 8
+    ihdr = None
+    idat: list[bytes] = []
+    saw_iend = False
+    while offset + 12 <= len(content):
+        length = int.from_bytes(content[offset:offset + 4], "big")
+        chunk_type = content[offset + 4:offset + 8]
+        data_start = offset + 8
+        data_end = data_start + length
+        crc_end = data_end + 4
+        if crc_end > len(content):
+            raise RuntimeError(f"PNG renderer produced a truncated chunk: {path}")
+        chunk_data = content[data_start:data_end]
+        expected_crc = int.from_bytes(content[data_end:crc_end], "big")
+        actual_crc = binascii.crc32(chunk_type + chunk_data) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            raise RuntimeError(f"PNG renderer produced a corrupt chunk: {path}")
+        if chunk_type == b"IHDR":
+            if ihdr is not None or offset != 8 or length != 13:
+                raise RuntimeError(f"PNG renderer produced an invalid IHDR: {path}")
+            ihdr = chunk_data
+        elif chunk_type == b"IDAT":
+            idat.append(chunk_data)
+        elif chunk_type == b"IEND":
+            if length != 0 or crc_end != len(content):
+                raise RuntimeError(f"PNG renderer produced an invalid IEND: {path}")
+            saw_iend = True
+            break
+        offset = crc_end
+
+    if ihdr is None or not idat or not saw_iend:
+        raise RuntimeError(f"PNG renderer produced an incomplete PNG: {path}")
+    width = int.from_bytes(ihdr[0:4], "big")
+    height = int.from_bytes(ihdr[4:8], "big")
+    if (width, height) != expected_size:
+        raise RuntimeError(
+            f"PNG renderer produced {width}x{height}; "
+            f"expected {expected_size[0]}x{expected_size[1]}"
+        )
+    bit_depth, color_type, compression, filter_method, interlace = ihdr[8:13]
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(color_type)
+    if (
+        channels is None
+        or compression != 0
+        or filter_method != 0
+        or interlace != 0
+    ):
+        raise RuntimeError(f"PNG renderer produced an unsupported PNG: {path}")
+    row_bytes = (width * channels * bit_depth + 7) // 8
+    try:
+        pixels = zlib.decompress(b"".join(idat))
+    except zlib.error as exc:
+        raise RuntimeError(f"PNG renderer produced corrupt image data: {path}") from exc
+    if len(pixels) != height * (row_bytes + 1):
+        raise RuntimeError(f"PNG renderer produced incomplete image data: {path}")
 
 
 # ---- walkthrough (animation) ------------------------------------------------
@@ -188,7 +323,7 @@ def make_gif(frames_png: list[str], out_gif: str,
         from PIL import Image
     except ImportError:
         print("! Pillow not installed; cannot assemble GIF. "
-              "Install with: pip install pillow", file=sys.stderr)
+              "Install with: uv pip install pillow", file=sys.stderr)
         return False
     imgs = [Image.open(p).convert("RGB") for p in frames_png]
     if not imgs:
@@ -245,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.raw:
         # A minimal pass-through source over the real (unobscured) records.
-        from agent_worktrees.picker_tui import derive
+        from worktree_manager.production_picker.picker_tui import derive
         import types
         import datetime
         derive.NOW = datetime.datetime.now()
@@ -271,6 +406,7 @@ def main(argv: list[str] | None = None) -> int:
 
     settle = pobs.settle_seconds(dumps)
     browser = find_browser()
+    rasterizer_ready = _resvg_command() is not None or browser is not None
 
     if args.animate:
         print("Capturing walkthrough frames...", file=sys.stderr)
@@ -281,8 +417,9 @@ def main(argv: list[str] | None = None) -> int:
         frames = asyncio.run(pcap.capture_frames_async(
             source, steps, view=args.view, size=args.size, settle=settle,
             update_state="current"))
-        if not browser:
-            print("! No Chromium-family browser found; cannot rasterize GIF.",
+        if not rasterizer_ready:
+            print("! No PNG rasterizer found; run npm install in "
+                  "scripts/picker-snapshot or install a Chromium-family browser.",
                   file=sys.stderr)
             return 3
         with tempfile.TemporaryDirectory() as td:
@@ -304,8 +441,8 @@ def main(argv: list[str] | None = None) -> int:
         open(args.out, "w", encoding="utf-8", newline="\n").write(
             caps["ansi" if ext == ".ansi" else "text"])
     else:  # .png (default)
-        if not browser:
-            print("! No Chromium-family browser found; writing SVG instead.",
+        if not rasterizer_ready:
+            print("! No PNG rasterizer found; writing SVG instead.",
                   file=sys.stderr)
             open(os.path.splitext(args.out)[0] + ".svg", "w",
                  encoding="utf-8").write(caps["svg"])

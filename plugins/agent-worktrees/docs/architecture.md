@@ -1025,7 +1025,8 @@ component reads them (and the list data `current_list` / `list_records`, the
 predicates `_wt_multiselect_active` / `_cleanable`, the shared `_checkbox` glyph, and
 the chrome rows `tab_bar` / `new_worktree_row` / `active_button`) via `self._eng`.
 Behaviour is byte-for-byte unchanged -- the golden snapshot
-`tests/goldens/picker/worktrees_list.txt` matches without modification, and a guard
+`worktree-manager/tests/production_picker/goldens/picker/worktrees_list.txt`
+matches without modification, and a guard
 test (`test_worktrees_view_component_renders_body`) asserts the component renders the
 body with the `("BTN", 0)` button row + one `("L", i)` stop per worktree and pinned
 group sections.
@@ -1277,7 +1278,8 @@ With NF1 done (every modal native), NF2 begins migrating the **main screen** off
 its single `render()` leaf toward a Textual container composing child leaf
 widgets. This is the highest-risk stretch: 93 tests `query_one(PickerScreen)` and
 drive its manual `sel`/`on_key` model, the `capture` module and the golden
-(`tests/goldens/picker/worktrees_list.txt`) ride `render()`, so the monolith is
+(`worktree-manager/tests/production_picker/goldens/picker/worktrees_list.txt`)
+ride `render()`, so the monolith is
 retired **last**, incrementally, keeping the golden byte-identical at every step.
 
 **NF2 slice 1 -- the segment seam + the `AGENT_WORKTREES_PICKER_NF` live toggle.**
