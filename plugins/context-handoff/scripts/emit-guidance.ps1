@@ -22,8 +22,24 @@ try {
         "[owner: context-handoff@$Version]"
         'This session has context-handoff enabled. When you own the active objective, it can span multiple agent sessions. Work thoroughly across context windows: do not narrow investigation, planning, implementation, validation, or landing merely to fit one session. A context boundary is a relay point, not a stopping condition. If the active plan is unfinished, finish the planning needed to act, then begin execution immediately, subject to any required safety, review, approval, or confirmation gate; do not stop at a plan unless the user requested planning only. Consuming or producing a handoff is setup or progress, never completion. Near token pressure, preserve the objective, remaining work, decisions, and in-flight state in a precise baton, transfer it through the available handoff path, and keep going in the successor. Bounded delegates remain within their assigned scope, and a session superseded by cutover stops work and assists the successor rather than competing. The session owning the objective stops only when its completion gate is met, an explicit scope or required confirmation stops progress, or a real blocker needs input. Use the `context-handoff` skill for handoff mechanics.'
     ) -join "`n"
+    $AggregateContext = @(
+        "[owner: context-handoff@$Version]"
+        'An owned objective may span sessions: a context boundary or handoff is progress, never completion. Continue until the objective''s completion gate, a required confirmation, or a real blocker. Near token pressure preserve the objective, remaining work, decisions, and in-flight state in the handoff; after cutover the predecessor stops competing. Use the `context-handoff` skill for mechanics.'
+    ) -join "`n"
     if ([Text.Encoding]::UTF8.GetByteCount($Context) -ge $MaxContextBytes) {
         throw 'guidance exceeds context budget'
+    }
+    if ($args -contains '--aggregate') {
+        [Console]::Out.Write(
+            (@{ additionalContext = $AggregateContext } | ConvertTo-Json -Compress)
+        )
+        exit 0
+    }
+    if ($args -contains '--own-only') {
+        [Console]::Out.Write(
+            (@{ additionalContext = $Context } | ConvertTo-Json -Compress)
+        )
+        exit 0
     }
 
     $Contexts = [System.Collections.Generic.List[string]]::new()

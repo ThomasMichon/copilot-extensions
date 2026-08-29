@@ -25,7 +25,10 @@ def _powershell() -> str | None:
     return shutil.which("pwsh")
 
 
-def _run_powershell(*, plugin_root: Path | None = PLUGIN) -> subprocess.CompletedProcess[str]:
+def _run_powershell(
+    *args: str,
+    plugin_root: Path | None = PLUGIN,
+) -> subprocess.CompletedProcess[str]:
     powershell = _powershell()
     assert powershell
     environment = os.environ.copy()
@@ -33,7 +36,7 @@ def _run_powershell(*, plugin_root: Path | None = PLUGIN) -> subprocess.Complete
     if plugin_root is not None:
         environment["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
     return subprocess.run(
-        [powershell, "-NoProfile", "-File", str(POWERSHELL_PRODUCER)],
+        [powershell, "-NoProfile", "-File", str(POWERSHELL_PRODUCER), *args],
         check=True,
         capture_output=True,
         text=True,
@@ -41,13 +44,16 @@ def _run_powershell(*, plugin_root: Path | None = PLUGIN) -> subprocess.Complete
     )
 
 
-def _run_bash(*, plugin_root: Path | None = PLUGIN) -> subprocess.CompletedProcess[str]:
+def _run_bash(
+    *args: str,
+    plugin_root: Path | None = PLUGIN,
+) -> subprocess.CompletedProcess[str]:
     environment = os.environ.copy()
     environment.pop("COPILOT_PLUGIN_ROOT", None)
     if plugin_root is not None:
         environment["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
     return subprocess.run(
-        ["bash", str(BASH_PRODUCER)],
+        ["bash", str(BASH_PRODUCER), *args],
         check=True,
         capture_output=True,
         text=True,
@@ -109,6 +115,18 @@ def test_powershell_falls_back_to_script_location() -> None:
 )
 def test_bash_matches_powershell_guidance() -> None:
     assert _context(_run_bash()) == _context(_run_powershell())
+
+
+def test_aggregate_guidance_is_owned_compact_and_cross_platform() -> None:
+    context = _context(_run_bash("--aggregate"))
+    assert context.startswith("[owner: delegation-guidance@")
+    assert "coordinator retains synthesis" in context
+    assert "do not spawn children unless explicitly authorized" in context
+    assert "Use the `delegating-work` skill" in context
+    assert len(context.encode("utf-8")) <= 480
+
+    if _powershell():
+        assert _context(_run_powershell("--aggregate")) == context
 
 
 @pytest.mark.skipif(

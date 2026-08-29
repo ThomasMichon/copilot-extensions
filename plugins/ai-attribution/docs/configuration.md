@@ -99,7 +99,7 @@ owner-marked region idempotently: update the single region in place, never appen
 duplicates or copy the full plugin policy.
 
 <!-- ai-attribution:static-fallback:start -->
-**Fallback policy `[owner: ai-attribution@0.1.0-dev2]`:** Before publishing,
+**Fallback policy `[owner: ai-attribution@0.1.0-dev3]`:** Before publishing,
 classify the audience and repository ownership. Disclose AI assistance
 prominently for another party's repository. In a verified operator-owned
 repository, omit disclosure unless the operator explicitly requests it or

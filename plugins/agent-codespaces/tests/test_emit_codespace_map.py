@@ -78,6 +78,15 @@ def test_render_survives_missing_codespace_block():
     assert "**bare**" in md
 
 
+def test_aggregate_render_is_owned_and_bounded():
+    rows = mod._codespace_delegated(RELATED)
+    context = mod._render_aggregate(rows * 20, "1.2.3")
+    assert context.startswith("[owner: agent-codespaces@1.2.3]\n")
+    assert "no local checkout" in context
+    assert "`agent-codespaces` skill" in context
+    assert len(context.encode("utf-8")) <= 384
+
+
 def test_empty_when_no_delegated_repos():
     assert mod._codespace_delegated([]) == []
     assert mod._codespace_delegated(RELATED[1:]) == []

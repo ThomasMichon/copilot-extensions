@@ -26,7 +26,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _run(home: Path, *, payload_command: bool = True) -> dict:
+def _run(
+    home: Path,
+    *,
+    payload_command: bool = True,
+    aggregate: bool = False,
+) -> dict:
     """Run the hook with HOME=<tmp> and a staged plugin dir; return parsed JSON."""
     plugin_dir = home / ".copilot/installed-plugins/copilot-extensions/agent-codespaces"
     plugin_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -34,8 +39,11 @@ def _run(home: Path, *, payload_command: bool = True) -> dict:
     if not payload_command:
         (plugin_dir / "bin" / "agent-codespaces").unlink()
     env = dict(os.environ, HOME=str(home))
+    command = [BASH, str(plugin_dir / "scripts" / "readiness-context.sh")]
+    if aggregate:
+        command.append("--aggregate")
     proc = subprocess.run(
-        [BASH, str(plugin_dir / "scripts" / "readiness-context.sh")],
+        command,
         capture_output=True, text=True, env=env, timeout=30,
     )
     assert proc.returncode == 0, proc.stderr
@@ -87,3 +95,38 @@ def test_missing_payload_command_and_runtime_reports_not_ready(tmp_path: Path):
     ctx = _run(tmp_path, payload_command=False)["additionalContext"]
     assert "NOT READY" in ctx
     assert "not provisioned" in ctx
+
+
+def test_aggregate_mode_is_owned_and_bounded(tmp_path: Path):
+    context = _run(tmp_path, aggregate=True)["additionalContext"]
+    assert context.startswith("[owner: agent-codespaces@")
+    assert "is READY" in context
+    assert "exact session-catalog command" in context
+    assert "`agent-codespaces` skill" in context
+    assert len(context.encode("utf-8")) <= 192
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
+def test_aggregate_mode_matches_powershell(tmp_path: Path):
+    bash_context = _run(tmp_path, aggregate=True)["additionalContext"]
+    plugin_dir = (
+        tmp_path
+        / ".copilot"
+        / "installed-plugins"
+        / "copilot-extensions"
+        / "agent-codespaces"
+    )
+    result = subprocess.run(
+        [
+            "pwsh",
+            "-NoProfile",
+            "-File",
+            str(plugin_dir / "scripts" / "readiness-context.ps1"),
+            "--aggregate",
+        ],
+        env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(result.stdout)["additionalContext"] == bash_context

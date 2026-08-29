@@ -12,12 +12,25 @@ import sys
 from . import output
 
 MAX_OUTPUT_CHARS = 4_000
+AGGREGATE_MAX_CONTEXT_BYTES = 1_200
 KNOWN_FRAGMENTS = ("account-conduct.md", "worktree-conduct.md")
 UNKNOWN_OMITTED = "[Additional unrecognized conduct fragments omitted.]"
 RELATED_OMITTED = "[Related-repository guidance omitted to fit the conduct budget.]"
 HISTORY_TRUNCATED = "[Older worktree history omitted.]"
 _SEMANTIC_HISTORY_PREFIXES = ("Active effort:", "Worktree succession:")
 _VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
+_AGGREGATE_GUIDANCE = (
+    "Agent-worktrees owns this session's worktree binding and Picker disposition. "
+    "Treat an emitted binding, active-effort assignment, and succession head as "
+    "authoritative; if another live head is named, coordinate instead of starting "
+    "parallel work. `agent-worktrees status` is the disposition source: mark "
+    "remaining work `--follow-up`, completed work `--resolved`, update title and "
+    "summary when focus changes, and run `finalize` last without resuming afterward. "
+    "Before GitHub mutations resolve the target account and use `repos gh`; before "
+    "touching another repository use `related resolve` and obey its class, locus, "
+    "and delegate. Load `agent-worktrees:worktree` and "
+    "`agent-worktrees:agent-worktrees-repos` for details."
+)
 
 
 def _installed_package_version() -> str:
@@ -42,6 +55,79 @@ def _payload(parts: list[str]) -> str:
     clean.insert(0, _owner_marker())
     return json.dumps(
         {"additionalContext": "\n\n".join(clean)},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _compact_block(text: str, prefix: str | None = None, limit: int = 160) -> str:
+    blocks = [block.strip() for block in text.split("\n\n") if block.strip()]
+    if prefix is not None:
+        blocks = [block for block in blocks if block.startswith(prefix)]
+    if not blocks:
+        return ""
+    compact = " ".join(blocks[-1].split())
+    if len(compact.encode("utf-8")) <= limit:
+        return compact
+    encoded = compact.encode("utf-8")[: limit - 3]
+    while True:
+        try:
+            return encoded.decode("utf-8") + "..."
+        except UnicodeDecodeError:
+            encoded = encoded[:-1]
+
+
+def assemble_aggregate_payload(
+    definition: str,
+    history: str,
+    *,
+    max_bytes: int = AGGREGATE_MAX_CONTEXT_BYTES,
+) -> str:
+    """Return the compact, read-only aggregate-mode conduct kernel."""
+    owner = _owner_marker()
+    candidates = {
+        "definition": _compact_block(definition),
+        "effort": _compact_block(history, "Active effort:"),
+        "succession": _compact_block(history, "Worktree succession:"),
+    }
+    selected: set[str] = set()
+    for name in ("succession", "effort", "definition"):
+        if not candidates[name]:
+            continue
+        candidate = "\n\n".join(
+            [
+                owner,
+                *(
+                    [candidates["definition"]]
+                    if "definition" in selected or name == "definition"
+                    else []
+                ),
+                _AGGREGATE_GUIDANCE,
+                *(
+                    [candidates["effort"]]
+                    if "effort" in selected or name == "effort"
+                    else []
+                ),
+                *(
+                    [candidates["succession"]]
+                    if "succession" in selected or name == "succession"
+                    else []
+                ),
+            ]
+        )
+        if len(candidate.encode("utf-8")) <= max_bytes:
+            selected.add(name)
+    context = "\n\n".join(
+        [
+            owner,
+            *([candidates["definition"]] if "definition" in selected else []),
+            _AGGREGATE_GUIDANCE,
+            *([candidates["effort"]] if "effort" in selected else []),
+            *([candidates["succession"]] if "succession" in selected else []),
+        ]
+    )
+    return json.dumps(
+        {"additionalContext": context},
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -201,12 +287,18 @@ def main() -> int:
     output.ensure_utf8_stdio()
     conduct_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path()
     try:
-        payload = assemble_payload(
-            conduct_dir,
-            os.environ.get("AW_CONDUCT_DEFINITION", ""),
-            os.environ.get("AW_CONDUCT_RELATED", ""),
-            os.environ.get("AW_CONDUCT_HISTORY", ""),
-        )
+        if "--aggregate" in sys.argv[1:]:
+            payload = assemble_aggregate_payload(
+                os.environ.get("AW_CONDUCT_DEFINITION", ""),
+                os.environ.get("AW_CONDUCT_HISTORY", ""),
+            )
+        else:
+            payload = assemble_payload(
+                conduct_dir,
+                os.environ.get("AW_CONDUCT_DEFINITION", ""),
+                os.environ.get("AW_CONDUCT_RELATED", ""),
+                os.environ.get("AW_CONDUCT_HISTORY", ""),
+            )
     except Exception:
         payload = "{}"
     sys.stdout.write(payload)

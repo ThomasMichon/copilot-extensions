@@ -1,8 +1,9 @@
 {
   "name": "agent-vault",
-  "version": "0.1.0-dev71",
+  "version": "0.1.0-dev72",
   "description": "Local KeePassXC-backed secret store for Copilot CLI agents. Provides a small machine-local service and CLI for retrieving and managing entries from a user-selected KeePass database.",
   "hooks": "hooks.json",
+  "sessionContext": "session-context.json",
   "runtimeScope": "machine-gated",
   "installerReadiness": "installer-readiness.json",
   "author": {

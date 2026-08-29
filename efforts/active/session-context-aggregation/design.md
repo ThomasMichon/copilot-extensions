@@ -163,6 +163,15 @@ The aggregator:
 7. joins fragments with a stable separator; and
 8. emits one final JSON object.
 
+The contributor protocol is a durable suite surface, not merely a temporary
+hook workaround. Plugins continue to define their own rules, guidance kernels,
+and command glossaries. The coordinator owns composition concerns that would
+otherwise be duplicated in every producer: active-stack resolution, ordering,
+source attribution, admission, diagnostics, and compact rendering. Structured
+contributors such as command catalogs may declare a known format so the
+coordinator can merge repeated headings and envelopes losslessly while
+preserving each exact command `argv`.
+
 Every fragment receives an aggregator-authored, source-qualified owner marker.
 Owner-marker-shaped lines inside contributor text are rejected or neutralized
 so one contributor cannot forge another contributor's policy boundary.

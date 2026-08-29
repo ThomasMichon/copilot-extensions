@@ -252,8 +252,8 @@ Suppress with `--no-custom-instructions`.
 > do not load plugin hooks, so irreducible safety and publication rules still
 > need a minimal static fail-safe there. Prefer the static dir for truly
 > fixed, always-identical text; reach for the hook when the payload is dynamic,
-> conditional, or repo-scoped. Because hook `additionalContext` is capped (10 KB,
-> joined across hooks) and shares the context budget, keep the injected text lean:
+> conditional, or repo-scoped. Hook output is bounded, and injected text shares
+> the model's context budget, so keep it lean:
 > inline only what every turn needs and **point at a file** (a backtick faux-link
 > the agent reads on demand) for the rest.
 
@@ -349,7 +349,10 @@ text or a slash command.
 > extension SDK `onPostToolUse` callback: a command hook can read a small
 > **state file** (e.g. a sidecar maintained by a background process) and inject
 > a nudge when some condition holds -- no `extension.mjs` required. Multiple
-> hooks' `additionalContext` are joined (double newline) and capped at 10 KB.
+> `postToolUse` hooks' `additionalContext` values are joined with a double
+> newline and capped at 10 KB. `sessionStart` has no documented 10 KB cap; the
+> command-hook output envelope is bounded at 10 MiB, but startup context should
+> still use an intentional, much smaller budget.
 
 > **Hooks are reactive -- they can't originate or schedule a turn.** Every hook
 > fires in response to activity the session is already producing. The only hook
@@ -394,22 +397,8 @@ Two consequences shape how a plugin author writes them:
   remains appropriate when the hook intentionally calls runtime code rather
   than payload code. Keep it under the perf budget below; do expensive work in
   a background process and have the hook read a cheap state file.
-- **The ACP transport and repo-scoped hooks — trust-gated, but usually fine.** A
-  host that drives the agent over **ACP** (for example an ACP-mode bridge) creates
-  a real session that loads plugin hooks, but ACP sessions **do not run the
-  interactive trust prompt** -- they honor only *persisted* folder-trust. A plugin
-  enabled at **repository scope** activates through a folder-trust-gated repo
-  settings file, so whether its `sessionStart` hook fires over ACP depends on
-  whether the session's `cwd` is already persisted-trusted. **In practice it
-  usually is:** a worktree manager (e.g. agent-worktrees) adds each worktree to the
-  trusted-folders store on creation, so a repo-scoped plugin's hook **does fire
-  over ACP** for those sessions (verified empirically). The gap bites only an ACP
-  `cwd` that was **never** trusted -- for that case enable the plugin at **user
-  scope** (not folder-trust-gated) and/or pre-trust the directory, and keep the
-  static `AGENTS.md` fail-safe. **Repo `.github/hooks` are different:** those file
-  hooks are deferred and **never load over ACP at all**, trusted or not
-  (confirmed) -- a hook that must run over ACP belongs in the plugin's own
-  `hooks.json` or in user hooks, not `.github/hooks`.
+- **ACP is trust-gated.** Repo-scoped plugin hooks need a persisted-trusted cwd;
+  user-scoped hooks do not. Repository `.github/hooks` do not load over ACP; use the runtime-context reference below and keep the static fail-safe.
 
 The complete path/CWD/session-ID contract for hooks, stdio MCP servers,
 JavaScript extensions, and plugin LSP servers is
@@ -426,7 +415,18 @@ string is injected into the session as context -- **dynamically computed, and
 targeted by `cwd`**. Unlike a **`prompt`**-type `sessionStart` hook (new
 interactive sessions only -- not resume, not `-p`), the `additionalContext`
 mechanism also applies on **resume**, so it can carry the always-on guidance an
-instructions file used to. Shape:
+instructions file used to.
+
+#### Affected-host aggregation rule
+
+Some hosts retain only one non-empty result from all plugin `sessionStart`
+hooks. Suite plugins retain direct output as backup and may declare only pure
+contributors through `plugin.json` `sessionContext` -> versioned
+`session-context.json`. Exactly one source-qualified `zz-context-injection`
+authority may supersede them after proving it is final; unknown, incomplete, or
+multiply-authoritative stacks stand down, and side-effect-only hooks stay direct; see [`references/session-context-aggregation.md`](references/session-context-aggregation.md).
+
+Hook payload/output shape:
 
 ```json
 {"cwd":"/path/to/repository","source":"<runtime-provided value>"}
@@ -448,7 +448,7 @@ Reference output:
 {"additionalContext":"[owner: example-plugin@1.2.3]\n<concise kernel>"}
 ```
 
-Discipline (context is a **shared, capped** resource -- 10 KB across all hooks):
+Discipline (context is a **shared, intentionally budgeted** resource):
 
 - **Inline only what every turn needs**; for the rest, inject a short pointer -- a
   one-line summary plus a **backtick faux-link** to a file the agent reads on

@@ -143,6 +143,20 @@ def test_register_session_bash_coalesces_command_catalog(tmp_path: Path):
     scripts_dir = plugin_root / "scripts"
     bin_dir.mkdir(parents=True)
     scripts_dir.mkdir(parents=True)
+    (plugin_root / "plugin.json").write_text(
+        json.dumps({"name": "agent-worktrees", "version": "1.2.3"}),
+        encoding="utf-8",
+    )
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    payload = json.dumps(
+        {
+            "sessionId": "session-1",
+            "cwd": str(worktree),
+            "source": "new",
+            "timestamp": 1_000,
+        }
+    )
 
     fake_python = tmp_path / "fake-python"
     fake_python.write_text(
@@ -170,7 +184,7 @@ def test_register_session_bash_coalesces_command_catalog(tmp_path: Path):
     env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
     result = subprocess.run(
         [_bash(), str(_PLUGIN / "scripts" / "register-session.sh")],
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,
@@ -181,6 +195,121 @@ def test_register_session_bash_coalesces_command_catalog(tmp_path: Path):
     assert json.loads(result.stdout) == {
         "additionalContext": "command catalog\n\nworktree binding"
     }
+    state_file = next(
+        (home / ".agent-worktrees" / ".session-context").glob(
+            "register-session-*"
+        )
+    )
+    state_mtime = state_file.stat().st_mtime_ns
+
+    replay = subprocess.run(
+        [
+            _bash(),
+            str(_PLUGIN / "scripts" / "register-session.sh"),
+            "--context-only",
+        ],
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(replay.stdout) == {
+        "additionalContext": "command catalog\n\nworktree binding"
+    }
+    assert state_file.stat().st_mtime_ns == state_mtime
+
+    other_session = subprocess.run(
+        [
+            _bash(),
+            str(_PLUGIN / "scripts" / "register-session.sh"),
+            "--context-only",
+        ],
+        input=json.dumps(
+            {
+                "sessionId": "session-2",
+                "cwd": str(worktree),
+                "source": "new",
+                "timestamp": 1_000,
+            }
+        ),
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert json.loads(other_session.stdout) == {}
+
+    for stale_payload in (
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(tmp_path),
+                "source": "new",
+                "timestamp": 1_000,
+            }
+        ),
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(worktree),
+                "source": "resume",
+                "timestamp": 1_000,
+            }
+        ),
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(worktree),
+                "source": "new",
+                "timestamp": 1_001,
+            }
+        ),
+        json.dumps(
+            {"sessionId": "session-1", "cwd": str(worktree), "source": "new"}
+        ),
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(worktree),
+                "source": "new",
+                "timestamp": "later",
+            }
+        ),
+    ):
+        stale = subprocess.run(
+            [
+                _bash(),
+                str(_PLUGIN / "scripts" / "register-session.sh"),
+                "--context-only",
+            ],
+            input=stale_payload,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert json.loads(stale.stdout) == {}
+
+    (plugin_root / "plugin.json").write_text(
+        json.dumps({"name": "agent-worktrees", "version": "1.2.4"}),
+        encoding="utf-8",
+    )
+    changed_version = subprocess.run(
+        [
+            _bash(),
+            str(_PLUGIN / "scripts" / "register-session.sh"),
+            "--context-only",
+        ],
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert json.loads(changed_version.stdout) == {}
 
 
 def test_register_session_bash_fails_open_when_merge_python_breaks(tmp_path: Path):
@@ -225,6 +354,20 @@ def test_register_session_bash_omits_catalog_without_binding(tmp_path: Path):
     scripts_dir = plugin_root / "scripts"
     bin_dir.mkdir(parents=True)
     scripts_dir.mkdir(parents=True)
+    (plugin_root / "plugin.json").write_text(
+        json.dumps({"name": "agent-worktrees", "version": "1.2.3"}),
+        encoding="utf-8",
+    )
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    payload = json.dumps(
+        {
+            "sessionId": "session-1",
+            "cwd": str(worktree),
+            "source": "new",
+            "timestamp": 1_000,
+        }
+    )
 
     fake_python = tmp_path / "fake-python"
     fake_python.write_text(
@@ -252,7 +395,7 @@ def test_register_session_bash_omits_catalog_without_binding(tmp_path: Path):
     env["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
     result = subprocess.run(
         [_bash(), str(_PLUGIN / "scripts" / "register-session.sh")],
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,
@@ -330,6 +473,20 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     scripts_dir = plugin_root / "scripts"
     bin_dir.mkdir(parents=True)
     scripts_dir.mkdir(parents=True)
+    (plugin_root / "plugin.json").write_text(
+        json.dumps({"name": "agent-worktrees", "version": "1.2.3"}),
+        encoding="utf-8",
+    )
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    payload = json.dumps(
+        {
+            "sessionId": "session-1",
+            "cwd": str(worktree),
+            "source": "new",
+            "timestamp": 1_000,
+        }
+    )
 
     fake_python = tmp_path / "fake-python.ps1"
     fake_python.write_text(
@@ -360,7 +517,7 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     ]
     result = subprocess.run(
         command,
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,
@@ -371,6 +528,91 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     assert json.loads(result.stdout) == {
         "additionalContext": "command catalog\n\nworktree binding"
     }
+    state_file = next(
+        (home / ".agent-worktrees" / ".session-context").glob(
+            "register-session-*"
+        )
+    )
+    state_mtime = state_file.stat().st_mtime_ns
+
+    replay = subprocess.run(
+        [*command, "--context-only"],
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert replay.returncode == 0, replay.stderr
+    assert json.loads(replay.stdout) == {
+        "additionalContext": "command catalog\n\nworktree binding"
+    }
+    assert state_file.stat().st_mtime_ns == state_mtime
+
+    for stale_payload in (
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(tmp_path),
+                "source": "new",
+                "timestamp": 1_000,
+            }
+        ),
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(worktree),
+                "source": "resume",
+                "timestamp": 1_000,
+            }
+        ),
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(worktree),
+                "source": "new",
+                "timestamp": 1_001,
+            }
+        ),
+        json.dumps(
+            {"sessionId": "session-1", "cwd": str(worktree), "source": "new"}
+        ),
+        json.dumps(
+            {
+                "sessionId": "session-1",
+                "cwd": str(worktree),
+                "source": "new",
+                "timestamp": "later",
+            }
+        ),
+    ):
+        stale = subprocess.run(
+            [*command, "--context-only"],
+            input=stale_payload,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert json.loads(stale.stdout) == {}
+
+    (plugin_root / "plugin.json").write_text(
+        json.dumps({"name": "agent-worktrees", "version": "1.2.4"}),
+        encoding="utf-8",
+    )
+    changed_version = subprocess.run(
+        [*command, "--context-only"],
+        input=payload,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert json.loads(changed_version.stdout) == {}
+    (plugin_root / "plugin.json").write_text(
+        json.dumps({"name": "agent-worktrees", "version": "1.2.3"}),
+        encoding="utf-8",
+    )
 
     catalog.write_text(
         "Write-Output 'invalid catalog JSON'\n",
@@ -378,7 +620,7 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     )
     result = subprocess.run(
         command,
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,
@@ -396,7 +638,7 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     )
     result = subprocess.run(
         command,
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,
@@ -414,7 +656,7 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     )
     result = subprocess.run(
         command,
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,
@@ -436,7 +678,7 @@ def test_register_session_powershell_coalesces_context_and_fails_open(
     )
     result = subprocess.run(
         command,
-        input='{"sessionId":"session-1","cwd":"/tmp/worktree"}',
+        input=payload,
         env=env,
         capture_output=True,
         text=True,

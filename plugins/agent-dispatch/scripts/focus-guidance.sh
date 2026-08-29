@@ -37,8 +37,13 @@ PY
 )" || emit_empty
 [[ -n "$plugin_version" ]] || emit_empty
 
-kernel="[owner: agent-dispatch@${plugin_version}]
+if [[ "${1:-}" == "--aggregate" ]]; then
+    kernel="[owner: agent-dispatch@${plugin_version}]
+Before new work, use the exact session-catalog command with \`worktree-status\` and prefer work targeted at this worktree. Check \`focus --list\` before overlapping work; advertise substantial or changed focus with \`focus \"<subject>\"\`. Agent-worktrees status remains authoritative. Use the \`agent-dispatch:pick-and-claim\` skill for details."
+else
+    kernel="[owner: agent-dispatch@${plugin_version}]
 Before choosing or starting new work, use the agent-dispatch session command catalog's exact \`argv[0]\` with \`worktree-status\`; resume or claim work explicitly targeted at this worktree before self-selecting unless it conflicts with the operator's current request. Before starting work likely to overlap another worktree, use the agent-dispatch session command catalog's exact \`argv[0]\` with \`focus --list\`. At the start of substantial operator-led or task-less work, and when its direction changes, advertise it early with that same command plus \`focus \"<one-line subject>\"\`; this is shorthand for writing the same agent-worktrees status-core summary, not a separate store. Agent-worktrees conduct and regular \`agent-worktrees status --summary\` remain authoritative for ongoing disposition, and their normal update cadence still applies."
+fi
 
 git_env=(
     GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_INDEX_FILE

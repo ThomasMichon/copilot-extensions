@@ -66,7 +66,8 @@ It reports (BLOCKING vs WARNING) on: **skill frontmatter** (`name` +
 anti-self-delegation line), **MCP readiness** (an MCP-owning agent without a
 `## MCP Readiness` section), **agent-mcp fallback** (an agent-mcp-backed agent
 without an equivalent materialized CLI fallback), **inline secrets** in config
-files, and **raw IPs** in ssh/scp/rsync commands.
+files, **raw IPs** in ssh/scp/rsync commands, and, with `--from-settings`,
+**session-start context composition**.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
 gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather
 than cry wolf; feed its findings into the design critique, don't treat a clean
@@ -130,6 +131,34 @@ python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
   exempt from the anti-self-delegation check. A coordinator agent is not exempt:
   it may delegate other types when authorized, but it must still forbid another
   copy of itself.
+
+The same loaded-set pass inventories each active command `sessionStart` plugin
+without executing hooks. It reports plugin identities and these roles only:
+
+- **aggregate authority** — the `zz-context-injection` candidate;
+- **complete declared contributor** — `plugin.json` points through
+  `sessionContext` to a version-1 `session-context.json` whose contributors are
+  explicitly pure;
+- **complete declared side-effect-only** — the declaration is complete and has
+  no contributors; and
+- **legacy direct or unknown** — no complete declaration proves the hook's
+  context behavior.
+
+The current guaranteed-last proof is deliberately strict: exactly one
+source-qualified `zz-context-injection` authority must be active, its plugin
+name must sort lexically after every other active plugin name, every known
+active command `sessionStart` plugin must be complete-declared, and no second
+authority may exist. A known session-start plugin missing that declaration
+blocks safe aggregate activation. An external plugin whose payload cannot be
+inspected remains a warning because the scanner cannot establish whether it
+emits context; the aggregate must stand down rather than assume it is safe.
+
+More than one possible non-empty result is BLOCKING unless the inventory proves
+that the one final authority supersedes all earlier direct backups or that every
+producer returns byte-identical output from one compatible broker. The current
+version-1 declaration provides the guaranteed-last proof; it does not infer a
+broker contract. Reports never include hook commands, contributor argv, or
+emitted context.
 
 Collision owners are tagged with their origin (`skill [marketplace/plugin]`).
 (The older `--include-installed` / `--include-plugins DIR` still work — they add

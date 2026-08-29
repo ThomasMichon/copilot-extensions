@@ -24,8 +24,10 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 
 def _emit_empty() -> None:
@@ -111,6 +113,30 @@ def _render(rows: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
+def _render_aggregate(rows: list[dict], version: str) -> str:
+    names = [str(row.get("name") or "?") for row in rows]
+    shown = names[:3]
+    label = ", ".join(f"`{name}`" for name in shown)
+    if len(names) > len(shown):
+        label += f", +{len(names) - len(shown)} more"
+    context = (
+        f"[owner: agent-codespaces@{version}]\n"
+        f"CodeSpace-delegated repos ({len(names)}): {label}. They have no local "
+        "checkout: resolve the exact venue with `agent-worktrees related resolve "
+        "<name>` and dispatch through the exact agent-bridge catalog command. "
+        "Use the `agent-codespaces` skill for lifecycle details."
+    )
+    if len(context.encode("utf-8")) > 384:
+        context = (
+            f"[owner: agent-codespaces@{version}]\n"
+            f"{len(names)} related repos require CodeSpace delegation and have no "
+            "local checkout. Resolve each with `agent-worktrees related resolve "
+            "<name>` and use the exact agent-bridge catalog command. Load the "
+            "`agent-codespaces` skill for details."
+        )
+    return context
+
+
 def main() -> None:
     # cwd-gate: only emit inside a managed agent-worktrees project.
     project = (_aw("get", "project") or "").strip()
@@ -129,7 +155,12 @@ def main() -> None:
     if not rows:
         _emit_empty()
 
-    print(json.dumps({"additionalContext": _render(rows)}))
+    if "--aggregate" in sys.argv[1:]:
+        manifest = Path(__file__).resolve().parents[1] / "plugin.json"
+        version = json.loads(manifest.read_text(encoding="utf-8"))["version"]
+        print(json.dumps({"additionalContext": _render_aggregate(rows, version)}))
+    else:
+        print(json.dumps({"additionalContext": _render(rows)}))
 
 
 if __name__ == "__main__":

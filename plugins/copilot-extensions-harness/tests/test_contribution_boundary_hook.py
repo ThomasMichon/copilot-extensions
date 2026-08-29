@@ -72,6 +72,7 @@ def test_powershell_hook_emits_existing_guide() -> None:
     assert payload["additionalContext"].startswith(
         f"[owner: copilot-extensions-harness@{VERSION}]"
     )
+    assert len(payload["additionalContext"].encode("utf-8")) <= 448
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh unavailable")
@@ -120,6 +121,7 @@ def test_bash_hook_emits_existing_guide() -> None:
     payload = json.loads(result.stdout)
     assert str(GUIDE) in payload["additionalContext"]
     assert "organization-neutral" in payload["additionalContext"]
+    assert len(payload["additionalContext"].encode("utf-8")) <= 448
 
 
 @pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None,

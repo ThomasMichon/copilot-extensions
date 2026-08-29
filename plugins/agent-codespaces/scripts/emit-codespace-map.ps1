@@ -20,7 +20,7 @@ $script = Join-Path $PSScriptRoot 'emit_codespace_map.py'
 if (-not (Test-Path $script)) { Emit-Empty }
 
 $env:PYTHONPATH = ''
-$out = (& $python $script 2>$null | Select-Object -First 1)
+$out = (& $python $script @args 2>$null | Select-Object -First 1)
 if (-not $out) { Emit-Empty }
 Write-Output $out
 exit 0

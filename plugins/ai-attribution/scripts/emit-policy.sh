@@ -3,7 +3,7 @@
 
 set -uo pipefail
 
-plugin_version="0.1.0-dev2"
+plugin_version="0.1.0-dev3"
 max_payload_bytes=65536
 max_config_bytes=65536
 max_config_lines=200
@@ -645,6 +645,12 @@ main() {
 
     read_config "$repo_root/.github/ai-attribution.conf" "repo"
 
+    if [[ "${1:-}" == "--aggregate" ]]; then
+        kernel="[owner: ai-attribution@$plugin_version] Before publishing, classify audience and repository ownership. Disclose AI assistance prominently for third-party contributions and whenever operator policy requires; ownership hints are not proof and apply only to the session-start repository. Public artifacts must be persona-neutral and scrub credentials, private identifiers, hosts, paths, accounts, record IDs, and private rationale; follow target conventions and audit the live surface. Use the \`ai-attribution\` skill for details."
+        printf '{"additionalContext":"%s"}' "$(json_escape "$kernel")"
+        return
+    fi
+
     kernel="[owner: ai-attribution@$plugin_version] Before publishing, determine the audience and repository ownership. "
     if [[ "$disclosure" == "always" ]]; then
         kernel+="Operator policy requires a prominent one-line italicized AI-assistance disclosure at the top of every contribution. "
@@ -674,5 +680,5 @@ main() {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
-    main
+    main "$@"
 fi

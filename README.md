@@ -69,6 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [harness-knowledge](plugins/harness-knowledge/) | Binding skill | Bind a stateless control harness to its private **knowledge** repo, harness-first — ask for (or create) the knowledge repo, write the machine-local `knowledge_repo` pointer, and assemble a machine-local instructions fragment labeling the concrete harness/knowledge/product paths. Keeps the shareable harness tree generic + name-free. Payload-only. |
 | [ai-attribution](plugins/ai-attribution/) | Ambient policy + skills | Keep publication and AI-attribution safety active through a concise payload-cwd-gated session-start kernel, host-qualified operator policy, an idempotent static-fallback setup skill, and an on-demand publication workflow. Payload-only; no runtime, network call, or authentication. |
 | [delegation-guidance](plugins/delegation-guidance/) | Ambient policy + skill | Route broad separable research, comparisons, evaluations, domain-tool calls, and disjoint bulk edits into bounded sub-agent contexts while the coordinator retains synthesis, integration, cohesive implementation, and completion. Payload-only; no runtime or configuration. |
+| [zz-context-injection](plugins/zz-context-injection/) | Context aggregation hook | Rollout scaffold for affected Copilot CLI hosts: resolve the active plugin stack and emit one deterministic aggregate only after every session-start plugin adopts a complete, pure declaration. The late-sorting name is verified before emission. Payload-only. |
 
 All support **Windows** and **Linux/WSL** (macOS planned).
 
@@ -76,13 +77,14 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 
 ## Architecture at a glance
 
-Twenty plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
+21 plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
-installer); **nine are payload-only** — `efforts` (skills), `visions` (skills),
+installer); **ten are payload-only** — `efforts` (skills), `visions` (skills),
 `context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
-`copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills), and
-`harness-knowledge` (skills), `ai-attribution` (hook + skill), and
-`delegation-guidance` (hook + skill) need no install beyond enabling the plugin.
+`copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills),
+`harness-knowledge` (skills), `ai-attribution` (hook + skill),
+`delegation-guidance` (hook + skill), and `zz-context-injection` (aggregation hook)
+need no install beyond enabling the plugin.
 Everything installs **from the marketplace** and runs
 **from local install paths** — no git checkout required at runtime.
 
@@ -101,7 +103,7 @@ flowchart TB
       AI["agent-index<br/>index/search service"]
       AK["agent-machines<br/>machine-state reconciler CLI"]
       AV["agent-vault<br/>secret store CLI + service"]
-      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge · ai-attribution · delegation-guidance<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts · visions · context-handoff · customizing-copilot<br/>copilot-extensions-harness · wsl-setup · harness-knowledge · ai-attribution · delegation-guidance · zz-context-injection<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes — ~/.* + ~/.local/bin"]
       RW["~/.agent-worktrees<br/>agent-worktrees"]
@@ -212,13 +214,14 @@ copilot plugin install context-handoff@copilot-extensions # optional — context
 copilot plugin install customizing-copilot@copilot-extensions # optional — how to customize the CLI (no runtime)
 copilot plugin install ai-attribution@copilot-extensions # optional — ambient publication safety (no runtime)
 copilot plugin install delegation-guidance@copilot-extensions # optional — coordinator-first task routing (no runtime)
+copilot plugin install zz-context-injection@copilot-extensions # optional — deterministic session-start context aggregation
 ```
 
 Each `copilot plugin install` only vendors the plugin's **payload** (source,
 skills, hooks, extensions). The eleven runtime plugins (every plugin except the
 payload-only `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-`ai-attribution`, and `delegation-guidance`) then need their runtime deployed once — that's Step 2,
+`ai-attribution`, `delegation-guidance`, and `zz-context-injection`) then need their runtime deployed once — that's Step 2,
 which runs each installer to build a `uv` venv under `~/.agent-*` and drop a
 binstub in `~/.local/bin`.
 
