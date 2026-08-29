@@ -88,8 +88,23 @@ gh repo create <owner>/<name> --private --clone --description "Personal knowledg
 ```
 
 Seed it minimally (a README plus the state trees the harness routes to):
-`efforts/`, `logs/`, `visions/` (with `.gitkeep`s). Commit + push. Knowledge
-repos are **direct-commit, low-ceremony** -- no PR gate.
+`efforts/`, `logs/`, and `visions/` (with `.gitkeep`s). Commit + push.
+Knowledge repos are **direct-commit, low-ceremony** -- no PR gate.
+
+For an existing/adopted knowledge repo, also inspect its repository-owned
+`.agent-worktrees/config.yaml`. If personal issues should go anywhere other than
+the repo's own GitHub origin, declare and commit the route from a writable
+knowledge worktree (not the registered anchor):
+
+```yaml
+issues:
+  provider: github
+  repo: <owner>/<personal-backlog-repo>
+```
+
+The current harness issue workflow supports GitHub routing. A non-GitHub
+knowledge origin (for example Azure DevOps) is valid for state, but it cannot be
+the implicit target of `gh issue` commands.
 
 ## 2. Register both repos with agent-worktrees
 
@@ -119,6 +134,25 @@ python skills/binding-knowledge/scripts/bind_knowledge.py \
 The binding is **machine-local** and is never committed into the harness.
 `agent-worktrees` owns the session-start state/worktree context and related-repo
 resolution; do not materialize those values into committed `related.yaml`.
+
+The configurator also reports an `issues` readiness object:
+
+- `ready` -- an explicit GitHub route exists, or the knowledge origin is GitHub;
+- `routing_required` -- the origin is non-GitHub/missing and an explicit
+  `issues.repo` must be added to the knowledge repo config;
+- `unsupported` -- an explicit non-GitHub issue provider is configured, but no
+  backend is available;
+- `unknown` -- the knowledge checkout path or its routing config could not be
+  read; re-run with the exact registered checkout before judging readiness.
+
+Issue-routing readiness is separate from state binding. The pointer is still
+written for a valid Git repo, but setup must present the required follow-up and
+must not claim personal issue filing is ready.
+
+This result validates repository configuration; it does not itself implement an
+issue backend. The consuming harness's personal issue-filing skill is the
+intended reader and must honor the declared route. `harness-knowledge` never
+files an issue or mutates the knowledge repo.
 
 When both `--harness-path` and `--knowledge-path` are given, the bind **also
 assembles the personal-plugin overlay** (see step 3b) -- so the operator's
@@ -192,6 +226,11 @@ and the exact writable path. The anchor returned by plain `state-root` identifie
 the bound repo but is not the task workspace. As a final proof, a fresh ask like
 *"start an effort for X"* should land the effort in the paired **knowledge**
 worktree, with the harness tree clean.
+
+Also inspect the configurator's `issues.status`. Do not finish setup with
+`routing_required`, `unsupported`, or `unknown` if the operator expects
+unqualified personal issue filing; create/claim a writable knowledge worktree
+and seed the repository-owned route there first.
 
 ## Idempotence & re-pointing
 
