@@ -185,6 +185,9 @@ async def lifespan(app: FastAPI):
                 logging.getLogger("agent-bridge").info(
                     "Reattached %d session(s) to surviving Session Hosts", n
                 )
+        except asyncio.CancelledError:
+            # Normal on shutdown (the task is cancelled) -- never a failure.
+            raise
         except Exception:
             logging.getLogger("agent-bridge").warning(
                 "Session-Host reattach on startup failed", exc_info=True
