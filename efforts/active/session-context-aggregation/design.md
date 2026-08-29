@@ -12,12 +12,26 @@ The host runs all configured `sessionStart` hooks, but only one non-empty
 isolation and still disappear. Adding retries, changing hook order, or making
 individual producers faster cannot create a correctness guarantee.
 
-The workaround therefore needs one suite-owned broker to produce one combined
-value. The aggregator plugin has one host hook, while migrated producer hooks
-call the same broker and return the same aggregate during the compatibility
-period. The broker should not absorb bootstrap, registration, service
-reconciliation, or other side effects that happen to run at `sessionStart`;
-those hooks can continue to run directly and return `{}`.
+The workaround therefore needs one suite-owned aggregator to produce one
+combined value. The simplest safe shape is available if the host can guarantee
+that one source-qualified plugin hook runs after every competing context hook:
+existing producer hooks keep their ordinary direct emissions, while the final
+aggregator re-runs their pure pseudo-hooks and supersedes those partial values
+with the complete aggregate. This preserves standalone behavior without putting
+a broker call in every producer hook.
+
+Current public documentation guarantees only that plugin hooks are loaded after
+policy, repository, user, and inline hook sources. It defines no hook priority,
+plugin dependency, `loadAfter`, or cross-plugin ordering field. Alphabetical
+plugin names, marketplace order, installation order, and JSON object order are
+therefore hypotheses to test, not contracts to build on. If no supported and
+version-stable guaranteed-last seam can be proven, migrated producer hooks must
+instead call the same session broker and return the same aggregate during the
+compatibility period.
+
+Neither design should absorb bootstrap, registration, service reconciliation,
+or other side effects that happen to run at `sessionStart`; those hooks continue
+to run directly and return `{}`.
 
 ### The resolver foundation exists, but its question differs
 
@@ -56,7 +70,7 @@ prove the aggregator is present and compatible at session start.
 
 ### 1. One explicit aggregator authority
 
-Add a payload-only plugin, working name `session-context`, containing:
+Add a payload-only plugin named `context-injection`, containing:
 
 - one `sessionStart` command hook;
 - dependency-light PowerShell and POSIX aggregator implementations;
@@ -69,6 +83,13 @@ configuration cannot select or replace it. Configuration allows at most one
 authority for a session. If the authority is absent, ambiguous, incompatible,
 or cannot prove the host's effective plugin set, migrated producers retain their
 direct path.
+
+The preferred execution mode is `guaranteed-last`: the selected authority must
+prove, for the current host version and launch shape, that its hook is ordered
+after all competing plugin context hooks. Only that hook emits the aggregate;
+producer hooks remain unchanged apart from publishing their pure contributor
+declarations. If the proof is unavailable, the authority stands down from this
+mode and the implementation uses the brokered-result mode below.
 
 This is explicit cross-cell interoperability, not implicit marketplace
 federation. The aggregator may compose contributors from several active cells
@@ -161,7 +182,23 @@ declines aggregation and producer wrappers use their direct paths. Once admitted
 a successful contributor is never omitted merely because a lower-priority
 fragment consumed the budget first.
 
-### 4. One brokered result per session
+### 4. Guaranteed-last primary mode
+
+When host ordering can be proven from a supported contract, the selected
+`context-injection` hook runs last, resolves the active plugin stack, executes
+each declared pure contributor, and emits the aggregate. Existing producer
+hooks continue to emit their ordinary context as a backup path. Under the
+affected last-result host behavior, those earlier partial results are discarded
+in favor of the final complete aggregate.
+
+This mode requires more than observing one favorable run. Tests must cover
+fresh install, update, enable/disable, multiple marketplaces, directory
+marketplaces, staged payloads, Windows, POSIX, new sessions, and resumes across
+every host version claimed compatible. The mechanism must be source-qualified
+and must reject a second guaranteed-last claimant. Any ordering ambiguity makes
+the aggregator fail open to the existing direct hooks.
+
+### 5. Brokered-result compatibility mode
 
 The hook payload supplies `sessionId`. The aggregator hook and every migrated
 producer hook call one payload-local broker owned by the selected aggregator.
@@ -187,6 +224,32 @@ every caller must be able to recover from a stale owner and return the same
 completed aggregate. Returning the same aggregate from several hooks is safe;
 returning different partial aggregates is not.
 
+### 5a. Authoring and review enforcement
+
+`customizing-copilot:authoring-skills` must define the host workaround
+explicitly: while affected host versions retain only one session-start
+`additionalContext` result, `context-injection` is the only plugin allowed to
+claim guaranteed-last aggregate authority. A migrated producer declares its
+pure context contributor and retains its original direct hook as the backup
+path. If guaranteed-last ordering cannot be proven, the producer instead calls
+the selected coordinator's broker and invokes its original direct producer only
+when that broker returns the explicit fallback disposition. Hooks that only
+reconcile state, register providers, or perform other side effects remain
+independent and return `{}`.
+
+`customizing-copilot:reviewing-customizations` must enforce this mechanically
+without executing hooks. It reads the versioned contributor declaration and
+the configured plugin stack, classifies session-start entries as aggregator,
+migrated wrapper, known legacy direct emitter, or unknown, and reports a
+blocking finding when more than one possible non-empty result is not proven to
+be either superseded by one proven guaranteed-last aggregate or the
+byte-identical output of one compatible broker. A legacy direct emitter
+alongside an aggregate is permitted only when the scanner can prove the
+aggregate owns the supported final-order seam; otherwise it remains blocking
+during partial migration. An unknown output remains a warning rather than being
+assumed safe. The scanner reports identities and roles only, never hook commands
+or emitted context.
+
 This creates version-skew states:
 
 | Aggregator | Producer | Producer-hook behavior | Aggregator behavior |
@@ -208,7 +271,7 @@ The wrapper must not search PATH or enumerate wildcard same-named payloads. It
 resolves the configured source-qualified authority and validates its exact
 payload before invoking the broker.
 
-### 5. Host-set authority and trust gates
+### 6. Host-set authority and trust gates
 
 Settings-derived reconstruction is not always the host's effective plugin set.
 ACP dispatch may use staged `--plugin-dir` payloads while ignoring
@@ -228,7 +291,7 @@ inputs prove that settings-derived resolution is authoritative. V1 must:
 This is intentionally conservative. A false negative restores today's direct
 behavior; a false positive can execute a plugin the host refused to load.
 
-### 6. Aggregate deadline and failure behavior
+### 7. Aggregate deadline and failure behavior
 
 The broker owns a hard aggregate wall-clock deadline below the shortest
 registered wrapper timeout. Admission considers declared worst-case cost and
@@ -244,7 +307,7 @@ The aggregate budget is a configured share below the host's full context cap,
 leaving headroom for repository instructions, nonmigrated hooks, and future
 native host aggregation.
 
-### 7. Shadow mode before emission
+### 8. Shadow mode before emission
 
 The aggregator initially supports audit-only execution:
 
@@ -259,7 +322,7 @@ This permits parity comparison with existing direct hooks without introducing a
 new non-empty competitor. Contributor commands must be pure and re-entrant
 because shadow mode may execute them alongside their direct hook.
 
-### 8. A-la-carte reconciliation
+### 9. A-la-carte reconciliation
 
 The aggregator is optional composition, not a prerequisite for a plugin's core
 reachability. A single-plugin install continues to emit its context directly.
