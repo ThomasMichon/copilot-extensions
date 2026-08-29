@@ -930,7 +930,6 @@ def _cmd_exec(args: argparse.Namespace) -> int:
             target.actual_profile,
             target.user,
             target.acp_command,
-            container_id=target.container_id,
         )
     finally:
         target_lock.release()
