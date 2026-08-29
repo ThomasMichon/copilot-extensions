@@ -6,7 +6,7 @@ a `uv`-built venv under legacy `~/.agent-*`, deployed by the plugin's own
 installer) plus generated payload-local agent commands and session command
 glossaries; compatibility management wrappers remain in `~/.local/bin` during
 the installation-cell migration. **Nine are payload-only** — `efforts` (skills), `visions`
-(skills), `context-handoff` (a session extension), `customizing-copilot`
+(skills), `context-handoff` (hook + session extension + skill), `customizing-copilot`
 (skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
 `wsl-setup` (skills), and
 `harness-knowledge` (skills), `ai-attribution` (hook + skill), and
@@ -38,7 +38,7 @@ section.
 |--------|------|-------------|-----------|
 | [efforts](../plugins/efforts/) | Planning skills (`planning-efforts`, `efforts-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
 | [visions](../plugins/visions/) | North-star skills (`envisioning`, `visions-setup`) | Marketplace payload (skills + assets) | Loaded on demand when a skill matches; no runtime to install |
-| [context-handoff](../plugins/context-handoff/) | Session **extension** + `/handoff` skill | Marketplace payload (`extensions/context-handoff/extension.mjs`) | Auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
+| [context-handoff](../plugins/context-handoff/) | Ambient continuity hook + session **extension** + `/handoff` skill | Marketplace payload (hook, scripts, extension, and skill) | Hook injects a concise owner-marked continuity kernel; extension is auto-discovered from the enabled plugin's `extensions/` dir; no copy to `~/.copilot/extensions/`, no deploy manifest |
 | [customizing-copilot](../plugins/customizing-copilot/) | Customization skills (authoring skills, sub-agents, MCP servers, plugins, harnesses, review) | Marketplace payload (skills) | Loaded on demand when a CLI-customization prompt matches; no runtime to install |
 | [copilot-extensions-harness](../plugins/copilot-extensions-harness/) | Operator-harness skills, `clean-room-judge` evaluator agent, and ambient contribution-boundary pointer | Marketplace payload (skills + agent + `sessionStart` hook) | Hook emits a concise guide pointer at session start; detailed skills/agent load on demand; no runtime to install |
 | [wsl-setup](../plugins/wsl-setup/) | WSL2 setup / troubleshooting skills | Marketplace payload (skills) | Loaded on demand when a WSL-setup prompt matches; no runtime to install |

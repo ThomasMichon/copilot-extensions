@@ -18,9 +18,11 @@ ENV DEBIAN_FRONTEND=noninteractive
 # plugins' installers use. We intentionally do NOT pre-create ~/.local/bin or
 # touch PATH beyond what Ubuntu's stock ~/.profile does.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git python3 python3-venv sudo \
+        ca-certificates curl git python3 python3-venv ripgrep sudo \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && mkdir -p /opt/copilot-cleanroom/bin \
+    && mv /usr/bin/rg /opt/copilot-cleanroom/bin/rg \
     && rm -rf /var/lib/apt/lists/*
 
 # uv (Astral) -- the plugins install their venvs with `uv pip install`.
@@ -28,6 +30,9 @@ RUN curl -fsSL https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/b
 
 # The GitHub Copilot CLI (agentic `copilot` command). Pinned loosely; the
 # harness records the exact version it ran against.
+# The distro ripgrep above stays outside the stock PATH. Tier-E launches opt
+# into it with USE_BUILTIN_RIPGREP=false because Copilot's bundled ARM64 rg
+# cannot run on hosts with 16 KiB pages; Tier-P scenarios remain unbiased.
 #
 # NPM_REGISTRY is a BUILD-TIME convenience ONLY, used to install the Copilot CLI
 # prereq. On a corp-governed box the public registry.npmjs.org is blocked at the
