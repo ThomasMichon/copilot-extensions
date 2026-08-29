@@ -37,7 +37,7 @@ instructions.
 
 ```markdown
 <!-- ai-attribution:static-fallback:start -->
-**Fallback policy `[owner: ai-attribution@0.1.0-dev2]`:** Before publishing,
+**Fallback policy `[owner: ai-attribution@0.1.0-dev3]`:** Before publishing,
 classify the audience and repository ownership. Disclose AI assistance
 prominently for another party's repository. In a verified operator-owned
 repository, omit disclosure unless the operator explicitly requests it or
@@ -81,7 +81,7 @@ at `.github/ai-attribution.conf`.
 ## 4. Validate both delivery paths
 
 1. Launch a normal session with the plugin enabled and confirm the emitted
-   context starts with `[owner: ai-attribution@0.1.0-dev2]`.
+   context starts with `[owner: ai-attribution@0.1.0-dev3]`.
 2. Exercise every known hook-less launch path and confirm the marked fallback
    remains in its always-on instructions.
 3. Re-run this setup and confirm it replaces the managed region in place without
