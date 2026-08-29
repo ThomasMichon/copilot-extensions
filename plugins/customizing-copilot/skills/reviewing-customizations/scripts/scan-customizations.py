@@ -703,10 +703,14 @@ def _session_context_declaration(
 def _supported_aggregate_authority(
     footprint: Path,
     identity: str,
+    *,
+    controlled: bool,
 ) -> bool:
     """Accept the official engine or an explicit thin tail adapter."""
     if identity == AGGREGATE_AUTHORITY_IDENTITY:
         return True
+    if not controlled:
+        return False
     manifest = _load_json(footprint / "plugin.json")
     if not manifest:
         manifest = _load_json(footprint / ".claude-plugin" / "plugin.json")
@@ -743,6 +747,7 @@ def scan_session_context(
         if is_authority and _supported_aggregate_authority(
             footprint,
             source.origin,
+            controlled=source.controlled,
         ):
             supported_authorities.add(source.origin)
 

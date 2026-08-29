@@ -67,7 +67,7 @@ def _authority_source() -> str | None:
     name, separator, marketplace = source.partition("@")
     if (
         not separator
-        or not IDENTIFIER.fullmatch(name)
+        or name != "zz-context-injection"
         or not IDENTIFIER.fullmatch(marketplace)
     ):
         return None

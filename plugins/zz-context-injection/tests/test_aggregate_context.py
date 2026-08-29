@@ -472,6 +472,22 @@ def test_malformed_authority_override_fails_closed_with_diagnostic(
     assert "authority identity is invalid" in result.stderr
 
 
+def test_authority_override_cannot_replace_canonical_plugin_name(
+    tmp_path: Path,
+) -> None:
+    adapter = tmp_path / "adapter"
+    shutil.copytree(PLUGIN, adapter)
+
+    result = _run(
+        tmp_path,
+        [("zz-context-injection", adapter)],
+        authority="other-plugin@aperture",
+    )
+
+    assert json.loads(result.stdout) == {}
+    assert "authority identity is invalid" in result.stderr
+
+
 def test_bash_wrapper_discards_partial_output_on_aggregator_failure(
     tmp_path: Path,
 ) -> None:
