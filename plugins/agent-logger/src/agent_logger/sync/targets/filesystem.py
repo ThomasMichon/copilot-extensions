@@ -938,12 +938,14 @@ def _replace_selected_sessions(
                     receipt_payload["capture_id"],
                 )
                 if snapshot_dest.exists() or snapshot_dest.is_symlink():
-                    safe_snapshot = existing_rescue_snapshot_path(
-                        dest,
-                        sid,
-                        receipt_payload["capture_id"],
-                    )
-                    if safe_snapshot is None:
+                    if (
+                        existing_rescue_snapshot_path(
+                            dest,
+                            sid,
+                            receipt_payload["capture_id"],
+                        )
+                        is None
+                    ):
                         raise OSError(
                             f"unsafe immutable rescue snapshot path for {sid}"
                         )
