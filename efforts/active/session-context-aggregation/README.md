@@ -115,6 +115,10 @@ The detailed investigation and proposed architecture are in
 - [ ] Reconcile the design with context-injection, a-la-carte independence,
   marketplace installation cells, and the absence of host-enforced transitive
   plugin dependencies.
+- [ ] Name the payload-only coordinator `context-injection` and specify the
+  authoring rule that only it may directly emit session-start context when it
+  is active; producer hooks must use its broker or retain their standalone
+  direct fallback.
 - [ ] Land the reviewed design before creating the aggregator plugin or changing
   any producer's activation behavior.
 
@@ -182,8 +186,14 @@ The detailed investigation and proposed architecture are in
 
 - [ ] Convert every suite-owned context producer to the contributor contract
   while leaving non-context `sessionStart` side effects direct.
-- [ ] Update runtime-agent-plugin and context-injection patterns, authoring
-  guidance, marketplace guards, and producer-coverage tests.
+- [ ] Update runtime-agent-plugin and context-injection patterns,
+  `customizing-copilot:authoring-skills`, marketplace guards, and
+  producer-coverage tests with the single-emitter rule and the required
+  standalone fallback.
+- [ ] Extend `customizing-copilot:reviewing-customizations` to inventory the
+  declared session-context role without executing hooks and report a blocking
+  finding when more than one direct session-start context emitter can coexist
+  in the configured plugin stack.
 - [ ] Make consumer enablement explicit because current Copilot plugin manifests
   do not enforce transitive dependency installation.
 - [ ] Replace direct producer commands only after the brokered wrapper and its

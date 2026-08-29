@@ -56,7 +56,7 @@ prove the aggregator is present and compatible at session start.
 
 ### 1. One explicit aggregator authority
 
-Add a payload-only plugin, working name `session-context`, containing:
+Add a payload-only plugin named `context-injection`, containing:
 
 - one `sessionStart` command hook;
 - dependency-light PowerShell and POSIX aggregator implementations;
@@ -186,6 +186,26 @@ recomputation. Concurrent callers may elect a worker and cache the result, but
 every caller must be able to recover from a stale owner and return the same
 completed aggregate. Returning the same aggregate from several hooks is safe;
 returning different partial aggregates is not.
+
+### 4a. Authoring and review enforcement
+
+`customizing-copilot:authoring-skills` must define the host workaround
+explicitly: while affected host versions retain only one session-start
+`additionalContext` result, `context-injection` is the only active-stack hook
+that may emit a direct aggregate. A migrated producer declares its context
+contributor and calls the selected coordinator's broker; it invokes its
+original direct producer only when that broker returns the explicit fallback
+disposition. Hooks that only reconcile state, register providers, or perform
+other side effects remain independent and return `{}`.
+
+`customizing-copilot:reviewing-customizations` must enforce this mechanically
+without executing hooks. It reads the versioned contributor declaration and
+the configured plugin stack, classifies session-start entries as aggregator,
+migrated wrapper, known legacy direct emitter, or unknown, and reports a
+blocking finding when multiple direct emitters can coexist without a compatible
+aggregator contract. An unknown output remains a warning rather than being
+assumed safe. The scanner reports identities and roles only, never hook
+commands or emitted context.
 
 This creates version-skew states:
 
