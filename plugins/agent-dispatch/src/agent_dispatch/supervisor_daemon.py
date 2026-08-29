@@ -91,6 +91,104 @@ def _spec_fingerprint(reg: dict) -> str:
     )
 
 
+def _runtime_equivalence_fingerprint(reg: dict) -> str:
+    """Fingerprint effective behavior, filling omitted lane defaults."""
+    kind = str(reg.get("kind") or "")
+    spec = dict(reg.get("spec") or {})
+    if kind in {RegistrationKind.SUPERVISED_LANE, RegistrationKind.EVALUATOR}:
+        defaults = {
+            "labels": [],
+            "max_concurrent": 1,
+            "max_attempts": 3,
+            "label_max_attempts": {},
+            "interval": 30.0,
+            "heartbeat": True,
+            "reactive": True,
+            "reactive_interval": 2.0,
+            "verify_timeout": 0,
+            "embody_backend": "headless",
+            "headless_labels": [],
+            "cli_labels": [],
+            "headless_agent": "task-worker",
+        }
+        for key, value in defaults.items():
+            spec.setdefault(key, value)
+        for key in ("labels", "headless_labels", "cli_labels"):
+            spec[key] = sorted(set(spec.get(key) or []))
+    return json.dumps(
+        {"kind": kind, "spec": spec},
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _logical_ids(reg: dict) -> set[str]:
+    """Stable names that can identify one unit across legacy/direct sources."""
+
+    result = {
+        str(value)
+        for value in (reg.get("logical_id"), reg.get("id"))
+        if value not in (None, "")
+    }
+    spec = reg.get("spec") or {}
+    for key in ("id", "name"):
+        if spec.get(key) not in (None, ""):
+            result.add(str(spec[key]))
+    schedules = spec.get("schedules")
+    if isinstance(schedules, list) and schedules and isinstance(schedules[0], dict):
+        if schedules[0].get("id") not in (None, ""):
+            result.add(str(schedules[0]["id"]))
+    return result
+
+
+@dataclass
+class DesiredRegistrationSet:
+    """One reconciled desired set plus source-migration diagnostics."""
+
+    registrations: dict[str, dict] = field(default_factory=dict)
+    deduplicated: list[str] = field(default_factory=list)
+    conflicts: list[str] = field(default_factory=list)
+
+
+def merge_registration_sources(
+    direct: Iterable[dict], declared: Iterable[dict]
+) -> DesiredRegistrationSet:
+    """Merge direct and declared registrations without duplicate children.
+
+    An equivalent declaration supersedes a legacy/direct row while it is present;
+    the row is retained in the coordinator store so removing the declaration
+    restores it.  Same-logical-name entries with different specs are both kept and
+    reported rather than silently choosing one.
+    """
+
+    direct_regs = list(direct)
+    declared_regs = list(declared)
+    result = DesiredRegistrationSet(
+        registrations={reg["id"]: reg for reg in direct_regs}
+    )
+    for declared_reg in declared_regs:
+        declared_fp = _runtime_equivalence_fingerprint(declared_reg)
+        declared_ids = _logical_ids(declared_reg)
+        for direct_reg in direct_regs:
+            direct_id = direct_reg["id"]
+            if direct_id not in result.registrations:
+                continue
+            if _runtime_equivalence_fingerprint(direct_reg) == declared_fp:
+                result.registrations.pop(direct_id, None)
+                result.deduplicated.append(direct_id)
+                continue
+            shared = sorted(declared_ids & _logical_ids(direct_reg))
+            if shared:
+                result.conflicts.append(
+                    f"{direct_id} <> {declared_reg['id']} "
+                    f"(logical unit {shared[0]!r}; specs differ)"
+                )
+        result.registrations[declared_reg["id"]] = declared_reg
+    result.deduplicated = sorted(set(result.deduplicated))
+    result.conflicts = sorted(set(result.conflicts))
+    return result
+
+
 def _lane_flags(spec: dict) -> list[str]:
     """The ``supervise`` lane flags shared by the supervised-lane and evaluator
     kinds (both drive the embody supervisor loop over a lane)."""
@@ -271,6 +369,10 @@ class ReconcileSummary:
     restarted: list[str] = field(default_factory=list)
     revived: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    #: Direct registrations suppressed by equivalent declarations this cycle.
+    deduplicated: list[str] = field(default_factory=list)
+    #: Same-logical-id direct/declaration pairs preserved because specs differ.
+    conflicts: list[str] = field(default_factory=list)
     #: Units whose subprocess is currently alive.
     running: list[str] = field(default_factory=list)
     #: Units tracked but not currently running -- a crashed unit awaiting its
@@ -345,6 +447,7 @@ class SupervisorDaemon:
         #: down live declared units (only a successful read that no longer lists a
         #: unit does). Empty until the first successful read.
         self._last_declared: list[dict] = []
+        self._last_merge_diagnostics: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
         self._units: dict[str, ManagedUnit] = {}
 
     # -- registry view -------------------------------------------------------
@@ -410,11 +513,26 @@ class SupervisorDaemon:
         regs = self.client.list_registrations(
             machine=self.machine, env=self.env, include_paused=False
         )
-        desired = {r["id"]: r for r in regs}
-        for reg in self._declared():
-            desired[reg["id"]] = reg
+        merged = merge_registration_sources(regs, self._declared())
+        diagnostics = (tuple(merged.deduplicated), tuple(merged.conflicts))
+        if diagnostics != self._last_merge_diagnostics:
+            for rid in merged.deduplicated:
+                log.info(
+                    "equivalent declaration supersedes direct registration %s; "
+                    "keeping the direct row dormant for reversible migration",
+                    rid,
+                )
+            for conflict in merged.conflicts:
+                log.warning(
+                    "direct/declaration registration conflict: %s; preserving both",
+                    conflict,
+                )
+            self._last_merge_diagnostics = diagnostics
+        desired = merged.registrations
         for rid in self._overridden_off():
             desired.pop(rid, None)
+        self._deduplicated = merged.deduplicated
+        self._conflicts = merged.conflicts
         return desired
 
     # -- unit lifecycle ------------------------------------------------------
@@ -495,6 +613,8 @@ class SupervisorDaemon:
         """
         summary = ReconcileSummary()
         desired = self._desired()
+        summary.deduplicated = list(self._deduplicated)
+        summary.conflicts = list(self._conflicts)
 
         # 1. stop units no longer desired (removed or paused)
         for rid in list(self._units):
