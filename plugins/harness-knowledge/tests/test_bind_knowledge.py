@@ -278,6 +278,52 @@ def test_commented_issues_header_keeps_nested_route(tmp_path: Path):
     assert routing["repo"] == "example/personal-backlog"
 
 
+def test_empty_issues_mapping_uses_origin_fallback(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://github.com/example/private-knowledge.git",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("issues: {} # use the default\n", encoding="utf-8")
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["source"] == "config+origin"
+    assert routing["repo"] == "example/private-knowledge"
+
+
+def test_empty_nested_issues_block_uses_origin_fallback(tmp_path: Path):
+    knowledge = _knowledge_repo(
+        tmp_path / "knowledge",
+        "https://github.com/example/private-knowledge.git",
+    )
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("issues:\n# next section\n", encoding="utf-8")
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["source"] == "config+origin"
+
+
+def test_hash_inside_quoted_repo_is_not_a_comment(tmp_path: Path):
+    knowledge = _knowledge_repo(tmp_path / "knowledge")
+    config = knowledge / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        'issues: { provider: github, repo: "example/personal#backlog" }\n',
+        encoding="utf-8",
+    )
+
+    routing = bk.inspect_issue_routing(str(knowledge))
+
+    assert routing["status"] == "ready"
+    assert routing["repo"] == "example/personal#backlog"
+
+
 def test_inline_unsupported_issue_provider_is_reported(tmp_path: Path):
     knowledge = _knowledge_repo(tmp_path / "knowledge")
     config = knowledge / ".agent-worktrees" / "config.yaml"

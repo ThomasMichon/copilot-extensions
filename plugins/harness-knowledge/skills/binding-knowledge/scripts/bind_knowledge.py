@@ -31,10 +31,22 @@ from urllib.parse import urlparse
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
 
 
+def _strip_yaml_comment(value: str) -> str:
+    quote = ""
+    for index, char in enumerate(value):
+        if quote:
+            if char == quote:
+                quote = ""
+            continue
+        if char in {"'", '"'}:
+            quote = char
+        elif char == "#" and (index == 0 or value[index - 1].isspace()):
+            return value[:index].rstrip()
+    return value.rstrip()
+
+
 def _yaml_scalar(value: str) -> str:
-    value = value.strip()
-    if " #" in value:
-        value = value.split(" #", 1)[0].rstrip()
+    value = _strip_yaml_comment(value.strip())
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
@@ -49,15 +61,13 @@ def read_issue_route(config: Path) -> dict[str, str] | None:
         match = re.match(r"^issues\s*:\s*(.*?)\s*$", line)
         if not match:
             continue
-        inline = match.group(1)
-        if inline.startswith("#"):
-            inline = ""
-        elif " #" in inline:
-            inline = inline.split(" #", 1)[0].rstrip()
+        inline = _strip_yaml_comment(match.group(1))
         if inline:
             body = inline.strip()
             if body.startswith("{") and body.endswith("}"):
                 body = body[1:-1]
+            if not body.strip():
+                return {}
             route = {}
             for item in body.split(","):
                 if ":" not in item:
@@ -86,6 +96,8 @@ def read_issue_route(config: Path) -> dict[str, str] | None:
             child_match = re.match(r"^\s+(provider|repo)\s*:\s*(.*?)\s*$", child)
             if child_match:
                 route[child_match.group(1)] = _yaml_scalar(child_match.group(2))
+        if not children:
+            return {}
         if not route:
             raise ValueError("issues block has an unrecognized nested shape")
         return route
