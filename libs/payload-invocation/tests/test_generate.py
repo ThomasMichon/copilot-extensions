@@ -485,6 +485,24 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
     (scripts / "resolve-runtime.ps1").write_text(
         f"$AgentRtPy = '{escaped_python}'\n", encoding="utf-8"
     )
+    for platform, relative_path in source["payloadDispatcher"].items():
+        if not relative_path:
+            continue
+        dispatcher = plugin / relative_path
+        dispatcher.parent.mkdir(parents=True, exist_ok=True)
+        if platform == "posix":
+            dispatcher.write_text(
+                '#!/bin/sh\nexec "$PAYLOAD_TEST_PY" -m '
+                '"$PAYLOAD_TEST_MODULE" "$@"\n',
+                encoding="utf-8",
+            )
+            dispatcher.chmod(0o755)
+        else:
+            dispatcher.write_text(
+                "& $env:PAYLOAD_TEST_PY -m $env:PAYLOAD_TEST_MODULE @args\n"
+                "exit $LASTEXITCODE\n",
+                encoding="utf-8",
+            )
     generator.process_manifest(staged_manifest, check=False)
 
     modules = tmp_path / "modules"
@@ -503,6 +521,7 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
             "USERPROFILE": str(home),
             "PYTHONPATH": str(modules),
             "PYTHONUTF8": "1",
+            "PAYLOAD_TEST_PY": python_path,
         }
     )
     if os.name == "nt":
@@ -553,7 +572,15 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
         "$&|;<>*?(){}[]!^%",
     ]
     stdin = "stdin with spaces, quotes, and unicode \u96ea"
+    modules_by_command = {
+        str(spec["command"]): str(spec["module"])
+        for spec in source["commands"]
+    }
     for command in catalog["commands"]:
+        command_env = {
+            **env,
+            "PAYLOAD_TEST_MODULE": modules_by_command[command["id"]],
+        }
         prefix = command["argv"]
         assert command["availability"] == "ready"
         entrypoint = Path(prefix[-1])
@@ -573,7 +600,7 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
         result = subprocess.run(
             invoke,
             input=stdin,
-            env=env,
+            env=command_env,
             capture_output=True,
             text=True,
             check=True,
@@ -588,7 +615,7 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
             shell_result = subprocess.run(
                 [pwsh, "-NoProfile", "-Command", rendered],
                 input=stdin,
-                env=env,
+                env=command_env,
                 capture_output=True,
                 text=True,
                 check=True,
