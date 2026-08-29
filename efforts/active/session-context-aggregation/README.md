@@ -24,11 +24,14 @@ as one deterministic, bounded aggregate, without depending on the host to
 preserve several different `additionalContext` results.
 
 The workaround must remain safe during partial rollout. A migrated producer
-retains a standalone direct path, but when one configured aggregator is
-provably present and compatible its hook calls the aggregator's own broker. All
-migrated hooks return the same cached aggregate bytes for the session, so the
-host may retain any one of them without losing a migrated sibling. If aggregation
-cannot be proven safe, each producer falls back to its existing direct behavior.
+retains its standalone direct path and additionally publishes a pure context
+contributor. If the host provides a supported, testable way to guarantee one
+configured aggregator runs after every competing context hook, that final hook
+re-runs the active contributors and its complete aggregate wins the host's
+last-result behavior. If no such ordering guarantee exists, the rollout falls
+back to the session broker design in which every migrated hook returns the same
+cached aggregate bytes. In either mode, uncertainty restores existing direct
+behavior rather than disabling a producer.
 
 ## Participants
 
@@ -112,6 +115,14 @@ The detailed investigation and proposed architecture are in
 - [ ] Characterize which hook result the affected host versions retain and
   record the version range. Do not rely on completion timing as a correctness
   mechanism.
+- [ ] Determine whether affected host versions expose a supported,
+  cross-platform, source-qualified way to guarantee one plugin hook executes
+  after all other plugin hooks. Distinguish a documented contract from
+  incidental alphabetical, installation, marketplace, or settings-object order.
+- [ ] If a guaranteed-last seam exists, specify how exactly one
+  `context-injection` authority claims it and how review tooling rejects a
+  second claimant. Otherwise retain the byte-identical session broker as the
+  required compatibility architecture.
 - [ ] Reconcile the design with context-injection, a-la-carte independence,
   marketplace installation cells, and the absence of host-enforced transitive
   plugin dependencies.
@@ -179,6 +190,10 @@ The detailed investigation and proposed architecture are in
   aggregator/old producer, no aggregator/new producer, compatible
   aggregator/new producer, incompatible aggregator/new producer, and ambiguous
   aggregators.
+- [ ] For a guaranteed-last implementation, prove migrated producers keep their
+  ordinary direct emissions and that the final aggregator deterministically
+  supersedes them with the complete aggregate; prove the ordinary direct path
+  still operates when the aggregator is absent or disabled.
 - [ ] Pilot one runtime command-catalog producer and one payload-only policy
   producer before broad conversion.
 
@@ -282,3 +297,13 @@ See [`design.md`](design.md).
   child payload environment reconstruction, cross-cell contributor consent,
   aggregate admission, wall-clock deadlines, and the still-lossy nature of
   partial migration.
+- Confirmed the official hooks reference orders hook source classes with plugin
+  hooks last, but does not define ordering among plugins or a plugin hook
+  priority field. The current plugin manifest also has no host-enforced
+  dependency field; dependency support remains an upstream feature request.
+- Revised the proposal to prefer a simpler guaranteed-last mode if an
+  executable cross-platform/version matrix proves a supported ordering seam:
+  producers keep their direct emissions as backup, while the final
+  `context-injection` hook re-runs pure contributors and supersedes them with
+  the aggregate. The byte-identical broker remains the compatibility design
+  when no such guarantee can be established.
