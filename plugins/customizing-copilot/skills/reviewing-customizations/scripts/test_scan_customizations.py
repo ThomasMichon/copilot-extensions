@@ -1101,6 +1101,12 @@ def test_session_context_accepts_declared_tail_adapter(
         ".ai",
         "zz-context-injection",
     )
+    installed = tmp_path / "installed"
+    official = _session_plugin(
+        installed,
+        "copilot-extensions",
+        "zz-context-injection",
+    )
     manifest_path = adapter / "plugin.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["sessionContextAuthority"] = {
@@ -1109,6 +1115,11 @@ def test_session_context_accepts_declared_tail_adapter(
     }
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     sources = [
+        scan.PluginSource(
+            skills_root=official / "skills",
+            origin="copilot-extensions/zz-context-injection",
+            controlled=False,
+        ),
         scan.PluginSource(
             skills_root=adapter / "skills",
             origin="aperture/zz-context-injection",
