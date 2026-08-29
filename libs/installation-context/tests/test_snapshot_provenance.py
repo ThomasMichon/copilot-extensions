@@ -23,9 +23,32 @@ POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 FIXTURES = LIB / "fixtures" / "source-identities.json"
 Runner = tuple[str, tuple[str, ...], str]
 
+
+def _supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    candidate = shutil.which("bash")
+    if candidate is None:
+        return None
+    result = subprocess.run(
+        [
+            candidate,
+            "-c",
+            "((BASH_VERSINFO[0] > 4 || "
+            "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
+        ],
+        capture_output=True,
+        check=False,
+    )
+    return candidate if result.returncode == 0 else None
+
+
+BASH = _supported_bash()
+
+
 RUNNERS: tuple[Runner, ...] = (
     ("python", (sys.executable, str(PYTHON_SCRIPT)), "long"),
-    ("posix", (str(POSIX_SCRIPT),), "long"),
+    *((("posix", (str(BASH), str(POSIX_SCRIPT)), "long"),) if BASH else ()),
     *(
         (
             (
@@ -384,21 +407,39 @@ def _legacy_footprint_snapshot(
 
 
 EXEMPLAR_INSTALLERS = (
-    (
-        "agent-machines",
+    *(
         (
-            "bash",
-            str(LIB.parents[1] / "plugins" / "agent-machines" / "scripts" / "init.sh"),
-        ),
-        "long",
-    ),
-    (
-        "agent-index",
-        (
-            "bash",
-            str(LIB.parents[1] / "plugins" / "agent-index" / "scripts" / "install.sh"),
-        ),
-        "long",
+            (
+                "agent-machines",
+                (
+                    str(BASH),
+                    str(
+                        LIB.parents[1]
+                        / "plugins"
+                        / "agent-machines"
+                        / "scripts"
+                        / "init.sh"
+                    ),
+                ),
+                "long",
+            ),
+            (
+                "agent-index",
+                (
+                    str(BASH),
+                    str(
+                        LIB.parents[1]
+                        / "plugins"
+                        / "agent-index"
+                        / "scripts"
+                        / "install.sh"
+                    ),
+                ),
+                "long",
+            ),
+        )
+        if BASH is not None
+        else ()
     ),
     *(
         (
@@ -1066,6 +1107,7 @@ def test_runtime_slot_rejects_snapshot_provenance_tampering(
     assert "does not match the validated snapshot" in result.stderr
 
 
+@pytest.mark.skipif(BASH is None, reason="Bash is unavailable")
 def test_posix_slot_publication_failure_releases_owned_empty_reservation(
     tmp_path: Path,
 ) -> None:
@@ -1093,6 +1135,7 @@ def test_posix_slot_publication_failure_releases_owned_empty_reservation(
     assert json.loads(_run_slot(posix, "slot-provision", layout).stdout)["slotChanged"]
 
 
+@pytest.mark.skipif(BASH is None, reason="Bash is unavailable")
 def test_posix_slot_digest_failure_releases_owned_empty_reservation(
     tmp_path: Path,
 ) -> None:
@@ -1290,7 +1333,6 @@ def test_runtime_slot_serializes_concurrent_publishers(
     assert sorted(result["slotChanged"] for result in results) == [False, True]
     assert len({result["ownership"] for result in results}) == 1
     assert Path(results[0]["ownership"]).is_file()
-
 
 def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
     tmp_path: Path,
@@ -2027,6 +2069,8 @@ def test_snapshot_identity_mismatches_fail_closed(
     target = provenance
     for key in path[:-1]:
         target = target[key]
+    if isinstance(replacement, str) and replacement.startswith("/other/"):
+        replacement = str(tmp_path / replacement.removeprefix("/other/"))
     target[path[-1]] = replacement
     _write_json(provenance_path, provenance)
     before = _tree_snapshot(Path(layout["durable"]))

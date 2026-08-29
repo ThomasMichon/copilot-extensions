@@ -338,7 +338,12 @@ def _runner_command(name: str, arguments: list[str]) -> list[str]:
     if name == "python":
         return [sys.executable, str(PYTHON_SCRIPT), *arguments]
     if name == "posix":
-        return [str(POSIX_SCRIPT), *arguments]
+        if os.name == "nt":
+            pytest.skip("Bash runner is unavailable on native Windows")
+        bash = shutil.which("bash")
+        if bash is None:
+            pytest.skip("Bash runner is unavailable")
+        return [bash, str(POSIX_SCRIPT), *arguments]
     assert POWERSHELL is not None
     mapping = {
         "--payload-root": "-PayloadRoot",
@@ -486,6 +491,7 @@ def test_python_policy_precedence_and_preactivation_semantics(tmp_path: Path) ->
     assert migration["probeReason"] == "migration-required"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX environment fixture")
 def test_activation_validation_and_policy_invalid_preserve_actual_root(
     tmp_path: Path,
 ) -> None:
@@ -566,6 +572,7 @@ def test_activation_validation_and_policy_invalid_preserve_actual_root(
     assert reactivation["actualMode"] == "legacy"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX environment fixture")
 def test_tombstone_validation_blocks_mutation_and_orphans_fail_closed(
     tmp_path: Path,
 ) -> None:
@@ -849,6 +856,7 @@ def test_namespaced_paths_with_newlines_round_trip_across_runners(
         ),
     ],
 )
+@pytest.mark.skipif(os.name == "nt", reason="WSL identity requires a POSIX host")
 def test_empty_wsl_identity_is_foreign_across_runners(
     tmp_path: Path, runner: str
 ) -> None:
@@ -2096,6 +2104,7 @@ def test_activation_cas_refuses_generation_overflow_without_replacement(
         ),
     ],
 )
+@pytest.mark.skipif(os.name == "nt", reason="WSL identity requires a POSIX host")
 def test_activation_generation_and_environment_classification_match(
     tmp_path: Path, runner: str
 ) -> None:

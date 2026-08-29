@@ -553,16 +553,47 @@ function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
 }
 
 function Read-LockOwner([string]$OwnerPath) {
-    $temporary = Join-Path ([IO.Path]::GetTempPath()) ('installation-context-lock-' + [guid]::NewGuid().ToString('N') + '.json')
     try {
-        Copy-Item -LiteralPath $OwnerPath -Destination $temporary -ErrorAction Stop
-        return Read-Json $temporary
+        $bytes = [IO.File]::ReadAllBytes($OwnerPath)
     }
-    finally {
-        if (Test-Path -LiteralPath $temporary) {
-            Remove-Item -LiteralPath $temporary -Force
+    catch [System.IO.FileNotFoundException] {
+        throw [System.Management.Automation.ItemNotFoundException]::new(
+            "Installation lock owner receipt disappeared: $OwnerPath"
+        )
+    }
+    catch [System.IO.DirectoryNotFoundException] {
+        throw [System.Management.Automation.ItemNotFoundException]::new(
+            "Installation lock owner receipt disappeared: $OwnerPath"
+        )
+    }
+    catch [System.UnauthorizedAccessException] {
+        Start-Sleep -Milliseconds 10
+        if (-not (Test-Path -LiteralPath $OwnerPath -PathType Leaf)) {
+            throw [System.Management.Automation.ItemNotFoundException]::new(
+                "Installation lock owner receipt disappeared: $OwnerPath"
+            )
         }
+        throw [System.Management.Automation.ItemNotFoundException]::new(
+            "Installation lock owner receipt changed during read: $OwnerPath"
+        )
     }
+    catch [System.IO.IOException] {
+        Start-Sleep -Milliseconds 10
+        if (-not (Test-Path -LiteralPath $OwnerPath -PathType Leaf)) {
+            throw [System.Management.Automation.ItemNotFoundException]::new(
+                "Installation lock owner receipt disappeared: $OwnerPath"
+            )
+        }
+        throw [System.Management.Automation.ItemNotFoundException]::new(
+            "Installation lock owner receipt changed during read: $OwnerPath"
+        )
+    }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+        $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        Fail "UTF-8 BOM is not allowed in '$OwnerPath'."
+    }
+    $text = $strictUtf8.GetString($bytes)
+    return Read-JsonText $text "installation lock owner receipt '$OwnerPath'"
 }
 
 function Assert-LockOwnerShape(
@@ -979,6 +1010,28 @@ function Normalize-GitPath([string]$Path) {
     return '/' + ($segments -join '/')
 }
 
+function ConvertTo-PortableGitPath([string]$Path) {
+    $safe = "/-._~!$&'()*+,;=:@%[]"
+    $encoded = New-Object Text.StringBuilder
+    foreach ($value in [Text.Encoding]::UTF8.GetBytes($Path.Replace('\', '/'))) {
+        $character = [char]$value
+        if (($value -ge 0x30 -and $value -le 0x39) -or
+            ($value -ge 0x41 -and $value -le 0x5A) -or
+            ($value -ge 0x61 -and $value -le 0x7A) -or
+            $safe.IndexOf($character) -ge 0) {
+            [void]$encoded.Append($character)
+        }
+        else {
+            [void]$encoded.AppendFormat(
+                [Globalization.CultureInfo]::InvariantCulture,
+                '%{0:X2}',
+                $value
+            )
+        }
+    }
+    return $encoded.ToString()
+}
+
 function Normalize-GitUrl([string]$Url) {
     foreach ($character in $Url.ToCharArray()) {
         $code = [int]$character
@@ -1053,10 +1106,22 @@ function Normalize-GitUrl([string]$Url) {
     if (-not $uri.IsAbsoluteUri -or [string]::IsNullOrWhiteSpace($uri.Host)) {
         Fail "Git URL must be absolute and include a host: $Url"
     }
-    $path = Normalize-GitPath ($uri.GetComponents(
-        [UriComponents]::Path,
-        [UriFormat]::UriEscaped
-    ))
+    $pathEnd = $candidate.Length
+    foreach ($separator in @('?', '#')) {
+        $index = $candidate.IndexOf(
+            $separator,
+            $authorityMatch.Length,
+            [StringComparison]::Ordinal
+        )
+        if ($index -ge 0 -and $index -lt $pathEnd) {
+            $pathEnd = $index
+        }
+    }
+    $rawPath = $candidate.Substring(
+        $authorityMatch.Length,
+        $pathEnd - $authorityMatch.Length
+    )
+    $path = ConvertTo-PortableGitPath $rawPath
     $path = [regex]::Replace($path, '%([0-9A-Fa-f]{2})', {
         param($match)
         $value = [Convert]::ToInt32($match.Groups[1].Value, 16)
@@ -1069,6 +1134,7 @@ function Normalize-GitUrl([string]$Url) {
         }
         return '%' + $match.Groups[1].Value.ToUpperInvariant()
     })
+    $path = Normalize-GitPath $path
     if ($path.EndsWith('.git', [StringComparison]::OrdinalIgnoreCase)) {
         $path = $path.Substring(0, $path.Length - 4)
     }
