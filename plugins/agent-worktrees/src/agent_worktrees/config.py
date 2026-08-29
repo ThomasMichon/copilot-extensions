@@ -1322,8 +1322,12 @@ def _control_plane_related_pr_map() -> dict[str, dict[str, Any]]:
     try:
         from . import related
 
-        anchors: list[str] = list(related.installed_plugin_related_anchors())
         cp = related.find_control_plane_anchor()
+        anchors: list[str] = list(
+            related.installed_plugin_related_anchors(
+                repo_dirs=[cp] if cp else None
+            )
+        )
         if cp:
             anchors.append(cp)
         if not anchors:

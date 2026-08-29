@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -175,6 +176,87 @@ def test_installed_plugin_related_anchors_empty_when_root_absent(
 ):
     monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(tmp_path / "nope"))
     assert related.installed_plugin_related_anchors() == []
+
+
+def test_installed_plugin_related_anchors_includes_enabled_directory_plugins(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    installed = tmp_path / "installed-plugins"
+    repo = tmp_path / "harness"
+    marketplace = repo / ".ai"
+    cached = _make_installed_plugin(
+        installed, "local-marketplace", "example-web-harness",
+        RelatedConfig(primary="cached-must-not-win", related={
+            "example-web": RelatedEntry(
+                name="example-web", role="product", summary="from cache"
+            )
+        }),
+    )
+    plugin = _make_installed_plugin(
+        marketplace, "", "example-web-harness",
+        RelatedConfig(primary="must-not-win", related={
+            "example-web": RelatedEntry(
+                name="example-web", role="product", summary="from live source"
+            )
+        }),
+    )
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "example-web-harness"}), encoding="utf-8"
+    )
+    disabled = _make_installed_plugin(
+        marketplace, "", "disabled-harness",
+        RelatedConfig(related={
+            "disabled": RelatedEntry(name="disabled", role="tooling")
+        }),
+    )
+    (disabled / "plugin.json").write_text(
+        json.dumps({"name": "disabled-harness"}), encoding="utf-8"
+    )
+    (marketplace / ".claude-plugin").mkdir(parents=True)
+    (marketplace / ".claude-plugin" / "marketplace.json").write_text(
+        json.dumps({
+            "name": "local-marketplace",
+            "plugins": [
+                {
+                    "name": "example-web-harness",
+                    "source": "./example-web-harness",
+                },
+                {
+                    "name": "disabled-harness",
+                    "source": "./disabled-harness",
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    settings = repo / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    (settings / "settings.json").write_text(
+        json.dumps({
+            "extraKnownMarketplaces": {
+                "local-marketplace": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {
+                "example-web-harness@local-marketplace": True,
+                "disabled-harness@local-marketplace": False,
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(installed))
+    anchors = related.installed_plugin_related_anchors(repo_dirs=[repo])
+    assert anchors == [str(cached), str(plugin)]
+
+    base = repo / "base"
+    _write_related(base, RelatedConfig(primary="base-primary"))
+    merged = related.read_related_grafted([*anchors, base])
+    assert merged.primary == "base-primary"
+    assert merged.related["example-web"].summary == "from live source"
+    assert merged.related["example-web"].origin_anchor == str(plugin)
+    assert "disabled" not in merged.related
 
 
 def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(

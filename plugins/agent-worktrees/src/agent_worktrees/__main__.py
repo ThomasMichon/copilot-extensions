@@ -14255,7 +14255,9 @@ def _related_config_source_anchors(base_anchor: str) -> list[str]:
         existing = {os.path.abspath(a) for a in anchors}
         plugin_anchors = [
             p
-            for p in _related_mod.installed_plugin_related_anchors()
+            for p in _related_mod.installed_plugin_related_anchors(
+                repo_dirs=anchors
+            )
             if os.path.abspath(p) not in existing
         ]
     except Exception:

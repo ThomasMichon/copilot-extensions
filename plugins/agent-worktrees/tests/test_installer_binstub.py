@@ -102,10 +102,13 @@ def test_windows_binstubs_avoid_unsigned_trampoline(monkeypatch, tmp_path: Path)
 
     assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
 
-    global_content = (lb / "agent-worktrees.cmd").read_text()
-    assert "\\Scripts\\python.exe" in global_content
-    assert "-m agent_worktrees" in global_content
-    assert "agent-worktrees.exe" not in global_content
+    global_cmd = (lb / "agent-worktrees.cmd").read_text()
+    assert "agent-worktrees.ps1" in global_cmd
+    assert "agent-worktrees.exe" not in global_cmd
+    global_ps1 = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text()
+    assert "resolve-runtime.ps1" in global_ps1
+    assert "-m agent_worktrees" in global_ps1
+    assert "agent-worktrees.exe" not in global_ps1
 
     for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
@@ -128,13 +131,14 @@ def test_windows_binstubs_resolve_via_current_version_marker(monkeypatch, tmp_pa
 
     assert inst.deploy_binstubs(repo_dir=tmp_path, project="demoproj") is True
 
-    for name in ("agent-worktrees.cmd",):
-        content = (lb / name).read_text()
-        assert "current-version" in content, f"{name} must resolve via the marker"
-        assert "versions" in content
-        # The retired junction-target parse must be gone.
-        assert "dir /a:l" not in content, f"{name} must not parse a .venv junction"
-        assert "\\.venv\\" not in content, f"{name} must not resolve through .venv"
+    global_cmd = (lb / "agent-worktrees.cmd").read_text()
+    assert "agent-worktrees.ps1" in global_cmd
+    global_ps1 = (PLUGIN / "bin" / "agent-worktrees.ps1").read_text()
+    assert "current-version" in global_ps1
+    assert "resolve-runtime.ps1" in global_ps1
+    # The retired junction-target parse must be gone.
+    assert "dir /a:l" not in global_ps1
+    assert "\\.venv\\" not in global_ps1
     for name in ("demoproj.cmd", "demoproj.ps1"):
         content = (lb / name).read_text()
         assert "bin\\payload\\agent-worktrees" in content
@@ -276,8 +280,14 @@ def test_deploy_binstubs_reserved_project_keeps_global_shim(monkeypatch, tmp_pat
     # The global shim never names a project -- that is the whole point of the
     # reserved name. A `--project agent-worktrees` here is the clobber bug.
     assert "--project agent-worktrees" not in global_stub
-    # And it resolves the versioned runtime via the marker (static shim identity).
-    assert "current-version" in global_stub
+    # And its static PowerShell target resolves the versioned runtime via the
+    # marker (the .cmd file is only the shell-selection shim).
+    resolver_stub = (
+        (PLUGIN / "bin" / "agent-worktrees.ps1").read_text()
+        if platform.system() == "Windows"
+        else global_stub
+    )
+    assert "current-version" in resolver_stub
 
 
 def test_deploy_project_binstub_refuses_reserved_name(monkeypatch, tmp_path: Path):

@@ -618,6 +618,10 @@ def get_primary(anchor: str | Path) -> str:
 INSTALLED_PLUGINS_ENV = "AGENT_WORKTREES_INSTALLED_PLUGINS_DIR"
 
 
+class _PluginContributionAnchor(str):
+    """Path marker preserving plugin provenance through graft ordering."""
+
+
 def installed_plugins_root() -> Path:
     """The Copilot CLI installed-plugins directory (override via env for tests)."""
     override = os.environ.get(INSTALLED_PLUGINS_ENV)
@@ -634,41 +638,83 @@ def _has_plugin_manifest(plugin_dir: Path) -> bool:
     )
 
 
-def installed_plugin_related_anchors(root: Path | None = None) -> list[str]:
-    """Discover installed plugins that ship a ``.agent-worktrees/related.yaml``.
+def installed_plugin_related_anchors(
+    root: Path | None = None,
+    *,
+    repo_dirs: list[str | Path] | None = None,
+) -> list[str]:
+    """Discover plugins that ship a ``.agent-worktrees/related.yaml``.
 
     Returns each contributing plugin's directory (a valid :func:`read_related`
-    anchor), de-duplicated and sorted deterministically. Tolerates both the
-    marketplace-nested (``<root>/<marketplace>/<plugin>/``) and flat
-    (``<root>/<plugin>/``) installed-plugins layouts. A directory only counts if
-    it also carries a plugin manifest, so an incidental ``.agent-worktrees`` dir
-    elsewhere is ignored.
+    anchor), de-duplicated and ordered deterministically. Cached plugins are
+    found in both the marketplace-nested
+    (``<root>/<marketplace>/<plugin>/``) and flat
+    (``<root>/<plugin>/``) installed-plugins layouts. Enabled plugins from
+    local directory marketplaces are resolved from each ``repo_dirs`` settings
+    root and ordered after cached copies so the live source wins on a duplicate
+    contribution. A directory only counts if it also carries a plugin manifest,
+    so an incidental ``.agent-worktrees`` dir elsewhere is ignored.
 
     These anchors are the lowest-precedence config-graft layer (see the module
     note above); callers prepend them ahead of the base/knowledge anchors.
     """
     base = root or installed_plugins_root()
-    try:
-        if not base.is_dir():
-            return []
-    except OSError:
-        return []
     rel = f"{INREPO_DIRNAME}/{RELATED_FILENAME}"
-    found: set[str] = set()
-    # marketplace-nested and flat layouts
-    for pattern in (f"*/*/{rel}", f"*/{rel}"):
+    cached: dict[str, str] = {}
+    live: dict[str, str] = {}
+
+    def _record(target: dict[str, str], plugin_dir: Path) -> None:
         try:
-            for related_yaml in base.glob(pattern):
-                plugin_dir = related_yaml.parent.parent
-                if _has_plugin_manifest(plugin_dir):
-                    found.add(str(plugin_dir))
+            resolved = plugin_dir.resolve()
         except OSError:
+            return
+        target[os.path.normcase(str(resolved))] = str(resolved)
+
+    try:
+        cache_available = base.is_dir()
+    except OSError:
+        cache_available = False
+    if cache_available:
+        # marketplace-nested and flat installed-cache layouts
+        for pattern in (f"*/*/{rel}", f"*/{rel}"):
+            try:
+                for related_yaml in base.glob(pattern):
+                    plugin_dir = related_yaml.parent.parent
+                    if _has_plugin_manifest(plugin_dir):
+                        _record(cached, plugin_dir)
+            except OSError:
+                continue
+
+    # A repo-scoped directory marketplace may load its enabled plugin directly
+    # from source rather than from the cache. Reuse the shared resolver so
+    # settings precedence, marketplace manifests, pluginRoot, and enabled state
+    # stay aligned with every other plugin consumer.
+    for repo_dir in repo_dirs or []:
+        try:
+            from plugin_resolve import resolve_repo_plugins
+
+            resolved = resolve_repo_plugins(repo_dir)
+        except Exception:
             continue
-    return sorted(found)
+        for plugin_dir in resolved.resolved.values():
+            try:
+                if related_path(plugin_dir).is_file() and _has_plugin_manifest(plugin_dir):
+                    _record(live, plugin_dir)
+            except OSError:
+                continue
+    cached_only = [
+        path for key, path in sorted(cached.items()) if key not in live
+    ]
+    return [
+        _PluginContributionAnchor(path)
+        for path in [*cached_only, *[path for _, path in sorted(live.items())]]
+    ]
 
 
 def _is_installed_plugin_anchor(anchor: str | Path) -> bool:
-    """True if ``anchor`` resolves to a path under the installed-plugins root."""
+    """True when ``anchor`` is a cached or explicitly tagged plugin root."""
+    if isinstance(anchor, _PluginContributionAnchor):
+        return True
     try:
         root = installed_plugins_root().resolve()
         return root in Path(anchor).resolve().parents
