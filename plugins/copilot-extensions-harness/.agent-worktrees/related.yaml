@@ -1,0 +1,10 @@
+# Contributed by copilot-extensions-harness at the lowest precedence.
+related:
+  copilot-extensions:
+    role: tooling
+    summary: >-
+      Public source repository for the general-purpose Copilot CLI plugin
+      marketplace and its reusable agent infrastructure.
+    locus:
+      preferred: local
+    delegate: { via: none }

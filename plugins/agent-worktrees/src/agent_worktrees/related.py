@@ -60,6 +60,8 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dropin_registry import ScanAuthority
+from plugin_activation import resolve_active_plugins
 
 # The in-repo ``.agent-worktrees/`` directory name.  Kept in sync with
 # ``config.INREPO_CONFIG_DIRNAME``; defined locally so this module has no
@@ -638,76 +640,73 @@ def _has_plugin_manifest(plugin_dir: Path) -> bool:
     )
 
 
+def _filesystem_plugin_related_anchors(base: Path) -> list[str]:
+    """Discover related fragments beneath one explicit plugin payload root."""
+    try:
+        if not base.is_dir():
+            return []
+    except OSError:
+        return []
+    rel = f"{INREPO_DIRNAME}/{RELATED_FILENAME}"
+    found: set[str] = set()
+    for pattern in (f"*/*/{rel}", f"*/{rel}"):
+        try:
+            for related_yaml in base.glob(pattern):
+                plugin_dir = related_yaml.parent.parent
+                if _has_plugin_manifest(plugin_dir):
+                    found.add(str(plugin_dir.resolve()))
+        except OSError:
+            continue
+    return [
+        _PluginContributionAnchor(path)
+        for path in sorted(found, key=os.path.normcase)
+    ]
+
+
 def installed_plugin_related_anchors(
     root: Path | None = None,
     *,
-    repo_dirs: list[str | Path] | None = None,
+    home: str | Path | None = None,
 ) -> list[str]:
-    """Discover plugins that ship a ``.agent-worktrees/related.yaml``.
+    """Discover active plugins that ship a ``.agent-worktrees/related.yaml``.
 
     Returns each contributing plugin's directory (a valid :func:`read_related`
-    anchor), de-duplicated and ordered deterministically. Cached plugins are
-    found in both the marketplace-nested
-    (``<root>/<marketplace>/<plugin>/``) and flat
-    (``<root>/<plugin>/``) installed-plugins layouts. Enabled plugins from
-    local directory marketplaces are resolved from each ``repo_dirs`` settings
-    root and ordered after cached copies so the live source wins on a duplicate
-    contribution. A directory only counts if it also carries a plugin manifest,
-    so an incidental ``.agent-worktrees`` dir elsewhere is ignored.
+    anchor), de-duplicated and sorted deterministically. Production discovery
+    uses the effective global-plus-adopted-project activation graph, so copied
+    payloads and live directory-marketplace plugins follow the same enabled and
+    identity-verified contract.
+
+    ``root`` and :data:`INSTALLED_PLUGINS_ENV` retain the legacy explicit
+    filesystem scan for contained tests and diagnostics. That scan tolerates
+    marketplace-nested and flat layouts and requires a plugin manifest.
 
     These anchors are the lowest-precedence config-graft layer (see the module
     note above); callers prepend them ahead of the base/knowledge anchors.
     """
-    base = root or installed_plugins_root()
-    rel = f"{INREPO_DIRNAME}/{RELATED_FILENAME}"
-    cached: dict[str, str] = {}
-    live: dict[str, str] = {}
-
-    def _record(target: dict[str, str], plugin_dir: Path) -> None:
-        try:
-            resolved = plugin_dir.resolve()
-        except OSError:
-            return
-        target[os.path.normcase(str(resolved))] = str(resolved)
+    override = os.environ.get(INSTALLED_PLUGINS_ENV)
+    if root is not None or override:
+        return _filesystem_plugin_related_anchors(
+            root or installed_plugins_root()
+        )
 
     try:
-        cache_available = base.is_dir()
-    except OSError:
-        cache_available = False
-    if cache_available:
-        # marketplace-nested and flat installed-cache layouts
-        for pattern in (f"*/*/{rel}", f"*/{rel}"):
-            try:
-                for related_yaml in base.glob(pattern):
-                    plugin_dir = related_yaml.parent.parent
-                    if _has_plugin_manifest(plugin_dir):
-                        _record(cached, plugin_dir)
-            except OSError:
-                continue
+        report = resolve_active_plugins(home=home)
+    except (OSError, ValueError):
+        return []
+    if report.authority is ScanAuthority.INDETERMINATE:
+        return []
+    active = report.active.values()
 
-    # A repo-scoped directory marketplace may load its enabled plugin directly
-    # from source rather than from the cache. Reuse the shared resolver so
-    # settings precedence, marketplace manifests, pluginRoot, and enabled state
-    # stay aligned with every other plugin consumer.
-    for repo_dir in repo_dirs or []:
+    found: set[str] = set()
+    for plugin in active:
         try:
-            from plugin_resolve import resolve_repo_plugins
-
-            resolved = resolve_repo_plugins(repo_dir)
-        except Exception:
+            if related_path(plugin.root).is_file():
+                found.add(str(plugin.root))
+        except OSError:
             continue
-        for plugin_dir in resolved.resolved.values():
-            try:
-                if related_path(plugin_dir).is_file() and _has_plugin_manifest(plugin_dir):
-                    _record(live, plugin_dir)
-            except OSError:
-                continue
-    cached_only = [
-        path for key, path in sorted(cached.items()) if key not in live
-    ]
     return [
         _PluginContributionAnchor(path)
-        for path in [*cached_only, *[path for _, path in sorted(live.items())]]
+        for path in sorted(found, key=os.path.normcase)
     ]
 
 
@@ -720,6 +719,15 @@ def _is_installed_plugin_anchor(anchor: str | Path) -> bool:
         return root in Path(anchor).resolve().parents
     except OSError:
         return False
+
+
+def _anchor_key(anchor: str | Path) -> str:
+    """Canonical comparison key for an anchor, with a fail-safe fallback."""
+    try:
+        resolved = Path(anchor).expanduser().resolve()
+    except OSError:
+        resolved = Path(os.path.abspath(os.path.expanduser(str(anchor))))
+    return os.path.normcase(str(resolved))
 
 
 def read_related_grafted(anchors: list[str | Path]) -> RelatedConfig:

@@ -18,6 +18,11 @@ organization-specific needs are routed elsewhere.
 | [diagnosing-copilot-extensions](skills/diagnosing-copilot-extensions/SKILL.md) | Symptom → cause → action for deployed plugins, key paths, diagnostic commands, and the baseline-reset escape hatch |
 | [validating-in-clean-room](skills/validating-in-clean-room/SKILL.md) | **Run · evaluate · author** clean-room validation (`tools/clean-room/`): fresh-box scenarios, `cr-report.json` + `cr-logs/`, jam taxonomy, Tier-E literal-mode judging, and the scenario contract |
 
+The plugin also ships `.agent-worktrees/related.yaml`, so an active
+`copilot-extensions-harness` contributes portable, lowest-precedence provenance
+for the `copilot-extensions` repository. Machine-local registration still owns
+the checkout path and repository class.
+
 | Sub-agent | Covers |
 |-----------|--------|
 | [clean-room-judge](agents/clean-room-judge.agent.md) | Read-only Tier-E evaluator: scores a clean-room eval run against a scenario's stated outcome under **literal-mode** rules (credits only the literal task; a self-heal "pass" is a false pass), emitting PASS/FAIL + classified jams |

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -145,6 +147,62 @@ def _make_installed_plugin(root: Path, marketplace: str, name: str,
     return plugin_dir
 
 
+def _write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _make_local_marketplace_plugin(
+    settings_root: Path,
+    marketplace: str,
+    name: str,
+    cfg: RelatedConfig,
+) -> Path:
+    market = settings_root / ".ai"
+    manifest_path = market / ".claude-plugin" / "marketplace.json"
+    manifest = (
+        json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest_path.is_file()
+        else {"name": marketplace, "plugins": []}
+    )
+    manifest["plugins"].append({"name": name, "source": f"./{name}"})
+    _write_json(
+        manifest_path,
+        manifest,
+    )
+    plugin = market / name
+    _write_json(plugin / ".claude-plugin" / "plugin.json", {"name": name})
+    _write_related(plugin, cfg)
+    return plugin.resolve()
+
+
+def _register_project(home: Path, name: str, repo: Path) -> None:
+    repo.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    remote = f"https://example.com/{name}.git"
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin", remote],
+        check=True,
+    )
+    platform_key = "windows" if os.name == "nt" else "linux"
+    _write_json(
+        home / ".agent-worktrees" / "projects.yaml",
+        {"projects": {name: {"config_dir": f"~/.{name}"}}},
+    )
+    _write_json(
+        home / ".agent-worktrees" / "repos.yaml",
+        {
+            "repos": {
+                name: {
+                    platform_key: str(repo),
+                    "remote": remote,
+                    "class": "worktree",
+                }
+            }
+        },
+    )
+
+
 def test_installed_plugin_related_anchors_discovers_and_filters(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -178,85 +236,144 @@ def test_installed_plugin_related_anchors_empty_when_root_absent(
     assert related.installed_plugin_related_anchors() == []
 
 
-def test_installed_plugin_related_anchors_includes_enabled_directory_plugins(
+def test_plugin_related_anchors_use_effective_active_local_plugins(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
-    installed = tmp_path / "installed-plugins"
-    repo = tmp_path / "harness"
-    marketplace = repo / ".ai"
-    cached = _make_installed_plugin(
-        installed, "local-marketplace", "example-web-harness",
-        RelatedConfig(primary="cached-must-not-win", related={
-            "example-web": RelatedEntry(
-                name="example-web", role="product", summary="from cache"
-            )
-        }),
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    enabled = _make_local_marketplace_plugin(
+        tmp_path / ".copilot",
+        "local",
+        "enabled-harness",
+        RelatedConfig(
+            related={"enabled": RelatedEntry(name="enabled", role="tooling")}
+        ),
     )
-    plugin = _make_installed_plugin(
-        marketplace, "", "example-web-harness",
-        RelatedConfig(primary="must-not-win", related={
-            "example-web": RelatedEntry(
-                name="example-web", role="product", summary="from live source"
-            )
-        }),
+    disabled = _make_local_marketplace_plugin(
+        tmp_path / ".copilot",
+        "local",
+        "disabled-harness",
+        RelatedConfig(
+            related={"disabled": RelatedEntry(name="disabled", role="tooling")}
+        ),
     )
-    (plugin / "plugin.json").write_text(
-        json.dumps({"name": "example-web-harness"}), encoding="utf-8"
-    )
-    disabled = _make_installed_plugin(
-        marketplace, "", "disabled-harness",
-        RelatedConfig(related={
-            "disabled": RelatedEntry(name="disabled", role="tooling")
-        }),
-    )
-    (disabled / "plugin.json").write_text(
-        json.dumps({"name": "disabled-harness"}), encoding="utf-8"
-    )
-    (marketplace / ".claude-plugin").mkdir(parents=True)
-    (marketplace / ".claude-plugin" / "marketplace.json").write_text(
-        json.dumps({
-            "name": "local-marketplace",
-            "plugins": [
-                {
-                    "name": "example-web-harness",
-                    "source": "./example-web-harness",
-                },
-                {
-                    "name": "disabled-harness",
-                    "source": "./disabled-harness",
-                },
-            ],
-        }),
-        encoding="utf-8",
-    )
-    settings = repo / ".github" / "copilot"
-    settings.mkdir(parents=True)
-    (settings / "settings.json").write_text(
-        json.dumps({
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {
             "extraKnownMarketplaces": {
-                "local-marketplace": {
+                "local": {
                     "source": {"source": "directory", "path": "./.ai"}
                 }
             },
             "enabledPlugins": {
-                "example-web-harness@local-marketplace": True,
-                "disabled-harness@local-marketplace": False,
+                "enabled-harness@local": True,
+                "disabled-harness@local": False,
             },
-        }),
-        encoding="utf-8",
+        },
     )
 
-    monkeypatch.setenv(related.INSTALLED_PLUGINS_ENV, str(installed))
-    anchors = related.installed_plugin_related_anchors(repo_dirs=[repo])
-    assert anchors == [str(cached), str(plugin)]
+    assert related.installed_plugin_related_anchors(home=tmp_path) == [
+        str(enabled)
+    ]
+    assert str(disabled) not in related.installed_plugin_related_anchors(
+        home=tmp_path
+    )
 
-    base = repo / "base"
+
+def test_active_local_plugin_primary_is_ignored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    plugin = _make_local_marketplace_plugin(
+        tmp_path / ".copilot",
+        "local",
+        "example-harness",
+        RelatedConfig(
+            primary="plugin-must-not-win",
+            related={"example": RelatedEntry(name="example", role="tooling")},
+        ),
+    )
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"example-harness@local": True},
+        },
+    )
+    base = tmp_path / "base"
     _write_related(base, RelatedConfig(primary="base-primary"))
-    merged = related.read_related_grafted([*anchors, base])
+
+    active = related.installed_plugin_related_anchors(home=tmp_path)
+    assert active == [str(plugin)]
+    merged = related.read_related_grafted([*active, base])
+
     assert merged.primary == "base-primary"
-    assert merged.related["example-web"].summary == "from live source"
-    assert merged.related["example-web"].origin_anchor == str(plugin)
-    assert "disabled" not in merged.related
+    assert "example" in merged.related
+
+
+def test_plugin_related_anchors_include_adopted_project_local_marketplace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    repo = tmp_path / "control-harness"
+    _register_project(tmp_path, "control-harness", repo)
+    plugin = _make_local_marketplace_plugin(
+        repo,
+        "control-marketplace",
+        "example-harness",
+        RelatedConfig(
+            related={"example": RelatedEntry(name="example", role="tooling")}
+        ),
+    )
+    _write_json(
+        repo / ".github" / "copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "control-marketplace": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"example-harness@control-marketplace": True},
+        },
+    )
+
+    assert related.installed_plugin_related_anchors(home=tmp_path) == [
+        str(plugin)
+    ]
+
+
+def test_plugin_related_anchors_fail_closed_on_indeterminate_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv(related.INSTALLED_PLUGINS_ENV, raising=False)
+    _make_local_marketplace_plugin(
+        tmp_path / ".copilot",
+        "local",
+        "example-harness",
+        RelatedConfig(
+            related={"example": RelatedEntry(name="example", role="tooling")}
+        ),
+    )
+    _write_json(
+        tmp_path / ".copilot" / "settings.json",
+        {
+            "extraKnownMarketplaces": {
+                "local": {
+                    "source": {"source": "directory", "path": "./.ai"}
+                }
+            },
+            "enabledPlugins": {"example-harness@local": True},
+        },
+    )
+    (tmp_path / ".copilot" / "settings.local.json").write_text(
+        "{not valid json",
+        encoding="utf-8",
+    )
+    assert related.installed_plugin_related_anchors(home=tmp_path) == []
+    assert related.installed_plugin_related_anchors(home=tmp_path) == []
 
 
 def test_grafted_plugin_is_lowest_precedence_and_primary_ignored(
