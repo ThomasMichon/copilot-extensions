@@ -7,8 +7,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 PLUGIN = Path(__file__).resolve().parents[1]
 SCRIPT = PLUGIN / "scripts" / "aggregate_context.py"
+BASH_WRAPPER = PLUGIN / "scripts" / "emit-context.sh"
+POWERSHELL_WRAPPER = PLUGIN / "scripts" / "emit-context.ps1"
 SCHEMA = "copilot-extensions.session-context-contributors"
 
 
@@ -429,3 +433,66 @@ def test_one_failed_contributor_rejects_partial_aggregate(tmp_path: Path) -> Non
 
     assert json.loads(result.stdout) == {}
     assert "contributors failed" in result.stderr
+
+
+def test_bash_wrapper_discards_partial_output_on_aggregator_failure(
+    tmp_path: Path,
+) -> None:
+    plugin = tmp_path / "zz-context-injection"
+    shutil.copytree(PLUGIN, plugin)
+    aggregate = plugin / "scripts" / "aggregate_context.py"
+    aggregate.write_text(
+        "import sys\nprint('{\"partial\":true}', end='')\nsys.exit(1)\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["COPILOT_PLUGIN_ROOT"] = str(plugin)
+
+    result = subprocess.run(
+        ["bash", str(BASH_WRAPPER)],
+        input="{}",
+        text=True,
+        capture_output=True,
+        env=environment,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == {}
+    assert "partial" not in result.stdout
+
+
+@pytest.mark.skipif(
+    not (shutil.which("pwsh") or shutil.which("powershell.exe")),
+    reason="PowerShell is unavailable",
+)
+def test_powershell_wrapper_discards_partial_output_on_aggregator_failure(
+    tmp_path: Path,
+) -> None:
+    plugin = tmp_path / "zz-context-injection"
+    shutil.copytree(PLUGIN, plugin)
+    aggregate = plugin / "scripts" / "aggregate_context.py"
+    aggregate.write_text(
+        "import sys\nprint('{\"partial\":true}', end='')\nsys.exit(1)\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+    assert powershell
+
+    result = subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-File",
+            str(POWERSHELL_WRAPPER),
+        ],
+        input="{}",
+        text=True,
+        capture_output=True,
+        env=environment,
+        check=True,
+    )
+
+    assert json.loads(result.stdout) == {}
+    assert "partial" not in result.stdout

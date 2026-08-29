@@ -16,5 +16,21 @@ if (-not $python) {
     exit 0
 }
 
-& $python.Source (Join-Path (Join-Path $root 'scripts') 'aggregate_context.py')
-exit $LASTEXITCODE
+$temp = [System.IO.Path]::GetTempFileName()
+try {
+    & $python.Source (Join-Path (Join-Path $root 'scripts') 'aggregate_context.py') `
+        > $temp
+    if ($LASTEXITCODE -eq 0) {
+        [Console]::Out.Write((Get-Content -Raw -LiteralPath $temp))
+    }
+    else {
+        [Console]::Error.WriteLine(
+            '[zz-context-injection] aggregator failed; direct context retained'
+        )
+        [Console]::Out.Write('{}')
+    }
+}
+finally {
+    Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+}
+exit 0

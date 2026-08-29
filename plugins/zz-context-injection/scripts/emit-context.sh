@@ -11,4 +11,14 @@ if [ -z "$python_bin" ]; then
     exit 0
 fi
 
-exec "$python_bin" "$root/scripts/aggregate_context.py"
+tmp="$(mktemp "${TMPDIR:-/tmp}/context-injection.XXXXXXXX")" || {
+    printf '{}'
+    exit 0
+}
+trap 'rm -f "$tmp"' EXIT
+if "$python_bin" "$root/scripts/aggregate_context.py" >"$tmp"; then
+    cat "$tmp"
+else
+    printf '%s\n' '[zz-context-injection] aggregator failed; direct context retained' >&2
+    printf '{}'
+fi
