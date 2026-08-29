@@ -11,7 +11,7 @@ import types
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees.picker_tui import data_ssh
+from worktree_manager.production_picker.picker_tui import data_ssh
 
 
 def _install_roster(monkeypatch, entries, *, machine, local_id):

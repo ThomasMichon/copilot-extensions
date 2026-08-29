@@ -60,7 +60,7 @@ version and be coordinated with the Manager.
 | Verb (as invoked) | Purpose |
 |---|---|
 | `<project> create [--json]` | Make a worktree, no launch (the programmatic "New worktree"). |
-| `<project> resolve [--worktree-id <id>] [--new] [--bare-resume]` | Emit the JSON launch plan the front-end acts on (resume / create-and-launch / bare-resume). |
+| `<project> resolve --json (--worktree-id <id> \| --new \| --base) [--bare-resume] [--machine <name> --environment <env> --target-no-mux]` | Emit the launch plan the front-end acts on: local resume/create/base-repo execution, or an environment-specific remote SSH handoff carrying the same selection. |
 | `<project> restart <id> --json` | Restart a worktree's session. |
 | `<project> reclaim --worktree-id <id> …` | Kill the exact bound orphan process so a session can be re-opened. |
 | `<project> finalize <id> --json` | Finalize a merged/completed worktree. |

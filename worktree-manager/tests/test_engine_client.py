@@ -169,6 +169,131 @@ def test_resolve_new_sends_new_flag(monkeypatch):
     assert plan.is_exec
 
 
+def test_resolve_base_sends_base_flag(monkeypatch):
+    def handler(cmd, kw):
+        assert "--base" in cmd
+        assert "--new" not in cmd and "--worktree-id" not in cmd
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", base=True)
+    assert plan.is_exec
+
+
+def test_resolve_base_skew_retries_non_json_plan(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(list(cmd))
+        if "--json" in cmd:
+            return _fake_completed(
+                cmd,
+                returncode=2,
+                stdout=json.dumps({
+                    "version": 1,
+                    "error": "--json requires --worktree-id or --new",
+                }),
+            )
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan("dotfiles", base=True)
+    assert plan.is_exec
+    assert any("--json" in call for call in calls)
+    assert any("--base" in call and "--json" not in call for call in calls)
+
+
+def test_resolve_remote_sends_environment_and_action(monkeypatch):
+    remote = {
+        "action": "remote",
+        "ssh_alias": "example-wsl",
+        "remote_command": "dotfiles --worktree-id wt-1 --bare-resume --no-mux",
+        "machine": "example",
+        "display_name": "Example WSL",
+    }
+
+    def handler(cmd, kw):
+        assert cmd[-8:] == [
+            "--worktree-id",
+            "wt-1",
+            "--bare-resume",
+            "--machine",
+            "Example",
+            "--environment",
+            "WSL",
+            "--target-no-mux",
+        ]
+        return _fake_completed(cmd, stdout=json.dumps(remote))
+
+    _install_fake(monkeypatch, handler)
+    plan = ec.resolve_launch_plan(
+        "dotfiles",
+        worktree_id="wt-1",
+        bare_resume=True,
+        target_machine="Example",
+        target_environment="WSL",
+        target_no_mux=True,
+    )
+    assert plan.action == "remote"
+    assert plan.raw["ssh_alias"] == "example-wsl"
+
+
+def test_resolve_remote_skew_reports_feature_unavailable(monkeypatch):
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: _fake_completed(
+            cmd,
+            returncode=2,
+            stderr="unrecognized arguments: --environment WSL",
+        ),
+    )
+    with pytest.raises(ec.EngineFeatureUnavailable):
+        ec.resolve_launch_plan(
+            "dotfiles",
+            new=True,
+            target_machine="Example",
+            target_environment="WSL",
+        )
+
+
+def test_resolve_remote_real_error_is_not_misclassified(monkeypatch):
+    payload = json.dumps({"version": 1, "error": "no such worktree"})
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: _fake_completed(cmd, returncode=1, stdout=payload),
+    )
+    with pytest.raises(ec.EngineError, match="no such worktree") as error:
+        ec.resolve_launch_plan(
+            "dotfiles",
+            worktree_id="missing",
+            target_machine="Example",
+            target_environment="WSL",
+        )
+    assert not isinstance(error.value, ec.EngineFeatureUnavailable)
+
+
+def test_resolve_remote_base_skew_does_not_fall_back_locally(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(list(cmd))
+        return _fake_completed(
+            cmd,
+            returncode=2,
+            stderr="unrecognized arguments: --base --machine Example",
+        )
+
+    _install_fake(monkeypatch, handler)
+    with pytest.raises(ec.EngineFeatureUnavailable):
+        ec.resolve_launch_plan(
+            "dotfiles",
+            base=True,
+            target_machine="Example",
+            target_environment="WSL",
+        )
+    assert len(calls) == 1
+
+
 def test_resolve_requires_a_target(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
     with pytest.raises(ec.EngineError):
@@ -179,6 +304,12 @@ def test_resolve_worktree_and_new_are_exclusive(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
     with pytest.raises(ec.EngineError):
         ec.resolve_launch_plan("dotfiles", worktree_id="x", new=True)
+
+
+def test_resolve_base_and_new_are_exclusive(monkeypatch):
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(cmd))
+    with pytest.raises(ec.EngineError):
+        ec.resolve_launch_plan("dotfiles", base=True, new=True)
 
 
 def test_resolve_none_action(monkeypatch):

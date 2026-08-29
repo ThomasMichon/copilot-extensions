@@ -147,16 +147,35 @@ parity slices; the bundled Picker stays in place until those are complete.
 The established production Picker source now lives under
 [`src/worktree_manager/production_picker/`](src/worktree_manager/production_picker/)
 as a wholesale copy of the still-shipping agent-worktrees implementation.
-`worktree-manager picker <project>` runs that transplanted UI; the minimal
-`picker_app` remains only for its existing demo/screenshot development surface.
+`worktree-manager picker <project>` runs that transplanted UI.
+
+The production validation and preview surfaces live with it:
+
+```bash
+uv run python -m worktree_manager picker mock <project> --local
+uv run python -m worktree_manager picker screenshot <project> --format text
+uv run python -m worktree_manager picker screenshot <project> --format svg --out picker.svg
+pwsh -File scripts/preview-picker.ps1 -Project <project> -Format svg -Out picker.svg
+cd scripts/picker-snapshot && npm install
+uv run python render.py picker.png
+```
+
+`picker mock` renders real-shaped state but simulates mutations. The screenshot
+command exports the production character grid, ANSI grid, or SVG through the
+same compositor used by the live app. `scripts/picker-shot.py` adds
+identity-obscured/shareable captures and validates the PNG signature and
+dimensions after browser rasterization. The older minimal `picker_app` remains
+only for the explicit `picker --demo` development surface.
 
 During the migration, the copied presentation modules reach their existing
 engine/data operations through a private compatibility boundary to the active
 agent-worktrees runtime. That boundary is intentionally temporary: it preserves
 the proven UX first, while later slices replace each dependency with the
-Manager-owned CLI/service contracts. Bare project invocation remains on the
-bundled production Picker until the Manager-hosted copy passes the full legacy
-UX and visual-capture suites.
+Manager-owned CLI/service contracts. The full legacy UX, golden, cache, pivot, streaming, steering, profile, SSH, and
+selection corpus now runs from `tests/production_picker/` against the
+Manager-owned package. Bare project invocation remains on the bundled
+production Picker until remote/base-repo decisions and final live validation
+are complete.
 
 **Projects** are the repos promoted to first-class harness projects (worthy of
 binstubs + profiles, in `projects.yaml`); **Repos** are everything else in the
