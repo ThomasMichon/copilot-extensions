@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import subprocess
 
+import pytest
 import yaml
 
 
@@ -78,3 +81,40 @@ def test_fallback_parser_handles_canonical_and_inline_forms():
     assert MODULE._fallback_machines(
         "indexer: {machine: host, endpoint: http://127.0.0.1:8000}\n"
     ) == ["host"]
+
+
+def test_posix_ensure_hook_resolves_helper_before_client_exit(tmp_path):
+    if os.name == "nt":
+        pytest.skip("POSIX hook execution is covered on Linux")
+    if subprocess.run(["bash", "--version"], capture_output=True).returncode != 0:
+        pytest.skip("bash is unavailable")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    config = repo / ".agent-index" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "indexer:\n  machine: another-host\n  ssh: another-host\n",
+        encoding="utf-8",
+    )
+    home = tmp_path / "home"
+    runtime = home / ".agent-index"
+    runtime.mkdir(parents=True)
+    (runtime / "deploy-manifest.json").write_text("{}\n", encoding="utf-8")
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "AGENT_INDEX_MACHINE": "client-host",
+    }
+
+    result = subprocess.run(
+        ["bash", SCRIPT.parent / "ensure-service.sh"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "unbound variable" not in result.stderr

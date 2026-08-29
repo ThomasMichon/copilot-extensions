@@ -6,6 +6,7 @@
 # safe: a healthy daemon returns immediately; an unhealthy one kicks a BACKGROUND
 # `install.sh ensure` and returns without blocking session start.
 set -u
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 INSTALL_DIR="$HOME/.agent-index"
 # Only act on a box where agent-index is actually deployed.
 [ -f "$INSTALL_DIR/deploy-manifest.json" ] || exit 0
