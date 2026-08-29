@@ -15,6 +15,13 @@ For the current guaranteed-last mode:
   declaration; and
 - no second aggregate authority is active.
 
+A repository-local directory marketplace that loads after installed remote
+plugins may provide a thin authority adapter. Its manifest declares
+`sessionContextAuthority` with `mode: "tail-adapter"` and engine
+`zz-context-injection@copilot-extensions`; its hook invokes that installed
+engine with the adapter's source-qualified identity. The adapter contains no
+resolver, admission, or rendering logic.
+
 If any active plugin, declaration, ordering fact, or stack input is unknown or
 incomplete, the authority emits `{}` and direct backups remain authoritative.
 Observed completion timing is not an ordering proof.

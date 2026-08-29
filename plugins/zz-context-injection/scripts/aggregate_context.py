@@ -26,7 +26,7 @@ MAX_TIMEOUT_SECONDS = 10
 MAX_TOTAL_TIMEOUT_SECONDS = 20
 MAX_WORKERS = 16
 COMMAND_CATALOG_BUDGET_BYTES = 32 * 1024
-AUTHORITY_SOURCE = "zz-context-injection@copilot-extensions"
+DEFAULT_AUTHORITY_SOURCE = "zz-context-injection@copilot-extensions"
 IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
 
 
@@ -57,6 +57,21 @@ class ContributorResult:
 
 def _diagnose(message: str) -> None:
     print(f"[zz-context-injection] {message}", file=sys.stderr)
+
+
+def _authority_source() -> str | None:
+    source = os.environ.get(
+        "COPILOT_CONTEXT_INJECTION_AUTHORITY",
+        DEFAULT_AUTHORITY_SOURCE,
+    )
+    name, separator, marketplace = source.partition("@")
+    if (
+        not separator
+        or name != "zz-context-injection"
+        or not IDENTIFIER.fullmatch(marketplace)
+    ):
+        return None
+    return source
 
 
 def _emit_empty(message: str | None = None) -> int:
@@ -650,7 +665,12 @@ def main() -> int:
     own = [plugin for plugin in active if plugin.root == own_root]
     if len(own) != 1:
         return _emit_empty("aggregator authority is absent or ambiguous")
-    if own[0].source != AUTHORITY_SOURCE:
+    authority_source = _authority_source()
+    if authority_source is None:
+        return _emit_empty(
+            "configured source-qualified authority identity is invalid"
+        )
+    if own[0].source != authority_source:
         return _emit_empty("aggregator is not the selected source-qualified authority")
     max_name = max(plugin.name for plugin in active)
     if own[0].name != max_name:
