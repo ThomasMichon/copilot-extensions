@@ -30,19 +30,22 @@ def _supported_bash() -> str | None:
     candidate = shutil.which("bash")
     if candidate is None:
         return None
-    result = subprocess.run(
-        [
-            candidate,
-            "--noprofile",
-            "--norc",
-            "-c",
-            "((BASH_VERSINFO[0] > 4 || "
-            "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
-        ],
-        capture_output=True,
-        check=False,
-        timeout=5,
-    )
+    try:
+        result = subprocess.run(
+            [
+                candidate,
+                "--noprofile",
+                "--norc",
+                "-c",
+                "((BASH_VERSINFO[0] > 4 || "
+                "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
     return candidate if result.returncode == 0 else None
 
 
