@@ -112,9 +112,27 @@ def _runtime_equivalence_fingerprint(reg: dict) -> str:
             "headless_agent": "task-worker",
         }
         for key, value in defaults.items():
-            spec.setdefault(key, value)
+            if spec.get(key) is None:
+                spec[key] = value
         for key in ("labels", "headless_labels", "cli_labels"):
             spec[key] = sorted(set(spec.get(key) or []))
+        for key in ("interval", "reactive_interval"):
+            try:
+                spec[key] = float(spec[key])
+            except (TypeError, ValueError):
+                pass
+        for key in ("max_concurrent", "max_attempts", "verify_timeout"):
+            try:
+                spec[key] = int(spec[key])
+            except (TypeError, ValueError):
+                pass
+        label_attempts = {}
+        for key, value in (spec.get("label_max_attempts") or {}).items():
+            try:
+                label_attempts[str(key)] = int(value)
+            except (TypeError, ValueError):
+                label_attempts[str(key)] = value
+        spec["label_max_attempts"] = label_attempts
     return json.dumps(
         {"kind": kind, "spec": spec},
         sort_keys=True,
@@ -148,6 +166,7 @@ class DesiredRegistrationSet:
     registrations: dict[str, dict] = field(default_factory=dict)
     deduplicated: list[str] = field(default_factory=list)
     conflicts: list[str] = field(default_factory=list)
+    replacements: dict[str, str] = field(default_factory=dict)
 
 
 def merge_registration_sources(
@@ -176,6 +195,7 @@ def merge_registration_sources(
             if _runtime_equivalence_fingerprint(direct_reg) == declared_fp:
                 result.registrations.pop(direct_id, None)
                 result.deduplicated.append(direct_id)
+                result.replacements[direct_id] = declared_reg["id"]
                 continue
             shared = sorted(declared_ids & _logical_ids(direct_reg))
             if shared:
@@ -531,6 +551,9 @@ class SupervisorDaemon:
         desired = merged.registrations
         for rid in self._overridden_off():
             desired.pop(rid, None)
+            replacement = merged.replacements.get(rid)
+            if replacement:
+                desired.pop(replacement, None)
         self._deduplicated = merged.deduplicated
         self._conflicts = merged.conflicts
         return desired
