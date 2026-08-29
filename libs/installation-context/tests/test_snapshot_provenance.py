@@ -95,7 +95,18 @@ ADAPTER_RUNNERS = (
     if EXHAUSTIVE_ADAPTERS
     else ALL_RUNNERS[1:]
 )
-EXHAUSTIVE_RUNNERS = ALL_RUNNERS if EXHAUSTIVE_ADAPTERS else ()
+EXHAUSTIVE_RUNNERS = (
+    ALL_RUNNERS
+    if EXHAUSTIVE_ADAPTERS
+    else (
+        pytest.param(
+            ("exhaustive-adapters-disabled", (), "long"),
+            marks=pytest.mark.skip(
+                reason="set INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1"
+            ),
+        ),
+    )
+)
 
 
 def _runner_case_matrix(
