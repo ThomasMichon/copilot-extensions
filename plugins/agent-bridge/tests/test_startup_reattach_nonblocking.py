@@ -33,18 +33,23 @@ def test_startup_does_not_block_on_slow_reattach(tmp_path, monkeypatch):
     invoked = {"called": False}
 
     async def slow_reattach(self, *args, **kwargs):
-        # Records invocation, then blocks far longer than the daemon's other
-        # startup work. If startup awaited this inline, entering the TestClient
-        # context (which runs the lifespan startup) would take ~60s+; with the
-        # reattach backgrounded it returns in the daemon's normal startup time.
+        # Records invocation, then blocks well beyond this (relay-disabled)
+        # daemon's startup. If startup awaited it inline, entering the
+        # TestClient context would take >= 10s; backgrounded, it returns in the
+        # daemon's normal (sub-second) startup time.
         invoked["called"] = True
-        await asyncio.sleep(60)
+        await asyncio.sleep(10)
         return 0
 
     monkeypatch.setattr(SessionManager, "reattach_session_hosts", slow_reattach)
 
+    # Disable the credential relay so the lifespan's own startup is fast and the
+    # threshold isolates the reattach contribution (not relay/socket setup).
     cfg = ServiceConfig(
-        port=0, bind="127.0.0.1", db_path=str(tmp_path / "test.db")
+        port=0,
+        bind="127.0.0.1",
+        db_path=str(tmp_path / "test.db"),
+        enable_credential_relay=False,
     )
     app = create_app(config=cfg, token="test-token")
 
@@ -56,10 +61,10 @@ def test_startup_does_not_block_on_slow_reattach(tmp_path, monkeypatch):
         resp = client.get("/health")
 
     assert resp.status_code == 200
-    # Startup returned well before the 60s reattach could finish -> it was
-    # backgrounded, not awaited. The generous margin above the daemon's normal
-    # startup keeps the assertion from being timing-flaky.
-    assert startup_elapsed < 40.0, (
+    # Startup returned in the daemon's normal (fast) time, far below the 10s
+    # reattach -> it was backgrounded, not awaited. A broken (inline-await)
+    # version fails in ~10s rather than hanging.
+    assert startup_elapsed < 5.0, (
         f"startup blocked on reattach ({startup_elapsed:.1f}s); "
         "it must run as a background task"
     )
