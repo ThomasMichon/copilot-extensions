@@ -22,13 +22,21 @@ from __future__ import annotations
 import asyncio
 import logging
 import subprocess
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
 
 from agent_procutil import no_window_flags
 
+from . import lifecycle
 from ._invoke import module_argv
-from .config import RESTRICTED_PROFILE, TRUSTED_PROFILE, load_config
+from .config import (
+    RESTRICTED_PROFILE,
+    SECURITY_PROFILE_LABEL,
+    TRUSTED_PROFILE,
+    ContainersConfig,
+    FleetConfig,
+    load_config,
+)
 from .lease import deploy_hold_status, get_deploy_hold, get_lease
 from .lifecycle import (
     get_container,
@@ -46,6 +54,21 @@ if TYPE_CHECKING:
 log = logging.getLogger("agent-containers")
 VENUE_SCHEMA_VERSION = 1
 VENUE_PROVIDER = "agent-containers"
+
+
+@dataclass(frozen=True)
+class LiveExecTarget:
+    """Live, policy-validated execution inputs for one configured container."""
+
+    name: str
+    container_id: str
+    config: ContainersConfig
+    fleet: FleetConfig
+    info: object
+    actual_profile: str
+    user: str
+    workspace_folder: str
+    acp_command: str
 
 
 def _creation_flags() -> int:
@@ -99,6 +122,8 @@ def build_restricted_spawn_command(
     container: str,
     user: str,
     acp_command: str,
+    *,
+    login: bool = True,
 ) -> list[str]:
     """Build the restricted ``docker exec`` command with no host projection.
 
@@ -113,7 +138,7 @@ def build_restricted_spawn_command(
         user,
         container,
         "bash",
-        "-lc",
+        "-lc" if login else "-c",
         acp_command,
     ]
 
@@ -131,6 +156,88 @@ def build_wrapper_command(name: str) -> list[str]:
     cmd.exe and mangle forwarded arguments (see ``._invoke``).
     """
     return [*module_argv(), "exec", "--stdio", name]
+
+
+def resolve_live_exec_target(
+    name: str,
+    *,
+    config: ContainersConfig | None = None,
+) -> LiveExecTarget:
+    """Resolve one running fleet member and validate its live trust posture."""
+    config = config or load_config()
+    try:
+        info = lifecycle.get_container(config, name)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"Container lookup failed for '{name}'; refusing dispatch: {exc}"
+        ) from exc
+    if info is None:
+        raise RuntimeError(
+            f"Container '{name}' is not a discovered fleet member; refusing dispatch"
+        )
+
+    inspected = lifecycle.inspect_container(name)
+    actual_profile = (
+        (inspected.get("Config") or {}).get("Labels") or {}
+    ).get(SECURITY_PROFILE_LABEL)
+    fleet = config.fleets.get(getattr(info, "fleet", "") or "")
+    if fleet is None:
+        raise RuntimeError(
+            f"Container '{name}' has no matching fleet configuration; "
+            "refusing dispatch"
+        )
+    if actual_profile not in {TRUSTED_PROFILE, RESTRICTED_PROFILE}:
+        raise RuntimeError(
+            f"Container '{name}' has unsupported live security profile "
+            f"{actual_profile!r}; refusing dispatch"
+        )
+    if fleet.security_profile != actual_profile:
+        raise RuntimeError(
+            f"Container '{name}' security profile does not match its fleet "
+            f"(configured={fleet.security_profile!r}, live={actual_profile!r}); "
+            "refusing dispatch"
+        )
+    discovered_id = getattr(info, "container_id", None)
+    inspected_id = inspected.get("Id")
+    if not discovered_id or not inspected_id or discovered_id != inspected_id:
+        raise RuntimeError(
+            f"Container '{name}' changed identity during validation; "
+            "refusing dispatch"
+        )
+    state = getattr(info, "state", "running")
+    is_running = bool(getattr(info, "is_running", state == "running"))
+    if not is_running:
+        raise RuntimeError(
+            f"Container '{name}' is not ready (state={state!r}); refusing dispatch"
+        )
+
+    workspace = fleet.workspace_folder or config.workspace_folder
+    user = fleet.exec_user or config.exec_user
+    if actual_profile == RESTRICTED_PROFILE:
+        posture_errors = lifecycle.restricted_policy_errors(
+            info,
+            fleet,
+            workspace_folder=workspace,
+            exec_user=user,
+            inspected=inspected,
+        )
+        if posture_errors:
+            raise RuntimeError(
+                f"Container '{name}' does not satisfy the restricted "
+                f"security policy: {'; '.join(posture_errors)}"
+            )
+
+    return LiveExecTarget(
+        name=name,
+        container_id=inspected_id,
+        config=config,
+        fleet=fleet,
+        info=info,
+        actual_profile=actual_profile,
+        user=user,
+        workspace_folder=workspace,
+        acp_command=config.acp_command_for(fleet),
+    )
 
 
 class ContainerResolver:
@@ -255,12 +362,16 @@ class ContainerResolver:
                 and hold_status["state"] == "none"
             ),
             "posture_verified": False,
-            "transport": "docker-exec" if restricted else "ssh",
+            "transport": "provider-exec" if restricted else "ssh",
             "capabilities": {
                 "container_local_workspace": True,
                 "host_credentials": forward_gh,
                 "credential_relay": relay_enabled,
                 "session_host": not restricted,
+                "ssh_profile": (
+                    fleet.security_profile == RESTRICTED_PROFILE
+                    and actual_profile == RESTRICTED_PROFILE
+                ),
             },
         }
         if restricted:

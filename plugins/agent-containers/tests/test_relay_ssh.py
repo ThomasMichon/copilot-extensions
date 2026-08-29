@@ -43,12 +43,16 @@ def _patch_cmd_context(monkeypatch, *, profile: str = "trusted"):
     monkeypatch.setattr(
         lifecycle,
         "get_container",
-        lambda cfg, name: SimpleNamespace(fleet="repo"),
+        lambda cfg, name: SimpleNamespace(
+            fleet="repo",
+            container_id="instance-123",
+        ),
     )
     monkeypatch.setattr(
         lifecycle,
         "inspect_container",
         lambda name: {
+            "Id": "instance-123",
             "Config": {
                 "Labels": {"agent-containers.security-profile": profile},
             },
@@ -114,12 +118,20 @@ def test_trusted_exec_returns_busy_exit(monkeypatch, capsys):
 
 def test_restricted_exec_skips_ssh_lock(monkeypatch):
     _patch_cmd_context(monkeypatch, profile="restricted")
+    seen = {}
+
+    def launch(*args, **kwargs):
+        seen.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(cli, "_launch_container_agent", launch)
     monkeypatch.setattr(
         ssh_manager,
         "TargetLock",
         lambda *args, **kwargs: pytest.fail("restricted path must not lock SSH"),
     )
     assert cli._cmd_exec(_args()) == 0
+    assert seen["container_id"] == "instance-123"
 
 
 def test_restricted_exec_real_deploy_hold_uses_busy_exit(
@@ -159,7 +171,10 @@ def test_exec_rejects_unknown_live_profile_before_launch(monkeypatch, live_profi
     monkeypatch.setattr(
         lifecycle,
         "get_container",
-        lambda cfg, name: SimpleNamespace(fleet="repo"),
+        lambda cfg, name: SimpleNamespace(
+            fleet="repo",
+            container_id="instance-123",
+        ),
     )
     labels = {}
     if live_profile is not None:
@@ -167,7 +182,10 @@ def test_exec_rejects_unknown_live_profile_before_launch(monkeypatch, live_profi
     monkeypatch.setattr(
         lifecycle,
         "inspect_container",
-        lambda name: {"Config": {"Labels": labels}},
+        lambda name: {
+            "Id": "instance-123",
+            "Config": {"Labels": labels},
+        },
     )
     monkeypatch.setattr(
         cli,
@@ -188,12 +206,16 @@ def test_exec_rejects_configured_observed_profile_mismatch(monkeypatch):
     monkeypatch.setattr(
         lifecycle,
         "get_container",
-        lambda cfg, name: SimpleNamespace(fleet="repo"),
+        lambda cfg, name: SimpleNamespace(
+            fleet="repo",
+            container_id="instance-123",
+        ),
     )
     monkeypatch.setattr(
         lifecycle,
         "inspect_container",
         lambda name: {
+            "Id": "instance-123",
             "Config": {
                 "Labels": {"agent-containers.security-profile": "restricted"},
             },
