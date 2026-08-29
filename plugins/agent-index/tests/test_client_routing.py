@@ -87,6 +87,19 @@ def test_client_local_endpoint_overrides_repo_endpoint(_iso, monkeypatch):
     assert config.client_url() == "http://local-forward:18420"
 
 
+def test_client_local_endpoint_does_not_capture_ssh_only_repo(_iso, monkeypatch):
+    root = _iso / "repo"
+    root.mkdir()
+    monkeypatch.setattr(config, "repo_root", lambda explicit=None: root)
+    monkeypatch.setattr(config, "machine_id", lambda: "client")
+    config.write_indexer_designation(root, "host", ssh="host")
+    config.set_machine_config(
+        {"role": "client", "endpoint": "http://other-repo-forward:18420"}
+    )
+
+    assert config.client_url() is None
+
+
 def test_host_falls_through_to_local(_iso, monkeypatch):
     # No configured endpoint (a host) -> local routing is used.
     config.set_machine_config({"role": "host"})
