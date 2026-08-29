@@ -2188,6 +2188,8 @@ class SessionManager:
                 if self._host_index is not None and is_dataclass(rec):
                     self._host_index.register(rec)
             await self._ensure_relays_from_endpoint(rec.session_id, endpoint)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             log.warning(
                 "Failed to (re-)establish forward for session %s (boundary=%s)",
