@@ -27,6 +27,14 @@ The realistic corp-box case to reproduce is an **asymmetry**: a policy sets
 **pip's** internal feed but not **uv**, so `uv`/`uv pip install` still hit the
 TLS-blocked public index while pip works.
 
+Both images also carry a distro `rg` in `/opt/copilot-cleanroom/bin`, outside
+the stock PATH. Only the driven Tier-E Copilot process tree sees it, with
+`USE_BUILTIN_RIPGREP=false`; this keeps Copilot's bundled ARM64 `rg` from
+crashing on 16 KiB-page hosts without granting Tier-P scenarios an extra
+ambient prerequisite. Agent-invoked subprocesses inherit that Tier-E PATH by
+design. Tier-E ACP processes also run with core dumps disabled so a tool crash
+cannot mutate the decision fixture.
+
 ## What it checks (the `generic-single-plugin` reference scenario)
 
 | Stage | Question it answers |
@@ -342,8 +350,8 @@ stage N). The scenario name + stage list live in `manifest.json`.
 | File | Role |
 |------|------|
 | [`SETUP.md`](SETUP.md) | From-zero machine setup: install Docker (per OS), verify it, build the image, wire auth, smoke-test, and troubleshoot. |
-| `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions. |
-| `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision. |
+| `Dockerfile` | Credential-free `base` "fresh machine": git, python, node, uv, Copilot CLI — nothing from copilot-extensions; a hidden distro `rg` is reserved for Tier-E Copilot compatibility. |
+| `Dockerfile.pristine` | The `pristine` variant: Copilot + git only (no venv/pip/uv/feed-governance) — forces the harness to self-provision; the same hidden Tier-E `rg` is outside the stock PATH. |
 | `lib/clean-room-lib.sh` | Shared scenario helper API (`phase`/`pass`/`fail`/`info`/`capture`/`envdump`/`jam`/`cr_meta`/`cr_finalize`) + uniform `cr-report.json` writer. Bind-mounted read-only at `/home/operator/lib`; scenarios source it via `$CR_LIB`. |
 | `<suite>/_lib/` (downstream) | Optional per-suite shared phase helpers beside a harness's scenario dirs. When the selected scenario has a sibling `_lib/`, the runner mounts it read-only at `/home/operator/scenario-lib` and exposes it as `$CR_SCENARIO_LIB` (opt-in; absent → unchanged). |
 | `scenarios/<name>/manifest.json` | Scenario descriptor: image variant, prereqs, auth, expected artifacts, ordered stages. |

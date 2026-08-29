@@ -45,6 +45,13 @@ can attribute the bytes:
 {"additionalContext":"[owner: example-plugin@1.2.3]\n<concise guidance kernel>"}
 ```
 
+Until Copilot CLI issue #1234 deterministically aggregates multiple non-empty
+results, registrations remain plugin-specific risk decisions. `context-handoff`
+is the explicit best-effort exception: its continuity kernel registers now and
+temporarily carries an adjacent agent-worktrees command catalog when its result
+wins the runtime race. Plugins whose richer policy can remain in a static
+fallback, including `efforts`, may continue to defer registration.
+
 Locate a payload-owned producer from the plugin-root environment that Copilot
 CLI supplies to plugin hooks (`COPILOT_PLUGIN_ROOT`, with `PLUGIN_ROOT` and
 `CLAUDE_PLUGIN_ROOT` as compatibility aliases). Do not use the session cwd or

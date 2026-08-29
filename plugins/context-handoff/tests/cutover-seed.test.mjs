@@ -47,11 +47,22 @@ test("leadFrom: replaces inherited handoff prefixes", () => {
 });
 
 test("continuation directive makes an active effort the completion gate", () => {
+  assert.match(CONTINUATION_DIRECTIVE, /Consuming the handoff is setup, not completion/);
+  assert.match(
+    CONTINUATION_DIRECTIVE,
+    /finish the planning needed to act and then execute it/,
+  );
+  assert.match(
+    CONTINUATION_DIRECTIVE,
+    /subject to any required safety, review, approval, or confirmation gate/,
+  );
   assert.match(
     CONTINUATION_DIRECTIVE,
     /effort -- not the handoff task, latest phase, or pull request -- as the source of truth and completion gate/,
   );
-  assert.match(CONTINUATION_DIRECTIVE, /Focus on driving it to `Done`/);
+  assert.match(CONTINUATION_DIRECTIVE, /bounded delegates continue only their inherited scope/);
+  assert.match(CONTINUATION_DIRECTIVE, /return or re-handoff at that boundary/);
+  assert.match(CONTINUATION_DIRECTIVE, /Objective owners focus on driving it to `Done`/);
   assert.match(
     CONTINUATION_DIRECTIVE,
     /select and execute the next authorized Plan or Validation Plan item/,
@@ -103,7 +114,7 @@ test("task + known pane/worktree/session -> BASH-FIRST seed (issue #853)", () =>
   assert.match(seed, new RegExp(`agent-dispatch complete ${TASK}`));
   assert.ok(seed.includes(CONTINUATION_DIRECTIVE));
   assert.match(seed, /completion of the predecessor's latest phase is not enough/);
-  assert.match(seed, /Focus on driving it to `Done`/);
+  assert.match(seed, /Objective owners focus on driving it to `Done`/);
 
   // Rides `copilot -i`: single line, ASCII only.
   assert.ok(!seed.includes("\n"), "seed must be a single line");
@@ -123,6 +134,9 @@ test("task + missing pane -> tool-based fallback seed", () => {
   );
   // Fallback still carries the retry-on-not-ready clause by default.
   assert.match(seed, /retry the SAME/);
+  assert.doesNotMatch(seed, /Treat the handoff as active responsibility/);
+  assert.match(seed, /successful consume result supplies the continuation directive/i);
+  assert.match(seed, /missing brief is not completion/);
 });
 
 test("task + missing worktree/session -> tool-based fallback seed", () => {
@@ -149,7 +163,9 @@ test("file-backed handoff -> tool-based seed (never bash-first)", () => {
   assert.match(seed, /consume_handoff tool/);
   assert.match(seed, /"handoff_id":"handoff-xyz"/);
   assert.ok(!seed.includes("agent-dispatch consume"));
-  assert.ok(seed.includes(CONTINUATION_DIRECTIVE));
+  assert.ok(!seed.includes(CONTINUATION_DIRECTIVE));
+  assert.match(seed, /successful consume result supplies the continuation directive/i);
+  assert.match(seed, /missing brief is not completion/);
 });
 
 test("retry:false drops the retry-on-not-ready clause (human paste prompt)", () => {
@@ -158,4 +174,6 @@ test("retry:false drops the retry-on-not-ready clause (human paste prompt)", () 
     retry: false,
   });
   assert.ok(!seed.includes("retry the SAME"));
+  assert.ok(!seed.includes(CONTINUATION_DIRECTIVE));
+  assert.match(seed, /missing brief is not completion/);
 });

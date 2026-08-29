@@ -908,7 +908,12 @@ function consumeFileHandoff(
 
 function formatConsumeResult(result, { deferComplete = false } = {}) {
   if (!result?.ok) {
-    return result?.message || "Handoff could not be consumed.";
+    const message = result?.message || "Handoff could not be consumed.";
+    return (
+      `${message}\n\nHandoff consumption is blocked. Do not treat the missing ` +
+      `brief as completion or reconstruct a different objective from session ` +
+      `history; retry the documented path when appropriate or report the blocker.`
+    );
   }
   const retire = result.retire || {};
   const retireResult = retire.retireResult;
@@ -931,6 +936,8 @@ function formatConsumeResult(result, { deferComplete = false } = {}) {
     deferComplete && result.id
       ? `**Completion:** when the handoff goal is reached, run \`agent-dispatch complete ${result.id}\`.`
       : null,
+    "",
+    CONTINUATION_DIRECTIVE,
     "",
     "---",
     "",

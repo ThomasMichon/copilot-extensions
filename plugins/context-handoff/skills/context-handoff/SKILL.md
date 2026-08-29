@@ -76,6 +76,11 @@ leg.
 - Keep driving every actionable next phase the original request permits, as far
   as the current context and available work allow. Do not wait for another user
   prompt merely because one phase, PR, or checklist slice completed.
+- Consuming the handoff is setup, not completion. Begin substantive work after
+  pickup. If the inherited plan is incomplete, finish the planning needed to
+  act and then execute it, subject to any required safety, review, approval, or
+  confirmation gate; do not stop at a plan unless the user explicitly requested
+  planning only.
 - A single session may consume one handoff, implement and land many additional
   slices or phases, and produce another handoff when context pressure returns.
   Session boundaries do not define effort boundaries.

@@ -2,14 +2,15 @@
 
 Context window monitoring and session handoff for GitHub Copilot CLI.
 
-This plugin ships two cooperating pieces:
+This plugin ships three cooperating pieces:
 
 | Piece | Type | Role |
 |-------|------|------|
+| **continuity guidance hook** | Declarative `sessionStart` hook | Injects a concise, owner-marked `additionalContext` kernel that tells objective-owning sessions to work thoroughly across context windows, treat handoff as a relay rather than completion, and move unfinished planning into execution without bypassing required gates |
 | **context-handoff extension** | Copilot CLI session extension (`extension.mjs`) | Monitors `session.usage_info` for exact token counts; applies percentage-based soft/hard thresholds (55% / 70% by default) with optional repository overrides, delivered on the next idle; provides `generate_handoff_prompt`, `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and `retry_handoff_cutover` tools plus the **`/handoff-continue`** and **`/resume-handoff`** slash commands. `save_handoff_prompt` sits **on top of agent-dispatch**: when a coordinator is reachable **and a linked worktree can be resolved**, it stores the handoff as a `proposed`/`handoff` **task** (payload = metadata plus markdown, pinned to the worktree, no file handoff); otherwise it falls back to a one-time machine-local state file outside the repo checkout, including from an adopted anchor. `retry_handoff_cutover` re-attempts a live cutover from the **already-saved** handoff (no regeneration) — for when a spawned successor window came up empty because its first prompt never submitted, so no session was created. `/resume-handoff` digs up this checkout's pending handoff (task, else file), consumes it once, and **injects its continuation prompt into the current session** |
 | **context-handoff skill** | Skill | The `/handoff` workflow -- composes the continuation prompt from the extension's structured facts and the agent's live context. (Resume is handled by the extension's `/resume-handoff` command, which injects the handoff; the skill documents both) |
 
-## Why an extension (and not a pure plugin)
+## Why the monitor is an extension
 
 The live monitor is **only** possible as a session extension. The Copilot CLI
 hook surface a plugin normally uses cannot replicate it:
@@ -23,7 +24,16 @@ hook surface a plugin normally uses cannot replicate it:
   delivering it on the next `session.idle` boundary. Command-hook output is
   discarded (only `preToolUse` can *deny* a tool call, not inject a message).
 
-So the capability requires the extension payload.
+So token monitoring and idle-boundary nudges require the extension payload.
+The ambient continuity contract does not: it is delivered independently through
+the plugin's declarative `sessionStart` hook, following the repository's
+context-injection pattern.
+
+The hook intentionally treats plugin enablement as its applicability gate. Its
+policy is capability-generic and source-neutral, so it does not inspect
+`sessionStart` `cwd` or `source`, assume a mux or worktree is present, or exclude
+resumed sessions. Detailed handoff mechanics select the available task, file,
+live-cutover, or paste path on demand.
 
 ## How the extension is delivered (no install step)
 
@@ -58,7 +68,25 @@ this plugin:
 
 ## Verify
 
-A loaded extension exposes the `generate_handoff_prompt`,
+A session where the plugin hook loaded receives an owner marker beginning with
+`[owner: context-handoff@...]` in `additionalContext`. When an adjacent
+agent-worktrees payload is present, the same hook result also preserves that
+payload's exact command in an honestly attributed
+`adjacent-compatibility` catalog. Adjacency is a payload-presence check, not an
+assertion that agent-worktrees is enabled in the current session; the catalog
+reports `ready` only when both its command and installer are present, otherwise
+`unavailable`. This is a deliberate best-effort exception to
+the normal "do not add another producer" rule while Copilot CLI
+[#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234) remains
+open: if this hook's result survives the runtime race, it does not strand the
+agent without the worktree command, but it cannot preserve every sibling
+plugin's context or guarantee that this kernel wins. The #1234 effort owns the
+holistic aggregation fix; once deterministic aggregation is available, this
+adjacent catalog should be removed in favor of agent-worktrees' own catalog.
+The POSIX compatibility catalog requires a system
+`python3` or `python`; without one, the valid continuity kernel still emits by
+itself. A standalone context-handoff installation also emits only its own
+kernel. A loaded extension exposes the `generate_handoff_prompt`,
 `save_handoff_prompt`, `consume_handoff`, `continue_handoff`, and
 `retry_handoff_cutover` tools, plus
 `/handoff-continue` and `/resume-handoff`; `/extensions` lists it with source **plugin**. It

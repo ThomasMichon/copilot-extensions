@@ -96,6 +96,14 @@ Fidelity is selectable so a scenario picks how much the box may assume:
 | **base** | git, python, node, uv | Install checks where a stock dev toolchain is assumed. |
 | **pristine** | **Copilot + git only** (a system `python3` exists, but no venv module / pip / uv / `~/.local/bin` / feed governance) | The harshest fresh internal box — forces the harness to provision its own toolchain, so uv/venv/pip-feed jams **surface** instead of hiding. |
 
+The images keep a distro `rg` under `/opt/copilot-cleanroom/bin`, outside the
+scenario's stock PATH. The Tier-E ACP command alone prepends that directory and
+sets `USE_BUILTIN_RIPGREP=false`, avoiding Copilot's bundled ARM64 `rg` failure
+on 16 KiB-page hosts without changing Tier-P prerequisite fidelity. It also
+exposes the compatibility PATH to the driven agent's subprocess tree and
+disables core dumps so a failing agent tool cannot dirty the fixture it is
+supposed to inspect.
+
 Two orthogonal knobs a scenario sets:
 
 - **Prereq presence** — which of {python, uv, gh, node} are pre-present vs. must

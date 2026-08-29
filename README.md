@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/ThomasMichon/copilot-extensions/mai
 | [efforts](plugins/efforts/) | Planning skills | Plan a stretch of work as an **effort** — a folder with a README-as-shared-contract (premise + plan + journal) that humans and agents coordinate through. The executor plugins above bind its participant seam. |
 | [visions](plugins/visions/) | Planning skills | Keep a persistent **vision** — a north-star statement of what a system should ultimately be — and derive efforts from the delta between vision and reality. Payload-only — no runtime to install. |
 | [agent-logger](plugins/agent-logger/) | Session logging | Turn raw Copilot sessions into structured Markdown logs — a segmenter, a voice-neutral log-writer agent, and a `session-sync` step that pushes local or validated provider-rescued session data to a configurable target (local / OneDrive / SSH / ingest). Personality is injected by the host, never built in. |
-| [context-handoff](plugins/context-handoff/) | Extension + skill | Watch the context window via a session extension and, before it fills, compose a continuation prompt so a fresh session can resume the work. Payload-only — no runtime to install. |
+| [context-handoff](plugins/context-handoff/) | Ambient policy + extension + skill | Keep a continuity contract active through a concise session-start kernel, watch the context window via a session extension, and transfer unfinished objectives into successor sessions before compaction. Payload-only — no runtime to install. |
 | [agent-dispatch](plugins/agent-dispatch/) | Task queue + coordinator | Manage durable queued task loops with deduplication, atomic claims, routing, retries, supervision, and terminal task state. |
 | [agent-index](plugins/agent-index/) | Index/search service | Portable indexing and semantic-search engine for a harness repo and its immediate ecosystem. Phase 1 ships the service shell; indexing and retrieval arrive in later slices. |
 | [agent-machines](plugins/agent-machines/) | Machine-state reconciler | Portable restore-machinestate — converge a machine to desired state declared in in-repo requirement packages (Copilot settings first). Machine-scoped union restore, a seven-disposition model, and a detect-not-arbitrate conflict validator. The engine is generic; sensitive OS-mutating modules stay repo-local. |
@@ -79,7 +79,7 @@ All support **Windows** and **Linux/WSL** (macOS planned).
 Twenty plugins, one marketplace. **Eleven ship a runtime** (a `uv`-built venv under
 `~/.agent-*` + a `~/.local/bin` binstub, deployed by the plugin's own
 installer); **nine are payload-only** — `efforts` (skills), `visions` (skills),
-`context-handoff` (a session extension), `customizing-copilot` (skills),
+`context-handoff` (hook + session extension + skill), `customizing-copilot` (skills),
 `copilot-extensions-harness` (skills + contribution-boundary hook), `wsl-setup` (skills), and
 `harness-knowledge` (skills), `ai-attribution` (hook + skill), and
 `delegation-guidance` (hook + skill) need no install beyond enabling the plugin.

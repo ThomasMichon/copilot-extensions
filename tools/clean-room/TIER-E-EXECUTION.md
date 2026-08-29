@@ -256,9 +256,10 @@ adding an `eval/` subtree and a sibling **`cr-eval.json`**:
 
 ```
 <results>/<timestamp>/
-├── cr-report.json         # setup.sh + post_check.sh telemetry (Tier-P-shaped)
+├── cr-report.json         # latest post_check.sh telemetry (Tier-P-shaped)
 ├── cr-logs/               # per-phase setup/post-check logs
 └── eval/
+    ├── setup-report.json  # immutable setup.sh report before post-check rewrites cr-report.json
     ├── prompt.txt         # the exact seed (literal-mode framing + stated purpose)
     ├── transcript.txt     # human-readable driven-agent transcript
     ├── turns.jsonl        # structured per-turn record (tool calls, outputs) when available
@@ -381,10 +382,13 @@ Per ARCHITECTURE §6, the split is unchanged and matters more for Tier E:
    no self-heal, corroborated by `post_check.sh` ground-truth).
 5. **◐ Flake/cost controls.** `-Runs N` + `runs.count`/`aggregate` are wired;
    `per_turn_timeout_s` is **enforced** (host-side bounded job → `timed_out`);
-   the **prompt + docs hash** and `copilot_version` are recorded in
-   `eval/eval-run.json` for reproducible-in-context verdicts; and a cheap **in-box
-   Tier-P precondition** (`<plugin> --version`, `-SkipTierPGate` to force) refuses
-   an eval on a broken CLI. **Advisory-only:** `runs.max_credits` (the
+   the **prompt + evaluated-payload hash**, exact `acp_plugin_dirs`, and
+   `copilot_version` are recorded in `eval/eval-run.json` for
+   reproducible-in-context verdicts; when explicit plugin directories are
+   supplied, the payload hash is computed from those directories rather than a
+   potentially different installed copy. A cheap **in-box Tier-P precondition**
+   (`<plugin> --version`, `-SkipTierPGate` to force) refuses an eval on a broken
+   CLI. **Advisory-only:** `runs.max_credits` (the
    `agent-bridge create` transport doesn't expose per-turn credits to the runner).
 6. **◐ The extreme F1-E.** The **public** suite-self-assembly eval is **built**:
    `scenarios/suite-assembly-eval/` installs the harness core (agent-worktrees base
