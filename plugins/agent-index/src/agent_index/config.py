@@ -526,16 +526,22 @@ def client_url() -> str | None:
     else:
         role = resolve_role()
     if role == "client":
+        repo_endpoints = [
+            str(item["endpoint"]).strip()
+            for item in indexers
+            if isinstance(item.get("endpoint"), str)
+            and str(item["endpoint"]).strip()
+        ]
         # Client-local routing (for example an SSH forward on a machine-specific
-        # port) overrides the shared repository designation.
-        endpoints = configured_endpoints()
+        # port) overrides the shared repository endpoint for the same corpus.
+        # It must not capture a different repo that declares SSH-only routing.
+        endpoints = (
+            configured_endpoints()
+            if root is None or repo_endpoints
+            else []
+        )
         if not endpoints:
-            endpoints = [
-                str(item["endpoint"]).strip()
-                for item in indexers
-                if isinstance(item.get("endpoint"), str)
-                and str(item["endpoint"]).strip()
-            ]
+            endpoints = repo_endpoints
         if len(endpoints) > 1:
             # Ordered failover across the designated indexers (primary first): use
             # the first reachable one, so a down primary or a broken SSH hop

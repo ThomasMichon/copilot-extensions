@@ -207,9 +207,13 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
         me = config.machine_id().strip().lower()
         if any(str(ix.get("machine", "")).strip().lower() == me for ix in indexers):
             return None  # this machine is a designated indexer -> run local
-        if config.configured_endpoints():
+        repo_has_endpoints = any(
+            str(ix.get("endpoint") or "").strip() for ix in indexers
+        )
+        if repo_has_endpoints and config.configured_endpoints():
             # A client-local endpoint (commonly an SSH forward on a
-            # machine-specific port) has precedence over shared repo SSH.
+            # machine-specific port) overrides this repo's shared endpoint, but
+            # never captures another repo's SSH-only designation.
             return None
         candidates = [ix for ix in indexers if str(ix.get("ssh") or "").strip()]
         if candidates:

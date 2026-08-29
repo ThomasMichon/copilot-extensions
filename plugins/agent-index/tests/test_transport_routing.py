@@ -133,7 +133,11 @@ def test_machine_local_endpoint_precedes_repo_ssh(monkeypatch):
     _patch(
         monkeypatch,
         root="/repo",
-        indexer={"machine": "indexer-host", "ssh": "indexer-host"},
+        indexer={
+            "machine": "indexer-host",
+            "ssh": "indexer-host",
+            "endpoint": "http://shared-endpoint:8420",
+        },
         machine="client-host",
     )
     monkeypatch.setattr(
@@ -150,6 +154,23 @@ def test_machine_local_endpoint_precedes_repo_ssh(monkeypatch):
     )
 
     assert transport.maybe_delegate("search", ["search", "q"]) is None
+
+
+def test_other_repo_endpoint_does_not_override_ssh_only_repo(monkeypatch):
+    _patch(
+        monkeypatch,
+        root="/repo",
+        indexer={"machine": "indexer-host", "ssh": "indexer-host"},
+        machine="client-host",
+    )
+    monkeypatch.setattr(
+        transport.config,
+        "configured_endpoints",
+        lambda: ["http://other-repo-forward:18420"],
+    )
+    monkeypatch.setattr(transport, "_delegate_over_ssh", lambda *_args: 23)
+
+    assert transport.maybe_delegate("search", ["search", "q"]) == 23
 
 
 def test_machine_local_endpoint_satisfies_client_readiness(monkeypatch):
