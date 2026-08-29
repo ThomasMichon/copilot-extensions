@@ -1798,14 +1798,15 @@ class SessionManager:
         from .session_host.version_mux import HostDisposition, plan_host
 
         loop = asyncio.get_running_loop()
-        deadline = loop.time() + remote_recovery_timeout
+        startup_budget = max(0.0, float(remote_recovery_timeout))
+        deadline = loop.time() + startup_budget
         startup_session_ids = {
             session.session_id
             for session in self._sessions.values()
             if session.status not in {SessionStatus.ENDED, SessionStatus.FAILED}
         }
         recovery_budget = min(
-            remote_recovery_timeout / 2,
+            startup_budget / 2,
             max(0.0, deadline - loop.time()),
         )
         recovered = await self._recover_remote_host_records(

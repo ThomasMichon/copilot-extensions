@@ -1168,6 +1168,26 @@ async def test_startup_reattach_timeout_covers_attach_work(
 
 
 @pytest.mark.asyncio
+async def test_startup_reattach_clamps_negative_budget(
+    session_manager,
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    recover = AsyncMock(return_value=0)
+    monkeypatch.setattr(
+        session_manager,
+        "_recover_remote_host_records",
+        recover,
+    )
+
+    assert await session_manager.reattach_session_hosts(
+        remote_recovery_timeout=-1,
+    ) == 0
+    assert recover.await_args.kwargs["timeout_seconds"] == 0.0
+
+
+@pytest.mark.asyncio
 async def test_reattach_cancellation_closes_partial_transport(
     session_manager,
     monkeypatch,
