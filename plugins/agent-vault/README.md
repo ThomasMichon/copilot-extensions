@@ -116,6 +116,13 @@ agent-vault cache-verify --entry API/OpenAI
 
 The cache and `seal`/`unseal` require the optional `cryptography` dependency. Without it, the cache is a safe no-op and KEK commands return a clear error. Install it into the active runtime slot with the environment's package manager. On POSIX, the stable target is `~/.agent-vault/.venv/bin/python`; on Windows, read `%USERPROFILE%\.agent-vault\current-version` and target `%USERPROFILE%\.agent-vault\versions\<version>\Scripts\python.exe`.
 
+Password replacement is journaled before the KeePass mutation. Pending
+replacements are never served by cache-first reads and cannot be overwritten by
+ordinary cache population. The daemon reconciles an ambiguous backend result
+against KeePass, while CLI callers serialize and generation-order their cache
+finalization. A crash or transport loss therefore leaves a recoverable pending
+record instead of resurrecting the retired password.
+
 `seal`/`unseal` use a named envelope KEK stored beside the agent-vault config (DPAPI-wrapped per user on Windows; `0600` file on POSIX). The KEK is independent of the KeePass master password, so these commands work while the vault is locked.
 
 ## SUDO_ASKPASS (Linux / WSL)

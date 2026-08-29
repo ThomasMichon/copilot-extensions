@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
+import threading
+from types import SimpleNamespace
+
 import pytest
 
 from agent_vault import cache as cache_mod
-from agent_vault import cli
+from agent_vault import cli, keepassxc, service
 from agent_vault.cache import PersistentCache, cache_enabled, get_cache
 
 cryptography = pytest.importorskip("cryptography")
@@ -63,6 +67,38 @@ def test_put_get_roundtrip(enabled_cache):
     assert PersistentCache().get("Aperture/HA", "password") == "portal-gun"
 
 
+def test_get_rejects_non_object_record(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    monkeypatch.setattr(
+        persistent,
+        "_read_store",
+        lambda: {"v": 1, "entries": {"A/x": {"password": "legacy"}}},
+    )
+
+    assert persistent.get("A/x", "password") is None
+
+
+def test_cache_paths_repair_non_object_entry_record(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    monkeypatch.setattr(
+        persistent,
+        "_read_store",
+        lambda: {"v": 1, "entries": {"A/x": "legacy"}},
+    )
+
+    assert persistent.get("A/x", "password") is None
+    assert persistent.pending_replace("A/x", "password") is None
+
+
+def test_put_repairs_non_object_field_record(enabled_cache):
+    persistent = get_cache()
+    store = {"v": 1, "entries": {"A/x": {"password": "legacy"}}}
+    assert persistent._write_store(store)
+
+    assert persistent.put("A/x", "password", "normalized", 1)
+    assert persistent.get("A/x", "password") == "normalized"
+
+
 def test_encrypted_on_disk(enabled_cache):
     c = get_cache()
     c.put("Aperture/HA", "password", "portal-gun")
@@ -101,9 +137,11 @@ class _Args:
     def __init__(self, **kw):
         self.entry = kw.get("entry")
         self.field = kw.get("field", "password")
+        self.password = kw.get("password")
         self.prompt = kw.get("prompt", False)
         self.refresh = kw.get("refresh", False)
         self.cache_only = kw.get("cache_only", False)
+        self.max_cache_age = kw.get("max_cache_age")
 
 
 def test_get_cache_only_hit(enabled_cache, capsys):
@@ -137,6 +175,266 @@ def test_get_refresh_bypasses_cache(enabled_cache, monkeypatch):
     rc = cli.cmd_get(_Args(entry="A/x", refresh=True))
     assert rc == 0
     assert get_cache().get("A/x", "password") == "fresh"  # cache updated with fresh value
+
+
+# ---------------------------------------------------------------------------
+# Password replacement transactions
+# ---------------------------------------------------------------------------
+
+
+def _rotation_service(backend, monkeypatch):
+    svc = service.VaultService()
+    svc.cli = backend
+    monkeypatch.setattr(svc, "ensure_unlocked", lambda *_args, **_kwargs: True)
+    return svc
+
+
+def test_cache_through_write_cannot_overwrite_pending_rotation(enabled_cache):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    assert persistent.begin_replace("A/x", "password", "new", 0)
+
+    assert persistent.put("A/x", "password", "old", 99)
+
+    assert persistent.get("A/x", "password") is None
+    assert persistent.pending_replace("A/x", "password")["candidate"] == "new"
+
+
+def test_legacy_read_cannot_overwrite_pending_rotation(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    assert persistent.begin_replace("A/x", "password", "new", 0)
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda request, timeout: {"ok": True, "value": "old"},
+    )
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+
+    assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 0
+    assert capsys.readouterr().out == "old\n"
+    assert persistent.get("A/x", "password") is None
+    assert persistent.pending_replace("A/x", "password")["candidate"] == "new"
+
+
+def test_failed_rotation_restores_prior_offline_value(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+
+    class Backend:
+        @staticmethod
+        def edit_password(_kpdb, _entry, _password):
+            return False, "backend rejected update"
+
+    monkeypatch.setattr(service, "get_cache", lambda: persistent)
+    svc = _rotation_service(Backend(), monkeypatch)
+
+    result = svc._set_password("vault.kdbx", "A/x", "new", "", "test")
+
+    assert result == {"ok": False, "error": "backend rejected update"}
+    assert persistent.get("A/x", "password") == "old"
+
+
+def test_interrupted_rotation_reconciles_before_retry(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    assert persistent.begin_replace("A/x", "password", "new", 10)
+
+    class Backend:
+        value = "old"
+
+        def get_entry(self, _kpdb, _entry, _field):
+            return self.value
+
+        def edit_password(self, _kpdb, _entry, password):
+            self.value = password
+            return True, "updated"
+
+    monkeypatch.setattr(service, "get_cache", lambda: persistent)
+    svc = _rotation_service(Backend(), monkeypatch)
+
+    result = svc._set_password("vault.kdbx", "A/x", "new", "", "test")
+
+    assert result["ok"] is True
+    assert persistent.get("A/x", "password") == "new"
+    assert persistent.pending_replace("A/x", "password") is None
+
+
+def test_ambiguous_rotation_confirms_committed_candidate(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+
+    class Backend:
+        value = "old"
+
+        def get_entry(self, _kpdb, _entry, _field):
+            return self.value
+
+        def edit_password(self, _kpdb, _entry, password):
+            self.value = password
+            raise keepassxc.PasswordMutationAmbiguous("backend timed out")
+
+    monkeypatch.setattr(service, "get_cache", lambda: persistent)
+    svc = _rotation_service(Backend(), monkeypatch)
+
+    result = svc._set_password("vault.kdbx", "A/x", "new", "", "test")
+
+    assert result["ok"] is True
+    assert persistent.get("A/x", "password") == "new"
+
+
+def test_ambiguous_rotation_evicts_memory_when_live_read_fails(
+    enabled_cache,
+    monkeypatch,
+):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+
+    class Backend:
+        @staticmethod
+        def get_entry(_kpdb, _entry, _field):
+            return None
+
+        @staticmethod
+        def edit_password(_kpdb, _entry, _password):
+            raise keepassxc.PasswordMutationAmbiguous("backend timed out")
+
+    monkeypatch.setattr(service, "get_cache", lambda: persistent)
+    svc = _rotation_service(Backend(), monkeypatch)
+    cache_key = ("vault.kdbx", "A/x", "password")
+    svc.cache[cache_key] = "old"
+    svc._credential_generations[cache_key] = 1
+
+    result = svc._set_password("vault.kdbx", "A/x", "new", "", "test")
+
+    assert result["cache_pending"] is True
+    assert persistent.get("A/x", "password") is None
+    assert cache_key not in svc.cache
+    assert cache_key not in svc._credential_generations
+
+
+def test_cli_keeps_journal_after_ambiguous_transport(enabled_cache, monkeypatch, capsys):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "_ensure_unlocked_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", lambda request, timeout: None)
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+
+    assert cli.cmd_set_password(_Args(entry="A/x", password="new")) == 1
+    assert "service unreachable" in capsys.readouterr().err
+    assert persistent.get("A/x", "password") is None
+    assert persistent.pending_replace("A/x", "password") is not None
+
+
+def test_cli_password_rotation_uses_bounded_rpc_timeouts(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    persistent = get_cache()
+    calls = []
+
+    def send(request, timeout):
+        calls.append((request["action"], timeout))
+        if request["action"] == "get":
+            return {"ok": True, "value": "old", "generation": 1}
+        return {"ok": True, "message": "updated", "generation": 2}
+
+    assert persistent.put("A/x", "password", "old", 1)
+    assert persistent.begin_replace("A/x", "password", "interrupted", 10)
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "_ensure_unlocked_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", send)
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+
+    assert cli.cmd_set_password(_Args(entry="A/x", password="new")) == 0
+    assert capsys.readouterr().out == "updated\n"
+    assert calls == [
+        ("get", cli.PASSWORD_MUTATION_TIMEOUT),
+        ("set-password", cli.PASSWORD_MUTATION_TIMEOUT),
+    ]
+
+
+def test_cli_serializes_concurrent_rotations(enabled_cache, monkeypatch):
+    persistent = get_cache()
+    first_started = threading.Event()
+    release_first = threading.Event()
+    second_lock_attempted = threading.Event()
+    second_rpc_started = threading.Event()
+    requests = []
+    results = []
+
+    def send(request, timeout):
+        requests.append(request["password"])
+        if request["password"] == "first":
+            first_started.set()
+            assert release_first.wait(timeout=5)
+            return {"ok": True, "message": "first updated", "generation": 10}
+        second_rpc_started.set()
+        return {"ok": True, "message": "second updated", "generation": 20}
+
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "_ensure_unlocked_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", send)
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+    replacement_lock = persistent.replacement_lock
+
+    @contextlib.contextmanager
+    def observed_replacement_lock():
+        if threading.current_thread().name == "second-rotation":
+            second_lock_attempted.set()
+        with replacement_lock():
+            yield
+
+    monkeypatch.setattr(persistent, "replacement_lock", observed_replacement_lock)
+    first = threading.Thread(
+        target=lambda: results.append(
+            cli.cmd_set_password(_Args(entry="A/x", password="first"))
+        ),
+        name="first-rotation",
+    )
+    second = threading.Thread(
+        target=lambda: results.append(
+            cli.cmd_set_password(_Args(entry="A/x", password="second"))
+        ),
+        name="second-rotation",
+    )
+
+    first.start()
+    assert first_started.wait(timeout=5)
+    second.start()
+    assert second_lock_attempted.wait(timeout=5)
+    assert not second_rpc_started.wait(timeout=0.1)
+    assert requests == ["first"]
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert sorted(results) == [0, 0]
+    assert requests == ["first", "second"]
+    assert persistent.get("A/x", "password") == "second"
 
 
 # ---------------------------------------------------------------------------
