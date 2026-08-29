@@ -24,18 +24,20 @@ Generated shims:
 Catalog entries carry an exact `argv` prefix. Callers append arguments without
 joining or re-parsing the prefix. Shell examples quote each prefix element
 separately and prepend `&` in PowerShell. On POSIX the prefix names the
-canonical payload-local executable. On Windows a ready entry pins the absolute PowerShell
-7 host, its non-interactive flags, and the canonical payload-local PowerShell
-entry point. Windows PowerShell 5.1 cannot preserve the full argument domain and
-therefore emits the entry as unavailable rather than advertising a lossy
-invocation. A command with no full-fidelity PowerShell implementation may
+canonical payload-local executable. On Windows a ready entry pins the absolute
+PowerShell 7.3+ host, its non-interactive flags, and the canonical payload-local
+PowerShell entry point. Earlier PowerShell versions cannot preserve the full
+native argument domain and therefore emit the entry as unavailable rather than
+advertising a lossy invocation. A command with no full-fidelity PowerShell implementation may
 explicitly select `cmd`. Catalog guidance forbids replacing any prefix element
 with a global or `PATH` binstub.
 
 Catalog emitters read the `sessionStart` payload from stdin. When it contains a
-session ID, an atomic per-user temporary marker suppresses an identical catalog
-from being emitted more than once in that session. Distinct payload paths,
-command inventories, availability states, or sessions remain independent.
+session ID, an atomic per-user temporary marker scoped to the current launcher
+process suppresses duplicate hooks within that one sessionStart dispatch. A new
+or resumed launch receives a new process identity and emits the catalog again
+even when it reuses the persisted session ID. Distinct payload paths, command
+inventories, availability states, sessions, or launches remain independent.
 
 `outputDir` defaults to `bin` and may name a nested payload-only directory when
 a plugin still uses its historical top-level `bin/` files as legacy global

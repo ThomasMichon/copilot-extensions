@@ -699,8 +699,9 @@ See [`design.md`](design.md).
 
 - Unified single- and multi-command catalog generation on one cross-platform
   emitter shape for all runtime `agent-*` plugins.
-- Added atomic session-scoped duplicate suppression while preserving fail-open
-  behavior for missing or malformed hook input and unredirected stdin.
+- Added atomic sessionStart-launch-scoped duplicate suppression while
+  preserving fail-open behavior for missing or malformed hook input and
+  unredirected stdin, and re-emission when a persisted session is resumed.
 - Made Windows catalogs advertise a directly executable absolute PowerShell 7
   host prefix plus the payload-local shim. Windows PowerShell 5.1 reports the
   entry unavailable rather than corrupting empty, quoted, Unicode, or

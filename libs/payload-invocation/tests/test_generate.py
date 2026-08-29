@@ -92,6 +92,61 @@ def _write_capture_module(root: Path, module: str) -> None:
     )
 
 
+def _run_catalog_launch(
+    tmp_path: Path,
+    command: list[str],
+    env: dict[str, str],
+    payload: str,
+    launch_number: int,
+) -> list[str]:
+    helper = tmp_path / "catalog-launch.py"
+    helper.write_text(
+        "import json\n"
+        "import os\n"
+        "import subprocess\n"
+        "command = json.loads(os.environ['CATALOG_COMMAND'])\n"
+        "payload = os.environ['CATALOG_PAYLOAD']\n"
+        "outputs = []\n"
+        "for _ in range(2):\n"
+        "    result = subprocess.run(\n"
+        "        command,\n"
+        "        input=payload,\n"
+        "        env=os.environ,\n"
+        "        capture_output=True,\n"
+        "        text=True,\n"
+        "        check=True,\n"
+        "    )\n"
+        "    outputs.append(result.stdout)\n"
+        "print(json.dumps(outputs))\n",
+        encoding="utf-8",
+    )
+    launch_env = {
+        **env,
+        "CATALOG_COMMAND": json.dumps(command),
+        "CATALOG_PAYLOAD": payload,
+        "CATALOG_LAUNCH_NUMBER": str(launch_number),
+    }
+    result = subprocess.run(
+        [sys.executable, str(helper)],
+        env=launch_env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
+def _powershell_version(pwsh: str) -> tuple[int, int]:
+    version = subprocess.run(
+        [pwsh, "-NoProfile", "-Command", "$PSVersionTable.PSVersion.ToString()"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    major, minor, *_rest = map(int, version.split("."))
+    return major, minor
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -308,6 +363,8 @@ def test_posix_catalog_emits_every_command_id(tmp_path: Path) -> None:
 def test_powershell_catalog_emits_every_command_id(tmp_path: Path) -> None:
     pwsh = shutil.which("pwsh")
     assert pwsh
+    if _powershell_version(pwsh) < (7, 3):
+        pytest.skip("PowerShell 7.3+ is required for lossless native argv")
     manifest = _multi_manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
     (manifest.parent / "plugin.json").write_text(
@@ -349,7 +406,9 @@ def test_powershell_catalog_emits_every_command_id(tmp_path: Path) -> None:
     assert all(command["availability"] == "ready" for command in catalog["commands"])
 
 
-def test_catalog_deduplicates_identical_session_blocks(tmp_path: Path) -> None:
+def test_catalog_deduplicates_per_launch_and_reemits_on_resume(
+    tmp_path: Path,
+) -> None:
     manifest = _multi_manifest(tmp_path)
     generator.process_manifest(manifest, check=False)
     (manifest.parent / "plugin.json").write_text(
@@ -383,34 +442,12 @@ def test_catalog_deduplicates_identical_session_blocks(tmp_path: Path) -> None:
             str(manifest.parent / "scripts" / "emit-command-catalog.sh")
         ]
 
-    first = subprocess.run(
-        command,
-        input=payload,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    second = subprocess.run(
-        command,
-        input=payload,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    third = subprocess.run(
-        command,
-        input='{"sessionId":"different-session"}',
-        env=env,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    first_launch = _run_catalog_launch(tmp_path, command, env, payload, 1)
+    resumed_launch = _run_catalog_launch(tmp_path, command, env, payload, 2)
 
-    assert _extract_catalog(first.stdout)["plugin"] == "agent-example"
-    assert json.loads(second.stdout) == {}
-    assert _extract_catalog(third.stdout)["plugin"] == "agent-example"
+    for launch in (first_launch, resumed_launch):
+        assert _extract_catalog(launch[0])["plugin"] == "agent-example"
+        assert json.loads(launch[1]) == {}
 
 
 @pytest.mark.parametrize(
@@ -468,6 +505,7 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
         pwsh = shutil.which("pwsh")
         if not pwsh:
             pytest.skip("pwsh is not installed")
+        lossless_powershell = _powershell_version(pwsh) >= (7, 3)
         catalog_command = [
             pwsh,
             "-NoProfile",
@@ -488,6 +526,19 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
         str(command_spec["command"]) for command_spec in source["commands"]
     }
     assert {command["id"] for command in catalog["commands"]} == expected_ids
+
+    if (
+        os.name == "nt"
+        and source["windowsCatalogShim"] == "powershell"
+        and not lossless_powershell
+    ):
+        for command in catalog["commands"]:
+            assert command["availability"] == "unavailable"
+            assert command["shell"] == "powershell"
+            assert command["argv"] == [
+                str(plugin / str(source["outputDir"]) / f"{command['id']}.ps1")
+            ]
+        return
 
     edge_args = [
         "two words",
@@ -553,6 +604,51 @@ def test_windows_powershell_51_catalog_refuses_lossy_direct_invocation(
             "Bypass",
             "-File",
             str(manifest.parent / "scripts" / "emit-command-catalog.ps1"),
+        ],
+        input="",
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    command = _extract_catalog(result.stdout)["commands"][0]
+    assert command["availability"] == "unavailable"
+    assert command["shell"] == "powershell"
+    assert command["argv"] == [
+        str(manifest.parent / "bin" / "agent-example.ps1")
+    ]
+
+
+@pytest.mark.skipif(shutil.which("pwsh") is None, reason="pwsh is not installed")
+def test_powershell_pre_73_catalog_is_unavailable(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh")
+    assert pwsh
+    manifest = _manifest(tmp_path)
+    generator.process_manifest(manifest, check=False)
+    (manifest.parent / "plugin.json").write_text(
+        '{"name":"agent-example"}\n', encoding="utf-8"
+    )
+    emitter = manifest.parent / "scripts" / "emit-command-catalog.ps1"
+    source = emitter.read_text(encoding="utf-8")
+    assert "$PSVersionTable.PSVersion -ge [Version]'7.3'" in source
+    compatibility_emitter = emitter.with_name("emit-command-catalog-pre73.ps1")
+    compatibility_emitter.write_text(
+        source.replace(
+            "$PSVersionTable.PSVersion -ge [Version]'7.3'",
+            "[Version]'7.2.99' -ge [Version]'7.3'",
+        ),
+        encoding="utf-8",
+    )
+    env = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": str(manifest.parent),
+    }
+    result = subprocess.run(
+        [
+            pwsh,
+            "-NoProfile",
+            "-File",
+            str(compatibility_emitter),
         ],
         input="",
         env=env,

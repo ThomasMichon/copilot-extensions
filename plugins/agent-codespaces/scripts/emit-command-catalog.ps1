@@ -11,7 +11,11 @@ if (-not [StringComparer]::OrdinalIgnoreCase.Equals($contextRoot, $selfRoot)) {
 
 $catalogShim = 'powershell'
 $hostPath = ''
-if ($catalogShim -eq 'powershell' -and $PSVersionTable.PSEdition -eq 'Core') {
+$losslessNativeArguments = (
+    $PSVersionTable.PSEdition -eq 'Core' -and
+    $PSVersionTable.PSVersion -ge [Version]'7.3'
+)
+if ($catalogShim -eq 'powershell' -and $losslessNativeArguments) {
     try { $hostPath = (Get-Process -Id $PID).Path } catch {}
     if (-not ($hostPath -and [IO.Path]::IsPathRooted($hostPath))) {
         $hostPath = ''
@@ -93,12 +97,44 @@ if ([Console]::IsInputRedirected) {
     }
 }
 
+$launchToken = ''
+try {
+    if (
+        $env:OS -eq 'Windows_NT' -or
+        (Get-Variable IsWindows -ErrorAction SilentlyContinue).Value
+    ) {
+        $currentProcess = Get-Process -Id $PID -ErrorAction Stop
+        if (
+            $currentProcess.PSObject.Properties['Parent'] -and
+            $currentProcess.Parent
+        ) {
+            $launcherPid = [int]$currentProcess.Parent.Id
+        } else {
+            $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $PID"
+            $launcherPid = [int]$processInfo.ParentProcessId
+        }
+    } else {
+        $launcherPid = [int](
+            & ps -o ppid= -p $PID 2>$null
+        ).Trim()
+    }
+    $launcher = Get-Process -Id $launcherPid -ErrorAction Stop
+    $launchToken = '{0}:{1}' -f $launcherPid, (
+        $launcher.StartTime.ToUniversalTime().Ticks
+    )
+} catch {
+    [Console]::Error.WriteLine(
+        '[agent-codespaces] catalog deduplication launch identity unavailable: ' +
+        $_.Exception.Message
+    )
+}
+
 $markerPath = ''
-if ($sessionId) {
+if ($sessionId -and $launchToken) {
     $hashAlgorithm = [Security.Cryptography.SHA256]::Create()
     try {
         $markerBytes = [Text.Encoding]::UTF8.GetBytes(
-            $sessionId + [char]0 + $catalogJson
+            $launchToken + [char]0 + $sessionId + [char]0 + $catalogJson
         )
         $markerKey = [BitConverter]::ToString(
             $hashAlgorithm.ComputeHash($markerBytes)

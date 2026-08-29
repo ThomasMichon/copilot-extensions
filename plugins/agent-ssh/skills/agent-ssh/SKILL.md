@@ -111,7 +111,7 @@ ssh <machine> "<command>"
 ```
 
 Match the command syntax to the target shell reported by the machine registry
-or `<catalog argv[0]> explore <machine>`. To launch a repository's agent entry
+or `<agent-ssh catalog argv prefix> explore <machine>`. To launch a repository's agent entry
 point remotely, invoke that repository's published binstub through the same
 profile. Transport setup and repair remain in the dedicated client, host, key,
 and troubleshooting skills shipped by this plugin.

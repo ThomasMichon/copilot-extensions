@@ -18,13 +18,29 @@ installer_path="$self_root/scripts/init.sh"
 command_specs='[{"id":"agent-containers","relativePath":"bin/agent-containers","purpose":"Manage local container fleets leases and dispatch"}]'
 hook_input=""
 [ -t 0 ] || hook_input="$(cat)"
+launch_token=""
+ancestor_pid="$PPID"
+for _depth in 1 2 3 4 5 6 7 8; do
+    [ -n "$ancestor_pid" ] || break
+    ancestor_name="$(ps -o comm= -p "$ancestor_pid" 2>/dev/null | tr -d '[:space:]')"
+    case "$ancestor_name" in
+        sh|bash|dash|ash|zsh|ksh)
+            ancestor_pid="$(ps -o ppid= -p "$ancestor_pid" 2>/dev/null | tr -d '[:space:]')"
+            ;;
+        *)
+            ancestor_started="$(ps -o lstart= -p "$ancestor_pid" 2>/dev/null || true)"
+            [ -n "$ancestor_started" ] && launch_token="$ancestor_pid:$ancestor_started"
+            break
+            ;;
+    esac
+done
 py="$(command -v python3 || command -v python || true)"
 [ -n "$py" ] || {
     printf '%s\n' '{}'
     exit 0
 }
 
-if ! SELF_ROOT="$self_root" INSTALLER_PATH="$installer_path" COMMAND_SPECS="$command_specs" HOOK_INPUT="$hook_input" "$py" <<'PY'
+if ! SELF_ROOT="$self_root" INSTALLER_PATH="$installer_path" COMMAND_SPECS="$command_specs" HOOK_INPUT="$hook_input" LAUNCH_TOKEN="$launch_token" "$py" <<'PY'
 import hashlib
 import json
 import os
@@ -90,9 +106,10 @@ if raw_hook_input:
         )
 
 marker_path = ""
-if session_id:
+launch_token = os.environ.get("LAUNCH_TOKEN", "")
+if session_id and launch_token:
     marker_key = hashlib.sha256(
-        (session_id + "\0" + catalog_json).encode("utf-8")
+        (launch_token + "\0" + session_id + "\0" + catalog_json).encode("utf-8")
     ).hexdigest()
     uid = getattr(os, "getuid", lambda: "user")()
     marker_root = os.path.join(

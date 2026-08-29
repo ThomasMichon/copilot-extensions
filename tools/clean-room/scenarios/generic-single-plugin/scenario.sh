@@ -188,7 +188,7 @@ for command in catalog["commands"]:
 assert second == {}
 PY
     then
-        pass "$PRIMARY_PLUGIN emits one payload-contained command catalog per session"
+        pass "$PRIMARY_PLUGIN emits one payload-contained command catalog per sessionStart launch"
     else
         fail "$PRIMARY_PLUGIN command catalog is duplicated or escapes its installed payload"
     fi

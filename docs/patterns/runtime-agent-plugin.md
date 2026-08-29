@@ -193,7 +193,8 @@ Every runtime plugin wires two independent `sessionStart` command hooks:
 
 The bootstrap hook prepares only this plugin. The catalog hook emits structured entries for every command declared by this
 payload and atomically suppresses an identical block after its first emission
-for the same session:
+within one sessionStart dispatch. A new or resumed launch emits again even when
+it carries the same persisted session ID:
 
 ```text
 id · argv prefix · shell · purpose · availability=ready|unavailable
