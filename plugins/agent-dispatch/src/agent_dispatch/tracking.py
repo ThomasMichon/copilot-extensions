@@ -245,8 +245,6 @@ def enrich_local_body_tasks(tasks: Any, reservations: Any) -> Any:
     if not task_to_session:
         return tasks
     sessions = list_local_body_sessions()
-    if sessions is None:
-        return tasks
     by_id = {
         str(row.get("session_id")): row
         for row in sessions
