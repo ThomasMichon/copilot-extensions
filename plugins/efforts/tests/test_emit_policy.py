@@ -50,6 +50,11 @@ def _producers() -> list[Path]:
     return result
 
 
+def _producer_timeout(producer: Path) -> int:
+    # Hosted Linux runners can spend over 10 seconds starting pwsh itself.
+    return 30 if producer.suffix == ".ps1" else 10
+
+
 def _repo(path: Path, config: object | bytes | None = None) -> Path:
     path.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(path)], check=True)
@@ -108,7 +113,7 @@ def _run(
         input=payload.encode() if isinstance(payload, str) else payload,
         capture_output=True,
         check=True,
-        timeout=10,
+        timeout=_producer_timeout(producer),
     )
 
 
@@ -154,7 +159,7 @@ def _check_adoption(
         input=b"",
         capture_output=True,
         check=True,
-        timeout=10,
+        timeout=_producer_timeout(producer),
     )
 
 
