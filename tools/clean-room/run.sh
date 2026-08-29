@@ -568,6 +568,9 @@ import sys
 roots = [pathlib.Path(value) for value in json.loads(sys.argv[1])]
 if not roots:
     roots = [pathlib.Path.home() / ".copilot" / "installed-plugins"]
+for root in roots:
+    if not root.is_dir():
+        raise SystemExit(f"evaluated payload root is not a directory: {root}")
 ignored = {".git", ".pytest_cache", "__pycache__", "node_modules", "build", "dist"}
 digest = hashlib.sha256()
 for index, root in enumerate(roots):
@@ -587,8 +590,14 @@ for index, root in enumerate(roots):
             digest.update(f"{path.stat().st_mode & 0o777:o}\0".encode("ascii"))
             digest.update(path.read_bytes())
 print(digest.hexdigest()[:16])
-' "$ACP_DIRS_JSON" \
-        2>/dev/null | head -1)"
+' "$ACP_DIRS_JSON")" || {
+        echo "eval: could not fingerprint the evaluated plugin payloads" >&2
+        exit 1
+    }
+    [[ "$docs_hash" =~ ^[0-9a-f]{16}$ ]] || {
+        echo "eval: evaluated plugin payload fingerprint is invalid" >&2
+        exit 1
+    }
 
     # --- 4/5) drive N times + capture transcripts ----------------------------
     echo "== eval: driving '$DRIVE_AGENT' x$RUN_COUNT (fresh session; literal-mode + stated purpose) =="

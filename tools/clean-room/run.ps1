@@ -724,6 +724,9 @@ import sys
 roots = [pathlib.Path(value) for value in json.loads(sys.argv[1])]
 if not roots:
     roots = [pathlib.Path.home() / ".copilot" / "installed-plugins"]
+for root in roots:
+    if not root.is_dir():
+        raise SystemExit(f"evaluated payload root is not a directory: {root}")
 ignored = {".git", ".pytest_cache", "__pycache__", "node_modules", "build", "dist"}
 digest = hashlib.sha256()
 for index, root in enumerate(roots):
@@ -744,8 +747,11 @@ for index, root in enumerate(roots):
             digest.update(path.read_bytes())
 print(digest.hexdigest()[:16])
 '@
-    $docsHash = (& docker exec $Container python3 -c $docsHashScript $acpDirsJson `
-        2>$null | Select-Object -First 1)
+    $docsHash = (& docker exec $Container python3 -c $docsHashScript $acpDirsJson |
+        Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $docsHash -notmatch '^[0-9a-f]{16}$') {
+        throw 'eval: could not fingerprint the evaluated plugin payloads'
+    }
 
     # --- 4/5) drive N times + capture transcripts ----------------------------
     # Always CREATE a fresh session per run (never `send <agent>`, which resumes a
