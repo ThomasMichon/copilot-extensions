@@ -1,8 +1,9 @@
 {
   "name": "context-handoff",
-  "description": "Context window monitoring and session handoff for Copilot CLI -- a session extension that tracks token utilization via session.usage_info and nudges toward a continuation prompt before auto-compaction, plus tools that store handoffs as worktree-pinned agent-dispatch tasks when a coordinator is present, else one-time worktree-state files; live cutover is successor-consume-driven so the predecessor is retired only after pickup",
-  "version": "0.1.0-dev49",
+  "description": "Context window monitoring and session handoff for Copilot CLI -- a session-start continuity kernel plus an extension that tracks token utilization via session.usage_info, nudges before auto-compaction, stores handoffs as worktree-pinned agent-dispatch tasks when available or one-time worktree-state files otherwise, and performs successor-consume-driven live cutover",
+  "version": "0.1.0-dev50",
   "runtimeScope": "none",
+  "hooks": "hooks.json",
   "author": {
     "name": "Thomas Michon"
   },

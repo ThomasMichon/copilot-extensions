@@ -95,7 +95,10 @@ NAME_TAIL=""; [ -n "$NAME_SUFFIX" ] && NAME_TAIL="-$NAME_SUFFIX"
 CONTAINER="cr-$IMAGE$NAME_TAIL"
 AGENT_NAME="cleanroom-$IMAGE$NAME_TAIL"   # legacy label (kept for logs)
 DRIVE_AGENT="cleanroom:$CONTAINER"        # the namespaced agent-bridge address
-ACP_COMMAND='copilot --acp --stdio --allow-all-tools'  # eval may add --plugin-dir
+# Keep Copilot's subprocess crashes from dirtying the fixture, and use the
+# hidden distro rg because the bundled ARM64 binary rejects 16 KiB pages.
+ACP_PREFIX='ulimit -c 0 && env USE_BUILTIN_RIPGREP=false PATH=/opt/copilot-cleanroom/bin:$PATH'
+ACP_COMMAND="$ACP_PREFIX copilot --acp --stdio --allow-all-tools"  # eval may add --plugin-dir
 BRIDGE_CONTAINER_ID=""
 
 if [ -n "${CR_RESULTS_DIR:-}" ]; then
@@ -103,6 +106,8 @@ if [ -n "${CR_RESULTS_DIR:-}" ]; then
 else
     RESULTS="${XDG_STATE_HOME:-$HOME/.local/state}/copilot-cleanroom/runs/$(date +%Y%m%d-%H%M%S)"
 fi
+RESULTS_PREEXISTED=0
+[ -e "$RESULTS" ] && RESULTS_PREEXISTED=1
 
 img_exists()  { [ -n "$(docker images -q "$1" 2>/dev/null)" ]; }
 is_running()  { [ -n "$(docker ps -q -f "name=^$1\$" 2>/dev/null)" ]; }
@@ -156,6 +161,69 @@ start_container() {
     fi
     docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
     mkdir -p "$RESULTS"
+    if [ "$RESULTS_PREEXISTED" = 0 ]; then
+        local docker_security
+        docker_security="$(docker info --format '{{join .SecurityOptions "\n"}}' 2>/dev/null || true)"
+        if printf '%s\n' "$docker_security" | grep -Eq '(^|=)(rootless|userns)($|,)'; then
+            # Discover the host uid/gid backing the remapped operator identity,
+            # then grant only that identity access. Keep the caller-owned tree
+            # private rather than opening predictable transcript paths.
+            command -v setfacl >/dev/null 2>&1 || {
+                echo "rootless/userns Docker result sharing requires host setfacl" >&2
+                exit 1
+            }
+            local operator_ids operator_uid operator_gid map_container map_pid
+            operator_ids="$(docker run --rm --entrypoint /bin/sh "$img" -c \
+                'printf "%s %s\n" "$(id -u operator)" "$(id -g operator)"')" || {
+                echo "could not read the container operator identity" >&2
+                exit 1
+            }
+            read -r operator_uid operator_gid <<< "$operator_ids"
+            map_container="$(docker run -d --entrypoint sleep "$img" 30)" || {
+                echo "could not start the container identity probe" >&2
+                exit 1
+            }
+            map_pid="$(docker inspect --format '{{.State.Pid}}' "$map_container")"
+            local mapped_uid mapped_gid
+            mapped_uid="$(awk -v id="$operator_uid" \
+                '$1 <= id && id < $1 + $3 { print $2 + (id - $1); exit }' \
+                "/proc/$map_pid/uid_map")"
+            mapped_gid="$(awk -v id="$operator_gid" \
+                '$1 <= id && id < $1 + $3 { print $2 + (id - $1); exit }' \
+                "/proc/$map_pid/gid_map")"
+            docker rm -f "$map_container" >/dev/null 2>&1 || true
+            [[ "$mapped_uid" =~ ^[0-9]+$ && "$mapped_gid" =~ ^[0-9]+$ ]] || {
+                echo "could not read the remapped container operator identity" >&2
+                exit 1
+            }
+            find "$RESULTS" -type d -exec chmod 0700 {} +
+            find "$RESULTS" -type f -exec chmod 0600 {} +
+            local host_uid
+            host_uid="$(id -u)"
+            find "$RESULTS" -type d -exec \
+                setfacl -m \
+                "u:$host_uid:rwx,u:$mapped_uid:rwx,d:u:$host_uid:rwx,d:u:$mapped_uid:rwx" \
+                {} +
+        else
+            # On ordinary rootful Docker, give the in-container operator
+            # ownership while retaining host access through the caller's group.
+            docker run --rm --user root \
+                -v "$RESULTS:/out" \
+                -e "CR_HOST_GID=$(id -g)" \
+                --entrypoint /bin/sh "$img" -c \
+                'chown -R operator:"$CR_HOST_GID" /out &&
+                 find /out -type d -exec chmod 2770 {} + &&
+                 find /out -type f -exec chmod 0660 {} +'
+        fi || {
+            echo "could not prepare the new results directory for the container: $RESULTS" >&2
+            exit 1
+        }
+        local host_probe="$RESULTS/.host-access-probe.$$"
+        : > "$host_probe" && rm -f -- "$host_probe" || {
+            echo "prepared results directory is not writable by the host caller: $RESULTS" >&2
+            exit 1
+        }
+    fi
     # Generic host->container value relay: forward each --pass-env NAME by name
     # (value from the runner's env, not on the docker CLI args). Only names set on
     # the host are forwarded; a missing one warns rather than silently dropping.
@@ -206,6 +274,13 @@ start_container() {
         "${pass_args[@]}" \
         --entrypoint sleep "$img" infinity >/dev/null
     [ -n "$token" ] && unset COPILOT_GITHUB_TOKEN
+    if ! docker exec "$CONTAINER" /bin/sh -c \
+        'dir=/home/operator/out; [ ! -d "$dir/eval" ] || dir="$dir/eval";
+         probe="$dir/.container-access-probe.$$"; : > "$probe" && rm -f -- "$probe"'; then
+        echo "prepared results directory is not writable by the container operator: $RESULTS" >&2
+        docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+        exit 1
+    fi
     echo "container $CONTAINER up (results -> $RESULTS)"
 }
 ensure_container() { is_running "$CONTAINER" || start_container; }
@@ -430,6 +505,9 @@ PY
     docker exec "$CONTAINER" /bin/bash -lc \
         "bash /home/operator/scenario/$SETUP_REL; rc=\$?; cp -r \$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit \$rc" \
         || echo "warn: setup driver exited non-zero -- the starting state may be incomplete (see cr-report.json)."
+    if [ -f "$RESULTS/cr-report.json" ]; then
+        cp "$RESULTS/cr-report.json" "$eval_dir/setup-report.json"
+    fi
 
     # Build the driven-agent ACP command after setup so a scenario whose
     # authoritative worktree path is generated at runtime can publish it through
@@ -455,6 +533,7 @@ import json, sys
 for value in json.loads(sys.argv[1]):
     print(value)
 ' "$ACP_DIRS_JSON" | clean_room_build_acp_command)"
+    ACP_COMMAND="$ACP_PREFIX $ACP_COMMAND"
     if [ -n "$ACP_CWD" ]; then
         local _quoted_cwd
         _quoted_cwd="$(clean_room_quote_bash "$ACP_CWD")"
@@ -480,8 +559,35 @@ for value in json.loads(sys.argv[1]):
 
     # --- reproducibility fingerprints (prompt hash computed above) -----------
     local docs_hash copilot_ver
-    docs_hash="$(docker exec "$CONTAINER" /bin/bash -lc \
-        'find $HOME/.copilot/installed-plugins -type f \( -name "*.md" -o -name "*.json" -o -name "*.sh" \) 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -c1-16' \
+    docs_hash="$(docker exec "$CONTAINER" python3 -c '
+import hashlib
+import json
+import pathlib
+import sys
+
+roots = [pathlib.Path(value) for value in json.loads(sys.argv[1])]
+if not roots:
+    roots = [pathlib.Path.home() / ".copilot" / "installed-plugins"]
+ignored = {".git", ".pytest_cache", "__pycache__", "node_modules", "build", "dist"}
+digest = hashlib.sha256()
+for index, root in enumerate(roots):
+    root = root.resolve()
+    for path in sorted(root.rglob("*"), key=lambda value: value.as_posix()):
+        relative = path.relative_to(root)
+        if any(part in ignored or part.endswith(".egg-info") for part in relative.parts):
+            continue
+        if path.is_symlink():
+            digest.update(f"L\0{index}\0{relative.as_posix()}\0".encode("utf-8"))
+            digest.update(path.readlink().as_posix().encode("utf-8"))
+            if path.is_file():
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+        elif path.is_file() and path.suffix not in {".pyc", ".pyo"}:
+            digest.update(f"F\0{index}\0{relative.as_posix()}\0".encode("utf-8"))
+            digest.update(f"{path.stat().st_mode & 0o777:o}\0".encode("ascii"))
+            digest.update(path.read_bytes())
+print(digest.hexdigest()[:16])
+' "$ACP_DIRS_JSON" \
         2>/dev/null | head -1)"
 
     # --- 4/5) drive N times + capture transcripts ----------------------------
@@ -520,6 +626,7 @@ for value in json.loads(sys.argv[1]):
     copilot_ver="$(docker exec "$CONTAINER" /bin/bash -lc 'copilot --version 2>/dev/null' 2>/dev/null | head -1)"
     CR_SCENARIO_NAME="$SCENARIO_NAME" CR_FAMILY="$FAMILY" CR_IMAGE="$IMAGE" CR_RUN_COUNT="$RUN_COUNT" \
     CR_AGG="$AGG" CR_COPILOT_VER="$copilot_ver" CR_PROMPT_HASH="$PROMPT_HASH" CR_DOCS_HASH="$docs_hash" \
+    CR_ACP_DIRS_JSON="$ACP_DIRS_JSON" \
     CR_PER_TURN="${PER_TURN:-0}" CR_TIERP="$TIERP" CR_SKIP_TIER_P="${SKIP_TIER_P:-0}" \
     CR_BRIDGE_CLEANUP_ERROR="$bridge_cleanup_error" \
     "$(_py)" - "$recs" > "$eval_dir/eval-run.json" <<'PY'
@@ -541,6 +648,7 @@ meta = {
     "prompt": "eval/prompt.txt", "literal_mode": "eval/literal-mode.txt",
     "runs": runs, "run_count": int(e["CR_RUN_COUNT"]), "aggregate_policy": e["CR_AGG"],
     "copilot_version": e["CR_COPILOT_VER"], "prompt_hash": e["CR_PROMPT_HASH"], "docs_hash": e["CR_DOCS_HASH"],
+    "acp_plugin_dirs": json.loads(e["CR_ACP_DIRS_JSON"]),
     "per_turn_timeout_s": int(e["CR_PER_TURN"]),
     "tier_p_precondition": tierp_field,
     "bridge_cleanup_error": e["CR_BRIDGE_CLEANUP_ERROR"],

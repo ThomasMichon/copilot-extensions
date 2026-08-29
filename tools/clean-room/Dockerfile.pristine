@@ -22,11 +22,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # ONLY git + the Copilot CLI's runtime deps. Intentionally NO python3, NO uv:
 # the harness must provision those. Node is the Copilot CLI's own runtime, not a
-# dev toolchain we grant to the harness.
+# dev toolchain we grant to the harness. The distro ripgrep is moved outside the
+# stock PATH and reserved for Tier-E Copilot compatibility on 16 KiB-page ARM64
+# hosts; scenarios cannot discover or depend on it as an ambient prerequisite.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git sudo \
+        ca-certificates curl git ripgrep sudo \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
+    && mkdir -p /opt/copilot-cleanroom/bin \
+    && mv /usr/bin/rg /opt/copilot-cleanroom/bin/rg \
     && rm -rf /var/lib/apt/lists/*
 
 # The GitHub Copilot CLI. NPM_REGISTRY is a BUILD-TIME convenience ONLY (install

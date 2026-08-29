@@ -273,7 +273,10 @@ $DriveAgent = "cleanroom:$Container"        # the namespaced agent-bridge addres
 # eval path overrides this to add --plugin-dir for the scenario's plugins (a bare
 # copilot --acp does not reliably load enabled plugins headless). Script-scoped so
 # Invoke-Eval can set it before Invoke-BridgeRegister bakes it into the manifest.
-$script:AcpCommand = 'copilot --acp --stdio --allow-all-tools'
+# Core dumps must not dirty a fixture, and the hidden distro rg avoids Copilot's
+# bundled ARM64 binary rejecting hosts with 16 KiB pages.
+$script:AcpPrefix = 'ulimit -c 0 && env USE_BUILTIN_RIPGREP=false PATH=/opt/copilot-cleanroom/bin:$PATH'
+$script:AcpCommand = "$($script:AcpPrefix) copilot --acp --stdio --allow-all-tools"
 $script:AcpCwd = ''
 $script:BridgeContainerId = ''
 
@@ -641,6 +644,8 @@ function Invoke-Eval {
     if (-not (Test-Path $litPath)) { throw "eval: literal-mode fixture missing at $litPath" }
     $literal = Get-Content $litPath -Raw
     $fullPrompt = "$literal`n`n--- TASK ---`n`n$prompt"
+    $evalDir = Join-Path $Results 'eval'
+    New-Item -ItemType Directory -Force -Path $evalDir | Out-Null
 
     # --- 1) start box + 2) establish starting state --------------------------
     Start-Container
@@ -649,6 +654,10 @@ function Invoke-Eval {
         "bash /home/operator/scenario/$setupRel; rc=`$?; cp -r `$HOME/cr-logs /home/operator/out/ 2>/dev/null; exit `$rc"
     if ($LASTEXITCODE -ne 0) {
         Write-Host "warn: setup driver exited $LASTEXITCODE -- the starting state may be incomplete (see cr-report.json)." -ForegroundColor Yellow
+    }
+    $setupReport = Join-Path $Results 'cr-report.json'
+    if (Test-Path -LiteralPath $setupReport -PathType Leaf) {
+        Copy-Item -LiteralPath $setupReport -Destination (Join-Path $evalDir 'setup-report.json') -Force
     }
 
     # Resolve and build the driven-agent command after setup. acp_cwd_file lets
@@ -670,6 +679,7 @@ print(cwd)
         }
     }
     $acp = New-CleanRoomAcpCommand -PluginDirs $acpPluginDirs
+    $acp = "$($script:AcpPrefix) $acp"
     $script:AcpCwd = $acpCwd
     if ($acpCwd) {
         $quotedCwd = ConvertTo-CleanRoomBashLiteral $acpCwd
@@ -695,8 +705,6 @@ print(cwd)
     Invoke-BridgeRegister
 
     # --- eval/ artifacts -----------------------------------------------------
-    $evalDir = Join-Path $Results 'eval'
-    New-Item -ItemType Directory -Force -Path $evalDir | Out-Null
     Set-Content -Path (Join-Path $evalDir 'literal-mode.txt') -Value $literal -Encoding utf8
     $promptTxt = Join-Path $evalDir 'prompt.txt'
     Set-Content -Path $promptTxt -Value $fullPrompt -Encoding utf8
@@ -706,8 +714,37 @@ print(cwd)
     # agent could see. Fingerprint both so a verdict is reproducible-in-context
     # and a doc change that flips it is visible.
     $promptHash = Get-Sha256Short $fullPrompt
-    $docsHash = (docker exec $Container /bin/bash -lc `
-        'find $HOME/.copilot/installed-plugins -type f \( -name "*.md" -o -name "*.json" -o -name "*.sh" \) 2>/dev/null | sort | xargs sha256sum 2>/dev/null | sha256sum | cut -c1-16' `
+    $acpDirsJson = ConvertTo-Json -InputObject @($acpPluginDirs) -Compress
+    $docsHashScript = @'
+import hashlib
+import json
+import pathlib
+import sys
+
+roots = [pathlib.Path(value) for value in json.loads(sys.argv[1])]
+if not roots:
+    roots = [pathlib.Path.home() / ".copilot" / "installed-plugins"]
+ignored = {".git", ".pytest_cache", "__pycache__", "node_modules", "build", "dist"}
+digest = hashlib.sha256()
+for index, root in enumerate(roots):
+    root = root.resolve()
+    for path in sorted(root.rglob("*"), key=lambda value: value.as_posix()):
+        relative = path.relative_to(root)
+        if any(part in ignored or part.endswith(".egg-info") for part in relative.parts):
+            continue
+        if path.is_symlink():
+            digest.update(f"L\0{index}\0{relative.as_posix()}\0".encode("utf-8"))
+            digest.update(path.readlink().as_posix().encode("utf-8"))
+            if path.is_file():
+                digest.update(b"\0")
+                digest.update(path.read_bytes())
+        elif path.is_file() and path.suffix not in {".pyc", ".pyo"}:
+            digest.update(f"F\0{index}\0{relative.as_posix()}\0".encode("utf-8"))
+            digest.update(f"{path.stat().st_mode & 0o777:o}\0".encode("ascii"))
+            digest.update(path.read_bytes())
+print(digest.hexdigest()[:16])
+'@
+    $docsHash = (& docker exec $Container python3 -c $docsHashScript $acpDirsJson `
         2>$null | Select-Object -First 1)
 
     # --- 4/5) drive N times + capture transcripts ----------------------------
@@ -769,6 +806,7 @@ print(cwd)
         copilot_version  = $copilotVer
         prompt_hash      = $promptHash
         docs_hash        = $docsHash
+        acp_plugin_dirs  = @($acpPluginDirs)
         per_turn_timeout_s = $perTurnTimeout
         tier_p_precondition = if ($SkipTierPGate) { "$tierPCmd (SKIPPED)" } else { $tierPCmd }
         bridge_cleanup_error = $bridgeCleanupError

@@ -24,4 +24,35 @@ else
     cr_meta "post_fixture_mutated" "yes"
 fi
 
+if capture "pc-guidance-delivery" -- python3 -c '
+import json
+import pathlib
+import sys
+
+for event_path in pathlib.Path(sys.argv[1]).rglob("events.jsonl"):
+    for line in event_path.read_text(encoding="utf-8").splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        data = event.get("data") if isinstance(event, dict) else None
+        output = data.get("output") if isinstance(data, dict) else None
+        context = output.get("additionalContext") if isinstance(output, dict) else None
+        if (
+            event.get("type") == "hook.end"
+            and data.get("hookType") == "sessionStart"
+            and isinstance(context, str)
+            and context.startswith("[owner: context-handoff@")
+        ):
+            print(event_path)
+            raise SystemExit(0)
+raise SystemExit(1)
+' "$HOME/.copilot/session-state"; then
+    pass "context-handoff sessionStart hook emitted owner-marked guidance"
+    cr_meta "guidance_emitted" "yes"
+else
+    info "context-handoff sessionStart hook did not emit owner-marked guidance; issue #1234 may have retained a competing result"
+    cr_meta "guidance_emitted" "no"
+fi
+
 cr_finalize

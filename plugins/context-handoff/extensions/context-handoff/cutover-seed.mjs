@@ -25,18 +25,25 @@ export function leadFrom(title) {
 }
 
 export const CONTINUATION_DIRECTIVE =
-  "Treat the handoff as active responsibility for the original objective, " +
-  "not as proof that the predecessor's latest phase finished the work. After " +
+  "Treat the handoff as active responsibility within the authority it assigns, " +
+  "not as proof that the predecessor's latest phase finished the work. Objective " +
+  "owners continue the original objective; bounded delegates continue only their " +
+  "inherited scope and return or re-handoff at that boundary. After " +
   "loading the brief, keep driving every actionable next phase the original " +
   "request permits, as far as your context and available work allow, without " +
-  "waiting for another user nudge. Stop only when the parent objective's " +
+  "waiting for another user nudge. Consuming the handoff is setup, not " +
+  "completion: begin substantive work immediately after pickup. If the " +
+  "inherited plan is incomplete, finish the planning needed to act and then " +
+  "execute it, subject to any required safety, review, approval, or " +
+  "confirmation gate; do not stop at a plan unless the user explicitly " +
+  "requested planning only. Stop only when the parent objective's " +
   "completion gate is met, an explicit user scope boundary or required " +
   "confirmation stops you, or a real blocker needs input; if context pressure " +
   "returns first, hand off again with the same parent objective and remaining " +
   "roster. When the handoff cites an active effort, load that effort before " +
   "reconstructing intent from session history. Treat the effort -- not the " +
   "handoff task, latest phase, or pull request -- as the source of truth and " +
-  "completion gate. Focus on driving it to `Done`: select and execute the next " +
+  "completion gate. Objective owners focus on driving it to `Done`: select and execute the next " +
   "authorized Plan or Validation Plan item, and do not finalize the worktree " +
   "while any item remains unresolved unless responsibility is explicitly " +
   "transferred to a named tracked objective.";
@@ -84,6 +91,10 @@ export function buildCutoverSeed(
       "extension is still loading), wait a couple of seconds and retry the SAME " +
       "call, up to 5 attempts, before doing anything else."
     : "";
+  const continuationClause =
+    "The successful consume result supplies the continuation directive. If " +
+    "consumption ultimately fails, report that blocker; a missing brief is not " +
+    "completion and is not permission to reconstruct the objective from session history.";
   if (kind === "task") {
     // Bash-first path: load the brief + take ownership, bind the new session to
     // the exact numbered handoff, then retire + reap its pane. Reproducing that as
@@ -120,7 +131,7 @@ export function buildCutoverSeed(
       `Call the context-handoff consume_handoff tool with arguments ` +
       `{"task_id":"${id}","defer_complete":true}.${retryClause} That consumes ` +
       `the handoff, loads your full brief, and retires the predecessor pane only ` +
-      `after you are alive. ${CONTINUATION_DIRECTIVE} For this deferred handoff ` +
+      `after you are alive. ${continuationClause} For this deferred handoff ` +
       `task, completion of the predecessor's latest phase is not enough; ONLY ` +
       `when you reach the handoff's completion gate run: agent-dispatch complete ` +
       `${id} .`
@@ -132,6 +143,6 @@ export function buildCutoverSeed(
   return (
     `${lead}. Call the context-handoff consume_handoff tool with ` +
     `arguments ${consumeArgs} to load this one-time file-backed ` +
-    `handoff and continue in place.${retryClause} ${CONTINUATION_DIRECTIVE}`
+    `handoff and continue in place.${retryClause} ${continuationClause}`
   );
 }

@@ -114,6 +114,12 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   discovery, project/`.claude`/`.ai`/suite agent ownership, Task-disabled
   exemptions, MCP readiness and equivalent fallback checks, origin/version-aware
   external advisories, collision remediation, and counts-only context inventory.
+- **context-handoff:** payload-only hook tests covering the owner/version-marked
+  continuity kernel, its 2 KB budget, the bounded 3 KB adjacent agent-worktrees
+  compatibility catalog, plugin-root compatibility aliases, incomplete-payload
+  failure-open behavior, oversized-catalog fallback, and cross-platform kernel
+  and catalog semantics; Node tests cover thresholds, configuration, successor
+  seeds, storage, and guidance.
 - **efforts:** payload-only policy-producer tests covering exact repository
   adoption, authoritative payload cwd, Git/config containment, malformed input,
   symlink/reparse rejection, contaminated Git environments, manifest-derived

@@ -15,18 +15,28 @@ if [ -d "$MARKETPLACE_REPO" ]; then
 else
     MARKETPLACE_SOURCE="{ \"source\": { \"source\": \"github\", \"repo\": $MARKETPLACE_REPO_JSON } }"
 fi
+PAYLOAD_ROOT="$INSTALLED_ROOT"
+PAYLOAD_MODE="installed-marketplace"
+if [ -d "$MARKETPLACE_REPO/plugins" ]; then
+    PAYLOAD_ROOT="$MARKETPLACE_REPO/plugins"
+    PAYLOAD_MODE="mounted-directory"
+fi
 
 : "${CR_SCENARIO_NAME:=effort-handoff-eval}"
 export CR_SCENARIO_NAME
 cr_init
 cr_meta "plugins" "agent-worktrees,agent-logger,context-handoff,efforts"
 cr_meta "role" "starting-state-setup"
+cr_meta "payload_root" "$PAYLOAD_ROOT"
+cr_meta "payload_mode" "$PAYLOAD_MODE"
 
 phase 0 "environment"
 envdump
 
 phase 1 "install continuity plugins"
 mkdir -p "$HOME/.copilot"
+EVAL_PLUGIN_ROOT="$HOME/effort-handoff-plugins"
+mkdir -p "$EVAL_PLUGIN_ROOT"
 cat > "$HOME/.copilot/settings.json" <<JSON
 {
   "extraKnownMarketplaces": {
@@ -42,13 +52,33 @@ cat > "$HOME/.copilot/settings.json" <<JSON
 JSON
 capture "marketplace-add" -- copilot plugin marketplace add "$MARKETPLACE_REPO" || true
 for plugin in agent-worktrees agent-logger context-handoff efforts; do
-    capture "install-$plugin" -- copilot plugin install "$plugin@$MARKETPLACE_NAME" || true
-    if [ -d "$INSTALLED_ROOT/$plugin" ]; then
+    install_ok=0
+    if capture "install-$plugin" -- copilot plugin install "$plugin@$MARKETPLACE_NAME"; then
+        install_ok=1
+    fi
+    if [ "$install_ok" = 1 ] && [ -d "$PAYLOAD_ROOT/$plugin" ]; then
+        ln -s "$PAYLOAD_ROOT/$plugin" "$EVAL_PLUGIN_ROOT/$plugin"
         pass "$plugin payload present"
     else
         jam "npm-registry" "$plugin payload NOT installed" "check marketplace source + npm feed"
     fi
 done
+
+guidance_probe="/home/operator/out/eval/guidance-probe.json"
+if COPILOT_PLUGIN_ROOT="$PAYLOAD_ROOT/context-handoff" \
+   bash "$PAYLOAD_ROOT/context-handoff/scripts/emit-guidance.sh" \
+   >"$guidance_probe" 2>"$CR_LOGDIR/context-guidance-probe.log" &&
+   python3 -c '
+import json, sys
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+context = value.get("additionalContext", "")
+raise SystemExit(0 if context.startswith("[owner: context-handoff@") else 1)
+' "$guidance_probe"; then
+    pass "context-handoff guidance producer emitted its owner-marked kernel"
+else
+    jam "plugin-load" "context-handoff guidance producer did not emit its owner-marked kernel" \
+        "inspect context-guidance-probe.log"
+fi
 
 phase 2 "seed active effort and compact baton"
 mkdir -p "$DEMO_REPO/.copilot-extensions/efforts"
@@ -56,6 +86,19 @@ mkdir -p "$DEMO_REPO/efforts/active/review-widget"
 cat > "$DEMO_REPO/.copilot-extensions/efforts/config.json" <<'JSON'
 {"version":1,"enforcement":"required"}
 JSON
+cat > "$DEMO_REPO/efforts/README.md" <<'MARKDOWN'
+# Efforts
+
+## Local conventions
+
+- Active efforts use `efforts/active/<slug>/`.
+- Completed efforts archive to `efforts/<YYYY>/MM/DD <slug>/`.
+- `Participants` names the managed-worktree role; the bound `Driver` is the
+  sole editor and superseded sessions are assistance-only.
+- Use the canonical effort sections without renaming.
+- This decision fixture has no external issue tracker; `HANDOFF.md` identifies
+  the active effort and current relay slice.
+MARKDOWN
 cat > "$DEMO_REPO/efforts/active/review-widget/README.md" <<'MARKDOWN'
 # Review Widget
 
@@ -125,8 +168,11 @@ git -C "$DEMO_REPO" rev-parse HEAD > "$HOME/.effort-handoff-eval-head"
 pass "active effort and compact handoff seeded"
 
 phase 3 "create and bind a real managed worktree"
+RUNTIME_PAYLOAD_ROOT="$HOME/.effort-handoff-runtime/plugins"
+mkdir -p "$RUNTIME_PAYLOAD_ROOT"
+cp -a "$PAYLOAD_ROOT/agent-worktrees" "$RUNTIME_PAYLOAD_ROOT/"
 capture "install-worktree-runtime" -- \
-    bash "$INSTALLED_ROOT/agent-worktrees/scripts/install.sh" install || true
+    bash "$RUNTIME_PAYLOAD_ROOT/agent-worktrees/scripts/install.sh" install || true
 _agent_worktrees="$(bash -lc 'command -v agent-worktrees' 2>/dev/null || true)"
 if [ -f "$_agent_worktrees" ] && [ -x "$_agent_worktrees" ]; then
     pass "agent-worktrees runtime installed"
