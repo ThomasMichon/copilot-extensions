@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+
 import pytest
 
 from agent_dispatch.__main__ import (
@@ -747,6 +749,24 @@ def test_parser_complete_owner_optional():
     assert a.task_id == "t1" and a.worker_id is None
     b = build_parser().parse_args(["complete", "t1", "m/wt", "--result-ref", "pr/9"])
     assert b.worker_id == "m/wt" and b.result_ref == "pr/9"
+    c = build_parser().parse_args(
+        ["complete", "t1", "m/wt", "--result-json", '{"ok":true}']
+    )
+    assert c.result_json == '{"ok":true}' and c.result_file is None
+
+
+def test_parser_complete_result_inputs_are_mutually_exclusive():
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(
+            [
+                "complete",
+                "t1",
+                "--result-json",
+                "{}",
+                "--result-file",
+                "result.json",
+            ]
+        )
 
 
 def test_parser_start_owner_optional():
@@ -994,9 +1014,11 @@ def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
     completed = {}
 
     class _C:
-        def complete(self, task_id, worker_id, *, result_ref=None):
+        def complete(self, task_id, worker_id, *, result_ref=None, result=None):
             completed["task_id"] = task_id
             completed["worker_id"] = worker_id
+            completed["result_ref"] = result_ref
+            completed["result"] = result
             return {"id": task_id, "status": "completed", "owner": worker_id}
 
         def __enter__(self):
@@ -1010,7 +1032,247 @@ def test_complete_resolves_owner_from_identity(monkeypatch, capsys):
 
     args = build_parser().parse_args(["complete", "T5"])
     assert args.func(args) == 0
-    assert completed == {"task_id": "T5", "worker_id": "anomalous-potato/wt-7"}
+    assert completed == {
+        "task_id": "T5",
+        "worker_id": "anomalous-potato/wt-7",
+        "result_ref": None,
+        "result": None,
+    }
+
+
+def test_complete_reads_structured_result_file(monkeypatch, tmp_path, capsys):
+    from agent_dispatch import __main__
+
+    result_path = tmp_path / "result.json"
+    result_path.write_text('{"checks":[{"name":"unit","passed":true}]}', encoding="utf-8")
+    completed = {}
+
+    class _C:
+        def complete(self, task_id, worker_id, *, result_ref=None, result=None):
+            completed.update(
+                task_id=task_id,
+                worker_id=worker_id,
+                result_ref=result_ref,
+                result=result,
+            )
+            return {"id": task_id, "status": "completed", "result": result}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    args = build_parser().parse_args(
+        [
+            "complete",
+            "T6",
+            "worker-1",
+            "--result-ref",
+            "artifact/6",
+            "--result-file",
+            str(result_path),
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert completed == {
+        "task_id": "T6",
+        "worker_id": "worker-1",
+        "result_ref": "artifact/6",
+        "result": {"checks": [{"name": "unit", "passed": True}]},
+    }
+
+
+def test_complete_reads_utf8_bom_result_file(monkeypatch, tmp_path):
+    from agent_dispatch import __main__
+
+    result_path = tmp_path / "result.json"
+    result_path.write_bytes(
+        b"\xef\xbb\xbf" + b'{"checks":[{"name":"unit","passed":true}]}'
+    )
+    completed = {}
+
+    class _C:
+        def complete(self, task_id, worker_id, *, result_ref=None, result=None):
+            completed["result"] = result
+            return {"id": task_id, "status": "completed", "result": result}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    args = build_parser().parse_args(
+        ["complete", "T6", "worker-1", "--result-file", str(result_path)]
+    )
+
+    assert args.func(args) == 0
+    assert completed["result"] == {
+        "checks": [{"name": "unit", "passed": True}]
+    }
+
+
+@pytest.mark.parametrize(
+    ("argv", "stdin"),
+    [
+        (
+            ["complete", "T6", "worker-1", "--result-json", '\ufeff{"ok":true}'],
+            None,
+        ),
+        (
+            ["complete", "T6", "worker-1", "--result-file", "-"],
+            io.TextIOWrapper(
+                io.BytesIO(b"\xef\xbb\xbf" + b'{"ok":true}'),
+                encoding="utf-8",
+            ),
+        ),
+    ],
+)
+def test_complete_accepts_utf8_bom_from_inline_and_windows_style_stdin(
+    monkeypatch, argv, stdin
+):
+    from agent_dispatch import __main__
+
+    completed = {}
+
+    class _C:
+        def complete(self, task_id, worker_id, *, result_ref=None, result=None):
+            completed["result"] = result
+            return {"id": task_id, "status": "completed", "result": result}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    if stdin is not None:
+        monkeypatch.setattr(__main__.sys, "stdin", stdin)
+    args = build_parser().parse_args(argv)
+
+    assert args.func(args) == 0
+    assert completed["result"] == {"ok": True}
+
+
+def test_complete_rejects_oversized_result_file_before_http(
+    monkeypatch, tmp_path, capsys
+):
+    from agent_dispatch import __main__
+    from agent_dispatch.queue import DEFAULT_RESULT_MAX_BYTES
+
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        '{"data":"' + ("x" * DEFAULT_RESULT_MAX_BYTES) + '"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        __main__,
+        "_client",
+        lambda args: (_ for _ in ()).throw(AssertionError("client must not open")),
+    )
+    args = build_parser().parse_args(
+        ["complete", "T6", "worker-1", "--result-file", str(result_path)]
+    )
+
+    assert args.func(args) == 2
+    assert "result exceeds the 65536-byte encoded limit" in capsys.readouterr().err
+
+
+def test_complete_prechecks_canonical_not_raw_result_file_size(
+    monkeypatch, tmp_path
+):
+    from agent_dispatch import __main__
+    from agent_dispatch.queue import DEFAULT_RESULT_MAX_BYTES
+
+    result_path = tmp_path / "result.json"
+    result_path.write_text(
+        (" " * (DEFAULT_RESULT_MAX_BYTES + 1)) + '{"ok":true}',
+        encoding="utf-8",
+    )
+    completed = {}
+
+    class _C:
+        def complete(self, task_id, worker_id, *, result_ref=None, result=None):
+            completed["result"] = result
+            return {"id": task_id, "status": "completed", "result": result}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    args = build_parser().parse_args(
+        ["complete", "T6", "worker-1", "--result-file", str(result_path)]
+    )
+
+    assert args.func(args) == 0
+    assert completed["result"] == {"ok": True}
+
+
+@pytest.mark.parametrize("raw", ["null", '"{\\"ok\\":true}"', "7"])
+def test_complete_rejects_non_structured_json_before_http(
+    monkeypatch, capsys, raw
+):
+    from agent_dispatch import __main__
+
+    monkeypatch.setattr(
+        __main__,
+        "_client",
+        lambda args: (_ for _ in ()).throw(AssertionError("client must not open")),
+    )
+    args = build_parser().parse_args(
+        ["complete", "T7", "worker-1", "--result-json", raw]
+    )
+
+    assert args.func(args) == 2
+    assert "result must be a JSON object or array" in capsys.readouterr().err
+
+
+def test_complete_rejects_invalid_result_json_before_http(monkeypatch, capsys):
+    from agent_dispatch import __main__
+
+    monkeypatch.setattr(
+        __main__,
+        "_client",
+        lambda args: (_ for _ in ()).throw(AssertionError("client must not open")),
+    )
+    args = build_parser().parse_args(
+        ["complete", "T7", "worker-1", "--result-json", "{bad"]
+    )
+
+    assert args.func(args) == 2
+    assert "invalid result: not valid JSON" in capsys.readouterr().err
+
+
+def test_result_command_retrieves_envelope_and_raw(monkeypatch, capsys):
+    from agent_dispatch import __main__
+
+    class _C:
+        def result(self, task_id):
+            return {
+                "task_id": task_id,
+                "ref": "artifact/7",
+                "result": {"ok": True},
+            }
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return None
+
+    monkeypatch.setattr(__main__, "_client", lambda args: _C())
+    args = build_parser().parse_args(["result", "T7", "--raw"])
+
+    assert args.func(args) == 0
+    assert capsys.readouterr().out == '{"ok": true}\n'
 
 
 def test_claim_positional_is_the_task(monkeypatch, capsys):

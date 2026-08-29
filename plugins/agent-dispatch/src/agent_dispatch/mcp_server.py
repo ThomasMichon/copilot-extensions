@@ -18,16 +18,31 @@ Requires the optional ``mcp`` extra (``pip install 'agent-dispatch[mcp]'``).
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import PlainValidator, WithJsonSchema
 
 from .client import DispatchClient
 from .config import client_token, client_url
 from .identity import resolve_identity, resolve_repo, resolve_repo_selector
-from .queue import worker_id_for
+from .queue import StructuredResult, worker_id_for
 
 ClientFactory = Callable[[], DispatchClient]
 IdentityResolver = Callable[[], "tuple[str | None, str | None]"]
 RepoResolver = Callable[[], "str | None"]
+
+
+def _validate_mcp_structured_result(value: Any) -> StructuredResult:
+    if not isinstance(value, (dict, list)):
+        raise ValueError("result must be a JSON object or array")
+    return value
+
+
+McpStructuredResult = Annotated[
+    str,
+    PlainValidator(_validate_mcp_structured_result),
+    WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "array"}]}),
+]
 
 
 def _default_client() -> DispatchClient:
@@ -275,6 +290,11 @@ class DispatchTools:
         with self._client_factory() as c:
             return c.payload(task_id)
 
+    def result(self, task_id: str) -> dict:
+        """Return a task's structured completion result."""
+        with self._client_factory() as c:
+            return c.result(task_id)
+
     # -- identity-bearing ----------------------------------------------------
 
     def worktree_status(
@@ -360,10 +380,21 @@ class DispatchTools:
         with self._client_factory() as c:
             return c.release(task_id, worker_id, reason=reason)
 
-    def complete(self, task_id: str, worker_id: str, result_ref: str | None = None) -> dict:
-        """Complete a started or suspended task under its preserved owner."""
+    def complete(
+        self,
+        task_id: str,
+        worker_id: str,
+        result_ref: str | None = None,
+        result: McpStructuredResult = None,  # type: ignore[assignment]
+    ) -> dict:
+        """Complete a task with an optional JSON object/array result."""
         with self._client_factory() as c:
-            return c.complete(task_id, worker_id, result_ref=result_ref)
+            return c.complete(
+                task_id,
+                worker_id,
+                result_ref=result_ref,
+                result=result,  # type: ignore[arg-type]
+            )
 
     def abandon(
         self,
@@ -422,6 +453,7 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_events")(t.events)
     mcp.tool(name="dispatch_wakes")(t.wakes)
     mcp.tool(name="dispatch_payload")(t.payload)
+    mcp.tool(name="dispatch_result")(t.result)
     mcp.tool(name="dispatch_worktree_status")(t.worktree_status)
     mcp.tool(name="dispatch_claim")(t.claim)
     mcp.tool(name="dispatch_start")(t.start)

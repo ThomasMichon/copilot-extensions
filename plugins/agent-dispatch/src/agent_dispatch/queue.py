@@ -37,6 +37,7 @@ import uuid
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .payload import PayloadStore, is_blob_ref
 from .registrations import (
@@ -58,6 +59,10 @@ DEFAULT_WAKE_DELIVERY_LEASE_SECONDS = 60
 #: Payloads whose UTF-8 size exceeds this are spilled to a content-addressed blob
 #: instead of being stored inline in the row.
 DEFAULT_BLOB_THRESHOLD = 4096
+#: Maximum UTF-8 size of a task's canonical JSON completion result. Results stay
+#: in SQLite rather than the payload blob store so the result bytes, result_ref,
+#: and terminal status commit in one transaction.
+DEFAULT_RESULT_MAX_BYTES = 64 * 1024
 #: Sentinel lane for rows created before ``repo`` became required. Backfilled on
 #: migration so legacy tasks never leak into a real repo's default-scoped views.
 LEGACY_REPO = "(legacy)"
@@ -171,6 +176,48 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class ResultValidationError(TaskError):
+    """Raised when a completion result is not a structured JSON value."""
+
+
+class ResultTooLargeError(TaskError):
+    """Raised when a completion result exceeds the configured byte limit."""
+
+
+StructuredResult = dict[str, Any] | list[Any]
+
+
+def encode_result(
+    result: object | None,
+    *,
+    max_bytes: int = DEFAULT_RESULT_MAX_BYTES,
+) -> str | None:
+    """Validate and canonically encode an optional structured JSON result."""
+    if result is None:
+        return None
+    if not isinstance(result, (dict, list)):
+        raise ResultValidationError(
+            "result must be a JSON object or array, not null or a scalar"
+        )
+    try:
+        encoded = json.dumps(
+            result,
+            ensure_ascii=False,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise ResultValidationError(
+            f"result is not JSON-compatible: {exc}"
+        ) from exc
+    if len(encoded.encode("utf-8")) > max_bytes:
+        raise ResultTooLargeError(
+            f"result exceeds the {max_bytes}-byte encoded limit"
+        )
+    return encoded
+
+
 class SpawnState:
     """The lifecycle states of a spawn reservation."""
 
@@ -233,7 +280,13 @@ class Task:
     claimed_at: float | None = None
     started_at: float | None = None
     completed_at: float | None = None
+    #: Stable identity that performed the terminal completion. Retained after
+    #: ``owner`` is cleared so only that identity may retry-fill a missing result.
+    completed_by: str | None = None
     result_ref: str | None = None
+    #: Optional schema-neutral completion result, decoded from canonical JSON.
+    #: The coordinator stores it atomically with terminal completion.
+    result: object | None = None
     #: Latest-only structured progress beat (JSON: phase/summary/blocker/pr/ts),
     #: or None. The "how far toward the goal" signal for at-a-glance tracking.
     latest_progress: str | None = None
@@ -309,7 +362,9 @@ class Task:
             claimed_at=row["claimed_at"],
             started_at=row["started_at"],
             completed_at=row["completed_at"],
+            completed_by=row["completed_by"],
             result_ref=row["result_ref"],
+            result=json.loads(row["result"]) if row["result"] is not None else None,
             latest_progress=row["latest_progress"],
             goal=row["goal"],
             done_criteria=row["done_criteria"],
@@ -351,6 +406,14 @@ class WakeOperation:
     @classmethod
     def _from_row(cls, row: sqlite3.Row) -> WakeOperation:
         return cls(**{field.name: row[field.name] for field in dataclasses.fields(cls)})
+
+
+@dataclass(frozen=True)
+class CompletionOutcome:
+    """A completed task plus the observable event caused by this invocation."""
+
+    task: Task
+    event_type: str | None
 
 
 @dataclass(frozen=True)
@@ -475,7 +538,9 @@ _COLUMNS: dict[str, str] = {
     "claimed_at": "REAL",
     "started_at": "REAL",
     "completed_at": "REAL",
+    "completed_by": "TEXT",
     "result_ref": "TEXT",
+    "result": "TEXT",
     "latest_progress": "TEXT",
     # Durable goal: the objective a worker loops toward (``goal``) and the
     # explicit criteria for when it is met (``done_criteria``). Both nullable --
@@ -533,12 +598,14 @@ class TaskQueue:
         eval_lease_seconds: int = DEFAULT_EVAL_LEASE_SECONDS,
         payload_dir: str | Path | None = None,
         blob_threshold: int = DEFAULT_BLOB_THRESHOLD,
+        result_max_bytes: int = DEFAULT_RESULT_MAX_BYTES,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
         #: Tight lease for an evaluation-mode claim (see ``claim_one(evaluation=)``).
         self.eval_lease_seconds = eval_lease_seconds
         self.blob_threshold = blob_threshold
+        self.result_max_bytes = result_max_bytes
         # Blobs live in a ``payloads/`` directory beside the queue DB unless the
         # caller overrides it (e.g. a shared blob volume).
         if payload_dir is None:
@@ -588,6 +655,21 @@ class TaskQueue:
                 "  worker TEXT,"
                 "  note TEXT"
                 ")"
+            )
+            # Rows completed before ``completed_by`` existed retain their
+            # original completing identity when the durable audit row has it.
+            # Runtime authorization never consults the audit log after this
+            # one-time additive backfill; an unprovable legacy owner stays NULL
+            # and retry-fill fails closed.
+            conn.execute(
+                "UPDATE tasks SET completed_by = ("
+                " SELECT worker FROM task_events"
+                " WHERE task_events.task_id = tasks.id"
+                "   AND task_events.to_status = ?"
+                "   AND task_events.worker IS NOT NULL"
+                " ORDER BY task_events.id DESC LIMIT 1"
+                ") WHERE status = ? AND completed_by IS NULL",
+                (Status.COMPLETED, Status.COMPLETED),
             )
             # Append-only progress log -- the *accumulated* counterpart of the
             # latest-only ``latest_progress`` beat (the *resumable-goal* feature).
@@ -875,6 +957,25 @@ class TaskQueue:
         if is_blob_ref(task.payload_ref):
             return self.payloads.get(task.payload_ref)  # type: ignore[arg-type]
         return None
+
+    def _encode_result(self, result: object | None) -> str | None:
+        """Validate and canonically encode an optional JSON-compatible result.
+
+        Results are structured objects/arrays, never JSON null, scalars, or
+        double-encoded JSON strings. The hard byte limit bounds task rows.
+        Results deliberately remain in SQLite instead of spilling to the payload
+        blob store: completion must atomically persist the terminal status,
+        ``result_ref``, and the result bytes in one coordinator transaction.
+        """
+        return encode_result(result, max_bytes=self.result_max_bytes)
+
+    def read_result(self, task_or_id: Task | str) -> StructuredResult | None:
+        """Return a task's decoded structured completion result, or ``None``."""
+        task = self.get(task_or_id) if isinstance(task_or_id, str) else task_or_id
+        if task is None:
+            raise TaskError(f"no such task: {task_or_id}")
+        result = task.result
+        return result if isinstance(result, (dict, list)) else None
 
     # -- producers -----------------------------------------------------------
 
@@ -1210,11 +1311,36 @@ class TaskQueue:
         worker_id: str,
         *,
         result_ref: str | None = None,
+        result: StructuredResult | None = None,
         expected_status: str | None = None,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
         now: float | None = None,
     ) -> Task:
+        """Complete work and return its task snapshot."""
+        return self.complete_with_outcome(
+            task_id,
+            worker_id,
+            result_ref=result_ref,
+            result=result,
+            expected_status=expected_status,
+            expected_owner_session_id=expected_owner_session_id,
+            expected_generation=expected_generation,
+            now=now,
+        ).task
+
+    def complete_with_outcome(
+        self,
+        task_id: str,
+        worker_id: str,
+        *,
+        result_ref: str | None = None,
+        result: StructuredResult | None = None,
+        expected_status: str | None = None,
+        expected_owner_session_id: str | None = None,
+        expected_generation: int | None = None,
+        now: float | None = None,
+    ) -> CompletionOutcome:
         """Complete active or suspended work (owner must match).
 
         A suspended task may resolve while no worker process is running (for
@@ -1224,6 +1350,7 @@ class TaskQueue:
         act on a previously read suspended snapshot may supply its status,
         owner-session identity, and generation as an atomic transition fence.
         """
+        encoded_result = self._encode_result(result)
         allowed = {Status.STARTED, Status.SUSPENDED}
         if expected_status is not None:
             if expected_status not in allowed:
@@ -1231,18 +1358,111 @@ class TaskQueue:
                     f"cannot expect {expected_status!r} when completing a task"
                 )
             allowed = {expected_status}
-        return self._transition(
-            task_id,
-            allowed=allowed,
-            to=Status.COMPLETED,
-            worker_id=worker_id,
-            now=now,
-            note="complete",
-            stamp="completed_at",
-            extra={"result_ref": result_ref, "owner": None, "lease_expires_at": None},
-            expected_owner_session_id=expected_owner_session_id,
-            expected_generation=expected_generation,
-        )
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+
+            if task.status == Status.COMPLETED and encoded_result is not None:
+                if task.completed_by is None:
+                    conn.execute("COMMIT")
+                    raise TaskError(
+                        f"task {task_id!r} has no recorded completing owner;"
+                        " cannot safely record a result"
+                    )
+                if task.completed_by != worker_id:
+                    conn.execute("COMMIT")
+                    raise TaskError(
+                        f"task {task_id!r} was completed by {task.completed_by!r},"
+                        f" not {worker_id!r}"
+                    )
+                row = conn.execute(
+                    "SELECT result, result_ref FROM tasks WHERE id = ?", (task_id,)
+                ).fetchone()
+                current_result = row["result"]
+                current_ref = row["result_ref"]
+                if result_ref is not None and current_ref not in (None, result_ref):
+                    conn.execute("COMMIT")
+                    raise TaskError(
+                        f"task {task_id!r} already has a different result_ref"
+                    )
+                if current_result is not None:
+                    if current_result != encoded_result:
+                        conn.execute("COMMIT")
+                        raise TaskError(
+                            f"task {task_id!r} already has a different result"
+                        )
+                    conn.execute("COMMIT")
+                    return CompletionOutcome(task, None)
+                conn.execute(
+                    "UPDATE tasks SET result = ?, result_ref = COALESCE(result_ref, ?),"
+                    " updated_at = ? WHERE id = ?",
+                    (encoded_result, result_ref, ts, task_id),
+                )
+                self._audit(
+                    conn,
+                    task_id,
+                    ts=ts,
+                    from_status=Status.COMPLETED,
+                    to_status=Status.COMPLETED,
+                    worker=worker_id,
+                    note="complete retry: result recorded",
+                )
+                completed = self._fetch(conn, task_id)
+                assert completed is not None
+                conn.execute("COMMIT")
+                return CompletionOutcome(completed, "task.result_recorded")
+
+            if task.status not in allowed:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"cannot complete a {task.status!r} task"
+                    f" (allowed: {sorted(allowed)})"
+                )
+            if task.owner not in (None, worker_id):
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} owned by {task.owner!r}, not {worker_id!r}"
+                )
+            if expected_generation is not None and (
+                task.generation != expected_generation
+                or task.owner_session_id != expected_owner_session_id
+            ):
+                conn.execute("COMMIT")
+                raise TaskError(f"task {task_id!r} ownership incarnation changed")
+
+            conn.execute(
+                "UPDATE tasks SET status = ?, updated_at = ?, activity = NULL,"
+                " activity_updated_at = ?, completed_at = ?, result_ref = ?,"
+                " result = ?, completed_by = ?, owner = NULL,"
+                " lease_expires_at = NULL WHERE id = ?",
+                (
+                    Status.COMPLETED,
+                    ts,
+                    ts,
+                    ts,
+                    result_ref,
+                    encoded_result,
+                    worker_id,
+                    task_id,
+                ),
+            )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=task.status,
+                to_status=Status.COMPLETED,
+                worker=worker_id,
+                note="complete",
+            )
+            completed = self._fetch(conn, task_id)
+            assert completed is not None
+            conn.execute("COMMIT")
+        return CompletionOutcome(completed, "task.completed")
 
     def suspend(
         self,

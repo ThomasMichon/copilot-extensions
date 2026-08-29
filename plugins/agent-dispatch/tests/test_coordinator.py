@@ -6,10 +6,15 @@ import socket
 import threading
 import time
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from agent_dispatch.client import DispatchClient, DispatchError
+from agent_dispatch.client import (
+    DispatchClient,
+    DispatchError,
+    DispatchUpgradeRequired,
+)
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status
 from tests._helpers import RepoDefaultingQueue as TaskQueue
@@ -178,6 +183,201 @@ def test_full_lifecycle_over_http(api):
         f"/tasks/{tid}/complete", json={"worker_id": "w1", "result_ref": "pr/1"}
     ).json()
     assert done["status"] == Status.COMPLETED
+
+
+def test_structured_result_is_full_on_show_bounded_in_bulk_and_retrievable(api):
+    tid = api.post(
+        "/tasks", json={"title": "x", "target_worktree": "wt-1"}
+    ).json()["id"]
+    owner = "m1/wt-1"
+    api.post(
+        "/claim",
+        json={
+            "worker_id": owner,
+            "machine": "m1",
+            "worktree": "wt-1",
+        },
+    )
+    api.post(f"/tasks/{tid}/start", json={"worker_id": owner})
+    result = {"summary": {"passed": 3}, "data": "x" * 60000}
+
+    completed = api.post(
+        f"/tasks/{tid}/complete",
+        json={"worker_id": owner, "result_ref": "artifact/3", "result": result},
+    )
+
+    assert completed.status_code == 200
+    assert completed.json()["result"] == result
+    assert api.get(f"/tasks/{tid}").json()["result"] == result
+    assert api.get(f"/tasks/{tid}/result").json() == {
+        "task_id": tid,
+        "ref": "artifact/3",
+        "result": result,
+    }
+    for path in (
+        "/tasks",
+        "/tasks?q=x",
+        "/tasks?sweep=true",
+    ):
+        response = api.get(path)
+        assert response.status_code == 200
+        assert len(response.content) < 20000
+        assert ("x" * 1000).encode() not in response.content
+        rows = response.json()
+        if isinstance(rows, dict):
+            rows = [task for group in rows.values() for task in group]
+        row = next(task for task in rows if task["id"] == tid)
+        assert row["has_result"] is True
+        assert "result" not in row
+
+    assigned = api.post(
+        "/tasks", json={"title": "assigned", "target_worktree": "wt-1"}
+    ).json()
+    mine = api.get("/tasks/mine?machine=m1&worktree=wt-1").json()
+    mine_row = next(
+        task for group in mine.values() for task in group if task["id"] == assigned["id"]
+    )
+    assert mine_row["has_result"] is False
+    assert "result" not in mine_row
+
+
+def test_invalid_http_result_leaves_task_started(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    response = api.post(
+        f"/tasks/{tid}/complete",
+        content='{"worker_id":"w1","result_ref":"artifact/bad","result":{"value":NaN}}',
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    task = api.get(f"/tasks/{tid}").json()
+    assert task["status"] == Status.STARTED
+    assert task["result_ref"] is None
+    assert task["result"] is None
+
+
+def test_oversized_http_result_leaves_task_started(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    response = api.post(
+        f"/tasks/{tid}/complete",
+        json={
+            "worker_id": "w1",
+            "result_ref": "artifact/large",
+            "result": {"data": "x" * (64 * 1024)},
+        },
+    )
+
+    assert response.status_code == 413
+    task = api.get(f"/tasks/{tid}").json()
+    assert task["status"] == Status.STARTED
+    assert task["result_ref"] is None
+    assert task["result"] is None
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        '{"worker_id":"w1","result":',
+        '{"worker_id":"w1","result":null}',
+        '{"worker_id":"w1","result":"{\\"ok\\":true}"}',
+    ],
+)
+def test_invalid_result_json_shapes_are_400_and_non_terminal(api, content):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+
+    response = api.post(
+        f"/tasks/{tid}/complete",
+        content=content,
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    assert api.get(f"/tasks/{tid}").json()["status"] == Status.STARTED
+
+
+def test_result_validation_response_omits_rejected_input(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    sensitive = "do-not-echo-this-value"
+
+    response = api.post(
+        f"/tasks/{tid}/complete",
+        json={"worker_id": "w1", "result": sensitive},
+    )
+
+    assert response.status_code == 400
+    assert sensitive not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+
+
+def test_non_result_validation_on_complete_remains_422(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+
+    response = api.post(
+        f"/tasks/{tid}/complete",
+        json={"worker_id": {"not": "a string"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "worker_id"]
+
+
+def test_result_size_validation_response_is_413_and_sanitized(api):
+    tid = api.post("/tasks", json={"title": "x"}).json()["id"]
+    api.post("/claim", json={"worker_id": "w1"})
+    api.post(f"/tasks/{tid}/start", json={"worker_id": "w1"})
+    sensitive = "sensitive-prefix-" + ("x" * (64 * 1024))
+
+    response = api.post(
+        f"/tasks/{tid}/complete",
+        json={"worker_id": "w1", "result": {"data": sensitive}},
+    )
+
+    assert response.status_code == 413
+    assert sensitive not in response.text
+    assert all("input" not in error for error in response.json()["detail"])
+    assert api.get(f"/tasks/{tid}").json()["status"] == Status.STARTED
+
+
+def test_client_omits_none_result_for_older_coordinator():
+    seen = {}
+
+    def handler(request):
+        import json
+
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200, json={"id": "t1", "status": Status.COMPLETED}
+        )
+
+    with DispatchClient(
+        "http://coordinator", transport=httpx.MockTransport(handler)
+    ) as client:
+        client.complete("t1", "w1")
+
+    assert "result" not in seen
+
+
+def test_client_detects_coordinator_that_drops_structured_result():
+    def handler(request):
+        return httpx.Response(
+            200, json={"id": "t1", "status": Status.COMPLETED}
+        )
+
+    with DispatchClient(
+        "http://coordinator", transport=httpx.MockTransport(handler)
+    ) as client:
+        with pytest.raises(DispatchUpgradeRequired, match="upgrade the coordinator"):
+            client.complete("t1", "w1", result={"ok": True})
 
 
 def test_progress_over_http(api):
@@ -394,7 +594,7 @@ def test_client_recover(client, monkeypatch):
 # -- SSE event stream --------------------------------------------------------
 
 
-def test_sse_stream_delivers_lifecycle_events(server_url):
+def test_sse_stream_distinguishes_retry_recorded_result(server_url):
     streamer = DispatchClient(server_url)
     mutator = DispatchClient(server_url)
     received: list[dict] = []
@@ -403,7 +603,7 @@ def test_sse_stream_delivers_lifecycle_events(server_url):
         try:
             for ev in streamer.stream_events():
                 received.append(ev)
-                if ev.get("type") == "task.completed":
+                if ev.get("type") == "task.result_recorded":
                     break
         except Exception:
             return  # stream closed / server stopped -- best effort
@@ -425,6 +625,7 @@ def test_sse_stream_delivers_lifecycle_events(server_url):
     mutator.claim("w1")
     mutator.start(tid, "w1")
     mutator.complete(tid, "w1")
+    mutator.complete(tid, "w1", result={"summary": "done"})
 
     t.join(timeout=5)
     streamer.close()
@@ -434,8 +635,18 @@ def test_sse_stream_delivers_lifecycle_events(server_url):
     assert "task.created" in types
     assert "task.claimed" in types
     assert "task.completed" in types
+    assert "task.result_recorded" in types
+    assert types.count("task.completed") == 1
     created = next(e for e in received if e["type"] == "task.created")
     assert created["task"]["id"] == tid
+    completed = next(e for e in received if e["type"] == "task.completed")
+    assert completed["task"]["has_result"] is False
+    assert "result" not in completed["task"]
+    recorded = next(
+        e for e in received if e["type"] == "task.result_recorded"
+    )
+    assert recorded["task"]["has_result"] is True
+    assert "result" not in recorded["task"]
 
 
 def test_health_reports_zero_subscribers_initially(api):

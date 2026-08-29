@@ -203,7 +203,12 @@ task = q.claim_one("worker-1", capabilities=["logger"])
 if task:
     q.start(task.id, "worker-1")
     # ... do the work ...
-    q.complete(task.id, "worker-1", result_ref="pr/123")
+    q.complete(
+        task.id,
+        "worker-1",
+        result_ref="artifact/123",
+        result={"summary": "completed", "checks": {"passed": 8, "failed": 0}},
+    )
 
 # Crash recovery: return any task whose owner is confirmed gone to the queue
 q.reconcile_liveness()
@@ -681,11 +686,47 @@ agent-dispatch start  <id>  <owner>
 agent-dispatch suspend <id> <owner> --reason "waiting for an external result"
 agent-dispatch resume <id> <owner>                 # same owner; durable async wake
 agent-dispatch release <id> <owner> --reason "use a replacement"
-agent-dispatch complete <id> <owner> --result-ref pr/123
+agent-dispatch complete <id> <owner> --result-ref artifact/123
+agent-dispatch complete <id> <owner> --result-file result.json
+agent-dispatch result <id> [--raw]
 agent-dispatch list --status queued
 agent-dispatch recover                                 # requeue tasks whose owner is gone
 agent-dispatch watch                                   # stream task events (SSE) as JSON lines
 ```
+
+Completion accepts an optional JSON object/array result through
+`--result-json` or the cross-platform-friendly `--result-file` (`-` reads
+stdin; one leading UTF-8 BOM is accepted on every input path). The client
+prechecks the canonical JSON size rather than the source file's formatting, the
+coordinator validates strict structured JSON, caps its canonical UTF-8 encoding
+at 64 KiB, and commits the result, `result_ref`, terminal status, and stable
+completing identity in one SQLite transaction. Invalid input returns HTTP 400,
+oversized input returns HTTP 413, and both leave the task non-terminal. JSON
+null, scalars, and double-encoded JSON strings are rejected.
+
+`show` keeps the decoded `result`. Bulk `list`/`find`/`sweep`/`inbox` rows omit
+the potentially large value and expose `has_result`; retrieve it with
+`result <id>`, `GET /tasks/<id>/result`, or MCP `dispatch_result`. SSE events
+also expose only `has_result`, never the result body. Initial completion emits
+`task.completed`; a later retry that fills a previously missing result emits
+`task.result_recorded`. Repeating the identical recorded result is a no-op and
+emits neither event again.
+
+When a structured result is sent, a new client verifies the coordinator returned
+the recorded value. A coordinator too old to store it raises an explicit
+upgrade-required error instead of reporting silent success. After upgrading, the
+same completing owner may retry only to fill a missing result (or repeat the
+identical value); a different or conflicting result is never overwritten.
+Omitting the result preserves the existing completion behavior.
+
+For MCP `dispatch_complete`, omit the `result` argument when there is no
+structured result. Explicit JSON null is rejected consistently with the CLI and
+REST surfaces.
+
+Results use a bounded database field rather than the payload blob store because
+the filesystem cannot participate in the SQLite completion transaction. The
+result remains opaque: agent-dispatch stores and returns JSON values without
+interpreting domain-specific fields.
 
 `inbox` complements the two lane-scoped reads: `worktree-status` is *this
 worktree's* assigned/owned tasks, and `list` is scoped to the calling repo's
@@ -844,18 +885,19 @@ Point a Copilot sub-agent (or any MCP client) at it:
 }
 ```
 
-It exposes the queue as 24 tools: `dispatch_create` / `dispatch_approve` /
+It exposes the queue as 25 tools: `dispatch_create` / `dispatch_approve` /
 `dispatch_find` / `dispatch_sweep` / `dispatch_recipe_list` /
 `dispatch_recipe_render` / `dispatch_recipe_kick` / `dispatch_list` /
 `dispatch_show` / `dispatch_events` / `dispatch_wakes` / `dispatch_payload` /
-`dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
+`dispatch_result` / `dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
 `dispatch_yield` / `dispatch_suspend` / `dispatch_resume` /
 `dispatch_release` / `dispatch_complete` / `dispatch_abandon` /
 `dispatch_heartbeat` / `dispatch_detach` / `dispatch_recover`. Wake-bearing
 operations return after scheduling delivery; inspect the task audit trail for
 the eventual result, or use `agent-dispatch wakes <id>`.
 `dispatch_create` takes an inline `payload` the coordinator spills to a blob when
-large.
+large. `dispatch_complete` accepts the same optional decoded object/array `result` as
+the CLI/REST completion path.
 
 ### Two MCP surfaces
 

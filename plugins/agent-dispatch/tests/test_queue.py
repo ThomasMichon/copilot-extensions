@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import concurrent.futures
+import sqlite3
 import threading
 
 import pytest
 
 from agent_dispatch.queue import (
     DEFAULT_LEASE_SECONDS,
+    DEFAULT_RESULT_MAX_BYTES,
     LEGACY_REPO,
+    ResultTooLargeError,
+    ResultValidationError,
     SpawnState,
     Status,
     TaskError,
@@ -51,6 +55,126 @@ def test_full_happy_path(q):
     assert done.status == Status.COMPLETED
     assert done.result_ref == "pr/42"
     assert done.owner is None
+    assert done.completed_by == "w1"
+
+
+def test_complete_persists_schema_neutral_structured_result(q):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    result = {
+        "outcome": "accepted",
+        "counts": {"passed": 4, "failed": 0},
+        "items": ["alpha", {"id": 2, "enabled": True}],
+    }
+
+    done = q.complete(t.id, "w1", result_ref="artifact/42", result=result)
+
+    assert done.status == Status.COMPLETED
+    assert done.result_ref == "artifact/42"
+    assert done.result == result
+    assert q.get(t.id).result == result
+    assert q.list()[0].result == result
+
+
+@pytest.mark.parametrize("invalid", ["{}", 7, True])
+def test_complete_rejects_explicit_non_structured_result(q, invalid):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+
+    with pytest.raises(ResultValidationError, match="JSON object or array"):
+        q.complete(t.id, "w1", result=invalid)
+
+
+def test_complete_result_persists_across_reopen(tmp_path):
+    db = tmp_path / "tasks.db"
+    q1 = TaskQueue(db)
+    t = q1.create("persist result")
+    q1.claim_one("w1", task_id=t.id)
+    q1.start(t.id, "w1")
+    q1.complete(t.id, "w1", result={"nested": {"value": 7}})
+
+    q2 = TaskQueue(db)
+
+    assert q2.get(t.id).result == {"nested": {"value": 7}}
+
+
+@pytest.mark.parametrize("invalid", [{"value": {1, 2}}, {"value": float("nan")}])
+def test_invalid_complete_result_is_atomic(q, invalid):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+
+    with pytest.raises(ResultValidationError, match="not JSON-compatible"):
+        q.complete(t.id, "w1", result_ref="artifact/invalid", result=invalid)
+
+    unchanged = q.get(t.id)
+    assert unchanged.status == Status.STARTED
+    assert unchanged.result_ref is None
+    assert unchanged.result is None
+    assert unchanged.completed_at is None
+
+
+def test_oversized_complete_result_is_atomic(tmp_path):
+    q = TaskQueue(tmp_path / "tasks.db", result_max_bytes=32)
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+
+    with pytest.raises(ResultTooLargeError, match="32-byte encoded limit"):
+        q.complete(t.id, "w1", result_ref="artifact/large", result={"data": "x" * 40})
+
+    unchanged = q.get(t.id)
+    assert unchanged.status == Status.STARTED
+    assert unchanged.result_ref is None
+    assert unchanged.result is None
+
+
+def test_complete_without_result_remains_backward_compatible(q):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+
+    done = q.complete(t.id, "w1", result_ref="artifact/legacy")
+
+    assert done.status == Status.COMPLETED
+    assert done.result_ref == "artifact/legacy"
+    assert done.result is None
+
+
+def test_same_owner_can_retry_completed_task_to_fill_missing_result(q):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1", result_ref="artifact/1")
+
+    result = {"outcome": "recorded"}
+    retried = q.complete_with_outcome(
+        t.id, "w1", result_ref="artifact/1", result=result
+    )
+
+    assert retried.event_type == "task.result_recorded"
+    assert retried.task.status == Status.COMPLETED
+    assert retried.task.result == result
+    assert q.events(t.id)[-1]["note"] == "complete retry: result recorded"
+    repeated = q.complete_with_outcome(t.id, "w1", result=result)
+    assert repeated.task.result == result
+    assert repeated.event_type is None
+
+
+def test_completion_retry_never_overwrites_result_or_crosses_owner(q):
+    t = q.create("work")
+    q.claim_one("w1", task_id=t.id)
+    q.start(t.id, "w1")
+    q.complete(t.id, "w1", result={"outcome": "first"})
+
+    with pytest.raises(TaskError, match="different result"):
+        q.complete(t.id, "w1", result={"outcome": "second"})
+    with pytest.raises(TaskError, match="completed by"):
+        q.complete(t.id, "w2", result={"outcome": "first"})
+
+    assert q.get(t.id).result == {"outcome": "first"}
 
 
 def test_resume_atomically_persists_wake_outbox(q):
@@ -719,6 +843,66 @@ def test_reopen_existing_db_is_idempotent(tmp_path):
     t = q1.create("persist")
     q2 = TaskQueue(db)  # re-run migrations on an existing DB
     assert q2.get(t.id).title == "persist"
+
+
+def test_migration_adds_nullable_result_column_to_existing_db(tmp_path):
+    db = tmp_path / "legacy.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute("CREATE TABLE tasks (id TEXT PRIMARY KEY)")
+
+    RealTaskQueue(db)
+
+    with sqlite3.connect(db) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(tasks)")}
+    assert {"result", "completed_by"} <= columns
+
+
+def test_migration_backfills_stable_completing_owner(tmp_path):
+    db = tmp_path / "legacy-completed.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE tasks ("
+            "id TEXT PRIMARY KEY, status TEXT, result TEXT, result_ref TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO tasks VALUES ('t1', 'completed', NULL, 'artifact/1')"
+        )
+        conn.execute(
+            "CREATE TABLE task_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,"
+            "ts REAL NOT NULL, from_status TEXT, to_status TEXT,"
+            "worker TEXT, note TEXT)"
+        )
+        conn.execute(
+            "INSERT INTO task_events "
+            "(task_id, ts, from_status, to_status, worker, note)"
+            " VALUES ('t1', 1, 'started', 'completed', 'worker-1', 'complete')"
+        )
+
+    q = RealTaskQueue(db)
+
+    assert q.get("t1").completed_by == "worker-1"
+    assert q.complete("t1", "worker-1", result={"ok": True}).result == {
+        "ok": True
+    }
+
+
+def test_legacy_completion_without_owner_fails_retry_fill_closed(tmp_path):
+    db = tmp_path / "legacy-unowned.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, result TEXT)"
+        )
+        conn.execute("INSERT INTO tasks VALUES ('t1', 'completed', NULL)")
+
+    q = RealTaskQueue(db)
+
+    with pytest.raises(TaskError, match="no recorded completing owner"):
+        q.complete("t1", "worker-1", result={"ok": True})
+
+
+def test_default_result_limit_is_conservative():
+    assert DEFAULT_RESULT_MAX_BYTES == 64 * 1024
 
 
 # -- audit trail -------------------------------------------------------------

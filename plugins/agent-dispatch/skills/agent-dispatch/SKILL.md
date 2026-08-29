@@ -550,8 +550,33 @@ README (**Hibernate the wait**) and `visions/plugins/agent-dispatch`
 # note the returned task id + owner, then:
 <agent-dispatch catalog argv[0]> start    <id> <owner>
 <agent-dispatch catalog argv[0]> heartbeat <id> <owner>        # optional: refresh the last-seen beat
-<agent-dispatch catalog argv[0]> complete <id> <owner> --result-ref pr/123
+<agent-dispatch catalog argv[0]> complete <id> <owner> --result-ref artifact/123
+<agent-dispatch catalog argv[0]> complete <id> <owner> --result-file result.json
+<agent-dispatch catalog argv[0]> result <id> [--raw]
 ```
+
+Completion may record an optional JSON object/array result with
+`--result-json` or the cross-platform-friendly `--result-file` (`-` reads
+stdin; one leading UTF-8 BOM is accepted on every input path). The canonical
+UTF-8 encoding is capped at 64 KiB and is committed atomically with
+`status=completed`, `result_ref`, and the stable completing identity; invalid
+input is HTTP 400, oversized input is HTTP 413, and both leave the task
+non-terminal. JSON null, scalars, and double-encoded JSON strings are rejected.
+`show` retains the full decoded value; bulk `list`/`find`/`sweep`/`inbox` rows
+expose only `has_result`. Retrieve the value with `result <id>`,
+`GET /tasks/<id>/result`, or `dispatch_result`. SSE events likewise carry only
+`has_result`: initial completion emits `task.completed`, retry-fill emits
+`task.result_recorded`, and an identical retry emits no duplicate event.
+
+A client sending a structured result verifies that the coordinator returned the
+recorded value and raises an upgrade-required error if an older coordinator
+silently ignored it. After upgrading, the same completing owner may retry to
+fill a missing result or repeat the identical value; conflicting values and
+different owners cannot overwrite it. Omitting it preserves the existing
+lifecycle and `result_ref` behavior.
+
+For MCP `dispatch_complete`, omit the `result` argument to complete without a
+structured result; explicit JSON null is invalid.
 
 > **Owner is optional on `claim`/`start`/`complete`/`yield`/`progress`.** Omit it
 > and the coordinator resolves your **worktree identity** (`<machine>/<worktree>`)
@@ -808,6 +833,7 @@ queued for any worker to claim. agent-dispatch stays fully usable standalone.
 `<agent-dispatch catalog argv[0]> mcp` runs a local **stdio MCP server** exposing the same
 operations as tools (`dispatch_create`, `dispatch_find`, `dispatch_sweep`,
 `dispatch_claim`, `dispatch_start`, `dispatch_complete`, `dispatch_payload`,
+`dispatch_result`,
 `dispatch_worktree_status`, ...). It resolves your `machine`/`worktree` identity
 from the working directory just like the CLI, so `dispatch_claim` /
 `dispatch_worktree_status` are auto-scoped with no arguments. Point a sub-agent's
@@ -816,6 +842,8 @@ from the working directory just like the CLI, so `dispatch_claim` /
 (needs the `mcp` extra). The coordinator also hosts the **same tools over HTTP at `/mcp`** for
 remote clients that supply identity via `X-Agent-Machine`/`X-Agent-Worktree`
 headers. The CLI and MCP tools are interchangeable — use whichever fits.
+`dispatch_complete` accepts an optional JSON object/array `result` argument and
+returns it in the completed task record; `dispatch_result` retrieves it later.
 
 ## Config quick reference
 
