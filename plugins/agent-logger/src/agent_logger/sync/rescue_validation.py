@@ -14,6 +14,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agent_logger.sync.provenance import (
+    is_link_or_reparse,
+    open_regular_no_follow,
+)
+
 SUPPORTED_PROVIDER = "agent-containers"
 ALLOWED_MEMBERS = (
     "events.jsonl",
@@ -101,65 +106,57 @@ def lstat_kind(path: Path) -> int:
 def require_directory(path: Path, label: str) -> None:
     """Require a real directory rather than a symlink or special file."""
     mode = lstat_kind(path)
-    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+    if is_link_or_reparse(path, mode) or not stat.S_ISDIR(mode):
         raise RescueSourceError(f"{label} is not a regular directory: {path}")
 
 
 def read_regular(path: Path, *, max_bytes: int | None = None) -> bytes:
     """Read one bounded regular file without following a final symlink."""
     mode = lstat_kind(path)
-    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+    if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
         raise RescueSourceError(f"not a regular file: {path}")
     size = path.lstat().st_size
     if max_bytes is not None and size > max_bytes:
         raise RescueSourceError(f"file exceeds {max_bytes} bytes: {path}")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(path, flags)
+        stream = open_regular_no_follow(path)
     except OSError as exc:
         raise RescueSourceError(f"cannot open {path}: {exc}") from exc
-    try:
-        opened = os.fstat(fd)
+    with stream:
+        opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode):
             raise RescueSourceError(f"not a regular file: {path}")
         if max_bytes is not None and opened.st_size > max_bytes:
             raise RescueSourceError(f"file exceeds {max_bytes} bytes: {path}")
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            data = stream.read() if max_bytes is None else stream.read(max_bytes + 1)
+        data = stream.read() if max_bytes is None else stream.read(max_bytes + 1)
         if max_bytes is not None and len(data) > max_bytes:
             raise RescueSourceError(f"file exceeds {max_bytes} bytes: {path}")
         return data
-    finally:
-        os.close(fd)
 
 
 def _hash_regular(path: Path, expected_size: int) -> str:
     mode = lstat_kind(path)
-    if stat.S_ISLNK(mode) or not stat.S_ISREG(mode):
+    if is_link_or_reparse(path, mode) or not stat.S_ISREG(mode):
         raise RescueSourceError(f"not a regular file: {path}")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(path, flags)
+        stream = open_regular_no_follow(path)
     except OSError as exc:
         raise RescueSourceError(f"cannot open {path}: {exc}") from exc
     digest = hashlib.sha256()
     read_size = 0
-    try:
-        opened = os.fstat(fd)
+    with stream:
+        opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode):
             raise RescueSourceError(f"not a regular file: {path}")
         if opened.st_size != expected_size:
             raise RescueSourceError(
                 f"size mismatch for {path}: expected {expected_size}, got {opened.st_size}"
             )
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            while chunk := stream.read(min(1024 * 1024, expected_size - read_size + 1)):
-                digest.update(chunk)
-                read_size += len(chunk)
-                if read_size > expected_size:
-                    break
-    finally:
-        os.close(fd)
+        while chunk := stream.read(min(1024 * 1024, expected_size - read_size + 1)):
+            digest.update(chunk)
+            read_size += len(chunk)
+            if read_size > expected_size:
+                break
     if read_size != expected_size:
         raise RescueSourceError(
             f"size changed while reading {path}: expected {expected_size}, got {read_size}"
@@ -169,16 +166,15 @@ def _hash_regular(path: Path, expected_size: int) -> str:
 
 def _validate_events_jsonl(path: Path) -> None:
     """Stream-validate that each nonblank UTF-8 JSONL record is an object."""
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(path, flags)
+        raw = open_regular_no_follow(path)
     except OSError as exc:
         raise RescueSourceError(f"cannot open events stream {path}: {exc}") from exc
     try:
-        opened = os.fstat(fd)
+        opened = os.fstat(raw.fileno())
         if not stat.S_ISREG(opened.st_mode):
             raise RescueSourceError(f"events stream is not regular: {path}")
-        with os.fdopen(fd, "rb", closefd=False) as raw:
+        with raw:
             with io.TextIOWrapper(raw, encoding="utf-8", errors="strict") as text:
                 for line_number, line in enumerate(text, start=1):
                     if not line.strip():
@@ -195,8 +191,6 @@ def _validate_events_jsonl(path: Path) -> None:
                         )
     except UnicodeDecodeError as exc:
         raise RescueSourceError("events.jsonl is not valid UTF-8") from exc
-    finally:
-        os.close(fd)
 
 
 def safe_component(value: str) -> str:

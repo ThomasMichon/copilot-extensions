@@ -1051,7 +1051,7 @@ def _replace_selected_sessions(
                     if candidate_order < destination_order:
                         raise OSError(
                             f"refusing rescue rewind for {sid}: "
-                            f"{candidate_order[1]} < {destination_order[1]}"
+                            f"{candidate_order} < {destination_order}"
                         )
                 staged_receipt = (
                     staged_root
