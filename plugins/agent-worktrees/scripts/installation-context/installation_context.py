@@ -39,6 +39,7 @@ SNAPSHOT_PROVENANCE_SCHEMA = "copilot-extensions.snapshot-provenance"
 SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
 RUNTIME_SLOT_OWNERSHIP_SCHEMA = "copilot-extensions.runtime-slot-ownership"
 RUNTIME_SLOT_OWNERSHIP_FILE = ".runtime-slot-ownership.json"
+WINDOWS_ERROR_ACCESS_DENIED = 5
 RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 
 
@@ -273,9 +274,48 @@ def _atomic_write_json(
             temporary.unlink()
 
 
+def _openprocess_denied_means_live(last_error: int) -> bool:
+    return last_error == WINDOWS_ERROR_ACCESS_DENIED
+
+
 def _pid_is_live(pid: int) -> bool:
     if pid < 1:
         return False
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        synchronize = 0x00100000
+        process_query_limited_information = 0x1000
+        wait_object_0 = 0
+        wait_timeout = 258
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = (
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        )
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.WaitForSingleObject.argtypes = (wintypes.HANDLE, wintypes.DWORD)
+        kernel32.WaitForSingleObject.restype = wintypes.DWORD
+        kernel32.CloseHandle.argtypes = (wintypes.HANDLE,)
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(
+            synchronize | process_query_limited_information,
+            False,
+            pid,
+        )
+        if not handle:
+            return _openprocess_denied_means_live(ctypes.get_last_error())
+        try:
+            wait_result = kernel32.WaitForSingleObject(handle, 0)
+            if wait_result == wait_object_0:
+                return False
+            if wait_result == wait_timeout:
+                return True
+            return True
+        finally:
+            kernel32.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
