@@ -152,7 +152,8 @@ def test_guards_remain_available_without_heavy_admission(monkeypatch) -> None:
     assert runner.main(["alpha", "--guards"]) == 0
 
 
-def test_host_state_requires_explicit_tier_opt_in() -> None:
+def test_host_state_requires_explicit_tier_opt_in(capsys) -> None:
     with pytest.raises(SystemExit) as exc:
         runner.main(["--allow-host-state"])
     assert exc.value.code == 2
+    assert "--allow-host-state requires --allow-explicit-tiers" in capsys.readouterr().err

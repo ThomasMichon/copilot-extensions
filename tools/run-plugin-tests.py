@@ -435,7 +435,7 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("admission_wait must be non-negative")
         if args.allow_host_state and not args.allow_explicit_tiers:
             raise ValueError(
-                "allow_host_state requires --allow-explicit-tiers"
+                "--allow-host-state requires --allow-explicit-tiers"
             )
     except ValueError as exc:
         ap.error(str(exc))
