@@ -437,6 +437,46 @@ else:
 PYEOF
 }
 
+_active_host() {
+    # The daemon's LIVE bind address from the routing table, mirroring
+    # install.ps1's endpoint resolution: default loopback, and treat a wildcard
+    # bind as loopback (you cannot connect TO 0.0.0.0). A daemon bound to a
+    # specific non-loopback address is otherwise unreachable on 127.0.0.1, so a
+    # loopback-only probe would miss a healthy daemon and start a duplicate.
+    local aj="$INSTALL_DIR/active.json"
+    local host="" py=""
+    if [[ -f "$aj" ]]; then
+        py="$VENV_DIR/bin/python"
+        [[ -x "$py" ]] || py="$(command -v python3 || command -v python || true)"
+        if [[ -n "$py" ]]; then
+            host="$(
+                "$py" - "$aj" 2>/dev/null <<'PYEOF'
+import json, re, sys
+try:
+    active = json.load(open(sys.argv[1])).get("active") or {}
+    bind = str(active.get("bind") or "").strip()
+except Exception:
+    bind = ""
+if bind.startswith("[") and bind.endswith("]"):
+    bind = bind[1:-1]
+# A wildcard is not connectable; fall back to loopback.
+if bind in ("", "0.0.0.0", "::", "*"):
+    bind = "127.0.0.1"
+# Emit only a plain host literal. Anything else is not a usable endpoint,
+# and a corrupt active.json must not reach the URL verbatim.
+if not re.fullmatch(r"[A-Za-z0-9._:-]+", bind):
+    bind = "127.0.0.1"
+# An IPv6 literal needs brackets to be a valid URL authority.
+if ":" in bind:
+    bind = "[" + bind + "]"
+print(bind)
+PYEOF
+            )"
+        fi
+    fi
+    [[ -n "$host" ]] || host="127.0.0.1"
+    printf '%s' "$host"
+}
 _health_check() {
     local retries=5 port
     for i in $(seq 1 $retries); do
@@ -1154,6 +1194,36 @@ do_start() {
     if pid=$(_get_pid); then
         _warn "agent-bridge is already running (pid=$pid)"
         return 0
+    fi
+
+    # The PID file only exists when THIS script started the daemon. The binstub,
+    # the sessionStart hook and the launcher all start it too, so a healthy
+    # daemon routinely leaves no PID file. Ask the daemon itself before
+    # spawning: `active.json` is the authoritative liveness signal (same one
+    # `agent-bridge status` uses).
+    #
+    # Without this the installer starts a duplicate, the singleton guard
+    # correctly refuses it ("Another daemon is already running ... not starting
+    # a duplicate"), the child exits, `kill -0` fails, and a routine update
+    # reports failure over a perfectly healthy bridge (exit 1).
+    # Keyed on active.json, NOT on $PORT: a live daemon always publishes its
+    # bound port there (post-#694), while a bare probe of the configured port
+    # would also match an unrelated listener -- or, with a dynamic port, the
+    # meaningless port 0.
+    # The response must identify itself as ours: `active.json` can be stale and
+    # its port reused by an unrelated service that also serves /health, and
+    # silently skipping the start would leave no daemon running at all. Bounded
+    # by explicit timeouts so a half-open listener cannot hang the installer
+    # before it ever reaches the normal start path.
+    local live_port live_host
+    if live_port="$(_active_port)" && [[ -n "$live_port" ]]; then
+        live_host="$(_active_host)"
+        if curl -sf --connect-timeout 2 --max-time 5 \
+                "http://${live_host}:${live_port}/health" 2>/dev/null |
+                grep -q '"service"[[:space:]]*:[[:space:]]*"agent-bridge"'; then
+            _ok "agent-bridge is already running and healthy (${live_host}:${live_port})"
+            return 0
+        fi
     fi
 
     local rt_py
