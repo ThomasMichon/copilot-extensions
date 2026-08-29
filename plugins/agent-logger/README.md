@@ -21,8 +21,12 @@ session-to-log pipeline out of any single bespoke service:
   `local` dotfolder, `onedrive`, `ssh`/`ssh-tunnel`, or a generic `ingest`
   endpoint. It archives only Copilot session state, can scope by repo
   allow/deny lists, and can fire a target-independent best-effort HTTP notify
-  after a successful push. Configure with the `session-sync-setup` skill; deploy
-  as a 4-hourly Scheduled Task (Windows) or systemd user timer (Linux).
+  after a successful push. Its `rescue-push` source adapter validates
+  provider-owned rescue captures, accepts only independently complete sessions,
+  and projects them into the same target layout under stable venue keys, with
+  host-authoritative generic per-session provenance. Configure with
+  the `session-sync-setup` skill; deploy as a 4-hourly Scheduled Task (Windows)
+  or systemd user timer (Linux).
 - **Background chronicling core** (`agent_logger.chronicle`) — an optional
   `agent-logger chronicle status | scan | tick` pass over a *synced* corpus. It
   discovers settled sessions, routes them by recorded origin, groups them into
@@ -68,6 +72,22 @@ optional background-chronicling core with its session-source + log-sink seams.
    target in `~/.agent-logger/config.yaml`, verify with `session-sync doctor`,
    then install the 4-hourly timer (`scripts\install.ps1 install` on Windows or
    `scripts/install.sh install` on Linux/WSL).
+   To publish host-side provider rescues through a single-writer,
+   compare-and-set `local` filesystem target, run
+   `session-sync rescue-push --rescue-root <provider-state>/rescues`.
+   Use `--verbose` to see exact older/revalidation/rejected reasons. The
+   checkpoint is `$AGENT_LOGGER_HOME/rescue-sync/checkpoint.json`; removing it
+   resets ingest ordering without deleting destination evidence. Provider container renames
+   intentionally create a new venue identity because the current key includes
+   the provider-visible container name. Host-recorded capture provenance owns
+   routing; rescued `origin.json` is retained only as `rescued-origin.json`
+   evidence. Independently complete sessions may be accepted from a partial
+   capture, while missing/invalid event streams are rejected visibly. Rescue
+   capture-ID fingerprints remain as compact durable tombstones after provider
+   retention, and checkpoint rewrites are size/record bounded before atomic
+   replacement. Venue pushes remain isolated, but any target failure makes the
+   final command nonzero. Rescue destination pruning is not yet wired to
+   `sync.retention_days`.
 4. For takeover, use `ramp-up-session`; it delegates the transcript-heavy read
    to the neutral `session-rampup` agent by default.
 

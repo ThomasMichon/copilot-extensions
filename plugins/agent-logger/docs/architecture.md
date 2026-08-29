@@ -57,11 +57,12 @@ deployment-specific hostname, shared-folder path, or persona baked in.
 
 A transport-blind engine that pushes raw Copilot session data to a configurable
 **target**, under a `{machine}/` subpath. It archives only `session-state/` and,
-when unfiltered, the session-store index files; it never copies installed
-plugins, credentials, settings, or other `~/.copilot` state. Sync scoping can
-use a repo allowlist, denylist, fail-closed behavior for unclassified sessions,
-and harness-repo origin sidecars for downstream routing. Targets implement a
-small `Target` interface
+when present, sibling `provenance/` sidecars and, when unfiltered, the
+session-store index files; it never copies installed plugins, credentials,
+settings, or other `~/.copilot` state. Sync scoping can use a repo allowlist,
+denylist, fail-closed behavior for unclassified sessions, and harness-repo
+origin sidecars for downstream routing. Targets implement a small `Target`
+interface
 (`push` / `prune` / `doctor` / `describe`):
 
 | Target | Destination |
@@ -85,6 +86,100 @@ Deployed as a 4-hourly **Scheduled Task** (Windows) or **systemd user timer**
 `session-sync run --prune`; failed pushes return non-zero and `doctor` prints
 per-check `[ok]` / `[FAIL]` readiness lines. Configure and troubleshoot with
 the `session-sync-setup` skill.
+
+#### Provider rescue source
+
+`session-sync rescue-push --rescue-root <root>` validates host-owned provider
+rescues and publishes them through a single-writer, compare-and-set `local`
+filesystem target. OneDrive replicas and remote push-only targets remain
+unavailable until they can enforce the same destination high-water contract
+across writers. The adapter never exposes the provider tree to a target.
+Schema-v1 captures must be `verified`; a partial capture contributes only
+sessions whose event stream and declared allowlisted members are independently
+complete. Missing/invalid event streams are rejected with explicit per-session
+reasons; accepted `events.jsonl` must be valid UTF-8 JSONL with one JSON object
+per nonblank line. Every copied member is checked against its byte count and
+SHA-256 before the newest valid capture per venue/session is projected as:
+
+```
+session-state/<session-uuid>/...
+provenance/<session-uuid>.json
+```
+
+The short-lived projection is created under the agent-logger home and removed
+after `Target.push`. The target namespace is a flat, filesystem-safe venue key
+such as `container-worker-1`, independent of the replaceable container
+instance. Generic additive provenance records provider, venue/target identity,
+container lineage, fleet, capture, repository/source repository, optional
+recorded model/interface/origin/source, member hashes, and
+`billing_scope: unknown`; it does not infer usage, cost, or account identity.
+The host-recorded capture `source_repo` is the routing authority. Rescued
+`origin.json` is retained only as `rescued-origin.json` evidence and can never
+replace canonical origin or override routing.
+
+An atomic host-local checkpoint under `$AGENT_LOGGER_HOME/rescue-sync/` makes
+the adapter incremental. It fingerprints the full capture metadata/session/
+member manifest by provider + venue + capture ID, so any reuse of an accepted
+capture ID with changed declarations rejects that whole capture. The same
+fingerprint is persisted in every per-session high-water record and as a compact
+provider+venue+capture-ID tombstone, so source retention cannot erase the
+identity proof even when a replacement declares entirely different sessions.
+The checkpoint is compacted to fixed-field records, bounded by record count and
+encoded bytes, and refuses an oversized rewrite before replacing the last
+readable checkpoint. A newer capture replaces the selected destination session tree (dropping stale
+optional members), while the same retained capture performs an idempotent
+target revalidation so destination loss can be repaired. An older, unverified,
+malformed, symlinked, or hash-mismatched capture cannot rewind accepted
+evidence, and a session's provider-recorded repository assignment cannot change
+between accepted captures without an explicit checkpoint reset. Repo policy
+reuses the normal session-sync exact classification and `fail_closed`
+semantics; rescued workspace/origin claims cannot opt themselves into the
+corpus. Rescue bytes are copied as data only and are never restored or executed.
+
+Verbose output reports ordering and rejection reasons. Removing
+`$AGENT_LOGGER_HOME/rescue-sync/checkpoint.json` resets ingest ordering without
+deleting already-published evidence. Container renames currently create a new
+venue identity because the stable key includes the provider-visible name.
+Configured `sync.retention_days` pruning is not yet applied per rescue venue;
+that effort item remains open.
+
+Filesystem replacement stages all changed selected sessions and provenance
+before publication, then rolls the whole venue batch back on failure. Its
+machine-level `.session-sync-replacement/` area is never beneath discoverable
+`session-state/`; the chronicler skips a venue while an `.active` transaction
+exists. Incomplete rollback state is retained there for recovery, while residue
+from a completed publish or rollback is marked for bounded cleanup on the next
+pass. A retained `.active` recovery blocks later pushes until it is resolved,
+and destination directory chains reject symlink leaves before publication.
+An atomic machine-generation sidecar lets a scanner discard any read that
+crossed a completed replacement. Symlinks and lock files are never projected.
+Generated provenance is bounded to the same maximum size accepted by its
+reader, so an oversized sidecar fails the venue rather than silently disabling
+trusted routing.
+
+On Windows, path validation distinguishes redirecting name-surrogate reparse
+tags (symlinks and mount points, rejected) from non-redirecting cloud
+placeholders (allowed to hydrate), so OneDrive Files On-Demand remains usable
+without weakening the escape boundary.
+
+A hidden per-session destination high-water receipt participates in the same
+rollback-capable filesystem transaction. It compares capture timestamp/ID and a
+canonical provenance fingerprint before replacement, so a stale or independent
+source checkpoint cannot rewind newer evidence already present at the target.
+A destination-scoped advisory lock serializes receipt validation through
+transaction completion across writers sharing that filesystem; a target whose
+filesystem does not honor cross-writer locks is not suitable for rescue
+publication.
+
+Rescued sessions keep their canonical session UUID for display and corpus
+layout, but chronicler reservation identity additionally includes venue and
+capture ID. Revalidating one capture remains idempotent; a newer accepted
+capture becomes a distinct analysis unit instead of being hidden by the first
+capture's journaled marker. The same transaction also publishes a hidden,
+immutable per-capture session snapshot, and chronicler manifests reference that
+snapshot rather than the mutable canonical-latest path.
+Venue pushes continue independently, but any target failure makes the final CLI
+exit nonzero even when another venue succeeds.
 
 ### Log writer (`agents/` + `skills/`)
 

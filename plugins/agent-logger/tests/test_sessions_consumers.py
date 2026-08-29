@@ -85,6 +85,18 @@ def test_collate_resolve_session_dir_finds_archive(tmp_path: Path, monkeypatch) 
     assert collate.read_workspace(resolved)["id"] == "arch-1"
 
 
+def test_collate_resolve_session_dir_accepts_absolute_archive(tmp_path: Path) -> None:
+    from agent_logger.segmenter import collate
+
+    src = _make_session(tmp_path / "session-state", "arch-absolute")
+    ref = archive_session(src, tmp_path / "archived")
+
+    resolved = collate.resolve_session_dir(str(ref.path))
+
+    assert (resolved / "events.jsonl").is_file()
+    assert collate.read_workspace(resolved)["id"] == "arch-absolute"
+
+
 def test_collate_resolve_missing_still_raises(tmp_path: Path, monkeypatch) -> None:
     from agent_logger.segmenter import collate
 

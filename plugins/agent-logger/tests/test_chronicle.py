@@ -8,6 +8,8 @@ landing policy) plus the objective narration-style resolution.
 
 from __future__ import annotations
 
+import json
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -42,6 +44,10 @@ from agent_logger.chronicle.source import (
 from agent_logger.config import (
     OBJECTIVE_NARRATION_INSTRUCTION,
     resolve_narration_style,
+)
+from agent_logger.sync.provenance import (
+    RESCUE_SNAPSHOT_PROVENANCE,
+    rescue_snapshot_path,
 )
 
 # --------------------------------------------------------------------------
@@ -169,6 +175,112 @@ def test_scan_applies_settle_gate(tmp_path: Path) -> None:
     assert found == {"settled"}
 
 
+def test_scan_skips_machine_with_active_replacement(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    _write_session(corpus, "book2", "one")
+    replacement = (
+        corpus
+        / "book2"
+        / ".session-sync-replacement"
+        / "transaction.active"
+    )
+    replacement.mkdir(parents=True)
+    source = SyncedSessionSource(
+        corpus,
+        ReservationStore(tmp_path / "c.db"),
+        settle_seconds=0,
+    )
+
+    assert source.scan() == []
+
+    replacement.rename(replacement.with_name("transaction.cleanup"))
+    assert {session.session_id for session in source.scan()} == {"one"}
+
+
+def test_scan_rejects_symlinked_corpus_root_ancestor(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    corpus = outside / "sessions"
+    _write_session(corpus, "book2", "one")
+    alias = tmp_path / "alias"
+    try:
+        alias.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    source = SyncedSessionSource(
+        alias / "sessions",
+        ReservationStore(tmp_path / "c.db"),
+        settle_seconds=0,
+    )
+
+    assert source.scan() == []
+
+
+def test_scan_rejects_linked_session_directory(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    state = corpus / "book2" / "session-state"
+    state.mkdir(parents=True)
+    _write_session(tmp_path / "outside-corpus", "book2", "one")
+    external_session = (
+        tmp_path / "outside-corpus" / "book2" / "session-state" / "one"
+    )
+    try:
+        (state / "one").symlink_to(external_session, target_is_directory=True)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    source = SyncedSessionSource(
+        corpus,
+        ReservationStore(tmp_path / "c.db"),
+        settle_seconds=0,
+    )
+
+    assert source.scan() == []
+
+
+def test_scan_rejects_linked_session_member(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    session = _write_session(corpus, "book2", "one")
+    outside = tmp_path / "outside-workspace.yaml"
+    outside.write_text("repository: attacker/repo\n", encoding="utf-8")
+    workspace = session / "workspace.yaml"
+    workspace.unlink()
+    try:
+        workspace.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink creation is unavailable")
+    source = SyncedSessionSource(
+        corpus,
+        ReservationStore(tmp_path / "c.db"),
+        settle_seconds=0,
+    )
+
+    assert source.scan() == []
+
+
+def test_scan_discards_machine_when_generation_changes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    corpus = tmp_path / "sessions"
+    _write_session(corpus, "book2", "one")
+    generation = corpus / "book2" / ".session-sync-generation"
+    generation.write_text("first.active", encoding="ascii")
+    source = SyncedSessionSource(
+        corpus,
+        ReservationStore(tmp_path / "c.db"),
+        settle_seconds=0,
+    )
+    original_discover = source._discover
+
+    def mutate_generation(*args, **kwargs):
+        discovered = original_discover(*args, **kwargs)
+        generation.write_text("second.active", encoding="ascii")
+        return discovered
+
+    monkeypatch.setattr(source, "_discover", mutate_generation)
+
+    assert source.scan() == []
+
+
 def test_scan_skips_journaled(tmp_path: Path) -> None:
     corpus = tmp_path / "sessions"
     _write_session(corpus, "book2", "one")
@@ -212,6 +324,172 @@ def test_scan_reads_recorded_origin_sidecar(tmp_path: Path) -> None:
     # A recorded machine-only origin: sidecar present, source_repo null.
     assert by_id["machine-only"].origin_recorded is True
     assert by_id["machine-only"].source_repo is None
+
+
+def test_scan_uses_generic_provenance_when_origin_sidecar_is_absent(
+    tmp_path: Path,
+) -> None:
+    corpus = tmp_path / "sessions"
+    session = _write_session(
+        corpus,
+        "container-sandbox-1",
+        "rescued",
+        repository="owner/fork",
+    )
+    provenance = corpus / "container-sandbox-1" / "provenance"
+    provenance.mkdir()
+    payload = {
+        "schema_version": 1,
+        "session_id": "rescued",
+        "provider": "agent-containers",
+        "venue_kind": "container",
+        "venue_id": "container-sandbox-1",
+        "target_id": "container:sandbox-1",
+        "capture_id": "100-a",
+        "captured_at": "2026-08-28T00:00:00+00:00",
+        "billing_scope": "unknown",
+        "source_repo": "example/repo",
+        "future_field": {"ignored": True},
+    }
+    provenance_path = provenance / "rescued.json"
+    provenance_path.write_text(json.dumps(payload), encoding="utf-8")
+    snapshot = rescue_snapshot_path(
+        corpus / "container-sandbox-1",
+        "rescued",
+        "100-a",
+    )
+    shutil.copytree(
+        session,
+        snapshot,
+    )
+    shutil.copy2(provenance_path, snapshot / RESCUE_SNAPSHOT_PROVENANCE)
+    source = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+
+    discovered = source.scan()[0]
+
+    assert discovered.machine == "container-sandbox-1"
+    assert discovered.source_repo == "example/repo"
+    assert discovered.origin_recorded is True
+    assert discovered.ref == SegmentRef(
+        "container-sandbox-1/rescued@100-a",
+        0,
+    )
+
+
+def test_newer_rescue_capture_is_a_distinct_chronicle_unit(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    session = _write_session(corpus, "container-worker", "rescued")
+    provenance = corpus / "container-worker" / "provenance"
+    provenance.mkdir()
+    payload = {
+        "schema_version": 1,
+        "session_id": "rescued",
+        "provider": "agent-containers",
+        "venue_kind": "container",
+        "venue_id": "container-worker",
+        "target_id": "container:worker",
+        "capture_id": "100-a",
+        "captured_at": "2026-08-28T00:00:00+00:00",
+        "billing_scope": "unknown",
+        "source_repo": "example/repo",
+    }
+    path = provenance / "rescued.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    first_snapshot = rescue_snapshot_path(
+        corpus / "container-worker",
+        "rescued",
+        "100-a",
+    )
+    shutil.copytree(
+        session,
+        first_snapshot,
+    )
+    shutil.copy2(path, first_snapshot / RESCUE_SNAPSHOT_PROVENANCE)
+    reservations = ReservationStore(tmp_path / "c.db")
+    source = SyncedSessionSource(corpus, reservations)
+    first = source.scan()[0]
+    reservations.mark_journaled(first.ref)
+
+    payload["capture_id"] = "200-b"
+    payload["captured_at"] = "2026-08-28T01:00:00+00:00"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    second_snapshot = rescue_snapshot_path(
+        corpus / "container-worker",
+        "rescued",
+        "200-b",
+    )
+    shutil.copytree(
+        session,
+        second_snapshot,
+    )
+    shutil.copy2(path, second_snapshot / RESCUE_SNAPSHOT_PROVENANCE)
+    second = source.scan()[0]
+
+    assert first.ref != second.ref
+    assert second.ref == SegmentRef("container-worker/rescued@200-b", 0)
+
+
+def test_scan_invalid_utf8_provenance_is_unknown_not_fatal(tmp_path: Path) -> None:
+    corpus = tmp_path / "sessions"
+    session = _write_session(corpus, "container-worker", "bad-provenance")
+    provenance = corpus / "container-worker" / "provenance"
+    provenance.mkdir()
+    (provenance / "bad-provenance.json").write_bytes(b"\xff\xfe")
+    source = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+
+    discovered = source.scan()[0]
+
+    assert discovered.session_path == session
+    assert discovered.source_repo is None
+    assert discovered.origin_recorded is False
+
+
+def test_scan_validated_provenance_overrides_conflicting_origin(
+    tmp_path: Path,
+) -> None:
+    corpus = tmp_path / "sessions"
+    session = _write_session(
+        corpus,
+        "container-worker",
+        "conflict",
+        source_repo="attacker/claim",
+    )
+    provenance_dir = corpus / "container-worker" / "provenance"
+    provenance_dir.mkdir()
+    payload = {
+        "schema_version": 1,
+        "session_id": "conflict",
+        "provider": "agent-containers",
+        "venue_kind": "container",
+        "venue_id": "container-worker",
+        "target_id": "container:worker",
+        "capture_id": "100-a",
+        "captured_at": "2026-08-28T00:00:00+00:00",
+        "billing_scope": "unknown",
+        "source_repo": "trusted/assignment",
+    }
+    provenance_path = provenance_dir / "conflict.json"
+    provenance_path.write_text(json.dumps(payload), encoding="utf-8")
+    snapshot = rescue_snapshot_path(
+        corpus / "container-worker",
+        "conflict",
+        "100-a",
+    )
+    shutil.copytree(
+        session,
+        snapshot,
+    )
+    shutil.copy2(provenance_path, snapshot / RESCUE_SNAPSHOT_PROVENANCE)
+    source = SyncedSessionSource(corpus, ReservationStore(tmp_path / "c.db"))
+
+    discovered = source.scan()[0]
+
+    assert discovered.session_path == rescue_snapshot_path(
+        corpus / "container-worker",
+        "conflict",
+        "100-a",
+    )
+    assert discovered.source_repo == "trusted/assignment"
 
 
 # --------------------------------------------------------------------------

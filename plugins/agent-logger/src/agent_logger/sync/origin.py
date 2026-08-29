@@ -123,25 +123,44 @@ def classify_for_sync(session_dir: Path, machine: str, allowlist: list[str],
        "everything else" sink.
     """
     origin = derive_origin(session_dir, machine, effective)
+    src = origin["source_repo"]
+    return classify_source_repo(
+        src,
+        has_recorded_paths=bool(_read_workspace_paths(session_dir)),
+        allowlist=allowlist,
+        denylist=denylist,
+        fail_closed=fail_closed,
+    ), origin
+
+
+def classify_source_repo(
+    source_repo: str | None,
+    *,
+    has_recorded_paths: bool,
+    allowlist: list[str],
+    denylist: list[str] | None = None,
+    fail_closed: bool = False,
+) -> bool:
+    """Apply the canonical exact repo policy to a pre-classified source."""
     allow = {a.lower() for a in allowlist if a}
     deny = {d.lower() for d in (denylist or []) if d}
-    src = origin["source_repo"]
+    src = source_repo
     if src is not None:
         low = src.lower()
         if low in deny:
-            return False, origin
+            return False
         if allow:
-            return (low in allow), origin
-        return True, origin
+            return low in allow
+        return True
     # No derived source_repo (machine-only).
-    if _read_workspace_paths(session_dir):
+    if has_recorded_paths:
         # A path that resolved to no recognized repo. With an allowlist this is a
         # strict exclude; in catch-all (no allowlist) mode it is not denied, so
         # it is kept unless fail_closed.
         if allow:
-            return False, origin
-        return (not fail_closed), origin
-    return (not fail_closed), origin
+            return False
+        return not fail_closed
+    return not fail_closed
 
 
 def read_origin_sidecar(session_dir: Path) -> dict | None:

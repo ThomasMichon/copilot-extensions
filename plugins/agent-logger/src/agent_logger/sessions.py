@@ -41,7 +41,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 #: Subdirectory of ``~/.copilot`` holding live session directories.
 SESSION_STATE_SUBDIR = "session-state"
@@ -100,10 +100,30 @@ def _validate_member_name(name: str) -> str:
     without relying on ``tarfile.extractall`` (which linters flag): callers
     read members explicitly and write them under a validated relative path.
     """
-    norm = name.replace("\\", "/").lstrip("/")
-    parts = [p for p in norm.split("/") if p not in ("", ".")]
-    if any(p == ".." for p in parts):
+    windows = PureWindowsPath(name)
+    norm = name.replace("\\", "/")
+    posix = PurePosixPath(norm)
+    if (
+        windows.anchor
+        or windows.drive
+        or windows.root
+        or posix.is_absolute()
+        or norm.startswith("/")
+    ):
         raise ValueError(f"unsafe archive member path: {name!r}")
+    parts = []
+    for part in norm.split("/"):
+        if part in ("", "."):
+            continue
+        windows_normalized = part.rstrip(" .")
+        if (
+            part == ".."
+            or windows_normalized != part
+            or windows_normalized in ("", ".", "..")
+            or ":" in part
+        ):
+            raise ValueError(f"unsafe archive member path: {name!r}")
+        parts.append(part)
     return "/".join(parts)
 
 
@@ -147,6 +167,12 @@ class TarGzCodec(Codec):
                     continue
                 rel = _validate_member_name(info.name)
                 out = dest_dir / rel
+                try:
+                    out.absolute().relative_to(dest_dir.absolute())
+                except ValueError as exc:
+                    raise ValueError(
+                        f"unsafe archive member path: {info.name!r}"
+                    ) from exc
                 out.parent.mkdir(parents=True, exist_ok=True)
                 fh = tar.extractfile(info)
                 if fh is None:
@@ -495,7 +521,11 @@ def verify_archive(ref: SessionRef) -> bool:
     if ref.kind != "archive":
         return False
     try:
-        members = set(_codec_for_archive(ref.path).list_members(ref.path))
+        raw_members = _codec_for_archive(ref.path).list_members(ref.path)
+        normalized = [_validate_member_name(member) for member in raw_members]
+        if len(normalized) != len(set(normalized)):
+            return False
+        members = set(normalized)
     except (tarfile.TarError, OSError, ValueError):
         return False
     return EVENTS_MEMBER in members

@@ -226,15 +226,17 @@ mount, credential relay, merge authority, or deployment authority.
       tests; bump agent-worktrees.
 
 ### Phase 6 — Session corpus ingestion
-- [ ] Teach agent-logger/session-sync to ingest the provider's rescued
+- [x] Teach agent-logger/session-sync to ingest the provider's rescued
       session-state under a stable venue/source identity without requiring the
       container to reach shared storage.
-- [ ] Preserve repo, provider target/instance, model, interface, origin, and
+- [x] Preserve repo, provider target/instance, model, interface, origin, and
       assignment provenance for asynchronous analysis.
-- [ ] Keep repo scope fail-closed and treat incomplete/unverified rescues as
+- [x] Keep repo scope fail-closed and treat incomplete/unverified rescues as
       unavailable rather than valid sessions.
 - [ ] Add incremental ingest, dedup, partial-rescue, and retention tests; bump
-      agent-logger plus the provider consumer contract as needed.
+      agent-logger plus the provider consumer contract as needed. Incremental,
+      dedup, and independently complete partial-session ingestion are covered;
+      configured destination pruning per rescue venue remains open.
 
 ### Phase 7 — Atomic dispatch ownership and recovery
 - [ ] Add a venue selector/binding to tasks without changing repository-lane
@@ -477,3 +479,44 @@ key and relay projection; restricted venues never enter that path.
   Docker timeout diagnostics now report only a parsed verb plus safe
   container/target identity (for example `docker exec <member>`), never option,
   environment, or command payload prefixes.
+
+### 2026-08-28 - Session corpus ingestion
+- Added an agent-logger rescue source adapter that accepts only verified,
+  complete schema-v1 provider captures, revalidates every selected member by
+  byte count and SHA-256, and ignores provider staging/status/pin artifacts.
+- Projects accepted evidence into a short-lived canonical session source and
+  publishes through the existing target interface under a stable flat venue
+  identity. Filesystem and rsync-backed targets now carry generic
+  `provenance/<session-id>.json` sidecars with provider target/instance,
+  generation, fleet, capture, repository, and recorded session-origin fields.
+- Added a host-local capture/member checkpoint so repeated scans are
+  idempotent, newer complete captures update the same venue/session, and late
+  older or incomplete captures cannot rewind accepted evidence. Configured repo
+  allowlists require the provider-recorded assignment and fail closed.
+- Added coverage for invalid metadata/status/completeness, missing events,
+  size/hash mismatch, capture ordering, no-rewind/idempotence, traversal,
+  symlink/special files, provenance transport, staging cleanup, and the
+  no-restore boundary.
+- Agent-logger review hardening made capture metadata the sole routing
+  authority: rescued origin is retained only as `rescued-origin.json`, while
+  chronicle discovery prefers validated provider provenance. Full capture
+  manifests are fingerprinted by provider/venue/capture ID, selected filesystem
+  sessions are replaced with delete semantics, invalid UTF-8 degrades to
+  unknown, and partial captures contribute only independently complete
+  sessions. Unknown future members remain deny-by-default and are reported.
+- Checkpoint records are pruned to retained captures (including corpora above
+  8,000 sessions), all-rejected runs fail visibly, venue target failures remain
+  isolated, and repo filtering now reuses exact normal sync classification plus
+  configured fail-closed behavior. Rescue-venue destination pruning and
+  name-based venue rename continuity remain explicit open limitations.
+- Final adapter review stream-validates accepted event evidence as strict UTF-8
+  JSON-object JSONL, persists the full capture fingerprint in per-session
+  high-water records so retention cannot erase capture-ID immutability, and
+  validates excluded-member metadata shapes before iteration. Invalid sessions
+  or captures remain isolated while other venues continue and report counts.
+- Ship hardening preserves compact capture-identity tombstones independently of
+  session IDs, compacts/bounds checkpoint records before atomic replacement,
+  and keeps no-rewind proof after provider retention. Mixed target success and
+  failure now completes sibling venues but exits nonzero. Filesystem selected-
+  session staging/backups live outside discoverable `session-state`; read-only-
+  aware cleanup failure is surfaced instead of silently leaving ghost sessions.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import tarfile
 from pathlib import Path
@@ -201,10 +202,8 @@ def test_extract_rejects_path_traversal(tmp_path: Path) -> None:
     with tarfile.open(evil, "w:gz") as tar:
         info = tarfile.TarInfo(name="../escape.txt")
         payload = b"pwned"
-        import io as _io
-
         info.size = len(payload)
-        tar.addfile(info, _io.BytesIO(payload))
+        tar.addfile(info, io.BytesIO(payload))
     ref = SessionRef(id="evil", kind="archive", path=evil, store=tmp_path)
     with pytest.raises(ValueError, match="unsafe archive member path"):
         with materialize(ref):
@@ -221,6 +220,47 @@ def test_no_such_codec_for_archive(tmp_path: Path) -> None:
 
 
 # --- force_rmtree ---------------------------------------------------------
+
+def test_archive_rejects_windows_absolute_member(tmp_path: Path) -> None:
+    evil = tmp_path / "evil-windows.tar.gz"
+    with tarfile.open(evil, "w:gz") as tar:
+        for name, payload in (
+            ("events.jsonl", b"{}\n"),
+            (r"C:\escape\owned.txt", b"owned"),
+        ):
+            info = tarfile.TarInfo(name=name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    ref = SessionRef(id="evil-windows", kind="archive", path=evil, store=tmp_path)
+
+    assert not verify_archive(ref)
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        with materialize(ref):
+            pass
+
+
+def test_archive_rejects_windows_normalized_traversal(tmp_path: Path) -> None:
+    evil = tmp_path / "evil-windows-normalized.tar.gz"
+    with tarfile.open(evil, "w:gz") as tar:
+        for name, payload in (
+            ("events.jsonl", b"{}\n"),
+            (".. /escaped.txt", b"escaped"),
+        ):
+            info = tarfile.TarInfo(name=name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    ref = SessionRef(
+        id="evil-windows-normalized",
+        kind="archive",
+        path=evil,
+        store=tmp_path,
+    )
+
+    assert not verify_archive(ref)
+    with pytest.raises(ValueError, match="unsafe archive member path"):
+        with materialize(ref):
+            pass
+
 
 def test_force_rmtree_removes_readonly_tree(tmp_path: Path) -> None:
     import os

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-logger"
-version = "0.1.1-dev75"
-description = "Reusable Copilot CLI session logging -- segmenter, log writer, session-sync, and orchestrator"
+version = "0.1.1-dev76"
+description = "Reusable Copilot CLI session logging -- segmenter, log writer, local/rescue session-sync, and orchestrator"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
