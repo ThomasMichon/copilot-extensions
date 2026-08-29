@@ -80,7 +80,7 @@ jobs:
           libs/payload-invocation/tests
           plugins/agent-index/tests/test_command_catalog.py
       - name: Installation context foundation tests
-        run: python -m pytest -q libs/installation-context/tests
+        run: python -m pytest -q --durations=50 libs/installation-context/tests
       - name: Installation context vendoring
         run: python tools/sync-installation-context.py --check
       - name: Installer readiness contract tests
