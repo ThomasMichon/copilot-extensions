@@ -24,6 +24,13 @@ remote marketplaces, the repository may provide one thin tail adapter named
 `COPILOT_CONTEXT_INJECTION_AUTHORITY` to its own source-qualified identity, and
 passes its own plugin root as `COPILOT_PLUGIN_ROOT`. The adapter contains no
 composition logic; this payload remains the single engine and schema owner.
+The upstream plugin may remain enabled so clean installations receive the
+engine payload. Its earlier hook stands down; the tail invocation accepts only
+the exact pair consisting of the official engine source and its configured
+adapter source.
+
+Adapters verify the adjacent `engine.json` contract before invoking the engine.
+Version 1 uses schema `copilot-extensions.context-injection-engine`.
 An explicitly configured malformed authority identity fails closed with `{}`;
 it never falls back to a different source.
 

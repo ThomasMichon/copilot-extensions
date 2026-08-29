@@ -675,8 +675,17 @@ def main() -> int:
     max_name = max(plugin.name for plugin in active)
     if own[0].name != max_name:
         return _emit_empty("aggregator is not the final active plugin")
-    if sum(plugin.name == max_name for plugin in active) != 1:
-        return _emit_empty("final plugin ordering is ambiguous")
+    final_sources = {
+        plugin.source for plugin in active if plugin.name == max_name
+    }
+    if len(final_sources) != 1:
+        paired_tail = (
+            authority_source != DEFAULT_AUTHORITY_SOURCE
+            and final_sources
+            == {DEFAULT_AUTHORITY_SOURCE, authority_source}
+        )
+        if not paired_tail:
+            return _emit_empty("final plugin ordering is ambiguous")
     contributors = _contributors(active)
     if contributors is None:
         return _emit_empty()
