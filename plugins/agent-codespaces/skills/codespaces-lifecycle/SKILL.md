@@ -29,7 +29,8 @@ Use the exact `argv` from the agent-codespaces session command catalog for
 CodeSpace operations and the exact `argv` from the agent-worktrees catalog for
 worktree claims. For bridge dispatch, use the exact `argv` prefix from the
 session command catalog for agent-bridge and replace
-`<agent-bridge catalog argv prefix>` below with its shell-ready rendering. Never substitute a
+`<agent-bridge catalog argv prefix>` below with its shell-ready rendering:
+quote each prefix element separately and prepend `&` in PowerShell. Never substitute a
 same-named plugin command through ambient PATH. The payload-local commands
 self-provision on first use. Full detail:
 `codespaces-setup` § *Readiness*.
@@ -73,7 +74,7 @@ The payload-local `send` operation blocks until the turn completes.
 Use when you need the result before continuing.
 
 ```
-powershell(command: '<agent-bridge catalog argv prefix> send "codespace:<name>" "<prompt>"', initial_wait: 120)
+powershell(command: '& <agent-bridge catalog argv prefix> send "codespace:<name>" "<prompt>"', initial_wait: 120)
 ```
 
 ### Long-running interactive work
@@ -84,7 +85,7 @@ thoughts and tools into a low-noise live feed and emits liveness markers during
 quiet tool calls.
 
 ```
-powershell(command: '<agent-bridge catalog argv prefix> send "codespace:<name>" "<prompt>"', initial_wait: 300)
+powershell(command: '& <agent-bridge catalog argv prefix> send "codespace:<name>" "<prompt>"', initial_wait: 300)
 ```
 
 If the outer tool runner backgrounds the still-running command after its
@@ -99,9 +100,9 @@ completion notification, and the remote feed accumulates unread until a caller
 attaches to it.
 
 ```
-powershell(command: '<agent-bridge catalog argv prefix> send --no-wait "codespace:<name>" "<prompt>"')
+powershell(command: '& <agent-bridge catalog argv prefix> send --no-wait "codespace:<name>" "<prompt>"')
 # Capture the returned session ID.
-powershell(command: '<agent-bridge catalog argv prefix> read <session-id>', initial_wait: 300)
+powershell(command: '& <agent-bridge catalog argv prefix> read <session-id>', initial_wait: 300)
 # `<agent-bridge catalog argv prefix> wait <session-id>` is also valid when only the current turn matters.
 ```
 

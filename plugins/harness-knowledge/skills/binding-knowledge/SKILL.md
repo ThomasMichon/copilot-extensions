@@ -26,9 +26,9 @@ description: >
 
 Use the exact `argv` prefix from the agent-worktrees session command catalog for
 state and repository operations below. Replace
-`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at each
-shell call site on POSIX; in PowerShell invoke it as
-`<agent-worktrees catalog argv prefix> <args>`.
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering: quote
+each prefix element separately and prepend `&` in PowerShell. In PowerShell invoke it as
+`& <agent-worktrees catalog argv prefix> <args>`.
 
 A **stateless harness** is a shareable/forkable control plane that holds the
 *intelligence* (instructions, config, skills, sub-agents) but **no personal

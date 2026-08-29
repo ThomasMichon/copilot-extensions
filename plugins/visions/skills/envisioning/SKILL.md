@@ -26,9 +26,9 @@ description: >
 
 Use the exact `argv` prefix from the agent-worktrees session command catalog for
 the state-root operation below. Replace
-`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at the shell
-call site on POSIX; in PowerShell invoke it as
-`<agent-worktrees catalog argv prefix> <args>`.
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering: quote
+each prefix element separately and prepend `&` in PowerShell. In PowerShell invoke it as
+`& <agent-worktrees catalog argv prefix> <args>`.
 
 A **vision** is a persistent, self-consistent statement of what a system,
 service, tool, or product is *ultimately meant to be*: its purpose, its

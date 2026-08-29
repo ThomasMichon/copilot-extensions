@@ -14,8 +14,10 @@ surrounding agent, its domain-service ownership, bounded execution contract,
 **`customizing-copilot:defining-subagents`**.
 
 Use the exact `argv` prefix from the agent-mcp session command catalog for every
-shell operation below. Replace `<agent-mcp catalog argv prefix>` with its shell-ready rendering;
-in PowerShell invoke it as `<agent-mcp catalog argv prefix> <args>`. Never
+shell operation below. Replace `<agent-mcp catalog argv prefix>` with its
+shell-ready rendering: quote each prefix element separately and prepend `&` in
+PowerShell;
+in PowerShell invoke it as `& <agent-mcp catalog argv prefix> <args>`. Never
 search `PATH` for a same-named command. If session-start hooks did not publish
 the catalog, use the compatibility readiness path from the **`agent-mcp`**
 skill before continuing.
@@ -107,7 +109,7 @@ PowerShell:
 
 ```powershell
 $root = git rev-parse --show-toplevel
-<agent-mcp catalog argv prefix> materialize `
+& <agent-mcp catalog argv prefix> materialize `
   "$root\.github\agents\service.mcp.yaml" `
   --server-name service `
   --windows

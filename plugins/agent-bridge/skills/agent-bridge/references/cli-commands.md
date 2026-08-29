@@ -2,7 +2,8 @@
 
 Use the exact `argv` prefix from the agent-bridge session command catalog for
 interactive bridge operations in this reference. Replace
-`<agent-bridge catalog argv prefix>` with its shell-ready rendering and never search `PATH`.
+`<agent-bridge catalog argv prefix>` with its shell-ready rendering: quote each
+prefix element separately and prepend `&` in PowerShell. Never search `PATH`.
 Commands labeled as service, deployment, provider, or elevated management
 boundaries remain literal global-wrapper invocations.
 
@@ -78,7 +79,7 @@ details.
 # never transits the shell's argv (avoids PowerShell mangling a prompt at the
 # first embedded double-quote). Mutually exclusive with the positional prompt.
 <agent-bridge catalog argv prefix> send <agent-name> --prompt-file ./dispatch.md
-Get-Content ./dispatch.md | <agent-bridge catalog argv prefix> send <agent-name> --prompt-file -
+Get-Content ./dispatch.md | & <agent-bridge catalog argv prefix> send <agent-name> --prompt-file -
 
 # Deliver INTO a live interactive session (human-attached), attributed and
 # answerable -- routes to the message queue, not an ACP turn. The receiver

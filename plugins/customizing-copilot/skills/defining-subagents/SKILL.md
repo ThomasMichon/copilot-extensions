@@ -25,9 +25,10 @@ description: >
 # Defining Sub-Agents
 
 Use the exact `argv` prefix from the agent-mcp session command catalog for MCP
-fallback operations below. Replace `<agent-mcp catalog argv prefix>` with the raw
-prefix, quote each element at the shell call site, and invoke the rendered prefix as
-`<agent-mcp catalog argv prefix> <args>`.
+fallback operations below. Replace `<agent-mcp catalog argv prefix>` with its
+shell-ready rendering: quote each prefix element separately and prepend `&` in
+PowerShell. Invoke the rendered prefix as
+`& <agent-mcp catalog argv prefix> <args>`.
 
 Custom agents are specialized profiles Copilot can delegate to. Each runs in its
 own subagent process with a separate context window. They are for **delegation**

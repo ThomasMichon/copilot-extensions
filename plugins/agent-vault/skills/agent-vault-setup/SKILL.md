@@ -26,8 +26,9 @@ Use installer paths below for install, update, supervision, status, and
 uninstall: those are explicit management boundaries that run outside session
 command context. For runtime CLI checks, use the exact `argv` prefix from the
 plugin's session command catalog. Replace
-`<agent-vault catalog argv prefix>` with its shell-ready rendering; in PowerShell invoke it as
-`<agent-vault catalog argv prefix> <args>`.
+`<agent-vault catalog argv prefix>` with its shell-ready rendering: quote each
+prefix element separately and prepend `&` in PowerShell. In PowerShell invoke it as
+`& <agent-vault catalog argv prefix> <args>`.
 
 `agent-vault` is a runtime plugin: a Python package/venv, binstub(s), and an
 optional always-on local daemon. It is also **standalone**: setup does not depend
@@ -172,8 +173,8 @@ After install/stamp, configure the database before reading entries:
 
 ```powershell
 $env:KPDB = "C:\Users\you\Secrets\vault.kdbx"
-<agent-vault catalog argv prefix> which
-<agent-vault catalog argv prefix> unlock
+& <agent-vault catalog argv prefix> which
+& <agent-vault catalog argv prefix> unlock
 ```
 
 ```bash

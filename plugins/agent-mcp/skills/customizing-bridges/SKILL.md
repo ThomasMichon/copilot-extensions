@@ -17,8 +17,10 @@ description: >-
 # customizing-bridges
 
 Use the exact `argv` prefix from the agent-mcp session command catalog for every
-shell operation in this skill. Replace `<agent-mcp catalog argv prefix>` with that
-path; in PowerShell invoke it as `<agent-mcp catalog argv prefix> <args>`.
+shell operation in this skill. Replace `<agent-mcp catalog argv prefix>` with
+its shell-ready rendering: quote each prefix element separately and prepend `&`
+in PowerShell. In
+PowerShell invoke it as `& <agent-mcp catalog argv prefix> <args>`.
 Never search `PATH` for a same-named command. If session-start hooks did not
 publish the catalog, use the compatibility readiness path from the
 **`agent-mcp`** skill before continuing.

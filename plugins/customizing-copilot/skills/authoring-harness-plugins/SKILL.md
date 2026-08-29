@@ -20,9 +20,9 @@ description: >
 
 Use the exact `argv` prefix from the agent-worktrees session command catalog for
 the related-repository operation below. Replace
-`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at the shell
-call site on POSIX; in PowerShell invoke it as
-`<agent-worktrees catalog argv prefix> <args>`.
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering: quote
+each prefix element separately and prepend `&` in PowerShell. In PowerShell invoke it as
+`& <agent-worktrees catalog argv prefix> <args>`.
 
 The **`<repo>-harness`** standard: a repo ships its own *operator harness* — a
 payload-only Copilot CLI plugin that teaches an agent how to work **on** that

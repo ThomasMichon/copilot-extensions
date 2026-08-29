@@ -23,8 +23,9 @@ description: >
 
 Use the exact `argv` prefix from the agent-dispatch session command catalog for
 every dispatch operation below. Replace `<agent-dispatch catalog argv prefix>`
-with its shell-ready rendering; never search `PATH` for a same-named command. In PowerShell,
-invoke it as `<agent-dispatch catalog argv prefix> <args>`. If the catalog is
+with its shell-ready rendering: quote each prefix element separately and prepend
+`&` in PowerShell. Never search `PATH` for a same-named command. In PowerShell,
+invoke it as `& <agent-dispatch catalog argv prefix> <args>`. If the catalog is
 missing, follow the single-installed-payload fallback in the `agent-dispatch`
 skill and fail on ambiguity.
 

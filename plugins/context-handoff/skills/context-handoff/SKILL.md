@@ -31,9 +31,9 @@ description: >
 
 Use the exact `argv` prefix from the agent-worktrees session command catalog for
 worktree-state and cutover operations executed in the current session. Replace
-`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at the shell
-call site on POSIX; in PowerShell use
-`<agent-worktrees catalog argv prefix> <args>`. Generated successor
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering: quote
+each prefix element separately and prepend `&` in PowerShell. In PowerShell use
+`& <agent-worktrees catalog argv prefix> <args>`. Generated successor
 first-action commands remain literal global
 wrappers because they run before the successor receives session catalog
 context.

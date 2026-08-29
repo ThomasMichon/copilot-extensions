@@ -17,9 +17,10 @@ description: >
 
 Use the exact `argv` prefix from the agent-bridge session command catalog for every
 interactive bridge operation below. Replace
-`<agent-bridge catalog argv prefix>` with its shell-ready rendering; never search `PATH` for a
+`<agent-bridge catalog argv prefix>` with its shell-ready rendering: quote each
+prefix element separately and prepend `&` in PowerShell. Never search `PATH` for a
 same-named command. In PowerShell, invoke it as
-`<agent-bridge catalog argv prefix> <args>`. Commands explicitly labeled as
+`& <agent-bridge catalog argv prefix> <args>`. Commands explicitly labeled as
 service or provider management boundaries remain literal global-wrapper
 invocations. If the catalog is missing, follow the single-installed-payload
 fallback in the `agent-bridge` skill and fail on ambiguity.

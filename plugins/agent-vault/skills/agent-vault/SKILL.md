@@ -35,9 +35,11 @@ registration, a broker, a tunnel, a container, or a remote core.
 ## Readiness
 
 Use the exact `argv` prefix from the agent-vault session command catalog for every
-shell operation in this skill. Replace `<agent-vault catalog argv prefix>` with that
-path; in PowerShell invoke it as
-`<agent-vault catalog argv prefix> <args>`. Never search `PATH` for a
+shell operation in this skill. Replace `<agent-vault catalog argv prefix>` with
+its shell-ready rendering: quote each prefix element separately and prepend `&`
+in PowerShell. In
+PowerShell invoke it as
+`& <agent-vault catalog argv prefix> <args>`. Never search `PATH` for a
 same-named command. The payload shim may self-provision on first use and print
 `::agent-provisioning::` (~30-120s); let that finish.
 

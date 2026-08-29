@@ -29,11 +29,12 @@ description: >
 > **Before you start — use the payload-local session command.**
 > The agent-bridge session command catalog supplies an exact `argv` prefix owned by
 > this plugin payload. Replace `<agent-bridge catalog argv prefix>` in interactive
-> bridge operations below with its shell-ready rendering; never search `PATH` or substitute a
+> bridge operations below with its shell-ready rendering: quote each prefix
+> element separately and prepend `&` in PowerShell. Never search `PATH` or substitute a
 > same-named command from another payload. Commands explicitly labeled as
 > management boundaries remain literal global-wrapper invocations. In
 > PowerShell, invoke the catalog prefix as
-> `<agent-bridge catalog argv prefix> <args>`.
+> `& <agent-bridge catalog argv prefix> <args>`.
 >
 > The payload shim provisions its own runtime on first use and works without
 > agent-worktrees. The first call may take ~30–120s (watch for
@@ -403,10 +404,10 @@ Write the prompt to a file (or pipe it on stdin) and hand `send`/`create` a path
 ```powershell
 # From a file:
 Set-Content -Path .\dispatch.md -Value $prompt -Encoding UTF8
-<agent-bridge catalog argv prefix> create --no-wait <agent> --prompt-file .\dispatch.md
+& <agent-bridge catalog argv prefix> create --no-wait <agent> --prompt-file .\dispatch.md
 
 # ...or straight from stdin:
-$prompt | <agent-bridge catalog argv prefix> create --no-wait <agent> --prompt-file -
+$prompt | & <agent-bridge catalog argv prefix> create --no-wait <agent> --prompt-file -
 ```
 
 Do not bypass the payload command with a legacy venv path for inline prompts.

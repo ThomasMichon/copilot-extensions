@@ -147,6 +147,10 @@ def _powershell_version(pwsh: str) -> tuple[int, int]:
     return major, minor
 
 
+def _powershell_literal(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
 def test_generates_three_payload_local_shims(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path)
     assert generator.process_manifest(manifest, check=False) == []
@@ -543,6 +547,7 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
     edge_args = [
         "two words",
         'embedded"quote',
+        "embedded'quote",
         "unicode-\u96ea",
         "",
         "$&|;<>*?(){}[]!^%",
@@ -576,6 +581,21 @@ def test_every_advertised_entrypoint_round_trips_exact_arguments(
         captured = json.loads(result.stdout)
         assert captured["args"] == edge_args
         assert captured["stdin"] == stdin
+        if os.name == "nt":
+            rendered = "& " + " ".join(
+                _powershell_literal(value) for value in [*prefix, *edge_args]
+            )
+            shell_result = subprocess.run(
+                [pwsh, "-NoProfile", "-Command", rendered],
+                input=stdin,
+                env=env,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            shell_captured = json.loads(shell_result.stdout)
+            assert shell_captured["args"] == edge_args
+            assert shell_captured["stdin"] == stdin
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell compatibility test")
@@ -831,10 +851,50 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
         *(REPO / "plugins").glob("*/scripts/*.ps1"),
     })
     stale_references = []
+    invalid_powershell_renderings = []
+    incomplete_powershell_contracts = []
+    invalid_powershell_sites = []
     for skill in capability_paths:
         text = skill.read_text(encoding="utf-8")
+        preamble = text[:3000]
+        normalized_preamble = " ".join(preamble.replace(">", " ").split())
         if re.search(r"catalog[^\n`]*argv\[0\]|<[^>]*argv\[0\]>", text):
             stale_references.append(skill.relative_to(REPO))
+        if re.search(
+            r"`<agent-[^`]+ catalog(?: \"[^\"]+\")? argv prefix> <args>`",
+            text,
+        ):
+            invalid_powershell_renderings.append(skill.relative_to(REPO))
+        if (
+            "catalog argv prefix" in preamble
+            and "PowerShell" in preamble
+            and (
+                "quote each prefix element separately and prepend `&` in PowerShell"
+                not in normalized_preamble
+            )
+        ):
+            incomplete_powershell_contracts.append(skill.relative_to(REPO))
+        in_powershell_fence = False
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if re.match(r"^\s*```powershell(?:\s|$)", line, re.IGNORECASE):
+                in_powershell_fence = True
+                continue
+            if in_powershell_fence and re.match(r"^\s*```", line):
+                in_powershell_fence = False
+                continue
+            has_prefix = bool(reference.search(line))
+            missing_call_operator = not re.search(r"&\s*<agent-", line)
+            if (
+                has_prefix
+                and missing_call_operator
+                and (
+                    in_powershell_fence
+                    or re.search(r"powershell\(command:\s*['\"]", line)
+                )
+            ):
+                invalid_powershell_sites.append(
+                    (skill.relative_to(REPO), line_number)
+                )
         for plugin, command in reference.findall(text):
             command_id = command or plugin
             references.setdefault(plugin, {}).setdefault(command_id, []).append(
@@ -842,6 +902,9 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
             )
 
     assert stale_references == []
+    assert invalid_powershell_renderings == []
+    assert incomplete_powershell_contracts == []
+    assert invalid_powershell_sites == []
     missing = {
         plugin: paths
         for plugin, paths in references.items()

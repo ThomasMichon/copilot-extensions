@@ -16,10 +16,11 @@ description: >-
 > **Before you start — use the payload-local session command.**
 > The agent-mcp session command catalog supplies an exact `argv` prefix owned by
 > this plugin payload. For every shell invocation below, replace
-> `<agent-mcp catalog argv prefix>` with that exact path; do not search `PATH` or
+> `<agent-mcp catalog argv prefix>` with its shell-ready rendering: quote each
+> prefix element separately and prepend `&` in PowerShell. Do not search `PATH` or
 > substitute a same-named command from another payload. In PowerShell, invoke
-> it as `<agent-mcp catalog argv prefix> <args>` so paths containing spaces stay
-> one argument. The shim provisions its own runtime on first use and works
+> it as `& <agent-mcp catalog argv prefix> <args>`. The shim provisions its own
+> runtime on first use and works
 > without agent-worktrees. If the catalog is unavailable because the host did
 > not run session-start hooks, use the
 > compatibility readiness path only after resolving exactly one installed

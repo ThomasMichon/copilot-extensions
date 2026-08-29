@@ -197,7 +197,7 @@ auth:
 ```
 
 Invoke the sibling through an interpreter (`${python}`/`node`/`pwsh`) rather than
-as `argv prefix` directly (a bare `.ps1`/`.py` is not itself executable). `${python}`
+invoking the script directly (a bare `.ps1`/`.py` is not itself executable). `${python}`
 resolves to a full interpreter path (an absolute `sys.executable` when neither
 `python`/`python3` is on `PATH`); `node`/`pwsh` are looked up on `PATH`. The
 `${config_dir}` token is only expanded when the config is loaded from a file (its
@@ -1001,7 +1001,7 @@ command fleet under `~/.agent-mcp/materialized/<server>/`:
 
 ```
 bin/    one short-named stub per tool
-        POSIX:   symlinks to a single `_amcp-dispatch` (argv prefix dispatch)
+        POSIX:   symlinks to a single `_amcp-dispatch` (argv[0] dispatch)
         Windows: a `.ps1` + `.cmd` shim per tool (`--windows` to force)
 doc/    a plated sidecar per tool: upstream description + raw inputSchema + TS sig
 index.md      the server's tool table

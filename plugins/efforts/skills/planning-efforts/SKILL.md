@@ -23,9 +23,9 @@ description: >
 
 Use the exact `argv` prefix from the agent-worktrees session command catalog for
 state-root and worktree operations below. Replace
-`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting each prefix element at each
-shell call site on POSIX; in PowerShell invoke it as
-`<agent-worktrees catalog argv prefix> <args>`.
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering: quote
+each prefix element separately and prepend `&` in PowerShell. In PowerShell invoke it as
+`& <agent-worktrees catalog argv prefix> <args>`.
 
 An **effort** is a planning folder under `efforts/` representing a stretch of
 work. It is the workspace *around* tracked work — deliberately not named
@@ -84,9 +84,9 @@ The efforts plugin remains standalone, but an agent-worktrees-managed worktree
 can durably bind its current objective to one canonical effort. Use the exact
 `argv prefix` from the agent-worktrees session command catalog for every
 `effort-focus` operation below. Replace
-`<agent-worktrees catalog argv prefix>` with its shell-ready rendering, quoting
-each element separately. In PowerShell invoke it as
-`<agent-worktrees catalog argv prefix> <args>`.
+`<agent-worktrees catalog argv prefix>` with its shell-ready rendering: quote
+each prefix element separately and prepend `&` in PowerShell. In PowerShell invoke it as
+`& <agent-worktrees catalog argv prefix> <args>`.
 
 After the effort's Participants/Coordination and Plan/Validation Plan are filled
 in, use the participant exactly as its table label and the slice exactly as its

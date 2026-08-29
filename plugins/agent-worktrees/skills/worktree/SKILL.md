@@ -54,7 +54,7 @@ description: >
 > Project binstubs and commands explicitly labeled as
 > management boundaries remain distinct attributable entry points. In
 > PowerShell, invoke the catalog prefix as
-> `<agent-worktrees catalog argv prefix> <args>`.
+> `& <agent-worktrees catalog argv prefix> <args>`.
 > Cross-plugin `<agent-codespaces catalog argv prefix>` examples use that plugin's
 > exact catalog prefix under the same rendering rule.
 >
@@ -573,10 +573,10 @@ Titles appear in the picker for easier identification. Resolution order:
 
 ```powershell
 # Set title without pushing (worktree stays active)
-<agent-worktrees catalog argv prefix> push-changes --title "Fix auth regression" --title-only
+& <agent-worktrees catalog argv prefix> push-changes --title "Fix auth regression" --title-only
 
 # Push changes and set title
-<agent-worktrees catalog argv prefix> push-changes --title "Fix auth regression"
+& <agent-worktrees catalog argv prefix> push-changes --title "Fix auth regression"
 ```
 
 ## Cross-Worktree Safety
