@@ -90,7 +90,6 @@ Create it once so the preview runs your worktree code:
     return $scripts
 }
 $managerScripts = Resolve-VenvScripts $manager
-$managerScripts = Resolve-VenvScripts $manager
 $previewPath = @($managerScripts)
 
 # --- Build the isolated sandbox ------------------------------------------------
