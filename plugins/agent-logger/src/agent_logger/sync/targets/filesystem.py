@@ -566,6 +566,23 @@ def _session_files(root: Path, *, source: bool) -> dict[Path, Path]:
     return files
 
 
+def _iter_regular_source_files(root: Path):
+    """Yield regular source files without descending through links/reparse points."""
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                path = Path(entry.path)
+                mode = path.lstat().st_mode
+                if is_link_or_reparse(path, mode):
+                    continue
+                if stat.S_ISDIR(mode):
+                    pending.append(path)
+                elif stat.S_ISREG(mode):
+                    yield path
+
+
 def _session_needs_replace(source: Path, destination: Path) -> bool:
     """Return whether the selected destination differs from the safe source tree."""
     if (
@@ -1284,8 +1301,13 @@ class FilesystemTarget(Target):
     def push(
         self, source: Path, machine: str, include_sessions: set[str] | None = None
     ) -> PushResult:
-        if not source.is_dir():
+        try:
+            safe_source = _existing_real_directory(source)
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"unsafe source: {exc}")
+        if safe_source is None:
             return PushResult(ok=False, detail=f"source not found: {source}")
+        source = safe_source
         try:
             root = self._root()
             dest = _ensure_relative_directory(root, Path(machine))
@@ -1324,41 +1346,37 @@ class FilesystemTarget(Target):
                 file_count=copied,
                 byte_count=nbytes,
             )
-        for src_file in source.rglob("*"):
-            try:
-                mode = src_file.lstat().st_mode
-            except OSError as exc:
-                return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
-            if (
-                not stat.S_ISREG(mode)
-                or stat.S_ISLNK(mode)
-                or src_file.name in _EXCLUDE_NAMES
-            ):
-                continue
-            rel = src_file.relative_to(source)
-            if not _included(rel, include_sessions):
-                continue
-            dst_file = dest / rel
-            try:
-                _ensure_relative_directory(dest, rel.parent)
-            except OSError as exc:
-                return PushResult(ok=False, detail=f"unsafe destination: {exc}")
-            if _needs_copy(src_file, dst_file):
+        try:
+            source_files = _iter_regular_source_files(source)
+            for src_file in source_files:
+                if src_file.name in _EXCLUDE_NAMES:
+                    continue
+                rel = src_file.relative_to(source)
+                if not _included(rel, include_sessions):
+                    continue
+                dst_file = dest / rel
                 try:
-                    # Replace by unlink-then-copy, never truncate-in-place. A
-                    # destination written read-only by another syncer (e.g. the
-                    # legacy session-sync's ``.session-origin.json`` provenance
-                    # markers, chmod'd 0444 and surfaced as the DOS read-only
-                    # attribute over CIFS) cannot be truncate-opened, so a plain
-                    # ``copy2`` would raise EPERM and abort the entire push --
-                    # and with it the post-push notify. Unlinking needs only
-                    # write permission on the parent directory, which we have,
-                    # so it succeeds regardless of the file's own mode.
-                    _copy_replace(src_file, dst_file)
+                    _ensure_relative_directory(dest, rel.parent)
                 except OSError as exc:
-                    return PushResult(ok=False, detail=f"copy failed: {exc}")
-                copied += 1
-                nbytes += src_file.stat().st_size
+                    return PushResult(ok=False, detail=f"unsafe destination: {exc}")
+                if _needs_copy(src_file, dst_file):
+                    try:
+                        # Replace by unlink-then-copy, never truncate-in-place. A
+                        # destination written read-only by another syncer (e.g. the
+                        # legacy session-sync's ``.session-origin.json`` provenance
+                        # markers, chmod'd 0444 and surfaced as the DOS read-only
+                        # attribute over CIFS) cannot be truncate-opened, so a plain
+                        # ``copy2`` would raise EPERM and abort the entire push --
+                        # and with it the post-push notify. Unlinking needs only
+                        # write permission on the parent directory, which we have,
+                        # so it succeeds regardless of the file's own mode.
+                        _copy_replace(src_file, dst_file)
+                    except OSError as exc:
+                        return PushResult(ok=False, detail=f"copy failed: {exc}")
+                    copied += 1
+                    nbytes += src_file.stat().st_size
+        except OSError as exc:
+            return PushResult(ok=False, detail=f"cannot inspect source: {exc}")
 
         session_count = _count_sessions(dest)
         write_sync_meta(dest, machine, self.name, "ok", session_count)

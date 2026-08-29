@@ -741,8 +741,15 @@ def test_unfiltered_push_omits_symlinks_and_special_files(tmp_path: Path) -> Non
     session = src / "session-state" / "abc-123"
     outside = tmp_path / "outside.txt"
     outside.write_text("secret", encoding="utf-8")
+    outside_dir = tmp_path / "outside-dir"
+    outside_dir.mkdir()
+    (outside_dir / "secret.txt").write_text("secret", encoding="utf-8")
     try:
         (session / "linked-file").symlink_to(outside)
+        (session / "linked-dir").symlink_to(
+            outside_dir,
+            target_is_directory=True,
+        )
     except OSError:
         pytest.skip("symlink creation is unavailable")
     fifo = session / "special-fifo"
@@ -756,6 +763,8 @@ def test_unfiltered_push_omits_symlinks_and_special_files(tmp_path: Path) -> Non
     published = dest_root / "m1" / "session-state" / "abc-123"
     assert not (published / "linked-file").exists()
     assert not (published / "linked-file").is_symlink()
+    assert not (published / "linked-dir").exists()
+    assert not (published / "linked-dir").is_symlink()
     assert not (published / "special-fifo").exists()
 
 
