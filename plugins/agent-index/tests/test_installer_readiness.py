@@ -70,6 +70,10 @@ def test_populated_corpus_is_ready(capsys):
 
 def test_payload_command_does_not_create_or_reindex_corpus(monkeypatch, capsys):
     monkeypatch.setattr(
+        "agent_index.transport.plan_route",
+        lambda: ("host", {"machine": "host"}),
+    )
+    monkeypatch.setattr(
         cli,
         "_status_payload",
         lambda: {"running": True, "index": {"chunks": 0}},
@@ -81,6 +85,60 @@ def test_payload_command_does_not_create_or_reindex_corpus(monkeypatch, capsys):
 
     assert cli.main(["installer-readiness"]) == 0
     assert json.loads(capsys.readouterr().out)["state"] == "configuration-empty"
+
+
+def test_unconfigured_payload_does_not_probe_service(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "agent_index.transport.plan_route",
+        lambda: ("unconfigured", None),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_status_payload",
+        lambda: (_ for _ in ()).throw(AssertionError("must not probe service")),
+    )
+
+    assert cli.main(["installer-readiness"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "configuration-empty"
+    assert "not configured for the current repository" in result["detail"]
+
+
+def test_configured_client_does_not_probe_local_service(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "agent_index.transport.plan_route",
+        lambda: ("client", {"machine": "host", "ssh": "host"}),
+    )
+    monkeypatch.setattr(
+        "agent_index.transport.has_usable_client_transport",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        cli,
+        "_status_payload",
+        lambda: (_ for _ in ()).throw(AssertionError("must not probe local service")),
+    )
+
+    assert cli.main(["installer-readiness"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "ready"
+    assert "configured as a client" in result["detail"]
+
+
+def test_incomplete_client_is_configuration_empty(monkeypatch, capsys):
+    monkeypatch.setattr(
+        "agent_index.transport.plan_route",
+        lambda: ("client", {"machine": "host"}),
+    )
+    monkeypatch.setattr(
+        "agent_index.transport.has_usable_client_transport",
+        lambda: False,
+    )
+
+    assert cli.main(["installer-readiness"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "configuration-empty"
+    assert "no SSH alias or endpoint" in result["detail"]
 
 
 def test_strict_inspection_distinguishes_absent_and_valid_empty(tmp_path):

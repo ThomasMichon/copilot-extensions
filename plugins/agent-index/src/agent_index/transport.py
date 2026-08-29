@@ -14,10 +14,10 @@ Routing (per invocation):
    ``indexer:`` block governs (``machine``/``ssh``/``shell``).
 2. Determine this machine's **role** for that project: ``host`` iff
    ``machine_id()`` equals the project's ``indexer.machine`` (canonical hostname).
-   When no project/indexer is resolvable (e.g. the delegated command running in
-   the host's home directory over SSH), fall back to the machine-global
-   ``resolve_role()`` — which makes the host run locally and so **terminates the
-   SSH recursion at the host**.
+   A project without an explicit indexer designation is ``unconfigured``. Only
+   when no project is resolvable at all (e.g. the delegated command running in
+   the host's home directory over SSH) does routing fall back to the explicit
+   machine-global ``resolve_role()``.
 3. **Route:** ``host`` → run locally (return ``None`` so the caller dispatches the
    normal local command). ``client`` → run the *same* ``agent-index <argv>`` on
    the project's indexer over SSH, forwarding stdout. A client with **no**
@@ -76,17 +76,38 @@ def _ssh_connect_timeout() -> int:
 def plan_route() -> tuple[str, dict | None]:
     """Return ``(role, indexer)`` for the current directory.
 
-    ``role`` is ``"host"`` or ``"client"``; ``indexer`` is the resolved project's
-    ``indexer:`` mapping, or ``None`` when no project/designation is resolvable.
+    ``role`` is ``"host"``, ``"client"``, or ``"unconfigured"``; ``indexer`` is
+    the resolved project's ``indexer:`` mapping, or ``None`` when no designation
+    is resolvable.
     """
     root = config.repo_root()
-    indexer = config.read_indexer(root) if root is not None else None
-    if indexer is not None:
-        designated = str(indexer.get("machine", "")).strip().lower()
-        role = "host" if config.machine_id().strip().lower() == designated else "client"
+    indexers = config.read_indexers(root) if root is not None else []
+    indexer = indexers[0] if indexers else None
+    if indexers:
+        me = config.machine_id().strip().lower()
+        role = (
+            "host"
+            if any(str(item.get("machine", "")).strip().lower() == me for item in indexers)
+            else "client"
+        )
+    elif root is not None:
+        role = config.UNCONFIGURED_ROLE
     else:
         role = config.resolve_role()
     return role, indexer
+
+
+def has_usable_client_transport() -> bool:
+    """Whether the current repo explicitly configures SSH or HTTP routing."""
+    if config.configured_endpoints():
+        return True
+    root = config.repo_root()
+    if root is None:
+        return False
+    return any(
+        str(item.get("ssh") or item.get("endpoint") or "").strip()
+        for item in config.read_indexers(root)
+    )
 
 
 def _q_pwsh(arg: str) -> str:
@@ -172,11 +193,10 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
       (exit 255 or an ``OSError`` launching ssh). A genuine remote command exit
       is authoritative and returned as-is -- a bad query must not silently retry
       on another indexer.
-    * No usable indexer for the current directory: **refuse** only when truly
-      bare -- not inside any repo -- on a ``client``-role machine (there is no
-      project to pick a transport target, and a client has no local store).
-      Everywhere else (inside a project without a designation, or a
-      host/standalone box) run locally, preserving direct local dispatch.
+    * A repository without a usable indexer designation is unconfigured and
+      read commands fail without probing or starting a local service.
+    * A truly bare invocation falls back to explicit machine-global role
+      configuration so a delegated command can terminate on its host.
     """
     if sub not in DELEGABLE:
         return None
@@ -187,20 +207,49 @@ def maybe_delegate(sub: str, raw_argv: list[str]) -> int | None:
         me = config.machine_id().strip().lower()
         if any(str(ix.get("machine", "")).strip().lower() == me for ix in indexers):
             return None  # this machine is a designated indexer -> run local
+        if config.configured_endpoints():
+            # A client-local endpoint (commonly an SSH forward on a
+            # machine-specific port) has precedence over shared repo SSH.
+            return None
         candidates = [ix for ix in indexers if str(ix.get("ssh") or "").strip()]
         if candidates:
             return _delegate_over_ssh(sub, raw_argv, candidates)
-        # designation without any ssh alias -> fall through to bare handling
+        if any(str(ix.get("endpoint") or "").strip() for ix in indexers):
+            # Explicit HTTP routing is handled by client_url() in the local
+            # command handler; no SSH hop is required.
+            return None
+        # designation without any usable transport -> report it as incomplete
 
-    if root is None and config.resolve_role() == "client":
+    if root is not None:
         return _emit_error(
             {
                 "error": (
-                    "agent-index: no indexer transport resolvable here. This machine is a "
-                    "client, so read commands run on the designated indexer over SSH — but "
-                    "the current directory is not inside an adopted repo. Run inside a repo "
-                    "with .agent-index/config.yaml indexer.ssh, or set AGENT_INDEX_REPO."
+                    "agent-index has no usable indexer transport for the current "
+                    "repository. Run `agent-index setup` with an SSH alias or "
+                    "endpoint before using the retrieval commands."
                 ),
+                "hits": [],
+            }
+        )
+
+    role = config.resolve_role()
+    if role != "host":
+        if role == config.UNCONFIGURED_ROLE:
+            message = (
+                "agent-index is not configured on this machine. Run inside a "
+                "repository with .agent-index/config.yaml, or run `agent-index "
+                "setup` explicitly."
+            )
+        else:
+            message = (
+                "agent-index: no indexer transport resolvable here. This machine is a "
+                "client, so read commands run on the designated indexer over SSH — but "
+                "the current directory is not inside an adopted repo. Run inside a repo "
+                "with .agent-index/config.yaml indexer.ssh, or set AGENT_INDEX_REPO."
+            )
+        return _emit_error(
+            {
+                "error": message,
                 "hits": [],
             }
         )

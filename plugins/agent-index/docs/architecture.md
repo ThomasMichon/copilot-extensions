@@ -68,9 +68,11 @@ The default lifecycle is user-mode and session-start-assisted:
 self-provisioning `agent-index` binstub on PATH.
 2. First binstub use runs `install.ps1|sh provision` from the stamped snapshot and
 builds the current versioned service slot.
-3. `ensure-service` runs on session start. On `host` machines it starts or
-recovers the user-mode service (and engine when provisioned); on `client`
-machines it exits without starting a daemon.
+3. `ensure-service` runs on session start only when the current repository has
+an explicit `indexer`/`indexers` designation. On a designated `host` it starts
+or recovers the user-mode service (and engine when provisioned); on a
+designated `client` or an unconfigured repository it exits without starting
+a daemon.
 4. `install update` performs an active/passive zdd service cutover when a live
 service is healthy. `agent-index deploy --recover` runs breadcrumb recovery for
 an interrupted cutover.
@@ -147,9 +149,10 @@ GitHub connector.
 operator-configured work-item queries and pull-request queries. No query means
 that side indexes nothing, by design.
 
-Corpus config is intentionally outside the runtime. For a plain standalone repo,
-no agent-worktrees registration is required: running `agent-index index` in the
-repo indexes the current git checkout by default. For multi-repo harness use,
+Corpus config is intentionally outside the runtime. A repository activates
+agent-index by explicitly designating its indexer with `agent-index setup`; mere
+plugin enablement leaves the runtime configuration-empty and does not start or
+probe a service. For multi-repo harness use,
 `.agent-index/config.yaml` `corpus.sources` is swept from locally adopted
 projects via the sibling agent-worktrees registry; machine-local
 `~/.agent-index/config.yaml` can add supplemental sources. The session-start
