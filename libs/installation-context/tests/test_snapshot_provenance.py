@@ -5532,7 +5532,9 @@ def test_powershell_lock_owner_invalid_utf8_is_classified(tmp_path: Path) -> Non
     )
     lock.mkdir(parents=True)
     (lock / "owner.json").write_bytes(b"\xff")
-    runner = next(candidate for candidate in RUNNERS if candidate[0] == "powershell")
+    runner = next(
+        candidate for candidate in ALL_RUNNERS if candidate[0] == "powershell"
+    )
 
     result = _run(runner, "snapshot-stamp", layout, check=False)
 
