@@ -1170,7 +1170,13 @@ function Retire-SupervisorProcesses {
         foreach ($message in @($result.errors)) {
             if ($message) { Write-Warn "Supervisor generation retirement: $message" }
         }
-        if ($rc -eq 0 -or $retired -gt 0) { return $retired }
+        $enumerationFailed = @($result.errors | Where-Object {
+            [string]$_ -like 'process enumeration failed:*'
+        }).Count -gt 0
+        # A partial termination failure is already classified precisely by the
+        # Python helper. Do not run a second, broader classifier over a changed
+        # process inventory; report the errors and keep its retired count.
+        if ($rc -eq 0 -or -not $enumerationFailed) { return $retired }
     } catch { }
     Write-Warn 'Full supervisor generation inventory failed; using native CIM supervisor-tree retirement'
     return (Retire-SupervisorProcessesFallback)
@@ -1179,24 +1185,20 @@ function Retire-SupervisorProcesses {
 function Retire-SupervisorProcessesFallback {
     <# Native fallback when no installed runtime can run the Python classifier.
        Select only supervise-service wrappers and `agent_dispatch supervise`
-       roots, superseded-slot producers, then their descendants. A standalone
-       producer on the current slot is preserved. #>
+       roots, registrar children carrying a supervisor-owned materialized spec,
+       then their descendants. Standalone producers are preserved. #>
     if ($env:OS -ne 'Windows_NT') { return 0 }
     try {
         $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
         $launcher = [IO.Path]::GetFullPath((Join-Path $InstallDir 'supervise-service.ps1'))
-        $currentPython = $null
-        try {
-            $marker = Join-Path $InstallDir 'current-version'
-            if (Test-Path -LiteralPath $marker) {
-                $current = ([IO.File]::ReadAllText($marker)).Trim()
-                if ($current) {
-                    $currentPython = [IO.Path]::GetFullPath(
-                        (Join-Path $InstallDir "versions\$current\Scripts\python.exe")
-                    )
-                }
-            }
-        } catch { }
+        $runtimeRun = if ($env:AGENT_DISPATCH_RUN_DIR) {
+            $env:AGENT_DISPATCH_RUN_DIR
+        } else {
+            Join-Path $InstallDir 'run'
+        }
+        $supervisorRun = (
+            [IO.Path]::GetFullPath((Join-Path $runtimeRun 'supervisor')).TrimEnd('\') + '\'
+        )
         $selected = [System.Collections.Generic.HashSet[int]]::new()
         foreach ($row in $rows) {
             $cmd = [string]$row.CommandLine
@@ -1217,22 +1219,17 @@ function Retire-SupervisorProcessesFallback {
                 } catch { }
             }
             $isSupervisor = $underRoot -and (
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?:\s|$)'
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+supervise(?=\s*(?:$|serve(?:\s|$)|-))'
             )
-            $isSupersededProducer = $false
-            if (
-                $currentPython -and
-                $underRoot -and
-                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve|schedule\s+serve|webhook(?:\s|$))'
-            ) {
-                try {
-                    $isSupersededProducer = $underRoot -and -not $exe.Equals(
-                        $currentPython,
-                        [StringComparison]::OrdinalIgnoreCase
-                    )
-                } catch { }
-            }
-            if ($isWrapper -or $isSupervisor -or $isSupersededProducer) {
+            $isRegistrarChild = $underRoot -and (
+                $cmd -match '(?i)(agent_dispatch|agent-dispatch)(?:\.exe)?["'']?\s+(emitter\s+serve(?:\s|$)|schedule\s+serve(?:\s|$)|webhook(?:\s|$))'
+            ) -and (
+                $cmd.Replace('"', '').IndexOf(
+                    $supervisorRun,
+                    [StringComparison]::OrdinalIgnoreCase
+                ) -ge 0
+            )
+            if ($isWrapper -or $isSupervisor -or $isRegistrarChild) {
                 [void]$selected.Add([int]$row.ProcessId)
             }
         }
@@ -1261,7 +1258,9 @@ function Retire-SupervisorProcessesFallback {
             $depth[$pid] = $value
         }
         $killed = 0
-        foreach ($pid in @($selected | Sort-Object { $depth[$_] } -Descending)) {
+        # Stop roots first so a still-live master cannot replace a child while
+        # the snapshot is being retired.
+        foreach ($pid in @($selected | Sort-Object { $depth[$_] })) {
             if ($pid -eq $PID) { continue }
             try {
                 Stop-Process -Id $pid -Force -ErrorAction Stop

@@ -88,17 +88,19 @@ def _is_supervisor_runtime(process: WindowsProcess, install_dir: str | Path) -> 
     argv = _agent_dispatch_argv(process.command_line)
     if not argv:
         return False
-    return argv[0] == "supervise"
+    if argv[0] != "supervise":
+        return False
+    return len(argv) == 1 or argv[1] == "serve" or argv[1].startswith("-")
 
 
-def _is_superseded_producer(
+def _is_materialized_supervisor_child(
     process: WindowsProcess,
     install_dir: str | Path,
-    current_version: str | None,
+    run_dir: str | Path,
 ) -> bool:
-    """True for an orphanable producer running from a non-current runtime slot."""
+    """True for a registrar child identified by its supervisor-owned spec path."""
 
-    if not current_version or not _under_install_root(process.executable, install_dir):
+    if not _under_install_root(process.executable, install_dir):
         return False
     argv = _agent_dispatch_argv(process.command_line)
     if not argv:
@@ -109,19 +111,11 @@ def _is_superseded_producer(
     )
     if not producer:
         return False
-    current_python = ntpath.normcase(
-        ntpath.abspath(
-            ntpath.join(
-                str(install_dir),
-                "versions",
-                current_version,
-                "Scripts",
-                "python.exe",
-            )
-        )
-    )
-    executable = ntpath.normcase(ntpath.abspath(process.executable.strip('"')))
-    return executable != current_python
+    spec_root = ntpath.normcase(
+        ntpath.abspath(ntpath.join(str(run_dir), "supervisor"))
+    ).rstrip("\\") + "\\"
+    command_line = ntpath.normcase(process.command_line.replace('"', ""))
+    return spec_root in command_line
 
 
 def _is_supervisor_wrapper(process: WindowsProcess, install_dir: str | Path) -> bool:
@@ -136,17 +130,18 @@ def select_supervisor_generation_pids(
     processes: Iterable[WindowsProcess],
     install_dir: str | Path,
     *,
-    current_version: str | None = None,
+    run_dir: str | Path | None = None,
 ) -> list[int]:
-    """Select every wrapper/supervisor root and descendant, deepest first.
+    """Select every wrapper/supervisor root and descendant, roots first.
 
-    Producer commands are supported standalone surfaces. A current-slot producer
-    is therefore selected only when ancestry proves supervisor ownership, while a
-    non-current-slot producer is stale by definition and is selected even if its
-    former supervisor parent has already exited.
+    Producer commands are supported standalone surfaces and are selected only
+    when ancestry or their supervisor-owned materialized spec proves ownership.
     """
 
     records = {process.pid: process for process in processes if process.pid > 0}
+    effective_run_dir = run_dir or os.environ.get("AGENT_DISPATCH_RUN_DIR")
+    if not effective_run_dir:
+        effective_run_dir = Path(install_dir) / "run"
     children: dict[int, list[int]] = {}
     for process in records.values():
         children.setdefault(process.parent_pid, []).append(process.pid)
@@ -156,7 +151,11 @@ def select_supervisor_generation_pids(
         for process in records.values()
         if _is_supervisor_wrapper(process, install_dir)
         or _is_supervisor_runtime(process, install_dir)
-        or _is_superseded_producer(process, install_dir, current_version)
+        or _is_materialized_supervisor_child(
+            process,
+            install_dir,
+            effective_run_dir,
+        )
     }
     stack = list(selected)
     while stack:
@@ -178,7 +177,7 @@ def select_supervisor_generation_pids(
             current = records.get(current.parent_pid)
         return value
 
-    return sorted(selected, key=lambda pid: (depth(pid), pid), reverse=True)
+    return sorted(selected, key=lambda pid: (depth(pid), pid))
 
 
 def parse_windows_process_json(text: str) -> list[WindowsProcess]:
@@ -256,34 +255,38 @@ def retire_windows_supervisor_generations(
     list_processes: Callable[[], list[WindowsProcess]] = iter_windows_processes,
     terminate: Callable[[int], bool] = terminate_process,
     platform_name: str | None = None,
-    current_version: str | None = None,
+    run_dir: str | Path | None = None,
 ) -> SupervisorRetireResult:
     """Retire every installed supervisor wrapper/master/child generation."""
 
     result = SupervisorRetireResult()
     if (platform_name or os.name) != "nt":
         return result
-    try:
-        processes = list_processes()
-    except Exception as exc:
-        result.errors.append(f"process enumeration failed: {exc}")
-        return result
-    if current_version is None:
+    attempted: set[int] = set()
+    for _ in range(3):
         try:
-            current_version = (
-                Path(install_dir, "current-version").read_text(encoding="utf-8").strip()
-                or None
+            processes = list_processes()
+        except Exception as exc:
+            result.errors.append(f"process enumeration failed: {exc}")
+            break
+        selected = [
+            pid
+            for pid in select_supervisor_generation_pids(
+                processes,
+                install_dir,
+                run_dir=run_dir,
             )
-        except OSError:
-            current_version = None
-    result.selected = select_supervisor_generation_pids(
-        processes, install_dir, current_version=current_version
-    )
-    for pid in result.selected:
-        if pid == os.getpid():
-            continue
-        if terminate(pid):
-            result.retired.append(pid)
-        else:
-            result.errors.append(f"terminate pid={pid} failed")
+            if pid not in attempted
+        ]
+        if not selected:
+            break
+        result.selected.extend(selected)
+        for pid in selected:
+            attempted.add(pid)
+            if pid == os.getpid():
+                continue
+            if terminate(pid):
+                result.retired.append(pid)
+            else:
+                result.errors.append(f"terminate pid={pid} failed")
     return result

@@ -1444,6 +1444,30 @@ def test_supervisor_publishes_local_body_activity_while_task_is_queued(
     assert q.get(t.id).activity is None
 
 
+def test_hold_live_leases_degrades_when_local_session_listing_fails(
+    q, client, monkeypatch
+):
+    from agent_dispatch import tracking
+
+    t = q.create("work")
+    spawn = _local_spawn("local-body:brg-unavailable")
+    monkeypatch.setattr(tracking, "list_local_body_sessions", lambda: [])
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        heartbeat=False,
+        publish_activity=True,
+        recover=False,
+        nudge=False,
+    )
+    assert sup.poll_once() == [t.id]
+
+    assert sup.hold_live_leases() == 0
+    assert q.get(t.id).activity is None
+
+
 def test_hold_live_leases_does_not_observe_suspended_local_body(
     q, client, monkeypatch
 ):

@@ -447,6 +447,13 @@ class TestWindowsSupervisorInstall:
         assert "function Retire-SupervisorProcessesFallback" in helper
         assert "Get-CimInstance Win32_Process" in helper
         assert "Stop-Process -Id $pid" in helper
-        assert "$isSupersededProducer" in helper
-        assert "$currentPython" in helper
+        assert "$isRegistrarChild" in helper
+        assert "$supervisorRun" in helper
+        assert "AGENT_DISPATCH_RUN_DIR" in helper
         assert "$isSupervisor = $underRoot -and (" in helper
+        assert "supervise(?=\\s*(?:$|serve(?:\\s|$)|-))" in helper
+        assert "$enumerationFailed" in helper
+        assert "if ($rc -eq 0 -or -not $enumerationFailed)" in helper
+        assert "emitter\\s+serve(?:\\s|$)" in helper
+        assert "schedule\\s+serve(?:\\s|$)" in helper
+        assert "Sort-Object { $depth[$_] } -Descending" not in helper
