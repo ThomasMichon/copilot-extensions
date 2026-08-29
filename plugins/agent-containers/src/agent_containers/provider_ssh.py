@@ -667,7 +667,7 @@ def _serve_ssh(
     output_thread.start()
 
     transport = paramiko.Transport(server_socket)
-    transport.add_server_key(paramiko.RSAKey.generate(2048))
+    transport.add_server_key(paramiko.ECDSAKey.generate())
     server = _ProviderServer(paramiko)
     try:
         transport.start_server(server=server)
