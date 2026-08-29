@@ -94,7 +94,9 @@ def _is_supervisor_runtime(process: WindowsProcess, install_dir: str | Path) -> 
 
 
 def _is_materialized_supervisor_child(
-    process: WindowsProcess, install_dir: str | Path
+    process: WindowsProcess,
+    install_dir: str | Path,
+    run_dir: str | Path,
 ) -> bool:
     """True for a registrar child identified by its supervisor-owned spec path."""
 
@@ -110,7 +112,7 @@ def _is_materialized_supervisor_child(
     if not producer:
         return False
     spec_root = ntpath.normcase(
-        ntpath.abspath(ntpath.join(str(install_dir), "run", "supervisor"))
+        ntpath.abspath(ntpath.join(str(run_dir), "supervisor"))
     ).rstrip("\\") + "\\"
     command_line = ntpath.normcase(process.command_line.replace('"', ""))
     return spec_root in command_line
@@ -127,6 +129,8 @@ def _is_supervisor_wrapper(process: WindowsProcess, install_dir: str | Path) -> 
 def select_supervisor_generation_pids(
     processes: Iterable[WindowsProcess],
     install_dir: str | Path,
+    *,
+    run_dir: str | Path | None = None,
 ) -> list[int]:
     """Select every wrapper/supervisor root and descendant, roots first.
 
@@ -135,6 +139,9 @@ def select_supervisor_generation_pids(
     """
 
     records = {process.pid: process for process in processes if process.pid > 0}
+    effective_run_dir = run_dir or os.environ.get("AGENT_DISPATCH_RUN_DIR")
+    if not effective_run_dir:
+        effective_run_dir = Path(install_dir) / "run"
     children: dict[int, list[int]] = {}
     for process in records.values():
         children.setdefault(process.parent_pid, []).append(process.pid)
@@ -144,7 +151,11 @@ def select_supervisor_generation_pids(
         for process in records.values()
         if _is_supervisor_wrapper(process, install_dir)
         or _is_supervisor_runtime(process, install_dir)
-        or _is_materialized_supervisor_child(process, install_dir)
+        or _is_materialized_supervisor_child(
+            process,
+            install_dir,
+            effective_run_dir,
+        )
     }
     stack = list(selected)
     while stack:
@@ -244,6 +255,7 @@ def retire_windows_supervisor_generations(
     list_processes: Callable[[], list[WindowsProcess]] = iter_windows_processes,
     terminate: Callable[[int], bool] = terminate_process,
     platform_name: str | None = None,
+    run_dir: str | Path | None = None,
 ) -> SupervisorRetireResult:
     """Retire every installed supervisor wrapper/master/child generation."""
 
@@ -259,7 +271,11 @@ def retire_windows_supervisor_generations(
             break
         selected = [
             pid
-            for pid in select_supervisor_generation_pids(processes, install_dir)
+            for pid in select_supervisor_generation_pids(
+                processes,
+                install_dir,
+                run_dir=run_dir,
+            )
             if pid not in attempted
         ]
         if not selected:

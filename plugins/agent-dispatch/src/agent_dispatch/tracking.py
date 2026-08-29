@@ -178,22 +178,22 @@ def resolve_live_session(
     return data
 
 
-def list_local_body_sessions(*, timeout: float = 3.0) -> list[dict[str, Any]] | None:
-    """List local agent-bridge ACP sessions for headless-body enrichment."""
+def list_local_body_sessions(*, timeout: float = 3.0) -> list[dict[str, Any]]:
+    """List local headless sessions; observation failures degrade to no rows."""
     prefix = agent_bridge_launch_prefix()
     if prefix is None:
-        return None
+        return []
     proc = _run_capture([*prefix, "--json", "sessions"], timeout=timeout)
     if proc is None:
-        return None
+        return []
     if proc.returncode != 0 or not proc.stdout.strip():
-        return None
+        return []
     try:
         data = json.loads(proc.stdout)
     except json.JSONDecodeError:
-        return None
+        return []
     if not isinstance(data, list):
-        return None
+        return []
     return [row for row in data if isinstance(row, dict)]
 
 

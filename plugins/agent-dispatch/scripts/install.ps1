@@ -1191,8 +1191,13 @@ function Retire-SupervisorProcessesFallback {
     try {
         $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
         $launcher = [IO.Path]::GetFullPath((Join-Path $InstallDir 'supervise-service.ps1'))
+        $runtimeRun = if ($env:AGENT_DISPATCH_RUN_DIR) {
+            $env:AGENT_DISPATCH_RUN_DIR
+        } else {
+            Join-Path $InstallDir 'run'
+        }
         $supervisorRun = (
-            [IO.Path]::GetFullPath((Join-Path $InstallDir 'run\supervisor')).TrimEnd('\') + '\'
+            [IO.Path]::GetFullPath((Join-Path $runtimeRun 'supervisor')).TrimEnd('\') + '\'
         )
         $selected = [System.Collections.Generic.HashSet[int]]::new()
         foreach ($row in $rows) {

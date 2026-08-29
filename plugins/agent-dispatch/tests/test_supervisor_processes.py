@@ -106,7 +106,11 @@ def test_selects_old_wrapper_master_children_and_descendants_across_slots():
         ),
     ]
 
-    selected = select_supervisor_generation_pids(processes, INSTALL_DIR)
+    selected = select_supervisor_generation_pids(
+        processes,
+        INSTALL_DIR,
+        run_dir=INSTALL_DIR + r"\run",
+    )
 
     assert set(selected) == {100, 101, 102, 103, 104, 105, 200}
     assert selected.index(102) < selected.index(103) < selected.index(105)
@@ -172,3 +176,23 @@ def test_retirement_terminates_every_selected_generation():
     assert result.selected == [10, 11, 12]
     assert result.retired == [10, 11, 12]
     assert terminated == [10, 11, 12]
+
+
+def test_materialized_child_honors_run_dir_override():
+    python = INSTALL_DIR + r"\versions\0.1.0-dev1\Scripts\python.exe"
+    custom_run = r"D:\agent-dispatch-runtime"
+    processes = [
+        _proc(
+            10,
+            1,
+            python,
+            rf'"{python}" -m agent_dispatch emitter serve '
+            rf'"{custom_run}\supervisor\scope\lane.emitter.json"',
+        )
+    ]
+
+    assert select_supervisor_generation_pids(
+        processes,
+        INSTALL_DIR,
+        run_dir=custom_run,
+    ) == [10]

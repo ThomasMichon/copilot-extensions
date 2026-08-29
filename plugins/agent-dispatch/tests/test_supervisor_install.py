@@ -449,6 +449,7 @@ class TestWindowsSupervisorInstall:
         assert "Stop-Process -Id $pid" in helper
         assert "$isRegistrarChild" in helper
         assert "$supervisorRun" in helper
+        assert "AGENT_DISPATCH_RUN_DIR" in helper
         assert "$isSupervisor = $underRoot -and (" in helper
         assert "supervise(?=\\s*(?:$|serve(?:\\s|$)|-))" in helper
         assert "$enumerationFailed" in helper
