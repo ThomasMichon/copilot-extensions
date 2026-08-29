@@ -154,6 +154,17 @@ if ($sessionId -and $launchToken) {
     $markerPath = Join-Path $markerRoot $markerKey
     try {
         [void][IO.Directory]::CreateDirectory($markerRoot)
+        try {
+            $markers = @(
+                Get-ChildItem -LiteralPath $markerRoot -File |
+                    Sort-Object LastWriteTimeUtc
+            )
+            if ($markers.Count -ge 2048) {
+                $markers |
+                    Select-Object -First ($markers.Count - 2047) |
+                    Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+        } catch {}
         $marker = [IO.File]::Open(
             $markerPath,
             [IO.FileMode]::CreateNew,

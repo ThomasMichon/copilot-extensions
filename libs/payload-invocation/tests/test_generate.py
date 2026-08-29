@@ -430,6 +430,13 @@ def test_catalog_deduplicates_per_launch_and_reemits_on_resume(
         }
     )
     (tmp_path / "temp").mkdir()
+    marker_root_name = "copilot-extensions-session-command-catalog"
+    if os.name != "nt":
+        marker_root_name += f"-{os.getuid()}"
+    marker_root = tmp_path / "temp" / marker_root_name
+    marker_root.mkdir()
+    for index in range(2050):
+        (marker_root / f"stale-{index:04d}").touch()
     payload = '{"sessionId":"session with spaces \u96ea"}'
     if os.name == "nt":
         pwsh = shutil.which("pwsh")
@@ -452,6 +459,7 @@ def test_catalog_deduplicates_per_launch_and_reemits_on_resume(
     for launch in (first_launch, resumed_launch):
         assert _extract_catalog(launch[0])["plugin"] == "agent-example"
         assert json.loads(launch[1]) == {}
+    assert len(list(marker_root.iterdir())) <= 2048
 
 
 @pytest.mark.parametrize(

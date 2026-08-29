@@ -38,6 +38,7 @@ process suppresses duplicate hooks within that one sessionStart dispatch. A new
 or resumed launch receives a new process identity and emits the catalog again
 even when it reuses the persisted session ID. Distinct payload paths, command
 inventories, availability states, sessions, or launches remain independent.
+The per-user marker store retains at most 2,048 recent entries.
 
 `outputDir` defaults to `bin` and may name a nested payload-only directory when
 a plugin still uses its historical top-level `bin/` files as legacy global

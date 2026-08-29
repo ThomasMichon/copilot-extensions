@@ -127,6 +127,22 @@ if session_id and launch_token:
             raise PermissionError(
                 f"unsafe marker directory ownership or mode: {marker_root}"
             )
+        try:
+            markers = sorted(
+                (
+                    entry.stat(follow_symlinks=False).st_mtime_ns,
+                    entry.path,
+                )
+                for entry in os.scandir(marker_root)
+                if entry.is_file(follow_symlinks=False)
+            )
+            for _modified, stale_path in markers[:-2047]:
+                try:
+                    os.unlink(stale_path)
+                except OSError:
+                    pass
+        except OSError:
+            pass
         descriptor = os.open(
             marker_path,
             os.O_CREAT | os.O_EXCL | os.O_WRONLY,
