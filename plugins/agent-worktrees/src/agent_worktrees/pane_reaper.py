@@ -270,10 +270,20 @@ class ResidentPaneReconciler:
         session_name, path = target
         try:
             self.activate_project(path, force=True)
-            worktree_id = session_name[3:]
+            worktree_id = sessions.worktree_id_from_mux_session(session_name)
             yaml_path = cfg.tracking_dir() / f"{worktree_id}.yaml"
             if not yaml_path.is_file():
-                return None
+                # A dotted id survives as `_` in the session name, so the direct
+                # path always misses on such a machine; resolve against the
+                # record FILENAMES before giving up. Stems only -- parsing every
+                # record here would be a steady-state cost on each tick.
+                tracking_dir = cfg.tracking_dir()
+                stems = [entry.stem for entry in tracking_dir.glob("*.yaml")]
+                worktree_id = sessions.worktree_id_from_mux_session(
+                    session_name, stems)
+                yaml_path = tracking_dir / f"{worktree_id}.yaml"
+                if not yaml_path.is_file():
+                    return None
             record = tracking.load_record(yaml_path)
             if record.status != "active":
                 return None

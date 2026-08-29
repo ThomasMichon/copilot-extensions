@@ -493,6 +493,9 @@ aw_joining_live_session() {
     local _wtid
     _wtid=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or 'base')" 2>/dev/null) || _wtid=base
     [[ -z "$_wtid" ]] && _wtid=base
+    # `.` is the window/pane separator in a target spec -- keep in sync with
+    # `sessions.mux_session_name` (and the session name built below).
+    _wtid="${_wtid//./_}"
     # `=`-prefix forces an exact session-name match (mirrors the join probe below).
     tmux has-session -t "=wt-${_wtid}" 2>/dev/null
 }
@@ -633,7 +636,13 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
             exit 1
         fi
 
+        # tmux/psmux parse `.` in a target spec as the `window.pane` separator,
+        # so a dotted WORKTREE_ID yields a session that can be created but never
+        # addressed again ("can't find window: wt-<host>"). Worktree ids embed
+        # the machine name, which is routinely dotted (every default macOS box
+        # is `<name>.local`). Keep this in sync with `sessions.mux_session_name`.
         TMUX_SESS="wt-${WORKTREE_ID:-base}"
+        TMUX_SESS="${TMUX_SESS//./_}"
         setup_log INFO "tmux: looking for session $TMUX_SESS"
 
         _aw_owned_tmux_session_id() {
