@@ -842,6 +842,10 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
     reference = re.compile(
         r'<(agent-[a-z0-9-]+) catalog(?: "([a-z][a-z0-9-]*)")? argv prefix>'
     )
+    site_reference = re.compile(
+        r'<(?:(?:agent-[a-z0-9-]+ )?catalog'
+        r'(?: "[a-z][a-z0-9-]*")? argv prefix)>'
+    )
     references: dict[str, dict[str, list[Path]]] = {}
     capability_paths = sorted({
         *(REPO / "plugins").glob("*/skills/**/*.md"),
@@ -861,7 +865,8 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
         if re.search(r"catalog[^\n`]*argv\[0\]|<[^>]*argv\[0\]>", text):
             stale_references.append(skill.relative_to(REPO))
         if re.search(
-            r"`<agent-[^`]+ catalog(?: \"[^\"]+\")? argv prefix> <args>`",
+            r"`<(?:agent-[^`]+ )?catalog(?: \"[^\"]+\")? "
+            r"argv prefix> <args>`",
             text,
         ):
             invalid_powershell_renderings.append(skill.relative_to(REPO))
@@ -882,8 +887,11 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
             if in_powershell_fence and re.match(r"^\s*```", line):
                 in_powershell_fence = False
                 continue
-            has_prefix = bool(reference.search(line))
-            missing_call_operator = not re.search(r"&\s*<agent-", line)
+            has_prefix = bool(site_reference.search(line))
+            missing_call_operator = not re.search(
+                r"&\s*<(?:agent-[a-z0-9-]+ )?catalog",
+                line,
+            )
             if (
                 has_prefix
                 and missing_call_operator
