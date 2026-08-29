@@ -76,11 +76,12 @@ def _run(
     plugins: list[tuple[str, Path]],
     *,
     cwd: Path | None = None,
+    marketplace: str = "copilot-extensions",
+    authority: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     home = tmp_path / "home"
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    marketplace = "copilot-extensions"
     settings = {
         "extraKnownMarketplaces": {
             marketplace: {
@@ -109,6 +110,8 @@ def _run(
     environment = os.environ.copy()
     environment["HOME"] = str(home)
     environment["COPILOT_PLUGIN_ROOT"] = str(aggregator)
+    if authority is not None:
+        environment["COPILOT_CONTEXT_INJECTION_AUTHORITY"] = authority
     return subprocess.run(
         [os.environ.get("PYTHON") or sys.executable, str(SCRIPT)],
         input=json.dumps(
@@ -433,6 +436,24 @@ def test_one_failed_contributor_rejects_partial_aggregate(tmp_path: Path) -> Non
 
     assert json.loads(result.stdout) == {}
     assert "contributors failed" in result.stderr
+
+
+def test_source_qualified_tail_adapter_can_own_final_slot(
+    tmp_path: Path,
+) -> None:
+    sources = tmp_path / "sources"
+    policy = _plugin(sources, "mkt", "a-policy", context="POLICY")
+    adapter = tmp_path / "adapter"
+    shutil.copytree(PLUGIN, adapter)
+
+    result = _run(
+        tmp_path,
+        [("a-policy", policy), ("zz-context-injection", adapter)],
+        marketplace="aperture",
+        authority="zz-context-injection@aperture",
+    )
+
+    assert "POLICY" in json.loads(result.stdout)["additionalContext"]
 
 
 def test_bash_wrapper_discards_partial_output_on_aggregator_failure(
