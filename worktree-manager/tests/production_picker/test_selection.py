@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent_worktrees.picker_tui.selection import ListSelection
+from worktree_manager.production_picker.picker_tui.selection import ListSelection
 
 
 def test_empty_selection_is_falsey_and_zero_len():

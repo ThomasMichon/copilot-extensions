@@ -1,10 +1,11 @@
 # picker-snapshot — the standing picker render flow
 
-The reproducible way to turn a picker state into a **crisp PNG** for A/B
-comparison, demos, audit, or sharing (agent-worktrees #88 NF work).
+The reproducible way to turn a Worktree Manager Picker state into a **crisp
+PNG** for A/B comparison, demos, audit, or sharing.
 
 It is a thin two-step pipeline over the deterministic
-[`picker_tui.capture`](../../src/agent_worktrees/picker_tui/capture.py) seam
+[`production_picker.picker_tui.capture`](../../src/worktree_manager/production_picker/picker_tui/capture.py)
+seam
 (vision item **A** — auditable-testable-rendering):
 
 1. **Capture → SVG** (Python). `capture.capture(...)` renders a picker state
@@ -33,7 +34,7 @@ the SVG to a bitmap.)
 Once, to install the Node dependency and cache the font:
 
 ```bash
-cd plugins/agent-worktrees/scripts/picker-snapshot
+cd worktree-manager/scripts/picker-snapshot
 npm install
 ```
 

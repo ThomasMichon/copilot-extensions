@@ -1662,7 +1662,9 @@ def scan_pivot_registry(
     """Scan, classify, reconcile, and de-duplicate Picker contributions."""
     directory = pivots_dir(base)
     activation = activation_report or resolve_active_plugins()
-    if materialize:
+    if materialize and not os.environ.get(
+        "WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE"
+    ):
         _materialize_active_pivots(directory, activation)
     entry_classes: dict[str, str] = {}
 

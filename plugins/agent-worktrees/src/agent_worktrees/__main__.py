@@ -54,6 +54,7 @@ import dataclasses
 import json
 import os
 import platform
+import re
 import secrets
 import shutil
 import socket
@@ -2095,15 +2096,17 @@ def cmd_resolve(args: argparse.Namespace) -> int:
     use_json = getattr(args, "json", False)
     use_base = getattr(args, "base", False)
     use_new = getattr(args, "new_worktree", False) or getattr(args, "auto", False)
+    requested_machine = getattr(args, "machine", None)
 
     if use_json:
         args.no_mux = True
         # Validate required args before any I/O
         wt_id = getattr(args, "worktree_id", None)
-        if wt_id and use_new:
-            return _json_error("--worktree-id and --new are mutually exclusive")
-        if not wt_id and not use_new:
-            return _json_error("--json requires --worktree-id or --new")
+        selectors = sum(bool(value) for value in (wt_id, use_new, use_base))
+        if selectors != 1:
+            return _json_error(
+                "--json requires exactly one of --worktree-id, --new, or --base"
+            )
 
     if use_base:
         args.no_mux = True
@@ -2149,9 +2152,40 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             _is_base_repo = _base_cfg.default_repo.base_repo
         except Exception:
             _base_cfg, _is_base_repo = None, False
-        if _is_base_repo and _base_cfg is not None:
+        if _is_base_repo and _base_cfg is not None and not requested_machine:
             base_profile = _resolve_profile(_base_cfg, args)
             return _resolve_base_repo(_base_cfg, args, profile=base_profile)
+
+        if use_json and requested_machine:
+            try:
+                config = cfg.load_config()
+            except Exception as e:
+                return _json_error(str(e))
+
+            remote_args: list[str] = []
+            if use_base:
+                remote_args.append("--base")
+            elif use_new:
+                remote_args.append("--new")
+            else:
+                remote_args += ["--worktree-id", str(wt_id)]
+                if getattr(args, "bare_resume", False):
+                    remote_args.append("--bare-resume")
+            if getattr(args, "target_no_mux", False):
+                remote_args.append("--no-mux")
+            rc = _emit_remote_plan_for_env(
+                config,
+                requested_machine,
+                getattr(args, "environment", None) or "",
+                remote_args,
+            )
+            if rc is not None:
+                return rc
+            return _json_error(
+                "unknown or unreachable remote machine: "
+                f"{requested_machine} "
+                f"{getattr(args, 'environment', None) or ''}".strip()
+            )
 
         if use_base:
             try:
@@ -3361,15 +3395,20 @@ def _emit_remote_plan_for_env(
     if entry is None or not entry.ssh_environments:
         return None
 
+    requested_environment = bool((env_label or "").strip())
     want = _ENV_LABEL_TO_NAME.get((env_label or "").lower())
+    if requested_environment and not want:
+        return None
     ssh_alias = ""
     if want:
         for e in entry.ssh_environments:
             if e.name == want:
                 ssh_alias = e.alias
                 break
+        if not ssh_alias:
+            return None
     if not ssh_alias:
-        # No env match -- fall back to the machine's primary alias.
+        # No environment was requested -- use the machine's primary alias.
         ssh_alias = _resolve_ssh_alias(entry)
 
     project = cfg.project_name()
@@ -15819,6 +15858,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--profile", help="Copilot backend profile name (skips Tab toggle)")
     p.add_argument("--machine", default=None,
                    help="Target machine name (bypasses machine picker)")
+    p.add_argument("--environment", default=None,
+                   help="With --machine: target environment label (Win/WSL/Linux)")
+    p.add_argument("--target-no-mux", action="store_true",
+                   help="With --json --machine: request a direct remote launch")
     p.add_argument("--parent-session", default=None, dest="parent_session",
                    help="With --new: session id that originated this worktree's "
                         "work, recorded so a later resume restores context (#1029). "
@@ -19574,6 +19617,7 @@ def cmd_help_unrouted(requested: str | None = None) -> int:
 # args route programmatically to the tool CLI and never touch this seam.
 
 _WORKTREE_MANAGER_BIN = "worktree-manager"
+_WORKTREE_MANAGER_MIN_PICKER_VERSION = (0, 1, 0, 21)
 
 # The Worktree Manager's canonical, human-visitable source (shown so a user can
 # verify the install command is ours before running it -- not an attack) and the
@@ -19641,6 +19685,26 @@ def _usable_worktree_manager() -> str | None:
             f"failed a --version health check (exit {proc.returncode}). This is "
             "usually a stale binstub from an old install; reinstall or remove "
             "it. Falling back to the bundled picker.")
+        return None
+    match = re.search(
+        r"\b(\d+)\.(\d+)\.(\d+)(?:-dev(\d+))?\b",
+        proc.stdout or "",
+    )
+    if match is None:
+        output.err(
+            f"Ignoring an incompatible '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
+            "its --version output did not include a supported version. Falling "
+            "back to the bundled picker."
+        )
+        return None
+    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
+    dev = int(match.group(4)) if match.group(4) is not None else 1_000_000
+    if (major, minor, patch, dev) < _WORKTREE_MANAGER_MIN_PICKER_VERSION:
+        output.err(
+            f"Ignoring an older '{_WORKTREE_MANAGER_BIN}' on PATH ({mgr}): "
+            f"production Picker handoff requires 0.1.0-dev21 or newer. "
+            "Falling back to the bundled picker."
+        )
         return None
     return mgr
 
@@ -20853,11 +20917,9 @@ def main(argv: list[str] | None = None) -> int:
     has_project = bool(cfg.active_project())
 
     # No args → the binstub seam (Phase 6 / DQ7 / DQ8). A bare, no-args
-    # invocation is the human-facing path. During the production-UX transplant,
-    # prefer the still-bundled production Picker while it ships; the replacement
-    # Manager Picker does not own the front door again until it carries that UX
-    # wholesale. Once the bundled Picker is retired, hand off to the Manager (or
-    # show the trustworthy install trigger when no usable Manager is present).
+    # invocation is the human-facing path. The Manager now owns the transplanted
+    # production UX, so prefer it when healthy. The bundled Picker remains the
+    # rollback/fallback until the compatibility boundary is removed.
     # Headless projects are never interactive, so they keep their CLI-only
     # summary. Any args route programmatically to the CLI (below), never through
     # this seam.
@@ -20865,11 +20927,11 @@ def main(argv: list[str] | None = None) -> int:
         if has_project:
             if _is_headless_project():
                 return cmd_headless_bare()
-            if _bundled_picker_available():
-                return cmd_launch([])
             mgr = _usable_worktree_manager()
             if mgr:
                 return _exec_worktree_manager(mgr, cfg.active_project())
+            if _bundled_picker_available():
+                return cmd_launch([])
             return cmd_manager_install_trigger(cfg.active_project())
         mgr = _usable_worktree_manager()
         if mgr:

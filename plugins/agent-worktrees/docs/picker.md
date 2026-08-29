@@ -350,11 +350,13 @@ The same capture seam produces **safe-to-publish** imagery from real fleet data:
 - **Animated walkthrough** — `capture_frames_async()` drives the picker through a
   scripted keyboard tour (switch pivot -> move selection -> open/close a menu)
   and returns a frame per step.
-- **The tool** — `tools/picker-shot.py` packages the whole pipeline: gather (a
+- **The tool** — `worktree-manager/scripts/picker-shot.py` packages the whole
+  pipeline: gather (a
   directory of dumps, or live across the roster over SSH) -> obscure -> render ->
   rasterize to **PNG** via a headless Chromium-family browser, or `--animate` to
   a **GIF**. Example:
-  `python tools/picker-shot.py --from-dir ./dumps --view all --out hero.png`.
+  `python worktree-manager/scripts/picker-shot.py --from-dir ./dumps --view all
+  --out hero.png`.
   It's a maintainer/demo tool (needs a browser, plus Pillow for GIF), not shipped
   runtime.
 

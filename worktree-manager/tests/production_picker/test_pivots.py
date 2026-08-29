@@ -6,10 +6,10 @@ import json
 from pathlib import Path
 
 import pytest
-from agent_worktrees.picker_tui import pivots
+from worktree_manager.production_picker.picker_tui import pivots
 
 #: Repo root (…/copilot-extensions), derived from this test's location:
-#: plugins/agent-worktrees/tests/test_pivots.py -> parents[3].
+#: worktree-manager/tests/production_picker/test_pivots.py -> parents[3].
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -25,6 +25,21 @@ def test_discover_missing_dir_is_empty(tmp_path):
 
 def test_discover_empty_dir_is_empty(tmp_path):
     assert pivots.discover_pivots(tmp_path) == []
+
+
+def test_preview_mode_suppresses_ambient_pivot_materialization(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setenv("WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE", "1")
+    monkeypatch.setattr(
+        pivots,
+        "_materialize_active_pivots",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    report = pivots.scan_pivot_registry(tmp_path)
+
+    assert report.contributions == []
+    assert calls == []
 
 
 def test_parse_minimal_manifest_applies_defaults(tmp_path):

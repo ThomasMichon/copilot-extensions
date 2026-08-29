@@ -106,6 +106,23 @@ def compose_launch(
     cap = capability if capability is not None else mux_capability()
     session = f"wt-{plan.worktree_id}" if plan.worktree_id else "wt-base"
 
+    if plan.action == "remote":
+        ssh_alias = str(plan.raw.get("ssh_alias") or "")
+        remote_command = str(plan.raw.get("remote_command") or "")
+        if not ssh_alias or not remote_command:
+            return LaunchExec(
+                kind="invalid", argv=[], cwd=None, env={},
+                muxed=False, exit_code=1, session=None)
+        return LaunchExec(
+            kind="exec",
+            argv=["ssh", "-t", ssh_alias, remote_command],
+            cwd=None,
+            env=dict(os.environ),
+            muxed=False,
+            exit_code=plan.exit_code,
+            session=None,
+        )
+
     if plan.action != "exec":
         return LaunchExec(
             kind=plan.action, argv=[], cwd=None, env={},

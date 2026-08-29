@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import types
 
-from agent_worktrees.picker_tui import data_local, derive
+from worktree_manager.production_picker.picker_tui import data_local, derive
 
 
 def _rec(**kw):
@@ -247,7 +247,7 @@ class TestCacheOnlySshArgs:
     """The remote fast-phase --cache-only argv plumbing (dotfiles#948)."""
 
     def test_add_and_drop_bash(self):
-        from agent_worktrees.picker_tui import data_ssh as ds
+        from worktree_manager.production_picker.picker_tui import data_ssh as ds
         argv = ["ssh", "host", "bash -lc 'proj list --json --mux-details'"]
         added = ds._add_cache_only_arg(argv)
         assert "--cache-only" in added[2]
@@ -259,7 +259,7 @@ class TestCacheOnlySshArgs:
     def test_add_and_drop_pwsh_encoded(self):
         import base64
 
-        from agent_worktrees.picker_tui import data_ssh as ds
+        from worktree_manager.production_picker.picker_tui import data_ssh as ds
         argv = ["ssh", "host", ds._pwsh_remote("proj list --json --mux-details")]
         added = ds._add_cache_only_arg(argv)
         enc = added[2].rsplit("-EncodedCommand ", 1)[1]
@@ -270,7 +270,7 @@ class TestCacheOnlySshArgs:
         assert "--cache-only" not in base64.b64decode(enc2).decode("utf-16-le")
 
     def test_unsupported_detection(self):
-        from agent_worktrees.picker_tui import data_ssh as ds
+        from worktree_manager.production_picker.picker_tui import data_ssh as ds
         assert ds._is_cache_only_unsupported(
             "error: unrecognized arguments: --cache-only")
         assert not ds._is_cache_only_unsupported("some other error")

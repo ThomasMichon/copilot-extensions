@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Picker snapshot render -- the standing demo / A-B render flow (agent-worktrees
-#88 NF).
+"""Picker snapshot render -- the standing Worktree Manager demo / A-B flow.
 
-Captures a deterministic picker state to SVG via the ``picker_tui.capture`` seam
+Captures a deterministic picker state to SVG via the Manager-owned
+``production_picker.picker_tui.capture`` seam
 (vision item A -- auditable-testable-rendering), then rasterizes it to PNG with
 the SVG's OWN Fira Code font via ``svg2png.mjs``. It never substitutes the font:
 Rich lays out the SVG's glyph x-positions on Fira Code's metric grid, so a
@@ -34,8 +34,8 @@ sys.path.insert(0, os.path.join(_HERE, "..", "..", "src"))
 import datetime  # noqa: E402
 import types  # noqa: E402
 
-from agent_worktrees.picker_tui import capture as pcap  # noqa: E402
-from agent_worktrees.picker_tui import derive  # noqa: E402
+from worktree_manager.production_picker.picker_tui import capture as pcap  # noqa: E402
+from worktree_manager.production_picker.picker_tui import derive  # noqa: E402
 
 
 def _demo_source():
@@ -118,7 +118,7 @@ async def _open_quit(scr, pilot):
 async def _open_prof(scr, pilot):
     # Push the Profiles-Apply confirm directly with a synthetic add/remove diff
     # (avoids driving the whole profiles grid just to render the confirm).
-    from agent_worktrees.picker_tui.engine import ProfConfirmScreen
+    from worktree_manager.production_picker.picker_tui.engine import ProfConfirmScreen
 
     def _sel(machine, env, kind):
         return types.SimpleNamespace(machine=machine, env=env, kind=kind)
@@ -192,7 +192,7 @@ async def _open_steer(
 ):
     from textual.widgets import RadioButton, RadioSet
 
-    from agent_worktrees.picker_tui.engine import PivotFormScreen
+    from worktree_manager.production_picker.picker_tui.engine import PivotFormScreen
 
     card = card or _steer_card()
     fields = card.get("request_input") or _steer_fields()

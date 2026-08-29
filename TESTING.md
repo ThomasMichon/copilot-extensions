@@ -97,7 +97,11 @@ python -m pytest -q libs/installer-readiness/tests  # schema/discovery/graph fix
   verified provider-rescue ingestion, generic provenance transport, compaction,
   and background-chronicle source/sink orchestration.
 - **agent-worktrees:** a large suite covering worktree lifecycle, the
-  status/tracking model, PR flow, and the Textual **Picker**.
+  status/tracking model, PR flow, and the Picker-facing engine contracts.
+- **Worktree Manager:** its standalone suite includes the production Textual
+  **Picker** UX, golden, cache, pivot, streaming, steering, profile, SSH-source,
+  selection, capture, mock, and PNG-validation corpus under
+  `worktree-manager/tests/production_picker/`.
 - **ai-attribution:** payload-only hook tests covering authoritative
   `sessionStart` payload cwd, malformed/missing payloads, git-repo gating, safe
   defaults, bounded operator/repository config discovery, symlink/reparse

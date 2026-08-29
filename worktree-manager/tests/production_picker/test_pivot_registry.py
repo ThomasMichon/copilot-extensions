@@ -17,7 +17,7 @@ from dropin_registry import (
 )
 from plugin_activation import ActivationReport, ActivePlugin
 
-from agent_worktrees.picker_tui import pivots
+from worktree_manager.production_picker.picker_tui import pivots
 
 
 def _command(root: Path, name: str = "sample") -> Path:

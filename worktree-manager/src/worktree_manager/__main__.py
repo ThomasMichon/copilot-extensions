@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 from . import __version__
 from .catalog import load_catalog
@@ -461,22 +462,57 @@ def _cmd_contracts(rest: list[str]) -> int:
 
 
 def _cmd_picker(rest: list[str]) -> int:
-    """Launch the interactive Picker, or capture a headless screenshot.
+    """Run, mock, or capture the Manager-owned production Picker."""
+    args = list(rest)
+    action = "run"
+    if args and args[0] in {"mock", "screenshot"}:
+        action = args.pop(0)
 
-    ``--demo`` renders the Aperture Labs fixture through the bundled fake engine
-    (no live agent-worktrees needed); ``--screenshot <file>`` writes an SVG and
-    exits instead of launching the TUI. A positional arg selects the project.
-    """
-    demo_mode = "--demo" in rest
-    screenshot = None
-    if "--screenshot" in rest:
-        i = rest.index("--screenshot")
-        if i + 1 >= len(rest):
-            print("error: --screenshot needs a file path")
+    values: dict[str, str] = {}
+    flags: set[str] = set()
+    positionals: list[str] = []
+    value_options = {"--screenshot", "--out", "--format", "--pivot", "--wait"}
+    flag_options = {"--demo", "--local", "--live", "--json"}
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token in value_options:
+            if index + 1 >= len(args):
+                print(f"error: {token} needs a value")
+                return 2
+            values[token] = args[index + 1]
+            index += 2
+            continue
+        if token in flag_options:
+            flags.add(token)
+            index += 1
+            continue
+        if token.startswith("-"):
+            print(f"error: unknown picker option: {token}")
             return 2
-        screenshot = rest[i + 1]
-    positionals = [a for a in rest if not a.startswith("-")
-                   and a != screenshot]
+        positionals.append(token)
+        index += 1
+
+    if len(positionals) > 1:
+        print("error: picker accepts at most one project name")
+        return 2
+
+    demo_mode = "--demo" in flags
+    legacy_screenshot = values.get("--screenshot")
+    if legacy_screenshot:
+        action = "screenshot"
+    screenshot_out = values.get("--out") or legacy_screenshot
+    if screenshot_out:
+        screenshot_out = str(Path(screenshot_out).resolve())
+    capture_format = values.get("--format", "svg")
+    if capture_format not in {"svg", "text", "ansi"}:
+        print("error: --format must be svg, text, or ansi")
+        return 2
+    try:
+        wait_pivot = float(values.get("--wait", "0"))
+    except ValueError:
+        print("error: --wait must be a number")
+        return 2
 
     if demo_mode:
         from . import picker_app
@@ -488,7 +524,7 @@ def _cmd_picker(rest: list[str]) -> int:
         contributions = ()
         context_source = None
     else:
-        if not engine_available():
+        if action == "run" and not engine_available():
             print()
             print("  The agent-worktrees engine is not installed. Try `--demo` for a")
             print("  mock preview, or `worktree-manager setup --apply` to install it.")
@@ -504,17 +540,59 @@ def _cmd_picker(rest: list[str]) -> int:
             print(f"error: unknown project {project!r}. "
                   f"Known: {', '.join(p.name for p in projects)}")
             return 2
-        if not screenshot:
+        if action == "run":
             return _run_production_picker(project)
-        from . import picker_app
-        source = picker_app.engine_source(project)
-        subtitle = project
-        on_launch = _run_launch
-        from .plugin_contracts import discover_contracts
-        contributions = discover_contracts(project=project).contributions
-        context_source = picker_app.engine_context_source(project)
 
-    if screenshot:
+        from .production_picker import runner
+
+        if action == "mock":
+            try:
+                decision = runner.run(
+                    project,
+                    mock_mode=True,
+                    local="--local" in flags,
+                )
+            except Exception as error:
+                print(f"error: production Picker mock failed: {error}")
+                return 1
+            if "--json" in flags:
+                print(json.dumps({"mock": True, "decision": decision}))
+            else:
+                print(f"mock picker exited - decision: {decision!r}")
+            return 0
+
+        try:
+            captures = runner.capture(
+                project,
+                live="--live" in flags,
+                pivot=values.get("--pivot"),
+                wait_pivot=wait_pivot,
+            )
+        except Exception as error:
+            print(f"error: production Picker capture failed: {error}")
+            return 1
+        content = captures[capture_format]
+        if screenshot_out:
+            with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(content)
+            if "--json" in flags:
+                print(json.dumps({
+                    "screenshot": screenshot_out,
+                    "format": capture_format,
+                    "bytes": len(content),
+                }))
+            else:
+                print(
+                    f"  wrote {capture_format} screenshot: {screenshot_out} "
+                    f"({len(content)} bytes)"
+                )
+        else:
+            sys.stdout.write(content)
+            if not content.endswith("\n"):
+                sys.stdout.write("\n")
+        return 0
+
+    if action == "screenshot":
         svg = picker_app.capture_svg(
             source,
             project=project,
@@ -522,9 +600,14 @@ def _cmd_picker(rest: list[str]) -> int:
             contributions=contributions,
             context_source=context_source,
         )
-        with open(screenshot, "w", encoding="utf-8", newline="\n") as fh:
-            fh.write(svg)
-        print(f"  wrote screenshot: {screenshot}")
+        if screenshot_out:
+            with open(screenshot_out, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(svg)
+            print(f"  wrote screenshot: {screenshot_out}")
+        else:
+            sys.stdout.write(svg)
+            if not svg.endswith("\n"):
+                sys.stdout.write("\n")
         return 0
     return picker_app.run_picker(
         source,
@@ -552,9 +635,6 @@ def _run_production_picker(project: str) -> int:
     action = str(decision.get("action") or "")
     options = decision.get("options")
     opts = dict(options) if isinstance(options, dict) else {}
-    if not bool(decision.get("is_local", True)):
-        print("error: remote Picker launch is not migrated yet; no action was taken.")
-        return 1
     if action == "resume":
         worktree_id = decision.get("worktree_id")
         if not worktree_id:
@@ -566,16 +646,29 @@ def _run_production_picker(project: str) -> int:
             mode="bare-resume" if opts.get("bare_resume") else "resume",
             title=str(decision.get("title") or "") or None,
             no_mux=bool(opts.get("no_mux")),
+            machine=(
+                None if decision.get("is_local", True)
+                else str(decision.get("machine") or "") or None
+            ),
+            environment=(
+                None if decision.get("is_local", True)
+                else str(decision.get("env") or "") or None
+            ),
         ))
     if action == "new":
-        if opts.get("anchor"):
-            print("error: base-repo launch is not migrated yet; no action was taken.")
-            return 1
         return _run_launch(picker_app.LaunchRequest(
             project=project,
             worktree_id=None,
-            mode="new",
+            mode="base" if opts.get("anchor") else "new",
             no_mux=bool(opts.get("no_mux")),
+            machine=(
+                None if decision.get("is_local", True)
+                else str(decision.get("machine") or "") or None
+            ),
+            environment=(
+                None if decision.get("is_local", True)
+                else str(decision.get("env") or "") or None
+            ),
         ))
     if action == "refresh":
         return _cmd_update([])
@@ -591,11 +684,36 @@ def _resolve_for(req) -> "tuple[object | None, int]":
     ``engine_client.resolve_launch_plan`` shells to ``agent-worktrees resolve
     --json`` and never imports the plugin.
     """
-    from .engine_client import EngineError, resolve_launch_plan
+    from .engine_client import (
+        EngineError,
+        EngineFeatureUnavailable,
+        launch_plan_from_dict,
+        resolve_launch_plan,
+    )
     try:
         plan = resolve_launch_plan(
             req.project, worktree_id=req.worktree_id,
-            new=(req.mode == "new"), bare_resume=(req.mode == "bare-resume"))
+            new=(req.mode == "new"), bare_resume=(req.mode == "bare-resume"),
+            base=(req.mode == "base"),
+            target_machine=getattr(req, "machine", None),
+            target_environment=getattr(req, "environment", None),
+            target_no_mux=getattr(req, "no_mux", False),
+        )
+    except EngineFeatureUnavailable:
+        from .production_picker import runner
+
+        try:
+            plan = launch_plan_from_dict(runner.compatibility_remote_plan(
+                req.project,
+                machine=req.machine,
+                environment=getattr(req, "environment", None),
+                worktree_id=req.worktree_id,
+                mode=req.mode,
+                no_mux=getattr(req, "no_mux", False),
+            ))
+        except (RuntimeError, OSError, ValueError) as error:
+            print(f"error: could not resolve a remote launch plan: {error}")
+            return None, 1
     except EngineError as e:
         print(f"error: could not resolve a launch plan: {e}")
         return None, 1
@@ -608,7 +726,7 @@ def _run_launch(req) -> int:
     plan, code = _resolve_for(req)
     if plan is None:
         return code
-    if plan.action != "exec":
+    if plan.action == "none":
         return plan.exit_code
     return launcher.launch(plan, want_mux=not getattr(req, "no_mux", False))
 
@@ -936,9 +1054,12 @@ def main(argv: list[str] | None = None) -> int:
         print("  worktrees [<project>]  live worktrees via the agent-worktrees engine (--json)")
         print("  contracts [--project NAME] [--json]")
         print("                         validate plugin-contributed pivots/actions/cards/config")
-        print("  picker [<project>]     launch the interactive Picker (Textual)")
-        print("  picker --demo          preview the Picker with mock Aperture Labs data")
-        print("  picker [...] --screenshot F  render a headless SVG screenshot to F")
+        print("  picker [<project>]     launch the production Picker (Textual)")
+        print("  picker mock [<project>] [--local] [--json]")
+        print("                         production UX with simulated mutations")
+        print("  picker screenshot [<project>] [--format svg|text|ansi] [--out F]")
+        print("                         capture the production Picker headlessly")
+        print("  picker --demo          preview the retired minimal scaffold")
         print("                         (in the Picker: l launch/resume · b bare-resume · n new)")
         print()
         print("Phase 2 provisions prerequisites + drives the core install; Phase 3")

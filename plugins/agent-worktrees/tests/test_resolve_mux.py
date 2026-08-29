@@ -16,7 +16,8 @@ from agent_worktrees import __main__ as cli
 def _args(**over):
     base = dict(
         json=False, base=False, new_worktree=False, auto=False,
-        worktree_id=None, machine=None, no_mux=False, dry_run=False,
+        worktree_id=None, machine=None, environment=None,
+        target_no_mux=False, no_mux=False, dry_run=False,
         recovery=False, no_resume=False, no_fast_forward=False,
         profile=None, copilot_args=[],
     )
@@ -80,3 +81,86 @@ def test_no_mux_new_without_tty_is_allowed():
     rc, captured = _run_new(_args(new_worktree=True, no_mux=True), tty=False)
     assert rc == 0
     assert captured["no_mux"] is True
+
+
+def test_json_remote_resume_emits_environment_specific_handoff():
+    args = _args(
+        json=True,
+        worktree_id="wt-1",
+        machine="Example",
+        environment="WSL",
+        bare_resume=True,
+        target_no_mux=True,
+    )
+    captured = {}
+
+    def _emit(config, machine, environment, remote_args):
+        captured.update(
+            machine=machine,
+            environment=environment,
+            remote_args=remote_args,
+        )
+        return 0
+
+    with patch.object(cli.cfg, "load_config", return_value=_fake_config()), \
+         patch.object(cli, "_emit_remote_plan_for_env", side_effect=_emit):
+        assert cli.cmd_resolve(args) == 0
+
+    assert captured == {
+        "machine": "Example",
+        "environment": "WSL",
+        "remote_args": [
+            "--worktree-id",
+            "wt-1",
+            "--bare-resume",
+            "--no-mux",
+        ],
+    }
+
+
+def test_json_remote_base_emits_base_handoff():
+    args = _args(
+        json=True,
+        base=True,
+        machine="Example",
+        environment="Win",
+    )
+    captured = {}
+
+    def _emit(config, machine, environment, remote_args):
+        captured["remote_args"] = remote_args
+        return 0
+
+    with patch.object(cli.cfg, "load_config", return_value=_fake_config()), \
+         patch.object(cli, "_emit_remote_plan_for_env", side_effect=_emit):
+        assert cli.cmd_resolve(args) == 0
+
+    assert captured["remote_args"] == ["--base"]
+
+
+def test_remote_plan_rejects_unknown_explicit_environment(tmp_path):
+    entry = cli.cfg.MachineEntry(
+        key="example",
+        display_name="Example",
+        environment="windows",
+        ssh_environments=[
+            cli.cfg.SSHEnvironment(name="windows", alias="example-win"),
+            cli.cfg.SSHEnvironment(name="wsl", alias="example-wsl"),
+        ],
+    )
+    config = SimpleNamespace(
+        machine="local",
+        default_repo=SimpleNamespace(anchor=str(tmp_path)),
+    )
+
+    with patch.object(cli.cfg, "load_machines_yaml", return_value={"example": entry}), \
+         patch.object(cli, "_emit_plan") as emit:
+        result = cli._emit_remote_plan_for_env(
+            config,
+            "Example",
+            "Bogus",
+            ["--new"],
+        )
+
+    assert result is None
+    emit.assert_not_called()

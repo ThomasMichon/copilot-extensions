@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from agent_worktrees import profiles as profiles_mod
-from agent_worktrees.picker_tui import profiles_io
+from worktree_manager.production_picker.picker_tui import profiles_io
 from agent_worktrees.profiles import TargetSel
 
 

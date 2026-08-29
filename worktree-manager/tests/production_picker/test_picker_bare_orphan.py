@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 
-from agent_worktrees.picker_tui import derive
+from worktree_manager.production_picker.picker_tui import derive
 
 _ORPHAN = "\u26a0"  # WARNING SIGN -- the orphan marker prefixed on the title
 

@@ -53,6 +53,17 @@ class EngineError(RuntimeError):
         self.install_hint = install_hint
 
 
+class EngineFeatureUnavailable(EngineError):
+    """The installed engine predates one optional Manager control-plane seam."""
+
+
+def _engine_error_detail(error: EngineError) -> str:
+    """Return the engine's payload/stderr detail without the echoed argv."""
+    text = str(error)
+    marker = "): "
+    return text.rsplit(marker, 1)[-1] if marker in text else text
+
+
 def _engine_override() -> list[str] | None:
     """The overriding base engine command from the environment, if set."""
     raw = os.environ.get(ENGINE_CMD_ENV)
@@ -305,7 +316,8 @@ class LaunchPlan:
         return self.action == "exec"
 
 
-def _to_launch_plan(d: dict) -> LaunchPlan:
+def launch_plan_from_dict(d: dict) -> LaunchPlan:
+    """Parse one engine launch-plan payload."""
     cmd = d.get("cmd")
     return LaunchPlan(
         action=str(d.get("action", "none")),
@@ -327,47 +339,81 @@ def resolve_launch_plan(
     worktree_id: str | None = None,
     new: bool = False,
     bare_resume: bool = False,
+    base: bool = False,
+    target_machine: str | None = None,
+    target_environment: str | None = None,
+    target_no_mux: bool = False,
     timeout: int = _DEFAULT_TIMEOUT,
 ) -> LaunchPlan:
     """Fetch a launch plan via ``agent-worktrees resolve --json`` (process boundary).
 
-    Exactly one of ``worktree_id`` (resume the worktree) or ``new`` (create + launch
-    a fresh worktree) must be given; ``bare_resume`` is the two-step-restore variant
-    of a resume. Mirrors the engine's own ``--json requires --worktree-id or --new``
-    rule so the Manager fails fast rather than shelling out to be rejected.
+    Exactly one of ``worktree_id`` (resume the worktree), ``new`` (create +
+    launch a fresh worktree), or ``base`` (launch the anchor checkout) must be
+    given. ``target_machine`` asks the engine to return an environment-specific
+    remote SSH handoff plan for that same selection.
 
     Version-skew tolerant: an older engine that does not know ``--bare-resume`` is
     retried as a plain resume (degrade the feature, don't fail) -- the same contract
     property :func:`list_worktrees` applies to ``--classify``.
     """
-    if worktree_id and new:
-        raise EngineError("worktree_id and new are mutually exclusive")
-    if not worktree_id and not new:
-        raise EngineError("resolve requires a worktree_id or new=True")
+    selectors = sum(bool(value) for value in (worktree_id, new, base))
+    if selectors != 1:
+        raise EngineError(
+            "resolve requires exactly one of worktree_id, new=True, or base=True"
+        )
 
     args = ["resolve", "--json"]
-    if new:
+    if base:
+        args.append("--base")
+    elif new:
         args.append("--new")
     else:
         args += ["--worktree-id", worktree_id or ""]
     if bare_resume:
         args.append("--bare-resume")
+    if target_machine:
+        args += ["--machine", target_machine]
+        if target_environment:
+            args += ["--environment", target_environment]
+        if target_no_mux:
+            args.append("--target-no-mux")
 
     try:
         obj = run_json(project, args, timeout=timeout)
     except EngineError as e:
-        if bare_resume and "--bare-resume" in str(e):
+        detail = _engine_error_detail(e)
+        if bare_resume and "--bare-resume" in detail:
             return resolve_launch_plan(
                 project, worktree_id=worktree_id, new=new,
+                base=base, target_machine=target_machine,
+                target_environment=target_environment,
+                target_no_mux=target_no_mux,
                 bare_resume=False, timeout=timeout)
-        raise
+        if target_machine and any(
+            flag in detail
+            for flag in ("--machine", "--environment", "--target-no-mux")
+        ):
+            raise EngineFeatureUnavailable(
+                "the installed engine predates remote Picker launch plans"
+            ) from e
+        if base and (
+            "--base" in detail
+            or "--json requires --worktree-id or --new" in detail
+        ):
+            obj = run_json(
+                project,
+                ["resolve", "--base", "--no-mux"],
+                timeout=timeout,
+            )
+        else:
+            raise
 
     # agent-bridge's ACP path nests the plan under ``launch``; the interactive
     # resolve emits it flat. Unwrap defensively so either shape parses (mirrors
     # the shell launcher's own unwrap).
     if isinstance(obj.get("launch"), dict):
         obj = obj["launch"]
-    return _to_launch_plan(obj)
+    return launch_plan_from_dict(obj)
 
 
 def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:

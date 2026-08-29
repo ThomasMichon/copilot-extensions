@@ -23,9 +23,9 @@ import pytest
 
 pytest.importorskip("textual", reason="textual not installed (optional TUI dep)")
 
-from agent_worktrees.picker_tui import capture as pcap  # noqa: E402
-from agent_worktrees.picker_tui import derive  # noqa: E402
-from agent_worktrees.picker_tui import obscure as pobs  # noqa: E402
+from worktree_manager.production_picker.picker_tui import capture as pcap  # noqa: E402
+from worktree_manager.production_picker.picker_tui import derive  # noqa: E402
+from worktree_manager.production_picker.picker_tui import obscure as pobs  # noqa: E402
 
 GOLDEN_DIR = os.path.join(os.path.dirname(__file__), "goldens", "picker")
 
