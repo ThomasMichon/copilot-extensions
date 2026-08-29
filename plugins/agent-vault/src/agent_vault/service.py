@@ -61,6 +61,7 @@ UNLOCK_COOLDOWN = 5
 
 # Extended cooldown after a prompt cycle ends with dismissal/timeout.
 PROMPT_DISMISS_COOLDOWN = int(os.environ.get("VAULT_PROMPT_DISMISS_COOLDOWN", "120"))
+PASSWORD_MUTATION_MAX_QUEUE_SECONDS = 30.0
 
 UNLOCK_REQUIRED_ACTIONS = frozenset({
     "get", "has", "search", "add", "set-password", "set-username",
@@ -166,11 +167,28 @@ class VaultService:
         password: str,
         vault_name: str,
         reason: str,
+        max_queue_seconds: float = PASSWORD_MUTATION_MAX_QUEUE_SECONDS,
     ) -> dict:
-        with self._credential_lock:
+        deadline = time.monotonic() + max_queue_seconds
+        if not self._credential_lock.acquire(timeout=max_queue_seconds):
+            return {
+                "ok": False,
+                "error": "Password mutation expired before the backend write",
+            }
+        try:
+            if time.monotonic() > deadline:
+                return {
+                    "ok": False,
+                    "error": "Password mutation expired before the backend write",
+                }
             if not self.ensure_unlocked(kpdb, vault_name, reason):
                 error_msg = self._last_error(kpdb) or self._last_error("") or "Vault locked"
                 return {"ok": False, "error": error_msg, "needs_unlock": True}
+            if time.monotonic() > deadline:
+                return {
+                    "ok": False,
+                    "error": "Password mutation expired before the backend write",
+                }
             operation = time.time_ns()
             try:
                 persistent, operation = self._prepare_password_cache(
@@ -252,6 +270,8 @@ class VaultService:
                     "error": str(exc),
                 }
             return {"ok": True, "message": msg, "generation": generation}
+        finally:
+            self._credential_lock.release()
 
     @property
     def ttl(self) -> int:
