@@ -344,6 +344,11 @@ def test_resolve_for_uses_remote_compatibility_on_older_engine(monkeypatch):
     assert plan.raw["ssh_alias"] == "example-wsl"
 
 
+def test_remote_compatibility_rejects_shell_metacharacters():
+    with pytest.raises(RuntimeError, match="unsafe remote launch token"):
+        runner._remote_command(["demo;Remove-Item", "--new"])
+
+
 def test_normal_picker_command_uses_production_transplant(monkeypatch):
     monkeypatch.setattr(entrypoint, "engine_available", lambda: True)
     monkeypatch.setattr(entrypoint, "build_projects", lambda: [])

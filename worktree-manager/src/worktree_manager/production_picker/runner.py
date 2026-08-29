@@ -3,12 +3,23 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 from collections.abc import Mapping
 from typing import Any
 
 from ._engine_runtime import engine_module
 from .picker_tui import run_tui_picker
+
+_SAFE_REMOTE_TOKEN = re.compile(r"^[A-Za-z0-9._:/@+-]+$")
+
+
+def _remote_command(tokens: list[str]) -> str:
+    """Join cross-shell-safe SSH command tokens without interpretation."""
+    unsafe = [token for token in tokens if not _SAFE_REMOTE_TOKEN.fullmatch(token)]
+    if unsafe:
+        raise RuntimeError(f"unsafe remote launch token: {unsafe[0]!r}")
+    return " ".join(tokens)
 
 
 def _prepare(project: str, *, heal: bool = True) -> tuple[Any, bool]:
@@ -165,7 +176,7 @@ def compatibility_remote_plan(
             remote_args.append("--bare-resume")
     if no_mux:
         remote_args.append("--no-mux")
-    remote_command = " ".join([project, *remote_args])
+    remote_command = _remote_command([project, *remote_args])
     return {
         "action": "remote",
         "ssh_alias": ssh_alias,
