@@ -21,6 +21,34 @@ GOVERNANCE_FIXTURES = LIB / "fixtures" / "installation-mode-governance.json"
 PLUGIN_ID = "agent-example"
 
 
+def _supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    candidate = shutil.which("bash")
+    if candidate is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                candidate,
+                "--noprofile",
+                "--norc",
+                "-c",
+                "((BASH_VERSINFO[0] > 4 || "
+                "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return candidate if result.returncode == 0 else None
+
+
+BASH = _supported_bash()
+
+
 def _load_module():
     spec = importlib.util.spec_from_file_location("installation_context", PYTHON_SCRIPT)
     assert spec and spec.loader
@@ -338,7 +366,9 @@ def _runner_command(name: str, arguments: list[str]) -> list[str]:
     if name == "python":
         return [sys.executable, str(PYTHON_SCRIPT), *arguments]
     if name == "posix":
-        return [str(POSIX_SCRIPT), *arguments]
+        if BASH is None:
+            pytest.skip("Bash runner is unavailable")
+        return [BASH, str(POSIX_SCRIPT), *arguments]
     assert POWERSHELL is not None
     mapping = {
         "--payload-root": "-PayloadRoot",
@@ -486,6 +516,7 @@ def test_python_policy_precedence_and_preactivation_semantics(tmp_path: Path) ->
     assert migration["probeReason"] == "migration-required"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX environment fixture")
 def test_activation_validation_and_policy_invalid_preserve_actual_root(
     tmp_path: Path,
 ) -> None:
@@ -566,6 +597,7 @@ def test_activation_validation_and_policy_invalid_preserve_actual_root(
     assert reactivation["actualMode"] == "legacy"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX environment fixture")
 def test_tombstone_validation_blocks_mutation_and_orphans_fail_closed(
     tmp_path: Path,
 ) -> None:
@@ -849,6 +881,7 @@ def test_namespaced_paths_with_newlines_round_trip_across_runners(
         ),
     ],
 )
+@pytest.mark.skipif(os.name == "nt", reason="WSL identity requires a POSIX host")
 def test_empty_wsl_identity_is_foreign_across_runners(
     tmp_path: Path, runner: str
 ) -> None:
@@ -2096,6 +2129,7 @@ def test_activation_cas_refuses_generation_overflow_without_replacement(
         ),
     ],
 )
+@pytest.mark.skipif(os.name == "nt", reason="WSL identity requires a POSIX host")
 def test_activation_generation_and_environment_classification_match(
     tmp_path: Path, runner: str
 ) -> None:

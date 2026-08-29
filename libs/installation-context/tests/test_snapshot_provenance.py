@@ -23,9 +23,38 @@ POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 FIXTURES = LIB / "fixtures" / "source-identities.json"
 Runner = tuple[str, tuple[str, ...], str]
 
+
+def _supported_bash() -> str | None:
+    if os.name == "nt":
+        return None
+    candidate = shutil.which("bash")
+    if candidate is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                candidate,
+                "--noprofile",
+                "--norc",
+                "-c",
+                "((BASH_VERSINFO[0] > 4 || "
+                "(BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4)))",
+            ],
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return candidate if result.returncode == 0 else None
+
+
+BASH = _supported_bash()
+
+
 RUNNERS: tuple[Runner, ...] = (
     ("python", (sys.executable, str(PYTHON_SCRIPT)), "long"),
-    ("posix", (str(POSIX_SCRIPT),), "long"),
+    *((("posix", (str(BASH), str(POSIX_SCRIPT)), "long"),) if BASH else ()),
     *(
         (
             (
@@ -61,6 +90,21 @@ def _vectors() -> list[dict[str, object]]:
 def _write_json(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def test_private_json_write_syncs_file_and_posix_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_python_module()
+    syncs: list[int] = []
+    monkeypatch.setattr(module.os, "fsync", syncs.append)
+
+    path = tmp_path / "private.json"
+    module._write_private_json(path, {"value": 1})
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {"value": 1}
+    assert len(syncs) == (1 if os.name == "nt" else 2)
 
 
 def _receipt_layout(
@@ -384,21 +428,39 @@ def _legacy_footprint_snapshot(
 
 
 EXEMPLAR_INSTALLERS = (
-    (
-        "agent-machines",
+    *(
         (
-            "bash",
-            str(LIB.parents[1] / "plugins" / "agent-machines" / "scripts" / "init.sh"),
-        ),
-        "long",
-    ),
-    (
-        "agent-index",
-        (
-            "bash",
-            str(LIB.parents[1] / "plugins" / "agent-index" / "scripts" / "install.sh"),
-        ),
-        "long",
+            (
+                "agent-machines",
+                (
+                    str(BASH),
+                    str(
+                        LIB.parents[1]
+                        / "plugins"
+                        / "agent-machines"
+                        / "scripts"
+                        / "init.sh"
+                    ),
+                ),
+                "long",
+            ),
+            (
+                "agent-index",
+                (
+                    str(BASH),
+                    str(
+                        LIB.parents[1]
+                        / "plugins"
+                        / "agent-index"
+                        / "scripts"
+                        / "install.sh"
+                    ),
+                ),
+                "long",
+            ),
+        )
+        if BASH is not None
+        else ()
     ),
     *(
         (
@@ -1066,6 +1128,7 @@ def test_runtime_slot_rejects_snapshot_provenance_tampering(
     assert "does not match the validated snapshot" in result.stderr
 
 
+@pytest.mark.skipif(BASH is None, reason="Bash is unavailable")
 def test_posix_slot_publication_failure_releases_owned_empty_reservation(
     tmp_path: Path,
 ) -> None:
@@ -1093,6 +1156,7 @@ def test_posix_slot_publication_failure_releases_owned_empty_reservation(
     assert json.loads(_run_slot(posix, "slot-provision", layout).stdout)["slotChanged"]
 
 
+@pytest.mark.skipif(BASH is None, reason="Bash is unavailable")
 def test_posix_slot_digest_failure_releases_owned_empty_reservation(
     tmp_path: Path,
 ) -> None:
@@ -1290,7 +1354,6 @@ def test_runtime_slot_serializes_concurrent_publishers(
     assert sorted(result["slotChanged"] for result in results) == [False, True]
     assert len({result["ownership"] for result in results}) == 1
     assert Path(results[0]["ownership"]).is_file()
-
 
 def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
     tmp_path: Path,
@@ -2027,6 +2090,8 @@ def test_snapshot_identity_mismatches_fail_closed(
     target = provenance
     for key in path[:-1]:
         target = target[key]
+    if isinstance(replacement, str) and replacement.startswith("/other/"):
+        replacement = str(tmp_path / replacement.removeprefix("/other/"))
     target[path[-1]] = replacement
     _write_json(provenance_path, provenance)
     before = _tree_snapshot(Path(layout["durable"]))
@@ -2517,3 +2582,23 @@ def test_concurrent_snapshot_publication_has_one_atomic_winner_and_retry(
     assert sum(payload["snapshotChanged"] is False for payload in payloads) == 1
     provenance = _provenance_path(layout)
     assert json.loads(provenance.read_text(encoding="utf-8"))["snapshot"]["id"] == "1.0.0"
+
+
+@pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is unavailable")
+def test_powershell_lock_owner_invalid_utf8_is_classified(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    lock = (
+        Path(layout["durable"])
+        / "marketplaces"
+        / ".locks"
+        / f"{layout['marketplace_id']}.genesis"
+    )
+    lock.mkdir(parents=True)
+    (lock / "owner.json").write_bytes(b"\xff")
+    runner = next(candidate for candidate in RUNNERS if candidate[0] == "powershell")
+
+    result = _run(runner, "snapshot-stamp", layout, check=False)
+
+    assert result.returncode != 0
+    assert "invalid utf-8 in installation lock owner receipt" in result.stderr.lower()
+    assert "decoderfallbackexception" not in result.stderr.lower()

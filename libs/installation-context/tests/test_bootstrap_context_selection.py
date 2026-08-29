@@ -100,6 +100,8 @@ def _prepare_legacy_current(home: Path, plugin: str) -> None:
 
 
 def _run_shell(plugin: str, environment: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    if os.name == "nt":
+        pytest.skip("Bash runner is unavailable on native Windows")
     return subprocess.run(
         ["bash", str(REPO / "plugins" / plugin / "scripts" / "bootstrap-check.sh")],
         capture_output=True,

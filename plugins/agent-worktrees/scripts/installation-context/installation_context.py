@@ -274,6 +274,20 @@ def _atomic_write_json(
             temporary.unlink()
 
 
+def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
+    descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(_json_bytes(value))
+        stream.flush()
+        os.fsync(stream.fileno())
+    if os.name != "nt":
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+
 def _openprocess_denied_means_live(last_error: int) -> bool:
     return last_error == WINDOWS_ERROR_ACCESS_DENIED
 
@@ -409,6 +423,7 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
                     owner = self._owner()
                 except InstallationContextError:
                     if not self.path.exists() or not self.owner_path.exists():
+                        time.sleep(LOCK_POLL_SECONDS)
                         continue
                     raise
                 owner_host = _string_property(owner, "host")
@@ -471,11 +486,26 @@ class _DirectoryLock(AbstractContextManager["_DirectoryLock"]):
         if not self.acquired:
             return
         self.assert_owned()
-        self.owner_path.unlink()
-        try:
-            self.path.rmdir()
-        except OSError as error:
-            _fail(f"Cannot release installation lock '{self.path}': {error}")
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                self.owner_path.unlink()
+                break
+            except PermissionError as error:
+                if time.monotonic() >= deadline:
+                    _fail(f"Cannot release installation lock '{self.path}': {error}")
+                time.sleep(LOCK_POLL_SECONDS)
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                self.path.rmdir()
+                break
+            except PermissionError as error:
+                if time.monotonic() >= deadline:
+                    _fail(f"Cannot release installation lock '{self.path}': {error}")
+                time.sleep(LOCK_POLL_SECONDS)
+            except OSError as error:
+                _fail(f"Cannot release installation lock '{self.path}': {error}")
         self.acquired = False
 
     def __enter__(self) -> _DirectoryLock:
@@ -2446,7 +2476,7 @@ def provision_runtime_slot(
             _fail("Versions root must be an ordinary directory.")
         slot_digest = hashlib.sha256(os.fsencode(slot_root)).hexdigest()[:16]
         temporary_slot = versions_root.parent / (
-            f".runtime-slot-{slot_digest}-{secrets.token_hex(16)}"
+            f".runtime-slot-{slot_digest}-{secrets.token_hex(8)}"
         )
         temporary_ownership = temporary_slot / RUNTIME_SLOT_OWNERSHIP_FILE
         try:
@@ -2458,11 +2488,9 @@ def provision_runtime_slot(
                 slot_root,
                 created_at=_utc_now(),
             )
-            _atomic_write_json(
-                temporary_ownership,
-                ownership,
-                lock=(genesis_lock, install_lock),
-            )
+            genesis_lock.assert_owned()
+            install_lock.assert_owned()
+            _write_private_json(temporary_ownership, ownership)
             genesis_lock.assert_owned()
             install_lock.assert_owned()
             _rename_directory_no_replace(temporary_slot, slot_root)
