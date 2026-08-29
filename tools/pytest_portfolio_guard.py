@@ -10,6 +10,7 @@ import pytest
 try:
     from plugin_test_containment import (
         ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES,
         CONTAINED_ENV,
         ROOT_ENV_NAMES,
         SANDBOX_ENV,
@@ -17,6 +18,7 @@ try:
 except ModuleNotFoundError:
     from tools.plugin_test_containment import (
         ALLOW_HOST_STATE_ENV,
+        ALWAYS_SANDBOX_ENV_NAMES,
         CONTAINED_ENV,
         ROOT_ENV_NAMES,
         SANDBOX_ENV,
@@ -57,15 +59,16 @@ def validate_contained_environment() -> None:
     raw_sandbox = os.environ.get(SANDBOX_ENV)
     if not raw_sandbox:
         raise pytest.UsageError(f"{SANDBOX_ENV} is required for contained tests")
-    if os.environ.get(ALLOW_HOST_STATE_ENV) == "1":
+    allow_host_state = os.environ.get(ALLOW_HOST_STATE_ENV) == "1"
+    if allow_host_state:
         if os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1":
             raise pytest.UsageError(
                 f"{ALLOW_HOST_STATE_ENV} requires explicit test tiers"
             )
-        return
     sandbox = Path(raw_sandbox)
     escaped = []
-    for name in ROOT_ENV_NAMES:
+    root_names = ALWAYS_SANDBOX_ENV_NAMES if allow_host_state else ROOT_ENV_NAMES
+    for name in root_names:
         value = os.environ.get(name)
         if not value or not _is_within(Path(value), sandbox):
             escaped.append(f"{name}={value!r}")

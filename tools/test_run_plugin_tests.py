@@ -18,6 +18,7 @@ sys.modules[_spec.name] = runner
 _spec.loader.exec_module(runner)
 
 import plugin_test_containment as containment  # noqa: E402
+import pytest_portfolio_guard as portfolio_guard  # noqa: E402
 
 
 def test_default_environment_redirects_all_mutable_roots(tmp_path: Path) -> None:
@@ -61,6 +62,26 @@ def test_host_state_opt_in_preserves_credentials_not_session_affinity(
     assert env[containment.ALLOW_HOST_STATE_ENV] == "1"
     assert "COPILOT_AGENT_SESSION_ID" not in env
     assert "AGENT_WORKTREES_OWNER_REF" not in env
+    for name in containment.ALWAYS_SANDBOX_ENV_NAMES:
+        Path(env[name]).resolve().relative_to(tmp_path.resolve())
+
+
+def test_host_state_still_fails_closed_on_escaped_temp(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    env = containment.isolated_environment(
+        os.environ,
+        tmp_path,
+        allow_explicit_tiers=True,
+        allow_host_state=True,
+    )
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("TMPDIR", str(tmp_path.parent))
+
+    with pytest.raises(pytest.UsageError, match="TMPDIR"):
+        portfolio_guard.validate_contained_environment()
 
 
 def test_admission_fails_fast_with_live_holder(monkeypatch, tmp_path: Path) -> None:

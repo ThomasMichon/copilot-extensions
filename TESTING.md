@@ -64,7 +64,8 @@ not belong in the declared tier. T3 clean-room and T4 end-to-end families are
 skipped unless the caller passes `--allow-explicit-tiers`; target-specific
 environment gates still apply. Credential-dependent explicit-tier checks may
 also pass `--allow-host-state`; this preserves host credentials and config
-roots while still removing live Copilot session and worktree-owner bindings.
+roots while keeping temporary/runtime roots sandboxed and removing live Copilot
+session and worktree-owner bindings.
 
 The shared `agent-procutil` spawn helper detects contained test runs and
 suppresses deliberate Windows Job breakaway and POSIX session detachment.

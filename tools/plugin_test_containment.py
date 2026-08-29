@@ -59,6 +59,12 @@ _FILE_ENV = {
 }
 
 ROOT_ENV_NAMES = tuple((*_ROOT_ENV, *_FILE_ENV))
+ALWAYS_SANDBOX_ENV_NAMES = (
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "XDG_RUNTIME_DIR",
+)
 
 _ALWAYS_SCRUB_NAMES = {
     "AGENT_RT_ROOT",
@@ -204,6 +210,10 @@ def isolated_environment(
         env.pop(name, None)
     if allow_host_state:
         env[ALLOW_HOST_STATE_ENV] = "1"
+        for name in ALWAYS_SANDBOX_ENV_NAMES:
+            value = root.joinpath(*_ROOT_ENV[name].split("/"))
+            value.mkdir(parents=True, exist_ok=True)
+            env[name] = str(value)
     else:
         env.pop(ALLOW_HOST_STATE_ENV, None)
         for name in _CREDENTIAL_NAMES:
