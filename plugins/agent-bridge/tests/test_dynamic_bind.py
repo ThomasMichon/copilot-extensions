@@ -12,6 +12,7 @@ from __future__ import annotations
 import socket
 
 import agent_bridge.__main__ as m
+import pytest
 
 
 def test_dynamic_is_default_when_unpinned(monkeypatch):
@@ -65,7 +66,18 @@ def test_bind_listen_socket_is_a_real_socket():
     sock = m._bind_listen_socket("127.0.0.1", 0)
     try:
         assert isinstance(sock, socket.socket)
-        # Listening is possible on the returned bound socket.
-        sock.listen(1)
+        # The kernel accepts connections before uvicorn attaches after lifespan.
+        with socket.create_connection(sock.getsockname(), timeout=1):
+            pass
     finally:
         sock.close()
+
+
+def test_bind_listen_socket_rejects_occupied_fixed_port():
+    owner = m._bind_listen_socket("127.0.0.1", 0)
+    try:
+        port = owner.getsockname()[1]
+        with pytest.raises(OSError):
+            m._bind_listen_socket("127.0.0.1", port)
+    finally:
+        owner.close()
