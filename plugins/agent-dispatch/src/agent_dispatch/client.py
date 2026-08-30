@@ -22,6 +22,13 @@ class DispatchError(RuntimeError):
         self.detail = detail
 
 
+class DispatchUpgradeRequired(DispatchError):
+    """The coordinator accepted a request but lacks the required protocol."""
+
+    def __init__(self, detail: str):
+        super().__init__(426, detail)
+
+
 class DispatchClient:
     """A synchronous client for one coordinator base URL."""
 
@@ -88,6 +95,9 @@ class DispatchClient:
 
     def payload(self, task_id: str) -> dict:
         return self._unwrap(self._http.get(f"/tasks/{task_id}/payload"))
+
+    def result(self, task_id: str) -> dict:
+        return self._unwrap(self._http.get(f"/tasks/{task_id}/result"))
 
     def list(self, **params: Any) -> list[dict]:
         clean = {k: v for k, v in params.items() if v is not None}
@@ -216,22 +226,37 @@ class DispatchClient:
         worker_id: str,
         *,
         result_ref: str | None = None,
+        result: Any = None,
         expected_status: str | None = None,
         expected_owner_session_id: str | None = None,
         expected_generation: int | None = None,
     ) -> dict:
-        return self._unwrap(
+        body = {
+            "worker_id": worker_id,
+            "result_ref": result_ref,
+            "expected_status": expected_status,
+            "expected_owner_session_id": expected_owner_session_id,
+            "expected_generation": expected_generation,
+        }
+        if result is not None:
+            body["result"] = result
+        completed = self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/complete",
-                json={
-                    "worker_id": worker_id,
-                    "result_ref": result_ref,
-                    "expected_status": expected_status,
-                    "expected_owner_session_id": expected_owner_session_id,
-                    "expected_generation": expected_generation,
-                },
+                json=body,
             )
         )
+        if result is not None:
+            expected = json.loads(
+                json.dumps(result, ensure_ascii=False, allow_nan=False)
+            )
+            if completed.get("result") != expected:
+                raise DispatchUpgradeRequired(
+                    "the coordinator completed the task without recording the "
+                    "structured result; upgrade the coordinator and retry the "
+                    "same-owner completion to fill the missing result"
+                )
+        return completed
 
     def abandon(
         self,

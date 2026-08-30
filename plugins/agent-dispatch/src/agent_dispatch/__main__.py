@@ -1423,8 +1423,47 @@ def _cmd_complete(args: argparse.Namespace) -> int:
     worker_id = _resolve_owner(args, verb="complete")
     if worker_id is None:
         return 2
+    try:
+        result = _read_result(args)
+    except (OSError, ValueError) as exc:
+        print(f"agent-dispatch: invalid result: {exc}", file=sys.stderr)
+        return 2
     with _client(args) as c:
-        return _emit(c.complete(args.task_id, worker_id, result_ref=args.result_ref))
+        return _emit(
+            c.complete(
+                args.task_id,
+                worker_id,
+                result_ref=args.result_ref,
+                result=result,
+            )
+        )
+
+
+def _read_result(args: argparse.Namespace) -> object | None:
+    """Read and decode the complete command's optional JSON result."""
+    raw = args.result_json
+    if args.result_file is not None:
+        if args.result_file == "-":
+            raw = sys.stdin.read()
+        else:
+            path = Path(args.result_file).expanduser()
+            raw = path.read_text(encoding="utf-8-sig")
+    if raw is None:
+        return None
+    raw = raw.removeprefix("\ufeff")
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"not valid JSON: {exc}") from exc
+    if result is None:
+        raise ValueError("result must be a JSON object or array, not null")
+    from .queue import ResultTooLargeError, ResultValidationError, encode_result
+
+    try:
+        encode_result(result)
+    except (ResultValidationError, ResultTooLargeError) as exc:
+        raise ValueError(str(exc)) from exc
+    return result
 
 
 def _cmd_abandon(args: argparse.Namespace) -> int:
@@ -1758,6 +1797,23 @@ def _consume_already_spent(task_id: str, task: dict) -> int:
         file=sys.stderr,
     )
     return 3
+
+
+def _cmd_result(args: argparse.Namespace) -> int:
+    with _client(args) as c:
+        result = c.result(args.task_id)
+    if args.raw:
+        content = result.get("result")
+        if content is None:
+            print(
+                f"agent-dispatch: task {args.task_id} has no structured result",
+                file=sys.stderr,
+            )
+            return 1
+        json.dump(content, sys.stdout, ensure_ascii=False)
+        sys.stdout.write("\n")
+        return 0
+    return _emit(result)
 
 
 def _cmd_consume(args: argparse.Namespace) -> int:
@@ -3598,6 +3654,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--machine", help="override the resolved machine identity")
     p.add_argument("--worktree", help="override the resolved worktree identity")
     p.add_argument("--result-ref")
+    result_group = p.add_mutually_exclusive_group()
+    result_group.add_argument(
+        "--result-json",
+        help="structured completion result as JSON",
+    )
+    result_group.add_argument(
+        "--result-file",
+        metavar="PATH",
+        help="read the structured completion result from a JSON file; '-' reads stdin",
+    )
     p.set_defaults(func=_cmd_complete)
 
     p = sub.add_parser(
@@ -3862,6 +3928,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--raw", action="store_true", help="print the payload content only (not JSON)"
     )
     p.set_defaults(func=_cmd_payload)
+
+    p = sub.add_parser("result", help="show a task's structured completion result")
+    p.add_argument("task_id")
+    p.add_argument(
+        "--raw", action="store_true", help="print the result JSON only (not the envelope)"
+    )
+    p.set_defaults(func=_cmd_result)
 
     p = sub.add_parser(
         "consume",

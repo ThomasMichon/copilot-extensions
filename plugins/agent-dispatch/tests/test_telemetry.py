@@ -216,6 +216,17 @@ def test_make_spool_sink_appends_jsonl_with_ts(tmp_path) -> None:
     assert isinstance(rows[0]["ts"], int)  # emit ts stamped when absent
 
 
+def test_result_recorded_telemetry_is_distinct_from_completion() -> None:
+    record = telemetry.task_lifecycle_event(
+        "task.result_recorded",
+        {"id": "t1", "status": "completed", "result": {"secret": "excluded"}},
+    )
+
+    assert record["event"] == "task.result_recorded"
+    assert record["to"] == "completed"
+    assert "result" not in record
+
+
 def test_make_spool_sink_preserves_existing_ts(tmp_path) -> None:
     _reset()
     spool = tmp_path / "s.spool"
