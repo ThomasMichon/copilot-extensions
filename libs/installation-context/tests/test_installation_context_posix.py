@@ -22,7 +22,14 @@ PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
 FIXTURES = LIB / "fixtures" / "source-identities.json"
 POWERSHELL_TEST_HOST = Path(__file__).with_name("powershell-test-host.ps1")
-POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
+POWERSHELL_HOSTS = tuple(
+    dict.fromkeys(
+        host
+        for host in (shutil.which("pwsh"), shutil.which("powershell"))
+        if host is not None
+    )
+)
+POWERSHELL = POWERSHELL_HOSTS[0] if POWERSHELL_HOSTS else None
 POWERSHELL_COMMAND = (
     (
         str(POWERSHELL),
@@ -88,6 +95,9 @@ def _bounded_powershell_host() -> None:
 
 EXHAUSTIVE_ADAPTERS = (
     os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
+)
+POWERSHELL_VECTOR_HOSTS = (
+    POWERSHELL_HOSTS if EXHAUSTIVE_ADAPTERS else POWERSHELL_HOSTS[:1]
 )
 ADAPTER_VECTOR_NAMES = {
     "github",
@@ -920,12 +930,23 @@ def test_python_and_posix_match_adapter_source_vectors(
         _assert_source_identity(json.loads(result.stdout), vector)
 
 
-@pytest.mark.skipif(POWERSHELL_COMMAND is None, reason="PowerShell is not installed")
-def test_powershell_matches_adapter_source_vectors() -> None:
-    assert POWERSHELL_COMMAND is not None
+@pytest.mark.parametrize("powershell_host", POWERSHELL_VECTOR_HOSTS or [None])
+def test_powershell_matches_adapter_source_vectors(
+    powershell_host: str | None,
+) -> None:
+    if powershell_host is None:
+        pytest.skip("PowerShell is not installed")
+    command = (
+        powershell_host,
+        "-NoProfile",
+        "-NoLogo",
+        "-NonInteractive",
+        "-File",
+        str(LIB / "installation-context.ps1"),
+    )
     for vector in _adapter_vectors():
         result = _run(
-            POWERSHELL_COMMAND,
+            command,
             "source-id",
             "-SourceJson",
             json.dumps(vector["descriptor"], separators=(",", ":")),

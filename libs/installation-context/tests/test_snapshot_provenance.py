@@ -84,6 +84,7 @@ ALL_RUNNERS: tuple[Runner, ...] = (
         else ()
     ),
 )
+RUNNERS = ALL_RUNNERS
 PARITY_RUNNERS = ALL_RUNNERS
 EXHAUSTIVE_ADAPTERS = (
     os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
@@ -409,6 +410,7 @@ def _run(
                 str(POWERSHELL),
                 POWERSHELL_TEST_HOST,
                 LIB / "installation-context.ps1",
+                timeout_seconds=60,
             )
         _, prefix, _ = runner
         result = _POWERSHELL_HOST.run(
@@ -486,6 +488,7 @@ def _run_context_validate(
                 str(POWERSHELL),
                 POWERSHELL_TEST_HOST,
                 LIB / "installation-context.ps1",
+                timeout_seconds=60,
             )
         return _POWERSHELL_HOST.run(arguments, None)
     environment = os.environ.copy()
@@ -622,6 +625,7 @@ def _run_completion(
     expected_payload_version: str | None = None,
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
+    direct: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return _run_slot(
         runner,
@@ -632,6 +636,7 @@ def _run_completion(
         expected_payload_version=expected_payload_version or _payload_version(layout),
         environment_overrides=environment_overrides,
         check=check,
+        direct=direct,
     )
 
 
@@ -645,6 +650,7 @@ def _run_cutover(
     expected_current_version: str | None = None,
     expect_current_absent: bool = False,
     check: bool = True,
+    direct: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return _run(
         runner,
@@ -658,6 +664,7 @@ def _run_cutover(
         expected_current_version=expected_current_version,
         expect_current_absent=expect_current_absent,
         check=check,
+        direct=direct,
     )
 
 
@@ -1240,7 +1247,7 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     exemplar: tuple[str, tuple[str, ...], str],
     tmp_path: Path,
 ) -> None:
-    plugin_id, prefix, style = exemplar
+    plugin_id, prefix, _style = exemplar
     plugin_root = Path(prefix[-1]).parents[1]
     version = next(
         line.split('"')[1]
@@ -4165,7 +4172,12 @@ def test_runtime_slot_completion_serializes_concurrent_publishers(
     with ThreadPoolExecutor(max_workers=2) as executor:
         completed = list(
             executor.map(
-                lambda _: _run_completion(runner, "slot-complete", layout),
+                lambda _: _run_completion(
+                    runner,
+                    "slot-complete",
+                    layout,
+                    direct=True,
+                ),
                 range(2),
             )
         )
@@ -4270,7 +4282,7 @@ def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receip
     recorded = published["receipt"]["build"]
     matched = [
         candidate
-        for candidate, content in zip(candidates, candidate_bytes)
+        for candidate, content in zip(candidates, candidate_bytes, strict=True)
         if recorded["receiptSha256"] == hashlib.sha256(content).hexdigest()
         and recorded["pid"] == candidate["pid"]
         and published["receipt"]["completedAt"] == candidate["completed_at"]
@@ -4615,6 +4627,7 @@ def test_runtime_slot_cutover_serializes_concurrent_winners(
                     layout,
                     runtime_version=version,
                     expected_current_version="1.0.0",
+                    direct=True,
                 ),
                 ("2.0.0", "3.0.0"),
             )
