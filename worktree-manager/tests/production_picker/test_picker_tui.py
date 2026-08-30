@@ -3785,6 +3785,26 @@ def test_provider_runner_cannot_be_created_after_unmount():
         screen._provider_runner()
 
 
+def test_live_provider_runner_cannot_be_reused_after_unmount():
+    from worktree_manager.production_picker.picker_tui import data_local
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+
+    screen = PickerScreen(data_local, live=True)
+
+    class _FakeLoader:
+        def cancel(self):
+            pass
+
+        def _spawn(self, argv, timeout):  # pragma: no cover - must not run
+            raise AssertionError("cancelled loader must not be reused")
+
+    screen.loader = _FakeLoader()
+    screen.on_unmount()
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        screen._provider_runner()
+
+
 def test_update_indicator_focus_glyph_and_refresh():
     """The launcher-stage update state drives the version glyph, the focusable
     refresh stop, and the refresh decision (#1430)."""

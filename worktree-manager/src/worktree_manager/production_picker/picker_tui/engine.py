@@ -4124,12 +4124,12 @@ class PickerScreen(Widget):
 
     def _provider_runner(self):
         """Return the Picker-owned tracked runner for local provider commands."""
-        loader = getattr(self, "loader", None)
-        if loader is not None:
-            return loader._spawn
         with self._provider_loader_lock:
             if self._provider_cancelled:
                 raise RuntimeError("picker provider runner is cancelled")
+            loader = getattr(self, "loader", None)
+            if loader is not None:
+                return loader._spawn
             if self._provider_loader is None:
                 from . import data_ssh
 
