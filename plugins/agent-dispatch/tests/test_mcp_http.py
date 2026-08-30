@@ -87,16 +87,79 @@ def test_mcp_endpoint_lists_tools(coord):
     names = sorted(t.name for t in tools)
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 25
+    assert len(names) == 26
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= set(
         names
     )
     assert "dispatch_wakes" in names
     assert "dispatch_result" in names
+    assert "dispatch_rearm_spawn" in names
     complete = next(t for t in tools if t.name == "dispatch_complete")
     result_schema = complete.input_schema["properties"]["result"]
     variants = result_schema.get("anyOf", [result_schema])
     assert {variant.get("type") for variant in variants} == {"array", "object"}
+
+
+def test_mcp_rearm_spawn(coord):
+    import asyncio
+    import json
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    for _ in range(3):
+        reservation = client.reserve_spawn(task["id"])["reservation"]
+        client.fail_spawn(reservation["key"], detail="down")
+
+    response = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_rearm_spawn",
+            {
+                "task_id": task["id"],
+                "permit": True,
+                "reason": "transport repaired",
+            },
+        )
+    )
+    result = json.loads(response.content[0].text)
+    assert result["rearmed"] == 3
+
+
+def test_mcp_rearm_spawn_reaches_rest_sse(coord):
+    import asyncio
+    import threading
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    for _ in range(3):
+        reservation = client.reserve_spawn(task["id"])["reservation"]
+        client.fail_spawn(reservation["key"], detail="down")
+
+    seen = []
+
+    def watch():
+        with DispatchClient(coord) as watcher:
+            for event in watcher.stream_events():
+                seen.append(event)
+                if event.get("type") == "spawn.rearmed":
+                    break
+
+    thread = threading.Thread(target=watch, daemon=True)
+    thread.start()
+    time.sleep(0.5)
+    asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_rearm_spawn",
+            {
+                "task_id": task["id"],
+                "permit": True,
+                "reason": "transport repaired",
+            },
+        )
+    )
+    thread.join(timeout=5)
+    assert any(event.get("type") == "spawn.rearmed" for event in seen)
 
 
 def test_mcp_create_visible_over_rest(coord):

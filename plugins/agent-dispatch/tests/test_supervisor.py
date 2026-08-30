@@ -271,6 +271,48 @@ def test_dead_letter_after_max_attempts(q, client):
     assert q.latest_reservation(t.id).attempt == 3  # still only 3 attempts made
 
 
+def test_dead_letter_summary_is_compact_and_only_repeats_on_change(
+    q, client, caplog
+):
+    first = q.create("first")
+    second = q.create("second")
+    sup = Supervisor(
+        client,
+        spawn_fn=lambda _task: (False, {"error": "boom"}),
+        repo=TEST_REPO,
+        max_concurrent=5,
+        max_attempts=1,
+    )
+    sup.poll_once()
+    caplog.clear()
+
+    sup.poll_once()
+    warnings = [r.message for r in caplog.records if r.levelname == "WARNING"]
+    summaries = [m for m in warnings if "spawn-dead-lettered task(s)" in m]
+    assert len(summaries) == 1
+    assert first.id in summaries[0]
+    assert second.id in summaries[0]
+    assert "reservations rearm <task> --permit" in summaries[0]
+
+    caplog.clear()
+    sup.poll_once()
+    assert not [
+        r for r in caplog.records if "spawn-dead-lettered task(s)" in r.message
+    ]
+
+    third = q.create("third")
+    sup.poll_once()
+    caplog.clear()
+    sup.poll_once()
+    summaries = [
+        r.message
+        for r in caplog.records
+        if "spawn-dead-lettered task(s)" in r.message
+    ]
+    assert len(summaries) == 1
+    assert third.id in summaries[0]
+
+
 def test_max_attempts_zero_retries_forever(q, client):
     t = q.create("work")
     sup = Supervisor(

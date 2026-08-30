@@ -233,12 +233,15 @@ class SpawnState:
     SETTLED = "settled"
     #: The spawn failed (or was lost); a fresh attempt may now be reserved.
     FAILED = "failed"
+    #: A failed attempt was explicitly retired by an operator rearm. The row
+    #: remains queryable for audit, but no longer counts toward dead-lettering.
+    REARMED = "rearmed"
 
     #: States in which a reservation still "owns" the task's spawn -- no new
     #: attempt may be reserved while one of these is outstanding.
     ACTIVE = frozenset({RESERVING, SPAWNED})
     #: States a reservation may be released from (a new attempt is allowed).
-    RELEASABLE = frozenset({SETTLED, FAILED})
+    RELEASABLE = frozenset({SETTLED, FAILED, REARMED})
 
 
 def spawn_key(task_id: str, attempt: int) -> str:
@@ -3037,6 +3040,10 @@ class TaskQueue:
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
             rows = conn.execute(
                 "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
                 (task_id,),
@@ -3045,6 +3052,12 @@ class TaskQueue:
                 if row["state"] in SpawnState.ACTIVE:
                     conn.execute("COMMIT")
                     return SpawnReservation._from_row(row), False
+            if task.status != Status.QUEUED or task.owner is not None:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} is {task.status!r} with owner "
+                    f"{task.owner!r}; spawn reservation requires queued and unowned"
+                )
             attempt = (max(r["attempt"] for r in rows) + 1) if rows else 1
             key = spawn_key(task_id, attempt)
             conn.execute(
@@ -3058,6 +3071,90 @@ class TaskQueue:
             ).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row), True
+
+    def rearm_spawn(
+        self,
+        task_id: str,
+        *,
+        permitted: bool = False,
+        reason: str | None = None,
+        min_failures: int = 3,
+        now: float | None = None,
+    ) -> dict[str, object]:
+        """Atomically retire failed spawn attempts so one fresh retry is eligible.
+
+        The task must still be queued and unowned, no active reservation may
+        exist, and at least ``min_failures`` failed attempts must be present.
+        All checks and the failed->rearmed transition share one
+        ``BEGIN IMMEDIATE`` transaction with task claims and spawn reservations.
+        """
+        if not permitted:
+            raise TaskError("rearming spawn reservations requires explicit permission")
+        reason = (reason or "").strip()
+        if not reason:
+            raise TaskError("rearming spawn reservations requires a non-empty reason")
+        if min_failures < 3:
+            raise TaskError("min_failures must be at least 3")
+
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None:
+                conn.execute("COMMIT")
+                raise TaskError(f"no such task {task_id!r}")
+            if task.status != Status.QUEUED or task.owner is not None:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} is {task.status!r} with owner "
+                    f"{task.owner!r}; rearm requires queued and unowned"
+                )
+            rows = conn.execute(
+                "SELECT * FROM spawn_reservations WHERE task_id = ? ORDER BY attempt ASC",
+                (task_id,),
+            ).fetchall()
+            active = [row["key"] for row in rows if row["state"] in SpawnState.ACTIVE]
+            if active:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} has active spawn reservation(s): "
+                    f"{', '.join(active)}"
+                )
+            failed = [row for row in rows if row["state"] == SpawnState.FAILED]
+            if len(failed) < min_failures:
+                conn.execute("COMMIT")
+                raise TaskError(
+                    f"task {task_id!r} has {len(failed)} failed spawn reservation(s); "
+                    f"at least {min_failures} required"
+                )
+
+            keys: list[str] = []
+            for row in failed:
+                keys.append(row["key"])
+                prior = (row["detail"] or "").strip()
+                detail = f"{prior}\nrearmed: {reason}".strip()
+                conn.execute(
+                    "UPDATE spawn_reservations "
+                    "SET state = ?, updated_at = ?, detail = ? WHERE key = ?",
+                    (SpawnState.REARMED, ts, detail, row["key"]),
+                )
+            self._audit(
+                conn,
+                task_id,
+                ts=ts,
+                from_status=Status.QUEUED,
+                to_status=Status.QUEUED,
+                worker="operator",
+                note=f"spawn reservations rearmed: {reason}",
+            )
+            conn.execute("COMMIT")
+        return {
+            "task_id": task_id,
+            "rearmed": len(keys),
+            "reservation_keys": keys,
+            "reason": reason,
+            "next_attempt": max(row["attempt"] for row in rows) + 1,
+        }
 
     def _update_reservation(
         self,

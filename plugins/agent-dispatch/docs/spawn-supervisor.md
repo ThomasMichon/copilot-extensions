@@ -53,7 +53,8 @@ that guarantees **exactly one embody spawn per (task, attempt)**.
   or — later — the supervisor loop), **before** launching embody.
 - **Keyed** `dispatch-task:<task_id>:<attempt>`.
 - **Lifecycle:** `reserving → spawned → settled`, plus `failed` for a bounded
-  retry that mints a fresh attempt.
+  retry that mints a fresh attempt and `rearmed` when an operator atomically
+  retires failed history after repairing the transport.
 
   | state       | meaning                                                        |
   |-------------|----------------------------------------------------------------|
@@ -61,14 +62,16 @@ that guarantees **exactly one embody spawn per (task, attempt)**.
   | `spawned`   | embody launched; the session/worktree handle is recorded.      |
   | `settled`   | the reserved attempt reached a terminal outcome; no more spawning. |
   | `failed`    | spawn failed or was lost; a fresh attempt may now be reserved.  |
+  | `rearmed`   | a failed attempt was retired by an audited operator rearm; preserved for history but excluded from the dead-letter count. |
 
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**
   (`reserving`/`spawned`), it returns `(existing, reserved=False)` — the caller
-  must **not** spawn. Otherwise it mints attempt `max(prior)+1` (or `1`),
-  `reserving`, and returns `(new, reserved=True)`. A prior `failed`/`settled`
-  reservation therefore never blocks a legitimate retry, but no two callers ever
-  spawn the same attempt.
+  must **not** spawn. Otherwise the task must still be `queued` and unowned; a
+  different task state is refused. It then mints attempt `max(prior)+1` (or
+  `1`), `reserving`, and returns `(new, reserved=True)`. A prior
+  `failed`/`settled`/`rearmed` reservation therefore never blocks a legitimate
+  retry, but no two callers ever spawn the same attempt.
 
 ### Where it lives
 
@@ -81,12 +84,14 @@ POST /spawn-reservations               {task_id, reserved_by} -> {reserved, rese
 POST /spawn-reservations/{key}/spawned  {session_handle, worktree}
 POST /spawn-reservations/{key}/fail     {detail}
 POST /spawn-reservations/{key}/settle   {detail}
+POST /spawn-reservations/tasks/{task_id}/rearm {permitted, reason, min_failures}
 GET  /spawn-reservations                ?task_id&state&limit
 GET  /spawn-reservations/{key}
 ```
 
 `DispatchClient` exposes each as a method. Events (`spawn.reserved`,
-`spawn.spawned`, `spawn.failed`, `spawn.settled`) are published on the SSE bus.
+`spawn.spawned`, `spawn.failed`, `spawn.settled`, `spawn.rearmed`) are published
+on the SSE bus.
 
 ### How `create --spawn` uses it (the bug fix)
 
@@ -139,7 +144,22 @@ agent-dispatch supervise [--repo R | --all-repos] [--label L ...] \
     [--headless-label L ...] [--headless-agent AGENT] [--interval S] [--once]
 agent-dispatch reservations list [--task ID] [--state S]
 agent-dispatch reservations fail|settle <key> [--detail ...]
+agent-dispatch reservations rearm <task> --permit --reason "transport repaired" \
+    [--min-failures 3]
 ```
+
+The rearm is one coordinator write transaction. It succeeds only while the
+task is still queued and unowned, no `reserving`/`spawned` reservation exists,
+and at least three (or the explicitly higher threshold) failed attempts remain.
+It changes those rows to `rearmed`, appends the operator reason to their audit
+detail and the task event trail, then makes exactly one fresh reservation
+attempt eligible. If a racing claim or reservation acquires the SQLite write lock
+first, the rearm fails without mutation; if the rearm linearizes first, the
+later claim or reservation observes the rearmed state normally.
+
+Dead-letter visibility is set-oriented: a supervisor logs one bounded,
+actionable summary when its blocked task set changes, rather than repeating one
+warning per task on every cycle.
 
 ## Registered supervision (built) — register-and-return
 

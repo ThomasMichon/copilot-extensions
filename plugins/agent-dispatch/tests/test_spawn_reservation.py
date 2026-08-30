@@ -55,6 +55,18 @@ def test_spawned_still_blocks_a_second_reservation(q):
     assert ok is False  # 'spawned' is still an active owner of the spawn
 
 
+def test_active_reservation_remains_idempotent_after_task_claim(q):
+    t = q.create("work")
+    first, _ = q.reserve_spawn(t.id)
+    q.record_spawn(first.key, session_handle="sess-1", worktree="wt-1")
+    q.claim_one("m/wt-1", task_id=t.id)
+
+    existing, reserved = q.reserve_spawn(t.id)
+
+    assert reserved is False
+    assert existing.key == first.key
+
+
 def test_settle_releases_for_a_fresh_attempt(q):
     t = q.create("work")
     r1, _ = q.reserve_spawn(t.id)
@@ -122,6 +134,142 @@ def test_reserve_is_atomic_under_concurrency(q):
     assert len(q.list_reservations(task_id=t.id)) == 1
 
 
+def _fail_attempts(q, task_id, count=3):
+    for _ in range(count):
+        reservation, reserved = q.reserve_spawn(task_id)
+        assert reserved is True
+        q.fail_spawn(reservation.key, detail="transport unavailable")
+
+
+def test_rearm_atomically_retires_failed_history(q):
+    t = q.create("work")
+    _fail_attempts(q, t.id)
+
+    result = q.rearm_spawn(
+        t.id, permitted=True, reason="transport repaired", min_failures=3
+    )
+
+    assert result["rearmed"] == 3
+    assert result["next_attempt"] == 4
+    assert q.list_reservations(task_id=t.id, state=SpawnState.FAILED) == []
+    rearmed = q.list_reservations(task_id=t.id, state=SpawnState.REARMED)
+    assert len(rearmed) == 3
+    assert all("rearmed: transport repaired" in (r.detail or "") for r in rearmed)
+    fresh, reserved = q.reserve_spawn(t.id)
+    assert reserved is True
+    assert fresh.attempt == 4
+    assert q.events(t.id)[-1]["note"] == (
+        "spawn reservations rearmed: transport repaired"
+    )
+
+
+@pytest.mark.parametrize(
+    ("permitted", "reason", "min_failures", "message"),
+    [
+        (False, "fixed", 3, "explicit permission"),
+        (True, "", 3, "non-empty reason"),
+        (True, "fixed", 2, "at least 3"),
+    ],
+)
+def test_rearm_requires_guardrails(
+    q, permitted, reason, min_failures, message
+):
+    t = q.create("work")
+    _fail_attempts(q, t.id)
+    with pytest.raises(TaskError, match=message):
+        q.rearm_spawn(
+            t.id,
+            permitted=permitted,
+            reason=reason,
+            min_failures=min_failures,
+        )
+    assert len(q.list_reservations(task_id=t.id, state=SpawnState.FAILED)) == 3
+
+
+def test_rearm_refuses_insufficient_or_active_history(q):
+    t = q.create("work")
+    _fail_attempts(q, t.id, count=2)
+    with pytest.raises(TaskError, match="at least 3 required"):
+        q.rearm_spawn(t.id, permitted=True, reason="fixed")
+
+    reservation, _ = q.reserve_spawn(t.id)
+    with pytest.raises(TaskError, match="active spawn reservation"):
+        q.rearm_spawn(t.id, permitted=True, reason="fixed", min_failures=3)
+    assert q.get_reservation(reservation.key).state == SpawnState.RESERVING
+
+
+def test_rearm_refuses_owned_task_without_mutation(q):
+    t = q.create("work")
+    _fail_attempts(q, t.id)
+    q.claim_one("m/wt", task_id=t.id)
+
+    with pytest.raises(TaskError, match="rearm requires queued and unowned"):
+        q.rearm_spawn(t.id, permitted=True, reason="fixed")
+
+    assert len(q.list_reservations(task_id=t.id, state=SpawnState.FAILED)) == 3
+
+
+def test_rearm_races_reserve_without_duplicate_spawn_right(q):
+    t = q.create("work")
+    _fail_attempts(q, t.id)
+    barrier = threading.Barrier(2)
+
+    def rearm():
+        barrier.wait()
+        try:
+            return q.rearm_spawn(t.id, permitted=True, reason="fixed")
+        except TaskError:
+            return None
+
+    def reserve():
+        barrier.wait()
+        try:
+            return q.reserve_spawn(t.id)
+        except TaskError:
+            return None
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        rearm_result, reserve_result = pool.submit(rearm), pool.submit(reserve)
+        outcomes = (rearm_result.result(), reserve_result.result())
+
+    active = q.list_reservations(task_id=t.id, state=SpawnState.ACTIVE)
+    assert len(active) == 1
+    assert outcomes[1] is not None
+    if outcomes[0] is None:
+        assert len(q.list_reservations(task_id=t.id, state=SpawnState.FAILED)) == 3
+    else:
+        assert q.list_reservations(task_id=t.id, state=SpawnState.FAILED) == []
+
+
+def test_rearm_races_claim_without_partial_mutation(q):
+    t = q.create("work")
+    _fail_attempts(q, t.id)
+    barrier = threading.Barrier(2)
+
+    def rearm():
+        barrier.wait()
+        try:
+            return q.rearm_spawn(t.id, permitted=True, reason="fixed")
+        except TaskError:
+            return None
+
+    def claim():
+        barrier.wait()
+        return q.claim_one("m/wt", task_id=t.id)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        rearm_result, claim_result = pool.submit(rearm), pool.submit(claim)
+        outcomes = (rearm_result.result(), claim_result.result())
+
+    assert outcomes[1] is not None
+    if outcomes[0] is None:
+        assert len(q.list_reservations(task_id=t.id, state=SpawnState.FAILED)) == 3
+        assert q.list_reservations(task_id=t.id, state=SpawnState.REARMED) == []
+    else:
+        assert q.list_reservations(task_id=t.id, state=SpawnState.FAILED) == []
+        assert len(q.list_reservations(task_id=t.id, state=SpawnState.REARMED)) == 3
+
+
 # -- HTTP surface ------------------------------------------------------------
 
 
@@ -166,6 +314,18 @@ def test_http_reserve_unknown_task_404(api):
     assert r.status_code == 404
 
 
+def test_http_reserve_nonqueued_task_409(api):
+    response = api.post(
+        "/tasks", json={"title": "draft", "repo": TEST_REPO, "proposed": True}
+    )
+    task_id = response.json()["id"]
+
+    reserved = api.post("/spawn-reservations", json={"task_id": task_id})
+
+    assert reserved.status_code == 409
+    assert "requires queued and unowned" in reserved.json()["detail"]
+
+
 def test_http_bad_transition_409(api):
     task_id = _create_task(api)
     key = api.post("/spawn-reservations", json={"task_id": task_id}).json()["reservation"]["key"]
@@ -177,6 +337,70 @@ def test_http_bad_transition_409(api):
 def test_http_record_missing_404(api):
     r = api.post("/spawn-reservations/dispatch-task:nope:1/spawned", json={})
     assert r.status_code == 404
+
+
+def test_http_rearm(api):
+    task_id = _create_task(api)
+    for _ in range(3):
+        reservation = api.post(
+            "/spawn-reservations", json={"task_id": task_id}
+        ).json()["reservation"]
+        api.post(
+            f"/spawn-reservations/{reservation['key']}/fail",
+            json={"detail": "down"},
+        )
+
+    response = api.post(
+        f"/spawn-reservations/tasks/{task_id}/rearm",
+        json={
+            "permitted": True,
+            "reason": "transport repaired",
+            "min_failures": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["rearmed"] == 3
+
+
+def test_reserve_refuses_nonqueued_task(q):
+    task = q.propose("draft")
+    with pytest.raises(TaskError, match="spawn reservation requires queued and unowned"):
+        q.reserve_spawn(task.id)
+
+
+def test_cli_rearm_passes_operator_guardrails(monkeypatch):
+    calls = []
+
+    class FakeClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def rearm_spawn(
+            self, task_id, *, permitted=False, reason=None, min_failures=3
+        ):
+            calls.append((task_id, permitted, reason, min_failures))
+            return {"task_id": task_id, "rearmed": 3}
+
+    monkeypatch.setattr(m, "_client", lambda _args: FakeClient())
+    args = m.build_parser().parse_args(
+        [
+            "reservations",
+            "rearm",
+            "task-1",
+            "--permit",
+            "--reason",
+            "transport repaired",
+            "--min-failures",
+            "4",
+        ]
+    )
+
+    assert args.func(args) == 0
+    assert calls == [("task-1", True, "transport repaired", 4)]
 
 
 # -- create --spawn double-spawn guard ---------------------------------------

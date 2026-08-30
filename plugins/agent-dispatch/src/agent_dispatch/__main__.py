@@ -2688,6 +2688,15 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
             return _emit(c.fail_spawn(args.key, detail=args.detail))
         if args.reservations_command == "settle":
             return _emit(c.settle_spawn(args.key, detail=args.detail))
+        if args.reservations_command == "rearm":
+            return _emit(
+                c.rearm_spawn(
+                    args.task,
+                    permitted=args.permit,
+                    reason=args.reason,
+                    min_failures=args.min_failures,
+                )
+            )
     return 2
 
 
@@ -4367,6 +4376,24 @@ def build_parser() -> argparse.ArgumentParser:
     rp = res_sub.add_parser("settle", help="mark a reservation settled (attempt over)")
     rp.add_argument("key")
     rp.add_argument("--detail")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "rearm",
+        help="atomically retire a dead-lettered task's failed spawn attempts",
+    )
+    rp.add_argument("task", help="queued, unowned task id")
+    rp.add_argument(
+        "--permit",
+        action="store_true",
+        help="explicitly authorize the reservation-history mutation",
+    )
+    rp.add_argument("--reason", required=True, help="auditable operator reason")
+    rp.add_argument(
+        "--min-failures",
+        type=int,
+        default=3,
+        help="required failed-attempt count (minimum/default: 3)",
+    )
     rp.set_defaults(func=_cmd_reservations)
 
     p = sub.add_parser(

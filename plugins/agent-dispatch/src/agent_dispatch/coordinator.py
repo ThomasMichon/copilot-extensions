@@ -410,6 +410,12 @@ class ReservationDetailBody(BaseModel):
     detail: str | None = None
 
 
+class RearmSpawnBody(BaseModel):
+    permitted: bool = False
+    reason: str | None = None
+    min_failures: int = 3
+
+
 class ScheduleLeaseBody(BaseModel):
     holder: str
     holder_session: str | None = None
@@ -1247,9 +1253,14 @@ def create_app(
         spawn); ``True`` when this caller now owns a fresh (task, attempt) spawn.
         """
         _require(queue.get(body.task_id))
-        reservation, reserved = queue.reserve_spawn(
-            body.task_id, reserved_by=body.reserved_by
-        )
+        try:
+            reservation, reserved = queue.reserve_spawn(
+                body.task_id, reserved_by=body.reserved_by
+            )
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such task") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
         result = _reservation_dict(reservation)
         if reserved:
             bus.publish({"type": "spawn.reserved", "reservation": result})
@@ -1283,6 +1294,22 @@ def create_app(
     def settle_spawn(key: str, body: ReservationDetailBody) -> dict:
         result = _reservation_guard(lambda: queue.settle_spawn(key, detail=body.detail))
         bus.publish({"type": "spawn.settled", "reservation": result})
+        return result
+
+    @app.post("/spawn-reservations/tasks/{task_id}/rearm")
+    def rearm_spawn(task_id: str, body: RearmSpawnBody) -> dict:
+        try:
+            result = queue.rearm_spawn(
+                task_id,
+                permitted=body.permitted,
+                reason=body.reason,
+                min_failures=body.min_failures,
+            )
+        except TaskError as exc:
+            msg = str(exc)
+            status = 404 if msg.startswith("no such task") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
+        bus.publish({"type": "spawn.rearmed", "rearm": result})
         return result
 
     @app.get("/spawn-reservations")

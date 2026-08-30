@@ -541,6 +541,26 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         counts = queue.reconcile_liveness()
         return {"recovered": counts["requeued"], **counts}
 
+    @mcp.tool(name="dispatch_rearm_spawn")
+    def rearm_spawn(
+        task_id: str,
+        permit: bool = False,
+        reason: str | None = None,
+        min_failures: int = 3,
+    ) -> dict:
+        """Atomically rearm a queued task's dead-lettered spawn history."""
+        try:
+            result = queue.rearm_spawn(
+                task_id,
+                permitted=permit,
+                reason=reason,
+                min_failures=min_failures,
+            )
+        except TaskError as exc:
+            return {"error": str(exc)}
+        bus.publish({"type": "spawn.rearmed", "rearm": result})
+        return result
+
     return mcp
 
 
