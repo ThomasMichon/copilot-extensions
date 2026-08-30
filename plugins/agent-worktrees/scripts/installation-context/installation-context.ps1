@@ -22,6 +22,8 @@ param(
     [object]$ExpectedNamespaceGeneration,
     [object]$ExpectedInstallGeneration,
     [object]$ExpectedActivationGeneration,
+    [string]$ExpectedCurrentVersion,
+    [switch]$ExpectCurrentAbsent,
     [string]$SnapshotId,
     [string]$RuntimeVersion,
     [string]$NamespaceState = 'active',
@@ -1550,6 +1552,32 @@ function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
         $json = $Value | ConvertTo-Json -Depth 12
         [IO.File]::WriteAllText($temporary, $json + "`n", $utf8NoBom)
         if (-not $SkipLockCheck -and $script:HeldLocks.Count -gt 0) {
+            Assert-AllLocksOwned
+        }
+        [CeAtomicFile]::Replace($temporary, $Path)
+        [void]$script:ValidatedFileSha256.Remove(
+            [IO.Path]::GetFullPath($Path)
+        )
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) {
+            Remove-Item -LiteralPath $temporary -Force
+        }
+    }
+}
+
+function Write-AtomicText([string]$Path, [string]$Value) {
+    $directory = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+    $temporary = Join-Path $directory (
+        '.' + (Split-Path -Leaf $Path) + '.tmp-' +
+        [guid]::NewGuid().ToString('N')
+    )
+    try {
+        [IO.File]::WriteAllText($temporary, $Value + "`n", $utf8NoBom)
+        if ($script:HeldLocks.Count -gt 0) {
             Assert-AllLocksOwned
         }
         [CeAtomicFile]::Replace($temporary, $Path)
@@ -5629,6 +5657,261 @@ function Invoke-SlotComplete([string]$ResolvedDurableHome) {
     }
 }
 
+function Read-RuntimeMarker([string]$Path, [string]$Label) {
+    $entry = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $entry) { return $null }
+    if ($entry.PSIsContainer -or
+        (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Fail "$Label may not be a symbolic link or reparse point."
+    }
+    $actual = Canonical-Path $Path -MustExist
+    if (-not (Paths-Equal $actual $Path)) {
+        Fail "$Label is not at its exact canonical location '$Path'."
+    }
+    try {
+        $capture = Read-RegularFileBytes `
+            $actual `
+            $Label `
+            -RequireSameIdentity
+        $value = $strictUtf8.GetString([byte[]]$capture.bytes)
+    }
+    catch {
+        Fail "Cannot read $($Label.ToLowerInvariant()) '$actual': $($_.Exception.Message)"
+    }
+    if ($value.EndsWith("`r`n", [StringComparison]::Ordinal)) {
+        $value = $value.Substring(0, $value.Length - 2)
+    }
+    elseif ($value.EndsWith("`n", [StringComparison]::Ordinal)) {
+        $value = $value.Substring(0, $value.Length - 1)
+    }
+    if ([string]::IsNullOrEmpty($value) -or
+        $value.Contains("`n") -or
+        $value.Contains("`r") -or
+        $value -cne $value.Trim()) {
+        Fail "$Label must contain exactly one runtime version."
+    }
+    Assert-RuntimeVersion $value
+    return $value
+}
+
+function Invoke-SlotCutover([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'slot-cutover requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'slot-cutover requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'slot-cutover requires -ExpectedPluginId.'
+    }
+    if (-not $ExpectedPayloadRoot) {
+        Fail 'slot-cutover requires -ExpectedPayloadRoot.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedPayloadVersion)) {
+        Fail 'slot-cutover requires -ExpectedPayloadVersion.'
+    }
+    if (-not $SnapshotId) { Fail 'slot-cutover requires -SnapshotId.' }
+    if (-not $RuntimeVersion) { Fail 'slot-cutover requires -RuntimeVersion.' }
+    if ($script:ExpectedCurrentVersionSupplied -eq [bool]$ExpectCurrentAbsent) {
+        Fail 'Specify exactly one of -ExpectedCurrentVersion and -ExpectCurrentAbsent.'
+    }
+    if ($script:ExpectedCurrentVersionSupplied) {
+        Assert-RuntimeVersion $ExpectedCurrentVersion
+    }
+
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $cellRoot = [string]$validated.cellRoot
+    $installPath = [string]$validated.installReceipt
+    $genesisLock = Join-Path (
+        Join-Path $ResolvedDurableHome 'marketplaces/.locks'
+    ) ($ExpectedMarketplaceId + '.genesis')
+    $installLock = Join-Path (
+        Join-Path $cellRoot '.locks'
+    ) ($ExpectedPluginId + '.install.lock')
+    $startingLockCount = $script:HeldLocks.Count
+    $operationFailed = $false
+    try {
+        Acquire-Lock $genesisLock 'genesis' $ExpectedMarketplaceId '' `
+            $script:RuntimeSlotCompletionLockTimeoutSeconds
+        Acquire-Lock $installLock 'install' $ExpectedMarketplaceId $ExpectedPluginId `
+            $script:RuntimeSlotCompletionLockTimeoutSeconds
+        $validated = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $installPath $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' $cellRoot
+        }
+        $runtimeRoot = Split-Path -Parent ([string]$validated.versionsRoot)
+        $currentPath = Join-Path $runtimeRoot 'current-version'
+        $lastKnownGoodPath = Join-Path $runtimeRoot 'last-known-good'
+        $actualNamespaceGeneration = [long]$validated.namespaceGeneration
+        $actualInstallGeneration = [long]$validated.generation
+        $actualCurrent = Read-RuntimeMarker $currentPath 'Current version marker'
+        $actualLastKnownGood = Read-RuntimeMarker `
+            $lastKnownGoodPath `
+            'Last-known-good marker'
+        if ($actualNamespaceGeneration -ne [long]$ExpectedNamespaceGeneration -or
+            $actualInstallGeneration -ne [long]$ExpectedInstallGeneration) {
+            return [pscustomobject][ordered]@{
+                action = 'slot-cutover'
+                status = 'revalidation-required'
+                reason = 'generation-changed'
+                cutoverChanged = $false
+                runtimeVersion = $RuntimeVersion
+                currentVersion = $actualCurrent
+                lastKnownGoodVersion = $actualLastKnownGood
+                namespaceGeneration = $actualNamespaceGeneration
+                installGeneration = $actualInstallGeneration
+                expectedNamespaceGeneration = [long]$ExpectedNamespaceGeneration
+                expectedInstallGeneration = [long]$ExpectedInstallGeneration
+                activated = $false
+                operative = $false
+            }
+        }
+        $namespaceReceipt = Read-Json ([string]$validated.namespaceReceipt)
+        if ((Get-StringProperty $namespaceReceipt 'state') -cne 'active' -or
+            (Get-StringProperty $validated 'state') -cne 'active') {
+            Fail 'Runtime slot cutover requires active namespace and install receipts.'
+        }
+        $currentMatches = if ($ExpectCurrentAbsent) {
+            $null -eq $actualCurrent
+        } else {
+            $actualCurrent -ceq $ExpectedCurrentVersion
+        }
+        if (-not $currentMatches) {
+            return [pscustomobject][ordered]@{
+                action = 'slot-cutover'
+                status = 'revalidation-required'
+                reason = 'current-version-changed'
+                cutoverChanged = $false
+                runtimeVersion = $RuntimeVersion
+                currentVersion = $actualCurrent
+                lastKnownGoodVersion = $actualLastKnownGood
+                expectedCurrentVersion = $(if (
+                    $script:ExpectedCurrentVersionSupplied
+                ) { $ExpectedCurrentVersion } else { $null })
+                expectedCurrentAbsent = [bool]$ExpectCurrentAbsent
+                namespaceGeneration = $actualNamespaceGeneration
+                installGeneration = $actualInstallGeneration
+                activated = $false
+                operative = $false
+            }
+        }
+
+        $snapshot = Validate-SnapshotProvenance `
+            $installPath `
+            $ResolvedDurableHome `
+            $ExpectedMarketplaceId `
+            $ExpectedPluginId `
+            $SnapshotId `
+            $false `
+            $ExpectedPayloadRoot `
+            $ExpectedPayloadVersion
+        $ownership = Validate-RuntimeSlotOwnershipCore `
+            $validated `
+            $snapshot `
+            $RuntimeVersion
+        $completion = Validate-RuntimeSlotCompletionCore `
+            $validated `
+            $snapshot `
+            $ownership `
+            $RuntimeVersion
+        $confirmedCurrent = Read-RuntimeMarker `
+            $currentPath `
+            'Current version marker'
+        $confirmedLastKnownGood = Read-RuntimeMarker `
+            $lastKnownGoodPath `
+            'Last-known-good marker'
+        if ($confirmedCurrent -cne $actualCurrent -or
+            $confirmedLastKnownGood -cne $actualLastKnownGood) {
+            return [pscustomobject][ordered]@{
+                action = 'slot-cutover'
+                status = 'revalidation-required'
+                reason = 'runtime-marker-changed'
+                cutoverChanged = $false
+                runtimeVersion = $RuntimeVersion
+                currentVersion = $confirmedCurrent
+                lastKnownGoodVersion = $confirmedLastKnownGood
+                namespaceGeneration = $actualNamespaceGeneration
+                installGeneration = $actualInstallGeneration
+                activated = $false
+                operative = $false
+            }
+        }
+
+        $desiredLastKnownGood = $RuntimeVersion
+        $changed = (
+            $actualCurrent -cne $RuntimeVersion -or
+            $actualLastKnownGood -cne $desiredLastKnownGood
+        )
+        if ($actualCurrent -cne $RuntimeVersion) {
+            Write-AtomicText $currentPath $RuntimeVersion
+        }
+        if ($actualLastKnownGood -cne $desiredLastKnownGood) {
+            Write-AtomicText $lastKnownGoodPath $desiredLastKnownGood
+        }
+        $publishedCurrent = Read-RuntimeMarker `
+            $currentPath `
+            'Current version marker'
+        $publishedLastKnownGood = Read-RuntimeMarker `
+            $lastKnownGoodPath `
+            'Last-known-good marker'
+        if ($publishedCurrent -cne $RuntimeVersion -or
+            $publishedLastKnownGood -cne $desiredLastKnownGood) {
+            Fail (
+                'Published runtime cutover markers did not validate as current: ' +
+                "current='$publishedCurrent', " +
+                "last-known-good='$publishedLastKnownGood', " +
+                "expected='$RuntimeVersion'."
+            )
+        }
+        return [pscustomobject][ordered]@{
+            action = 'slot-cutover'
+            status = 'ready'
+            reason = $(if ($changed) {
+                'runtime-slot-cutover-published'
+            } else {
+                'runtime-slot-cutover-current'
+            })
+            cutoverChanged = $changed
+            runtimeVersion = $RuntimeVersion
+            previousVersion = $actualCurrent
+            currentVersion = $publishedCurrent
+            lastKnownGoodVersion = $publishedLastKnownGood
+            currentMarker = $currentPath
+            lastKnownGoodMarker = $lastKnownGoodPath
+            completion = [string]$completion.completion
+            namespaceGeneration = $actualNamespaceGeneration
+            installGeneration = $actualInstallGeneration
+            activated = $false
+            operative = $false
+        }
+    }
+    catch {
+        $operationFailed = $true
+        throw
+    }
+    finally {
+        $releaseError = $null
+        while ($script:HeldLocks.Count -gt $startingLockCount) {
+            try {
+                Release-Lock
+            }
+            catch {
+                Pop-HeldLock
+                if ($null -eq $releaseError) {
+                    $releaseError = $_.Exception
+                }
+                if ($operationFailed) {
+                    [Console]::Error.WriteLine(
+                        "installation-context: $($_.Exception.Message) while preserving the original slot cutover failure."
+                    )
+                }
+            }
+        }
+        if (-not $operationFailed -and $null -ne $releaseError) {
+            throw $releaseError
+        }
+    }
+}
+
 function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
     if ([string]::IsNullOrWhiteSpace($PayloadVersion)) {
         Fail 'stamp requires -PayloadVersion.'
@@ -5866,16 +6149,27 @@ try {
         'slot-validate',
         'slot-complete',
         'slot-completion-validate',
+        'slot-cutover',
         'status',
         'probe-legacy'
     ) 'Action'
     $expectedPayloadRootSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadRoot')
     $expectedPayloadVersionSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadVersion')
+    $script:ExpectedCurrentVersionSupplied = $PSBoundParameters.ContainsKey(
+        'ExpectedCurrentVersion'
+    )
+    if ($Action -cne 'slot-cutover' -and (
+        $script:ExpectedCurrentVersionSupplied -or
+        $PSBoundParameters.ContainsKey('ExpectCurrentAbsent')
+    )) {
+        Fail '-ExpectedCurrentVersion and -ExpectCurrentAbsent are valid only for slot-cutover.'
+    }
     if ($Action -in @(
         'slot-provision',
         'slot-validate',
         'slot-complete',
-        'slot-completion-validate'
+        'slot-completion-validate',
+        'slot-cutover'
     )) {
         if ($expectedPayloadRootSupplied -and
             [string]::IsNullOrWhiteSpace($ExpectedPayloadRoot)) {
@@ -5889,7 +6183,11 @@ try {
     elseif ($expectedPayloadVersionSupplied) {
         Fail '-ExpectedPayloadVersion is valid only for runtime slot actions.'
     }
-    if ($Action -in @('slot-complete', 'slot-completion-validate')) {
+    if ($Action -in @(
+        'slot-complete',
+        'slot-completion-validate',
+        'slot-cutover'
+    )) {
         if (-not $expectedPayloadRootSupplied) {
             Fail "$Action requires -ExpectedPayloadRoot."
         }
@@ -5905,12 +6203,18 @@ try {
             'slot-validate',
             'slot-complete',
             'slot-completion-validate',
+            'slot-cutover',
             'status',
             'probe-legacy'
         )) {
         Fail "-ExpectedPayloadRoot is not valid for $Action."
     }
-    if ($Action -cin @('stamp', 'activation-cas', 'snapshot-stamp')) {
+    if ($Action -cin @(
+        'stamp',
+        'activation-cas',
+        'snapshot-stamp',
+        'slot-cutover'
+    )) {
         $ExpectedNamespaceGeneration = ConvertTo-ExpectedGeneration `
             $ExpectedNamespaceGeneration `
             'namespace.json'
@@ -5978,6 +6282,9 @@ try {
     }
     elseif ($Action -eq 'slot-completion-validate') {
         $result = Invoke-SlotCompletionValidate $resolvedDurableHome
+    }
+    elseif ($Action -eq 'slot-cutover') {
+        $result = Invoke-SlotCutover $resolvedDurableHome
     }
     elseif ($Action -eq 'validate') {
         $pointer = $Context

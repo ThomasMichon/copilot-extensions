@@ -694,3 +694,19 @@ See [`design.md`](design.md).
 - Normal stamp, provision, install, bootstrap, and service behavior remains
   legacy and unchanged. Build completion, operative cutover, rollback,
   repair/release, uninstall, and dual-cell proof remain separate slices.
+
+### 2026-08-29 — Ownership-checked runtime cutover primitive
+
+- Added cross-runner `slot-cutover` with explicit context, payload/snapshot
+  identity, receipt-generation expectations, and current-version CAS.
+- Cutover revalidates immutable slot completion under the genesis and
+  installation locks, rejects malformed or linked runtime markers, and returns
+  revalidation-required without mutation when generations or current selection
+  drift.
+- Initial install, forward update, and explicit historical rollback now share
+  one marker rule: both current-version and last-known-good name the completed
+  selected target. Last-known-good remains resolver fallback, not rollback
+  selection state.
+- Kept the primitive non-activating. Agent Machines normal-flow adoption,
+  runtime gating, dual-cell lifecycle proof, and activation remain in the
+  operative exemplar slice.

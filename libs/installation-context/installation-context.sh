@@ -290,6 +290,22 @@ atomic_write_json() {
     unset 'VALIDATED_FILE_METADATA[$path]'
 }
 
+atomic_write_text() {
+    local path="$1" content="$2" directory temporary
+    directory="$(dirname -- "$path")"
+    mkdir -p -- "$directory"
+    temporary="$(mktemp "$directory/.$(basename -- "$path").tmp.XXXXXX")"
+    TEMP_FILES+=("$temporary")
+    printf '%s\n' "$content" >"$temporary"
+    if ((${#HELD_LOCK_DIRS[@]} > 0)); then
+        assert_all_locks_owned
+    fi
+    mv -f -- "$temporary" "$path"
+    unset 'VALIDATED_FILE_SHA256[$path]'
+    unset 'VALIDATED_FILE_IDENTITY[$path]'
+    unset 'VALIDATED_FILE_METADATA[$path]'
+}
+
 lock_owner_matches() {
     local owner="$1" expected_token="$2" token
     [[ -f "$owner" ]] || return 1
@@ -3057,6 +3073,237 @@ complete_runtime_slot() {
     printf '%s\n' "$COMPLETION_JSON"
 }
 
+read_runtime_marker_into() {
+    local variable="$1" path="$2" label="$3" actual raw value byte_count expected_size
+    if [[ ! -e "$path" && ! -L "$path" ]]; then
+        printf -v "$variable" ''
+        return
+    fi
+    [[ -f "$path" && ! -L "$path" ]] ||
+        fail "$label may not be a symbolic link or reparse point."
+    actual="$(canonical_path "$path" true)"
+    paths_equal "$actual" "$path" ||
+        fail "$label is not at its exact canonical location '$path'."
+    raw="$(cat -- "$actual"; printf '\034')" ||
+        fail "Cannot read ${label,,} '$actual'."
+    raw="${raw%$'\034'}"
+    byte_count="$(wc -c <"$actual" | tr -d '[:space:]')"
+    value="$raw"
+    expected_size="${#value}"
+    if [[ "$value" == *$'\r\n' ]]; then
+        value="${value%$'\r\n'}"
+        expected_size=$((${#value} + 2))
+    elif [[ "$value" == *$'\n' ]]; then
+        value="${value%$'\n'}"
+        expected_size=$((${#value} + 1))
+    fi
+    [[ "$byte_count" == "$expected_size" &&
+       -n "$value" &&
+       "$value" != *$'\n'* &&
+       "$value" != *$'\r'* &&
+       "$value" == "${value#"${value%%[![:space:]]*}"}" &&
+       "$value" == "${value%"${value##*[![:space:]]}"}" ]] ||
+        fail "$label must contain exactly one runtime version."
+    assert_runtime_version "$value"
+    printf -v "$variable" '%s' "$value"
+}
+
+cutover_runtime_slot() {
+    local genesis_lock install_lock actual_namespace_generation actual_install_generation
+    local actual_current actual_lkg confirmed_current confirmed_lkg desired_lkg
+    local published_current published_lkg current_matches namespace_state runtime_root
+    local changed=false
+
+    [[ -n "$CONTEXT" ]] || fail "slot-cutover requires --context."
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] ||
+        fail "slot-cutover requires --expected-marketplace-id."
+    [[ -n "$EXPECTED_PLUGIN_ID" ]] ||
+        fail "slot-cutover requires --expected-plugin-id."
+    [[ -n "$EXPECTED_PAYLOAD_ROOT" ]] ||
+        fail "slot-cutover requires --expected-payload-root."
+    [[ -n "${EXPECTED_PAYLOAD_VERSION//[[:space:]]/}" ]] ||
+        fail "slot-cutover requires --expected-payload-version."
+    [[ -n "$SNAPSHOT_ID" ]] || fail "slot-cutover requires --snapshot-id."
+    [[ -n "$RUNTIME_VERSION" ]] || fail "slot-cutover requires --runtime-version."
+    [[ -n "$EXPECTED_NAMESPACE_GENERATION" ]] ||
+        fail "slot-cutover requires --expected-namespace-generation."
+    [[ -n "$EXPECTED_INSTALL_GENERATION" ]] ||
+        fail "slot-cutover requires --expected-install-generation."
+    if [[ "$EXPECTED_CURRENT_VERSION_SUPPLIED" == "$EXPECT_CURRENT_ABSENT" ]]; then
+        fail "Specify exactly one of --expected-current-version and --expect-current-absent."
+    fi
+    normalize_expected_generation_into EXPECTED_NAMESPACE_GENERATION \
+        "$EXPECTED_NAMESPACE_GENERATION" namespace
+    normalize_expected_generation_into EXPECTED_INSTALL_GENERATION \
+        "$EXPECTED_INSTALL_GENERATION" install
+    if [[ "$EXPECTED_CURRENT_VERSION_SUPPLIED" == true ]]; then
+        assert_runtime_version "$EXPECTED_CURRENT_VERSION"
+    fi
+
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+    genesis_lock="$DURABLE_HOME/marketplaces/.locks/$EXPECTED_MARKETPLACE_ID.genesis"
+    install_lock="$CTX_CELL_ROOT/.locks/$EXPECTED_PLUGIN_ID.install.lock"
+    acquire_lock "$genesis_lock" genesis "$EXPECTED_MARKETPLACE_ID" "" \
+        "$RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS"
+    acquire_lock "$install_lock" install "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
+        "$RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+        "$EXPECTED_PLUGIN_ID" "" "$CTX_CELL_ROOT"
+    actual_namespace_generation="$CTX_NAMESPACE_GENERATION"
+    actual_install_generation="$CTX_INSTALL_GENERATION"
+    runtime_root="$(dirname -- "$CTX_VERSIONS_ROOT")"
+    read_runtime_marker_into actual_current \
+        "$runtime_root/current-version" "Current version marker"
+    read_runtime_marker_into actual_lkg \
+        "$runtime_root/last-known-good" "Last-known-good marker"
+
+    if [[ "$actual_namespace_generation" != "$EXPECTED_NAMESPACE_GENERATION" ||
+          "$actual_install_generation" != "$EXPECTED_INSTALL_GENERATION" ]]; then
+        release_lock
+        release_lock
+        printf '{
+  "action":"slot-cutover",
+  "status":"revalidation-required",
+  "reason":"generation-changed",
+  "cutoverChanged":false,
+  "runtimeVersion":%s,
+  "currentVersion":%s,
+  "lastKnownGoodVersion":%s,
+  "namespaceGeneration":%s,
+  "installGeneration":%s,
+  "expectedNamespaceGeneration":%s,
+  "expectedInstallGeneration":%s,
+  "activated":false,
+  "operative":false
+}\n' \
+            "$(json_quote "$RUNTIME_VERSION")" \
+            "$(if [[ -n "$actual_current" ]]; then json_quote "$actual_current"; else printf null; fi)" \
+            "$(if [[ -n "$actual_lkg" ]]; then json_quote "$actual_lkg"; else printf null; fi)" \
+            "$actual_namespace_generation" "$actual_install_generation" \
+            "$EXPECTED_NAMESPACE_GENERATION" "$EXPECTED_INSTALL_GENERATION"
+        return
+    fi
+    json_optional_string_into namespace_state "$CTX_NAMESPACE_RECEIPT" state
+    [[ "$namespace_state" == active && "$CTX_INSTALL_STATE" == active ]] ||
+        fail "Runtime slot cutover requires active namespace and install receipts."
+    if [[ "$EXPECT_CURRENT_ABSENT" == true ]]; then
+        if [[ -n "$actual_current" ]]; then
+            current_matches=false
+        else
+            current_matches=true
+        fi
+    elif [[ "$actual_current" == "$EXPECTED_CURRENT_VERSION" ]]; then
+        current_matches=true
+    else
+        current_matches=false
+    fi
+    if [[ "$current_matches" != true ]]; then
+        release_lock
+        release_lock
+        printf '{
+  "action":"slot-cutover",
+  "status":"revalidation-required",
+  "reason":"current-version-changed",
+  "cutoverChanged":false,
+  "runtimeVersion":%s,
+  "currentVersion":%s,
+  "lastKnownGoodVersion":%s,
+  "expectedCurrentVersion":%s,
+  "expectedCurrentAbsent":%s,
+  "namespaceGeneration":%s,
+  "installGeneration":%s,
+  "activated":false,
+  "operative":false
+}\n' \
+            "$(json_quote "$RUNTIME_VERSION")" \
+            "$(if [[ -n "$actual_current" ]]; then json_quote "$actual_current"; else printf null; fi)" \
+            "$(if [[ -n "$actual_lkg" ]]; then json_quote "$actual_lkg"; else printf null; fi)" \
+            "$(if [[ "$EXPECTED_CURRENT_VERSION_SUPPLIED" == true ]]; then json_quote "$EXPECTED_CURRENT_VERSION"; else printf null; fi)" \
+            "$EXPECT_CURRENT_ABSENT" "$actual_namespace_generation" \
+            "$actual_install_generation"
+        return
+    fi
+
+    validate_runtime_slot_completion \
+        "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+        "$EXPECTED_PLUGIN_ID" "$EXPECTED_PAYLOAD_ROOT" \
+        "$EXPECTED_PAYLOAD_VERSION" "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+    read_runtime_marker_into confirmed_current \
+        "$runtime_root/current-version" "Current version marker"
+    read_runtime_marker_into confirmed_lkg \
+        "$runtime_root/last-known-good" "Last-known-good marker"
+    if [[ "$confirmed_current" != "$actual_current" ||
+          "$confirmed_lkg" != "$actual_lkg" ]]; then
+        release_lock
+        release_lock
+        printf '{
+  "action":"slot-cutover",
+  "status":"revalidation-required",
+  "reason":"runtime-marker-changed",
+  "cutoverChanged":false,
+  "runtimeVersion":%s,
+  "currentVersion":%s,
+  "lastKnownGoodVersion":%s,
+  "namespaceGeneration":%s,
+  "installGeneration":%s,
+  "activated":false,
+  "operative":false
+}\n' \
+            "$(json_quote "$RUNTIME_VERSION")" \
+            "$(if [[ -n "$confirmed_current" ]]; then json_quote "$confirmed_current"; else printf null; fi)" \
+            "$(if [[ -n "$confirmed_lkg" ]]; then json_quote "$confirmed_lkg"; else printf null; fi)" \
+            "$actual_namespace_generation" "$actual_install_generation"
+        return
+    fi
+
+    desired_lkg="$RUNTIME_VERSION"
+    if [[ "$actual_current" != "$RUNTIME_VERSION" || "$actual_lkg" != "$desired_lkg" ]]; then
+        changed=true
+    fi
+    if [[ "$actual_current" != "$RUNTIME_VERSION" ]]; then
+        atomic_write_text "$runtime_root/current-version" "$RUNTIME_VERSION"
+    fi
+    if [[ "$actual_lkg" != "$desired_lkg" ]]; then
+        atomic_write_text "$runtime_root/last-known-good" "$desired_lkg"
+    fi
+    read_runtime_marker_into published_current \
+        "$runtime_root/current-version" "Current version marker"
+    read_runtime_marker_into published_lkg \
+        "$runtime_root/last-known-good" "Last-known-good marker"
+    [[ "$published_current" == "$RUNTIME_VERSION" &&
+       "$published_lkg" == "$desired_lkg" ]] ||
+        fail "Published runtime cutover markers did not validate as current: current='$published_current', last-known-good='$published_lkg', expected='$RUNTIME_VERSION'."
+    release_lock
+    release_lock
+    printf '{
+  "action":"slot-cutover",
+  "status":"ready",
+  "reason":%s,
+  "cutoverChanged":%s,
+  "runtimeVersion":%s,
+  "previousVersion":%s,
+  "currentVersion":%s,
+  "lastKnownGoodVersion":%s,
+  "currentMarker":%s,
+  "lastKnownGoodMarker":%s,
+  "completion":%s,
+  "namespaceGeneration":%s,
+  "installGeneration":%s,
+  "activated":false,
+  "operative":false
+}\n' \
+        "$(if [[ "$changed" == true ]]; then json_quote runtime-slot-cutover-published; else json_quote runtime-slot-cutover-current; fi)" \
+        "$changed" "$(json_quote "$RUNTIME_VERSION")" \
+        "$(if [[ -n "$actual_current" ]]; then json_quote "$actual_current"; else printf null; fi)" \
+        "$(json_quote "$published_current")" "$(json_quote "$published_lkg")" \
+        "$(json_quote "$runtime_root/current-version")" \
+        "$(json_quote "$runtime_root/last-known-good")" \
+        "$(json_quote "$RUNTIME_COMPLETION_PATH")" \
+        "$actual_namespace_generation" "$actual_install_generation"
+}
+
 emit_source_identity() {
     printf '{'
     printf '"kind":%s,' "$(json_quote "$SOURCE_KIND")"
@@ -4334,8 +4581,8 @@ run_status_action() {
 }
 
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-complete|slot-completion-validate|status|probe-legacy} [options]"
+[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == slot-cutover || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-complete|slot-completion-validate|slot-cutover|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -4361,6 +4608,9 @@ PAYLOAD_ORIGIN_RECEIPT=""
 EXPECTED_NAMESPACE_GENERATION=""
 EXPECTED_INSTALL_GENERATION=""
 EXPECTED_ACTIVATION_GENERATION=""
+EXPECTED_CURRENT_VERSION=""
+EXPECTED_CURRENT_VERSION_SUPPLIED=false
+EXPECT_CURRENT_ABSENT=false
 SNAPSHOT_ID=""
 RUNTIME_VERSION=""
 NAMESPACE_STATE="active"
@@ -4397,6 +4647,8 @@ while (($#)); do
         --expected-namespace-generation) need_value "$@"; EXPECTED_NAMESPACE_GENERATION="$2"; shift 2 ;;
         --expected-install-generation) need_value "$@"; EXPECTED_INSTALL_GENERATION="$2"; shift 2 ;;
         --expected-activation-generation) need_value "$@"; EXPECTED_ACTIVATION_GENERATION="$2"; shift 2 ;;
+        --expected-current-version) need_value "$@"; EXPECTED_CURRENT_VERSION="$2"; EXPECTED_CURRENT_VERSION_SUPPLIED=true; shift 2 ;;
+        --expect-current-absent) EXPECT_CURRENT_ABSENT=true; shift ;;
         --snapshot-id) need_value "$@"; SNAPSHOT_ID="$2"; shift 2 ;;
         --runtime-version) need_value "$@"; RUNTIME_VERSION="$2"; shift 2 ;;
         --namespace-state) need_value "$@"; NAMESPACE_STATE="$2"; shift 2 ;;
@@ -4416,10 +4668,16 @@ done
     fail "Specify only one of --source-json and --source-file."
 [[ "$LEGACY_PROBE_JSON_SUPPLIED" != true || "$LEGACY_PROBE_FILE_SUPPLIED" != true ]] ||
     fail "Specify only one of --legacy-probe-json and --legacy-probe-file."
+if [[ "$ACTION" != slot-cutover &&
+      ( "$EXPECTED_CURRENT_VERSION_SUPPLIED" == true ||
+        "$EXPECT_CURRENT_ABSENT" == true ) ]]; then
+    fail "--expected-current-version and --expect-current-absent are valid only for slot-cutover."
+fi
 if [[ "$ACTION" == slot-provision ||
       "$ACTION" == slot-validate ||
       "$ACTION" == slot-complete ||
-      "$ACTION" == slot-completion-validate ]]; then
+      "$ACTION" == slot-completion-validate ||
+      "$ACTION" == slot-cutover ]]; then
     if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true && -z "$EXPECTED_PAYLOAD_ROOT" ]]; then
         fail "Expected snapshot payload root must be absolute."
     fi
@@ -4430,7 +4688,9 @@ if [[ "$ACTION" == slot-provision ||
 elif [[ "$EXPECTED_PAYLOAD_VERSION_SUPPLIED" == true ]]; then
     fail "--expected-payload-version is valid only for runtime slot actions."
 fi
-if [[ "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate ]]; then
+if [[ "$ACTION" == slot-complete ||
+      "$ACTION" == slot-completion-validate ||
+      "$ACTION" == slot-cutover ]]; then
     [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true ]] ||
         fail "$ACTION requires --expected-payload-root."
     [[ "$EXPECTED_PAYLOAD_VERSION_SUPPLIED" == true ]] ||
@@ -4443,6 +4703,7 @@ if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true &&
       "$ACTION" != slot-validate &&
       "$ACTION" != slot-complete &&
       "$ACTION" != slot-completion-validate &&
+      "$ACTION" != slot-cutover &&
       "$ACTION" != status &&
       "$ACTION" != probe-legacy ]]; then
     fail "--expected-payload-root is not valid for $ACTION."
@@ -4489,7 +4750,8 @@ if [[ "$ACTION" != activation-cas &&
       "$ACTION" != slot-provision &&
       "$ACTION" != slot-validate &&
       "$ACTION" != slot-complete &&
-      "$ACTION" != slot-completion-validate ]]; then
+      "$ACTION" != slot-completion-validate &&
+      "$ACTION" != slot-cutover ]]; then
     CONTEXT="${CONTEXT:-${COPILOT_EXTENSIONS_CONTEXT:-}}"
 fi
 if [[ "$ACTION" == validate ]]; then
@@ -4539,6 +4801,11 @@ fi
 
 if [[ "$ACTION" == slot-complete ]]; then
     complete_runtime_slot
+    exit 0
+fi
+
+if [[ "$ACTION" == slot-cutover ]]; then
+    cutover_runtime_slot
     exit 0
 fi
 

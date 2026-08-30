@@ -46,6 +46,8 @@ WINDOWS_ERROR_ACCESS_DENIED = 5
 RUNTIME_SLOT_COMPLETION_SCHEMA = "copilot.extensions/runtime-slot-completion/v1"
 RUNTIME_SLOT_COMPLETION_FILE = ".runtime-slot-completion.json"
 BUILD_COMPLETION_FILE = ".install-complete.json"
+CURRENT_VERSION_FILE = "current-version"
+LAST_KNOWN_GOOD_FILE = "last-known-good"
 RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 LOWER_SHA256 = re.compile(r"[0-9a-f]{64}", flags=re.ASCII)
 MAX_RECEIPT_PID = (1 << 63) - 1
@@ -1023,6 +1025,41 @@ def _atomic_write_json(
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(_json_bytes(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        if lock is None:
+            locks: Sequence[_DirectoryLock] = ()
+        elif isinstance(lock, Sequence):
+            locks = lock
+        else:
+            locks = (lock,)
+        for held_lock in locks:
+            held_lock.assert_owned()
+        os.replace(temporary, path)
+        _invalidate_validated_file_digest(path)
+        if os.name != "nt":
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _atomic_write_text(
+    path: Path,
+    value: str,
+    *,
+    lock: _DirectoryLock | Sequence[_DirectoryLock] | None = None,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp-{secrets.token_hex(16)}")
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write((value + "\n").encode("utf-8"))
             stream.flush()
             os.fsync(stream.fileno())
         if lock is None:
@@ -3860,6 +3897,282 @@ def complete_runtime_slot(
         return result
 
 
+def _read_runtime_marker(path: Path, label: str) -> str | None:
+    if not os.path.lexists(path):
+        return None
+    if _is_link_or_junction(path):
+        _fail(f"{label} may not be a symbolic link or reparse point.")
+    actual = canonical_path(path, must_exist=True)
+    if not paths_equal(actual, path):
+        _fail(f"{label} is not at its exact canonical location '{path}'.")
+    try:
+        content, _ = _read_regular_file(
+            actual,
+            label=label,
+            require_stable_identity=True,
+        )
+        value = content.decode("utf-8")
+    except (OSError, UnicodeError) as error:
+        _fail(f"Cannot read {label.lower()} '{actual}': {error}")
+    if value.endswith("\r\n"):
+        value = value[:-2]
+    elif value.endswith("\n"):
+        value = value[:-1]
+    if not value or "\n" in value or "\r" in value or value != value.strip():
+        _fail(f"{label} must contain exactly one runtime version.")
+    _assert_runtime_version(value)
+    return value
+
+
+@_validation_scope
+def cutover_runtime_slot(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    expected_payload_root: str | os.PathLike[str],
+    expected_payload_version: str,
+    snapshot_id: str,
+    runtime_version: str,
+    expected_namespace_generation: int,
+    expected_install_generation: int,
+    expected_current_version: str | None = None,
+    expect_current_absent: bool = False,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """CAS-cut over one completed owned runtime slot without activating it."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    _assert_runtime_version(runtime_version)
+    if not _path_is_fully_qualified(expected_payload_root):
+        _fail("Expected snapshot payload root must be absolute.")
+    if not isinstance(expected_payload_version, str) or not expected_payload_version.strip():
+        _fail("Expected snapshot payload version must be a non-empty string.")
+    if (expected_current_version is None) == (not expect_current_absent):
+        _fail(
+            "Specify exactly one of expected_current_version and "
+            "expect_current_absent."
+        )
+    if expected_current_version is not None:
+        _assert_runtime_version(expected_current_version)
+    expected_generations = {
+        "namespace": expected_namespace_generation,
+        "install": expected_install_generation,
+    }
+    for name, value in expected_generations.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            _fail(f"Expected {name} generation must be a non-negative integer.")
+        if value > MAX_RECEIPT_GENERATION:
+            _fail(
+                f"Expected {name} generation exceeds the portable signed "
+                "64-bit maximum."
+            )
+
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Runtime slot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    cell_root = canonical_path(_string_property(validated, "cellRoot"))
+    install_path = canonical_path(_string_property(validated, "installReceipt"))
+    genesis_lock = _DirectoryLock(
+        durable
+        / "marketplaces"
+        / ".locks"
+        / f"{expected_marketplace_id}.genesis",
+        kind="genesis",
+        marketplace_id=expected_marketplace_id,
+        timeout_seconds=RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS,
+    )
+    install_lock = _DirectoryLock(
+        cell_root / ".locks" / f"{expected_plugin_id}.install.lock",
+        kind="install",
+        marketplace_id=expected_marketplace_id,
+        plugin_id=expected_plugin_id,
+        timeout_seconds=RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS,
+    )
+    with genesis_lock, install_lock:
+        validated = validate_context_receipt(
+            install_path,
+            durable,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            expected_cell_root=cell_root,
+            environment={},
+        )
+        runtime_root = canonical_path(
+            _string_property(validated, "versionsRoot")
+        ).parent
+        current_path = runtime_root / CURRENT_VERSION_FILE
+        last_known_good_path = runtime_root / LAST_KNOWN_GOOD_FILE
+        actual_namespace_generation = int(validated["namespaceGeneration"])
+        actual_install_generation = int(validated["generation"])
+        actual_current_version = _read_runtime_marker(
+            current_path,
+            "Current version marker",
+        )
+        actual_last_known_good = _read_runtime_marker(
+            last_known_good_path,
+            "Last-known-good marker",
+        )
+        actual_generations = {
+            "namespace": actual_namespace_generation,
+            "install": actual_install_generation,
+        }
+        if actual_generations != expected_generations:
+            return {
+                "action": "slot-cutover",
+                "status": "revalidation-required",
+                "reason": "generation-changed",
+                "cutoverChanged": False,
+                "runtimeVersion": runtime_version,
+                "currentVersion": actual_current_version,
+                "lastKnownGoodVersion": actual_last_known_good,
+                "namespaceGeneration": actual_namespace_generation,
+                "installGeneration": actual_install_generation,
+                "expectedNamespaceGeneration": expected_namespace_generation,
+                "expectedInstallGeneration": expected_install_generation,
+                "activated": False,
+                "operative": False,
+            }
+        namespace_receipt = read_json(validated["namespaceReceipt"])
+        if not isinstance(namespace_receipt, Mapping):
+            _fail("namespace.json must be a JSON object.")
+        if (
+            _string_property(namespace_receipt, "state") != "active"
+            or _string_property(validated, "state") != "active"
+        ):
+            _fail("Runtime slot cutover requires active namespace and install receipts.")
+        current_matches = (
+            actual_current_version is None
+            if expect_current_absent
+            else actual_current_version == expected_current_version
+        )
+        if not current_matches:
+            return {
+                "action": "slot-cutover",
+                "status": "revalidation-required",
+                "reason": "current-version-changed",
+                "cutoverChanged": False,
+                "runtimeVersion": runtime_version,
+                "currentVersion": actual_current_version,
+                "lastKnownGoodVersion": actual_last_known_good,
+                "expectedCurrentVersion": expected_current_version,
+                "expectedCurrentAbsent": expect_current_absent,
+                "namespaceGeneration": actual_namespace_generation,
+                "installGeneration": actual_install_generation,
+                "activated": False,
+                "operative": False,
+            }
+
+        completion = validate_runtime_slot_completion(
+            context=install_path,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            expected_payload_root=expected_payload_root,
+            expected_payload_version=expected_payload_version,
+            snapshot_id=snapshot_id,
+            runtime_version=runtime_version,
+            durable_home=durable,
+            environment={},
+        )
+        confirmed_current_version = _read_runtime_marker(
+            current_path,
+            "Current version marker",
+        )
+        confirmed_last_known_good = _read_runtime_marker(
+            last_known_good_path,
+            "Last-known-good marker",
+        )
+        if (
+            confirmed_current_version != actual_current_version
+            or confirmed_last_known_good != actual_last_known_good
+        ):
+            return {
+                "action": "slot-cutover",
+                "status": "revalidation-required",
+                "reason": "runtime-marker-changed",
+                "cutoverChanged": False,
+                "runtimeVersion": runtime_version,
+                "currentVersion": confirmed_current_version,
+                "lastKnownGoodVersion": confirmed_last_known_good,
+                "namespaceGeneration": actual_namespace_generation,
+                "installGeneration": actual_install_generation,
+                "activated": False,
+                "operative": False,
+            }
+
+        desired_last_known_good = runtime_version
+        locks = (genesis_lock, install_lock)
+        changed = (
+            actual_current_version != runtime_version
+            or actual_last_known_good != desired_last_known_good
+        )
+        if actual_current_version != runtime_version:
+            _atomic_write_text(current_path, runtime_version, lock=locks)
+        if actual_last_known_good != desired_last_known_good:
+            _atomic_write_text(
+                last_known_good_path,
+                desired_last_known_good,
+                lock=locks,
+            )
+        published_current = _read_runtime_marker(
+            current_path,
+            "Current version marker",
+        )
+        published_last_known_good = _read_runtime_marker(
+            last_known_good_path,
+            "Last-known-good marker",
+        )
+        if (
+            published_current != runtime_version
+            or published_last_known_good != desired_last_known_good
+        ):
+            _fail(
+                "Published runtime cutover markers did not validate as current: "
+                f"current={published_current!r}, "
+                f"last-known-good={published_last_known_good!r}, "
+                f"expected={runtime_version!r}."
+            )
+        return {
+            "action": "slot-cutover",
+            "status": "ready",
+            "reason": (
+                "runtime-slot-cutover-published"
+                if changed
+                else "runtime-slot-cutover-current"
+            ),
+            "cutoverChanged": changed,
+            "runtimeVersion": runtime_version,
+            "previousVersion": actual_current_version,
+            "currentVersion": published_current,
+            "lastKnownGoodVersion": published_last_known_good,
+            "currentMarker": str(current_path),
+            "lastKnownGoodMarker": str(last_known_good_path),
+            "completion": completion["completion"],
+            "namespaceGeneration": actual_namespace_generation,
+            "installGeneration": actual_install_generation,
+            "activated": False,
+            "operative": False,
+        }
+
+
 def _find_existing_source(
     durable_home: Path,
     fingerprint: str,
@@ -5502,6 +5815,34 @@ def _build_parser() -> argparse.ArgumentParser:
     slot_completion_validate_parser.add_argument("--runtime-version", required=True)
     slot_completion_validate_parser.add_argument("--durable-home")
 
+    slot_cutover_parser = subparsers.add_parser("slot-cutover")
+    slot_cutover_parser.add_argument("--context", required=True)
+    slot_cutover_parser.add_argument("--expected-marketplace-id", required=True)
+    slot_cutover_parser.add_argument("--expected-plugin-id", required=True)
+    slot_cutover_parser.add_argument("--expected-payload-root", required=True)
+    slot_cutover_parser.add_argument("--expected-payload-version", required=True)
+    slot_cutover_parser.add_argument("--snapshot-id", required=True)
+    slot_cutover_parser.add_argument("--runtime-version", required=True)
+    slot_cutover_parser.add_argument(
+        "--expected-namespace-generation",
+        required=True,
+        type=_parse_cli_generation,
+    )
+    slot_cutover_parser.add_argument(
+        "--expected-install-generation",
+        required=True,
+        type=_parse_cli_generation,
+    )
+    current_expectation = slot_cutover_parser.add_mutually_exclusive_group(
+        required=True
+    )
+    current_expectation.add_argument("--expected-current-version")
+    current_expectation.add_argument(
+        "--expect-current-absent",
+        action="store_true",
+    )
+    slot_cutover_parser.add_argument("--durable-home")
+
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
 
@@ -5653,6 +5994,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 expected_payload_version=arguments.expected_payload_version,
                 snapshot_id=arguments.snapshot_id,
                 runtime_version=arguments.runtime_version,
+                durable_home=arguments.durable_home,
+            )
+        elif arguments.action == "slot-cutover":
+            result = cutover_runtime_slot(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                expected_payload_root=arguments.expected_payload_root,
+                expected_payload_version=arguments.expected_payload_version,
+                snapshot_id=arguments.snapshot_id,
+                runtime_version=arguments.runtime_version,
+                expected_namespace_generation=arguments.expected_namespace_generation,
+                expected_install_generation=arguments.expected_install_generation,
+                expected_current_version=arguments.expected_current_version,
+                expect_current_absent=arguments.expect_current_absent,
                 durable_home=arguments.durable_home,
             )
         else:
