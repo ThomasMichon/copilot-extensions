@@ -295,6 +295,52 @@ async def test_liveness_on_child_exit():
 
 
 @pytest.mark.asyncio
+async def test_reattach_replays_buffer_before_dead_liveness():
+    """A dead child still yields its final unacknowledged frames on reattach."""
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        child.feed_frame(b'{"final":true}')
+        child.finish(4)
+        await asyncio.wait_for(host._child_done.wait(), timeout=5)
+
+        client = await SessionHostClient.connect(port=port)
+        await client.attach(0)
+        gen = client.frames()
+        seq, data = await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert seq == 1
+        assert data == b'{"final":true}\n'
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(gen.__anext__(), timeout=5)
+        assert client.child_alive is False
+        assert client.child_exit_code == 4
+        await client.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
+async def test_reader_exit_flushes_final_frame_before_dead_liveness():
+    """Child exit cannot overtake a final frame on an attached frontend."""
+    child = _FakeChild()
+    host, port = await _serve(child)
+    try:
+        client = await SessionHostClient.connect(port=port)
+        await client.attach(0)
+        child.feed_frame(b'{"final":true}')
+        child.finish(5)
+
+        frames = []
+        async for seq, data in client.frames():
+            frames.append((seq, data))
+        assert frames == [(1, b'{"final":true}\n')]
+        assert client.child_exit_code == 5
+        await client.close()
+    finally:
+        await host.close()
+
+
+@pytest.mark.asyncio
 async def test_terminate_reaps_child():
     child = _FakeChild()
     host, port = await _serve(child)
@@ -1223,6 +1269,9 @@ async def test_reattach_cancellation_closes_partial_transport(
         def mark_transport_lost(self):
             pass
 
+        def mark_host_child_exited(self, _exit_code):
+            pass
+
         async def start_streams(self, *_args, **_kwargs):
             await asyncio.sleep(60)
 
@@ -2082,19 +2131,62 @@ async def test_adapter_no_transport_lost_on_child_exit():
     host, port = await _serve(child)
     client = await SessionHostClient.connect(port=port)
     await client.attach(0)
-    fired = asyncio.Event()
+    transport_lost = asyncio.Event()
+    child_exited = asyncio.Event()
+    exit_codes = []
     streams = await open_acp_streams(client)
-    streams.on_transport_lost = fired.set
+    streams.on_transport_lost = transport_lost.set
+    streams.on_child_exit = lambda code: (exit_codes.append(code), child_exited.set())
     try:
         child.feed_frame(b'{"jsonrpc":"2.0"}')
         await asyncio.sleep(0.05)
-        child.finish(0)  # child exits -> host emits LIVENESS(dead)
-        await asyncio.sleep(0.2)
-        assert not fired.is_set()
+        child.finish(7)  # child exits -> host emits LIVENESS(dead)
+        await asyncio.wait_for(child_exited.wait(), timeout=5)
+        assert not transport_lost.is_set()
+        assert exit_codes == [7]
+        assert streams.child_exit_code == 7
     finally:
         await streams.aclose()
         await client.close()
         await host.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_settles_attached_client_after_child_exit(
+    session_manager, monkeypatch
+):
+    """A latched child exit is terminal, not a reattach-loop candidate."""
+    import os
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agent_bridge.models import SessionStatus
+    from agent_bridge.session_host.host_index import HostRecord
+    from agent_bridge.session_manager import Session
+    from agent_bridge.transport import SpawnTarget
+
+    session = Session("s1", "one", SpawnTarget(type="command"), "local")
+    session.acp_session_id = "acp-1"
+    session.status = SessionStatus.IDLE
+    client = MagicMock()
+    client.is_running = False
+    client.host_child_exit_code = 7
+    client.shutdown = AsyncMock()
+    session.client = client
+    session_manager._sessions["s1"] = session
+    session_manager._host_index.register(HostRecord(
+        session_id="s1",
+        port=1234,
+        host_pid=os.getpid(),
+        child_pid=222,
+    ))
+    reap = MagicMock()
+    monkeypatch.setattr(session_manager, "_reap_host_record", reap)
+
+    assert await session_manager.recover_disconnected_hosts() == 0
+    reap.assert_called_once()
+    assert session.status == SessionStatus.STOPPED
+    assert session.client is None
+    client.shutdown.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -2763,6 +2855,35 @@ async def test_run_host_end_to_end_reattach(tmp_path):
             await task
         except asyncio.CancelledError:
             pass
+
+
+@pytest.mark.asyncio
+async def test_run_host_persists_child_exit_state(tmp_path):
+    """The host authority record stops claiming a dead child is running."""
+    import sys
+
+    state = tmp_path / "host.json"
+    ready = asyncio.Event()
+    task = asyncio.create_task(
+        launcher.run_host(
+            [sys.executable, "-c", "raise SystemExit(7)"],
+            port=0, state_file=str(state), ready=ready,
+        )
+    )
+    try:
+        await asyncio.wait_for(ready.wait(), timeout=10)
+        for _ in range(200):
+            meta = json.loads(state.read_text())
+            if meta.get("state") == "child_exited":
+                break
+            await asyncio.sleep(0.01)
+        assert meta["state"] == "child_exited"
+        assert meta["child_exit_code"] == 7
+        assert meta["child_exited_at"] >= meta["created_at"]
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
 
 
 # --------------------------------------------------------------------------
