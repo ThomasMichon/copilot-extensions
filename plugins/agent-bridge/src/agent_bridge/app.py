@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import logging
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,7 +14,7 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from . import __version__, telemetry
-from .agent_registry import daemon_resolver
+from .agent_registry import AgentResolver, daemon_resolver
 from .auth import BearerAuthMiddleware
 from .config import load_config, load_or_create_auth_token
 from .db import Database
@@ -46,6 +47,33 @@ def _count_active_sessions(mgr) -> int:
         if str(st).lower() in _ACTIVE_STATUSES:
             n += 1
     return n
+
+
+async def _run_in_daemon_thread(fn, *args):
+    """Await blocking readiness work without letting it pin process shutdown."""
+    loop = asyncio.get_running_loop()
+    future = loop.create_future()
+
+    def deliver(setter, value) -> None:
+        if not future.done():
+            setter(value)
+
+    def run() -> None:
+        try:
+            result = fn(*args)
+        except BaseException as exc:
+            try:
+                loop.call_soon_threadsafe(deliver, future.set_exception, exc)
+            except RuntimeError:
+                pass
+        else:
+            try:
+                loop.call_soon_threadsafe(deliver, future.set_result, result)
+            except RuntimeError:
+                pass
+
+    threading.Thread(target=run, daemon=True, name="bridge-readiness").start()
+    return await future
 
 
 # Generation self-retire tuning. Default-ON (opt-out): validated on real cutovers
@@ -168,6 +196,12 @@ async def lifespan(app: FastAPI):
 
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
+    app.state.resolver = AgentResolver({}, {})
+    app.state.ready = False
+    app.state.readiness_error = None
+    app.state.readiness_exception = None
+    app.state.topology_ready = False
+    app.state.credential_relay_ready = False
 
     # The launch path reserved the serving socket before entering lifespan.
     # Publish that concrete endpoint before topology, relay, or remote recovery
@@ -229,59 +263,91 @@ async def lifespan(app: FastAPI):
 
     reattach_task = asyncio.create_task(_reattach_session_hosts_bg())
 
-    async def _abort_startup() -> None:
-        reattach_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await reattach_task
-        if published_endpoint is not None:
-            await asyncio.to_thread(
-                routing.restore_previous_if_owner,
-                config_dir(),
-                pid=published_endpoint.pid,
-                generation=published_endpoint.generation,
-            )
-        await asyncio.to_thread(db.close)
+    relay_server = None
+    relay_start_lock = asyncio.Lock()
 
-    try:
-        # Load topology profiles + auto-discover local agents. Always a resolver
-        # (empty when there is no topology) so declarative namespace providers
-        # (codespace:, container:) attach even without machines.yaml.
-        resolver = daemon_resolver(cfg)
-        app.state.resolver = resolver
-
-        # Start worktree discovery if topology is available.
-        if resolver.agents or resolver.machines:
-            from .routes.worktrees import get_cache
-            wt_cache = get_cache()
-            wt_cache.configure(interval=cfg.worktree_discovery_interval)
-            wt_cache.start(resolver)
-
-        # Start credential relay server for auth forwarding over SSH tunnels and
-        # container connections. The elevated sub-daemon disables this so it
-        # never re-binds the primary daemon's shared relay port.
-        relay_server = None
-        if not getattr(cfg, "enable_credential_relay", True):
-            log.info(
-                "Credential relay disabled for this daemon "
-                "(enable_credential_relay=False) -- reusing the primary daemon's relay"
-            )
-        else:
+    async def _ensure_relay():
+        nonlocal relay_server
+        async with relay_start_lock:
             relay_server = await _start_credential_relay(app)
+            app.state.credential_relay_ready = bool(
+                relay_server is not None
+                and getattr(relay_server, "running", False)
+            )
+            return relay_server
 
-        log.info(
-            "agent-bridge started (port=%s, db=%s, sessions=%d)",
-            cfg.port, db_path, len(mgr.list_sessions()),
-        )
-    except Exception:
-        await _abort_startup()
-        raise
+    async def _initialize_readiness() -> None:
+        retry_delay = 0.25
+        while True:
+            try:
+                # Topology/provider discovery can shell out and touch
+                # remote-facing state. Swap the fully-built resolver in once.
+                resolver = (
+                    await _run_in_daemon_thread(daemon_resolver, cfg)
+                    if getattr(app.state, "background_readiness", False)
+                    else daemon_resolver(cfg)
+                )
+                app.state.resolver = resolver
+                app.state.topology_ready = True
+
+                if resolver.agents or resolver.machines:
+                    from .routes.worktrees import get_cache
+                    wt_cache = get_cache()
+                    wt_cache.configure(interval=cfg.worktree_discovery_interval)
+                    wt_cache.start(resolver)
+
+                if not getattr(cfg, "enable_credential_relay", True):
+                    log.info(
+                        "Credential relay disabled for this daemon "
+                        "(enable_credential_relay=False) -- reusing the primary daemon's relay"
+                    )
+                else:
+                    await _ensure_relay()
+
+                session_count = len(mgr.list_sessions())
+                app.state.readiness_error = None
+                app.state.readiness_exception = None
+                log.info(
+                    "agent-bridge ready (port=%s, db=%s, sessions=%d)",
+                    cfg.port, db_path, session_count,
+                )
+                app.state.ready = True
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                app.state.ready = False
+                app.state.readiness_error = "initialization failed"
+                app.state.readiness_exception = exc
+                log.error("Background readiness initialization failed", exc_info=True)
+                if not getattr(app.state, "background_readiness", False):
+                    return
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 5.0)
+
+    readiness_task = asyncio.create_task(_initialize_readiness())
+    if not getattr(app.state, "background_readiness", False):
+        await readiness_task
+        if app.state.readiness_error:
+            readiness_exception = app.state.readiness_exception
+            reattach_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await reattach_task
+            if published_endpoint is not None:
+                await asyncio.to_thread(
+                    routing.restore_previous_if_owner,
+                    config_dir(),
+                    pid=published_endpoint.pid,
+                    generation=published_endpoint.generation,
+                )
+            await asyncio.to_thread(db.close)
+            raise RuntimeError(str(readiness_exception)) from readiness_exception
 
     # Expose a relay-adoption hook so a passive cutover instance can bind the
     # shared relay port *after* the retiring daemon releases it (the relay is a
     # singleton on 9857). The /api/v1/relay/adopt endpoint calls this.
     async def _adopt_relay():
-        nonlocal relay_server
-        relay_server = await _start_credential_relay(app)
+        await _ensure_relay()
         return relay_server is not None and getattr(relay_server, "running", False)
 
     app.state.adopt_relay = _adopt_relay
@@ -580,6 +646,9 @@ async def lifespan(app: FastAPI):
         self_retire_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self_retire_task
+    readiness_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await readiness_task
     import os as _os
 
     from zdd import routing

@@ -134,6 +134,10 @@ async def _run_bridge_ws(
     expected = getattr(ws.app.state, "auth_token", None)
     offered = list(ws.scope.get("subprotocols", []))
 
+    if agent_name is not None and not getattr(ws.app.state, "ready", True):
+        await ws.close(code=1013, reason="agent-bridge is initializing")
+        return
+
     # --- Auth (websocket scope bypasses BearerAuthMiddleware) ---------------
     if expected:
         provided = _provided_token(ws, offered)

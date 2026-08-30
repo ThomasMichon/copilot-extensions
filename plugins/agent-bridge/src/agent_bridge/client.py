@@ -258,6 +258,7 @@ class BridgeClient:
         sock_timeout = request_timeout if request_timeout is not None else self._timeout
         session_deadline: float | None = None
         session_replacement_used = False
+        readiness_deadline: float | None = None
         backoff = 0.25
         while True:
             try:
@@ -274,6 +275,15 @@ class BridgeClient:
                     detail = json.loads(exc.read().decode()).get("detail", str(exc))
                 except Exception:
                     detail = str(exc)
+                if exc.code == 503 and "initializing" in str(detail).lower():
+                    if readiness_deadline is None:
+                        readiness_deadline = (
+                            _time.monotonic() + self._connect_grace
+                        )
+                    if _time.monotonic() + backoff < readiness_deadline:
+                        _time.sleep(backoff)
+                        backoff = min(backoff * 2, 1.0)
+                        continue
                 # A session-scoped 404 can come from the retiring daemon after
                 # active.json has flipped (or just before it flips) to the
                 # daemon that adopted the session. Follow discovery immediately,

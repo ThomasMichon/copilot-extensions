@@ -354,6 +354,11 @@ async def start_session(req: StartSessionRequest, request: Request):
     mgr: SessionManager = request.app.state.session_manager
     resolver = getattr(request.app.state, "resolver", None)
     agent_name = req.agent
+    if agent_name and not getattr(request.app.state, "ready", True):
+        raise HTTPException(
+            status_code=503,
+            detail="agent-bridge is initializing; retry shortly",
+        )
     if agent_name and resolver:
         canonicalize = getattr(resolver, "canonical_agent_name", None)
         if callable(canonicalize):
