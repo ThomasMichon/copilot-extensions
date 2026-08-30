@@ -540,6 +540,9 @@ class Supervisor:
         #: Task ids whose terminal lifecycle event has already been dispatched to
         #: the evaluator this process (dedup_key is the cross-restart guard).
         self._evaluated: set[str] = set()
+        #: Last compact dead-letter set emitted by this process. Unchanged sets
+        #: stay quiet across poll cycles; a set change emits one actionable line.
+        self._dead_letter_signature: tuple[tuple[str, int, int], ...] = ()
 
     # -- helpers -------------------------------------------------------------
 
@@ -1191,6 +1194,40 @@ class Supervisor:
             return False
         return failed_counts.get(task["id"], 0) >= cap
 
+    def _log_dead_lettered(
+        self, tasks: Sequence[dict], failed_counts: dict[str, int]
+    ) -> set[str]:
+        blocked = [
+            (
+                task["id"],
+                failed_counts.get(task["id"], 0),
+                self._effective_max_attempts(task),
+            )
+            for task in tasks
+            if self._is_dead_lettered(task, failed_counts)
+        ]
+        signature = tuple(sorted(blocked))
+        if signature != self._dead_letter_signature:
+            self._dead_letter_signature = signature
+            if signature:
+                shown = ", ".join(
+                    f"{task_id} ({failures}/{cap})"
+                    for task_id, failures, cap in signature[:10]
+                )
+                suppressed = (
+                    f"; +{len(signature) - 10} more" if len(signature) > 10 else ""
+                )
+                log.warning(
+                    "%d spawn-dead-lettered task(s): %s%s; inspect with "
+                    "`agent-dispatch reservations list --state failed`; rearm one "
+                    "with `agent-dispatch reservations rearm <task> --permit "
+                    "--reason <reason>`",
+                    len(signature),
+                    shown,
+                    suppressed,
+                )
+        return {task_id for task_id, _failures, _cap in signature}
+
     def poll_once(self, *, now: float | None = None) -> list[str]:
         """One supervision cycle: reconcile, hold live leases, then spawn eligible
         tasks up to the cap.
@@ -1208,17 +1245,15 @@ class Supervisor:
         if self.nudge:
             self.nudge_stalled(now=now)
         failed_counts = self._failed_spawn_counts()
+        eligible = list(self._eligible(now))
+        dead_lettered = self._log_dead_lettered(eligible, failed_counts)
         active = len(self._active_reservations())
         spawned: list[str] = []
-        for task in self._eligible(now):
+        for task in eligible:
+            if task["id"] in dead_lettered:
+                continue
             if active >= self.max_concurrent:
                 break
-            if self._is_dead_lettered(task, failed_counts):
-                log.warning(
-                    "task %s dead-lettered (>= %d failed spawn attempts); skipping",
-                    task["id"], self._effective_max_attempts(task),
-                )
-                continue
             if self.capacity_gate is not None and not self.capacity_gate(task):
                 # No capacity for this task right now (e.g. a fleet pool that is
                 # entirely asleep). Defer WITHOUT reserving so no spawn attempt is

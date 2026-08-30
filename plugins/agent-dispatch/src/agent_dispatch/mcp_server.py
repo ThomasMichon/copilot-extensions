@@ -424,6 +424,22 @@ class DispatchTools:
         with self._client_factory() as c:
             return c.recover()
 
+    def rearm_spawn(
+        self,
+        task_id: str,
+        permit: bool = False,
+        reason: str | None = None,
+        min_failures: int = 3,
+    ) -> dict:
+        """Atomically rearm a queued task's dead-lettered spawn history."""
+        with self._client_factory() as c:
+            return c.rearm_spawn(
+                task_id,
+                permitted=permit,
+                reason=reason,
+                min_failures=min_failures,
+            )
+
 
 def build_server(tools: DispatchTools | None = None) -> Any:
     """Build the MCPServer stdio server exposing the dispatch tools.
@@ -468,6 +484,7 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_heartbeat")(t.heartbeat)
     mcp.tool(name="dispatch_detach")(t.detach)
     mcp.tool(name="dispatch_recover")(t.recover)
+    mcp.tool(name="dispatch_rearm_spawn")(t.rearm_spawn)
     return mcp
 
 
