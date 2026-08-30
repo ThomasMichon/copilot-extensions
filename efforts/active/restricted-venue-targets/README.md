@@ -213,17 +213,19 @@ mount, credential relay, merge authority, or deployment authority.
       agent-containers and agent-ssh as required.
 
 ### Phase 5 — Provider-backed worktree sources and Picker
-- [ ] Generalize Picker sources from machine-SSH-only to an explicit source kind
+- [x] Generalize Picker sources from machine-SSH-only to an explicit source kind
       (`machine-ssh` or `provider-exec`) with one canonical source identity.
 - [ ] Route list/session/status and exact-worktree lifecycle verbs to the owning
       provider; never create a local synthetic machine/worktree record.
 - [ ] Render venue name, readiness, and trust posture, and disable unsupported
       actions rather than falling back to local behavior.
-- [ ] Preserve all existing physical-machine source behavior and engine/Picker
+- [x] Preserve all existing physical-machine source behavior and engine/Picker
       compatibility; bump the contract only if additive compatibility cannot be
       maintained.
 - [ ] Add source, cache-key, rendering, version-skew, lineage, and ownership
-      tests; bump agent-worktrees.
+      tests; bump agent-worktrees. Source identity, cache-key isolation, duplicate
+      handling, and machine-source compatibility coverage landed in #1396;
+      provider rendering, lineage, and ownership coverage remain.
 
 ### Phase 6 — Session corpus ingestion
 - [x] Teach agent-logger/session-sync to ingest the provider's rescued
@@ -545,3 +547,26 @@ key and relay projection; restricted venues never enter that path.
   lifecycle action was deferred with an active provider admission, and the
   container identity, network set, read-only root, empty ports/mounts, dropped
   privilege, and capability posture remained unchanged.
+
+### 2026-08-30 - Picker source identity foundation
+- PR #1396 closed #1394 and shipped the additive Phase 5 source identity
+  foundation as agent-worktrees `1.5.3-dev678`, Worktree Manager
+  `0.1.0-dev22`, and marketplace `1.7.5-dev701`.
+- Existing local and remote machine sources now use canonical
+  `machine-ssh:<machine>:<environment>` identities. Normalized rows carry source
+  kind, ID, and label; loader state is keyed by source ID; and source-oriented
+  filtering, reload, state, records, and error APIs coexist with the legacy
+  machine/environment surface.
+- Machine identities cannot be overridden, non-machine IDs must remain in their
+  declared namespace, encoded components avoid delimiter collisions, and
+  duplicate IDs degrade by retaining the first source rather than crashing the
+  Picker. Provider-specific enumeration, action routing, lineage invalidation,
+  and rendering remain separate follow-up slices.
+- The Worktree Manager suite passed with 638 tests, the Picker transplant guard
+  preserved byte parity, and the installation-context suite passed with 974
+  tests and 9 skips. Four unrelated stale updater tests found by the broader
+  agent-worktrees run remain tracked in #1395.
+- The unified update deployed the new agent-worktrees runtime. Worktree Manager
+  was installed through its supported bootstrap, and its headless
+  `picker screenshot` command rendered the production Picker successfully
+  through the documented engine-runtime process boundary.
