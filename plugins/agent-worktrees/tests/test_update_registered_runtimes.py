@@ -86,7 +86,7 @@ def _stub_reconcile(
 ) -> None:
     monkeypatch.setattr(reconcile, "read_enabled_plugins", lambda repo_dir: list(enabled))
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir",
+        reconcile, "core_installed_payload_dir",
         lambda name: Path(f"/inst/{name}") if name in scopes else None,
     )
     monkeypatch.setattr(
@@ -248,10 +248,10 @@ def test_failure_is_best_effort(monkeypatch):
     _install_config(monkeypatch)
     _stub_reconcile(
         monkeypatch,
-        enabled=["aaa", "bbb"],
-        scopes={"aaa": "universal", "bbb": "universal"},
-        deployed={"aaa": None, "bbb": None},
-        payload={"aaa": "1", "bbb": "1"},
+        enabled=["agent-aaa", "agent-bbb"],
+        scopes={"agent-aaa": "universal", "agent-bbb": "universal"},
+        deployed={"agent-aaa": None, "agent-bbb": None},
+        payload={"agent-aaa": "1", "agent-bbb": "1"},
     )
     attempted: list[str] = []
 
@@ -261,7 +261,7 @@ def test_failure_is_best_effort(monkeypatch):
             if tok.endswith("install.sh"):
                 name = Path(tok).parent.parent.name
         attempted.append(name)
-        if name == "aaa":
+        if name == "agent-aaa":
             return types.SimpleNamespace(returncode=1, stdout="", stderr="boom")
         return _ok()
 
@@ -271,9 +271,9 @@ def test_failure_is_best_effort(monkeypatch):
         Path, "exists",
         lambda self: True if str(self).endswith("install.sh") else real_exists(self),
     )
-    # Must not raise despite aaa failing; both attempted.
+    # Must not raise despite agent-aaa failing; both attempted.
     m._reconcile_registered_runtimes(Path("/plugin/dir"), "linux", force=True)
-    assert attempted == ["aaa", "bbb"]
+    assert attempted == ["agent-aaa", "agent-bbb"]
 
 
 def test_no_config_is_noop(monkeypatch):
