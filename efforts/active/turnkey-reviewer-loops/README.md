@@ -29,13 +29,13 @@ side-load.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | `copilot-extensions-host` | Public contract, recipe/runtime implementation, self-hosted validation | independent copilot-extensions worktrees |
-| `dotfiles-validation` | Second-repository declaration and end-to-end proof | `tmichon_microsoft/dotfiles` PR flow |
+| `validation-repository` | Second-repository declaration and end-to-end proof | repository-owned PR flow |
 
 ## Coordination
 
 - **Topology:** independent per-slice PRs, sequenced by the phases below
 - **Host (owns PRs):** `copilot-extensions-host`
-- **Delegates:** none initially; `dotfiles-validation` may own
+- **Delegates:** none initially; `validation-repository` may own
   only its declaration/proof slice
 - **Handoff:** every slice records merged PRs and observable validation in the
   Journal before the next phase begins
@@ -67,9 +67,9 @@ The missing capability is composition, not another bespoke reviewer.
 
 > Harden the reviewer recipe upstream in copilot-extensions. Make it possible
 > for copilot-extensions itself to run an agent-dispatch reviewer loop, guided
-> by a repository agent, as a more powerful alternative to the base GitHub
-> Copilot reviewer. Use another public repository as the target-repository
-> validation. Make the pattern turn-key.
+> by a repository agent, as a more powerful alternative to the base forge
+> reviewer. Use another public repository as the target-repository validation.
+> Make the pattern turn-key.
 
 ## Plan
 
@@ -155,13 +155,14 @@ The missing capability is composition, not another bespoke reviewer.
 - [ ] Document the host/runtime prerequisites and how maintainers inspect,
       pause, resume, recover, and side-load the loop.
 
-### Phase 5 — Validate portability in dotfiles
+### Phase 5 — Validate portability in a second repository
 
-- [ ] Hand the Phase 4 declaration/control contract to `dotfiles-validation`;
+- [ ] Hand the Phase 4 declaration/control contract to
+      `validation-repository`;
       this slice starts only after the extracted schema and doctor/status
       surfaces have merged upstream.
-- [ ] Adopt the same turn-key contract in `tmichon_microsoft/dotfiles` using
-      only repository-owned policy/configuration.
+- [ ] Adopt the same turn-key contract in a second public repository using only
+      repository-owned policy/configuration.
 - [ ] Prove discovery creates one review task for an eligible external pull
       request and creates none for an excluded pull request.
 - [ ] Prove a task survives worker or frontend interruption, resumes from its
@@ -240,4 +241,4 @@ declarative expansion follows only after that composition is proven.
   discrimination, acting-identity semantics, untrusted-change containment,
   discovery watermarks, and inactive-declaration diagnostics. Reordered the
   work to self-host the raw composition before extracting the turn-key schema,
-  and named `tmichon_microsoft/dotfiles` as the portability target.
+  with a second public repository reserved for portability validation.
