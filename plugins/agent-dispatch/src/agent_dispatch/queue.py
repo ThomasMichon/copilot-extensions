@@ -678,19 +678,33 @@ class TaskQueue:
                 ")"
             )
             # Rows completed before ``completed_by`` existed retain their
-            # original completing identity when the durable audit row has it.
-            # Runtime authorization never consults the audit log after this
-            # one-time additive backfill; an unprovable legacy owner stays NULL
-            # and retry-fill fails closed.
+            # original completing identity when the durable audit trail proves
+            # exactly one owner.  A completion retry is a completed->completed
+            # event, so only the original transition into the terminal state is
+            # authoritative.  Ambiguous or unprovable legacy ownership stays
+            # NULL and retry-fill fails closed.
             conn.execute(
                 "UPDATE tasks SET completed_by = ("
-                " SELECT worker FROM task_events"
+                " SELECT MIN(worker) FROM task_events"
                 " WHERE task_events.task_id = tasks.id"
                 "   AND task_events.to_status = ?"
+                "   AND task_events.from_status <> ?"
                 "   AND task_events.worker IS NOT NULL"
-                " ORDER BY task_events.id DESC LIMIT 1"
-                ") WHERE status = ? AND completed_by IS NULL",
-                (Status.COMPLETED, Status.COMPLETED),
+                ") WHERE status = ? AND completed_by IS NULL"
+                " AND 1 = ("
+                " SELECT COUNT(DISTINCT worker) FROM task_events"
+                " WHERE task_events.task_id = tasks.id"
+                "   AND task_events.to_status = ?"
+                "   AND task_events.from_status <> ?"
+                "   AND task_events.worker IS NOT NULL"
+                ")",
+                (
+                    Status.COMPLETED,
+                    Status.COMPLETED,
+                    Status.COMPLETED,
+                    Status.COMPLETED,
+                    Status.COMPLETED,
+                ),
             )
             # Append-only progress log -- the *accumulated* counterpart of the
             # latest-only ``latest_progress`` beat (the *resumable-goal* feature).
@@ -877,6 +891,19 @@ class TaskQueue:
             "VALUES (?, ?, ?, ?, ?, ?)",
             (task_id, ts, from_status, to_status, worker, note),
         )
+
+    @staticmethod
+    def _completion_event_workers(
+        conn: sqlite3.Connection, task_id: str
+    ) -> list[str]:
+        """Return distinct owners from authoritative completion transitions."""
+        rows = conn.execute(
+            "SELECT DISTINCT worker FROM task_events"
+            " WHERE task_id = ? AND to_status = ? AND from_status <> ?"
+            " AND worker IS NOT NULL ORDER BY worker",
+            (task_id, Status.COMPLETED, Status.COMPLETED),
+        )
+        return [str(row["worker"]) for row in rows]
 
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None:
         row = conn.execute(
@@ -1394,16 +1421,28 @@ class TaskQueue:
                 raise TaskError(f"no such task {task_id!r}")
 
             if task.status == Status.COMPLETED and encoded_result is not None:
-                if task.completed_by is None:
+                completing_owner = task.completed_by
+                if completing_owner is None:
+                    completion_workers = self._completion_event_workers(conn, task_id)
+                    if not completion_workers:
+                        conn.execute("COMMIT")
+                        raise TaskError(
+                            f"task {task_id!r} has no unambiguous completing owner"
+                            " in its completion events; cannot safely record a result"
+                        )
+                    if len(completion_workers) != 1:
+                        conn.execute("COMMIT")
+                        owners = ", ".join(repr(owner) for owner in completion_workers)
+                        raise TaskError(
+                            f"task {task_id!r} has ambiguous completing owners"
+                            f" in its completion events ({owners});"
+                            " cannot safely record a result"
+                        )
+                    completing_owner = completion_workers[0]
+                if completing_owner != worker_id:
                     conn.execute("COMMIT")
                     raise TaskError(
-                        f"task {task_id!r} has no recorded completing owner;"
-                        " cannot safely record a result"
-                    )
-                if task.completed_by != worker_id:
-                    conn.execute("COMMIT")
-                    raise TaskError(
-                        f"task {task_id!r} was completed by {task.completed_by!r},"
+                        f"task {task_id!r} was completed by {completing_owner!r},"
                         f" not {worker_id!r}"
                     )
                 row = conn.execute(
@@ -1422,12 +1461,21 @@ class TaskQueue:
                         raise TaskError(
                             f"task {task_id!r} already has a different result"
                         )
+                    if task.completed_by is None:
+                        conn.execute(
+                            "UPDATE tasks SET completed_by = ?"
+                            " WHERE id = ? AND completed_by IS NULL",
+                            (completing_owner, task_id),
+                        )
+                        task = self._fetch(conn, task_id)
+                        assert task is not None
                     conn.execute("COMMIT")
                     return CompletionOutcome(task, None)
                 conn.execute(
                     "UPDATE tasks SET result = ?, result_ref = COALESCE(result_ref, ?),"
-                    " updated_at = ? WHERE id = ?",
-                    (encoded_result, result_ref, ts, task_id),
+                    " completed_by = COALESCE(completed_by, ?), updated_at = ?"
+                    " WHERE id = ?",
+                    (encoded_result, result_ref, completing_owner, ts, task_id),
                 )
                 self._audit(
                     conn,

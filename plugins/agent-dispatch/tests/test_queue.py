@@ -206,6 +206,69 @@ def test_same_owner_can_retry_completed_task_to_fill_missing_result(q):
     assert repeated.event_type is None
 
 
+def test_retry_fill_recovers_owner_from_completion_after_migration(tmp_path):
+    db = tmp_path / "cutover.db"
+    q = TaskQueue(db)
+    task = q.create("old generation completion")
+    q.claim_one("worker-1", task_id=task.id)
+    q.start(task.id, "worker-1")
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE tasks SET status = ?, completed_at = ?, result_ref = ?,"
+            " result = NULL, completed_by = NULL, owner = NULL"
+            " WHERE id = ?",
+            (Status.COMPLETED, 10, "artifact/old", task.id),
+        )
+        conn.execute(
+            "INSERT INTO task_events"
+            " (task_id, ts, from_status, to_status, worker, note)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                task.id,
+                10,
+                Status.STARTED,
+                Status.COMPLETED,
+                "worker-1",
+                "complete",
+            ),
+        )
+
+    assert q.get(task.id).completed_by is None
+    events_before = q.events(task.id)
+    with pytest.raises(TaskError, match="completed by 'worker-1', not 'worker-2'"):
+        q.complete(task.id, "worker-2", result={"outcome": "wrong owner"})
+    assert q.get(task.id).completed_by is None
+    assert q.get(task.id).result is None
+
+    outcome = q.complete_with_outcome(
+        task.id,
+        "worker-1",
+        result_ref="artifact/old",
+        result={"outcome": "recorded"},
+    )
+
+    assert outcome.event_type == "task.result_recorded"
+    assert outcome.task.completed_by == "worker-1"
+    assert outcome.task.result == {"outcome": "recorded"}
+    events_after = q.events(task.id)
+    assert len(events_after) == len(events_before) + 1
+    assert events_after[-1] == {
+        "ts": events_after[-1]["ts"],
+        "from_status": Status.COMPLETED,
+        "to_status": Status.COMPLETED,
+        "worker": "worker-1",
+        "note": "complete retry: result recorded",
+    }
+    listed = next(item for item in q.list() if item.id == task.id)
+    assert listed.result is None
+    assert listed.has_result is True
+
+    with pytest.raises(TaskError, match="completed by 'worker-1', not 'worker-2'"):
+        q.complete(task.id, "worker-2", result={"outcome": "recorded"})
+    assert q.get(task.id).result == {"outcome": "recorded"}
+
+
 def test_completion_retry_never_overwrites_result_or_crosses_owner(q):
     t = q.create("work")
     q.claim_one("w1", task_id=t.id)
@@ -940,8 +1003,37 @@ def test_legacy_completion_without_owner_fails_retry_fill_closed(tmp_path):
 
     q = RealTaskQueue(db)
 
-    with pytest.raises(TaskError, match="no recorded completing owner"):
+    with pytest.raises(TaskError, match="no unambiguous completing owner"):
         q.complete("t1", "worker-1", result={"ok": True})
+
+
+def test_legacy_completion_with_ambiguous_owners_fails_retry_fill_closed(tmp_path):
+    db = tmp_path / "legacy-ambiguous.db"
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "CREATE TABLE tasks (id TEXT PRIMARY KEY, status TEXT, result TEXT)"
+        )
+        conn.execute("INSERT INTO tasks VALUES ('t1', 'completed', NULL)")
+        conn.execute(
+            "CREATE TABLE task_events ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,"
+            "ts REAL NOT NULL, from_status TEXT, to_status TEXT,"
+            "worker TEXT, note TEXT)"
+        )
+        conn.executemany(
+            "INSERT INTO task_events"
+            " (task_id, ts, from_status, to_status, worker, note)"
+            " VALUES ('t1', ?, 'started', 'completed', ?, 'complete')",
+            [(1, "worker-1"), (2, "worker-2")],
+        )
+
+    q = RealTaskQueue(db)
+
+    assert q.get("t1").completed_by is None
+    with pytest.raises(TaskError, match="ambiguous completing owners"):
+        q.complete("t1", "worker-1", result={"ok": True})
+    assert q.get("t1").completed_by is None
+    assert q.get("t1").result is None
 
 
 def test_default_result_limit_is_conservative():
