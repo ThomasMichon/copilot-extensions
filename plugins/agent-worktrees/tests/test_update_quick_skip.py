@@ -143,7 +143,7 @@ def test_prelaunch_selected_context_suppresses_self_legacy_installer(
     monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
-        "installed_payload_dir",
+        "core_installed_payload_dir",
         lambda name: plugin_dir,
     )
     monkeypatch.setattr(
@@ -189,7 +189,7 @@ def test_prelaunch_invalid_other_context_fails_closed(
     monkeypatch.setattr(m.svc, "discover_services", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         reconcile,
-        "installed_payload_dir",
+        "core_installed_payload_dir",
         lambda name: plugin_dir,
     )
     monkeypatch.setattr(
