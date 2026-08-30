@@ -1258,7 +1258,9 @@ def create_app(
                 body.task_id, reserved_by=body.reserved_by
             )
         except TaskError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
+            msg = str(exc)
+            status = 404 if msg.startswith("no such task") else 409
+            raise HTTPException(status_code=status, detail=msg) from exc
         result = _reservation_dict(reservation)
         if reserved:
             bus.publish({"type": "spawn.reserved", "reservation": result})
