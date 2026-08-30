@@ -182,3 +182,29 @@ def test_watchdog_enabled_default_and_disable(monkeypatch):
         assert _watchdog_enabled() is False
     monkeypatch.setenv("AGENT_BRIDGE_WATCHDOG", "1")
     assert _watchdog_enabled() is True
+
+
+def test_arm_uses_supplied_terminal_action(monkeypatch):
+    from agent_bridge import watchdog
+
+    captured = {}
+
+    class FakeThread:
+        def __init__(self, *, target, name, daemon):
+            captured.update(target=target, name=name, daemon=daemon)
+
+        def start(self):
+            pass
+
+    class Server:
+        started = True
+        should_exit = False
+
+    terminal = lambda reason: None
+    monkeypatch.setattr(watchdog.threading, "Thread", FakeThread)
+    thread = watchdog.arm_serving_watchdog(
+        Server(), bind="127.0.0.1", port=1234, on_dead=terminal
+    )
+
+    assert thread is not None
+    assert captured["target"].__self__._on_dead is terminal

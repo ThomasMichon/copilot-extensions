@@ -470,9 +470,22 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # and the next start succeeds instead of refusing against a zombie. Armed
     # before serving so it also catches a startup that hangs after the lock is
     # taken. A graceful shutdown (server.should_exit) is never treated as a wedge.
-    from .watchdog import arm_serving_watchdog
+    from .watchdog import (
+        WINDOWS_INTERVAL,
+        WINDOWS_SERVING_GRACE,
+        arm_serving_watchdog,
+    )
 
-    arm_serving_watchdog(server, bind=cfg.bind, port=bound_port)
+    watchdog_kwargs: dict[str, Any] = {}
+    if sys.platform == "win32":
+        watchdog_kwargs = {
+            "interval": WINDOWS_INTERVAL,
+            "serving_grace": WINDOWS_SERVING_GRACE,
+            "on_dead": _watchdog_dead,
+        }
+    arm_serving_watchdog(
+        server, bind=cfg.bind, port=bound_port, **watchdog_kwargs
+    )
     try:
         if listen_sock is not None:
             server.run(sockets=[listen_sock])
@@ -1082,8 +1095,8 @@ def _spawn_via_wmi_broker(argv: list[str]) -> bool:
         return False
 
 
-def _spawn_detached_daemon() -> None:
-    """Spawn ``agent-bridge start`` as a detached, job-surviving daemon.
+def _spawn_detached_argv(argv: list[str]) -> None:
+    """Spawn ``argv`` as a detached, job-surviving process.
 
     Uses ``detached_kwargs(breakaway=True)`` so the daemon escapes the caller's
     Windows **Job object** and outlives whoever started it -- the persistence
@@ -1102,7 +1115,6 @@ def _spawn_detached_daemon() -> None:
     """
     import subprocess as _sp
 
-    argv = _daemon_launch_argv()
     try:
         logf = open(os.path.join(_INSTALL_DIR, "agent-bridge.log"), "ab")
         errf = open(os.path.join(_INSTALL_DIR, "agent-bridge-err.log"), "ab")
@@ -1124,6 +1136,43 @@ def _spawn_detached_daemon() -> None:
             argv, stdout=logf, stderr=errf, stdin=_sp.DEVNULL,
             **detached_kwargs(),
         )
+
+
+def _spawn_detached_daemon() -> None:
+    """Spawn ``agent-bridge start`` through the job-surviving launch path."""
+    _spawn_detached_argv(_daemon_launch_argv())
+
+
+def _spawn_watchdog_replacement(*, delay: float = 1.0) -> None:
+    """Schedule a fresh daemon after the wedged Windows process releases its lock.
+
+    The helper is detached before the watchdog hard-exits. It waits briefly so
+    the kernel can release the singleton, then replaces itself with the normal
+    ``agent-bridge start`` entrypoint from this versioned runtime.
+    """
+    code = (
+        "import os,sys,time;"
+        "time.sleep(float(sys.argv[1]));"
+        "os.execv(sys.executable,[sys.executable,'-m','agent_bridge','start'])"
+    )
+    argv = [windowless_python(sys.executable), "-c", code, str(delay)]
+    _spawn_detached_argv(argv)
+
+
+def _watchdog_dead(reason: str) -> None:
+    """Restart the Windows frontend promptly, then hard-exit the wedged one."""
+    from .watchdog import _force_exit
+
+    try:
+        _spawn_watchdog_replacement()
+        logging.getLogger("agent-bridge").error(
+            "Self-watchdog: scheduled a detached Windows replacement before exit"
+        )
+    except OSError as exc:
+        logging.getLogger("agent-bridge").error(
+            "Self-watchdog: could not schedule Windows replacement: %s", exc
+        )
+    _force_exit(reason)
 
 
 

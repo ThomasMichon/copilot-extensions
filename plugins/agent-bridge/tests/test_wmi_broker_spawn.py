@@ -106,3 +106,36 @@ def test_spawn_detached_happy_path_is_breakaway(monkeypatch, tmp_path):
     m._spawn_detached_daemon()
     # Breakaway succeeded -> the WMI broker is never reached.
     assert seen["wmi"] == 0
+
+
+def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(m.sys, "executable", r"C:\venv\python.exe")
+    monkeypatch.setattr(m, "windowless_python", lambda path: path.replace("python.exe", "pythonw.exe"))
+    monkeypatch.setattr(
+        m, "_spawn_detached_argv", lambda argv: captured.setdefault("argv", argv)
+    )
+
+    m._spawn_watchdog_replacement(delay=1.5)
+
+    argv = captured["argv"]
+    assert argv[0] == r"C:\venv\pythonw.exe"
+    assert argv[1] == "-c"
+    assert "agent_bridge" in argv[2]
+    assert argv[3] == "1.5"
+
+
+def test_watchdog_dead_schedules_replacement_before_exit(monkeypatch):
+    from agent_bridge import watchdog
+
+    calls = []
+    monkeypatch.setattr(
+        m, "_spawn_watchdog_replacement", lambda: calls.append("replacement")
+    )
+    monkeypatch.setattr(
+        watchdog, "_force_exit", lambda reason: calls.append(("exit", reason))
+    )
+
+    m._watchdog_dead("listener stopped")
+
+    assert calls == ["replacement", ("exit", "listener stopped")]
