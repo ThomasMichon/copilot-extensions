@@ -143,3 +143,23 @@ def test_watchdog_dead_schedules_replacement_before_exit(monkeypatch):
     m._watchdog_dead("listener stopped")
 
     assert calls == ["replacement", ("exit", "listener stopped")]
+
+
+def test_watchdog_dead_still_exits_when_replacement_scheduling_crashes(
+    monkeypatch,
+):
+    from agent_bridge import watchdog
+
+    calls = []
+
+    def crash():
+        raise RuntimeError("unexpected helper failure")
+
+    monkeypatch.setattr(m, "_spawn_watchdog_replacement", crash)
+    monkeypatch.setattr(
+        watchdog, "_force_exit", lambda reason: calls.append(("exit", reason))
+    )
+
+    m._watchdog_dead("listener stopped")
+
+    assert calls == [("exit", "listener stopped")]

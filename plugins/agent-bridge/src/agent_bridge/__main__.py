@@ -471,16 +471,16 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # before serving so it also catches a startup that hangs after the lock is
     # taken. A graceful shutdown (server.should_exit) is never treated as a wedge.
     from .watchdog import (
-        WINDOWS_INTERVAL,
-        WINDOWS_SERVING_GRACE,
+        _WINDOWS_INTERVAL,
+        _WINDOWS_SERVING_GRACE,
         arm_serving_watchdog,
     )
 
     watchdog_kwargs: dict[str, Any] = {}
     if sys.platform == "win32":
         watchdog_kwargs = {
-            "interval": WINDOWS_INTERVAL,
-            "serving_grace": WINDOWS_SERVING_GRACE,
+            "interval": _WINDOWS_INTERVAL,
+            "serving_grace": _WINDOWS_SERVING_GRACE,
             "on_dead": _watchdog_dead,
         }
     arm_serving_watchdog(
@@ -1178,7 +1178,7 @@ def _watchdog_dead(reason: str) -> None:
         logging.getLogger("agent-bridge").error(
             "Self-watchdog: scheduled a detached Windows replacement before exit"
         )
-    except OSError as exc:
+    except Exception as exc:
         logging.getLogger("agent-bridge").error(
             "Self-watchdog: could not schedule Windows replacement: %s", exc
         )
