@@ -79,9 +79,18 @@ def test_full_lifecycle(tools):
     t = tools.create("work")
     owner = tools.claim()["owner"]
     assert tools.start(t["id"], owner)["status"] == Status.STARTED
-    done = tools.complete(t["id"], owner, result_ref="pr/1")
+    result = {"verdict": "accepted", "checks": [1, 2, 3]}
+    done = tools.complete(
+        t["id"], owner, result_ref="pr/1", result=result
+    )
     assert done["status"] == Status.COMPLETED
     assert done["result_ref"] == "pr/1"
+    assert done["result"] == result
+    assert tools.show(t["id"])["result"] == result
+    listed = tools.list(status=Status.COMPLETED)[0]
+    assert listed["has_result"] is True
+    assert "result" not in listed
+    assert tools.result(t["id"])["result"] == result
 
 
 def test_suspended_lifecycle(tools, monkeypatch):
@@ -139,7 +148,18 @@ def test_build_server_registers_tools():
     mcp = build_server(
         DispatchTools(client_factory=lambda: None, identity_resolver=lambda: (None, None))
     )
-    names = {t.name for t in asyncio.new_event_loop().run_until_complete(mcp.list_tools())}
-    assert {"dispatch_create", "dispatch_claim", "dispatch_complete", "dispatch_payload"} <= names
+    registered = asyncio.new_event_loop().run_until_complete(mcp.list_tools())
+    names = {t.name for t in registered}
+    assert {
+        "dispatch_create",
+        "dispatch_claim",
+        "dispatch_complete",
+        "dispatch_payload",
+        "dispatch_result",
+    } <= names
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= names
     assert "dispatch_wakes" in names
+    complete = next(t for t in registered if t.name == "dispatch_complete")
+    result_schema = complete.input_schema["properties"]["result"]
+    variants = result_schema.get("anyOf", [result_schema])
+    assert {variant.get("type") for variant in variants} == {"array", "object"}

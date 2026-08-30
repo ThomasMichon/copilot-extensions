@@ -23,21 +23,57 @@ importable (otherwise the REST API still serves).
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
 
 from dataclasses import asdict
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import PlainValidator, WithJsonSchema
 
 from . import telemetry
 from .events import EventBus
 from .identity import canonicalize_remote
-from .queue import TaskError, TaskQueue, worker_id_for
+from .queue import (
+    CompletionOutcome,
+    StructuredResult,
+    Task,
+    TaskError,
+    TaskQueue,
+    worker_id_for,
+)
 
 MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
 REPO_HEADER = "x-agent-repo"
 
 
+def _validate_mcp_structured_result(value: Any) -> StructuredResult:
+    if not isinstance(value, (dict, list)):
+        raise ValueError("result must be a JSON object or array")
+    return value
+
+
+McpStructuredResult = Annotated[
+    StructuredResult,
+    PlainValidator(_validate_mcp_structured_result),
+    WithJsonSchema({"anyOf": [{"type": "object"}, {"type": "array"}]}),
+]
+
+
 def _headers_of(ctx: Any) -> dict[str, str]:
     req = getattr(getattr(ctx, "request_context", None), "request", None)
     return dict(req.headers) if req is not None else {}
+
+
+def _bulk_task_dict(task: Task) -> dict:
+    result = asdict(task)
+    result.pop("result")
+    return result
+
+
+def _event_task_dict(task: dict) -> dict:
+    result = dict(task)
+    result["has_result"] = result.pop("result", None) is not None or bool(
+        result.get("has_result")
+    )
+    return result
 
 
 def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
@@ -58,14 +94,19 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     mcp = MCPServer("agent-dispatch-coordinator")
 
     def _emit(event_type: str, task: dict) -> None:
-        bus.publish({"type": event_type, "task": task})
+        event_task = _event_task_dict(task)
+        bus.publish({"type": event_type, "task": event_task})
         # Generic telemetry seam (no-op unless a consumer registered a sink).
-        telemetry.emit(telemetry.task_lifecycle_event(event_type, task))
+        telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 
     def _mutate(op, event_type: str | None) -> dict:
         """Run a queue mutation; map TaskError to an error dict; emit on success."""
         try:
-            result = asdict(op())
+            mutation = op()
+            if isinstance(mutation, CompletionOutcome):
+                event_type = mutation.event_type
+                mutation = mutation.task
+            result = asdict(mutation)
         except TaskError as exc:
             return {"error": str(exc)}
         if event_type is not None:
@@ -159,12 +200,18 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     @mcp.tool(name="dispatch_find")
     def find(ctx: Context, query: str, limit: int = 50, repo: str | None = None) -> list[dict]:
         """Substring-search task titles/prompts in the lane -- a quick dedup probe."""
-        return [asdict(t) for t in queue.find(query, repo=_repo(ctx, repo), limit=limit)]
+        return [
+            _bulk_task_dict(t)
+            for t in queue.find(query, repo=_repo(ctx, repo), limit=limit)
+        ]
 
     @mcp.tool(name="dispatch_sweep")
     def sweep(ctx: Context, limit: int = 500, repo: str | None = None) -> list[dict]:
         """The dedup corpus for the lane: every non-abandoned task, newest first."""
-        return [asdict(t) for t in queue.sweep(repo=_repo(ctx, repo), limit=limit)]
+        return [
+            _bulk_task_dict(t)
+            for t in queue.sweep(repo=_repo(ctx, repo), limit=limit)
+        ]
 
     # -- recipes -------------------------------------------------------------
 
@@ -267,7 +314,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     ) -> list[dict]:
         """List tasks in the lane, optionally filtered by status/machine/repo/label."""
         return [
-            asdict(t)
+            _bulk_task_dict(t)
             for t in queue.list(
                 repo=_repo(ctx, repo),
                 status=status,
@@ -307,6 +354,18 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
             "payload": queue.read_payload(task),
         }
 
+    @mcp.tool(name="dispatch_result")
+    def result(task_id: str) -> dict:
+        """Return a task's structured completion result."""
+        task = queue.get(task_id)
+        if task is None:
+            return {"error": f"no such task {task_id!r}"}
+        return {
+            "task_id": task.id,
+            "ref": task.result_ref,
+            "result": queue.read_result(task),
+        }
+
     # -- identity-bearing ----------------------------------------------------
 
     @mcp.tool(name="dispatch_worktree_status")
@@ -330,7 +389,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
             "machine": machine,
             "worktree": worktree,
             "repo": lane,
-            **{k: [asdict(t) for t in v] for k, v in inbox.items()},
+            **{k: [_bulk_task_dict(t) for t in v] for k, v in inbox.items()},
         }
 
     @mcp.tool(name="dispatch_claim")
@@ -437,10 +496,23 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         )
 
     @mcp.tool(name="dispatch_complete")
-    def complete(task_id: str, worker_id: str, result_ref: str | None = None) -> dict:
-        """Complete a started or suspended task under its preserved owner."""
+    def complete(
+        task_id: str,
+        worker_id: str,
+        result_ref: str | None = None,
+        result: McpStructuredResult = None,  # type: ignore[assignment]
+    ) -> dict:
+        """Complete a task.
+
+        Omit ``result`` for no structured result; explicit JSON null is invalid.
+        """
+        if result is not None:
+            result = _validate_mcp_structured_result(result)
         return _mutate(
-            lambda: queue.complete(task_id, worker_id, result_ref=result_ref), "task.completed"
+            lambda: queue.complete_with_outcome(
+                task_id, worker_id, result_ref=result_ref, result=result
+            ),
+            None,
         )
 
     @mcp.tool(name="dispatch_abandon")

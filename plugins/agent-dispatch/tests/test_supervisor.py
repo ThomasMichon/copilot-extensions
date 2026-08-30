@@ -858,6 +858,22 @@ def test_completion_verify_accepts_goal_with_progress(q, client):
     assert "progress" in (res.detail or "")
 
 
+def test_completion_verify_accepts_goal_with_structured_result(q, client):
+    """A non-null structured result is recorded completion evidence."""
+    t = q.create("goal work", goal="reach X", done_criteria="X is done")
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    sup.poll_once()
+    q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
+    q.start(t.id, "m/wt-1")
+    q.complete(t.id, "m/wt-1", result={"outcome": "complete"})
+
+    assert sup.reconcile() == 1
+    detail = q.latest_reservation(t.id).detail or ""
+    assert "UNVERIFIED" not in detail
+    assert "structured result" in detail
+
+
 def test_completion_verify_ignores_one_shot_task(q, client):
     """A plain one-shot task (no goal) is never flagged, even with no evidence."""
     t = q.create("plain work")  # no goal

@@ -81,16 +81,22 @@ def test_mcp_endpoint_lists_tools(coord):
             async with streamable_http_client(f"{coord}/mcp", http_client=http_client) as (r, w):
                 async with ClientSession(r, w) as s:
                     await s.initialize()
-                    return sorted(t.name for t in (await s.list_tools()).tools)
+                    return (await s.list_tools()).tools
 
-    names = asyncio.new_event_loop().run_until_complete(go())
+    tools = asyncio.new_event_loop().run_until_complete(go())
+    names = sorted(t.name for t in tools)
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 24
+    assert len(names) == 25
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= set(
         names
     )
     assert "dispatch_wakes" in names
+    assert "dispatch_result" in names
+    complete = next(t for t in tools if t.name == "dispatch_complete")
+    result_schema = complete.input_schema["properties"]["result"]
+    variants = result_schema.get("anyOf", [result_schema])
+    assert {variant.get("type") for variant in variants} == {"array", "object"}
 
 
 def test_mcp_create_visible_over_rest(coord):
@@ -133,6 +139,129 @@ def test_mcp_claim_without_identity_errors(coord):
     res = asyncio.new_event_loop().run_until_complete(_call(coord, "dispatch_claim", {}))
     payload = json.loads(res.content[0].text)
     assert "error" in payload
+
+
+def test_mcp_complete_result_is_visible_over_rest(coord):
+    import asyncio
+    import json
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+    result = {"verdict": "accepted", "details": {"count": 2}}
+
+    response = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_complete",
+            {
+                "task_id": task["id"],
+                "worker_id": owner,
+                "result_ref": "artifact/2",
+                "result": result,
+            },
+        )
+    )
+    completed = json.loads(response.content[0].text)
+
+    assert completed["result"] == result
+    assert client.get(task["id"])["result"] == result
+    listed = client.list(status=Status.COMPLETED)[0]
+    assert listed["has_result"] is True
+    assert "result" not in listed
+    retrieved = asyncio.new_event_loop().run_until_complete(
+        _call(coord, "dispatch_result", {"task_id": task["id"]})
+    )
+    assert json.loads(retrieved.content[0].text)["result"] == result
+
+
+def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
+    coord, monkeypatch
+):
+    import asyncio
+    import json
+
+    from agent_dispatch.events import EventBus
+
+    published = []
+    original_publish = EventBus.publish
+
+    def capture(self, event):
+        published.append(event)
+        return original_publish(self, event)
+
+    monkeypatch.setattr(EventBus, "publish", capture)
+    client = DispatchClient(coord)
+    task = client.create("work")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+    client.complete(task["id"], owner)
+
+    response = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_complete",
+            {
+                "task_id": task["id"],
+                "worker_id": owner,
+                "result": {"ok": True},
+            },
+        )
+    )
+
+    assert json.loads(response.content[0].text)["result"] == {"ok": True}
+    types = [event["type"] for event in published]
+    assert types.count("task.completed") == 1
+    assert types.count("task.result_recorded") == 1
+
+
+def test_mcp_complete_rejects_null_result(coord):
+    import asyncio
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+
+    response = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_complete",
+            {
+                "task_id": task["id"],
+                "worker_id": owner,
+                "result": None,
+            },
+        )
+    )
+
+    assert response.is_error
+    assert client.get(task["id"])["status"] == Status.STARTED
+
+
+def test_mcp_complete_normalizes_json_object_string(coord):
+    import asyncio
+
+    client = DispatchClient(coord)
+    task = client.create("work")
+    owner = client.claim(worker_id="worker-1")["owner"]
+    client.start(task["id"], owner)
+
+    response = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_complete",
+            {
+                "task_id": task["id"],
+                "worker_id": owner,
+                "result": '{"ok":true}',
+            },
+        )
+    )
+
+    assert not response.is_error
+    assert client.result(task["id"])["result"] == {"ok": True}
 
 
 def test_mcp_events_reach_rest_sse(coord):

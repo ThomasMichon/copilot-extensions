@@ -17,20 +17,29 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import asdict
 from threading import Condition
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+from pydantic_core import PydanticCustomError
 
 from . import __version__, telemetry
 from .config import DEFAULT_ORPHAN_GRACE
 from .events import EventBus, sse_format
 from .queue import (
+    CompletionOutcome,
+    ResultTooLargeError,
+    ResultValidationError,
     SpawnReservation,
+    StructuredResult,
     Task,
     TaskError,
     TaskQueue,
+    encode_result,
     worker_id_for,
 )
 from .satellites import (
@@ -40,6 +49,23 @@ from .satellites import (
 )
 
 log = logging.getLogger("agent-dispatch.coordinator")
+
+
+def _strict_structured_result(value: Any) -> Any:
+    if value is None:
+        return value
+    try:
+        encode_result(value)
+    except ResultTooLargeError as exc:
+        raise PydanticCustomError("result_too_large", str(exc)) from exc
+    except ResultValidationError as exc:
+        raise ValueError(str(exc)) from exc
+    return value
+
+
+HttpStructuredResult = Annotated[
+    StructuredResult, BeforeValidator(_strict_structured_result)
+]
 
 
 # Generation self-retire tuning. Default-ON (opt-out): validated on real cutovers
@@ -324,6 +350,7 @@ class ReleaseBody(BaseModel):
 class CompleteBody(BaseModel):
     worker_id: str
     result_ref: str | None = None
+    result: HttpStructuredResult = None  # type: ignore[assignment]
     expected_status: str | None = None
     expected_owner_session_id: str | None = None
     expected_generation: int | None = None
@@ -443,6 +470,20 @@ class DirectoryHeartbeatBody(BaseModel):
 
 def _task_dict(task: Task) -> dict:
     return asdict(task)
+
+
+def _bulk_task_dict(task: Task) -> dict:
+    result = asdict(task)
+    result.pop("result")
+    return result
+
+
+def _event_task_dict(task: dict) -> dict:
+    result = dict(task)
+    result["has_result"] = result.pop("result", None) is not None or bool(
+        result.get("has_result")
+    )
+    return result
 
 
 def _reservation_dict(res: SpawnReservation) -> dict:
@@ -677,20 +718,58 @@ def create_app(
     # Graceful-cutover drain gate (docs/patterns/graceful-daemon-cutover.md).
     app.state.drain_gate = DrainGate()
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        errors = exc.errors()
+        result_errors = [
+            error
+            for error in errors
+            if tuple(error.get("loc", ()))[:2] == ("body", "result")
+        ]
+        if any(error.get("type") == "result_too_large" for error in result_errors):
+            status = 413
+        elif result_errors or any(
+            error.get("type") == "json_invalid" for error in errors
+        ):
+            status = 400
+        else:
+            status = 422
+        safe_errors = [
+            {
+                key: error[key]
+                for key in ("type", "loc", "msg")
+                if key in error
+            }
+            for error in errors
+        ]
+        return JSONResponse(
+            status_code=status,
+            content=jsonable_encoder({"detail": safe_errors}),
+        )
+
     def _require(task: Task | None) -> Task:
         if task is None:
             raise HTTPException(status_code=404, detail="no such task")
         return task
 
     def _emit(event_type: str, task: dict) -> None:
-        bus.publish({"type": event_type, "task": task})
+        event_task = _event_task_dict(task)
+        bus.publish({"type": event_type, "task": event_task})
         # Generic telemetry seam (no-op unless a consumer registered a sink).
-        telemetry.emit(telemetry.task_lifecycle_event(event_type, task))
+        telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
 
     def _guard(op, event_type: str | None = None) -> dict:
         """Run a queue mutation (TaskError -> 409 / missing -> 404), then emit."""
         try:
-            result = _task_dict(op())
+            mutation = op()
+            if isinstance(mutation, CompletionOutcome):
+                event_type = mutation.event_type
+                mutation = mutation.task
+            result = _task_dict(mutation)
+        except ResultTooLargeError as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except ResultValidationError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         except TaskError as exc:
             msg = str(exc)
             status = 404 if msg.startswith("no such task") else 409
@@ -822,9 +901,9 @@ def create_app(
         limit: int = 200,
     ) -> list[dict]:
         if sweep:
-            return [_task_dict(t) for t in queue.sweep(repo=repo, limit=limit)]
+            return [_bulk_task_dict(t) for t in queue.sweep(repo=repo, limit=limit)]
         if q is not None:
-            return [_task_dict(t) for t in queue.find(q, repo=repo, limit=limit)]
+            return [_bulk_task_dict(t) for t in queue.find(q, repo=repo, limit=limit)]
         # ``status`` may be a single state or a comma-separated set (multi-state
         # browse), e.g. ``?status=queued,started``.
         status_filter: str | list[str] | None = None
@@ -839,16 +918,25 @@ def create_app(
             label=label,
             limit=limit,
         )
-        return [_task_dict(t) for t in tasks]
+        return [_bulk_task_dict(t) for t in tasks]
 
     @app.get("/tasks/mine")
     def mine(machine: str, worktree: str, repo: str | None = None) -> dict:
         result = queue.mine(machine, worktree, repo=repo)
-        return {k: [_task_dict(t) for t in v] for k, v in result.items()}
+        return {k: [_bulk_task_dict(t) for t in v] for k, v in result.items()}
 
     @app.get("/tasks/{task_id}")
     def get_task(task_id: str) -> dict:
         return _task_dict(_require(queue.get(task_id)))
+
+    @app.get("/tasks/{task_id}/result")
+    def get_result(task_id: str) -> dict:
+        task = _require(queue.get(task_id))
+        return {
+            "task_id": task.id,
+            "ref": task.result_ref,
+            "result": queue.read_result(task),
+        }
 
     @app.get("/tasks/{task_id}/events")
     def get_events(task_id: str) -> list[dict]:
@@ -1032,15 +1120,15 @@ def create_app(
     @app.post("/tasks/{task_id}/complete")
     def complete(task_id: str, body: CompleteBody) -> dict:
         return _guard(
-            lambda: queue.complete(
+            lambda: queue.complete_with_outcome(
                 task_id,
                 body.worker_id,
                 result_ref=body.result_ref,
+                result=body.result,
                 expected_status=body.expected_status,
                 expected_owner_session_id=body.expected_owner_session_id,
                 expected_generation=body.expected_generation,
-            ),
-            "task.completed",
+            )
         )
 
     @app.post("/tasks/{task_id}/abandon")

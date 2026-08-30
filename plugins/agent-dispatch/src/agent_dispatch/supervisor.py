@@ -591,6 +591,8 @@ class Supervisor:
             return f"task {status}"
         if task.get("result_ref"):
             return "task completed (result-ref recorded)"
+        if task.get("result") is not None or task.get("has_result"):
+            return "task completed (structured result recorded)"
         try:
             has_progress = bool(self.client.progress_log(task["id"]))
         except DispatchError:
