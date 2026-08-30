@@ -22,6 +22,7 @@ def _reset_engine_resolution(monkeypatch):
     monkeypatch.setattr(ec, "_INHERITED_ENGINE_COMMAND", None)
     monkeypatch.delenv(ec.ENGINE_ARGV_ENV, raising=False)
     monkeypatch.delenv(ec.ENGINE_CMD_ENV, raising=False)
+    monkeypatch.delenv("AGENT_HOME", raising=False)
 
 
 def _fake_completed(cmd, returncode=0, stdout="", stderr=""):
@@ -287,6 +288,63 @@ def test_installed_engine_command_falls_back_to_last_known_good(
     monkeypatch.delenv("AGENT_HOME", raising=False)
     assert ec.installed_engine_command() == [
         str(python), "-m", "agent_worktrees"
+    ]
+
+
+def test_installed_engine_command_honors_agent_home(monkeypatch, tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    slot = root / "versions" / "1.2.3"
+    python = slot / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_text("", encoding="utf-8")
+    (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+    (root / "current-version").write_text("1.2.3", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "1.2.3"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    assert ec.installed_engine_command() == [
+        str(python), "-m", "agent_worktrees"
+    ]
+
+
+def test_installed_engine_command_rejects_marker_path_escape(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / ".agent-worktrees"
+    versions = root / "versions"
+    legitimate = versions / "1.2.3"
+    legit_python = (
+        legitimate / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    )
+    legit_python.parent.mkdir(parents=True)
+    legit_python.write_text("", encoding="utf-8")
+    (legitimate / ".install-complete.json").write_text("{}", encoding="utf-8")
+
+    escaped = root / "outside"
+    escaped_python = (
+        escaped / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    )
+    escaped_python.parent.mkdir(parents=True)
+    escaped_python.write_text("", encoding="utf-8")
+    (escaped / ".install-complete.json").write_text("{}", encoding="utf-8")
+
+    escape = "..\\outside" if ec.os.name == "nt" else "../outside"
+    (root / "current-version").write_text(escape, encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "1.2.3"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    assert ec.installed_engine_command() == [
+        str(legit_python), "-m", "agent_worktrees"
     ]
 
 

@@ -126,6 +126,9 @@ def accept_inherited_engine_command() -> str | None:
 
 
 def _state_home() -> Path:
+    override = os.environ.get("AGENT_HOME")
+    if override:
+        return Path(override)
     variable = "USERPROFILE" if os.name == "nt" else "HOME"
     return Path(os.environ.get(variable) or Path.home())
 
@@ -149,13 +152,31 @@ def _version_key(version: str):
 def _runtime_candidates(root: Path) -> list[Path]:
     versions = root / "versions"
     candidates: list[Path] = []
+
+    def contained_slot(version: str) -> Path | None:
+        if (
+            not version
+            or version in {".", ".."}
+            or Path(version).name != version
+        ):
+            return None
+        try:
+            versions_root = versions.resolve()
+            candidate = (versions / version).resolve()
+        except OSError:
+            return None
+        if candidate.parent != versions_root:
+            return None
+        return candidate
+
     for marker_name in ("current-version", "last-known-good"):
         try:
             version = (root / marker_name).read_text(encoding="utf-8").strip()
         except OSError:
             version = ""
-        if version:
-            candidates.append(versions / version)
+        candidate = contained_slot(version)
+        if candidate is not None:
+            candidates.append(candidate)
     try:
         fallback = sorted(
             (path for path in versions.iterdir() if path.is_dir()),
@@ -164,7 +185,11 @@ def _runtime_candidates(root: Path) -> list[Path]:
         )
     except OSError:
         fallback = []
-    candidates.extend(fallback)
+    candidates.extend(
+        candidate
+        for path in fallback
+        if (candidate := contained_slot(path.name)) is not None
+    )
     out: list[Path] = []
     seen: set[str] = set()
     for candidate in candidates:
