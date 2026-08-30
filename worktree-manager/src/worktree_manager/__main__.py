@@ -21,7 +21,12 @@ from pathlib import Path
 from . import __version__
 from .catalog import load_catalog
 from .core_install import core_status, install_command, install_core
-from .engine_client import EngineError, engine_available, list_worktrees
+from .engine_client import (
+    EngineError,
+    accept_inherited_engine_command,
+    engine_available,
+    list_worktrees,
+)
 from .harness_state import (
     build_projects,
     build_repos,
@@ -1025,6 +1030,10 @@ def _cmd_update(rest: list[str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    inherited_warning = accept_inherited_engine_command()
+    if inherited_warning:
+        print(f"worktree-manager: ignoring invalid provider handoff: "
+              f"{inherited_warning}", file=sys.stderr)
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] in ("--version", "-V"):
         print(f"worktree-manager {__version__}")

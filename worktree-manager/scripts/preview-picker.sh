@@ -54,7 +54,11 @@ resolve_venv() {
 }
 
 manager_scripts="$(resolve_venv "$manager")"
-preview_path="$manager_scripts"
+aw_scripts="$(resolve_venv "$aw_plugin")"
+preview_path="$manager_scripts:$aw_scripts"
+engine_argv="$("$manager_scripts/python" -c \
+  'import json,sys; print(json.dumps([sys.argv[1], "-m", "agent_worktrees"]))' \
+  "$aw_scripts/python")"
 
 sandbox="$(mktemp -d "${TMPDIR:-/tmp}/agent-picker-preview-XXXXXXXX")"
 pivots_dir="$sandbox/.agent-worktrees/pivots"
@@ -99,6 +103,7 @@ export AGENT_WORKTREES_PLUGINS_DIR="$plugins_dir"
 export WORKTREE_MANAGER_PICKER_NO_PIVOT_MATERIALIZE=1
 export WORKTREE_PROJECT="$project"
 export WORKTREE_MANAGER_AGENT_WORKTREES_SRC="$aw_plugin/src"
+export WORKTREE_MANAGER_ENGINE_ARGV="$engine_argv"
 export PATH="$preview_path:$PATH"
 
 if [ -n "$interactive" ]; then

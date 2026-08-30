@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from agent_worktrees import __main__ as m
 from agent_worktrees import reclaim
@@ -393,6 +394,88 @@ class TestCmdReclaim:
         assert out["action"] == "reclaim"
         assert out["reaped"][0]["killed"] is True
         assert [t["pid"] for t in captured["t"]] == [200]
+
+    def test_worktree_target_includes_bridge_bound_process(
+            self, monkeypatch, capfd):
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda value: value)
+        seen = {}
+        monkeypatch.setattr(
+            m, "reclaim_one",
+            lambda worktree_id, *, bare_only: seen.update(
+                worktree_id=worktree_id, bare_only=bare_only
+            ) or {
+                "ok": True,
+                "worktree_id": worktree_id,
+                "targets": 1,
+                "reaped": [{"pid": 210, "killed": True}],
+                "bridge_locks_cleared": [{"pid": 210}],
+            },
+        )
+        rc = m.cmd_reclaim(_ns(
+            worktree_id="wt-bridge", bare_only=True, yes=True
+        ))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert seen == {"worktree_id": "wt-bridge", "bare_only": True}
+        assert out["bridge_locks_cleared"] == [{"pid": 210}]
+        assert out["ok"] is True
+
+    def test_failed_reap_returns_nonzero_json(self, monkeypatch, capfd):
+        rows = [{
+            "session_id": "s1", "pid": 200, "cwd": "/w",
+            "worktree_id": "wt", "homing": "bare",
+        }]
+        self._stub_resolution(monkeypatch, rows)
+        monkeypatch.setattr(
+            m.reclaim, "reap_bound_copilots",
+            lambda targets, **kwargs: [{
+                **targets[0], "killed": False, "children_killed": 0,
+            }],
+        )
+        rc = m.cmd_reclaim(_ns(session_id="s1", yes=True))
+        assert rc == 1
+        assert json.loads(capfd.readouterr().out)["ok"] is False
+
+    def test_combined_session_and_worktree_filters_do_not_widen_scope(
+            self, monkeypatch, capfd):
+        rows = [{
+            "session_id": "only-this",
+            "pid": 200,
+            "cwd": "/w",
+            "worktree_id": "wt",
+            "homing": "bare",
+        }]
+        self._stub_resolution(monkeypatch, rows)
+        monkeypatch.setattr(m, "_resolve_worktree_id", lambda value: value)
+        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: Path("/missing"))
+        monkeypatch.setattr(
+            m, "reclaim_one",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("combined filters must use the general path")
+            ),
+        )
+        monkeypatch.setattr(
+            m.reclaim,
+            "resolve_bridge_bound",
+            lambda worktree_id, **kwargs: (_ for _ in ()).throw(
+                AssertionError("session-filtered reclaim must not add bridge peers")
+            ),
+        )
+        monkeypatch.setattr(
+            m.reclaim,
+            "reap_bound_copilots",
+            lambda targets, **kwargs: [{
+                **targets[0], "killed": True, "children_killed": 0,
+            }],
+        )
+        rc = m.cmd_reclaim(_ns(
+            session_id="only-this",
+            worktree_id="wt",
+            yes=True,
+        ))
+        assert rc == 0
+        out = json.loads(capfd.readouterr().out)
+        assert [row["session_id"] for row in out["targets"]] == ["only-this"]
 
     def test_self_is_never_targeted(self, monkeypatch, capfd):
         import os

@@ -8,6 +8,7 @@ import threading
 from collections.abc import Mapping
 from typing import Any
 
+from . import context
 from ._engine_runtime import engine_module
 from .picker_tui import run_tui_picker
 
@@ -24,6 +25,7 @@ def _remote_command(tokens: list[str]) -> str:
 
 def _prepare(project: str, *, heal: bool = True) -> tuple[Any, bool]:
     """Activate ``project`` and return the engine CLI plus default live mode."""
+    context.set_project(project)
     config_module = engine_module("config")
     cli = engine_module("__main__")
     resolved, assumed = cli._resolve_active_project(project)

@@ -35,17 +35,23 @@ def _isolate_agent_worktrees_home(tmp_path_factory):
     (fake_home / ".agent-worktrees").mkdir(parents=True, exist_ok=True)
     saved_userprofile = os.environ.get("USERPROFILE")
     saved_home = os.environ.get("HOME")
+    saved_agent_home = os.environ.get("AGENT_HOME")
     saved_path_home = pathlib.Path.__dict__.get("home")
 
     os.environ["USERPROFILE"] = str(fake_home)
     os.environ["HOME"] = str(fake_home)
+    os.environ.pop("AGENT_HOME", None)
     pathlib.Path.home = classmethod(lambda cls: fake_home)
     try:
         yield fake_home
     finally:
         if saved_path_home is not None:
             pathlib.Path.home = saved_path_home
-        for key, value in (("USERPROFILE", saved_userprofile), ("HOME", saved_home)):
+        for key, value in (
+            ("USERPROFILE", saved_userprofile),
+            ("HOME", saved_home),
+            ("AGENT_HOME", saved_agent_home),
+        ):
             if value is None:
                 os.environ.pop(key, None)
             else:
