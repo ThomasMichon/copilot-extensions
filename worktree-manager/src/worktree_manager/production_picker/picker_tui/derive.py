@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import datetime as _dt
 
+from . import source_identity
+
 # The "now" derived ages are measured against. Data sources refresh this to the
 # real clock before normalizing a batch (see ``data_local``).
 NOW = _dt.datetime.now()
@@ -317,8 +319,20 @@ def _sessionless(w):
     return True
 
 
-def norm(w, machine, env):
+def norm(
+    w,
+    machine,
+    env,
+    *,
+    source_kind=source_identity.MACHINE_SSH_KIND,
+    source_id=None,
+    source_label=None,
+):
     """Normalize one raw worktree dict into the engine's record shape."""
+    source_id = source_identity.resolve_id(
+        source_kind, source_id, machine=str(machine), env=str(env)
+    )
+    source_label = source_label or f"{machine} / {env}"
     kind = w.get("kind") or "session"
     title = (w.get("title") or "").strip() or "(untitled)"
     # Type marker (#2668). Prefer the two-axis interface/origin marks the
@@ -382,6 +396,10 @@ def norm(w, machine, env):
         "machine": machine,
         "env": env,
         "machine_env": f"{machine} {env}",
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_label": source_label,
+        "source": source_identity.metadata(source_kind, source_id, source_label),
         "title": disp_title,
         "follow_up": follow_up,
         "summary": summary,
@@ -457,6 +475,13 @@ def norm(w, machine, env):
 
 def for_machine(wts, machine, env):
     here = [w for w in wts if w["machine"] == machine and w["env"] == env]
+    annotate_pairs(here)
+    return bucket(here)
+
+
+def for_source(wts, source_id):
+    """Return rows owned by one canonical source."""
+    here = [w for w in wts if w.get("source_id") == source_id]
     annotate_pairs(here)
     return bucket(here)
 
