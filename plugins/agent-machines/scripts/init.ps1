@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'init', 'stamp', 'provision', 'slot-provision', 'slot-validate')]
+    [ValidateSet('install', 'init', 'stamp', 'provision', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate')]
     [string]$Action = 'install',
     [string]$InstallDir,
     [string]$Context,
@@ -41,7 +41,12 @@ $probePayload = if ($env:COPILOT_PLUGIN_STAGED_FROM) {
     (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 }
 $probeHost = (Get-Process -Id $PID).Path
-if ($Action -notin @('slot-provision', 'slot-validate')) {
+if ($Action -notin @(
+    'slot-provision',
+    'slot-validate',
+    'slot-complete',
+    'slot-completion-validate'
+)) {
     $probeLegacyRoot = if ($InstallDir) {
         [IO.Path]::GetFullPath($InstallDir)
     } else {
@@ -59,7 +64,12 @@ if ($Action -notin @('slot-provision', 'slot-validate')) {
 
 # The dependency-light cell-slot runner does not need the legacy installer's
 # payload self-stage, whose staging root is itself legacy state.
-$cellSlotAction = $Action -in @('slot-provision', 'slot-validate')
+$cellSlotAction = $Action -in @(
+    'slot-provision',
+    'slot-validate',
+    'slot-complete',
+    'slot-completion-validate'
+)
 if ($cellSlotAction) {
     Set-Location -LiteralPath $env:USERPROFILE
     [IO.Directory]::SetCurrentDirectory($env:USERPROFILE)
@@ -291,7 +301,12 @@ if ($SrcVersion) {
 }
 # === end install-contract:v3 versioned-venv ===
 
-if ($Action -in @('slot-provision', 'slot-validate')) {
+if ($Action -in @(
+    'slot-provision',
+    'slot-validate',
+    'slot-complete',
+    'slot-completion-validate'
+)) {
     if ([string]::IsNullOrWhiteSpace($Context)) {
         Write-Fail "$Action requires -Context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
         exit 2
@@ -376,23 +391,298 @@ function Get-BootstrapPython {
     return $null
 }
 
-function Get-PayloadHash {
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
-    try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
+function Get-PayloadHash(
+    [long]$MaxEntries = 100000,
+    [long]$MaxPathBytes = 4096,
+    [long]$MaxContentBytes = 4294967296
+) {
+    <# Match installation-context snapshot content hashing over the whole payload.
+       All non-root entries, including root snapshot-provenance.json, count
+       toward the limits; only its digest record is excluded. #>
+    $strictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $root = Get-Item -LiteralPath $PluginDir -Force -ErrorAction Stop
+    if (-not $root.PSIsContainer -or
+        (($root.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw "Payload root must be an ordinary directory: $PluginDir"
+    }
+    $payloadIsWindows = $env:OS -eq 'Windows_NT'
+    $statCommand = $null
+    if (-not $payloadIsWindows) {
+        $statCommand = Get-Command stat -CommandType Application -ErrorAction Stop |
+            Select-Object -First 1
+    }
+    if ($payloadIsWindows -and -not ('CePayloadDirectoryState' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+
+public static class CePayloadDirectoryState {
+    private const uint SHARE_READ = 1, SHARE_WRITE = 2, SHARE_DELETE = 4;
+    private const uint OPEN_EXISTING = 3;
+    private const uint OPEN_REPARSE = 0x00200000;
+    private const uint BACKUP_SEMANTICS = 0x02000000;
+    private const uint DIRECTORY = 0x10, REPARSE = 0x400;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct Info {
+        public uint Attributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME Creation;
+        public System.Runtime.InteropServices.ComTypes.FILETIME Access;
+        public System.Runtime.InteropServices.ComTypes.FILETIME Write;
+        public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow;
+    }
+    [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    private static extern SafeFileHandle CreateFile(
+        string path, uint access, uint share, IntPtr security, uint creation,
+        uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError=true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle, out Info info);
+    public static string Inspect(string path) {
+        using (SafeFileHandle handle = CreateFile(
+            path, 0, SHARE_READ | SHARE_WRITE | SHARE_DELETE, IntPtr.Zero,
+            OPEN_EXISTING, OPEN_REPARSE | BACKUP_SEMANTICS, IntPtr.Zero)) {
+            if (handle.IsInvalid) throw new Win32Exception(Marshal.GetLastWin32Error());
+            Info info;
+            if (!GetFileInformationByHandle(handle, out info)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((info.Attributes & REPARSE) != 0 || (info.Attributes & DIRECTORY) == 0) {
+                throw new IOException("path is not an ordinary directory");
+            }
+            return string.Format(
+                "{0:x8}:{1:x8}{2:x8}|{3:x8}{4:x8}|{5:x8}{6:x8}|{7:x8}",
+                info.Volume, info.IndexHigh, info.IndexLow,
+                info.Write.dwHighDateTime, info.Write.dwLowDateTime,
+                info.Creation.dwHighDateTime, info.Creation.dwLowDateTime,
+                info.Attributes);
         }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
-    } catch { return '' }
+    }
+}
+'@
+    }
+    function Get-PayloadKind($Entry, [string]$Relative) {
+        if (($Entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw "Payload content may not contain symbolic links or reparse points: $Relative"
+        }
+        if ($payloadIsWindows) {
+            return $(if ($Entry.PSIsContainer) { 'directory' } else { 'file' })
+        }
+        if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                [Runtime.InteropServices.OSPlatform]::Linux
+            )) {
+            $kind = ("" + (& $statCommand.Source '--format=%F' '--' $Entry.FullName)).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Cannot inspect payload content: $Relative" }
+            if ($kind -ceq 'directory') { return 'directory' }
+            if ($kind -ceq 'regular file' -or $kind -ceq 'regular empty file') {
+                return 'file'
+            }
+        } elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                [Runtime.InteropServices.OSPlatform]::OSX
+            )) {
+            $kind = ("" + (& $statCommand.Source '-f' '%HT' $Entry.FullName)).Trim()
+            if ($LASTEXITCODE -ne 0) { throw "Cannot inspect payload content: $Relative" }
+            if ($kind -ceq 'Directory') { return 'directory' }
+            if ($kind -ceq 'Regular File') { return 'file' }
+        } else {
+            throw 'Payload content classification is unavailable on this platform'
+        }
+        throw "Payload content entries must be ordinary files or directories: $Relative"
+    }
+    function Get-PayloadDirectoryToken([string]$Path, [string]$Relative) {
+        $entry = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ((Get-PayloadKind $entry $Relative) -cne 'directory') {
+            throw "Payload content changed during hashing: $Relative"
+        }
+        if ($payloadIsWindows) {
+            return [CePayloadDirectoryState]::Inspect($Path)
+        }
+        if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                [Runtime.InteropServices.OSPlatform]::Linux
+            )) {
+            $token = & $statCommand.Source '--format=%d|%i|%s|%y|%z' '--' $Path
+        } else {
+            $token = & $statCommand.Source '-f' '%d|%i|%z|%m|%c' $Path
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Cannot inspect payload directory: $Relative" }
+        return "" + $token
+    }
+    function Get-PayloadFileToken($Entry) {
+        return (
+            [string]$Entry.Length + '|' +
+            [string]$Entry.LastWriteTimeUtc.Ticks + '|' +
+            [string]$Entry.CreationTimeUtc.Ticks + '|' +
+            [string][int64]$Entry.Attributes
+        )
+    }
+    function Get-PayloadTreeState {
+        $files = [Collections.Generic.SortedDictionary[string, object]]::new(
+            [StringComparer]::Ordinal
+        )
+        $entries = [Collections.Generic.SortedDictionary[string, string]]::new(
+            [StringComparer]::Ordinal
+        )
+        $directoryStates = [Collections.Generic.SortedDictionary[string, string]]::new(
+            [StringComparer]::Ordinal
+        )
+        $directories = [Collections.Stack]::new()
+        $directories.Push([pscustomobject]@{ path = $PluginDir; relative = '' })
+        [long]$entryCount = 0
+        [long]$totalBytes = 0
+        while ($directories.Count -gt 0) {
+            $directory = $directories.Pop()
+            $directoryKey = if ($directory.relative) {
+                ([BitConverter]::ToString(
+                    $strictUtf8.GetBytes($directory.relative)
+                )).Replace('-', '')
+            } else { '' }
+            $directoryStates.Add(
+                $directoryKey,
+                (Get-PayloadDirectoryToken $directory.path $directory.relative)
+            )
+            $enumerator = [IO.Directory]::EnumerateFileSystemEntries(
+                $directory.path
+            ).GetEnumerator()
+            try {
+                while ($enumerator.MoveNext()) {
+                    $entryPath = [string]$enumerator.Current
+                    $entryName = [IO.Path]::GetFileName($entryPath)
+                    $relative = if ($directory.relative) {
+                        $directory.relative + '/' + $entryName
+                    } else { $entryName }
+                    $pathBytes = $strictUtf8.GetBytes($relative)
+                    if ($pathBytes.Length -gt $MaxPathBytes) {
+                        throw "Payload content relative path exceeds the $MaxPathBytes-byte UTF-8 limit: $relative"
+                    }
+                    $entryCount++
+                    if ($entryCount -gt $MaxEntries) {
+                        throw "Payload content exceeds the $MaxEntries-entry limit"
+                    }
+                    $entry = Get-Item -LiteralPath $entryPath `
+                        -Force -ErrorAction Stop
+                    $kind = Get-PayloadKind $entry $relative
+                    $sortKey = ([BitConverter]::ToString($pathBytes)).Replace('-', '')
+                    $entries.Add($sortKey, $kind)
+                    if ($kind -ceq 'directory') {
+                        $directories.Push([pscustomobject]@{
+                            path = $entry.FullName
+                            relative = $relative
+                        })
+                        continue
+                    }
+                    [long]$length = $entry.Length
+                    if ($length -gt ($MaxContentBytes - $totalBytes)) {
+                        throw "Payload content exceeds the $MaxContentBytes-byte regular-file limit"
+                    }
+                    $totalBytes += $length
+                    if ($directory.relative -or
+                        $entry.Name -cne 'snapshot-provenance.json') {
+                        $files.Add($sortKey, [pscustomobject]@{
+                            path = $entry.FullName
+                            relativeBytes = $pathBytes
+                            token = Get-PayloadFileToken $entry
+                        })
+                    }
+                }
+            }
+            finally {
+                if ($enumerator -is [IDisposable]) {
+                    $enumerator.Dispose()
+                }
+            }
+        }
+        return [pscustomobject]@{
+            files = $files
+            entries = $entries
+            directories = $directoryStates
+            entryCount = $entryCount
+            totalBytes = $totalBytes
+        }
+    }
+    function Assert-PayloadTreeState($Before, $After) {
+        if ($Before.entryCount -ne $After.entryCount -or
+            $Before.totalBytes -ne $After.totalBytes -or
+            $Before.entries.Count -ne $After.entries.Count -or
+            $Before.directories.Count -ne $After.directories.Count) {
+            throw 'Payload content tree changed during hashing'
+        }
+        foreach ($pair in $Before.entries.GetEnumerator()) {
+            if (-not $After.entries.ContainsKey($pair.Key) -or
+                $After.entries[$pair.Key] -cne $pair.Value) {
+                throw 'Payload content tree changed during hashing'
+            }
+        }
+        foreach ($pair in $Before.directories.GetEnumerator()) {
+            if (-not $After.directories.ContainsKey($pair.Key) -or
+                $After.directories[$pair.Key] -cne $pair.Value) {
+                throw 'Payload content tree changed during hashing'
+            }
+        }
+    }
+    $before = Get-PayloadTreeState
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($file in $before.files.Values) {
+            $entry = Get-Item -LiteralPath $file.path -Force -ErrorAction Stop
+            if ($entry.PSIsContainer -or
+                (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+                (Get-PayloadFileToken $entry) -cne $file.token) {
+                throw "Payload content changed during hashing: $($entry.FullName)"
+            }
+            $stream = [IO.File]::Open(
+                $file.path,
+                [IO.FileMode]::Open,
+                [IO.FileAccess]::Read,
+                ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+            )
+            $fileSha = [Security.Cryptography.SHA256]::Create()
+            try {
+                $fileDigest = ([BitConverter]::ToString(
+                    $fileSha.ComputeHash($stream)
+                )).Replace('-', '').ToLowerInvariant()
+            }
+            finally {
+                $fileSha.Dispose()
+                $stream.Dispose()
+            }
+            $entry = Get-Item -LiteralPath $file.path -Force -ErrorAction Stop
+            if ($entry.PSIsContainer -or
+                (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) -or
+                (Get-PayloadFileToken $entry) -cne $file.token) {
+                throw "Payload content changed during hashing: $($entry.FullName)"
+            }
+            $prefix = [byte[]]@(0x46, 0x00)
+            $separator = [byte[]]@(0x00)
+            $digestBytes = [Text.Encoding]::ASCII.GetBytes($fileDigest)
+            $newline = [byte[]]@(0x0A)
+            [void]$sha.TransformBlock($prefix, 0, $prefix.Length, $null, 0)
+            [void]$sha.TransformBlock(
+                $file.relativeBytes,
+                0,
+                $file.relativeBytes.Length,
+                $null,
+                0
+            )
+            [void]$sha.TransformBlock($separator, 0, 1, $null, 0)
+            [void]$sha.TransformBlock(
+                $digestBytes,
+                0,
+                $digestBytes.Length,
+                $null,
+                0
+            )
+            [void]$sha.TransformBlock($newline, 0, 1, $null, 0)
+        }
+        Assert-PayloadTreeState $before (Get-PayloadTreeState)
+        [void]$sha.TransformFinalBlock([byte[]]@(), 0, 0)
+        return ([BitConverter]::ToString($sha.Hash)).Replace('-', '').ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
+    }
 }
 
 function Invoke-VersionedSlotClean {
@@ -416,11 +706,15 @@ function Invoke-VersionedMarkComplete {
     if (-not $VersionedRuntime) { return }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
     $py = Get-BootstrapPython
-    if (-not $py) { return }
-    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion)
+    if (-not $py) {
+        throw 'Cannot locate Python to write the runtime completion marker'
+    }
     $ph = Get-PayloadHash
-    if ($ph) { $mcArgs += @('--payload-hash', $ph) }
+    $mcArgs = @($vr, '--root', $InstallDir, '--link-name', (Split-Path -Leaf $LinkDir), 'mark-complete', $SrcVersion, '--payload-hash', $ph)
     & $py @mcArgs 2>&1 | ForEach-Object { Write-Host "  ...    $_" }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Runtime completion marker writer failed with exit code $LASTEXITCODE"
+    }
 }
 # === end install-contract:v4 marker/toss helpers ===
 
