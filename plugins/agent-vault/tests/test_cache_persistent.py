@@ -262,6 +262,31 @@ def test_get_refresh_holds_replacement_lock_across_rpc_and_reconcile(
     assert events == ["lock-enter", "rpc", "reconcile", "lock-exit"]
 
 
+def test_get_refresh_fails_when_authoritative_reconciliation_cannot_persist(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    persistent = get_cache()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(
+        persistent,
+        "reconcile_authoritative",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(cli, "ensure_service", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda req, timeout=None: {"ok": True, "value": "fresh"},
+    )
+
+    assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "persistent cache could not be reconciled" in captured.err
+
+
 def test_cache_only_migrates_legacy_raw_key_without_service(
     enabled_cache,
     monkeypatch,
@@ -380,6 +405,48 @@ def test_cache_populate_reconciles_legacy_response(
         }
     ]
     assert persistent.get("A/x", "password") == "fresh"
+
+
+def test_cache_populate_reports_authoritative_reconciliation_failure(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    from agent_vault import extensions as ext
+
+    registry = ext.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(ext, "_REGISTRY", registry)
+    persistent = get_cache()
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(
+        persistent,
+        "reconcile_authoritative",
+        lambda *_args, **_kwargs: False,
+    )
+    monkeypatch.setattr(cli, "ensure_service", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda request, timeout=None: {"ok": True, "value": "fresh"},
+    )
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+
+    args = SimpleNamespace(
+        entry=["A/x"],
+        manifest=None,
+        machine=None,
+        prompt=False,
+        verify=False,
+    )
+    assert cli.cmd_cache_populate(args) == 1
+    captured = capsys.readouterr()
+    assert captured.out.endswith("Cached 0 credential(s), 1 failed\n")
+    assert "cache update failed: A/x [password]" in captured.err
 
 
 def test_failed_rotation_restores_prior_offline_value(enabled_cache, monkeypatch):

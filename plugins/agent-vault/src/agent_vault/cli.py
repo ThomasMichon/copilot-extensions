@@ -694,6 +694,7 @@ def cmd_get(args):
         else contextlib.nullcontext()
     )
     succeeded = False
+    reconciliation_failed = False
     with read_lock:
         resp = send_command(request, timeout=None)
         if resp and resp.get("ok"):
@@ -702,7 +703,7 @@ def cmd_get(args):
             if cache.enabled:
                 generation = resp.get("generation")
                 if authoritative:
-                    cache.reconcile_authoritative(
+                    reconciliation_failed = not cache.reconcile_authoritative(
                         cache_entry,
                         field,
                         value,
@@ -712,6 +713,13 @@ def cmd_get(args):
                     cache.put(cache_entry, field, value)
                 else:
                     cache.put(cache_entry, field, value, int(generation))
+    if reconciliation_failed:
+        print(
+            "Error: credential was read, but the persistent cache could not be "
+            "reconciled",
+            file=sys.stderr,
+        )
+        return 2
     if succeeded:
         print(value)
         return 0
@@ -1404,7 +1412,7 @@ def cmd_cache_populate(args):
 
     cache = get_cache()
     ok = 0
-    missing: list[str] = []
+    failures: list[str] = []
     for entry, field in pairs:
         action = "has" if args.verify else "get"
         request = {"action": action, "entry": entry, "field": field}
@@ -1417,6 +1425,7 @@ def cmd_cache_populate(args):
             if not args.verify
             else contextlib.nullcontext()
         )
+        failure = None
         with read_lock:
             resp = send_command(request, timeout=None if args.prompt else 15.0)
             present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
@@ -1432,25 +1441,26 @@ def cmd_cache_populate(args):
                 )
                 cache.migrate_entry(entry, cache_entry, field)
                 generation = resp.get("generation")
-                cache.reconcile_authoritative(
+                if not cache.reconcile_authoritative(
                     cache_entry,
                     field,
                     resp["value"],
                     int(generation) if generation is not None else None,
-                )
+                ):
+                    present = False
+                    failure = f"cache update failed: {entry} [{field}]"
         if present:
             ok += 1
         else:
-            missing.append(f"{entry} [{field}]")
+            failures.append(failure or f"missing: {entry} [{field}]")
 
     fail = len(pairs) - ok
     if args.verify:
         print(f"Present: {ok}/{len(pairs)}")
     else:
         print(f"Cached {ok} credential(s), {fail} failed")
-    if missing:
-        for m in missing:
-            print(f"  missing: {m}", file=sys.stderr)
+    for failure in failures:
+        print(f"  {failure}", file=sys.stderr)
     return 1 if fail > 0 else 0
 
 
