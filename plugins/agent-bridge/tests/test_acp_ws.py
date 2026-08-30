@@ -83,6 +83,17 @@ class TestStatusUi:
 
 
 class TestAcpWebSocket:
+    def test_agent_target_closes_retry_later_while_initializing(self, app):
+        with TestClient(app) as c:
+            app.state.ready = False
+            with pytest.raises(Exception) as exc_info:
+                with c.websocket_connect(
+                    "/acp/test-agent",
+                    subprotocols=["acp.v1", "bearer.test-token"],
+                ):
+                    pass
+        assert getattr(exc_info.value, "code", None) == 1013
+
     def test_rejects_without_token(self, app):
         with TestClient(app) as c:
             with pytest.raises(Exception):
