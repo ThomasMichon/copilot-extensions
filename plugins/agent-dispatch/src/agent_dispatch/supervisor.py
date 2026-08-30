@@ -540,8 +540,8 @@ class Supervisor:
         #: Task ids whose terminal lifecycle event has already been dispatched to
         #: the evaluator this process (dedup_key is the cross-restart guard).
         self._evaluated: set[str] = set()
-        #: Last compact dead-letter set emitted by this process. Unchanged sets
-        #: stay quiet across poll cycles; a set change emits one actionable line.
+        #: Last compact dead-letter signature emitted by this process. Unchanged
+        #: task ids, failed counts, and caps stay quiet across poll cycles.
         self._dead_letter_signature: tuple[tuple[str, int, int], ...] = ()
 
     # -- helpers -------------------------------------------------------------

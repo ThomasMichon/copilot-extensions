@@ -67,10 +67,11 @@ that guarantees **exactly one embody spawn per (task, attempt)**.
 - **Exactly-one invariant.** `reserve_spawn(task_id)` is a single
   `BEGIN IMMEDIATE` transaction: if any reservation for the task is **active**
   (`reserving`/`spawned`), it returns `(existing, reserved=False)` — the caller
-  must **not** spawn. Otherwise it mints attempt `max(prior)+1` (or `1`),
-  `reserving`, and returns `(new, reserved=True)`. A prior `failed`/`settled`
-  reservation therefore never blocks a legitimate retry, but no two callers ever
-  spawn the same attempt.
+  must **not** spawn. Otherwise the task must still be `queued` and unowned; a
+  different task state is refused. It then mints attempt `max(prior)+1` (or
+  `1`), `reserving`, and returns `(new, reserved=True)`. A prior
+  `failed`/`settled`/`rearmed` reservation therefore never blocks a legitimate
+  retry, but no two callers ever spawn the same attempt.
 
 ### Where it lives
 
@@ -89,7 +90,8 @@ GET  /spawn-reservations/{key}
 ```
 
 `DispatchClient` exposes each as a method. Events (`spawn.reserved`,
-`spawn.spawned`, `spawn.failed`, `spawn.settled`) are published on the SSE bus.
+`spawn.spawned`, `spawn.failed`, `spawn.settled`, `spawn.rearmed`) are published
+on the SSE bus.
 
 ### How `create --spawn` uses it (the bug fix)
 
