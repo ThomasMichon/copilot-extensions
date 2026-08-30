@@ -43,7 +43,9 @@ import logging
 import os
 import socket
 import sys
+import threading
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +53,8 @@ from pathlib import Path
 log = logging.getLogger("zdd")
 
 _TABLE_FILENAME = "active.json"
+_LOCK_FILENAME = "active.lock"
+_PROCESS_ROUTING_LOCK = threading.RLock()
 # A loopback connect on a live port returns in well under a millisecond; this
 # bounds the heal-probe so a stale entry can never hang a CLI invocation.
 _PROBE_TIMEOUT_S = 0.25
@@ -99,6 +103,44 @@ class Endpoint:
 def routing_table_path(config_dir: str | os.PathLike[str]) -> Path:
     """Absolute path of the routing table inside ``config_dir``."""
     return Path(config_dir) / _TABLE_FILENAME
+
+
+@contextmanager
+def _file_routing_lock(config_dir: str | os.PathLike[str]):
+    path = Path(config_dir) / _LOCK_FILENAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+b") as handle:
+        if sys.platform == "win32":
+            import msvcrt
+
+            handle.seek(0)
+            if not handle.read(1):
+                handle.seek(0)
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            try:
+                yield
+            finally:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _routing_lock(config_dir: str | os.PathLike[str]):
+    """Serialize routing mutations across threads and processes."""
+    with _PROCESS_ROUTING_LOCK:
+        with _file_routing_lock(config_dir):
+            yield
 
 
 def read_table(config_dir: str | os.PathLike[str]) -> dict | None:
@@ -220,7 +262,7 @@ def _next_generation(data: dict | None) -> int:
     return best + 1
 
 
-def publish_active(
+def _publish_active_unlocked(
     config_dir: str | os.PathLike[str],
     *,
     bind: str,
@@ -230,13 +272,6 @@ def publish_active(
     generation: int | None = None,
     demote_existing: bool = False,
 ) -> Endpoint:
-    """Publish ``host:port`` as the active endpoint, atomically.
-
-    When ``demote_existing`` is set and the current active endpoint is a
-    *different* port, it is recorded as ``previous`` (the cutover flip). When it
-    is the same port (a plain restart re-announcing itself) it is simply
-    replaced. ``generation`` defaults to one past the highest recorded value.
-    """
     path = routing_table_path(config_dir)
     current = read_table(config_dir) or {}
     gen = generation if generation is not None else _next_generation(current)
@@ -261,6 +296,75 @@ def publish_active(
     return new_active
 
 
+def publish_active(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+) -> Endpoint:
+    """Publish ``host:port`` as the active endpoint, atomically.
+
+    When ``demote_existing`` is set and the current active endpoint is a
+    *different* port, it is recorded as ``previous`` (the cutover flip). When it
+    is the same port (a plain restart re-announcing itself) it is simply
+    replaced. ``generation`` defaults to one past the highest recorded value.
+    """
+    with _routing_lock(config_dir):
+        return _publish_active_unlocked(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            generation=generation,
+            demote_existing=demote_existing,
+        )
+
+
+def restore_previous_if_owner(
+    config_dir: str | os.PathLike[str],
+    *,
+    pid: int,
+    generation: int,
+) -> bool:
+    """Restore ``previous`` iff the caller still owns the active generation."""
+    with _routing_lock(config_dir):
+        data = read_table(config_dir)
+        if not data:
+            return False
+        active_raw = data.get("active")
+        active = (
+            Endpoint.from_dict(active_raw)
+            if isinstance(active_raw, dict)
+            else None
+        )
+        if active is None or active.pid != pid or active.generation != generation:
+            return False
+
+        previous_raw = data.get("previous")
+        previous = (
+            Endpoint.from_dict(previous_raw)
+            if isinstance(previous_raw, dict)
+            else None
+        )
+        table: dict = {"epoch": datetime.now(timezone.utc).isoformat()}
+        if previous is not None:
+            restored = Endpoint(
+                bind=previous.bind,
+                port=previous.port,
+                pid=previous.pid,
+                version=previous.version,
+                generation=_next_generation(data),
+            )
+            table["active"] = restored.to_dict()
+        _atomic_write(routing_table_path(config_dir), table)
+        return True
+
+
 def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
     """Remove our active entry on shutdown iff we are still the recorded active.
 
@@ -270,25 +374,43 @@ def clear_if_owner(config_dir: str | os.PathLike[str], pid: int) -> bool:
     entry to ``previous`` so an in-flight client mid-resolve still has a fallback
     if the successor is not yet listening.
     """
-    data = read_table(config_dir)
-    if not data:
-        return False
-    active = Endpoint.from_dict(data.get("active", {})) \
-        if isinstance(data.get("active"), dict) else None
-    if active is None or active.pid != pid:
-        return False
-    path = routing_table_path(config_dir)
-    table: dict = {"previous": active.to_dict(),
-                   "epoch": datetime.now(timezone.utc).isoformat()}
-    try:
-        _atomic_write(path, table)
-    except OSError:
-        return False
+    with _routing_lock(config_dir):
+        data = read_table(config_dir)
+        if not data:
+            return False
+        active = Endpoint.from_dict(data.get("active", {})) \
+            if isinstance(data.get("active"), dict) else None
+        if active is None or active.pid != pid:
+            return False
+        path = routing_table_path(config_dir)
+        table: dict = {"previous": active.to_dict(),
+                       "epoch": datetime.now(timezone.utc).isoformat()}
+        try:
+            _atomic_write(path, table)
+        except OSError:
+            return False
     log.info("Cleared active endpoint for pid %d on shutdown", pid)
     return True
 
 
 def reap_stale_active(
+    config_dir: str | os.PathLike[str],
+    *,
+    service: str | None = None,
+    listening: Callable[[str, int], bool] | None = None,
+    pid_alive: Callable[[int | None], bool] | None = None,
+) -> dict:
+    """Reap a stale active endpoint under the routing-table mutation lock."""
+    with _routing_lock(config_dir):
+        return _reap_stale_active_unlocked(
+            config_dir,
+            service=service,
+            listening=listening,
+            pid_alive=pid_alive,
+        )
+
+
+def _reap_stale_active_unlocked(
     config_dir: str | os.PathLike[str],
     *,
     service: str | None = None,
@@ -352,7 +474,7 @@ def reap_stale_active(
         promoted = False
         if prev is not None and prev.port != active.port and \
                 _listen(prev.client_host, prev.port):
-            publish_active(
+            _publish_active_unlocked(
                 config_dir, bind=prev.bind, port=prev.port, pid=prev.pid,
                 version=prev.version, demote_existing=False,
             )

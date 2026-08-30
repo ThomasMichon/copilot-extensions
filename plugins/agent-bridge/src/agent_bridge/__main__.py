@@ -316,8 +316,16 @@ def _bind_listen_socket(host: str, port: int) -> socket.socket:
     family, socktype, proto, _canon, sockaddr = infos[0]
     sock = socket.socket(family, socktype, proto)
     try:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if sys.platform == "win32":
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind(sockaddr)
+        # Begin accepting TCP handshakes immediately. Uvicorn attaches its
+        # protocol handler after lifespan startup; until then the kernel backlog
+        # keeps early clients connected rather than rejecting them while the
+        # daemon finishes topology/relay initialization.
+        sock.listen(socket.SOMAXCONN)
     except OSError:
         sock.close()
         raise
@@ -412,31 +420,29 @@ def _cmd_start(args: argparse.Namespace) -> None:
     # orchestrator flips the table after a health check.
     app.state.publish_on_ready = not passive
 
-    # Dynamic-endpoint bind (dotfiles #694): a primary daemon with no pinned port
-    # binds an OS-assigned ephemeral port -- nothing well-known (9280/9281) is
-    # reserved -- and advertises the *actual* bound port via the routing table
-    # (active.json), which clients already resolve. We pre-bind the listening
-    # socket ourselves to read the bound port back before serving. A pinned port
-    # (--port, or a positive `port` in config.yaml) still binds fixed, so an
-    # existing deployment that pins 9280 is unchanged until its config drops the
-    # port; AGENT_BRIDGE_DYNAMIC_PORT=0 forces the legacy fixed default_port().
+    # Reserve the serving socket before lifespan starts, for both dynamic and
+    # pinned ports. Lifespan publishes this already-owned endpoint immediately;
+    # delaying a fixed-port bind until after that publication could demote a
+    # healthy predecessor and only then discover that another process owns the
+    # requested port.
     from .models import default_port
 
     dynamic_port = _dynamic_bind_requested(cfg.port, explicit_port)
-    listen_sock = None
-    if dynamic_port:
-        try:
-            listen_sock = _bind_listen_socket(cfg.bind, 0)
-            bound_port = listen_sock.getsockname()[1]
-        except OSError as exc:
-            logging.getLogger("agent-bridge").warning(
-                "dynamic bind failed (%s); falling back to fixed port", exc,
-            )
-            listen_sock = None
-    if listen_sock is None:
-        # Fixed bind: the pinned config/--port, or the legacy fallback when the
-        # port is the unset sentinel (0) but dynamic was forced off.
-        bound_port = cfg.port if cfg.port > 0 else default_port()
+    requested_port = 0 if dynamic_port else (
+        cfg.port if cfg.port > 0 else default_port()
+    )
+    try:
+        listen_sock = _bind_listen_socket(cfg.bind, requested_port)
+    except OSError as exc:
+        singleton.release()
+        logging.getLogger("agent-bridge").error(
+            "failed to reserve serving port %s:%s: %s",
+            cfg.bind,
+            requested_port or "dynamic",
+            exc,
+        )
+        raise
+    bound_port = listen_sock.getsockname()[1]
     # The port every downstream reader (routing-table publish, /status) advertises
     # -- the *actually bound* port (ephemeral or the pinned/fallback fixed port).
     app.state.bound_port = bound_port
@@ -448,9 +454,9 @@ def _cmd_start(args: argparse.Namespace) -> None:
         print(f"[agent-bridge] Idle shutdown after {cfg.idle_shutdown_seconds}s")
 
     # Use an explicit Server (not uvicorn.run) so the idle-shutdown monitor in
-    # the lifespan can request a graceful stop via server.should_exit. When we
-    # pre-bound a socket (dynamic path) uvicorn serves it directly and ignores
-    # host/port; otherwise it binds host/bound_port itself.
+    # the lifespan can request a graceful stop via server.should_exit. Uvicorn
+    # always serves the socket reserved above, so endpoint publication cannot
+    # race a later bind failure.
     config_kwargs: dict[str, Any] = {
         "log_level": cfg.log_level,
         # Pure-Python WebSocket protocol (wsproto) for the ACP-over-WS
@@ -458,9 +464,6 @@ def _cmd_start(args: argparse.Namespace) -> None:
         # would 403 every /acp WebSocket upgrade) on a host without it.
         "ws": "wsproto",
     }
-    if listen_sock is None:
-        config_kwargs["host"] = cfg.bind
-        config_kwargs["port"] = bound_port
     config = uvicorn.Config(app, **config_kwargs)
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
@@ -487,14 +490,10 @@ def _cmd_start(args: argparse.Namespace) -> None:
         server, bind=cfg.bind, port=bound_port, **watchdog_kwargs
     )
     try:
-        if listen_sock is not None:
-            server.run(sockets=[listen_sock])
-        else:
-            server.run()
+        server.run(sockets=[listen_sock])
     finally:
         singleton.release()
-        if listen_sock is not None:
-            listen_sock.close()
+        listen_sock.close()
 
 
 def _cmd_status(args: argparse.Namespace) -> None:

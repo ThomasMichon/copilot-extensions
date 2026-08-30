@@ -148,6 +148,46 @@ def test_flip_demotes_previous(cfg_dir: Path):
         new.close()
 
 
+def test_restore_previous_requires_active_generation_ownership(cfg_dir: Path):
+    old = routing.publish_active(
+        cfg_dir, bind="127.0.0.1", port=9281, pid=101, version="old"
+    )
+    failed = routing.publish_active(
+        cfg_dir, bind="127.0.0.1", port=9282, pid=202, version="failed",
+        demote_existing=True,
+    )
+
+    assert routing.restore_previous_if_owner(
+        cfg_dir, pid=failed.pid, generation=failed.generation
+    ) is True
+    table = routing.read_table(cfg_dir)
+    assert table["active"]["port"] == old.port
+    assert table["active"]["pid"] == old.pid
+    assert table["active"]["generation"] > failed.generation
+
+
+def test_restore_previous_does_not_overwrite_newer_successor(cfg_dir: Path):
+    routing.publish_active(
+        cfg_dir, bind="127.0.0.1", port=9281, pid=101, version="old"
+    )
+    failed = routing.publish_active(
+        cfg_dir, bind="127.0.0.1", port=9282, pid=202, version="failed",
+        demote_existing=True,
+    )
+    successor = routing.publish_active(
+        cfg_dir, bind="127.0.0.1", port=9283, pid=303, version="successor",
+        demote_existing=True,
+    )
+
+    assert routing.restore_previous_if_owner(
+        cfg_dir, pid=failed.pid, generation=failed.generation
+    ) is False
+    active = routing.read_table(cfg_dir)["active"]
+    assert active["port"] == successor.port
+    assert active["pid"] == successor.pid
+    assert active["generation"] == successor.generation
+
+
 def test_heal_to_previous_when_active_dead(cfg_dir: Path):
     prev = _Listener()
     dead_port = _free_port()

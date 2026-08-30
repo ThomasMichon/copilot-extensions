@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 
 from zdd import lifecycle, routing
@@ -371,6 +372,45 @@ def test_watchdog_leaves_starting_active(tmp_path: Path):
     )
     assert diag["reaped"] is False
     assert "starting" in diag["reason"]
+
+
+def test_watchdog_serializes_against_newer_publication(tmp_path: Path):
+    routing.publish_active(tmp_path, bind="127.0.0.1", port=9290, pid=222)
+    watchdog_read = threading.Event()
+    release_watchdog = threading.Event()
+    published = threading.Event()
+
+    def blocked_listener(host, port):
+        watchdog_read.set()
+        assert release_watchdog.wait(timeout=5)
+        return False
+
+    watchdog = threading.Thread(
+        target=routing.reap_stale_active,
+        args=(tmp_path,),
+        kwargs={"listening": blocked_listener, "pid_alive": lambda pid: False},
+    )
+
+    def publish_successor():
+        routing.publish_active(
+            tmp_path, bind="127.0.0.1", port=9291, pid=333,
+            demote_existing=True,
+        )
+        published.set()
+
+    successor = threading.Thread(target=publish_successor)
+    watchdog.start()
+    assert watchdog_read.wait(timeout=5)
+    successor.start()
+    assert not published.wait(timeout=0.1)
+    release_watchdog.set()
+    watchdog.join(timeout=5)
+    successor.join(timeout=5)
+
+    assert not watchdog.is_alive()
+    assert not successor.is_alive()
+    assert published.is_set()
+    assert routing.read_table(tmp_path)["active"]["port"] == 9291
 
 
 def test_cutover_watchdog_uses_injected_routing(tmp_path: Path):

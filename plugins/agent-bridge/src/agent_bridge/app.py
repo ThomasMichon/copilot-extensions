@@ -150,6 +150,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan -- initialize DB, topology, and session manager."""
     cfg = app.state.config
 
+    lifecycle_start_task = None
     # Record the *actually-running* daemon version so the launch-path reconciler
     # can detect a daemon lagging its installed plugin even when the on-disk
     # deploy manifest already matches (dotfiles #533). Only the **primary** daemon
@@ -167,6 +168,39 @@ async def lifespan(app: FastAPI):
 
     mgr = session_manager_from_config(db, cfg)
     app.state.session_manager = mgr
+
+    # The launch path reserved the serving socket before entering lifespan.
+    # Publish that concrete endpoint before topology, relay, or remote recovery
+    # work so clients immediately follow this generation and the prior active
+    # daemon becomes legacy. A passive ZDD cutover instance stays silent: its
+    # orchestrator owns the health-gated routing flip.
+    published_endpoint = None
+    if getattr(app.state, "publish_on_ready", False):
+        import os as _os
+
+        from . import __version__ as _ver
+        from . import lifecycle_hooks
+        from .config import config_dir
+        from zdd import routing
+
+        _bound_port = getattr(app.state, "bound_port", cfg.port)
+        await asyncio.to_thread(lifecycle_hooks.startup_sweep, config_dir())
+        try:
+            published_endpoint = await asyncio.to_thread(
+                routing.publish_active,
+                config_dir(),
+                bind=cfg.bind,
+                port=_bound_port,
+                pid=_os.getpid(),
+                version=_ver,
+                demote_existing=True,
+            )
+        except Exception as exc:
+            await asyncio.to_thread(db.close)
+            log.exception("Failed to publish the bound daemon endpoint")
+            raise RuntimeError(
+                "Cannot start agent-bridge without publishing its active endpoint"
+            ) from exc
 
     # Reattach to any Session Hosts that survived a prior frontend restart
     # (goal 3), instead of leaving those sessions STOPPED. Best-effort and, per
@@ -195,33 +229,52 @@ async def lifespan(app: FastAPI):
 
     reattach_task = asyncio.create_task(_reattach_session_hosts_bg())
 
-    # Load topology profiles + auto-discover local agents. Always a resolver
-    # (empty when there is no topology) so declarative namespace providers
-    # (codespace:, container:) from providers.d attach even without machines.yaml.
-    resolver = daemon_resolver(cfg)
-    app.state.resolver = resolver
+    async def _abort_startup() -> None:
+        reattach_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await reattach_task
+        if published_endpoint is not None:
+            await asyncio.to_thread(
+                routing.restore_previous_if_owner,
+                config_dir(),
+                pid=published_endpoint.pid,
+                generation=published_endpoint.generation,
+            )
+        await asyncio.to_thread(db.close)
 
-    # Start worktree discovery if topology is available
-    if resolver.agents or resolver.machines:
-        from .routes.worktrees import get_cache
-        wt_cache = get_cache()
-        wt_cache.configure(interval=cfg.worktree_discovery_interval)
-        wt_cache.start(resolver)
+    try:
+        # Load topology profiles + auto-discover local agents. Always a resolver
+        # (empty when there is no topology) so declarative namespace providers
+        # (codespace:, container:) attach even without machines.yaml.
+        resolver = daemon_resolver(cfg)
+        app.state.resolver = resolver
 
-    # Start credential relay server for auth forwarding over SSH tunnels and
-    # container connections. agent-bridge owns/runs the relay; provider plugins
-    # inject their per-target source profiles (see register_credential_sources).
-    # The elevated sub-daemon disables this (enable_credential_relay=False) so it
-    # never re-binds -- and thus never evicts -- the primary daemon's relay on the
-    # shared loopback port 9857; local elevated agents reuse the primary's relay.
-    relay_server = None
-    if not getattr(cfg, "enable_credential_relay", True):
+        # Start worktree discovery if topology is available.
+        if resolver.agents or resolver.machines:
+            from .routes.worktrees import get_cache
+            wt_cache = get_cache()
+            wt_cache.configure(interval=cfg.worktree_discovery_interval)
+            wt_cache.start(resolver)
+
+        # Start credential relay server for auth forwarding over SSH tunnels and
+        # container connections. The elevated sub-daemon disables this so it
+        # never re-binds the primary daemon's shared relay port.
+        relay_server = None
+        if not getattr(cfg, "enable_credential_relay", True):
+            log.info(
+                "Credential relay disabled for this daemon "
+                "(enable_credential_relay=False) -- reusing the primary daemon's relay"
+            )
+        else:
+            relay_server = await _start_credential_relay(app)
+
         log.info(
-            "Credential relay disabled for this daemon "
-            "(enable_credential_relay=False) -- reusing the primary daemon's relay"
+            "agent-bridge started (port=%s, db=%s, sessions=%d)",
+            cfg.port, db_path, len(mgr.list_sessions()),
         )
-    else:
-        relay_server = await _start_credential_relay(app)
+    except Exception:
+        await _abort_startup()
+        raise
 
     # Expose a relay-adoption hook so a passive cutover instance can bind the
     # shared relay port *after* the retiring daemon releases it (the relay is a
@@ -232,11 +285,6 @@ async def lifespan(app: FastAPI):
         return relay_server is not None and getattr(relay_server, "running", False)
 
     app.state.adopt_relay = _adopt_relay
-
-    log.info(
-        "agent-bridge started (port=%s, db=%s, sessions=%d)",
-        cfg.port, db_path, len(mgr.list_sessions()),
-    )
 
     # Periodic GC sweep -- prune aged terminal/disconnected sessions and
     # compact the DB while the daemon runs (startup GC already ran in the
@@ -409,61 +457,29 @@ async def lifespan(app: FastAPI):
 
     live_reap_task = asyncio.create_task(_live_reap_loop())
 
-    # Routing-table publish-on-ready -- a normal daemon announces its endpoint
-    # to active.json once it is actually listening, so CLI clients discover it
-    # via the routing table. A passive cutover instance leaves publish_on_ready
-    # False; the deploy orchestrator flips the table after its own health check.
-    publish_task = None
+    # The route was published before slow startup work. Record the durable START
+    # event only after uvicorn confirms that it is accepting connections.
     if getattr(app.state, "publish_on_ready", False):
-        async def _publish_when_listening() -> None:
-            import os as _os
-
-            from . import __version__ as _ver
-            from zdd import routing
-            from . import lifecycle_hooks
-            from .config import config_dir
-
+        async def _record_start_when_listening() -> None:
             server = getattr(app.state, "uvicorn_server", None)
-            # Wait for uvicorn to actually bind the socket before announcing.
+            # Lifespan completes before uvicorn marks the server started, so
+            # this confirmation must remain a background task.
             for _ in range(600):  # ~60s ceiling
                 if server is not None and getattr(server, "started", False):
                     break
                 await asyncio.sleep(0.1)
             started = server is not None and getattr(server, "started", False)
-            # Dead-port watchdog: before announcing ourselves, retire any
-            # advertised-but-dead endpoint a prior crashed daemon/cutover may
-            # have left in the routing table (self-heals a stale port on a plain
-            # restart, not only on a redeploy). Best-effort / fail-open.
-            await asyncio.to_thread(lifecycle_hooks.startup_sweep, config_dir())
-            try:
-                # Advertise the *actually bound* port (dotfiles #694): equals
-                # cfg.port in the default path, but the real OS-assigned port
-                # when the daemon bound dynamically. Clients resolve the port
-                # from this routing record, so an ephemeral port is transparent.
-                _bound_port = getattr(app.state, "bound_port", cfg.port)
-                await asyncio.to_thread(
-                    routing.publish_active,
-                    config_dir(),
-                    bind=cfg.bind,
-                    port=_bound_port,
-                    pid=_os.getpid(),
-                    version=_ver,
-                    demote_existing=True,
+            if not started:
+                log.warning(
+                    "Daemon endpoint was published but uvicorn did not report "
+                    "started within 60s"
                 )
-                # Durable lifecycle record: emitted only when the server is
-                # confirmed listening, so a START never claims "serving" for a
-                # daemon whose startup timed out without binding. (The publish
-                # above still runs: a live-pid-but-not-yet-listening entry is
-                # intentional -- consumers wait on it rather than the old port.)
-                # The recorded flag gates the shutdown STOP on a matching START.
-                if started:
-                    app.state.lifecycle_started = await asyncio.to_thread(
-                        lifecycle_hooks.record_start, config_dir(), _ver, _bound_port
-                    )
-            except Exception:
-                log.warning("Failed to publish routing table", exc_info=True)
+                return
+            app.state.lifecycle_started = await asyncio.to_thread(
+                lifecycle_hooks.record_start, config_dir(), _ver, _bound_port
+            )
 
-        publish_task = asyncio.create_task(_publish_when_listening())
+        lifecycle_start_task = asyncio.create_task(_record_start_when_listening())
 
     # Self-retire on supersession (owner-liveness tether). A daemon that has been
     # *demoted* -- a newer generation flipped the routing table and now serves
@@ -555,29 +571,31 @@ async def lifespan(app: FastAPI):
     # Shutdown: retract our routing-table claim so clients fall back (or follow
     # a successor that already flipped the table). Done first so no new client
     # is routed to us while we tear sessions down.
-    if publish_task is not None:
-        publish_task.cancel()
+    if lifecycle_start_task is not None:
+        lifecycle_start_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
-            await publish_task
+            await lifecycle_start_task
     # Shutdown: stop the generation self-retire watch (if armed)
     if self_retire_task is not None:
         self_retire_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self_retire_task
-    if getattr(app.state, "publish_on_ready", False):
-        import os as _os
+    import os as _os
 
-        from zdd import routing
-        from . import lifecycle_hooks
-        from .config import config_dir
-        # STOP only if we emitted a matching START (the server confirmed
-        # listening), so a daemon that never actually served records neither.
-        if getattr(app.state, "lifecycle_started", False):
-            await asyncio.to_thread(lifecycle_hooks.record_stop, config_dir())
-        try:
-            await asyncio.to_thread(routing.clear_if_owner, config_dir(), _os.getpid())
-        except Exception:
-            log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
+    from zdd import routing
+    from . import lifecycle_hooks
+    from .config import config_dir
+    # STOP only if we emitted a matching START (the server confirmed
+    # listening), so a daemon that never actually served records neither.
+    if getattr(app.state, "lifecycle_started", False):
+        await asyncio.to_thread(lifecycle_hooks.record_stop, config_dir())
+    # Every daemon clears only a route it currently owns. This is a no-op for an
+    # unpromoted passive instance, but lets a passive instance promoted by the
+    # cutover orchestrator retract its route on a later graceful shutdown.
+    try:
+        await asyncio.to_thread(routing.clear_if_owner, config_dir(), _os.getpid())
+    except Exception:
+        log.debug("Routing-table clear-on-shutdown skipped", exc_info=True)
 
     # Shutdown: stop the idle-shutdown monitor
     if idle_task is not None:
