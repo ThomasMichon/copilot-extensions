@@ -188,7 +188,9 @@ def installed_engine_command() -> list[str] | None:
         )
     except (OSError, ValueError, TypeError):
         return None
-    source = manifest.get("source") if isinstance(manifest, dict) else None
+    if not isinstance(manifest, dict):
+        return None
+    source = manifest.get("source")
     if (
         manifest.get("service") != ENGINE_BIN
         or not isinstance(source, dict)

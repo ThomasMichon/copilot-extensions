@@ -227,6 +227,15 @@ def test_installed_engine_command_validates_manifest(monkeypatch, tmp_path):
     ]
 
 
+def test_installed_engine_command_rejects_non_object_manifest(monkeypatch, tmp_path):
+    root = tmp_path / ".agent-worktrees"
+    root.mkdir(parents=True)
+    (root / "deploy-manifest.json").write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert ec.installed_engine_command() is None
+
+
 def test_installed_engine_command_allows_manifest_version_skew(monkeypatch, tmp_path):
     root = tmp_path / ".agent-worktrees"
     slot = root / "versions" / "1.2.3"

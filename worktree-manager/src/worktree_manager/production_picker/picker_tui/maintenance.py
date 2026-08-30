@@ -6,7 +6,7 @@ Runs the real per-worktree op on a daemon thread (sequentially, matching the
 run through the provider's attributable JSON CLI; **remote** worktrees run over
 SSH per item against the project binstub's JSON CLI
 (``cleanup --worktree-id`` / ``sync --worktree-id`` / ``restart <id>`` /
-``finalize --worktree-id``). The engine polls each item's state from its render
+``finalize <id>``). The engine polls each item's state from its render
 tick.
 
 The executor is the *real* counterpart to the engine's mock progress walker
@@ -88,9 +88,9 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
     *items* are engine record dicts (``id4`` + ``raw.id`` + ``machine`` /
-    ``env``). Local items (machine/env == ``src.LOCAL``) call the in-process
-    ``__main__`` helper; remote items call the SSH CLI via
-    ``data_ssh.remote_op_argv``. A target that resolves to neither (unknown /
+    ``env``). Local items call the attributable provider JSON CLI; remote items
+    call the same project CLI over SSH via ``data_ssh.remote_op_argv``. A target
+    that resolves to neither (unknown /
     *not-ready, or no remote argv builder on the source) yields a failed task.
     """
     project = project or context.project()
