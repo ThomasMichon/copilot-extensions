@@ -83,7 +83,7 @@ class TestStatusUi:
 
 
 class TestAcpWebSocket:
-    def test_agent_target_retries_while_initializing(self, app):
+    def test_agent_target_closes_retry_later_while_initializing(self, app):
         with TestClient(app) as c:
             app.state.ready = False
             with pytest.raises(Exception) as exc_info:
