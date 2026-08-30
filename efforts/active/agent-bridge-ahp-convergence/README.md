@@ -208,6 +208,17 @@ rather than binding to private implementation details.
       turning task scheduling, Git worktrees, mux control, or federation into
       false AHP core requirements.
 
+### Phase 8 — Reconcile deferred backlog
+
+- [ ] Accept AHP and bridge candidates only through
+      [`migration-intake`](../migration-intake/README.md)'s deduplication and
+      ownership gate.
+- [ ] Revalidate accepted technical scope against the current protocol and
+      architecture; return obsolete or unsafe candidates for explicit disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+      extending this plan before implementation when necessary.
+- [ ] Keep reproductions synthetic and independent of any adopting environment.
+
 ## Validation Plan
 
 - [ ] A released AHP 0.8 client initializes, subscribes to root state, discovers

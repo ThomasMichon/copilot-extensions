@@ -125,6 +125,18 @@ cross-checked against a live host running ~7 concurrent sessions) found:
 - agent-vault adopts the shared drain-safe cutover so a version bump doesn't force
   a re-unlock (#743) — pairs with the #609 clean-room scenario.
 
+### Phase 7 — Reconcile deferred backlog
+
+- Accept process-lifecycle candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- Revalidate accepted technical scope against the current service, lease, and
+  cutover contracts; return obsolete or unsafe candidates for explicit
+  disposition.
+- Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- Keep process evidence synthetic and free of machine-specific values.
+
 ## Validation Plan
 
 - **Unit tests** for the lease/reaper primitive (Phase 2) and the marker
