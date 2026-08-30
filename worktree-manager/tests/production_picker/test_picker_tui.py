@@ -3374,6 +3374,14 @@ def test_make_task_local_restart_calls_provider_cli(monkeypatch):
     assert res["ok"] is True
 
 
+def test_build_tasks_rejects_explicit_empty_project():
+    from worktree_manager.production_picker.picker_tui import maintenance as mnt
+
+    src = types.SimpleNamespace(LOCAL=("M", "Win"))
+    with pytest.raises(ValueError, match="project must not be empty"):
+        mnt.build_tasks("restart", [], src, project="")
+
+
 def test_cleanup_extra_confirm_gate_and_real_executor(monkeypatch):
     """Beyond-clean cleanup requires an extra confirm, then runs the executor."""
     monkeypatch.setenv("AGENT_WORKTREES_PICKER_REAL_OPS", "1")

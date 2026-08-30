@@ -203,8 +203,9 @@ def _runtime_candidates(root: Path) -> list[Path]:
 def installed_engine_command() -> list[str] | None:
     """Resolve the exact marker-selected agent-worktrees runtime.
 
-    The deployment manifest binds the runtime slot to the owning provider and
-    version. A bare command name or PATH lookup is never accepted.
+    The deployment manifest attests the owning provider; its marker/fallback
+    files select the immutable runtime slot. A bare command name or PATH lookup
+    is never accepted.
     """
     root = _state_home() / ".agent-worktrees"
     try:

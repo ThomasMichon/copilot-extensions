@@ -93,7 +93,10 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
     that resolves to neither (unknown /
     *not-ready, or no remote argv builder on the source) yields a failed task.
     """
-    project = project or context.project()
+    if project is None:
+        project = context.project()
+    elif not project.strip():
+        raise ValueError("project must not be empty")
     local = getattr(src, "LOCAL", None)
     tasks = []
     for w in items:
