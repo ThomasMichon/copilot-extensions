@@ -275,6 +275,74 @@ def test_transport_lost_wakes_in_flight_prompt() -> None:
     asyncio.run(scenario())
 
 
+def test_host_child_exit_wakes_prompt_with_specific_error() -> None:
+    """A dead Session Host child is not reported as a live transport."""
+    import asyncio
+    from unittest.mock import MagicMock
+
+    async def scenario() -> None:
+        client, events = _client_with_recorder()
+        client._host_mode = True
+        client._host_transport_alive = True
+        client._acp_session_id = "acp-1"
+
+        conn = MagicMock()
+
+        async def _hang(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        conn.prompt = _hang
+        client._connection = conn
+
+        task = asyncio.ensure_future(client.send_prompt("hi"))
+        await asyncio.sleep(0.05)
+        client.mark_host_child_exited(17)
+
+        with pytest.raises(
+            ConnectionResetError, match=r"Session Host child exited \(code=17\)"
+        ):
+            await asyncio.wait_for(task, timeout=1.0)
+
+        assert client.is_running is False
+        assert any(t == "host_child_exit" for t, _ in events)
+        assert any(t == "error" for t, _ in events)
+
+    asyncio.run(scenario())
+
+
+def test_host_child_exit_latches_before_host_mode_initializes() -> None:
+    """A fast child exit cannot be erased by start_streams initialization."""
+    client, events = _client_with_recorder()
+
+    client.mark_host_child_exited(9)
+    client._host_mode = True
+
+    assert client.is_running is False
+    assert client.host_child_exit_code == 9
+    assert client._host_child_exit_code == 9
+    assert client._transport_lost_event.is_set()
+    assert ("host_child_exit", {"exit_code": 9}) in events
+
+
+@pytest.mark.asyncio
+async def test_start_streams_preserves_latched_child_exit() -> None:
+    """Host-mode initialization cannot resurrect a child already reported dead."""
+    client, _events = _client_with_recorder()
+    client.mark_host_child_exited(9)
+    client._init_connection = AsyncMock()
+
+    async def _close() -> None:
+        return None
+
+    reader = asyncio.StreamReader()
+    writer = MagicMock(spec=asyncio.StreamWriter)
+    await client.start_streams(reader, writer, child_pid=123, closer=_close)
+
+    assert client.is_running is False
+    assert client.host_child_exit_code == 9
+    assert client._transport_lost_event.is_set()
+
+
 def test_transport_lost_does_not_disturb_a_completing_prompt() -> None:
     """When the prompt completes normally, the transport-lost race must not
     interfere -- a clean turn still emits turn_complete (issue #22)."""

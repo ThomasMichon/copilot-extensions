@@ -52,6 +52,10 @@ class AcpStreams:
     # signal the frontend's liveness-driven reattach driver keys on (P1). Set by
     # the caller AFTER the AcpClient exists (typically ``client.mark_transport_lost``).
     on_transport_lost: Callable[[], None] | None = field(default=None)
+    # Fired when the Session Host explicitly reports that its child exited.
+    # Kept distinct from transport loss: reconnecting cannot revive a dead child.
+    on_child_exit: Callable[[int], None] | None = field(default=None)
+    child_exit_code: int | None = field(default=None)
 
     async def aclose(self) -> None:
         for t in self._tasks:
@@ -118,7 +122,14 @@ async def open_acp_streams(
             # liveness-driven driver can reattach by cursor (P1). A genuine
             # child exit (LIVENESS(dead), which clears ``child_alive``) is NOT a
             # transport loss and must not trigger a reattach.
-            if client.child_alive and streams.on_transport_lost is not None:
+            if not client.child_alive:
+                streams.child_exit_code = client.child_exit_code
+                if streams.on_child_exit is not None:
+                    try:
+                        streams.on_child_exit(client.child_exit_code)
+                    except Exception:
+                        log.debug("on_child_exit callback raised", exc_info=True)
+            elif streams.on_transport_lost is not None:
                 try:
                     streams.on_transport_lost()
                 except Exception:

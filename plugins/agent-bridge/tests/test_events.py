@@ -186,6 +186,18 @@ class TestActiveToolCall:
         assert active is not None
         assert active["command"] == "do X"
 
+    @pytest.mark.parametrize("raw_input", ["list files", ["list", "files"], 7, True])
+    def test_non_mapping_raw_input_has_no_command(
+        self, event_log: EventLog, raw_input: object
+    ) -> None:
+        event_log.append(
+            "tool_call_start",
+            {"tool_call_id": "t1", "title": "X", "raw_input": raw_input},
+        )
+        active = event_log.active_tool_call()
+        assert active is not None
+        assert active["command"] is None
+
 
 class TestEventLogFromDB:
     """EventLog restoration from database."""

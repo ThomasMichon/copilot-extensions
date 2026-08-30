@@ -254,7 +254,11 @@ class EventLog:
 
         start = max(open_calls.values(), key=lambda ev: ev.id)
         raw = start.data.get("raw_input") or {}
-        command = raw.get("command") or raw.get("description")
+        command = (
+            raw.get("command") or raw.get("description")
+            if isinstance(raw, dict)
+            else None
+        )
         return {
             "tool_call_id": start.data.get("tool_call_id"),
             "title": start.data.get("title")

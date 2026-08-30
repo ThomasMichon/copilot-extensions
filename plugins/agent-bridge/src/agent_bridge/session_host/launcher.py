@@ -254,12 +254,23 @@ async def run_host(
     apply_host_survival()
     nonce = nonce or os.environ.get(_NONCE_ENV, "")
     child = await _spawn_child(child_argv, cwd, env)
+    state_path = Path(state_file) if state_file is not None else None
+    state: dict[str, Any] = {}
+
+    def _publish_child_exit(exit_code: int) -> None:
+        if state_path is None or not state:
+            return
+        state["state"] = "child_exited"
+        state["child_exit_code"] = exit_code
+        state["child_exited_at"] = time.time()
+        _write_host_state(state_path, state)
+
     host = SessionHost(child, nonce=nonce,
                        unexpected_reap_seconds=unexpected_reap_seconds,
-                       active_reap_seconds=active_reap_seconds)
+                       active_reap_seconds=active_reap_seconds,
+                       on_child_exit=_publish_child_exit)
     bound_port = await host.serve(port=port)
-    state_path = Path(state_file) if state_file is not None else None
-    state = {
+    state.update({
         "version": 2,
         "session_id": session_id,
         "pid": os.getpid(),
@@ -277,9 +288,11 @@ async def run_host(
         "boot_id": _boot_id(),
         "host_start_ticks": _process_start_ticks(os.getpid()),
         "child_start_ticks": _process_start_ticks(child.pid),
-    }
+    })
     if state_path is not None:
         _write_host_state(state_path, state)
+        if not host.child_alive:
+            _publish_child_exit(host.child_exit_code or 0)
     if ready is not None:
         ready.set()
     try:
