@@ -299,6 +299,9 @@ def row_text(rec, cols, width, selected, indent=1, pulse=0, mark=None):
             t.append(PAD)
         val = str(rec.get(k, ""))
         if k == "machine_env":
+            if rec.get("source_kind") != "machine-ssh":
+                t.append(_clip(val, w, a))
+                continue
             raw = val
             mach, env = (raw.rsplit(" ", 1) if " " in raw else (raw, ""))
             if env and len(mach) + 1 + len(env) > w:
@@ -345,7 +348,7 @@ def header_text(cols, width, label_style=C_HEADER, indent=1):
 
 ACTIVE_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 4),
-    ("machine_env", "machine env", 19, "l", 5),
+    ("machine_env", "source", 19, "l", 5),
     ("age", "age", 4, "l", 7), ("sess", "live", 4, "l", 8),
     ("pr", "pr", 8, "l", 3), ("title", "title", 10, "l", 1),
 ]
@@ -1217,6 +1220,7 @@ class PickerScreen(Widget):
         self._wt_submenu_ext = {}
         self.data = []
         self.machines = []
+        self.source_tabs = []
         self.pulse = 0
         self.frame = 0
         self.t0 = 0.0
@@ -1388,14 +1392,18 @@ class PickerScreen(Widget):
     def _pivot_machine(self):
         """The machine name the registered pivot's ``list``/actions run against:
         the selected machine sub-tab, or the local machine when 'All' is
-        selected (a registered pivot is inherently machine-scoped).
+        selected. Provider-backed tabs return ``None`` because a registered
+        machine pivot cannot be routed through a provider source.
 
         This returns the tab's *display* name (``machines.yaml`` ``display_name``)
         -- use it for human-facing status lines. For the value handed to a
         contributed pivot's CLI, use :meth:`_pivot_machine_id`."""
         label, m, _e, _ok = self.machines[self.machine_idx]
-        if m is not None:
+        tab = self.source_tabs[self.machine_idx] if self.source_tabs else {}
+        if m is not None and tab.get("source_kind") in (None, "machine-ssh"):
             return m
+        if tab.get("source_kind") not in (None, "machine-ssh"):
+            return None
         loc = self.machines[self.local_index()] if self.machines else (None, None, None, None)
         return loc[1]
 
@@ -1544,10 +1552,12 @@ class PickerScreen(Widget):
                 pass
 
     def _poll_keys(self):
-        """The ``(machine, env)`` keys to background-poll: every ready machine on
-        the 'All' tab, else just the machine of the current tab (#1421)."""
+        """Source keys to background-poll: all ready sources or the current tab."""
         if self.is_all():
-            return self.ready_envs()
+            return self.ready_envs() | self.ready_source_ids()
+        source_id = self._current_tab().get("source_id")
+        if source_id:
+            return {source_id}
         m, e = self.cur_machine()[:2]
         return {(m, e)}
 
@@ -1571,8 +1581,11 @@ class PickerScreen(Widget):
         if now - self._last_pivot_poll < POLL_SECS:
             return
         self._last_pivot_poll = now
+        scope = self._pivot_scope_key()
+        if scope is None:
+            return
         try:
-            self._pivot_runtime(reg).repoll(self._pivot_scope_key())
+            self._pivot_runtime(reg).repoll(scope)
         except Exception:
             pass
 
@@ -1671,8 +1684,52 @@ class PickerScreen(Widget):
                 _rt.invalidate()
             except Exception:
                 pass
-        # Machine tabs gain a leading "All" entry that interleaves every machine.
-        self.machines = [("All", None, None, True)] + self.src.machines()
+        snapshot_fn = getattr(self.src, "source_snapshot", None)
+        source_snapshot = snapshot_fn() if callable(snapshot_fn) else None
+        # Source tabs gain a leading "All" entry that interleaves every source.
+        source_tabs = getattr(self.src, "source_tabs", None)
+        if callable(source_tabs):
+            tabs = list(
+                source_tabs(source_snapshot)
+                if source_snapshot is not None
+                else source_tabs()
+            )
+        else:
+            machine_tabs = (
+                self.src.machines(source_snapshot)
+                if source_snapshot is not None
+                else self.src.machines()
+            )
+            tabs = [
+                {
+                    "label": label,
+                    "machine": machine,
+                    "env": env,
+                    "ready": ready,
+                    "source_kind": "machine-ssh",
+                    "source_id": None,
+                    "capabilities": {},
+                }
+                for label, machine, env, ready in machine_tabs
+            ]
+        self.source_tabs = [{
+            "label": "All",
+            "machine": None,
+            "env": None,
+            "ready": True,
+            "source_kind": "all",
+            "source_id": None,
+            "capabilities": {},
+        }, *tabs]
+        self.machines = [
+            (
+                tab["label"],
+                tab.get("machine"),
+                tab.get("env"),
+                bool(tab.get("ready")),
+            )
+            for tab in self.source_tabs
+        ]
         self.machine_idx = self.local_index()
         self.maint_sel = ListSelection()  # drop any stale Maintenance selection
         # Worktrees selection persists across reload (#2258 P3-7): it is NOT
@@ -1688,7 +1745,11 @@ class PickerScreen(Widget):
             # seed self.data empty and let the render tick fill it as each
             # machine resolves.
             self.data = []
-            self.loader = self.src.make_loader()
+            self.loader = (
+                self.src.make_loader(source_snapshot)
+                if source_snapshot is not None
+                else self.src.make_loader()
+            )
             self.loader.start()
             self.data = self.loader.records()
         else:
@@ -1816,9 +1877,14 @@ class PickerScreen(Widget):
             # worktrees in scope to act on; Toggle-hidden only when there's
             # something to reveal (or it's already revealing) so it never
             # clutters (#1422).
-            bset = ["N"]
-            if self._scope_data():
-                bset += ["K", "SY"]
+            bset = []
+            if self._tab_supports("create"):
+                bset.append("N")
+            scoped = self._scope_data()
+            if any(self._record_supports(rec, "cleanup") for rec in scoped):
+                bset.append("K")
+            if any(self._record_supports(rec, "sync") for rec in scoped):
+                bset.append("SY")
             if self.show_hidden or self._hidden_count() > 0:
                 bset.append("TH")
             return bset
@@ -1846,7 +1912,9 @@ class PickerScreen(Widget):
         if not ok:
             return "disabled"
         if self.live:
-            # Real per-machine load status: loading | ready | failed.
+            source_id = self.source_tabs[i].get("source_id")
+            if source_id and hasattr(self.loader, "state_for_source"):
+                return self.loader.state_for_source(source_id)
             return self.loader.state(m, e)
         if (m, e) == self.src.LOCAL:
             return "ready"
@@ -1855,9 +1923,21 @@ class PickerScreen(Widget):
     def ready_envs(self):
         out = set()
         for i, (label, m, e, ok) in enumerate(self.machines):
-            if label != "All" and self.machine_state(i) == "ready":
+            tab = self.source_tabs[i] if self.source_tabs else {}
+            if (
+                label != "All"
+                and tab.get("source_kind") in (None, "machine-ssh")
+                and self.machine_state(i) == "ready"
+            ):
                 out.add((m, e))
         return out
+
+    def ready_source_ids(self):
+        return {
+            tab.get("source_id")
+            for i, tab in enumerate(self.source_tabs)
+            if i and tab.get("source_id") and self.machine_state(i) == "ready"
+        }
 
     def spin(self):
         return SPINNER[self.frame % len(SPINNER)]
@@ -1870,7 +1950,7 @@ class PickerScreen(Widget):
 
     # ---- model helpers ----
     def is_all(self):
-        return self.machines[self.machine_idx][1] is None
+        return self.machine_idx == 0
 
     # ---- registered-pivot task data (read-only, background-loaded) ----
     def _task_state(self):
@@ -1881,6 +1961,12 @@ class PickerScreen(Widget):
         if reg is None:
             return ("idle", [], "")
         machine = self._pivot_scope_key()
+        if machine is None:
+            return (
+                "error",
+                [],
+                "machine-scoped pivots are unavailable for provider sources",
+            )
         rt = self._pivot_runtime(reg)
         rt.ensure(machine)
         return rt.get(machine)
@@ -1904,7 +1990,8 @@ class PickerScreen(Widget):
         getter = getattr(rt, "get_summary", None)
         if getter is None:
             return {}
-        return getter(self._pivot_scope_key())
+        scope = self._pivot_scope_key()
+        return {} if scope is None else getter(scope)
 
     def _worktree_title_map(self):
         """``{short-id: title}`` from the Picker's loaded worktree records -- the
@@ -1977,11 +2064,43 @@ class PickerScreen(Widget):
         label, m, e, ok = self.machines[self.machine_idx]
         return m, e, ok
 
-    def _scope_data(self):
-        """Worktrees in the active machine-tab scope (All = every ready env)."""
+    def _current_tab(self):
+        return self.source_tabs[self.machine_idx]
+
+    @staticmethod
+    def _record_supports(rec, capability):
+        if rec.get("source_kind", "machine-ssh") == "machine-ssh":
+            return True
+        return bool((rec.get("source_capabilities") or {}).get(capability))
+
+    @staticmethod
+    def _row_key(rec):
+        return rec.get("selection_id") or rec.get("id4")
+
+    def _tab_supports(self, capability):
         if self.is_all():
-            ready = self.ready_envs()
-            return [w for w in self.data if (w["machine"], w["env"]) in ready]
+            return capability == "create"
+        tab = self._current_tab()
+        if tab.get("source_kind", "machine-ssh") == "machine-ssh":
+            return True
+        return bool((tab.get("capabilities") or {}).get(capability))
+
+    def _scope_data(self):
+        """Worktrees in the active source-tab scope."""
+        if self.is_all():
+            ready_sources = self.ready_source_ids()
+            ready_envs = self.ready_envs()
+            return [
+                w for w in self.data
+                if (
+                    w.get("source_id") in ready_sources
+                    or (w.get("machine"), w.get("env")) in ready_envs
+                )
+            ]
+        tab = self._current_tab()
+        source_id = tab.get("source_id")
+        if source_id:
+            return [w for w in self.data if w.get("source_id") == source_id]
         m, e, _ = self.cur_machine()
         return [w for w in self.data if w["machine"] == m and w["env"] == e]
 
@@ -2052,7 +2171,9 @@ class PickerScreen(Widget):
         update is staged), ("V",0)=View pivot row, ("M",0)=machine picker,
         ("BTN",0)=button row, then the table/grid rows."""
         if self._kind() == "worktrees":
-            out = [*self._v_stops(), ("M", 0), ("BTN", 0)]
+            out = [*self._v_stops(), ("M", 0)]
+            if self.button_set():
+                out.append(("BTN", 0))
             for i in range(len(self.list_records())):
                 out.append(("L", i))
         elif self._kind() == "maintenance":
@@ -2100,7 +2221,9 @@ class PickerScreen(Widget):
         horizontal ◀▶ nav, so Tab lands on the pivots and ◀▶ reaches Config."""
         v = [("V", 0)]
         if self._kind() == "worktrees":
-            heads = [*v, ("M", 0), ("BTN", 0)]
+            heads = [*v, ("M", 0)]
+            if self.button_set():
+                heads.append(("BTN", 0))
             if self.list_records():
                 heads.append(self._l_head())
         elif self._kind() == "maintenance":
@@ -2189,9 +2312,15 @@ class PickerScreen(Widget):
         ids = self.maint_sel.ids
         chosen = [r for r in self.maint_records() if r["id4"] in ids]
         acts = []
-        if any(r.get("ff_eligible") for r in chosen):
+        if any(
+            r.get("ff_eligible") and self._record_supports(r, "sync")
+            for r in chosen
+        ):
             acts.append("Sync")
-        if any(self._cleanable(r) for r in chosen):
+        if any(
+            self._cleanable(r) and self._record_supports(r, "cleanup")
+            for r in chosen
+        ):
             acts.append("Cleanup")
         if not acts:
             # Nothing actionable for this selection (no FF-eligible or cleanable
@@ -2216,24 +2345,40 @@ class PickerScreen(Widget):
     def _run_maint_action(self, act, ids):
         """Run one Maintenance action against the ``ids`` set. Mirrors the former
         ``_key_maint_menu`` Enter branch exactly (#88 F4)."""
+        capability = {
+            "Sync": "sync",
+            "Cleanup": "cleanup",
+            "Finalize": "finalize",
+            "Stop": "stop",
+            "Reclaim": "reclaim",
+        }.get(act)
+        if capability:
+            ids = {
+                self._row_key(rec)
+                for rec in self.list_records()
+                if (
+                    (self._row_key(rec) in ids or rec["id4"] in ids)
+                    and self._record_supports(rec, capability)
+                )
+            }
         if act == "Sync":
             self._open_sync(ids=ids)
         elif act == "Cleanup":
             self._open_cleanup(ids=ids)
         elif act == "Finalize":
             self._start_finalize(
-                [r for r in self.list_records() if r["id4"] in ids])
+                [r for r in self.list_records() if self._row_key(r) in ids])
         elif act == "Stop":
             self._start_stop(
-                [r for r in self.list_records() if r["id4"] in ids])
+                [r for r in self.list_records() if self._row_key(r) in ids])
         elif act == "Reclaim":
             self._start_reclaim(
-                [r for r in self.list_records() if r["id4"] in ids])
+                [r for r in self.list_records() if self._row_key(r) in ids])
 
     # ---- Worktrees list multi-select (#2228 Phase 2b, #2258 Phase 3) ----
     def _l_ids(self):
-        """The id4 of every Worktrees row, in display order."""
-        return [r["id4"] for r in self.list_records()]
+        """The collision-safe selection key of each Worktrees row."""
+        return [self._row_key(r) for r in self.list_records()]
 
     def _wt_focused_id(self):
         """The id4 of the currently focused Worktrees row, or None when focus is
@@ -2281,7 +2426,7 @@ class PickerScreen(Widget):
             return
         if not recs:
             return
-        present = {r["id4"] for r in recs}
+        present = {self._row_key(r) for r in recs}
         if self.wt_sel:
             self.wt_sel.replace(self.wt_sel.ids & present)
         self.wt_anchor = None
@@ -2409,11 +2554,14 @@ class PickerScreen(Widget):
         there so a following Shift+arrow extends from this row."""
         recs = self.list_records()
         if 0 <= i < len(recs):
-            wid = recs[i]["id4"]
-            now_on = self.wt_sel.toggle(wid)
+            rec = recs[i]
+            key = self._row_key(rec)
+            now_on = self.wt_sel.toggle(key)
             self.wt_anchor = i
-            self.debug = (f"{'selected' if now_on else 'deselected'} {wid}"
-                          f" · {len(self.wt_sel)} selected")
+            self.debug = (
+                f"{'selected' if now_on else 'deselected'} {rec['id4']}"
+                f" · {len(self.wt_sel)} selected"
+            )
 
     def _open_wt_action_menu(self):
         """Enter on the Worktrees list with a multi-selection opens the bulk
@@ -2423,18 +2571,36 @@ class PickerScreen(Widget):
         with no selection keeps opening its per-row sub-menu (which carries
         Open/Resume) -- see ``_activate``."""
         ids = self.wt_sel.ids
-        chosen = [r for r in self.list_records() if r["id4"] in ids]
+        chosen = [
+            r for r in self.list_records()
+            if self._row_key(r) in ids or r["id4"] in ids
+        ]
         acts = []
-        if any(r.get("ff_eligible") for r in chosen):
+        if any(
+            r.get("ff_eligible") and self._record_supports(r, "sync")
+            for r in chosen
+        ):
             acts.append("Sync")
-        if any(self._cleanable(r) for r in chosen):
+        if any(
+            self._cleanable(r) and self._record_supports(r, "cleanup")
+            for r in chosen
+        ):
             acts.append("Cleanup")
-        if any(r.get("cleanup_bucket") in ("conversation", "unused")
-               for r in chosen):
+        if any(
+            r.get("cleanup_bucket") in ("conversation", "unused")
+            and self._record_supports(r, "finalize")
+            for r in chosen
+        ):
             acts.append("Finalize")
-        if any(r.get("mux_live") for r in chosen):
+        if any(
+            r.get("mux_live") and self._record_supports(r, "stop")
+            for r in chosen
+        ):
             acts.append("Stop")
-        if any(PickerScreen._reclaimable(r) for r in chosen):
+        if any(
+            PickerScreen._reclaimable(r) and self._record_supports(r, "reclaim")
+            for r in chosen
+        ):
             # Bulk parity with the per-row menu: reap the un-muxed bound Copilots
             # across the selection -- the ones Stop cannot reach (#4058).
             acts.append("Reclaim")
@@ -2863,6 +3029,27 @@ class PickerScreen(Widget):
             t.append("All", style=self._hl(base, sel, focused))
             t.append(" ")
             return t
+        tab0 = self.source_tabs[group[0]] if self.source_tabs else {}
+        if tab0.get("source_kind") not in (None, "machine-ssh"):
+            i = group[0]
+            state = self.machine_state(i)
+            sel = i == self.machine_idx
+            label_base = C_DISABLED if state == "disabled" else (
+                "bold white" if sel else C_TABOFF
+            )
+            t.append(label0, style=self._hl(label_base, sel, focused))
+            t.append(" ")
+            if state == "disabled":
+                marker, marker_style = "-", C_DISABLED
+            elif state == "loading":
+                marker, marker_style = self.spin(), C_LOAD
+            elif state == "failed":
+                marker, marker_style = "✗", C_WARN
+            else:
+                marker, marker_style = "✓", C_READY
+            t.append(marker, style=self._hl(marker_style, sel, focused))
+            t.append(" ")
+            return t
         group_sel = any(i == self.machine_idx for i in group)
         all_disabled = all(self.machine_state(i) == "disabled" for i in group)
         name_base = (C_DISABLED if all_disabled
@@ -2897,11 +3084,17 @@ class PickerScreen(Widget):
         groups = []
         prev = None
         for i, (label, m, e, ok) in enumerate(self.machines):
-            if label != "All" and m == prev:
+            tab = self.source_tabs[i] if self.source_tabs else {}
+            group_key = (
+                m
+                if tab.get("source_kind") in (None, "machine-ssh")
+                else tab.get("source_id")
+            )
+            if label != "All" and group_key == prev:
                 groups[-1].append(i)
             else:
                 groups.append([i])
-            prev = m if label != "All" else None
+            prev = group_key if label != "All" else None
         blocks = [self._machine_group(g, focused) for g in groups]
         blen = [b.cell_len for b in blocks]
         ng = len(groups)
@@ -3758,7 +3951,7 @@ class PickerScreen(Widget):
         verb = dlg.get("verb", "Clean up")
         op = "sync" if verb.lower().startswith("sync") else "cleanup"
         ids = self._scope_union(dlg)
-        recs = [w for w in self.data if w["id4"] in ids]
+        recs = [w for w in self.data if self._row_key(w) in ids]
         if not recs:
             self.debug = (f"{verb.lower()} {dlg['scope']}: "
                           f"{', '.join(picked) or 'nothing'} → 0 worktrees")
@@ -3772,7 +3965,7 @@ class PickerScreen(Widget):
             p in ("Conversation-only", "All eligible") for p in picked)
         beyond_clean = op == "cleanup" and (
             include_unused or include_conversations)
-        items = [{"id4": w["id4"], "title": w["title"],
+        items = [{"key": self._row_key(w), "id4": w["id4"], "title": w["title"],
                   "machine_env": w["machine_env"], "state": "pending"}
                  for w in recs]
         self.progress = {
@@ -3887,22 +4080,27 @@ class PickerScreen(Widget):
             return
         id4 = rec.get("id4")
         m, e = rec.get("machine"), rec.get("env")
+        source_id = rec.get("source_id")
         self.debug = f"refreshing {id4}…"
 
         def work():
             row = None
-            try:
-                from . import data_local
-                row = data_local.refresh_one(wt_id, m, e)
-            except Exception:
-                row = None
+            if rec.get("source_kind", "machine-ssh") == "machine-ssh":
+                try:
+                    from . import data_local
+                    row = data_local.refresh_one(wt_id, m, e)
+                except Exception:
+                    row = None
             if row is not None:
                 self._replace_row(wt_id, row)
                 self.debug = f"refreshed {id4}"
                 return
             # Remote (or gone locally): fall back to a machine-level reload.
             try:
-                if self.live and self.loader is not None and m and e:
+                if self.live and self.loader is not None and source_id:
+                    self.loader.reload_source(source_id)
+                    self.debug = f"refreshing {rec.get('source_label') or id4}…"
+                elif self.live and self.loader is not None and m and e:
                     self.loader.reload(m, e)
                     self.debug = f"refreshing {m} · {e}…"
                 elif not self.live:
@@ -3978,7 +4176,7 @@ class PickerScreen(Widget):
         p = self.progress
         ex = self.executor
         for it in p["items"]:
-            it["state"] = ex.state(it["id4"])
+            it["state"] = ex.state(it.get("key", it["id4"]))
         if ex.is_done():
             p["done"] = True
 
@@ -4055,7 +4253,12 @@ class PickerScreen(Widget):
         if zone == "V":
             self.sel = ("PR", 0) if self._kind() == "profiles" else ("M", 0)
         elif zone == "M":
-            self.sel = ("BTN", 0)
+            buttons = self.button_set()
+            records = self.list_records()
+            if buttons:
+                self.sel = ("BTN", 0)
+            elif records:
+                self.sel = ("L", 0)
         elif zone == "PR":
             self.btn_idx = 0            # progress to the Apply button
             self.sel = ("BTN", 0)
@@ -4228,6 +4431,14 @@ class PickerScreen(Widget):
         write-back (the only way to populate an **Unknown** row and re-derive a
         stale one), which also runs the head-session recovery repair.
         """
+        if rec.get("source_kind", "machine-ssh") != "machine-ssh":
+            capabilities = rec.get("source_capabilities") or {}
+            acts = []
+            if capabilities.get("messages"):
+                acts.append("Messages")
+            if capabilities.get("refresh"):
+                acts.append("Refresh")
+            return acts
         gone = rec.get("cleanup_bucket") == "gone"
         warning = PickerScreen._warning(rec)
         reclaimable = PickerScreen._reclaimable(rec)
@@ -4287,7 +4498,7 @@ class PickerScreen(Widget):
         if len(self.wt_sel) == 1:
             wid = next(iter(self.wt_sel.ids))
             for r in self.list_records():
-                if r.get("id4") == wid:
+                if self._row_key(r) == wid or r.get("id4") == wid:
                     return r
         return self._selected_record()
 
@@ -4307,7 +4518,11 @@ class PickerScreen(Widget):
         # with its hand-set liveness, no spinner, no refine.
         _wt_id = (rec.get("raw") or {}).get("id")
         _need_verify = False
-        if self.real_ops and _wt_id:
+        if (
+            self.real_ops
+            and _wt_id
+            and rec.get("source_kind", "machine-ssh") == "machine-ssh"
+        ):
             try:
                 from .. import config as _config
                 _need_verify = (_config.tracking_dir() / f"{_wt_id}.yaml").exists()
@@ -4356,6 +4571,8 @@ class PickerScreen(Widget):
         # ``_session_action_verbs`` (unit-tested #4058); the bridge/system nav +
         # cross-plugin verbs below need engine state, so they are appended here.
         acts = self._session_action_verbs(rec)
+        if rec.get("source_kind", "machine-ssh") != "machine-ssh":
+            return acts, {}
         # #1424/#2178: a bridge/system worktree is host-owned. Prefer jumping to
         # the *caller* worktree that requested it (the "caller-id"), when that
         # worktree is loaded; otherwise fall back to jumping to its own host tab.
@@ -4366,7 +4583,10 @@ class PickerScreen(Widget):
                     (w.get("raw") or {}).get("id") == caller for w in self.data):
                 acts.append("Jump to caller")
             elif self._machine_index_for(
-                    rec.get("machine"), rec.get("env")) is not None:
+                    rec.get("machine"),
+                    rec.get("env"),
+                    rec.get("source_id"),
+            ) is not None:
                 acts.append("Jump to host")
         # Cross-plugin worktree actions (#B): any installed layer can add a verb
         # to this menu. Only actions whose `when` matches the worktree appear,
@@ -4446,9 +4666,9 @@ class PickerScreen(Widget):
                 (rec.get("raw") or {}).get("caller_worktree"))
         elif cur == "Sync":
             # Real per-worktree FF-sync via the shared dialog (#1427).
-            self._open_sync(ids={rec.get("id4")})
+            self._open_sync(ids={self._row_key(rec)})
         elif cur == "Cleanup":
-            self._open_cleanup(ids={rec.get("id4")})
+            self._open_cleanup(ids={self._row_key(rec)})
         elif cur == "Finalize":
             # Wrap up a conversation-only / unused worktree (#2258 follow-up).
             self._start_finalize([rec])
@@ -4563,7 +4783,19 @@ class PickerScreen(Widget):
                     return []
                 return _sessions.list_worktree_sessions(record)
             from . import data_ssh, maintenance
-            argv = data_ssh.list_sessions_argv(m, e, wt_id)
+            argv = data_ssh.list_sessions_argv(
+                m,
+                e,
+                wt_id,
+                source_id=rec.get("source_id"),
+                expected_instance_id=(rec.get("source") or {}).get("instance_id"),
+                expected_assignment=(rec.get("source") or {}).get("venue", {}).get(
+                    "assignment"
+                ),
+                expected_transport_fingerprint=(rec.get("source") or {}).get(
+                    "transport_fingerprint"
+                ),
+            )
             if argv is None:
                 return []
             payload = maintenance._ssh_json(argv)
@@ -4594,7 +4826,20 @@ class PickerScreen(Widget):
                         record, limit=limit)
             else:
                 from . import data_ssh, maintenance
-                argv = data_ssh.recent_messages_argv(m, e, wt_id, limit=limit)
+                argv = data_ssh.recent_messages_argv(
+                    m,
+                    e,
+                    wt_id,
+                    source_id=rec.get("source_id"),
+                    expected_instance_id=(rec.get("source") or {}).get("instance_id"),
+                    expected_assignment=(rec.get("source") or {}).get(
+                        "venue", {}
+                    ).get("assignment"),
+                    expected_transport_fingerprint=(rec.get("source") or {}).get(
+                        "transport_fingerprint"
+                    ),
+                    limit=limit,
+                )
                 if argv is None:
                     payload = {"error": f"no remote route to {m} {e}"}
                 else:
@@ -4632,14 +4877,35 @@ class PickerScreen(Widget):
         elif key == "up":
             mv["scroll"] = max(0, mv.get("scroll", 0) - 1)
 
-    def _machine_index_for(self, machine, env):
+    def _machine_index_for(self, machine, env, source_id=None):
         """Index of the (machine, env) tab in ``self.machines``, or None."""
         for i, (label, m, e, _ok) in enumerate(self.machines):
-            if label != "All" and m == machine and e == env:
+            tab_source_id = (
+                self.source_tabs[i].get("source_id") if self.source_tabs else None
+            )
+            if label != "All" and (
+                (source_id and tab_source_id and tab_source_id == source_id)
+                or ((not source_id or not tab_source_id) and m == machine and e == env)
+            ):
                 return i
         return None
 
-    def _jump_to_worktree(self, wid):
+    def _find_internal_worktree(self, wid, source_id=None):
+        if not wid:
+            return None, "no worktree id"
+        matches = [
+            row
+            for row in self.data
+            if (row.get("raw") or {}).get("id") == wid
+            and (source_id is None or row.get("source_id") == source_id)
+        ]
+        if not matches:
+            return None, "worktree not found on any loaded source"
+        if len(matches) != 1:
+            return None, "worktree id is ambiguous across loaded sources"
+        return matches[0], None
+
+    def _jump_to_worktree(self, wid, source_id=None):
         """#1424/#1425: navigate to the Worktrees view, the host machine tab of
         the worktree with id ``wid``, and highlight that row.
 
@@ -4649,16 +4915,15 @@ class PickerScreen(Widget):
         registered pivot. Internal navigation only -- never exits the picker.
         Returns ``(ok, message)``.
         """
-        if not wid:
-            return False, "no worktree id"
-        row = next(
-            (w for w in self.data if (w.get("raw") or {}).get("id") == wid),
-            None,
-        )
+        row, error = self._find_internal_worktree(wid, source_id)
         if row is None:
-            return False, "worktree not found on any loaded machine"
+            return False, error
         machine, env = row.get("machine"), row.get("env")
-        idx = self._machine_index_for(machine, env)
+        idx = self._machine_index_for(
+            machine,
+            env,
+            source_id=row.get("source_id"),
+        )
         if idx is None:
             self.debug = f"jump: host {machine} {env} not available"
             return False, f"host {machine} {env} not available"
@@ -4699,12 +4964,18 @@ class PickerScreen(Widget):
         ``open-cli`` opens that worktree into a CLI session (exits the picker with
         a resume decision -- the shared launch-plumbing, #2253)."""
         if verb == "jump-host":
-            return self._jump_to_worktree(ctx.get("worktree") or ctx.get("id"))
+            return self._jump_to_worktree(
+                ctx.get("worktree") or ctx.get("id"),
+                ctx.get("source_id"),
+            )
         if verb == "open-cli":
-            return self._open_worktree_cli(ctx.get("worktree") or ctx.get("id"))
+            return self._open_worktree_cli(
+                ctx.get("worktree") or ctx.get("id"),
+                ctx.get("source_id"),
+            )
         return False, f"unknown internal action: {verb}"
 
-    def _open_worktree_cli(self, wid):
+    def _open_worktree_cli(self, wid, source_id=None):
         """#2253: open the worktree ``wid`` into a CLI session, the same way
         selecting its Worktrees row + Open does.
 
@@ -4716,14 +4987,11 @@ class PickerScreen(Widget):
         routes through the normal SSH handoff. Returns ``(ok, message)``; on
         success the caller's post-action re-anchor is a harmless no-op since the
         app is already exiting."""
-        if not wid:
-            return False, "no worktree id"
-        row = next(
-            (w for w in self.data if (w.get("raw") or {}).get("id") == wid),
-            None,
-        )
+        row, error = self._find_internal_worktree(wid, source_id)
         if row is None:
-            return False, "worktree not found on any loaded machine"
+            return False, error
+        if row.get("source_kind") != "machine-ssh":
+            return False, "provider-backed worktrees are read-only"
         decision = self._resume_decision(row)
         self._decide(decision)
         return True, f"opening …{str(wid)[-4:]} into a CLI session"
@@ -5118,15 +5386,14 @@ class PickerScreen(Widget):
         self._run_bg(action.label, _work, _done)
 
     def _scope_label(self):
-        return "All machines" if self.is_all() else \
-            "{} {}".format(*self.cur_machine()[:2])
+        return "All sources" if self.is_all() else self._current_tab()["label"]
 
     def _impact_rows(self, ids):
         """Display rows ``(id4, machine_env, title)`` for the worktrees in
         ``ids`` -- the read-only impact list the Clean/Sync modal shows so the
         operator sees exactly what Confirm will act on."""
         return [(w["id4"], w.get("machine_env", ""), w.get("title", ""))
-                for w in self.data if w["id4"] in ids]
+                for w in self.data if self._row_key(w) in ids]
 
     def _open_cleanup(self, ids=None):
         # With no explicit selection (the bulk "Clean" button), default the
@@ -5141,12 +5408,23 @@ class PickerScreen(Widget):
         bulk = ids is None
         scope = self._scope_label() if bulk else f"{len(ids)} selected"
         rows = self.cleanup_rows()
+        rows = [w for w in rows if self._record_supports(w, "cleanup")]
         if not bulk:
-            rows = [w for w in rows if w["id4"] in ids]
-        clean = {w["id4"] for w in rows if w["cleanup_bucket"] == "clean"}
-        unused = {w["id4"] for w in rows if w["cleanup_bucket"] == "unused"}
-        convo = {w["id4"] for w in rows if w["cleanup_bucket"] == "conversation"}
-        gone = {w["id4"] for w in rows if w["cleanup_bucket"] == "gone"}
+            rows = [w for w in rows if self._row_key(w) in ids]
+        clean = {
+            self._row_key(w) for w in rows if w["cleanup_bucket"] == "clean"
+        }
+        unused = {
+            self._row_key(w) for w in rows if w["cleanup_bucket"] == "unused"
+        }
+        convo = {
+            self._row_key(w)
+            for w in rows
+            if w["cleanup_bucket"] == "conversation"
+        }
+        gone = {
+            self._row_key(w) for w in rows if w["cleanup_bucket"] == "gone"
+        }
         all_eligible = clean | unused | convo | gone
         dlg = {
             "verb": "Clean up", "prompt": "Select what to prune:",
@@ -5172,13 +5450,11 @@ class PickerScreen(Widget):
     def _open_sync(self, ids=None):
         scope = self._scope_label() if ids is None else f"{len(ids)} selected"
         if ids is not None:
-            rows = [w for w in self.data if w["id4"] in ids]
-        elif self.is_all():
-            rows = list(self.data)
+            rows = [w for w in self.data if self._row_key(w) in ids]
         else:
-            m, e, _ = self.cur_machine()
-            rows = [w for w in self.data if w["machine"] == m and w["env"] == e]
-        eligible = {w["id4"] for w in rows if w.get("ff_eligible")}
+            rows = self._scope_data()
+        rows = [w for w in rows if self._record_supports(w, "sync")]
+        eligible = {self._row_key(w) for w in rows if w.get("ff_eligible")}
         skipped = len(rows) - len(eligible)
         dlg = {
             "verb": "Sync", "prompt": "Fast-forward worktrees onto the default "
@@ -5253,7 +5529,7 @@ def _size_mb(w):
 
 CLEAN_SPECS = [
     ("id4", "id", 4, "l", 2), ("state", "state", 6, "l", 6),
-    ("machine_env", "machine env", 19, "l", 7),
+    ("machine_env", "source", 19, "l", 7),
     ("dispo", "disposition", 18, "l", 3), ("pr", "pr", 8, "l", 5),
     ("age", "age", 4, "l", 9), ("mib", "size", 6, "r", 9),
     ("title", "title", 10, "l", 1),
@@ -7524,10 +7800,11 @@ class WorktreesView:
         eng = self._eng
         btn_focus = sel == ("BTN", 0)
         add(eng.tab_bar(width, sel == ("M", 0)))
-        add(Text(""))  # breathing room above the buttons
-        add(eng.new_worktree_row(width, btn_focus, eng.btn_idx),
-            stop=("BTN", 0))
-        add(Text(""))  # breathing room below the buttons
+        if eng.button_set():
+            add(Text(""))  # breathing room above the buttons
+            add(eng.new_worktree_row(width, btn_focus, eng.btn_idx),
+                stop=("BTN", 0))
+            add(Text(""))  # breathing room below the buttons
 
     def build_data(self, add, width, sel):
         eng = self._eng
@@ -7592,7 +7869,10 @@ class WorktreesView:
         native list passes a sentinel (focus is the amber cursor, not baked in)."""
         eng = self._eng
         focused = sel == ("L", li)
-        is_sel = rec["id4"] in eng.wt_sel
+        is_sel = (
+            eng._row_key(rec) in eng.wt_sel
+            or rec["id4"] in eng.wt_sel
+        )
         # Always show the per-row checkbox glyph (#88 NF5-5): with mouse support
         # the box is a discoverable, clickable multi-select affordance, so it
         # renders at rest rather than only when a set is already held.
@@ -7650,7 +7930,9 @@ class TasksView:
         the empty/error hint."""
         eng = self._eng
         account = bool(getattr(reg, "account_scoped", False))
-        machine = eng._pivot_machine() or "this machine"
+        machine = eng._pivot_machine()
+        if machine is None:
+            machine = eng._scope_label()
         # An account-scoped pivot (CodeSpaces) is a cross-machine shared resource:
         # its status counts items, not "on <machine>".
         where = "" if account else f" for {machine}"

@@ -12,6 +12,7 @@ Subcommands:
   exec <name>           Run the ACP launch command through the venue transport
   ssh-stdio <name>      Serve restricted SSH protocol over provider stdio
   ssh-profile <name>    Emit a named restricted provider SSH profile
+  source-remove <name>  Remove a project-scoped Picker source
   version               Show version
 """
 
@@ -145,6 +146,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Serve an SSH-compatible restricted provider target over stdio",
     )
     ssh_stdio_p.add_argument("name", help="Restricted container name")
+    ssh_stdio_p.add_argument("--expected-target-id")
+    ssh_stdio_p.add_argument("--expected-instance-id")
+    ssh_stdio_p.add_argument(
+        "--expected-assignment",
+        type=json.loads,
+        help="Canonical expected lease-assignment JSON",
+    )
     ssh_profile_p = sub.add_parser(
         "ssh-profile",
         help="Emit a named agent-ssh profile for a restricted target",
@@ -153,6 +161,14 @@ def main(argv: list[str] | None = None) -> int:
     ssh_profile_p.add_argument(
         "--alias",
         help="SSH Host alias (defaults to the provider target name)",
+    )
+    ssh_profile_p.add_argument(
+        "--project",
+        help="Also register this target as a Worktree Picker source for PROJECT",
+    )
+    ssh_profile_p.add_argument(
+        "--label",
+        help="Picker source label (requires --project; defaults to the SSH alias)",
     )
     profile_output = ssh_profile_p.add_mutually_exclusive_group()
     profile_output.add_argument(
@@ -165,6 +181,12 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Render the OpenSSH fragment through agent-ssh without writing it",
     )
+    source_remove_p = sub.add_parser(
+        "source-remove",
+        help="Remove a project-scoped Worktree Picker source registration",
+    )
+    source_remove_p.add_argument("name", help="Restricted container name")
+    source_remove_p.add_argument("--project", required=True)
 
     host_prepare = sub.add_parser(
         "session-host-prepare",
@@ -273,18 +295,41 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "ssh-stdio":
             from .provider_ssh import run_ssh_stdio
 
-            return run_ssh_stdio(args.name)
+            return run_ssh_stdio(
+                args.name,
+                expected_target_id=args.expected_target_id,
+                expected_instance_id=args.expected_instance_id,
+                expected_assignment=args.expected_assignment,
+            )
         if args.command == "ssh-profile":
             from .provider_ssh import emit_ssh_profile, ssh_profile_spec
 
+            if args.label and not args.project:
+                raise ValueError("--label requires --project")
             if args.json:
-                print(json.dumps(ssh_profile_spec(args.name, args.alias), indent=2))
+                print(json.dumps(
+                    ssh_profile_spec(
+                        args.name,
+                        args.alias,
+                        project=args.project,
+                        label=args.label,
+                    ),
+                    indent=2,
+                ))
                 return 0
             return emit_ssh_profile(
                 args.name,
                 args.alias,
                 print_only=args.print,
+                project=args.project,
+                label=args.label,
             )
+        if args.command == "source-remove":
+            from .provider_ssh import remove_worktree_source
+
+            removed = remove_worktree_source(args.name, args.project)
+            print("removed" if removed else "not registered")
+            return 0
         if args.command == "session-host-prepare":
             return _cmd_session_host_prepare(args)
         if args.command == "session-host-state":
@@ -766,9 +811,26 @@ def _cmd_borrow(args: argparse.Namespace) -> int:
 
 def _cmd_release(args: argparse.Namespace) -> int:
     from .lease import release
+    from .provider_ssh import remove_stale_worktree_sources
 
-    if release(args.target):
+    released = release(args.target)
+    try:
+        removed = remove_stale_worktree_sources(args.target)
+    except (OSError, RuntimeError) as exc:
+        if released:
+            print(f"Released: {args.target}")
+        print(
+            f"Picker source cleanup failed after release: {exc}",
+            file=sys.stderr,
+        )
+        return 1
+    if released:
         print(f"Released: {args.target}")
+        if removed:
+            print(f"Removed Picker source registrations: {removed}")
+        return 0
+    if removed:
+        print(f"Removed stale Picker source registrations: {removed}")
         return 0
     print(f"No lease found for '{args.target}'", file=sys.stderr)
     return 1

@@ -176,6 +176,203 @@ def _fixture_source():
     return src
 
 
+def test_provider_source_tab_scopes_by_canonical_source_id():
+    src = _fixture_source()
+    provider_id = "provider-exec:example:target-1"
+    provider_row = derive.norm(
+        {
+            "id": "provider-worktree-ffff",
+            "title": "Provider work",
+            "status": "active",
+            "state": "wip",
+            "session_count": 1,
+        },
+        "",
+        "",
+        source_kind="provider-exec",
+        source_id=provider_id,
+        source_label="Restricted target",
+        source_capabilities={
+            "messages": True,
+            "refresh": True,
+            "create": False,
+            "cleanup": False,
+            "sync": False,
+        },
+    )
+    original_load = src.load
+    machine_duplicate = derive.norm(
+        {
+            "id": "provider-worktree-ffff",
+            "title": "Machine work",
+            "status": "active",
+            "state": "wip",
+            "session_count": 1,
+        },
+        "anomalous-potato",
+        "Win",
+    )
+    src.load = lambda: [*original_load(), machine_duplicate, provider_row]
+    src.source_tabs = lambda: [
+        {
+            "label": "anomalous-potato Win",
+            "machine": "anomalous-potato",
+            "env": "Win",
+            "ready": True,
+            "source_kind": "machine-ssh",
+            "source_id": "machine-ssh:anomalous-potato:win",
+            "capabilities": {},
+        },
+        {
+            "label": "Restricted target",
+            "machine": "",
+            "env": "",
+            "ready": True,
+            "source_kind": "provider-exec",
+            "source_id": provider_id,
+            "capabilities": provider_row["source_capabilities"],
+        },
+    ]
+
+    screen = PickerScreen(src, live=False)
+    screen.setup()
+    screen.machine_idx = 2
+
+    assert screen._scope_data() == [provider_row]
+    assert screen.button_set() == []
+    assert ("BTN", 0) not in screen.stops()
+    assert ("BTN", 0) not in screen.region_heads()
+    assert screen._pivot_machine() is None
+    assert screen._session_action_verbs(provider_row) == ["Messages", "Refresh"]
+    screen.sel = ("M", 0)
+    screen._activate()
+    assert screen.sel == ("L", 0)
+    ok, message = screen._open_worktree_cli(
+        "provider-worktree-ffff",
+        provider_id,
+    )
+    assert ok is False
+    assert "read-only" in message
+    ok, message = screen._open_worktree_cli("provider-worktree-ffff")
+    assert ok is False
+    assert "ambiguous" in message
+
+
+def test_setup_uses_one_source_snapshot_for_tabs_and_loader():
+    src = _fixture_source()
+    snapshot = (object(),)
+    seen = []
+    snapshot_calls = 0
+
+    class _Loader:
+        def start(self):
+            seen.append(("start", None))
+
+        def records(self):
+            return []
+
+    def source_snapshot():
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        return snapshot
+
+    src.source_snapshot = source_snapshot
+    src.source_tabs = lambda sources: (
+        seen.append(("tabs", sources)) or [{
+            "label": "anomalous-potato Win",
+            "machine": "anomalous-potato",
+            "env": "Win",
+            "ready": True,
+            "source_kind": "machine-ssh",
+            "source_id": "machine-ssh:anomalous-potato:win",
+            "capabilities": {},
+        }]
+    )
+    src.make_loader = lambda sources: (
+        seen.append(("loader", sources)) or _Loader()
+    )
+
+    screen = PickerScreen(src, live=True)
+    screen.setup()
+
+    assert snapshot_calls == 1
+    assert ("tabs", snapshot) in seen
+    assert ("loader", snapshot) in seen
+
+
+def test_provider_selection_does_not_collide_with_machine_id4():
+    src = _fixture_source()
+    provider_id = "provider-exec:example:target-1"
+    provider_row = derive.norm(
+        {
+            "id": "provider-worktree-aaaa",
+            "title": "Provider work",
+            "status": "active",
+            "state": "wip",
+            "session_count": 1,
+        },
+        "",
+        "",
+        source_kind="provider-exec",
+        source_id=provider_id,
+        source_label="Restricted target",
+        source_capabilities={
+            "messages": True,
+            "refresh": True,
+            "create": False,
+            "cleanup": False,
+            "sync": False,
+        },
+    )
+    original_load = src.load
+    src.load = lambda: [*original_load(), provider_row]
+    src.source_tabs = lambda: [
+        {
+            "label": "anomalous-potato Win",
+            "machine": "anomalous-potato",
+            "env": "Win",
+            "ready": True,
+            "source_kind": "machine-ssh",
+            "source_id": "machine-ssh:anomalous-potato:win",
+            "capabilities": {},
+        },
+        {
+            "label": "Restricted target",
+            "machine": "",
+            "env": "",
+            "ready": True,
+            "source_kind": "provider-exec",
+            "source_id": provider_id,
+            "capabilities": provider_row["source_capabilities"],
+        },
+    ]
+
+    screen = PickerScreen(src, live=False)
+    screen.setup()
+    screen.ready_source_ids = lambda: {
+        "machine-ssh:anomalous-potato:win",
+        provider_id,
+    }
+    screen.ready_envs = lambda: {("anomalous-potato", "Win")}
+    screen.machine_idx = 0
+    rows = screen.list_records()
+    provider_index = rows.index(provider_row)
+    screen.sel = ("L", provider_index)
+    screen._wt_track_focus()
+
+    assert screen.wt_sel == {provider_row["selection_id"]}
+    assert screen._submenu_target() is provider_row
+    assert screen._session_action_verbs(screen._submenu_target()) == [
+        "Messages",
+        "Refresh",
+    ]
+
+    opened = []
+    screen._open_cleanup = lambda *, ids=None: opened.append(ids)
+    screen._run_maint_action("Cleanup", screen.wt_sel.ids)
+    assert opened == [set()]
+
+
 def test_maintenance_eliminated_from_nav():
     """#1427: Maintenance is a hidden anchor -- off the left rail and not under
     Configuration; the Worktrees pivot carries bulk Clean/Sync buttons instead."""

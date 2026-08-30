@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from agent_containers import provider_ssh
+from agent_containers import provider_launcher, provider_ssh
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.resolver import LiveExecTarget
 
@@ -72,6 +72,19 @@ def _venue(**overrides):
     }
     venue.update(overrides)
     return venue
+
+
+def _lease():
+    return SimpleNamespace(
+        container="sandbox-1",
+        effort="example-effort",
+        acquired_at=1_700_000_000.0,
+    )
+
+
+@contextmanager
+def _lease_guard(*leases):
+    yield leases
 
 
 def test_command_request_uses_fleet_user_and_no_projection():
@@ -246,6 +259,142 @@ def test_profile_spec_is_named_hardened_and_provider_owned(monkeypatch, tmp_path
     assert machine["options"]["UserKnownHostsFile"] in {"/dev/null", "NUL"}
 
 
+def test_profile_spec_can_describe_project_scoped_picker_source(monkeypatch, tmp_path):
+    module = tmp_path / "module.yaml"
+    runtime_root = tmp_path / "runtime"
+    state_root = tmp_path / "state"
+    module.write_text("module: provider-exec\n", encoding="utf-8")
+    monkeypatch.setattr(provider_ssh, "provider_module_path", lambda: module)
+    monkeypatch.setattr(provider_ssh, "RUNTIME_DIR", runtime_root)
+    monkeypatch.setattr(provider_ssh, "STATE_DIR", state_root)
+    monkeypatch.setattr(
+        provider_ssh,
+        "resolve_live_exec_target",
+        lambda name: _target(),
+    )
+
+    async def resolve_spec(_self, _name):
+        return {"venue": _venue()}
+
+    monkeypatch.setattr(provider_ssh.ContainerResolver, "resolve_spec", resolve_spec)
+    monkeypatch.setattr(provider_ssh, "get_lease", lambda _name: _lease())
+    monkeypatch.setattr(
+        provider_ssh.shutil,
+        "which",
+        lambda name: f"/bin/{name}",
+    )
+
+    result = provider_ssh.ssh_profile_spec(
+        "sandbox-1",
+        "restricted-worker",
+        project="example-project",
+        label="Restricted target",
+    )
+
+    source = result["worktree_source"]
+    assert source["project"] == "example-project"
+    assert source["target_id"] == "container:sandbox-1"
+    assert source["instance_id"] == "instance-123"
+    assert source["label"] == "Restricted target"
+    assert source["alias"] == "restricted-worker"
+    assert source["resolve"] == [
+        str(Path(getattr(sys, "_base_executable", sys.executable)).resolve()),
+        "-I",
+        str(runtime_root / "provider-launcher.py"),
+        "ssh-profile",
+        "sandbox-1",
+        "--alias",
+        "restricted-worker",
+        "--project",
+        "example-project",
+        "--label",
+        "Restricted target",
+        "--json",
+    ]
+    assert source["connect"] == [
+        str(Path(getattr(sys, "_base_executable", sys.executable)).resolve()),
+        "-I",
+        str(runtime_root / "provider-launcher.py"),
+        "ssh-stdio",
+        "sandbox-1",
+    ]
+    assert (runtime_root / "provider-launcher.py").read_bytes() == (
+        Path(provider_launcher.__file__).read_bytes()
+    )
+    assert source["venue"]["posture_verified"] is True
+    assert source["venue"]["assignment"] == {
+        "kind": "lease",
+        "effort": "example-effort",
+        "acquired_at": 1_700_000_000.0,
+    }
+    assert source["capabilities"]["messages"] is True
+    assert source["capabilities"]["resume"] is False
+
+
+def test_provider_launcher_executes_active_isolated_runtime(monkeypatch, tmp_path):
+    runtime = tmp_path / "runtime"
+    python = runtime / "versions" / "1.2.3" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"")
+    (runtime / "current-version").write_text("1.2.3\n", encoding="utf-8")
+    monkeypatch.setattr(
+        provider_launcher,
+        "__file__",
+        str(runtime / "provider-launcher.py"),
+    )
+    monkeypatch.setattr(
+        provider_launcher.sys,
+        "argv",
+        ["provider-launcher.py", "leases"],
+    )
+    calls = []
+
+    def execv(executable, argv):
+        calls.append((executable, argv))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(provider_launcher.os, "execv", execv)
+
+    with pytest.raises(SystemExit):
+        provider_launcher.main()
+
+    assert calls == [(
+        str(python),
+        [
+            str(python),
+            "-I",
+            str(runtime / "provider-launcher.py"),
+            "--agent-containers-active-runtime",
+            "leases",
+        ],
+    )]
+
+
+def test_profile_spec_refuses_unleased_picker_source(monkeypatch, tmp_path):
+    module = tmp_path / "module.yaml"
+    module.write_text("module: provider-exec\n", encoding="utf-8")
+    monkeypatch.setattr(provider_ssh, "provider_module_path", lambda: module)
+    monkeypatch.setattr(
+        provider_ssh,
+        "resolve_live_exec_target",
+        lambda _name: _target(),
+    )
+
+    async def resolve_spec(_self, _name):
+        return {"venue": _venue()}
+
+    monkeypatch.setattr(provider_ssh.ContainerResolver, "resolve_spec", resolve_spec)
+    monkeypatch.setattr(provider_ssh, "get_lease", lambda _name: None)
+
+    with pytest.raises(RuntimeError, match="active lease"):
+        provider_ssh.ssh_profile_spec(
+            "sandbox-1",
+            project="example-project",
+        )
+
+
 def test_emit_profile_persists_registry_and_delegates_to_agent_ssh(
     monkeypatch,
     tmp_path,
@@ -309,6 +458,244 @@ def test_emit_profile_persists_registry_and_delegates_to_agent_ssh(
         str(registry_path),
         "--module",
         spec["module"],
+    ]
+
+
+def test_emit_profile_publishes_picker_source_after_ssh_profile(
+    monkeypatch,
+    tmp_path,
+):
+    registry_path = tmp_path / "profiles" / "provider-exec.json"
+    source_path = tmp_path / "sources" / "agent-containers.json"
+    spec = {
+        "module": str(tmp_path / "module.yaml"),
+        "registry": {
+            "transport": "provider-exec",
+            "proxy_command_binary": "/bin/agent-containers",
+            "machines": [{"name": "restricted-worker"}],
+        },
+        "worktree_source": {
+            "kind": "provider-exec",
+            "project": "example-project",
+            "target_id": "container:sandbox-1",
+            "instance_id": "container-id",
+            "label": "Restricted target",
+            "alias": "restricted-worker",
+            "shell": "bash",
+            "resolve": [
+                "/bin/agent-containers",
+                "ssh-profile",
+                "sandbox-1",
+                "--alias",
+                "restricted-worker",
+                "--project",
+                "example-project",
+                "--label",
+                "Restricted target",
+                "--json",
+            ],
+            "venue": {
+                "provider": "agent-containers",
+                "target_id": "container:sandbox-1",
+                "posture_verified": True,
+                "assignment": {
+                    "kind": "lease",
+                    "effort": "example-effort",
+                    "acquired_at": 1_700_000_000.0,
+                },
+            },
+            "capabilities": {"list": True, "resume": False},
+        },
+    }
+    monkeypatch.setattr(provider_ssh, "ssh_profile_spec", lambda *_args, **_kwargs: spec)
+    monkeypatch.setattr(provider_ssh, "_profile_registry_path", lambda: registry_path)
+    monkeypatch.setattr(provider_ssh, "_source_registry_path", lambda: source_path)
+    monkeypatch.setattr(
+        provider_ssh.shutil,
+        "which",
+        lambda name: f"/bin/{name}",
+    )
+    monkeypatch.setattr(
+        provider_ssh.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setattr(
+        provider_ssh,
+        "provider_lease_guard",
+        lambda: _lease_guard(_lease()),
+    )
+
+    assert provider_ssh.emit_ssh_profile(
+        "sandbox-1",
+        "restricted-worker",
+        project="example-project",
+        label="Restricted target",
+    ) == 0
+
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 1
+    assert payload["provider"] == "agent-containers"
+    assert payload["sources"] == [spec["worktree_source"]]
+
+    monkeypatch.setattr(
+        provider_ssh,
+        "provider_lease_guard",
+        lambda: _lease_guard(
+            SimpleNamespace(
+                container="sandbox-1",
+                effort="replacement-effort",
+                acquired_at=2_000_000_000.0,
+            )
+        ),
+    )
+    with pytest.raises(RuntimeError, match="lease assignment changed"):
+        provider_ssh.emit_ssh_profile(
+            "sandbox-1",
+            "restricted-worker",
+            project="example-project",
+            label="Restricted target",
+        )
+
+
+def test_publish_picker_source_replaces_project_case_insensitively(
+    monkeypatch,
+    tmp_path,
+):
+    source_path = tmp_path / "sources" / "agent-containers.json"
+    monkeypatch.setattr(provider_ssh, "_source_registry_path", lambda: source_path)
+    original = {
+        "kind": "provider-exec",
+        "project": "Example-Project",
+        "target_id": "container:sandbox-1",
+    }
+    provider_ssh._publish_worktree_source(original)
+
+    replacement = {
+        **original,
+        "project": "example-project",
+        "instance_id": "replacement",
+    }
+    provider_ssh._publish_worktree_source(replacement)
+
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    assert payload["sources"] == [replacement]
+
+
+def test_remove_picker_source_is_case_insensitive_and_targeted(
+    monkeypatch,
+    tmp_path,
+):
+    profile_path = tmp_path / "profiles" / "provider-exec.json"
+    source_path = tmp_path / "sources" / "agent-containers.json"
+    monkeypatch.setattr(provider_ssh, "_profile_registry_path", lambda: profile_path)
+    monkeypatch.setattr(provider_ssh, "_source_registry_path", lambda: source_path)
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "provider": "agent-containers",
+            "sources": [
+                {
+                    "project": "Example-Project",
+                    "target_id": "container:sandbox-1",
+                },
+                {
+                    "project": "other-project",
+                    "target_id": "container:sandbox-2",
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    assert provider_ssh.remove_worktree_source(
+        "sandbox-1", "example-project"
+    ) is True
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    assert payload["sources"] == [
+        {
+            "project": "other-project",
+            "target_id": "container:sandbox-2",
+        }
+    ]
+    assert provider_ssh.remove_worktree_source(
+        "sandbox-1", "example-project"
+    ) is False
+
+
+def test_remove_stale_picker_sources_by_container_or_effort(monkeypatch, tmp_path):
+    source_path = tmp_path / "sources" / "agent-containers.json"
+    monkeypatch.setattr(provider_ssh, "_source_registry_path", lambda: source_path)
+    monkeypatch.setattr(
+        provider_ssh,
+        "provider_lease_guard",
+        lambda: _lease_guard(
+            SimpleNamespace(
+                container="sandbox-2",
+                effort="two",
+                acquired_at=200.0,
+            )
+        ),
+    )
+    source_path.parent.mkdir(parents=True)
+    source_path.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "provider": "agent-containers",
+            "sources": [
+                {
+                    "project": "one",
+                    "target_id": "container:sandbox-1",
+                    "venue": {
+                        "assignment": {
+                            "kind": "lease",
+                            "effort": "released-effort",
+                            "acquired_at": 100.0,
+                        }
+                    },
+                },
+                {
+                    "project": "two",
+                    "target_id": "container:sandbox-2",
+                    "venue": {
+                        "assignment": {
+                            "kind": "lease",
+                            "effort": "two",
+                            "acquired_at": 200.0,
+                        }
+                    },
+                },
+                {
+                    "project": "three",
+                    "target_id": "container:sandbox-3",
+                    "venue": {
+                        "assignment": {
+                            "kind": "lease",
+                            "effort": "released-effort",
+                            "acquired_at": 300.0,
+                        }
+                    },
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+
+    assert provider_ssh.remove_stale_worktree_sources("released-effort") == 2
+    payload = json.loads(source_path.read_text(encoding="utf-8"))
+    assert payload["sources"] == [
+        {
+            "project": "two",
+            "target_id": "container:sandbox-2",
+            "venue": {
+                "assignment": {
+                    "kind": "lease",
+                    "effort": "two",
+                    "acquired_at": 200.0,
+                }
+            },
+        }
     ]
 
 
@@ -437,8 +824,8 @@ def test_run_ssh_stdio_holds_session_admission_for_transport(monkeypatch):
     events = []
 
     @contextmanager
-    def admission(name):
-        events.append(("admit", name))
+    def admission(name, *, expected_assignment=None):
+        events.append(("admit", name, expected_assignment))
         yield
         events.append(("release", name))
 
@@ -466,7 +853,7 @@ def test_run_ssh_stdio_holds_session_admission_for_transport(monkeypatch):
 
     assert provider_ssh.run_ssh_stdio("sandbox-1") == 0
     assert events == [
-        ("admit", "sandbox-1"),
+        ("admit", "sandbox-1", None),
         ("resolve", "sandbox-1"),
         ("serve", "sandbox-1"),
         ("release", "sandbox-1"),
@@ -475,7 +862,7 @@ def test_run_ssh_stdio_holds_session_admission_for_transport(monkeypatch):
 
 def test_run_ssh_stdio_reports_provider_hold_as_busy(monkeypatch, capsys):
     @contextmanager
-    def admission(_name):
+    def admission(_name, *, expected_assignment=None):
         raise provider_ssh.ProviderAdmissionError("replacement in progress")
         yield
 
@@ -483,6 +870,61 @@ def test_run_ssh_stdio_reports_provider_hold_as_busy(monkeypatch, capsys):
 
     assert provider_ssh.run_ssh_stdio("sandbox-1") == 75
     assert "replacement in progress" in capsys.readouterr().err
+
+
+def test_run_ssh_stdio_binds_expected_target_instance_and_assignment(
+    monkeypatch,
+    capsys,
+):
+    assignment = {
+        "kind": "lease",
+        "effort": "example-effort",
+        "acquired_at": 1_700_000_000.0,
+    }
+    captured = {}
+
+    @contextmanager
+    def admission(name, *, expected_assignment=None):
+        captured["admission"] = (name, expected_assignment)
+        yield
+
+    monkeypatch.setattr(provider_ssh, "session_admission", admission)
+    monkeypatch.setattr(provider_ssh, "resolve_live_exec_target", lambda _name: _target())
+    monkeypatch.setattr(provider_ssh, "_serve_ssh", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(
+        provider_ssh.sys,
+        "stdin",
+        SimpleNamespace(buffer=SimpleNamespace()),
+    )
+    monkeypatch.setattr(
+        provider_ssh.sys,
+        "stdout",
+        SimpleNamespace(buffer=SimpleNamespace()),
+    )
+
+    assert provider_ssh.run_ssh_stdio(
+        "sandbox-1",
+        expected_target_id="container:sandbox-1",
+        expected_instance_id="instance-123",
+        expected_assignment=assignment,
+    ) == 0
+    assert captured["admission"] == ("sandbox-1", assignment)
+
+    assert provider_ssh.run_ssh_stdio(
+        "sandbox-1",
+        expected_target_id="container:other",
+        expected_instance_id="instance-123",
+        expected_assignment=assignment,
+    ) == 75
+    assert "target identity changed" in capsys.readouterr().err
+
+    assert provider_ssh.run_ssh_stdio(
+        "sandbox-1",
+        expected_target_id="container:sandbox-1",
+        expected_instance_id="instance-other",
+        expected_assignment=assignment,
+    ) == 75
+    assert "instance identity changed" in capsys.readouterr().err
 
 
 @pytest.mark.skipif(

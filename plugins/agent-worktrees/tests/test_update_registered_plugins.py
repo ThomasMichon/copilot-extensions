@@ -77,7 +77,7 @@ def test_loop_covers_all_registered_including_payload_only(monkeypatch):
     )
     # All are already installed -> "update" verb.
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
 
     calls: list[list[str]] = []
@@ -107,7 +107,7 @@ def test_repo_declared_marketplace_operations_run_from_declaring_anchor(monkeypa
         reconcile, "read_enabled_plugins", lambda repo_dir: ["context-handoff"]
     )
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
     calls: list[tuple[list[str], Path | None]] = []
 
@@ -135,7 +135,7 @@ def test_trusted_invocation_context_wins_over_untrusted_anchor(monkeypatch, tmp_
         reconcile, "read_enabled_plugins", lambda repo_dir: ["context-handoff"]
     )
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
     calls: list[tuple[list[str], Path | None]] = []
 
@@ -167,7 +167,7 @@ def test_missing_plugin_uses_install_path(monkeypatch):
     monkeypatch.setattr(
         reconcile, "read_enabled_plugins", lambda repo_dir: ["context-handoff"]
     )
-    monkeypatch.setattr(reconcile, "installed_payload_dir", lambda name: None)
+    monkeypatch.setattr(reconcile, "core_installed_payload_dir", lambda name: None)
 
     calls: list[list[str]] = []
 
@@ -194,7 +194,7 @@ def test_single_failure_warns_and_continues(monkeypatch):
         lambda repo_dir: ["aaa", "bbb", "ccc"],
     )
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
 
     updated: list[str] = []
@@ -225,7 +225,7 @@ def test_timeout_on_one_plugin_does_not_abort(monkeypatch):
         reconcile, "read_enabled_plugins", lambda repo_dir: ["aaa", "bbb"]
     )
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
 
     attempted: list[str] = []
@@ -355,7 +355,7 @@ def test_user_global_enabled_are_refreshed(monkeypatch):
         reconcile, "read_user_enabled_plugins", lambda: ["efforts", "visions"]
     )
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
     calls: list[list[str]] = []
     monkeypatch.setattr(
@@ -381,7 +381,7 @@ def test_union_of_repo_and_user_global(monkeypatch):
         reconcile, "read_user_enabled_plugins", lambda: ["efforts", "visions"]
     )
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
     updated: list[str] = []
 
@@ -410,7 +410,7 @@ def test_user_global_updates_without_project_config(monkeypatch):
     monkeypatch.setattr(cfg, "load_config", _boom)
     monkeypatch.setattr(reconcile, "read_user_enabled_plugins", lambda: ["visions"])
     monkeypatch.setattr(
-        reconcile, "installed_payload_dir", lambda name: Path(f"/inst/{name}")
+        reconcile, "core_installed_payload_dir", lambda name: Path(f"/inst/{name}")
     )
     calls: list[list[str]] = []
     monkeypatch.setattr(
