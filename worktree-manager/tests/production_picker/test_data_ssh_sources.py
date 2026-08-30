@@ -961,6 +961,7 @@ def test_local_fetch_passes_source_metadata_to_normalizer(monkeypatch):
         "source_kind": "provider-exec",
         "source_id": "provider-exec:example:target-1",
         "source_label": "Virtual target",
+        "runner": data_ssh._run,
     }
 
 

@@ -7120,6 +7120,52 @@ def _list_records_for_args(args: argparse.Namespace):
     return records
 
 
+def _filter_list_worktree(records, raw_id: str):
+    """Restrict list records to one exact or unique-suffix worktree id."""
+    exact = [rec for rec in records if rec.worktree_id == raw_id]
+    if exact:
+        return exact
+    matches = [rec for rec in records if rec.worktree_id.endswith(raw_id)]
+    if len(matches) > 1:
+        ids = ", ".join(sorted(rec.worktree_id[-12:] for rec in matches))
+        raise ValueError(
+            f"Ambiguous short ID '{raw_id}' matches {len(matches)} "
+            f"worktrees: {ids}"
+        )
+    return matches
+
+
+def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
+    """Repair and refresh one record before an explicit Picker row read."""
+    if getattr(rec, "sessions", None) is None:
+        try:
+            discovered = sessions.backfill_sessions([rec])
+            rec.sessions = [
+                tracking.SessionEntry(session_id=session_id, started_at="")
+                for session_id in discovered.get(rec.worktree_id, [])
+            ]
+            tracking.save_record(rec)
+        except Exception:
+            pass
+
+    try:
+        bridge_live = rec.worktree_id in reclaim.live_bridge_worktrees()
+        bound_live = bool(
+            reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id)
+        ) or bridge_live
+        mux_info = sessions.mux_status_many([rec.worktree_id]).get(rec.worktree_id)
+        mux_live = bool(mux_info and mux_info.exists)
+        now = datetime.now().isoformat(timespec="seconds")
+        rec.bound_live = bound_live
+        rec.bound_live_at = now
+        rec.mux_live = mux_live
+        rec.mux_live_at = now
+        tracking.stamp_bound_live(rec.worktree_id, bound_live)
+        tracking.stamp_mux_live(rec.worktree_id, mux_live, sync=True)
+    except Exception:
+        pass
+
+
 def _build_list_json_payload(
     args: argparse.Namespace,
     records,
@@ -7140,17 +7186,23 @@ def _build_list_json_payload(
     # annotate the row. Gated on --mux-details (the Picker's flag) so a plain
     # list --json stays cheap.
     bare_orphan_wts: set[str] | None = None
+    bridge_live_wts: set[str] | None = None
     if getattr(args, "mux_details", False):
         try:
             bare_orphan_wts = reclaim.bare_orphan_worktree_ids()
         except Exception:
             bare_orphan_wts = None
+        try:
+            bridge_live_wts = reclaim.live_bridge_worktrees()
+        except Exception:
+            bridge_live_wts = None
     worktrees = [
         _worktree_to_dict(
             rec, mux_info=mux_map.get(rec.worktree_id),
             session_ctx=session_ctx,
             state_info=state_map.get(rec.worktree_id),
             bare_orphan_wts=bare_orphan_wts,
+            bridge_live_wts=bridge_live_wts,
         )
         for rec in records
     ]
@@ -7210,6 +7262,17 @@ def cmd_list(args: argparse.Namespace) -> int:
     control.
     """
     records = _list_records_for_args(args)
+    worktree_id = getattr(args, "worktree_id", None)
+    if worktree_id:
+        try:
+            records = _filter_list_worktree(records, worktree_id)
+        except ValueError as error:
+            return _json_error(str(error))
+    if getattr(args, "refresh", False):
+        if not worktree_id:
+            return _json_error("--refresh requires --worktree-id")
+        if records:
+            _refresh_list_record(records[0])
 
     if getattr(args, "glance", False):
         # Compact situational-awareness digest -- active worktrees only, title +
@@ -7245,14 +7308,16 @@ def cmd_list(args: argparse.Namespace) -> int:
         # bypasses the read; the cache is bounded by a short TTL (display rows
         # tolerate a few seconds of staleness) and best-effort.
         _lc_key = None
-        try:
-            _project = cfg.project_name()
-            _lc_key = list_cache.cache_key(
-                args, project=_project,
-                tracking_status=getattr(args, "tracking_status", "all"))
-        except Exception:
-            _lc_key = None
-            _project = None
+        _project = None
+        if not worktree_id:
+            try:
+                _project = cfg.project_name()
+                _lc_key = list_cache.cache_key(
+                    args, project=_project,
+                    tracking_status=getattr(args, "tracking_status", "all"))
+            except Exception:
+                _lc_key = None
+                _project = None
         if _lc_key and _project:
             list_cache.note_demand(
                 _lc_key,
@@ -16284,6 +16349,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "short-TTL cache so concurrent/repeated calls coalesce "
                         "onto one scan (tune via AGENT_WORKTREES_LIST_CACHE_TTL, "
                         "0 disables).")
+    p.add_argument("--worktree-id",
+                   help="Restrict the listing to one exact or unique-suffix ID")
+    p.add_argument("--refresh", action="store_true",
+                   help="Before listing one --worktree-id, repair its missing "
+                        "session registry and refresh bound/mux liveness")
     p.add_argument("--glance", action="store_true",
                    help="Compact, agent-digestible 'at a glance' digest of "
                         "ACTIVE worktrees: one line each (id, disposition age, "

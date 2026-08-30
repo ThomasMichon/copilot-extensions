@@ -1185,6 +1185,7 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
             source_kind=source.source_kind,
             source_id=source.source_id,
             source_label=source.source_label,
+            runner=runner,
         )
 
     eff_timeout = source.timeout if timeout is None else timeout
@@ -1536,6 +1537,11 @@ class LiveLoader:
             # reader, freezing the picker's keys until the load fan-out exits.
             stdin=subprocess.DEVNULL,
             text=True, encoding="utf-8", errors="replace",
+            env={
+                **os.environ,
+                "PYTHONUTF8": "1",
+                "PYTHONSAFEPATH": "1",
+            },
         )
         if os.name == "posix":
             kwargs["start_new_session"] = True   # own group -> killpg on cancel

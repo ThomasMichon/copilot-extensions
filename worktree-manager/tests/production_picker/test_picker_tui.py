@@ -3184,23 +3184,25 @@ def test_submenu_offers_messages_only_with_a_session():
 
 
 def test_msgview_local_load_populates_and_closes(monkeypatch):
-    """Enter on 'Messages' loads the worktree's latest-session tail in-process
-    (local target) into the viewer overlay, and Esc closes it."""
-    from worktree_manager.production_picker import config as _cfg
-    from worktree_manager.production_picker import sessions as _sessions
-    from worktree_manager.production_picker import tracking as _tracking
+    """Enter on 'Messages' loads the local worktree through the provider CLI."""
+    from worktree_manager import engine_client
+    from worktree_manager.production_picker import context
 
-    monkeypatch.setattr(_cfg, "tracking_dir", lambda: __import__("pathlib").Path("."))
+    monkeypatch.setattr(context, "project", lambda: "example")
     monkeypatch.setattr(
-        _tracking, "list_records",
-        lambda *_a, **_k: [types.SimpleNamespace(
-            worktree_id="anomalous-potato-win-20260627-stop")])
+        engine_client,
+        "list_worktree_sessions",
+        lambda *_a, **_k: [{"id": "sess-abc12345", "is_head": True}],
+    )
     payload = {"session_id": "sess-abc12345",
                "messages": [{"role": "user", "text": "do the thing"},
                             {"role": "assistant", "text": "done"}],
                "count": 2}
-    monkeypatch.setattr(_sessions, "recent_worktree_messages",
-                        lambda *_a, **_k: dict(payload))
+    monkeypatch.setattr(
+        engine_client,
+        "recent_worktree_messages",
+        lambda *_a, **_k: dict(payload),
+    )
 
     src = _verb_fixture_source()
 
@@ -3752,20 +3754,24 @@ def test_live_loader_cancel_kills_inflight_prefetch():
 
 
 def test_screen_on_unmount_cancels_loader():
-    """The picker's teardown hook cancels the loader (no orphaned prefetch)."""
+    """Teardown cancels both fleet and standalone provider process owners."""
     from worktree_manager.production_picker.picker_tui import data_local
     from worktree_manager.production_picker.picker_tui.engine import PickerScreen
 
     screen = PickerScreen(data_local, live=True)
-    cancelled = {"v": False}
+    cancelled = {"fleet": False, "provider": False}
 
     class _FakeLoader:
-        def cancel(self):
-            cancelled["v"] = True
+        def __init__(self, key):
+            self.key = key
 
-    screen.loader = _FakeLoader()
+        def cancel(self):
+            cancelled[self.key] = True
+
+    screen.loader = _FakeLoader("fleet")
+    screen._provider_loader = _FakeLoader("provider")
     screen.on_unmount()
-    assert cancelled["v"] is True
+    assert cancelled == {"fleet": True, "provider": True}
 
 
 def test_update_indicator_focus_glyph_and_refresh():

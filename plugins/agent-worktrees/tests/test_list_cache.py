@@ -163,6 +163,60 @@ def test_cmd_list_json_coalesces_scans(_cache_home, monkeypatch):
     assert scans["n"] == 2
 
 
+def test_filter_list_worktree_accepts_exact_and_unique_suffix():
+    from agent_worktrees import __main__ as m
+
+    records = [
+        types.SimpleNamespace(worktree_id="project-win-20260829-ab12"),
+        types.SimpleNamespace(worktree_id="project-win-20260829-cd34"),
+    ]
+
+    assert m._filter_list_worktree(
+        records, "project-win-20260829-ab12") == [records[0]]
+    assert m._filter_list_worktree(records, "cd34") == [records[1]]
+    assert m._filter_list_worktree(records, "none") == []
+
+
+def test_filter_list_worktree_rejects_ambiguous_suffix():
+    from agent_worktrees import __main__ as m
+
+    records = [
+        types.SimpleNamespace(worktree_id="project-win-a-same"),
+        types.SimpleNamespace(worktree_id="project-win-b-same"),
+    ]
+
+    with pytest.raises(ValueError, match="Ambiguous short ID"):
+        m._filter_list_worktree(records, "same")
+
+
+def test_list_payload_includes_bridge_live_signal(monkeypatch):
+    from agent_worktrees import __main__ as m
+    from agent_worktrees import reclaim, sessions, tracking
+
+    rec = tracking.WorktreeRecord(
+        worktree_id="wt-x", branch="b", worktree_path="/w/x", repo="r",
+        machine="m", platform="windows", started_at="", last_resumed_at="",
+        resume_count=0, title="t", status="active", completed_at=None)
+    monkeypatch.setattr(sessions, "mux_status_many", lambda ids: {})
+    monkeypatch.setattr(
+        sessions, "scan_sessions_fast", lambda records: sessions.SessionContext())
+    monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: {"wt-x"})
+    seen = {}
+
+    def serialize(record, **kwargs):
+        seen.update(kwargs)
+        return {"id": record.worktree_id, "title": record.title}
+
+    monkeypatch.setattr(m, "_worktree_to_dict", serialize)
+    args = types.SimpleNamespace(mux_details=True, classify=False)
+
+    assert m._build_list_json_payload(
+        args, [rec], stamp_session_state=False)["worktrees"] == [
+            {"id": "wt-x", "title": "t"}]
+    assert seen["bridge_live_wts"] == {"wt-x"}
+
+
 def test_resident_warm_populates_exact_demanded_shapes(_cache_home, monkeypatch):
     """The daemon refreshes Windows Picker and bridge shapes without guessing."""
     from agent_worktrees import __main__ as m

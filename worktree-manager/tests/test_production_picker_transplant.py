@@ -27,7 +27,13 @@ def test_transplanted_picker_sources_match_production_copy():
             for path in sorted((source / "picker_tui").glob("*.py"))
             # These are Manager-owned process-boundary adapters, not source
             # copies. All other transplanted modules remain byte-identical.
-            if path.name not in {"maintenance.py", "pivots.py"}
+            if path.name not in {
+                "data_local.py",
+                "data_ssh.py",
+                "engine.py",
+                "maintenance.py",
+                "pivots.py",
+            }
         ),
     ]
 

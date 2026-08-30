@@ -278,6 +278,7 @@ def _run(
     *,
     timeout: int = _DEFAULT_TIMEOUT,
     allow_nonzero: bool = False,
+    runner=None,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -294,21 +295,24 @@ def _run(
         cmd += ["--project", project]
     cmd += args
     try:
-        kwargs = {
-            "capture_output": True,
-            "text": True,
-            "timeout": timeout,
-            "check": False,
-            "env": {
-                **os.environ,
-                "PYTHONUTF8": "1",
-                "PYTHONSAFEPATH": "1",
-            },
-            "stdin": subprocess.DEVNULL,
-        }
-        if os.name == "nt":
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        proc = subprocess.run(cmd, **kwargs)
+        if runner is not None:
+            proc = runner(cmd, timeout)
+        else:
+            kwargs = {
+                "capture_output": True,
+                "text": True,
+                "timeout": timeout,
+                "check": False,
+                "env": {
+                    **os.environ,
+                    "PYTHONUTF8": "1",
+                    "PYTHONSAFEPATH": "1",
+                },
+                "stdin": subprocess.DEVNULL,
+            }
+            if os.name == "nt":
+                kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            proc = subprocess.run(cmd, **kwargs)
     except subprocess.TimeoutExpired as e:
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
@@ -342,9 +346,16 @@ def _error_from_envelope(stdout: str) -> str | None:
 
 def run_json(project: str | None, args: list[str], *,
              timeout: int = _DEFAULT_TIMEOUT,
-             allow_nonzero: bool = False) -> dict:
+             allow_nonzero: bool = False,
+             runner=None) -> dict:
     """Run a ``--json`` verb and parse its stdout envelope into a dict."""
-    raw = _run(project, args, timeout=timeout, allow_nonzero=allow_nonzero)
+    raw = _run(
+        project,
+        args,
+        timeout=timeout,
+        allow_nonzero=allow_nonzero,
+        runner=runner,
+    )
     try:
         obj = json.loads(raw)
     except ValueError as e:
@@ -609,6 +620,87 @@ def resolve_launch_plan(
     return launch_plan_from_dict(obj)
 
 
+def list_worktree_rows(
+    project: str,
+    *,
+    classify: bool = True,
+    mux_details: bool = False,
+    cache_only: bool = False,
+    fresh: bool = False,
+    worktree_id: str | None = None,
+    refresh: bool = False,
+    runner=None,
+) -> list[dict]:
+    """Return raw worktree rows from the provider's JSON list contract.
+
+    Unsupported optional flags are dropped one at a time so an older provider
+    still supplies the richest listing it understands.
+    """
+    args = ["list", "--json"]
+    optional: list[tuple[str, bool]] = [
+        ("--classify", classify),
+        ("--mux-details", mux_details),
+        ("--cache-only", cache_only),
+        ("--fresh", fresh),
+    ]
+    args.extend(flag for flag, enabled in optional if enabled)
+    if worktree_id:
+        args += ["--worktree-id", worktree_id]
+    if refresh:
+        args.append("--refresh")
+
+    try:
+        obj = run_json(project, args, runner=runner)
+    except EngineError as error:
+        detail = _engine_error_detail(error)
+        for flag, enabled in optional:
+            if enabled and "unrecognized arguments" in detail and flag in detail:
+                return list_worktree_rows(
+                    project,
+                    classify=classify and flag != "--classify",
+                    mux_details=mux_details and flag != "--mux-details",
+                    cache_only=cache_only and flag != "--cache-only",
+                    fresh=fresh and flag != "--fresh",
+                    worktree_id=worktree_id,
+                    refresh=refresh,
+                    runner=runner,
+                )
+        if (
+            "unrecognized arguments" in detail
+            and worktree_id
+            and ("--worktree-id" in detail or "--refresh" in detail)
+        ):
+            if refresh:
+                _run(
+                    project,
+                    ["backfill-sessions"],
+                    timeout=60,
+                    runner=runner,
+                )
+            rows = list_worktree_rows(
+                project,
+                classify=classify,
+                mux_details=mux_details,
+                cache_only=cache_only,
+                fresh=fresh,
+                runner=runner,
+            )
+            exact = [row for row in rows if row.get("id") == worktree_id]
+            if exact:
+                return exact
+            matches = [
+                row for row in rows
+                if isinstance(row.get("id"), str)
+                and row["id"].endswith(worktree_id)
+            ]
+            return matches if len(matches) == 1 else []
+        raise
+    rows = obj.get("worktrees")
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict)]
+
+
 def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:
     """List a project's worktrees via ``agent-worktrees list --json``.
 
@@ -617,16 +709,47 @@ def list_worktrees(project: str, *, classify: bool = True) -> list[Worktree]:
     Manager degrades a feature (no state block) instead of failing -- the
     version-skew tolerance the contract calls for.
     """
-    args = ["list", "--json"]
-    if classify:
-        args.append("--classify")
-    try:
-        obj = run_json(project, args)
-    except EngineError as e:
-        if classify and "--classify" in str(e):
-            return list_worktrees(project, classify=False)
-        raise
-    rows = obj.get("worktrees")
+    return [
+        worktree_from_dict(row)
+        for row in list_worktree_rows(project, classify=classify)
+    ]
+
+
+def list_worktree_sessions(
+    project: str,
+    worktree_id: str,
+    *,
+    runner=None,
+) -> list[dict]:
+    """Return one worktree's registered sessions through the provider CLI."""
+    obj = run_json(
+        project,
+        ["list-sessions", "--worktree", worktree_id, "--json"],
+        runner=runner,
+    )
+    rows = obj.get("sessions")
     if not isinstance(rows, list):
         return []
-    return [worktree_from_dict(d) for d in rows if isinstance(d, dict)]
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def recent_worktree_messages(
+    project: str,
+    worktree_id: str,
+    *,
+    limit: int = 3,
+    runner=None,
+) -> dict:
+    """Return one worktree's recent conversation messages."""
+    return run_json(
+        project,
+        [
+            "recent-messages",
+            "--worktree",
+            worktree_id,
+            "--limit",
+            str(limit),
+            "--json",
+        ],
+        runner=runner,
+    )
