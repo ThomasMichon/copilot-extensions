@@ -415,6 +415,7 @@ def _cmd_start(args: argparse.Namespace) -> None:
 
     app = create_app(config=cfg, token=token)
     app.state.single_instance = singleton
+    app.state.background_readiness = True
     # A normal start self-publishes the routing table once it is listening so
     # CLI clients discover it; a passive instance stays silent until the deploy
     # orchestrator flips the table after a health check.
@@ -1940,7 +1941,10 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
             with urllib.request.urlopen(
                 f"http://{h}:{port}/health", timeout=2
             ) as resp:
-                return resp.status == 200
+                if resp.status != 200:
+                    return False
+                body = json.loads(resp.read().decode("utf-8"))
+                return body.get("status") == "ok" and body.get("ready") is True
         except Exception:
             return False
 

@@ -20,10 +20,20 @@ async def health(request: Request) -> dict:
     body = {
         "status": "ok",
         "service": "agent-bridge",
+        "ready": bool(getattr(request.app.state, "ready", False)),
+        "topology_ready": bool(
+            getattr(request.app.state, "topology_ready", False)
+        ),
+        "credential_relay_ready": bool(
+            getattr(request.app.state, "credential_relay_ready", False)
+        ),
         "draining": draining,
         "protocol_version": HTTP_PROTOCOL_VERSION,
         "min_protocol_version": HTTP_PROTOCOL_MIN_SUPPORTED,
     }
+    readiness_error = getattr(request.app.state, "readiness_error", None)
+    if readiness_error:
+        body["readiness_error"] = readiness_error
     # Live Session Host census (dotfiles#1656): how many independent Session
     # Hosts (each owning a possibly-mid-turn child that survives a frontend
     # restart) this daemon is fronting. Always surfaced so a drain/cutover is
