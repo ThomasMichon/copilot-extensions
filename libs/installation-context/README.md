@@ -26,11 +26,14 @@ publishes only `installation-activation.json` after pinning the caller-observed
 namespace, install, and activation generations. The cross-runner actions do not
 otherwise migrate legacy state, launch a runtime, or wire an automatic caller.
 The Python module additionally exposes importable slot APIs. All three runners
-provide equivalent `slot-provision`, `slot-validate`, `slot-complete`, and
-`slot-completion-validate` CLI actions. Ownership publication reserves a
-cell-local version slot. Completion publication immutably binds that owned slot
-to strict build-completion evidence without activating it. Agent Machines and
-Agent Index expose explicit installer adapter actions for all four transactions;
+provide equivalent `slot-provision`, `slot-validate`, `slot-complete`,
+`slot-completion-validate`, and `slot-cutover` CLI actions. Ownership publication
+reserves a cell-local version slot. Completion publication immutably binds that
+owned slot to strict build-completion evidence without activating it. Cutover
+uses explicit receipt-generation and current-marker compare-and-swap
+expectations to publish only cell-local runtime markers. Agent Machines and
+Agent Index expose explicit installer adapter actions for the first four
+transactions;
 their normal install/bootstrap paths do not call them. The adapters bind the
 selected snapshot to their exact payload root and version. Every mutation
 requires an explicit `--context` / `-Context`; it never adopts an ambient
@@ -409,9 +412,29 @@ atomic replacement fails closed and the reader never replaces the observed
 marker.
 Completion results always report `activated: false` and `operative: false`.
 They do not write `current-version`, `last-known-good`, activation, launcher,
-service, state, or other lifecycle artifacts. Cutover, health qualification,
-rollback, repair/release, uninstall, and normal-flow adoption remain later
-lifecycle transactions.
+service, state, or other lifecycle artifacts.
+
+`slot-cutover` and Python's `cutover_runtime_slot` API require the same explicit
+context, payload, snapshot, and runtime identity as completion plus exact
+current namespace/install generations and exactly one current-marker
+expectation: an exact runtime version or absence. Under the genesis and
+installation locks they revalidate the current receipts and immutable target
+completion, then re-read both runtime markers immediately before mutation.
+Generation or current-marker drift returns `status: revalidation-required`
+without mutation.
+
+`last-known-good` follows the established versioned-runtime meaning: the last
+version successfully selected by cutover, used only when `current-version`
+cannot resolve. It is not a rollback pointer. Initial installation, update, and
+explicit rollback therefore publish the target version to both markers; a
+target already named by both markers is an idempotent no-op that preserves the
+marker bytes.
+Every marker is a strict ordinary,
+non-link, single-version UTF-8 file and is atomically replaced under both
+ownership locks. The transaction validates the published markers and reports
+`activated: false` and `operative: false`; activation publication, launchers,
+services, health qualification, repair/release, uninstall, and normal-flow
+adoption remain separate lifecycle boundaries.
 Read-only callers may import `resolve_installation_mode` and
 `probe_legacy_entrypoint`. Their optional `os_profile`, `platform`,
 `wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit
@@ -492,7 +515,8 @@ exemplar payloads. No exemplar installer or bootstrap calls `activation-cas`;
 the existing callers only protect legacy mutation and do not activate a
 namespaced root.
 
-Later slices still own runtime-root activation and cutover, health qualification,
-tombstone writing, migration, rollback/uninstall enforcement,
+Later slices still own normal-flow runtime-root cutover adoption, explicit
+historical rollback selection, activation,
+health qualification, tombstone writing, migration, rollback/uninstall enforcement,
 payload-invocation schema changes, repair/release, and operative dual-cell
 exemplars.

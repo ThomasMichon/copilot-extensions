@@ -568,9 +568,31 @@ uninstall behavior.
   fails closed without the reader replacing the observed marker.
 - Completion is still non-activating and non-operative. The transaction writes
   no `current-version`, `last-known-good`, activation, launcher, service, state,
-  endpoint, task/unit, or tombstone artifact. Operative cutover, health
-  qualification, rollback, repair/release, uninstall, and adoption by normal
-  install/bootstrap flows remain later lifecycle boundaries.
+  endpoint, task/unit, or tombstone artifact.
+- The Python, dependency-light Bash, and PowerShell runners expose a separate
+  explicit `slot-cutover` transaction. It requires the same exact context,
+  marketplace/plugin, payload root/version, snapshot, and runtime identity as
+  completion plus caller-observed namespace/install generations and exactly one
+  current-marker CAS expectation: an exact current version or marker absence.
+- Under the genesis lock and then plugin installation lock, cutover revalidates
+  the current receipt generations and immutable target completion, validates
+  existing `current-version` and `last-known-good` as ordinary non-link
+  single-version files, and re-reads both immediately before mutation.
+  Generation or current-marker drift returns `revalidation-required` without
+  mutation.
+- `last-known-good` retains its established versioned-runtime meaning: the last
+  version successfully selected when `current-version` cannot resolve, not a
+  rollback pointer. Initial install, update, and explicit historical rollback
+  publish the completed target to both markers; a target already named by both
+  markers is an idempotent no-op. Each changed marker is atomically replaced under both
+  ownership locks and revalidated after publication. A caller that observes a
+  partial failure revalidates the markers and retries with their new explicit
+  current expectation before activation.
+- `slot-cutover` writes no activation receipt, launcher, service, manifest,
+  payload, state, endpoint, task/unit, repair, release, garbage-collection, or
+  uninstall artifact. Health qualification, activation publication, operative
+  exemplar adoption, repair/release, and uninstall remain separate lifecycle
+  boundaries.
 - Versioned-runtime receives the resolved `pluginRoot` explicitly.
 - `current-version`, `last-known-good`, process checks, and garbage collection
   never enumerate outside that plugin root.
@@ -580,7 +602,9 @@ uninstall behavior.
 ### Update, rollback, repair, and uninstall
 
 - Update may replace the payload root only within the same validated cell.
-- Rollback selects only a slot owned by the same `install.json`.
+- Rollback explicitly selects only a completed historical slot owned by the
+  same `install.json` and compare-and-swaps from the observed current version.
+  After selection, both runtime markers name that rollback target.
 - Repair recreates only artifacts whose ownership receipt matches.
 - Uninstall validates the namespace and plugin receipt immediately before every
   destructive step. It never removes the namespace or repo state merely because

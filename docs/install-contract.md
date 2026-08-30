@@ -252,6 +252,20 @@ platform-appropriate publication primitive described above.
 Expected generation arguments use unsigned ASCII decimal syntax, normalize
 leading zeroes before comparison, and must fit the portable signed 64-bit range.
 
+The same three runners expose explicit `slot-complete`,
+`slot-completion-validate`, and `slot-cutover` transactions. Completion captures
+strict build evidence into an immutable owned-slot receipt without selecting the
+runtime. Cutover requires exact payload/snapshot identity, current
+namespace/install generations, and a current-version compare-and-swap
+expectation. It revalidates immutable completion under both receipt locks before
+atomically replacing only the cell-local `current-version` and
+`last-known-good` marker files. Both markers name the completed selected target:
+last-known-good is the fallback when current-version cannot resolve, not a
+rollback pointer. An already-current target is idempotent. Cutover changes the
+versioned-runtime tier-1 selection inside the cell; `activated: false` means it
+does not publish `installation-activation.json`. It does not mutate launchers,
+services, manifests, payloads, or plugin application state.
+
 ### Installation-mode governance
 
 This section is the normative authority for desired-mode policy, actual-mode
