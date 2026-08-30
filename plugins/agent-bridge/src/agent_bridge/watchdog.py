@@ -44,6 +44,8 @@ log = logging.getLogger("agent-bridge")
 _DEFAULT_INTERVAL = 15.0
 _DEFAULT_STARTUP_GRACE = 120.0
 _DEFAULT_SERVING_GRACE = 60.0
+_WINDOWS_INTERVAL = 5.0
+_WINDOWS_SERVING_GRACE = 15.0
 _EXIT_CODE = 70  # EX_SOFTWARE -- distinguishable in logs/postmortems
 
 
@@ -185,6 +187,7 @@ def arm_serving_watchdog(
     interval: float = _DEFAULT_INTERVAL,
     startup_grace: float = _DEFAULT_STARTUP_GRACE,
     serving_grace: float = _DEFAULT_SERVING_GRACE,
+    on_dead: Callable[[str], None] | None = None,
 ) -> threading.Thread | None:
     """Start the serving watchdog on a daemon thread; return it (or None).
 
@@ -200,7 +203,7 @@ def arm_serving_watchdog(
         is_started=lambda: bool(getattr(server, "started", False)),
         is_shutting_down=lambda: bool(getattr(server, "should_exit", False)),
         probe_serving=_make_health_probe(bind, port),
-        on_dead=_force_exit,
+        on_dead=_force_exit if on_dead is None else on_dead,
         interval=interval,
         startup_grace=startup_grace,
         serving_grace=serving_grace,
