@@ -17,8 +17,10 @@ import time
 import warnings
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
@@ -28,6 +30,7 @@ LOCK_VERSION = 1
 LOCK_INITIALIZATION_GRACE_SECONDS = 5.0
 LOCK_POLL_SECONDS = 0.01
 RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS = 30.0
+RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS = 300.0
 MAX_NAMESPACE_LOCATORS = 16
 MAX_RECEIPT_GENERATION = (1 << 63) - 1
 ROOT_NAMES = ("versions", "snapshots", "state", "run", "logs", "cache", "launchers")
@@ -40,7 +43,40 @@ SNAPSHOT_PROVENANCE_FILE = "snapshot-provenance.json"
 RUNTIME_SLOT_OWNERSHIP_SCHEMA = "copilot-extensions.runtime-slot-ownership"
 RUNTIME_SLOT_OWNERSHIP_FILE = ".runtime-slot-ownership.json"
 WINDOWS_ERROR_ACCESS_DENIED = 5
+RUNTIME_SLOT_COMPLETION_SCHEMA = "copilot.extensions/runtime-slot-completion/v1"
+RUNTIME_SLOT_COMPLETION_FILE = ".runtime-slot-completion.json"
+BUILD_COMPLETION_FILE = ".install-complete.json"
 RFC3339_UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+LOWER_SHA256 = re.compile(r"[0-9a-f]{64}", flags=re.ASCII)
+MAX_RECEIPT_PID = (1 << 63) - 1
+MAX_SNAPSHOT_ENTRIES = 100_000
+MAX_SNAPSHOT_PATH_BYTES = 4_096
+MAX_SNAPSHOT_CONTENT_BYTES = 4_294_967_296
+
+
+@dataclass(frozen=True)
+class _ValidatedFileDigest:
+    digest: str
+    identity: tuple[int, int]
+    metadata: tuple[int, int, int, int]
+
+
+@dataclass
+class _SnapshotWalkFrame:
+    relative_parts: tuple[str, ...]
+    initial_stat: os.stat_result
+    manifest: list[tuple[bytes, str]]
+    entries: list[tuple[str, str, bytes, os.stat_result, str]]
+    next_entry: int = 0
+
+
+_VALIDATED_FILE_SHA256: ContextVar[dict[str, _ValidatedFileDigest] | None] = (
+    ContextVar("_VALIDATED_FILE_SHA256", default=None)
+)
+_VALIDATION_SCOPE_DEPTH: ContextVar[int] = ContextVar(
+    "_VALIDATION_SCOPE_DEPTH",
+    default=0,
+)
 
 
 class InstallationContextError(ValueError):
@@ -58,6 +94,25 @@ class NormalizedSource:
 
 def _fail(message: str) -> None:
     raise InstallationContextError(message)
+
+
+def _validation_scope(function: Callable[..., Any]) -> Callable[..., Any]:
+    @wraps(function)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        depth = _VALIDATION_SCOPE_DEPTH.get()
+        outermost = depth == 0
+        cache_token = None
+        if outermost:
+            cache_token = _VALIDATED_FILE_SHA256.set({})
+        depth_token = _VALIDATION_SCOPE_DEPTH.set(depth + 1)
+        try:
+            return function(*args, **kwargs)
+        finally:
+            _VALIDATION_SCOPE_DEPTH.reset(depth_token)
+            if cache_token is not None:
+                _VALIDATED_FILE_SHA256.reset(cache_token)
+
+    return wrapped
 
 
 def _property(value: Mapping[str, Any] | None, name: str, default: Any = None) -> Any:
@@ -217,10 +272,17 @@ def _rename_directory_no_replace(source: Path, destination: Path) -> None:
 def read_json(path: str | os.PathLike[str]) -> Any:
     canonical = canonical_path(path, must_exist=True)
     try:
-        return json.loads(
-            canonical.read_text(encoding="utf-8"),
+        content, validated_stat = _read_regular_file(
+            canonical,
+            label="JSON document",
+            require_stable_identity=True,
+        )
+        value = json.loads(
+            content.decode("utf-8"),
             object_pairs_hook=_reject_duplicate_keys,
         )
+        _cache_validated_file_digest(canonical, content, validated_stat)
+        return value
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
         _fail(f"Invalid JSON in '{canonical}': {error}")
 
@@ -233,11 +295,720 @@ def _json_bytes(value: Mapping[str, Any]) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
-def _sha256_file(path: Path) -> str:
+def _stat_identity(value: os.stat_result) -> tuple[int, int]:
+    return value.st_dev, value.st_ino
+
+
+def _stat_metadata(value: os.stat_result) -> tuple[int, int, int, int]:
+    return value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+
+
+def _file_cache_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(os.fspath(path)))
+
+
+def _cache_validated_file_digest(
+    path: Path,
+    content: bytes,
+    validated_stat: os.stat_result,
+) -> str:
+    cached = _ValidatedFileDigest(
+        digest=hashlib.sha256(content).hexdigest(),
+        identity=_stat_identity(validated_stat),
+        metadata=_stat_metadata(validated_stat),
+    )
+    key = _file_cache_key(path)
+    cache = _VALIDATED_FILE_SHA256.get()
+    if cache is None:
+        return cached.digest
+    previous = cache.get(key)
+    if previous is not None and previous != cached:
+        _fail(f"File '{path}' changed after it was validated.")
+    updated = dict(cache)
+    updated[key] = cached
+    _VALIDATED_FILE_SHA256.set(updated)
+    return cached.digest
+
+
+def _invalidate_validated_file_digest(path: Path) -> None:
+    cache = _VALIDATED_FILE_SHA256.get()
+    if cache is None:
+        return
+    key = _file_cache_key(path)
+    if key not in cache:
+        return
+    updated = dict(cache)
+    updated.pop(key)
+    _VALIDATED_FILE_SHA256.set(updated)
+
+
+def _read_regular_file(
+    path: Path,
+    *,
+    label: str,
+    require_stable_identity: bool = False,
+) -> tuple[bytes, os.stat_result]:
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
     try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
+        for _attempt in range(64):
+            descriptor = os.open(path, flags)
+            opened_stat = os.fstat(descriptor)
+            if not stat.S_ISREG(opened_stat.st_mode):
+                _fail(f"{label} must be an ordinary file.")
+            try:
+                named_stat = os.lstat(path)
+            except OSError:
+                os.close(descriptor)
+                descriptor = -1
+                continue
+            if stat.S_ISLNK(named_stat.st_mode) or _is_link_or_junction(path):
+                _fail(f"{label} may not be a symbolic link or reparse point.")
+            if not stat.S_ISREG(named_stat.st_mode):
+                _fail(f"{label} must be an ordinary file.")
+            if _stat_identity(named_stat) == _stat_identity(opened_stat):
+                break
+            if not require_stable_identity and _attempt == 63:
+                break
+            os.close(descriptor)
+            descriptor = -1
+        else:
+            _fail(f"{label} changed while it was being opened.")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        final_stat = os.fstat(descriptor)
+        if require_stable_identity and (
+            _stat_identity(opened_stat) != _stat_identity(final_stat)
+            or _stat_metadata(opened_stat) != _stat_metadata(final_stat)
+        ):
+            _fail(f"{label} changed while it was being read.")
     except OSError as error:
-        _fail(f"Cannot hash '{path}': {error}")
+        _fail(f"Cannot read {label.lower()} '{path}': {error}")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    try:
+        current_stat = os.lstat(path)
+    except OSError as error:
+        _fail(f"Cannot inspect {label.lower()} '{path}': {error}")
+    if _is_link_or_junction(path):
+        _fail(f"{label} may not be a symbolic link or reparse point.")
+    if not stat.S_ISREG(current_stat.st_mode):
+        _fail(f"{label} must be an ordinary file.")
+    if require_stable_identity and (
+        _stat_identity(current_stat) != _stat_identity(final_stat)
+        or _stat_metadata(current_stat) != _stat_metadata(final_stat)
+    ):
+        _fail(f"{label} changed while it was being read.")
+    return b"".join(chunks), final_stat
+
+
+def _read_regular_file_bytes(
+    path: Path,
+    *,
+    label: str,
+    require_stable_identity: bool = False,
+) -> bytes:
+    content, _validated_stat = _read_regular_file(
+        path,
+        label=label,
+        require_stable_identity=require_stable_identity,
+    )
+    return content
+
+
+def _sha256_file(path: Path) -> str:
+    cache = _VALIDATED_FILE_SHA256.get()
+    cached = cache.get(_file_cache_key(path)) if cache is not None else None
+    if cached is not None:
+        content, current_stat = _read_regular_file(
+            path,
+            label=f"File '{path}'",
+            require_stable_identity=True,
+        )
+        current = _ValidatedFileDigest(
+            digest=hashlib.sha256(content).hexdigest(),
+            identity=_stat_identity(current_stat),
+            metadata=_stat_metadata(current_stat),
+        )
+        if current != cached:
+            _fail(f"File '{path}' changed after it was validated.")
+        return current.digest
+    content, validated_stat = _read_regular_file(
+        path,
+        label=f"File '{path}'",
+        require_stable_identity=True,
+    )
+    return _cache_validated_file_digest(path, content, validated_stat)
+
+
+def _snapshot_content_sha256(
+    snapshot_root: Path,
+    *,
+    max_entries: int = MAX_SNAPSHOT_ENTRIES,
+    max_path_bytes: int = MAX_SNAPSHOT_PATH_BYTES,
+    max_content_bytes: int = MAX_SNAPSHOT_CONTENT_BYTES,
+) -> str:
+    records: list[tuple[bytes, str]] = []
+    entry_count = 0
+    total_content_bytes = 0
+
+    if max_entries < 0 or max_path_bytes < 0 or max_content_bytes < 0:
+        _fail("Snapshot content limits must be non-negative integers.")
+
+    def relative_bytes(relative_text: str) -> bytes:
+        try:
+            encoded = relative_text.encode("utf-8")
+        except UnicodeEncodeError as error:
+            _fail(
+                f"Snapshot content path is not valid UTF-8: '{relative_text}': "
+                f"{error}"
+            )
+        if len(encoded) > max_path_bytes:
+            _fail(
+                "Snapshot content relative path exceeds the "
+                f"{max_path_bytes}-byte UTF-8 limit: '{relative_text}'."
+            )
+        return encoded
+
+    def account_entry(
+        relative_text: str,
+        encoded: bytes,
+        entry_stat: os.stat_result,
+    ) -> None:
+        nonlocal entry_count, total_content_bytes
+        entry_count += 1
+        if entry_count > max_entries:
+            _fail(
+                f"Snapshot content exceeds the {max_entries}-entry limit."
+            )
+        if stat.S_ISREG(entry_stat.st_mode):
+            total_content_bytes += entry_stat.st_size
+            if total_content_bytes > max_content_bytes:
+                _fail(
+                    "Snapshot content exceeds the "
+                    f"{max_content_bytes}-byte regular-file limit."
+                )
+        if len(encoded) > max_path_bytes:
+            _fail(
+                "Snapshot content relative path exceeds the "
+                f"{max_path_bytes}-byte UTF-8 limit: '{relative_text}'."
+            )
+
+    def entry_kind(entry_stat: os.stat_result, relative_text: str) -> str:
+        if stat.S_ISLNK(entry_stat.st_mode):
+            _fail(
+                "Snapshot content may not contain symbolic links or reparse "
+                f"points: '{relative_text}'."
+            )
+        if stat.S_ISDIR(entry_stat.st_mode):
+            return "D"
+        if stat.S_ISREG(entry_stat.st_mode):
+            return "F"
+        _fail(
+            "Snapshot content entries must be ordinary files or "
+            f"directories: '{relative_text}'."
+        )
+
+    def hash_opened_file(
+        descriptor: int,
+        opened_stat: os.stat_result,
+        relative_text: str,
+    ) -> str:
+        file_hash = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            file_hash.update(chunk)
+        final_stat = os.fstat(descriptor)
+        if (
+            _stat_identity(opened_stat) != _stat_identity(final_stat)
+            or opened_stat.st_size != final_stat.st_size
+            or opened_stat.st_mtime_ns != final_stat.st_mtime_ns
+            or opened_stat.st_ctime_ns != final_stat.st_ctime_ns
+        ):
+            _fail(f"Snapshot content changed during hashing: '{relative_text}'.")
+        return file_hash.hexdigest()
+
+    if (
+        os.name != "nt"
+        and os.open in os.supports_dir_fd
+        and os.scandir in os.supports_fd
+    ):
+        directory_flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        directory_flags |= getattr(os, "O_DIRECTORY", 0)
+        directory_flags |= getattr(os, "O_NOFOLLOW", 0)
+
+        def validate_directory(
+            descriptor: int,
+            relative_parts: tuple[str, ...],
+            expected_stat: os.stat_result | None,
+        ) -> os.stat_result:
+            opened_stat = os.fstat(descriptor)
+            if (
+                not stat.S_ISDIR(opened_stat.st_mode)
+                or (
+                    expected_stat is not None
+                    and (
+                        _stat_identity(opened_stat)
+                        != _stat_identity(expected_stat)
+                        or _stat_metadata(opened_stat)
+                        != _stat_metadata(expected_stat)
+                    )
+                )
+            ):
+                relative_text = "/".join(relative_parts)
+                if relative_text:
+                    _fail(
+                        "Snapshot content changed during hashing: "
+                        f"'{relative_text}'."
+                    )
+                _fail("Snapshot content changed during hashing.")
+            return opened_stat
+
+        def enter_directory(
+            directory_descriptor: int,
+            relative_parts: tuple[str, ...],
+            expected_stat: os.stat_result | None,
+        ) -> _SnapshotWalkFrame:
+            initial_stat = validate_directory(
+                directory_descriptor,
+                relative_parts,
+                expected_stat,
+            )
+            manifest: list[tuple[bytes, str]] = []
+            inspected: list[tuple[str, str, bytes, os.stat_result, str]] = []
+            try:
+                with os.scandir(directory_descriptor) as iterator:
+                    for entry in iterator:
+                        relative_text = "/".join((*relative_parts, entry.name))
+                        try:
+                            entry_stat = os.stat(
+                                entry.name,
+                                dir_fd=directory_descriptor,
+                                follow_symlinks=False,
+                            )
+                        except OSError as error:
+                            _fail(
+                                "Cannot inspect snapshot content "
+                                f"'{relative_text}': {error}"
+                            )
+                        encoded = relative_bytes(relative_text)
+                        kind = entry_kind(entry_stat, relative_text)
+                        account_entry(relative_text, encoded, entry_stat)
+                        manifest.append((encoded, kind))
+                        inspected.append(
+                            (
+                                entry.name,
+                                relative_text,
+                                encoded,
+                                entry_stat,
+                                kind,
+                            )
+                        )
+            except OSError as error:
+                _fail(f"Cannot enumerate snapshot content: {error}")
+            manifest.sort()
+            return _SnapshotWalkFrame(
+                relative_parts,
+                initial_stat,
+                manifest,
+                inspected,
+            )
+
+        def hash_descriptor_file(
+            directory_descriptor: int,
+            frame: _SnapshotWalkFrame,
+            entry: tuple[str, str, bytes, os.stat_result, str],
+        ) -> None:
+            name, relative_text, encoded, entry_stat, _kind = entry
+            validate_directory(
+                directory_descriptor,
+                frame.relative_parts,
+                frame.initial_stat,
+            )
+            descriptor = -1
+            try:
+                flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+                flags |= getattr(os, "O_CLOEXEC", 0)
+                flags |= getattr(os, "O_NONBLOCK", 0)
+                flags |= getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(name, flags, dir_fd=directory_descriptor)
+                opened_stat = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(opened_stat.st_mode)
+                    or _stat_identity(opened_stat) != _stat_identity(entry_stat)
+                ):
+                    _fail(
+                        "Snapshot content changed during hashing: "
+                        f"'{relative_text}'."
+                    )
+                file_digest = hash_opened_file(
+                    descriptor,
+                    opened_stat,
+                    relative_text,
+                )
+                current_stat = os.stat(
+                    name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    not stat.S_ISREG(current_stat.st_mode)
+                    or _stat_identity(current_stat) != _stat_identity(entry_stat)
+                    or _stat_metadata(current_stat) != _stat_metadata(entry_stat)
+                ):
+                    _fail(
+                        f"Snapshot content changed during hashing: '{relative_text}'."
+                    )
+            except OSError as error:
+                _fail(f"Cannot hash snapshot content '{relative_text}': {error}")
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+            if frame.relative_parts or name != SNAPSHOT_PROVENANCE_FILE:
+                records.append((encoded, file_digest))
+
+        def leave_directory(
+            directory_descriptor: int,
+            frame: _SnapshotWalkFrame,
+        ) -> None:
+            final_directory_stat = validate_directory(
+                directory_descriptor,
+                frame.relative_parts,
+                frame.initial_stat,
+            )
+            final_manifest: list[tuple[bytes, str]] = []
+            try:
+                with os.scandir(directory_descriptor) as iterator:
+                    for entry in iterator:
+                        if len(final_manifest) >= len(frame.manifest):
+                            _fail("Snapshot content tree changed during hashing.")
+                        relative_text = "/".join(
+                            (*frame.relative_parts, entry.name)
+                        )
+                        entry_stat = os.stat(
+                            entry.name,
+                            dir_fd=directory_descriptor,
+                            follow_symlinks=False,
+                        )
+                        final_manifest.append(
+                            (
+                                relative_bytes(relative_text),
+                                entry_kind(entry_stat, relative_text),
+                            )
+                        )
+                final_directory_stat = os.fstat(directory_descriptor)
+            except OSError as error:
+                _fail(f"Cannot enumerate snapshot content: {error}")
+            final_manifest.sort()
+            if (
+                frame.manifest != final_manifest
+                or _stat_identity(final_directory_stat)
+                != _stat_identity(frame.initial_stat)
+                or _stat_metadata(final_directory_stat)
+                != _stat_metadata(frame.initial_stat)
+            ):
+                _fail("Snapshot content tree changed during hashing.")
+
+        current_descriptor = -1
+        try:
+            current_descriptor = os.open(snapshot_root, directory_flags)
+            try:
+                opened_root_stat = os.fstat(current_descriptor)
+                if not stat.S_ISDIR(opened_root_stat.st_mode):
+                    _fail("Snapshot root must be an ordinary directory.")
+                named_root_stat = os.lstat(snapshot_root)
+                if (
+                    not stat.S_ISDIR(named_root_stat.st_mode)
+                    or _stat_identity(named_root_stat)
+                    != _stat_identity(opened_root_stat)
+                ):
+                    _fail(
+                        "Snapshot root may not traverse a symbolic link or "
+                        "reparse point."
+                    )
+                stack = [
+                    enter_directory(
+                        current_descriptor,
+                        (),
+                        opened_root_stat,
+                    )
+                ]
+                while stack:
+                    frame = stack[-1]
+                    if frame.next_entry < len(frame.entries):
+                        entry = frame.entries[frame.next_entry]
+                        frame.next_entry += 1
+                        name, relative_text, _encoded, entry_stat, kind = entry
+                        if kind == "D":
+                            child_descriptor = -1
+                            try:
+                                child_descriptor = os.open(
+                                    name,
+                                    directory_flags,
+                                    dir_fd=current_descriptor,
+                                )
+                                child_frame = enter_directory(
+                                    child_descriptor,
+                                    (*frame.relative_parts, name),
+                                    entry_stat,
+                                )
+                                os.close(current_descriptor)
+                                current_descriptor = child_descriptor
+                                stack.append(
+                                    child_frame
+                                )
+                            except OSError as error:
+                                if child_descriptor >= 0:
+                                    os.close(child_descriptor)
+                                _fail(
+                                    "Cannot enumerate snapshot content "
+                                    f"'{relative_text}': {error}"
+                                )
+                            except BaseException:
+                                if child_descriptor >= 0:
+                                    os.close(child_descriptor)
+                                raise
+                        else:
+                            hash_descriptor_file(
+                                current_descriptor,
+                                frame,
+                                entry,
+                            )
+                        continue
+                    leave_directory(current_descriptor, frame)
+                    stack.pop()
+                    if stack:
+                        parent_descriptor = -1
+                        try:
+                            parent_descriptor = os.open(
+                                "..",
+                                directory_flags,
+                                dir_fd=current_descriptor,
+                            )
+                            validate_directory(
+                                parent_descriptor,
+                                stack[-1].relative_parts,
+                                stack[-1].initial_stat,
+                            )
+                        except BaseException:
+                            if parent_descriptor >= 0:
+                                os.close(parent_descriptor)
+                            raise
+                        os.close(current_descriptor)
+                        current_descriptor = parent_descriptor
+                current_root_stat = os.lstat(snapshot_root)
+                if (
+                    not stat.S_ISDIR(current_root_stat.st_mode)
+                    or _stat_identity(current_root_stat)
+                    != _stat_identity(opened_root_stat)
+                ):
+                    _fail("Snapshot root changed during hashing.")
+            finally:
+                os.close(current_descriptor)
+        except OSError as error:
+            _fail(f"Cannot enumerate snapshot content '{snapshot_root}': {error}")
+    else:
+        def directory_path(relative_parts: tuple[str, ...]) -> Path:
+            return snapshot_root.joinpath(*relative_parts)
+
+        def enter_directory(
+            relative_parts: tuple[str, ...],
+            expected_stat: os.stat_result | None,
+        ) -> _SnapshotWalkFrame:
+            directory = directory_path(relative_parts)
+            try:
+                initial_stat = os.lstat(directory)
+            except OSError as error:
+                _fail(f"Cannot inspect snapshot content '{directory}': {error}")
+            if (
+                not stat.S_ISDIR(initial_stat.st_mode)
+                or _is_link_or_junction(directory)
+            ):
+                _fail(
+                    "Snapshot content may not traverse symbolic links or reparse "
+                    f"points: '{'/'.join(relative_parts)}'."
+                )
+            if expected_stat is not None and (
+                _stat_identity(initial_stat) != _stat_identity(expected_stat)
+                or _stat_metadata(initial_stat) != _stat_metadata(expected_stat)
+            ):
+                _fail("Snapshot content changed during hashing.")
+            manifest: list[tuple[bytes, str]] = []
+            inspected: list[tuple[str, str, bytes, os.stat_result, str]] = []
+            try:
+                with os.scandir(directory) as iterator:
+                    for entry in iterator:
+                        path = Path(entry.path)
+                        relative_text = "/".join((*relative_parts, entry.name))
+                        if _is_link_or_junction(path):
+                            _fail(
+                                "Snapshot content may not contain symbolic links "
+                                f"or reparse points: '{relative_text}'."
+                            )
+                        try:
+                            entry_stat = entry.stat(follow_symlinks=False)
+                        except OSError as error:
+                            _fail(
+                                f"Cannot inspect snapshot content '{path}': {error}"
+                            )
+                        encoded = relative_bytes(relative_text)
+                        kind = entry_kind(entry_stat, relative_text)
+                        account_entry(relative_text, encoded, entry_stat)
+                        manifest.append((encoded, kind))
+                        inspected.append(
+                            (
+                                entry.name,
+                                relative_text,
+                                encoded,
+                                entry_stat,
+                                kind,
+                            )
+                        )
+            except OSError as error:
+                _fail(f"Cannot enumerate snapshot content '{directory}': {error}")
+            manifest.sort()
+            return _SnapshotWalkFrame(
+                relative_parts,
+                initial_stat,
+                manifest,
+                inspected,
+            )
+
+        def hash_path_file(
+            frame: _SnapshotWalkFrame,
+            entry: tuple[str, str, bytes, os.stat_result, str],
+        ) -> None:
+            name, relative_text, encoded, entry_stat, _kind = entry
+            path = directory_path((*frame.relative_parts, name))
+            flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
+            flags |= getattr(os, "O_CLOEXEC", 0)
+            flags |= getattr(os, "O_NONBLOCK", 0)
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            descriptor = -1
+            try:
+                descriptor = os.open(path, flags)
+                opened_stat = os.fstat(descriptor)
+                if (
+                    not stat.S_ISREG(opened_stat.st_mode)
+                    or _stat_identity(opened_stat) != _stat_identity(entry_stat)
+                ):
+                    _fail(
+                        "Snapshot content changed during hashing: "
+                        f"'{relative_text}'."
+                    )
+                file_digest = hash_opened_file(
+                    descriptor,
+                    opened_stat,
+                    relative_text,
+                )
+            except OSError as error:
+                _fail(f"Cannot hash snapshot content '{relative_text}': {error}")
+            finally:
+                if descriptor >= 0:
+                    os.close(descriptor)
+            try:
+                current_stat = os.lstat(path)
+            except OSError as error:
+                _fail(f"Cannot inspect snapshot content '{relative_text}': {error}")
+            if (
+                _is_link_or_junction(path)
+                or not stat.S_ISREG(current_stat.st_mode)
+                or _stat_identity(current_stat) != _stat_identity(entry_stat)
+                or _stat_metadata(current_stat) != _stat_metadata(entry_stat)
+            ):
+                _fail(f"Snapshot content changed during hashing: '{relative_text}'.")
+            if frame.relative_parts or name != SNAPSHOT_PROVENANCE_FILE:
+                records.append((encoded, file_digest))
+
+        def leave_directory(frame: _SnapshotWalkFrame) -> None:
+            directory = directory_path(frame.relative_parts)
+            try:
+                current_directory_stat = os.lstat(directory)
+            except OSError as error:
+                _fail(f"Cannot inspect snapshot content '{directory}': {error}")
+            if (
+                _is_link_or_junction(directory)
+                or not stat.S_ISDIR(current_directory_stat.st_mode)
+                or _stat_identity(current_directory_stat)
+                != _stat_identity(frame.initial_stat)
+                or _stat_metadata(current_directory_stat)
+                != _stat_metadata(frame.initial_stat)
+            ):
+                _fail("Snapshot content tree changed during hashing.")
+            final_manifest: list[tuple[bytes, str]] = []
+            try:
+                with os.scandir(directory) as iterator:
+                    for entry in iterator:
+                        if len(final_manifest) >= len(frame.manifest):
+                            _fail("Snapshot content tree changed during hashing.")
+                        path = Path(entry.path)
+                        relative_text = "/".join(
+                            (*frame.relative_parts, entry.name)
+                        )
+                        if _is_link_or_junction(path):
+                            _fail(
+                                "Snapshot content may not contain symbolic links "
+                                f"or reparse points: '{relative_text}'."
+                            )
+                        entry_stat = entry.stat(follow_symlinks=False)
+                        final_manifest.append(
+                            (
+                                relative_bytes(relative_text),
+                                entry_kind(entry_stat, relative_text),
+                            )
+                        )
+                final_directory_stat = os.lstat(directory)
+            except OSError as error:
+                _fail(f"Cannot enumerate snapshot content '{directory}': {error}")
+            final_manifest.sort()
+            if (
+                _is_link_or_junction(directory)
+                or not stat.S_ISDIR(final_directory_stat.st_mode)
+                or frame.manifest != final_manifest
+                or _stat_identity(final_directory_stat)
+                != _stat_identity(frame.initial_stat)
+                or _stat_metadata(final_directory_stat)
+                != _stat_metadata(frame.initial_stat)
+            ):
+                _fail("Snapshot content tree changed during hashing.")
+
+        stack = [enter_directory((), None)]
+        while stack:
+            frame = stack[-1]
+            if frame.next_entry < len(frame.entries):
+                entry = frame.entries[frame.next_entry]
+                frame.next_entry += 1
+                name, _relative_text, _encoded, entry_stat, kind = entry
+                if kind == "D":
+                    stack.append(
+                        enter_directory(
+                            (*frame.relative_parts, name),
+                            entry_stat,
+                        )
+                    )
+                else:
+                    hash_path_file(frame, entry)
+                continue
+            leave_directory(frame)
+            stack.pop()
+    digest = hashlib.sha256()
+    for relative_bytes, file_sha256 in sorted(records, key=lambda item: item[0]):
+        digest.update(b"F\0")
+        digest.update(relative_bytes)
+        digest.update(b"\0")
+        digest.update(file_sha256.encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _atomic_write_json(
@@ -263,6 +1034,7 @@ def _atomic_write_json(
         for held_lock in locks:
             held_lock.assert_owned()
         os.replace(temporary, path)
+        _invalidate_validated_file_digest(path)
         if os.name != "nt":
             directory = os.open(path.parent, os.O_RDONLY)
             try:
@@ -290,6 +1062,44 @@ def _write_private_json(path: Path, value: Mapping[str, Any]) -> None:
 
 def _openprocess_denied_means_live(last_error: int) -> bool:
     return last_error == WINDOWS_ERROR_ACCESS_DENIED
+
+
+def _publish_json_no_replace(
+    path: Path,
+    value: Mapping[str, Any],
+    *,
+    locks: Sequence[_DirectoryLock],
+) -> bool:
+    temporary = path.with_name(f".{path.name}.tmp-{secrets.token_hex(16)}")
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(_json_bytes(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        for held_lock in locks:
+            held_lock.assert_owned()
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            return False
+        except OSError as error:
+            if os.path.lexists(path):
+                return False
+            _fail(f"Cannot publish runtime slot completion '{path}': {error}")
+        _invalidate_validated_file_digest(path)
+        if os.name != "nt":
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        return True
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
 
 
 def _pid_is_live(pid: int) -> bool:
@@ -963,6 +1773,7 @@ def _assert_receipt_generation(value: Any, name: str) -> None:
         _fail(f"{name} exceeds the portable signed 64-bit maximum.")
 
 
+@_validation_scope
 def validate_namespace_receipt(
     receipt_path: str | os.PathLike[str],
     durable_home: str | os.PathLike[str],
@@ -1110,6 +1921,7 @@ def _resolve_relative_root(plugin_root: Path, relative: str, name: str) -> Path:
     return resolved
 
 
+@_validation_scope
 def validate_context_receipt(
     receipt_path: str | os.PathLike[str],
     durable_home: str | os.PathLike[str],
@@ -1455,6 +2267,7 @@ def _without_mutation_fields(receipt: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+@_validation_scope
 def stamp_context(
     *,
     payload_version: str,
@@ -1901,6 +2714,7 @@ def _validate_snapshot_provenance(
     }
 
 
+@_validation_scope
 def validate_snapshot_provenance(
     *,
     context: str | os.PathLike[str],
@@ -1927,6 +2741,7 @@ def validate_snapshot_provenance(
     )
 
 
+@_validation_scope
 def stamp_snapshot_provenance(
     *,
     context: str | os.PathLike[str],
@@ -2309,6 +3124,7 @@ def _validated_runtime_slot_ownership(
     }
 
 
+@_validation_scope
 def validate_runtime_slot_ownership(
     *,
     context: str | os.PathLike[str],
@@ -2363,6 +3179,7 @@ def validate_runtime_slot_ownership(
     )
 
 
+@_validation_scope
 def provision_runtime_slot(
     *,
     context: str | os.PathLike[str],
@@ -2522,6 +3339,527 @@ def provision_runtime_slot(
         return result
 
 
+def _runtime_slot_completion_paths(
+    validated: Mapping[str, Any],
+    runtime_version: str,
+) -> tuple[Path, Path, Path, Path]:
+    _, slot_root, ownership_path = _runtime_slot_paths(
+        validated,
+        runtime_version,
+        require_existing=True,
+    )
+    build_path = slot_root / BUILD_COMPLETION_FILE
+    completion_path = slot_root / RUNTIME_SLOT_COMPLETION_FILE
+    if _is_link_or_junction(completion_path):
+        _fail("Runtime slot completion may not be a symbolic link or reparse point.")
+    return slot_root, ownership_path, build_path, completion_path
+
+
+def _read_regular_json_object(
+    path: Path,
+    *,
+    label: str,
+    required_keys: set[str],
+    require_stable_identity: bool = False,
+) -> tuple[dict[str, Any], str]:
+    if not os.path.lexists(path):
+        _fail(f"{label} must exist.")
+    if _is_link_or_junction(path):
+        _fail(f"{label} may not be a symbolic link or reparse point.")
+    actual = canonical_path(path, must_exist=True)
+    if not paths_equal(actual, path):
+        _fail(f"{label} is not at its exact canonical location '{path}'.")
+    try:
+        content, _validated_stat = _read_regular_file(
+            actual,
+            label=label,
+            require_stable_identity=require_stable_identity,
+        )
+    except OSError as error:
+        _fail(f"Cannot read {label.lower()} '{actual}': {error}")
+    try:
+        value = json.loads(
+            content.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (UnicodeError, json.JSONDecodeError) as error:
+        _fail(f"Invalid JSON in '{actual}': {error}")
+    if not isinstance(value, Mapping):
+        _fail(f"{label} must be a JSON object.")
+    if set(value) != required_keys:
+        _fail(f"{label} contains unknown or missing fields.")
+    digest = hashlib.sha256(content).hexdigest()
+    return dict(value), digest
+
+
+def _validated_build_completion(
+    build_path: Path,
+    runtime_version: str,
+    snapshot_content_sha256: str,
+) -> dict[str, Any]:
+    build, receipt_sha256 = _read_regular_json_object(
+        build_path,
+        label="Build completion evidence",
+        required_keys={"version", "completed_at", "pid", "payload_hash"},
+    )
+    version = build["version"]
+    if not isinstance(version, str) or version != runtime_version:
+        _fail("Build completion evidence version must match the runtime version.")
+    completed_at = build["completed_at"]
+    _parse_rfc3339_utc(completed_at, "build completion completed_at")
+    pid = build["pid"]
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid < 0
+        or pid > MAX_RECEIPT_PID
+    ):
+        _fail(
+            "Build completion evidence pid must be an integer from 0 through "
+            f"{MAX_RECEIPT_PID}."
+        )
+    payload_hash = build["payload_hash"]
+    if not isinstance(payload_hash, str) or LOWER_SHA256.fullmatch(payload_hash) is None:
+        _fail("Build completion evidence payload_hash must be lowercase 64-hex.")
+    if payload_hash != snapshot_content_sha256:
+        _fail(
+            "Build completion evidence payload_hash does not match the snapshot "
+            "content digest."
+        )
+    return {
+        "path": str(build_path),
+        "receiptSha256": receipt_sha256,
+        "payloadSha256": payload_hash,
+        "pid": pid,
+        "completedAt": completed_at,
+        "value": build,
+    }
+
+
+def _runtime_slot_completion_value(
+    validated: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    ownership: Mapping[str, Any],
+    build: Mapping[str, Any],
+    runtime_version: str,
+    slot_root: Path,
+    snapshot_content_sha256: str,
+) -> dict[str, Any]:
+    ownership_path = Path(_string_property(ownership, "ownership"))
+    return {
+        "schema": RUNTIME_SLOT_COMPLETION_SCHEMA,
+        "marketplaceId": _string_property(validated, "marketplaceId"),
+        "pluginId": _string_property(validated, "pluginId"),
+        "sourceFingerprint": _string_property(validated, "sourceFingerprint"),
+        "runtime": {
+            "version": runtime_version,
+            "root": str(slot_root),
+        },
+        "snapshot": {
+            "id": _string_property(snapshot, "snapshotId"),
+            "provenance": _string_property(snapshot, "provenance"),
+            "provenanceSha256": _sha256_file(
+                Path(_string_property(snapshot, "provenance"))
+            ),
+            "contentSha256": snapshot_content_sha256,
+        },
+        "ownership": {
+            "path": str(ownership_path),
+            "sha256": _sha256_file(ownership_path),
+        },
+        "build": {
+            "receipt": _string_property(build, "path"),
+            "receiptSha256": _string_property(build, "receiptSha256"),
+            "payloadSha256": _string_property(build, "payloadSha256"),
+            "pid": _property(build, "pid"),
+        },
+        "namespaceReceipt": {
+            "path": _string_property(ownership, "namespaceReceipt"),
+            "generation": _property(ownership, "namespaceGeneration"),
+        },
+        "installReceipt": {
+            "path": _string_property(ownership, "installReceipt"),
+            "generation": _property(ownership, "installGeneration"),
+        },
+        "completedAt": _string_property(build, "completedAt"),
+    }
+
+
+def _validated_runtime_slot_completion(
+    validated: Mapping[str, Any],
+    snapshot: Mapping[str, Any],
+    ownership: Mapping[str, Any],
+    runtime_version: str,
+) -> dict[str, Any]:
+    slot_root, ownership_path, build_path, completion_path = (
+        _runtime_slot_completion_paths(validated, runtime_version)
+    )
+    snapshot_content_sha256 = _snapshot_content_sha256(
+        Path(_string_property(snapshot, "snapshotRoot"))
+    )
+    completion, _ = _read_regular_json_object(
+        completion_path,
+        label="Runtime slot completion",
+        require_stable_identity=True,
+        required_keys={
+            "schema",
+            "marketplaceId",
+            "pluginId",
+            "sourceFingerprint",
+            "runtime",
+            "snapshot",
+            "ownership",
+            "build",
+            "namespaceReceipt",
+            "installReceipt",
+            "completedAt",
+        },
+    )
+    nested_shapes = (
+        ("runtime", {"version", "root"}),
+        ("snapshot", {"id", "provenance", "provenanceSha256", "contentSha256"}),
+        ("ownership", {"path", "sha256"}),
+        ("build", {"receipt", "receiptSha256", "payloadSha256", "pid"}),
+        ("namespaceReceipt", {"path", "generation"}),
+        ("installReceipt", {"path", "generation"}),
+    )
+    for name, keys in nested_shapes:
+        nested = completion[name]
+        if not isinstance(nested, Mapping) or set(nested) != keys:
+            _fail(f"Runtime slot completion {name} contains unknown or missing fields.")
+    if completion["schema"] != RUNTIME_SLOT_COMPLETION_SCHEMA:
+        _fail("Runtime slot completion has an unsupported schema.")
+    _parse_rfc3339_utc(
+        completion["completedAt"],
+        "runtime slot completion completedAt",
+    )
+    for container_name, key in (
+        ("namespaceReceipt", "generation"),
+        ("installReceipt", "generation"),
+    ):
+        _assert_receipt_generation(
+            completion[container_name][key],
+            f"runtime slot completion {container_name} generation",
+        )
+    for container_name, fields in (
+        ("snapshot", ("provenanceSha256", "contentSha256")),
+        ("ownership", ("sha256",)),
+        ("build", ("receiptSha256", "payloadSha256")),
+    ):
+        for field in fields:
+            value = completion[container_name][field]
+            if not isinstance(value, str) or LOWER_SHA256.fullmatch(value) is None:
+                _fail(
+                    f"Runtime slot completion {container_name}.{field} must be "
+                    "lowercase 64-hex."
+                )
+    pid = completion["build"]["pid"]
+    if (
+        isinstance(pid, bool)
+        or not isinstance(pid, int)
+        or pid < 0
+        or pid > MAX_RECEIPT_PID
+    ):
+        _fail(
+            "Runtime slot completion build.pid must be an integer from 0 through "
+            f"{MAX_RECEIPT_PID}."
+        )
+    expected_paths = {
+        ("runtime", "root"): str(slot_root),
+        ("snapshot", "provenance"): _string_property(snapshot, "provenance"),
+        ("ownership", "path"): str(ownership_path),
+        ("build", "receipt"): str(build_path),
+        ("namespaceReceipt", "path"): _string_property(
+            ownership, "namespaceReceipt"
+        ),
+        ("installReceipt", "path"): _string_property(ownership, "installReceipt"),
+    }
+    path_fields = (
+        ("runtime", "root"),
+        ("snapshot", "provenance"),
+        ("ownership", "path"),
+        ("build", "receipt"),
+        ("namespaceReceipt", "path"),
+        ("installReceipt", "path"),
+    )
+    for container_name, key in path_fields:
+        recorded = completion[container_name][key]
+        if not isinstance(recorded, str) or not _path_is_fully_qualified(recorded):
+            _fail(
+                f"Runtime slot completion {container_name}.{key} must be absolute."
+            )
+        if recorded != expected_paths[(container_name, key)]:
+            _fail(
+                "Runtime slot completion does not match the validated snapshot, "
+                "ownership, and installation receipts."
+            )
+    if (
+        completion["marketplaceId"] != _string_property(validated, "marketplaceId")
+        or completion["pluginId"] != _string_property(validated, "pluginId")
+        or completion["sourceFingerprint"]
+        != _string_property(validated, "sourceFingerprint")
+        or completion["runtime"]["version"] != runtime_version
+        or completion["snapshot"]["id"] != _string_property(snapshot, "snapshotId")
+        or completion["snapshot"]["provenanceSha256"]
+        != _sha256_file(Path(_string_property(snapshot, "provenance")))
+        or completion["snapshot"]["contentSha256"] != snapshot_content_sha256
+        or completion["ownership"]["sha256"] != _sha256_file(ownership_path)
+        or completion["build"]["payloadSha256"] != snapshot_content_sha256
+        or completion["namespaceReceipt"]["generation"]
+        != _property(ownership, "namespaceGeneration")
+        or completion["installReceipt"]["generation"]
+        != _property(ownership, "installGeneration")
+    ):
+        _fail(
+            "Runtime slot completion does not match the validated snapshot, "
+            "ownership, and installation receipts."
+        )
+    return {
+        "action": "slot-completion-validate",
+        "status": "ready",
+        "reason": "runtime-slot-completion-valid",
+        "slotRoot": str(slot_root),
+        "runtimeVersion": runtime_version,
+        "ownership": str(ownership_path),
+        "completion": str(completion_path),
+        "buildReceipt": str(build_path),
+        "receipt": completion,
+        "snapshotId": _string_property(snapshot, "snapshotId"),
+        "snapshotProvenance": _string_property(snapshot, "provenance"),
+        "marketplaceId": _string_property(validated, "marketplaceId"),
+        "pluginId": _string_property(validated, "pluginId"),
+        "sourceFingerprint": _string_property(validated, "sourceFingerprint"),
+        "namespaceReceipt": _string_property(ownership, "namespaceReceipt"),
+        "installReceipt": _string_property(ownership, "installReceipt"),
+        "namespaceGeneration": _property(ownership, "namespaceGeneration"),
+        "installGeneration": _property(ownership, "installGeneration"),
+        "completedAt": completion["completedAt"],
+        "payloadSha256": completion["build"]["payloadSha256"],
+        "activated": False,
+        "operative": False,
+    }
+
+
+@_validation_scope
+def validate_runtime_slot_completion(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    expected_payload_root: str | os.PathLike[str],
+    expected_payload_version: str,
+    snapshot_id: str,
+    runtime_version: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Validate immutable runtime build completion without activating the slot."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    _assert_runtime_version(runtime_version)
+    if not _path_is_fully_qualified(expected_payload_root):
+        _fail("Expected snapshot payload root must be absolute.")
+    if not isinstance(expected_payload_version, str) or not expected_payload_version.strip():
+        _fail("Expected snapshot payload version must be a non-empty string.")
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Runtime slot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    snapshot = _validate_snapshot_provenance(
+        context=context_path,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        snapshot_id=snapshot_id,
+        expected_payload_root=expected_payload_root,
+        expected_payload_version=expected_payload_version,
+        durable_home=durable,
+        environment={},
+        require_current_receipts=False,
+    )
+    ownership = _validated_runtime_slot_ownership(
+        validated,
+        snapshot,
+        runtime_version,
+    )
+    return _validated_runtime_slot_completion(
+        validated,
+        snapshot,
+        ownership,
+        runtime_version,
+    )
+
+
+@_validation_scope
+def complete_runtime_slot(
+    *,
+    context: str | os.PathLike[str],
+    expected_marketplace_id: str,
+    expected_plugin_id: str,
+    expected_payload_root: str | os.PathLike[str],
+    expected_payload_version: str,
+    snapshot_id: str,
+    runtime_version: str,
+    durable_home: str | os.PathLike[str] | None = None,
+    environment: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Publish immutable runtime build completion without activating the slot."""
+
+    _validate_marketplace_id(expected_marketplace_id)
+    _assert_plugin_id(expected_plugin_id)
+    _assert_snapshot_id(snapshot_id)
+    _assert_runtime_version(runtime_version)
+    if not _path_is_fully_qualified(expected_payload_root):
+        _fail("Expected snapshot payload root must be absolute.")
+    if not isinstance(expected_payload_version, str) or not expected_payload_version.strip():
+        _fail("Expected snapshot payload version must be a non-empty string.")
+    caller_environment = environment if environment is not None else os.environ
+    if durable_home is not None and not _path_is_fully_qualified(durable_home):
+        _fail("--durable-home must be absolute.")
+    durable = canonical_path(
+        durable_home
+        or Path(caller_environment.get("HOME") or Path.home())
+        / ".copilot-extensions"
+    )
+    context_path = Path(context)
+    if not _path_is_fully_qualified(context_path):
+        _fail("Runtime slot context must be absolute.")
+    validated = validate_context_receipt(
+        context_path,
+        durable,
+        expected_marketplace_id=expected_marketplace_id,
+        expected_plugin_id=expected_plugin_id,
+        environment={},
+    )
+    cell_root = canonical_path(_string_property(validated, "cellRoot"))
+    genesis_lock = _DirectoryLock(
+        durable
+        / "marketplaces"
+        / ".locks"
+        / f"{expected_marketplace_id}.genesis",
+        kind="genesis",
+        marketplace_id=expected_marketplace_id,
+        timeout_seconds=RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS,
+    )
+    install_lock = _DirectoryLock(
+        cell_root / ".locks" / f"{expected_plugin_id}.install.lock",
+        kind="install",
+        marketplace_id=expected_marketplace_id,
+        plugin_id=expected_plugin_id,
+        timeout_seconds=RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS,
+    )
+    with genesis_lock, install_lock:
+        validated = validate_context_receipt(
+            context_path,
+            durable,
+            expected_marketplace_id=expected_marketplace_id,
+            expected_plugin_id=expected_plugin_id,
+            expected_cell_root=cell_root,
+            environment={},
+        )
+        slot_root, _, build_path, completion_path = _runtime_slot_completion_paths(
+            validated,
+            runtime_version,
+        )
+        if os.path.lexists(completion_path):
+            snapshot = _validate_snapshot_provenance(
+                context=context_path,
+                expected_marketplace_id=expected_marketplace_id,
+                expected_plugin_id=expected_plugin_id,
+                snapshot_id=snapshot_id,
+                expected_payload_root=expected_payload_root,
+                expected_payload_version=expected_payload_version,
+                durable_home=durable,
+                environment={},
+                require_current_receipts=False,
+            )
+            ownership = _validated_runtime_slot_ownership(
+                validated,
+                snapshot,
+                runtime_version,
+            )
+            result = _validated_runtime_slot_completion(
+                validated,
+                snapshot,
+                ownership,
+                runtime_version,
+            )
+            created = False
+        else:
+            snapshot = _validate_snapshot_provenance(
+                context=context_path,
+                expected_marketplace_id=expected_marketplace_id,
+                expected_plugin_id=expected_plugin_id,
+                snapshot_id=snapshot_id,
+                expected_payload_root=expected_payload_root,
+                expected_payload_version=expected_payload_version,
+                durable_home=durable,
+                environment={},
+                require_current_receipts=True,
+            )
+            ownership = _validated_runtime_slot_ownership(
+                validated,
+                snapshot,
+                runtime_version,
+            )
+            snapshot_content_sha256 = _snapshot_content_sha256(
+                Path(_string_property(snapshot, "snapshotRoot"))
+            )
+            build = _validated_build_completion(
+                build_path,
+                runtime_version,
+                snapshot_content_sha256,
+            )
+            desired = _runtime_slot_completion_value(
+                validated,
+                snapshot,
+                ownership,
+                build,
+                runtime_version,
+                slot_root,
+                snapshot_content_sha256,
+            )
+            confirmed_snapshot_content_sha256 = _snapshot_content_sha256(
+                Path(_string_property(snapshot, "snapshotRoot"))
+            )
+            if confirmed_snapshot_content_sha256 != snapshot_content_sha256:
+                _fail("Snapshot content changed before completion publication.")
+            created = _publish_json_no_replace(
+                completion_path,
+                desired,
+                locks=(genesis_lock, install_lock),
+            )
+            result = _validated_runtime_slot_completion(
+                validated,
+                snapshot,
+                ownership,
+                runtime_version,
+            )
+        result["action"] = "slot-complete"
+        result["reason"] = (
+            "runtime-slot-completion-published"
+            if created
+            else "runtime-slot-completion-current"
+        )
+        result["created"] = created
+        return result
+
+
 def _find_existing_source(
     durable_home: Path,
     fingerprint: str,
@@ -2564,6 +3902,7 @@ def _find_existing_source(
     return results
 
 
+@_validation_scope
 def resolve_context(
     *,
     payload_root: str | os.PathLike[str] | None = None,
@@ -3192,6 +4531,7 @@ def _activation_result(
         return result
 
 
+@_validation_scope
 def compare_and_swap_activation(
     *,
     context: str | os.PathLike[str],
@@ -3630,6 +4970,7 @@ def _trusted_plugin_id(
     return None
 
 
+@_validation_scope
 def resolve_installation_mode(
     *,
     legacy_root: str | os.PathLike[str],
@@ -3876,6 +5217,7 @@ def resolve_installation_mode(
     }
 
 
+@_validation_scope
 def probe_legacy_entrypoint(**arguments: Any) -> dict[str, Any]:
     """Resolve installation mode and decide whether legacy mutation is allowed."""
 
@@ -4126,6 +5468,40 @@ def _build_parser() -> argparse.ArgumentParser:
     slot_validate_parser.add_argument("--expected-payload-version")
     slot_validate_parser.add_argument("--durable-home")
 
+    slot_complete_parser = subparsers.add_parser("slot-complete")
+    slot_complete_parser.add_argument("--context", required=True)
+    slot_complete_parser.add_argument("--expected-marketplace-id", required=True)
+    slot_complete_parser.add_argument("--expected-plugin-id", required=True)
+    slot_complete_parser.add_argument("--expected-payload-root", required=True)
+    slot_complete_parser.add_argument("--expected-payload-version", required=True)
+    slot_complete_parser.add_argument("--snapshot-id", required=True)
+    slot_complete_parser.add_argument("--runtime-version", required=True)
+    slot_complete_parser.add_argument("--durable-home")
+
+    slot_completion_validate_parser = subparsers.add_parser(
+        "slot-completion-validate"
+    )
+    slot_completion_validate_parser.add_argument("--context", required=True)
+    slot_completion_validate_parser.add_argument(
+        "--expected-marketplace-id",
+        required=True,
+    )
+    slot_completion_validate_parser.add_argument(
+        "--expected-plugin-id",
+        required=True,
+    )
+    slot_completion_validate_parser.add_argument(
+        "--expected-payload-root",
+        required=True,
+    )
+    slot_completion_validate_parser.add_argument(
+        "--expected-payload-version",
+        required=True,
+    )
+    slot_completion_validate_parser.add_argument("--snapshot-id", required=True)
+    slot_completion_validate_parser.add_argument("--runtime-version", required=True)
+    slot_completion_validate_parser.add_argument("--durable-home")
+
     status_parser = subparsers.add_parser("status")
     _add_mode_arguments(status_parser)
 
@@ -4255,6 +5631,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                 runtime_version=arguments.runtime_version,
                 expected_payload_root=arguments.expected_payload_root,
                 expected_payload_version=arguments.expected_payload_version,
+                durable_home=arguments.durable_home,
+            )
+        elif arguments.action == "slot-complete":
+            result = complete_runtime_slot(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                expected_payload_root=arguments.expected_payload_root,
+                expected_payload_version=arguments.expected_payload_version,
+                snapshot_id=arguments.snapshot_id,
+                runtime_version=arguments.runtime_version,
+                durable_home=arguments.durable_home,
+            )
+        elif arguments.action == "slot-completion-validate":
+            result = validate_runtime_slot_completion(
+                context=arguments.context,
+                expected_marketplace_id=arguments.expected_marketplace_id,
+                expected_plugin_id=arguments.expected_plugin_id,
+                expected_payload_root=arguments.expected_payload_root,
+                expected_payload_version=arguments.expected_payload_version,
+                snapshot_id=arguments.snapshot_id,
+                runtime_version=arguments.runtime_version,
                 durable_home=arguments.durable_home,
             )
         else:

@@ -5,12 +5,14 @@ import hashlib
 import importlib.util
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 from typing import Any
 
@@ -21,6 +23,14 @@ PYTHON_SCRIPT = LIB / "installation_context.py"
 POSIX_SCRIPT = LIB / "installation-context.sh"
 POWERSHELL = shutil.which("pwsh") or shutil.which("powershell")
 FIXTURES = LIB / "fixtures" / "source-identities.json"
+BUILD_PID_ERROR = (
+    "build completion evidence pid must be an integer from 0 through "
+    "9223372036854775807"
+)
+IMMUTABLE_PID_ERROR = (
+    "runtime slot completion build.pid must be an integer from 0 through "
+    "9223372036854775807"
+)
 Runner = tuple[str, tuple[str, ...], str]
 
 
@@ -237,7 +247,12 @@ def _command(
                 str(expected_install_generation),
             ]
         )
-    if action in {"slot-provision", "slot-validate"}:
+    if action in {
+        "slot-provision",
+        "slot-validate",
+        "slot-complete",
+        "slot-completion-validate",
+    }:
         command.extend(
             [
                 _flag(style, "runtime-version"),
@@ -389,6 +404,104 @@ def _provision_slot_with_python(
         durable_home=layout["durable"],
         environment={},
     )
+
+
+def _payload_version(layout: dict[str, Path | str]) -> str:
+    install = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
+    return str(install["payload"]["version"])
+
+
+def _snapshot_content_digest(snapshot_root: Path) -> str:
+    records: list[tuple[bytes, str]] = []
+    for directory, directory_names, file_names in os.walk(
+        snapshot_root,
+        followlinks=False,
+    ):
+        directory_path = Path(directory)
+        for name in directory_names:
+            assert not (directory_path / name).is_symlink()
+        for name in file_names:
+            path = directory_path / name
+            relative = path.relative_to(snapshot_root).as_posix()
+            if relative == "snapshot-provenance.json":
+                continue
+            records.append(
+                (
+                    relative.encode("utf-8"),
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+            )
+    digest = hashlib.sha256()
+    for relative, file_digest in sorted(records):
+        digest.update(b"F\0")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(file_digest.encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
+
+
+def _build_receipt(
+    layout: dict[str, Path | str],
+    *,
+    runtime_version: str = "3.4.5",
+    completed_at: str = "2026-01-02T03:04:05Z",
+    pid: object = 123,
+    payload_hash: object | None = None,
+) -> Path:
+    path = (
+        Path(layout["plugin_root"])
+        / "versions"
+        / runtime_version
+        / ".install-complete.json"
+    )
+    _write_json(
+        path,
+        {
+            "version": runtime_version,
+            "completed_at": completed_at,
+            "pid": pid,
+            "payload_hash": (
+                payload_hash
+                if payload_hash is not None
+                else _snapshot_content_digest(Path(layout["snapshot_root"]))
+            ),
+        },
+    )
+    return path
+
+
+def _run_completion(
+    runner: Runner,
+    action: str,
+    layout: dict[str, Path | str],
+    *,
+    runtime_version: str = "3.4.5",
+    expected_payload_root: Path | None = None,
+    expected_payload_version: str | None = None,
+    environment_overrides: dict[str, str] | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return _run_slot(
+        runner,
+        action,
+        layout,
+        runtime_version=runtime_version,
+        expected_payload_root=expected_payload_root or Path(layout["payload"]),
+        expected_payload_version=expected_payload_version or _payload_version(layout),
+        environment_overrides=environment_overrides,
+        check=check,
+    )
+
+
+def _prepare_completion_slot(
+    layout: dict[str, Path | str],
+    *,
+    runtime_version: str = "3.4.5",
+) -> Path:
+    _stamp_with_python(layout)
+    _provision_slot_with_python(layout, runtime_version=runtime_version)
+    return _build_receipt(layout, runtime_version=runtime_version)
 
 
 def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes]]:
@@ -553,9 +666,306 @@ def _installed_exemplar(
         home / ".copilot" / "installed-plugins" / "example--0123456789abcdef" / source_plugin.name
     )
     if not installed_plugin.exists():
-        shutil.copytree(source_plugin, installed_plugin)
+        shutil.copytree(
+            source_plugin,
+            installed_plugin,
+            ignore=shutil.ignore_patterns(
+                ".pytest_cache",
+                ".ruff_cache",
+                "__pycache__",
+                "*.pyc",
+            ),
+        )
     installed_script = installed_plugin / source_script.relative_to(source_plugin)
     return (*prefix[:-1], str(installed_script)), installed_plugin, home
+
+
+def _function_source(
+    script: Path,
+    start: str,
+    following: str,
+) -> str:
+    source = script.read_text(encoding="utf-8")
+    begin = source.index(start)
+    end = source.index(following, begin)
+    return source[begin:end].rstrip() + "\n"
+
+
+def _activation_tail_source(script: Path, plugin_id: str, style: str) -> str:
+    source = script.read_text(encoding="utf-8")
+    if style == "powershell":
+        call = source.rindex("Invoke-VersionedMarkComplete\n")
+        following = (
+            "\n    Write-Ok "
+            if plugin_id == "agent-machines"
+            else "\n    Write-Manifest"
+        )
+    else:
+        call = source.rindex("_versioned_mark_complete\n")
+        following = (
+            "\n    _ok "
+            if plugin_id == "agent-machines"
+            else "\n    _write_manifest"
+        )
+    start = source.rfind("\n", 0, call) + 1
+    return source[start : source.index(following, start)].rstrip() + "\n"
+
+
+def _run_exemplar_mark_complete(
+    exemplar: tuple[str, tuple[str, ...], str],
+    installed_plugin: Path,
+    layout: dict[str, Path | str],
+    tmp_path: Path,
+    *,
+    runtime_version: str,
+    python_executable: str | None = None,
+    activation_sentinel: Path | None = None,
+    environment_overrides: dict[str, str] | None = None,
+    powershell_preamble: str = "",
+) -> subprocess.CompletedProcess[str]:
+    _, _, style = exemplar
+    producer = tmp_path / f"producer-{installed_plugin.name}-{style}"
+    producer.mkdir()
+    source_script = installed_plugin / "scripts" / (
+        ("init.ps1" if style == "powershell" else "init.sh")
+        if installed_plugin.name == "agent-machines"
+        else ("install.ps1" if style == "powershell" else "install.sh")
+    )
+    powershell_sentinel = (
+        str(activation_sentinel).replace("'", "''")
+        if activation_sentinel is not None
+        else ""
+    )
+    if style == "powershell":
+        harness = producer / "producer.ps1"
+        shutil.copyfile(
+            installed_plugin / "scripts" / "versioned_runtime.py",
+            producer / "versioned_runtime.py",
+        )
+        harness.write_text(
+            "\n".join(
+                (
+                    "param(",
+                    "    [Parameter(Mandatory = $true)][string]$PayloadRoot,",
+                    "    [Parameter(Mandatory = $true)][string]$RuntimeRoot,",
+                    "    [Parameter(Mandatory = $true)][string]$RuntimeVersion,",
+                    "    [Parameter(Mandatory = $true)][string]$Python",
+                    ")",
+                    "Set-StrictMode -Version 2.0",
+                    "$ErrorActionPreference = 'Stop'",
+                    "$PluginDir = $PayloadRoot",
+                    "$InstallDir = $RuntimeRoot",
+                    "$LinkDir = Join-Path $InstallDir '.venv'",
+                    "$SrcVersion = $RuntimeVersion",
+                    "$VersionedRuntime = $true",
+                    "$VenvPython = $Python",
+                    "$VrScript = Join-Path $PSScriptRoot 'versioned_runtime.py'",
+                    "function Get-BootstrapPython { return $Python }",
+                    "function Write-Fail([string]$Message) { throw $Message }",
+                    "function Write-Ok([string]$Message) {}",
+                    (
+                        "function Invoke-VersionedActivate { "
+                        f"[IO.File]::WriteAllText('{powershell_sentinel}', 'activated'); "
+                        "return $true }"
+                        if activation_sentinel is not None
+                        and installed_plugin.name == "agent-index"
+                        else ""
+                    ),
+                    _function_source(
+                        source_script,
+                        "function Get-PayloadHash(",
+                        "\nfunction Invoke-VersionedSlotClean",
+                    ).rstrip(),
+                    _function_source(
+                        source_script,
+                        "function Invoke-VersionedMarkComplete {",
+                        "\n# === end install-contract:v4 marker/toss helpers",
+                    ).rstrip(),
+                    powershell_preamble,
+                    (
+                        _activation_tail_source(
+                            source_script,
+                            installed_plugin.name,
+                            style,
+                        ).rstrip()
+                        if activation_sentinel is not None
+                        else "Invoke-VersionedMarkComplete"
+                    ),
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        command = [
+            str(POWERSHELL),
+            "-NoProfile",
+            "-File",
+            str(harness),
+            "-PayloadRoot",
+            str(installed_plugin),
+            "-RuntimeRoot",
+            str(layout["plugin_root"]),
+            "-RuntimeVersion",
+            runtime_version,
+            "-Python",
+            python_executable or sys.executable,
+        ]
+    else:
+        harness = producer / "producer.sh"
+        harness.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env bash",
+                    "set -euo pipefail",
+                    f"PLUGIN_DIR={shlex.quote(str(installed_plugin))}",
+                    f"SCRIPT_DIR={shlex.quote(str(installed_plugin / 'scripts'))}",
+                    f"INSTALL_DIR={shlex.quote(str(layout['plugin_root']))}",
+                    'LINK_DIR="$INSTALL_DIR/.venv"',
+                    f"SRC_VERSION={shlex.quote(runtime_version)}",
+                    "VERSIONED_RUNTIME=1",
+                    f"PYTHON={shlex.quote(python_executable or sys.executable)}",
+                    'VENV_PYTHON="$PYTHON"',
+                    'VR_SCRIPT="$SCRIPT_DIR/versioned_runtime.py"',
+                    "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                    "_ok() { :; }",
+                    "_bootstrap_python() { printf '%s\\n' \"$PYTHON\"; }",
+                    (
+                        "_versioned_activate() { "
+                        f"printf activated >{shlex.quote(str(activation_sentinel))}; }}"
+                        if activation_sentinel is not None
+                        and installed_plugin.name == "agent-index"
+                        else ""
+                    ),
+                    _function_source(
+                        source_script,
+                        "_payload_hash() {",
+                        "\n_versioned_slot_clean()",
+                    ).rstrip(),
+                    _function_source(
+                        source_script,
+                        "_versioned_mark_complete() {",
+                        "\necho ''",
+                    ).rstrip()
+                    if installed_plugin.name == "agent-machines"
+                    else _function_source(
+                        source_script,
+                        "_versioned_mark_complete() {",
+                        "\n# === install-contract:v4 source-kind",
+                    ).rstrip(),
+                    (
+                        _activation_tail_source(
+                            source_script,
+                            installed_plugin.name,
+                            style,
+                        ).rstrip()
+                        if activation_sentinel is not None
+                        else "_versioned_mark_complete"
+                    ),
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        harness.chmod(0o755)
+        command = ("bash", str(harness))
+    environment = os.environ.copy()
+    if environment_overrides:
+        environment.update(environment_overrides)
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=environment,
+        check=False,
+    )
+
+
+def _run_exemplar_payload_hash(
+    exemplar: tuple[str, tuple[str, ...], str],
+    payload_root: Path,
+    work_root: Path,
+    *,
+    max_entries: int,
+    max_path_bytes: int,
+    max_content_bytes: int,
+) -> subprocess.CompletedProcess[str]:
+    _, prefix, style = exemplar
+    source_script = Path(prefix[-1])
+    harness_root = work_root / f"payload-hash-{source_script.parent.parent.name}-{style}"
+    harness_root.mkdir(parents=True)
+    if style == "powershell":
+        harness = harness_root / "hash.ps1"
+        harness.write_text(
+            "\n".join(
+                (
+                    "param([string]$PayloadRoot)",
+                    "$ErrorActionPreference = 'Stop'",
+                    "$PluginDir = $PayloadRoot",
+                    _function_source(
+                        source_script,
+                        "function Get-PayloadHash(",
+                        "\nfunction Invoke-VersionedSlotClean",
+                    ).rstrip(),
+                    (
+                        "Get-PayloadHash "
+                        f"-MaxEntries {max_entries} "
+                        f"-MaxPathBytes {max_path_bytes} "
+                        f"-MaxContentBytes {max_content_bytes}"
+                    ),
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        command = (
+            str(POWERSHELL),
+            "-NoProfile",
+            "-File",
+            str(harness),
+            "-PayloadRoot",
+            str(payload_root),
+        )
+    else:
+        harness = harness_root / "hash.sh"
+        harness.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env bash",
+                    "set -euo pipefail",
+                    f"PLUGIN_DIR={shlex.quote(str(payload_root))}",
+                    "_fail() { printf '%s\\n' \"$1\" >&2; }",
+                    _function_source(
+                        source_script,
+                        "_payload_hash() {",
+                        "\n_versioned_slot_clean()",
+                    ).rstrip(),
+                    (
+                        "_payload_hash "
+                        f"{max_entries} {max_path_bytes} {max_content_bytes}"
+                    ),
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        harness.chmod(0o755)
+        command = ("bash", str(harness))
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+
+def _payload_file_bytes(root: Path) -> dict[str, bytes]:
+    return {
+        path.relative_to(root).as_posix(): path.read_bytes()
+        for path in root.rglob("*")
+        if path.is_file()
+    }
 
 
 @pytest.mark.parametrize(
@@ -563,7 +973,7 @@ def _installed_exemplar(
     EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
-def test_exemplar_slot_actions_delegate_without_legacy_or_activation_mutation(
+def test_exemplar_marker_writer_failure_prevents_activation_tail(
     exemplar: tuple[str, tuple[str, ...], str],
     tmp_path: Path,
 ) -> None:
@@ -582,6 +992,96 @@ def test_exemplar_slot_actions_delegate_without_legacy_or_activation_mutation(
         snapshot_id=version,
         payload_root=installed_plugin,
     )
+    slot = Path(layout["plugin_root"]) / "versions" / version
+    slot.mkdir(parents=True)
+    activation_sentinel = tmp_path / "activation-reached"
+    dispatcher_source = tmp_path / "completion-writer-dispatch.py"
+    dispatcher_source.write_text(
+        "\n".join(
+            (
+                "from pathlib import Path",
+                "import sys",
+                f"sentinel = Path({str(activation_sentinel)!r})",
+                "if 'activate' in sys.argv:",
+                "    sentinel.write_text('activated', encoding='utf-8')",
+                "    raise SystemExit(0)",
+                "if 'mark-complete' in sys.argv:",
+                "    raise SystemExit(23)",
+                "raise SystemExit(0)",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    if os.name == "nt":
+        failing_writer = tmp_path / "completion-writer.cmd"
+        failing_writer.write_text(
+            f'@"{sys.executable}" "{dispatcher_source}" %*\r\n',
+            encoding="utf-8",
+        )
+    else:
+        failing_writer = tmp_path / "completion-writer"
+        failing_writer.write_text(
+            f"#!{sys.executable}\n"
+            + dispatcher_source.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        failing_writer.chmod(0o755)
+
+    result = _run_exemplar_mark_complete(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+        runtime_version=version,
+        python_executable=str(failing_writer),
+        activation_sentinel=activation_sentinel,
+    )
+
+    assert result.returncode != 0
+    assert not activation_sentinel.exists()
+    assert not (slot / ".install-complete.json").exists()
+    assert not (Path(layout["plugin_root"]) / "current-version").exists()
+    assert not (Path(layout["plugin_root"]) / "last-known-good").exists()
+    assert not (Path(layout["plugin_root"]) / "installation-activation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, style = exemplar
+    plugin_root = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (plugin_root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    (installed_plugin / ".payload-hash-dotfile").write_bytes(b"hidden payload\n")
+    nested = installed_plugin / "payload-hash-fixtures"
+    nested.mkdir()
+    (nested / "snapshot-provenance.json").write_bytes(b"nested payload\n")
+    (nested / "\u00e9.txt").write_bytes(b"unicode path\n")
+    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    (nested / "empty").mkdir()
+    snapshot_root = Path(layout["snapshot_root"])
+    (snapshot_root / "payload-content.txt").unlink()
+    shutil.copytree(installed_plugin, snapshot_root, dirs_exist_ok=True)
+    payload_bytes = _payload_file_bytes(installed_plugin)
+    assert _payload_file_bytes(snapshot_root) == payload_bytes
     _stamp_with_python(layout, snapshot_id=version)
     legacy_before = _legacy_footprint_snapshot(
         installed_plugin,
@@ -614,10 +1114,62 @@ def test_exemplar_slot_actions_delegate_without_legacy_or_activation_mutation(
     )
     assert validated.returncode == 0, validated.stderr
     assert json.loads(validated.stdout)["reason"] == "runtime-slot-ownership-valid"
+    plugin_state_before = {
+        relative: _tree_snapshot(Path(layout["plugin_root"]) / relative)
+        for relative in ("state", "run", "logs", "cache", "launchers")
+    }
+    produced = _run_exemplar_mark_complete(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+        runtime_version=version,
+    )
+    assert produced.returncode == 0, produced.stderr
+    build_path = (
+        Path(layout["plugin_root"])
+        / "versions"
+        / version
+        / ".install-complete.json"
+    )
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    content_digest = _snapshot_content_digest(snapshot_root)
+    assert build["payload_hash"] == content_digest
+    assert set(build) == {"version", "completed_at", "pid", "payload_hash"}
+    completed = _run_exemplar_slot_action(
+        exemplar,
+        "slot-complete",
+        layout,
+        tmp_path,
+    )
+    assert completed.returncode == 0, completed.stderr
+    completion_result = json.loads(completed.stdout)
+    assert completion_result["action"] == "slot-complete"
+    assert completion_result["created"] is True
+    assert completion_result["activated"] is False
+    assert completion_result["operative"] is False
+    completion_validated = _run_exemplar_slot_action(
+        exemplar,
+        "slot-completion-validate",
+        layout,
+        tmp_path,
+    )
+    assert completion_validated.returncode == 0, completion_validated.stderr
+    assert (
+        json.loads(completion_validated.stdout)["reason"]
+        == "runtime-slot-completion-valid"
+    )
     assert (
         _legacy_footprint_snapshot(installed_plugin, tmp_path / "home")
         == legacy_before
     )
+    assert {
+        relative: _tree_snapshot(Path(layout["plugin_root"]) / relative)
+        for relative in ("state", "run", "logs", "cache", "launchers")
+    } == plugin_state_before
+    assert not (plugin_root / "current-version").exists()
+    assert not (plugin_root / "last-known-good").exists()
+    assert not (plugin_root / "installation-activation.json").exists()
 
 
 @pytest.mark.parametrize(
@@ -625,8 +1177,282 @@ def test_exemplar_slot_actions_delegate_without_legacy_or_activation_mutation(
     EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
+@pytest.mark.parametrize(
+    ("entry_kind", "message"),
+    (("link", "symbolic links"), ("non-regular", "ordinary files or directories")),
+)
+def test_exemplar_producer_hash_failure_does_not_omit_payload_hash(
+    exemplar: tuple[str, tuple[str, ...], str],
+    entry_kind: str,
+    message: str,
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, _ = exemplar
+    plugin_root = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (plugin_root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    (
+        Path(layout["plugin_root"])
+        / "versions"
+        / version
+    ).mkdir(parents=True)
+    if entry_kind == "link":
+        target = tmp_path / "outside-payload.txt"
+        target.write_bytes(b"outside\n")
+        try:
+            (installed_plugin / "!linked-payload").symlink_to(target)
+        except OSError as error:
+            pytest.skip(f"file symlinks are unavailable: {error}")
+    else:
+        if os.name == "nt":
+            pytest.skip("non-regular filesystem payload entries require POSIX")
+        os.mkfifo(installed_plugin / "!payload-pipe")
+
+    produced = _run_exemplar_mark_complete(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+        runtime_version=version,
+    )
+
+    assert produced.returncode != 0
+    assert message in produced.stderr.lower()
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / version
+        / ".install-complete.json"
+    ).exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+@pytest.mark.parametrize("mutation", ("add", "remove", "rename"))
+def test_exemplar_payload_hash_rejects_tree_membership_change(
+    exemplar: tuple[str, tuple[str, ...], str],
+    mutation: str,
+    tmp_path: Path,
+) -> None:
+    plugin_id, prefix, style = exemplar
+    plugin_root = Path(prefix[-1]).parents[1]
+    version = next(
+        line.split('"')[1]
+        for line in (plugin_root / "pyproject.toml").read_text(encoding="utf-8").splitlines()
+        if line.startswith("version = ")
+    )
+    _, installed_plugin, _ = _installed_exemplar(exemplar, tmp_path)
+    layout = _receipt_layout(
+        tmp_path,
+        plugin_id=plugin_id,
+        payload_version=version,
+        snapshot_id=version,
+        payload_root=installed_plugin,
+    )
+    slot = Path(layout["plugin_root"]) / "versions" / version
+    slot.mkdir(parents=True)
+    target = installed_plugin / "plugin.json"
+    environment_overrides: dict[str, str] | None = None
+    powershell_preamble = ""
+    if style == "long":
+        real_find = shutil.which("find")
+        assert real_find is not None
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+        count_path = tmp_path / "find-count"
+        if mutation == "add":
+            mutation_command = (
+                f"printf 'added\\n' >{shlex.quote(str(installed_plugin / 'added.txt'))}"
+            )
+        elif mutation == "remove":
+            mutation_command = f"rm -f -- {shlex.quote(str(target))}"
+        else:
+            mutation_command = (
+                f"mv -- {shlex.quote(str(target))} "
+                f"{shlex.quote(str(installed_plugin / 'renamed-plugin.json'))}"
+            )
+        fake_find = fake_bin / "find"
+        fake_find.write_text(
+            "\n".join(
+                (
+                    "#!/usr/bin/env bash",
+                    "set -euo pipefail",
+                    f"count_file={shlex.quote(str(count_path))}",
+                    "count=0",
+                    '[[ ! -f "$count_file" ]] || count="$(cat "$count_file")"',
+                    "count=$((count + 1))",
+                    'printf "%s\\n" "$count" >"$count_file"',
+                    f"if [[ \"$count\" -eq 2 ]]; then {mutation_command}; fi",
+                    f"exec {shlex.quote(real_find)} \"$@\"",
+                    "",
+                )
+            ),
+            encoding="utf-8",
+        )
+        fake_find.chmod(0o755)
+        environment_overrides = {
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        }
+    else:
+        payload_entries = list(installed_plugin.rglob("*"))
+        directory_count = 1 + sum(1 for path in payload_entries if path.is_dir())
+        hashed_file_count = sum(
+            1
+            for path in payload_entries
+            if path.is_file()
+            and path.relative_to(installed_plugin).as_posix()
+            != "snapshot-provenance.json"
+        )
+        get_item_count_before_second_scan = (
+            1
+            + directory_count
+            + len(payload_entries)
+            + (2 * hashed_file_count)
+        )
+        target_ps = str(target).replace("'", "''")
+        added_ps = str(installed_plugin / "added.txt").replace("'", "''")
+        renamed_ps = str(
+            installed_plugin / "renamed-plugin.json"
+        ).replace("'", "''")
+        if mutation == "add":
+            mutation_statement = (
+                f"[IO.File]::WriteAllText('{added_ps}', 'added')"
+            )
+        elif mutation == "remove":
+            mutation_statement = f"[IO.File]::Delete('{target_ps}')"
+        else:
+            mutation_statement = (
+                f"[IO.File]::Move('{target_ps}', '{renamed_ps}')"
+            )
+        powershell_preamble = "\n".join(
+            (
+                "$script:PayloadGetItemCount = 0",
+                (
+                    "$script:PayloadMutationAt = "
+                    f"{get_item_count_before_second_scan + 1}"
+                ),
+                "function Get-Item {",
+                "    param([string]$LiteralPath, [switch]$Force, $ErrorAction)",
+                "    $script:PayloadGetItemCount++",
+                "    if ($script:PayloadGetItemCount -eq $script:PayloadMutationAt) {",
+                f"        {mutation_statement}",
+                "    }",
+                "    Microsoft.PowerShell.Management\\Get-Item "
+                "-LiteralPath $LiteralPath -Force -ErrorAction Stop",
+                "}",
+            )
+        )
+
+    result = _run_exemplar_mark_complete(
+        exemplar,
+        installed_plugin,
+        layout,
+        tmp_path,
+        runtime_version=version,
+        environment_overrides=environment_overrides,
+        powershell_preamble=powershell_preamble,
+    )
+
+    assert result.returncode != 0
+    assert "tree changed during hashing" in result.stderr.lower()
+    assert not (slot / ".install-complete.json").exists()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+def test_exemplar_payload_hash_limit_boundaries_are_inclusive(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    (payload / "a").write_bytes(b"x")
+
+    accepted = _run_exemplar_payload_hash(
+        exemplar,
+        payload,
+        tmp_path,
+        max_entries=1,
+        max_path_bytes=1,
+        max_content_bytes=1,
+    )
+    assert accepted.returncode == 0, accepted.stderr
+    assert len(accepted.stdout.strip()) == 64
+
+    for limit, message in (
+        ({"max_entries": 0, "max_path_bytes": 1, "max_content_bytes": 1}, "entry limit"),
+        ({"max_entries": 1, "max_path_bytes": 0, "max_content_bytes": 1}, "utf-8 limit"),
+        (
+            {"max_entries": 1, "max_path_bytes": 1, "max_content_bytes": 0},
+            "regular-file limit",
+        ),
+    ):
+        rejected = _run_exemplar_payload_hash(
+            exemplar,
+            payload,
+            tmp_path / message.replace(" ", "-"),
+            **limit,
+        )
+        assert rejected.returncode != 0
+        assert message in rejected.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    tuple(exemplar for exemplar in EXEMPLAR_INSTALLERS if exemplar[2] == "powershell"),
+    ids=lambda exemplar: exemplar[0],
+)
+def test_powershell_exemplar_wide_payload_rejects_small_limit(
+    exemplar: tuple[str, tuple[str, ...], str],
+    tmp_path: Path,
+) -> None:
+    payload = tmp_path / "payload"
+    payload.mkdir()
+    for index in range(256):
+        (payload / f"{index:03d}").write_bytes(b"x")
+
+    result = _run_exemplar_payload_hash(
+        exemplar,
+        payload,
+        tmp_path,
+        max_entries=3,
+        max_path_bytes=3,
+        max_content_bytes=256,
+    )
+
+    assert result.returncode != 0
+    assert "3-entry limit" in result.stderr.lower()
+
+
+@pytest.mark.parametrize(
+    "exemplar",
+    EXEMPLAR_INSTALLERS,
+    ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
+)
+@pytest.mark.parametrize(
+    "action",
+    ("slot-provision", "slot-validate", "slot-complete", "slot-completion-validate"),
+)
 def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
     exemplar: tuple[str, tuple[str, ...], str],
+    action: str,
     tmp_path: Path,
 ) -> None:
     _, _, style = exemplar
@@ -664,7 +1490,7 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
 
     result = _run_exemplar_slot_action(
         exemplar,
-        "slot-provision",
+        action,
         layout,
         tmp_path,
         environment_overrides={"COPILOT_PLUGIN_INSTALL_STAGED": "1"},
@@ -684,8 +1510,13 @@ def test_exemplar_slot_actions_release_installed_payload_cwd_when_prestaged(
     EXEMPLAR_INSTALLERS,
     ids=lambda exemplar: f"{exemplar[0]}-{exemplar[2]}",
 )
+@pytest.mark.parametrize(
+    "action",
+    ("slot-provision", "slot-validate", "slot-complete", "slot-completion-validate"),
+)
 def test_exemplar_slot_actions_do_not_adopt_ambient_context(
     exemplar: tuple[str, tuple[str, ...], str],
+    action: str,
     tmp_path: Path,
 ) -> None:
     plugin_id, prefix, _ = exemplar
@@ -707,7 +1538,7 @@ def test_exemplar_slot_actions_do_not_adopt_ambient_context(
 
     result = _run_exemplar_slot_action(
         exemplar,
-        "slot-provision",
+        action,
         layout,
         tmp_path,
         include_context=False,
@@ -1170,8 +2001,13 @@ def test_posix_slot_digest_failure_releases_owned_empty_reservation(
     fake_sha256sum = fake_bin / "sha256sum"
     fake_sha256sum.write_text(
         "#!/bin/sh\n"
-        'if [ "$#" -gt 0 ]; then exit 1; fi\n'
-        f'exec "{real_sha256sum}"\n',
+        'capture="${TMPDIR:-/tmp}/fake-sha256sum.$$"\n'
+        'trap \'rm -f "$capture"\' EXIT\n'
+        'cat >"$capture"\n'
+        "if grep -q 'copilot-extensions.snapshot-provenance' \"$capture\"; then\n"
+        "  exit 1\n"
+        "fi\n"
+        f'exec "{real_sha256sum}" <"$capture"\n',
         encoding="utf-8",
     )
     fake_sha256sum.chmod(fake_sha256sum.stat().st_mode | stat.S_IXUSR)
@@ -1963,6 +2799,1326 @@ def test_python_cli_provisions_and_validates_runtime_slot(tmp_path: Path) -> Non
     assert validate.returncode == 0, validate.stderr
     assert json.loads(provision.stdout)["slotChanged"] is True
     assert json.loads(validate.stdout)["reason"] == "runtime-slot-ownership-valid"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_completion_publishes_validates_and_replays_without_activation(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    build_path = _prepare_completion_slot(layout)
+    plugin_root = Path(layout["plugin_root"])
+    watched = (
+        plugin_root / "current-version",
+        plugin_root / "last-known-good",
+        plugin_root / "installation-activation.json",
+        plugin_root / "state",
+        plugin_root / "run",
+        plugin_root / "logs",
+        plugin_root / "cache",
+        plugin_root / "launchers",
+    )
+    before = _tree_snapshot(plugin_root)
+
+    first = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+    completion_path = Path(first["completion"])
+    receipt = json.loads(completion_path.read_text(encoding="utf-8"))
+    content_digest = _snapshot_content_digest(Path(layout["snapshot_root"]))
+
+    assert first["created"] is True
+    assert first["activated"] is False
+    assert first["operative"] is False
+    assert first["completedAt"] == "2026-01-02T03:04:05Z"
+    assert first["payloadSha256"] == content_digest
+    assert receipt == first["receipt"]
+    assert receipt["schema"] == "copilot.extensions/runtime-slot-completion/v1"
+    assert receipt["runtime"] == {
+        "version": "3.4.5",
+        "root": str(plugin_root / "versions" / "3.4.5"),
+    }
+    assert receipt["build"] == {
+        "receipt": str(build_path),
+        "receiptSha256": hashlib.sha256(build_path.read_bytes()).hexdigest(),
+        "payloadSha256": content_digest,
+        "pid": 123,
+    }
+    assert receipt["snapshot"]["contentSha256"] == content_digest
+    assert receipt["completedAt"] == "2026-01-02T03:04:05Z"
+    assert all(not path.exists() for path in watched)
+    after = _tree_snapshot(plugin_root)
+    changed = {
+        path
+        for path in set(before) | set(after)
+        if before.get(path) != after.get(path)
+    }
+    assert changed == {"versions/3.4.5/.runtime-slot-completion.json"}
+
+    marker_bytes = completion_path.read_bytes()
+    validated = json.loads(
+        _run_completion(runner, "slot-completion-validate", layout).stdout
+    )
+    replayed = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+
+    assert validated["reason"] == "runtime-slot-completion-valid"
+    assert validated["receipt"] == receipt
+    assert replayed["reason"] == "runtime-slot-completion-current"
+    assert replayed["created"] is False
+    assert completion_path.read_bytes() == marker_bytes
+    assert all(not path.exists() for path in watched)
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    snapshot_root = Path(layout["snapshot_root"])
+    (snapshot_root / ".hidden").write_bytes(b"hidden\n")
+    nested = snapshot_root / "nested"
+    nested.mkdir()
+    (nested / "snapshot-provenance.json").write_bytes(b"nested sidecar name\n")
+    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    (nested / "z.txt").write_bytes(b"last\n")
+    (snapshot_root / "\u03a9.txt").write_bytes(b"unicode path\n")
+    (snapshot_root / "empty").mkdir()
+    _prepare_completion_slot(layout)
+    expected = _snapshot_content_digest(snapshot_root)
+
+    published = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+
+    assert published["payloadSha256"] == expected
+    assert published["receipt"]["snapshot"]["contentSha256"] == expected
+    assert published["receipt"]["build"]["payloadSha256"] == expected
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_snapshot_content_mutation_invalidates_completion(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    published = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+    marker = Path(published["completion"])
+    marker_bytes = marker.read_bytes()
+    (Path(layout["snapshot_root"]) / "payload-content.txt").write_text(
+        "mutated snapshot\n",
+        encoding="utf-8",
+    )
+
+    validated = _run_completion(
+        runner,
+        "slot-completion-validate",
+        layout,
+        check=False,
+    )
+    replayed = _run_completion(runner, "slot-complete", layout, check=False)
+
+    assert validated.returncode != 0
+    assert replayed.returncode != 0
+    assert "validated snapshot" in validated.stderr.lower()
+    assert marker.read_bytes() == marker_bytes
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX special-file behavior")
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("entry_kind", ("symlink", "fifo"))
+def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
+    runner: Runner,
+    entry_kind: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    snapshot_root = Path(layout["snapshot_root"])
+    if entry_kind == "symlink":
+        target = tmp_path / "outside-content.txt"
+        target.write_text("outside\n", encoding="utf-8")
+        (snapshot_root / "linked-content").symlink_to(target)
+    else:
+        os.mkfifo(snapshot_root / "named-pipe")
+    _stamp_with_python(layout)
+    _provision_slot_with_python(layout)
+    _build_receipt(layout, payload_hash="a" * 64)
+
+    result = _run_completion(runner, "slot-complete", layout, check=False)
+
+    assert result.returncode != 0
+    if entry_kind == "symlink":
+        assert "symbolic links or reparse points" in result.stderr.lower()
+    else:
+        assert "ordinary files or directories" in result.stderr.lower()
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    real_find = shutil.which("find")
+    assert real_find is not None
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    fake_find = fake_bin / "find"
+    fake_find.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                "if [[ \"$*\" == *'-mindepth 1 -print0'* ]]; then",
+                "  printf '%s\\0' \"$1/payload-content.txt\"",
+                "  exit 7",
+                "fi",
+                f"exec {shlex.quote(real_find)} \"$@\"",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    fake_find.chmod(0o755)
+
+    result = _run_completion(
+        RUNNERS[1],
+        "slot-complete",
+        layout,
+        environment_overrides={
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "enumerate all snapshot contents" in result.stderr.lower()
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX replacement primitives")
+@pytest.mark.parametrize("replacement", ("symlink", "fifo"))
+def test_python_build_receipt_open_rejects_replacement_to_unsafe_object(
+    replacement: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    build_path = _prepare_completion_slot(layout)
+    module = _load_python_module()
+    original_open = module.os.open
+    replaced = False
+
+    def racing_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal replaced
+        if (
+            not replaced
+            and dir_fd is None
+            and Path(path) == build_path
+        ):
+            replaced = True
+            build_path.unlink()
+            if replacement == "symlink":
+                target = tmp_path / "outside-build.json"
+                target.write_text(
+                    json.dumps(
+                        {
+                            "version": "3.4.5",
+                            "completed_at": "2026-01-02T03:04:05Z",
+                            "pid": 999,
+                            "payload_hash": _snapshot_content_digest(
+                                Path(layout["snapshot_root"])
+                            ),
+                        },
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                build_path.symlink_to(target)
+            else:
+                os.mkfifo(build_path)
+        if dir_fd is None:
+            return original_open(path, flags, mode)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(module.os, "open", racing_open)
+    with pytest.raises(module.InstallationContextError):
+        module.complete_runtime_slot(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            expected_payload_root=layout["payload"],
+            expected_payload_version="1.0.0",
+            snapshot_id="1.0.0",
+            runtime_version="3.4.5",
+            durable_home=layout["durable"],
+            environment={},
+        )
+    assert replaced
+    assert not build_path.with_name(".runtime-slot-completion.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX replacement primitives")
+@pytest.mark.parametrize("replacement", ("symlink", "fifo"))
+def test_python_snapshot_hash_open_rejects_replacement_to_unsafe_object(
+    replacement: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    snapshot_file = Path(layout["snapshot_root"]) / "payload-content.txt"
+    module = _load_python_module()
+    original_open = module.os.open
+    replaced = False
+
+    def racing_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal replaced
+        if (
+            not replaced
+            and (
+                (dir_fd is not None and os.fspath(path) == snapshot_file.name)
+                or (dir_fd is None and Path(path) == snapshot_file)
+            )
+        ):
+            replaced = True
+            snapshot_file.unlink()
+            if replacement == "symlink":
+                target = tmp_path / "outside-snapshot.txt"
+                target.write_text("outside\n", encoding="utf-8")
+                snapshot_file.symlink_to(target)
+            else:
+                os.mkfifo(snapshot_file)
+        if dir_fd is None:
+            return original_open(path, flags, mode)
+        return original_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(module.os, "open", racing_open)
+    with pytest.raises(module.InstallationContextError):
+        module._snapshot_content_sha256(Path(layout["snapshot_root"]))
+    assert replaced
+
+
+@pytest.mark.parametrize("artifact", ("provenance", "ownership"))
+def test_python_completion_rejects_atomic_regular_replacement_after_validation(
+    artifact: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    module = _load_python_module()
+    artifact_path = (
+        _provenance_path(layout)
+        if artifact == "provenance"
+        else (
+            Path(layout["plugin_root"])
+            / "versions"
+            / "3.4.5"
+            / ".runtime-slot-ownership.json"
+        )
+    )
+    original_sha256_file = module._sha256_file
+    replaced = False
+
+    def replace_before_digest(path: Path) -> str:
+        nonlocal replaced
+        if not replaced and Path(path) == artifact_path:
+            replaced = True
+            replacement = artifact_path.with_name(f".{artifact_path.name}.next")
+            replacement.write_bytes(artifact_path.read_bytes())
+            os.replace(replacement, artifact_path)
+        return original_sha256_file(path)
+
+    monkeypatch.setattr(module, "_sha256_file", replace_before_digest)
+    with pytest.raises(
+        module.InstallationContextError,
+        match="changed after it was validated",
+    ):
+        module.complete_runtime_slot(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            expected_payload_root=layout["payload"],
+            expected_payload_version="1.0.0",
+            snapshot_id="1.0.0",
+            runtime_version="3.4.5",
+            durable_home=layout["durable"],
+            environment={},
+        )
+
+    assert replaced
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+def test_python_immutable_completion_read_rejects_atomic_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    module = _load_python_module()
+    published = module.complete_runtime_slot(
+        context=layout["install"],
+        expected_marketplace_id=layout["marketplace_id"],
+        expected_plugin_id=layout["plugin_id"],
+        expected_payload_root=layout["payload"],
+        expected_payload_version="1.0.0",
+        snapshot_id="1.0.0",
+        runtime_version="3.4.5",
+        durable_home=layout["durable"],
+        environment={},
+    )
+    marker = Path(published["completion"])
+    replacement = marker.with_name(".replacement-completion.json")
+    replacement_bytes = b'{"replaced":true}\n'
+    replacement.write_bytes(replacement_bytes)
+    original_open = module.os.open
+    original_read = module.os.read
+    marker_descriptor: int | None = None
+    replaced = False
+
+    def racing_open(
+        path: str | os.PathLike[str],
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        nonlocal marker_descriptor
+        if dir_fd is None:
+            descriptor = original_open(path, flags, mode)
+        else:
+            descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if dir_fd is None and Path(path) == marker:
+            marker_descriptor = descriptor
+        return descriptor
+
+    def racing_read(descriptor: int, length: int) -> bytes:
+        nonlocal replaced
+        if descriptor == marker_descriptor and not replaced:
+            replaced = True
+            os.replace(replacement, marker)
+        return original_read(descriptor, length)
+
+    monkeypatch.setattr(module.os, "open", racing_open)
+    monkeypatch.setattr(module.os, "read", racing_read)
+    with pytest.raises(
+        module.InstallationContextError,
+        match="changed while it was being read",
+    ):
+        module.validate_runtime_slot_completion(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            expected_payload_root=layout["payload"],
+            expected_payload_version="1.0.0",
+            snapshot_id="1.0.0",
+            runtime_version="3.4.5",
+            durable_home=layout["durable"],
+            environment={},
+        )
+
+    assert replaced
+    assert marker.read_bytes() == replacement_bytes
+
+
+@pytest.mark.parametrize("mutation", ("add", "remove", "rename"))
+def test_python_slot_completion_reconfirms_tree_before_publication(
+    mutation: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    module = _load_python_module()
+    original_digest = module._snapshot_content_sha256
+    snapshot_root = Path(layout["snapshot_root"])
+    calls = 0
+
+    def racing_digest(root: Path, **kwargs: object) -> str:
+        nonlocal calls
+        digest = original_digest(root, **kwargs)
+        calls += 1
+        if calls == 1:
+            target = snapshot_root / "payload-content.txt"
+            if mutation == "add":
+                (snapshot_root / "added.txt").write_text(
+                    "added\n",
+                    encoding="utf-8",
+                )
+            elif mutation == "remove":
+                target.unlink()
+            else:
+                target.rename(snapshot_root / "renamed-content.txt")
+        return digest
+
+    monkeypatch.setattr(module, "_snapshot_content_sha256", racing_digest)
+    with pytest.raises(
+        module.InstallationContextError,
+        match="changed before completion publication",
+    ):
+        module.complete_runtime_slot(
+            context=layout["install"],
+            expected_marketplace_id=layout["marketplace_id"],
+            expected_plugin_id=layout["plugin_id"],
+            expected_payload_root=layout["payload"],
+            expected_payload_version="1.0.0",
+            snapshot_id="1.0.0",
+            runtime_version="3.4.5",
+            durable_home=layout["durable"],
+            environment={},
+        )
+
+    assert calls == 2
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="Bash 4.4 is unavailable")
+@pytest.mark.parametrize("mutation", ("add", "remove", "rename"))
+def test_posix_slot_completion_reconfirms_tree_before_publication(
+    mutation: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    real_find = shutil.which("find")
+    assert real_find is not None
+    snapshot_root = Path(layout["snapshot_root"])
+    fake_bin = tmp_path / "fake-bin"
+    fake_bin.mkdir()
+    count_path = tmp_path / "find-count"
+    target = snapshot_root / "payload-content.txt"
+    if mutation == "add":
+        mutation_command = (
+            f"printf 'added\\n' >{shlex.quote(str(snapshot_root / 'added.txt'))}"
+        )
+    elif mutation == "remove":
+        mutation_command = f"rm -f -- {shlex.quote(str(target))}"
+    else:
+        mutation_command = (
+            f"mv -- {shlex.quote(str(target))} "
+            f"{shlex.quote(str(snapshot_root / 'renamed-content.txt'))}"
+        )
+    fake_find = fake_bin / "find"
+    fake_find.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                "set -euo pipefail",
+                f"count_file={shlex.quote(str(count_path))}",
+                "count=0",
+                '[[ ! -f "$count_file" ]] || count="$(cat "$count_file")"',
+                "count=$((count + 1))",
+                'printf "%s\\n" "$count" >"$count_file"',
+                f"if [[ \"$count\" -eq 3 ]]; then {mutation_command}; fi",
+                f"exec {shlex.quote(real_find)} \"$@\"",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    fake_find.chmod(0o755)
+
+    result = _run_completion(
+        RUNNERS[1],
+        "slot-complete",
+        layout,
+        environment_overrides={
+            "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+        },
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "snapshot content" in result.stderr.lower()
+    assert "changed" in result.stderr.lower()
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+def test_snapshot_digest_limits_are_inclusive_and_count_provenance(
+    tmp_path: Path,
+) -> None:
+    module = _load_python_module()
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    (root / "a").write_bytes(b"x")
+
+    assert module._snapshot_content_sha256(
+        root,
+        max_entries=1,
+        max_path_bytes=1,
+        max_content_bytes=1,
+    )
+    with pytest.raises(module.InstallationContextError, match="0-entry limit"):
+        module._snapshot_content_sha256(root, max_entries=0)
+    with pytest.raises(module.InstallationContextError, match="0-byte UTF-8"):
+        module._snapshot_content_sha256(root, max_path_bytes=0)
+    with pytest.raises(module.InstallationContextError, match="0-byte regular-file"):
+        module._snapshot_content_sha256(root, max_content_bytes=0)
+
+    (root / "a").unlink()
+    (root / "snapshot-provenance.json").write_bytes(b"x")
+    assert module._snapshot_content_sha256(
+        root,
+        max_entries=1,
+        max_path_bytes=len("snapshot-provenance.json"),
+        max_content_bytes=1,
+    ) == hashlib.sha256().hexdigest()
+    with pytest.raises(module.InstallationContextError, match="0-entry limit"):
+        module._snapshot_content_sha256(root, max_entries=0)
+    with pytest.raises(module.InstallationContextError, match="0-byte regular-file"):
+        module._snapshot_content_sha256(root, max_content_bytes=0)
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    ("evidence", "message"),
+    (
+        ("missing", "must exist"),
+        ("malformed", "invalid json"),
+        ("extra-key", "unknown or missing fields"),
+        ("wrong-version", "version must match"),
+        ("bad-time", "completed_at"),
+        ("bool-pid", BUILD_PID_ERROR),
+        ("negative-pid", BUILD_PID_ERROR),
+        ("fractional-pid", BUILD_PID_ERROR),
+        ("exponent-pid", BUILD_PID_ERROR),
+        ("overflow-pid", BUILD_PID_ERROR),
+        ("uppercase-hash", "lowercase 64-hex"),
+        ("short-hash", "lowercase 64-hex"),
+        ("forged-hash", "does not match the snapshot content digest"),
+    ),
+)
+def test_runtime_slot_completion_rejects_invalid_build_evidence_without_replacement(
+    runner: Runner,
+    evidence: str,
+    message: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    build_path = _prepare_completion_slot(layout)
+    if evidence == "missing":
+        build_path.unlink()
+    elif evidence == "malformed":
+        build_path.write_bytes(b"{")
+    else:
+        build = json.loads(build_path.read_text(encoding="utf-8"))
+        if evidence == "extra-key":
+            build["unexpected"] = True
+        elif evidence == "wrong-version":
+            build["version"] = "9.9.9"
+        elif evidence == "bad-time":
+            build["completed_at"] = "2026-02-30T00:00:00Z"
+        elif evidence == "bool-pid":
+            build["pid"] = True
+        elif evidence == "negative-pid":
+            build["pid"] = -1
+        elif evidence == "fractional-pid":
+            build["pid"] = 1.5
+        elif evidence == "exponent-pid":
+            build_path.write_text(
+                json.dumps(
+                    {
+                        "version": build["version"],
+                        "completed_at": build["completed_at"],
+                    },
+                    indent=2,
+                )[:-2]
+                + ',\n  "pid": 1e3,\n'
+                + f'  "payload_hash": "{build["payload_hash"]}"\n'
+                + "}\n",
+                encoding="utf-8",
+            )
+            build = None
+        elif evidence == "overflow-pid":
+            build["pid"] = 9223372036854775808
+        elif evidence == "uppercase-hash":
+            build["payload_hash"] = str(build["payload_hash"]).upper()
+        elif evidence == "short-hash":
+            build["payload_hash"] = "a" * 63
+        else:
+            build["payload_hash"] = "b" * 64
+        if build is not None:
+            _write_json(build_path, build)
+    evidence_bytes = build_path.read_bytes() if build_path.exists() else None
+
+    result = _run_completion(runner, "slot-complete", layout, check=False)
+
+    assert result.returncode != 0
+    assert message in result.stderr.lower()
+    assert not build_path.with_name(".runtime-slot-completion.json").exists()
+    if evidence_bytes is not None:
+        assert build_path.read_bytes() == evidence_bytes
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("marker_kind", ("malformed", "conflicting"))
+def test_runtime_slot_completion_preserves_existing_malformed_or_conflicting_marker(
+    runner: Runner,
+    marker_kind: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    marker = (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    )
+    if marker_kind == "malformed":
+        marker.write_bytes(b"{")
+    else:
+        published = json.loads(
+            _run_completion(RUNNERS[0], "slot-complete", layout).stdout
+        )
+        receipt = published["receipt"]
+        receipt["build"]["payloadSha256"] = "b" * 64
+        _write_json(marker, receipt)
+    before = marker.read_bytes()
+
+    result = _run_completion(runner, "slot-complete", layout, check=False)
+
+    assert result.returncode != 0
+    assert marker.read_bytes() == before
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("legacy_change", ("rewrite", "remove"))
+def test_runtime_slot_completion_ignores_legacy_evidence_after_publication(
+    runner: Runner,
+    legacy_change: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    build_path = _prepare_completion_slot(layout)
+    published = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+    marker = Path(published["completion"])
+    marker_bytes = marker.read_bytes()
+    if legacy_change == "rewrite":
+        build = json.loads(build_path.read_text(encoding="utf-8"))
+        build["payload_hash"] = "b" * 64
+        build["pid"] = -1
+        _write_json(build_path, build)
+    else:
+        build_path.unlink()
+
+    validated = _run_completion(
+        runner,
+        "slot-completion-validate",
+        layout,
+    )
+    replayed = _run_completion(runner, "slot-complete", layout)
+
+    assert json.loads(validated.stdout)["receipt"] == published["receipt"]
+    assert json.loads(replayed.stdout)["created"] is False
+    assert marker.read_bytes() == marker_bytes
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("pid", (0, 9223372036854775807))
+def test_runtime_slot_completion_accepts_pid_bounds(
+    runner: Runner,
+    pid: int,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    build_path = (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".install-complete.json"
+    )
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    build["pid"] = pid
+    _write_json(build_path, build)
+
+    published = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+    validated = json.loads(
+        _run_completion(runner, "slot-completion-validate", layout).stdout
+    )
+
+    assert published["receipt"]["build"]["pid"] == pid
+    assert validated["receipt"]["build"]["pid"] == pid
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    ("pid_kind", "pid"),
+    (
+        ("boolean", True),
+        ("negative", -1),
+        ("fractional", 1.5),
+        ("overflow", 9223372036854775808),
+        ("exponent", None),
+    ),
+)
+def test_runtime_slot_completion_rejects_invalid_immutable_receipt_pid(
+    runner: Runner,
+    pid_kind: str,
+    pid: object,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    published = json.loads(_run_completion(RUNNERS[0], "slot-complete", layout).stdout)
+    marker = Path(published["completion"])
+    receipt = published["receipt"]
+    if pid_kind == "exponent":
+        marker.write_text(
+            json.dumps(receipt, indent=2).replace('"pid": 123', '"pid": 1e3') + "\n",
+            encoding="utf-8",
+        )
+    else:
+        receipt["build"]["pid"] = pid
+        _write_json(marker, receipt)
+
+    result = _run_completion(
+        runner,
+        "slot-completion-validate",
+        layout,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert IMMUTABLE_PID_ERROR in result.stderr.lower()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("container", ("snapshot", "build"))
+def test_runtime_slot_completion_rejects_non_strict_nested_shapes(
+    runner: Runner,
+    container: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    published = json.loads(_run_completion(RUNNERS[0], "slot-complete", layout).stdout)
+    marker = Path(published["completion"])
+    receipt = published["receipt"]
+    receipt[container]["unexpected"] = True
+    _write_json(marker, receipt)
+
+    result = _run_completion(
+        runner,
+        "slot-completion-validate",
+        layout,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "unknown or missing fields" in result.stderr.lower()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("receipt_name", ("namespace", "install"))
+def test_runtime_slot_completion_requires_current_receipts_for_first_publication(
+    runner: Runner,
+    receipt_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    receipt_path = Path(layout[receipt_name])
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt["generation"] += 1
+    _write_json(receipt_path, receipt)
+
+    result = _run_completion(runner, "slot-complete", layout, check=False)
+
+    assert result.returncode != 0
+    assert (
+        f"snapshot provenance {receipt_name} generation is stale"
+        in result.stderr.lower()
+    )
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_completion_validation_is_historical_but_rejects_regression(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    published = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+    namespace_path = Path(layout["namespace"])
+    namespace = json.loads(namespace_path.read_text(encoding="utf-8"))
+    namespace["generation"] = 2
+    namespace["state"] = "inactive"
+    _write_json(namespace_path, namespace)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["generation"] = 3
+    install["state"] = "inactive"
+    install["payload"]["version"] = "2.0.0"
+    _write_json(install_path, install)
+
+    validated = json.loads(
+        _run_completion(
+            runner,
+            "slot-completion-validate",
+            layout,
+            expected_payload_version="1.0.0",
+        ).stdout
+    )
+    replay = json.loads(
+        _run_completion(
+        runner,
+        "slot-complete",
+        layout,
+        expected_payload_version="1.0.0",
+        ).stdout
+    )
+
+    assert validated["completion"] == published["completion"]
+    assert validated["namespaceGeneration"] == 1
+    assert validated["installGeneration"] == 2
+    assert replay["created"] is False
+    assert replay["receipt"] == published["receipt"]
+
+    install["generation"] = 1
+    _write_json(install_path, install)
+    regressed = _run_completion(
+        runner,
+        "slot-completion-validate",
+        layout,
+        expected_payload_version="1.0.0",
+        check=False,
+    )
+    assert regressed.returncode != 0
+    assert "predates the owned runtime slot" in regressed.stderr.lower()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_completion_rejects_copied_foreign_ownership_and_completion(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    source_layout = _receipt_layout(tmp_path, plugin_id="agent-source")
+    target_layout = _receipt_layout(tmp_path, plugin_id="agent-target")
+    _prepare_completion_slot(source_layout)
+    source_completion = json.loads(
+        _run_completion(RUNNERS[0], "slot-complete", source_layout).stdout
+    )
+    _prepare_completion_slot(target_layout)
+    target_slot = Path(target_layout["plugin_root"]) / "versions" / "3.4.5"
+
+    target_ownership = target_slot / ".runtime-slot-ownership.json"
+    target_ownership_bytes = target_ownership.read_bytes()
+    shutil.copyfile(source_completion["ownership"], target_ownership)
+    foreign_ownership = _run_completion(
+        runner,
+        "slot-complete",
+        target_layout,
+        check=False,
+    )
+    assert foreign_ownership.returncode != 0
+    assert not (target_slot / ".runtime-slot-completion.json").exists()
+    target_ownership.write_bytes(target_ownership_bytes)
+
+    target_completion = target_slot / ".runtime-slot-completion.json"
+    shutil.copyfile(source_completion["completion"], target_completion)
+    completion_bytes = target_completion.read_bytes()
+    foreign_completion = _run_completion(
+        runner,
+        "slot-completion-validate",
+        target_layout,
+        check=False,
+    )
+    assert foreign_completion.returncode != 0
+    assert target_completion.read_bytes() == completion_bytes
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_completion_rejects_same_version_build_from_other_snapshot(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    source_layout = _receipt_layout(tmp_path, plugin_id="agent-source")
+    target_layout = _receipt_layout(tmp_path, plugin_id="agent-target")
+    (Path(source_layout["snapshot_root"]) / "payload-content.txt").write_text(
+        "source snapshot\n",
+        encoding="utf-8",
+    )
+    source_build = _prepare_completion_slot(source_layout)
+    target_build = _prepare_completion_slot(target_layout)
+    shutil.copyfile(source_build, target_build)
+
+    result = _run_completion(runner, "slot-complete", target_layout, check=False)
+
+    assert result.returncode != 0
+    assert "does not match the snapshot content digest" in result.stderr.lower()
+    assert not target_build.with_name(".runtime-slot-completion.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("linked_artifact", ("build", "completion"))
+def test_runtime_slot_completion_rejects_linked_artifacts(
+    runner: Runner,
+    linked_artifact: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    build_path = _prepare_completion_slot(layout)
+    slot = build_path.parent
+    if linked_artifact == "build":
+        content = build_path.read_bytes()
+        build_path.unlink()
+        target = tmp_path / "outside-build.json"
+        target.write_bytes(content)
+        build_path.symlink_to(target)
+        action = "slot-complete"
+    else:
+        published = json.loads(
+            _run_completion(RUNNERS[0], "slot-complete", layout).stdout
+        )
+        completion = Path(published["completion"])
+        content = completion.read_bytes()
+        completion.unlink()
+        target = tmp_path / "outside-completion.json"
+        target.write_bytes(content)
+        completion.symlink_to(target)
+        action = "slot-completion-validate"
+
+    result = _run_completion(runner, action, layout, check=False)
+
+    assert result.returncode != 0
+    assert "symbolic link or reparse point" in result.stderr.lower()
+    assert target.read_bytes() == content
+    if linked_artifact == "build":
+        assert not (slot / ".runtime-slot-completion.json").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    "unrelated_artifact",
+    (".install-complete.json", ".runtime-slot-completion.json"),
+)
+def test_slot_validate_semantics_ignore_completion_artifacts(
+    runner: Runner,
+    unrelated_artifact: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    provisioned = _provision_slot_with_python(layout)
+    slot = Path(provisioned["slotRoot"])
+    target = tmp_path / f"outside-{unrelated_artifact.lstrip('.')}"
+    target.write_text("{}\n", encoding="utf-8")
+    (slot / unrelated_artifact).symlink_to(target)
+
+    result = json.loads(_run_slot(runner, "slot-validate", layout).stdout)
+
+    assert result["reason"] == "runtime-slot-ownership-valid"
+    assert result["slotEmpty"] is False
+    assert target.read_text(encoding="utf-8") == "{}\n"
+
+
+@pytest.mark.parametrize("producer", RUNNERS, ids=lambda runner: f"from-{runner[0]}")
+@pytest.mark.parametrize("consumer", RUNNERS, ids=lambda runner: f"to-{runner[0]}")
+def test_runtime_slot_completion_interoperates_across_runners(
+    producer: Runner,
+    consumer: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+
+    published = json.loads(_run_completion(producer, "slot-complete", layout).stdout)
+    validated = json.loads(
+        _run_completion(consumer, "slot-completion-validate", layout).stdout
+    )
+
+    assert validated["completion"] == published["completion"]
+    assert validated["receipt"] == published["receipt"]
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_completion_serializes_concurrent_publishers(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completed = list(
+            executor.map(
+                lambda _: _run_completion(runner, "slot-complete", layout),
+                range(2),
+            )
+        )
+    results = [json.loads(result.stdout) for result in completed]
+
+    assert sorted(result["created"] for result in results) == [False, True]
+    assert len({result["completion"] for result in results}) == 1
+    assert results[0]["receipt"] == results[1]["receipt"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX byte-oriented filenames")
+def test_posix_completion_rejects_non_utf8_snapshot_path(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    snapshot_root = os.fsencode(Path(layout["snapshot_root"]))
+    invalid_path = os.path.join(snapshot_root, b"invalid-\xff.txt")
+    try:
+        descriptor = os.open(invalid_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except OSError as error:
+        pytest.skip(f"filesystem does not support invalid-byte filenames: {error}")
+    try:
+        os.write(descriptor, b"invalid path\n")
+    finally:
+        os.close(descriptor)
+
+    result = _run_completion(RUNNERS[1], "slot-complete", layout, check=False)
+
+    assert result.returncode != 0
+    assert "snapshot content path is not valid utf-8" in result.stderr.lower()
+    assert not (
+        Path(layout["plugin_root"])
+        / "versions"
+        / "3.4.5"
+        / ".runtime-slot-completion.json"
+    ).exists()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_completion_accepts_literal_replacement_character_in_snapshot_path(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    (Path(layout["snapshot_root"]) / "valid-\ufffd.txt").write_text(
+        "valid UTF-8 path\n",
+        encoding="utf-8",
+    )
+    _prepare_completion_slot(layout)
+
+    result = json.loads(_run_completion(runner, "slot-complete", layout).stdout)
+
+    assert result["created"] is True
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receipt(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    build_path = _prepare_completion_slot(layout)
+    payload_hash = _snapshot_content_digest(Path(layout["snapshot_root"]))
+    candidates = (
+        {
+            "version": "3.4.5",
+            "completed_at": "2026-01-02T03:04:05Z",
+            "pid": 11,
+            "payload_hash": payload_hash,
+        },
+        {
+            "version": "3.4.5",
+            "completed_at": "2026-01-02T03:04:06Z",
+            "pid": 22,
+            "payload_hash": payload_hash,
+        },
+    )
+    candidate_bytes = tuple(
+        (json.dumps(candidate, indent=2) + "\n").encode("utf-8")
+        for candidate in candidates
+    )
+    build_path.write_bytes(candidate_bytes[0])
+    stop = Event()
+
+    def rewrite() -> None:
+        index = 1
+        staging = build_path.with_name(".install-complete.next")
+        while not stop.is_set():
+            staging.write_bytes(candidate_bytes[index])
+            os.replace(staging, build_path)
+            index = 1 - index
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(rewrite)
+        try:
+            published = json.loads(
+                _run_completion(runner, "slot-complete", layout).stdout
+            )
+        finally:
+            stop.set()
+            future.result(timeout=10)
+
+    recorded = published["receipt"]["build"]
+    matched = [
+        candidate
+        for candidate, content in zip(candidates, candidate_bytes)
+        if recorded["receiptSha256"] == hashlib.sha256(content).hexdigest()
+        and recorded["pid"] == candidate["pid"]
+        and published["receipt"]["completedAt"] == candidate["completed_at"]
+    ]
+    assert len(matched) == 1
+    validated = json.loads(
+        _run_completion(runner, "slot-completion-validate", layout).stdout
+    )
+    assert validated["receipt"] == published["receipt"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX date compatibility")
+def test_posix_completion_accepts_bsd_date_interface(tmp_path: Path) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    real_date = shutil.which("date")
+    assert real_date is not None
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    fake_date = fake_bin / "date"
+    fake_date.write_text(
+        "\n".join(
+            (
+                "#!/usr/bin/env bash",
+                "set -e",
+                'if [[ "$1" == "-u" && "$2" == "-d" ]]; then exit 1; fi',
+                'if [[ "$1" == "-j" && "$2" == "-u" && "$3" == "-f" ]]; then',
+                f"  exec {shlex.quote(real_date)} -u -d \"$5\" \"$6\"",
+                "fi",
+                'if [[ "$1" == "-j" && "$2" == "-u" && "$3" == "-r" ]]; then',
+                f"  exec {shlex.quote(real_date)} -u -d \"@$4\" \"$5\"",
+                "fi",
+                "exit 2",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
+    fake_date.chmod(0o755)
+
+    result = json.loads(
+        _run_completion(
+            RUNNERS[1],
+            "slot-complete",
+            layout,
+            environment_overrides={
+                "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+            },
+        ).stdout
+    )
+
+    assert result["created"] is True
+
+
+def test_python_api_publishes_and_validates_runtime_slot_completion(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    module = _load_python_module()
+    arguments = {
+        "context": layout["install"],
+        "expected_marketplace_id": layout["marketplace_id"],
+        "expected_plugin_id": layout["plugin_id"],
+        "expected_payload_root": layout["payload"],
+        "expected_payload_version": "1.0.0",
+        "snapshot_id": "1.0.0",
+        "runtime_version": "3.4.5",
+        "durable_home": layout["durable"],
+        "environment": {},
+    }
+
+    first = module.complete_runtime_slot(**arguments)
+    replay = module.complete_runtime_slot(**arguments)
+    validated = module.validate_runtime_slot_completion(**arguments)
+
+    assert first["created"] is True
+    assert replay["created"] is False
+    assert validated["receipt"] == first["receipt"]
+    assert validated["activated"] is False
+    assert validated["operative"] is False
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    "action",
+    ("slot-complete", "slot-completion-validate"),
+)
+@pytest.mark.parametrize(
+    "flag_name",
+    ("expected-payload-root", "expected-payload-version"),
+)
+def test_completion_actions_require_explicit_payload_expectations(
+    runner: Runner,
+    action: str,
+    flag_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    command = _command(
+        runner,
+        action,
+        layout,
+        expected_payload_root=Path(layout["payload"]),
+        expected_payload_version="1.0.0",
+    )
+    _, _, style = runner
+    flag = _flag(style, flag_name)
+    index = command.index(flag)
+    del command[index : index + 2]
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={
+            **os.environ,
+            "COPILOT_EXTENSIONS_CONTEXT": str(layout["install"]),
+        },
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert flag.lower() in (result.stdout + result.stderr).lower()
 
 
 @pytest.mark.parametrize(
