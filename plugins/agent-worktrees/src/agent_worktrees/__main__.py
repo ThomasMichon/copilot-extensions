@@ -9480,7 +9480,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         session_id=session_id, worktree_id=wt_id,
         worktree_path=wt_path, table=table,
     )
-    if wt_id:
+    if wt_id and not session_id:
         seen_pids = {item["pid"] for item in found}
         for bound in reclaim.resolve_bridge_bound(wt_id, table=table):
             if bound["pid"] not in seen_pids:

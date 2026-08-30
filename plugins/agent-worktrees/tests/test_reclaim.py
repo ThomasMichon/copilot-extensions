@@ -457,7 +457,9 @@ class TestCmdReclaim:
         monkeypatch.setattr(
             m.reclaim,
             "resolve_bridge_bound",
-            lambda worktree_id, **kwargs: [],
+            lambda worktree_id, **kwargs: (_ for _ in ()).throw(
+                AssertionError("session-filtered reclaim must not add bridge peers")
+            ),
         )
         monkeypatch.setattr(
             m.reclaim,
