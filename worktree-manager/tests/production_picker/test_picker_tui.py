@@ -3720,7 +3720,7 @@ def test_live_loader_local_streams_without_blocking_start(monkeypatch):
     sentinel = [{"id4": "abcd", "machine": "anomalous-potato", "env": "Win"}]
     gate = threading.Event()
 
-    def _slow_local(m=None, e=None, *, classify=True):
+    def _slow_local(m=None, e=None, *, classify=True, **source):
         gate.wait(5)
         return sentinel
 
@@ -3759,7 +3759,7 @@ def test_live_loader_reload_local_refetches(monkeypatch):
     # and let the test swap what "current" means between start and reload.
     state = {"rows": [{"id4": "a"}]}
 
-    def _load(m=None, e=None, *, classify=True):
+    def _load(m=None, e=None, *, classify=True, **source):
         return list(state["rows"])
 
     monkeypatch.setattr(data_ssh.data_local, "load", _load)
@@ -3790,7 +3790,7 @@ def test_live_loader_local_two_phase_fast_then_fill(monkeypatch):
     full_gate = threading.Event()
     calls = []
 
-    def _load(m=None, e=None, *, classify=True):
+    def _load(m=None, e=None, *, classify=True, **source):
         calls.append(classify)
         if classify:
             full_gate.wait(5)

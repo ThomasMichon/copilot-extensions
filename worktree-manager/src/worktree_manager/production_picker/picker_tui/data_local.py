@@ -3,9 +3,9 @@
 
 Exposes the same surface the engine's prototype sources did
 (``LOCAL`` / ``LOCAL_LABEL`` / ``machines()`` / ``load()`` / ``bucket`` /
-``for_machine``), but backed by the real tracking store + git classification
-on *this* machine. Slice 1 of the port covers the local machine only; remote
-machines arrive via an SSH source + async loader in a later slice.
+``for_machine`` / ``for_source``), but backed by the real tracking store + git
+classification on *this* machine. Slice 1 of the port covers the local machine
+only; remote machines arrive via an SSH source + async loader in a later slice.
 """
 from __future__ import annotations
 
@@ -15,10 +15,11 @@ from pathlib import Path
 
 from .. import config as cfg
 from .. import reclaim, sessions, tracking
-from . import derive, roster
+from . import derive, roster, source_identity
 
 bucket = derive.bucket
 for_machine = derive.for_machine
+for_source = derive.for_source
 host_cols = roster.host_cols
 target_envs = roster.target_envs
 
@@ -278,8 +279,15 @@ def _overlay_cached_state(raw: dict, rec) -> None:
         raw["state"] = "unknown"
 
 
-def load(machine: str | None = None, env: str | None = None,
-         *, classify: bool = True):
+def load(
+    machine: str | None = None,
+    env: str | None = None,
+    *,
+    classify: bool = True,
+    source_kind=source_identity.MACHINE_SSH_KIND,
+    source_id=None,
+    source_label=None,
+):
     """Normalized records for this machine's worktrees (tracking + classify).
 
     *machine*/*env* default to this host's identity (``LOCAL``). The SSH source
@@ -317,6 +325,11 @@ def load(machine: str | None = None, env: str | None = None,
         return []
     machine = machine if machine is not None else LOCAL[0]
     env = env if env is not None else LOCAL[1]
+    norm_source = {
+        "source_kind": source_kind,
+        "source_id": source_id,
+        "source_label": source_label,
+    }
 
     if not classify:
         # PASS 1 -- cache-only first paint (dotfiles#948). Read ONLY the state
@@ -327,7 +340,7 @@ def load(machine: str | None = None, env: str | None = None,
         for rec in records:
             raw = _worktree_to_dict(rec)
             _overlay_cached_state(raw, rec)
-            out.append(derive.norm(raw, machine, env))
+            out.append(derive.norm(raw, machine, env, **norm_source))
         return out
 
     session_ctx = sessions.scan_sessions_fast(records)
@@ -362,7 +375,7 @@ def load(machine: str | None = None, env: str | None = None,
         # processes. Best-effort: a stamp hiccup must never break the render.
         if classify:
             _stamp_from_raw(rec, raw, session_ctx)
-        out.append(derive.norm(raw, machine, env))
+        out.append(derive.norm(raw, machine, env, **norm_source))
     return out
 
 
