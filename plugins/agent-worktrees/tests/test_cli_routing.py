@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pytest
@@ -973,6 +974,36 @@ def test_bare_prefers_manager_after_production_ux_transplant(monkeypatch):
     rc = m.main([])
     assert rc == 0
     assert seam == {"mgr": "/usr/bin/worktree-manager", "project": "demo"}
+
+
+def test_manager_handoff_binds_exact_engine_runtime(monkeypatch):
+    """The Manager receives this provider runtime, never a PATH command name."""
+    seen = {}
+
+    class _Proc:
+        def wait(self, timeout=None):
+            return 0
+
+    def fake_popen(argv, **kwargs):
+        seen["argv"] = argv
+        seen["env"] = kwargs["env"]
+        return _Proc()
+
+    monkeypatch.setattr(m.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(m.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(m.sys, "executable", r"C:\runtime\python.exe")
+
+    with pytest.raises(SystemExit) as exc:
+        m._exec_worktree_manager(
+            r"C:\manager\worktree-manager.cmd", "demo"
+        )
+    assert exc.value.code == 0
+    assert seen["argv"] == [
+        r"C:\manager\worktree-manager.cmd", "--project", "demo"
+    ]
+    assert json.loads(
+        seen["env"][m._WORKTREE_MANAGER_ENGINE_ARGV_ENV]
+    ) == [r"C:\runtime\python.exe", "-m", "agent_worktrees"]
 
 
 def test_bare_falls_back_to_picker_without_manager(monkeypatch):

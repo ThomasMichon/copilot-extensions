@@ -31,6 +31,11 @@ version and be coordinated with the Manager.
 - **Project scope is explicit.** The Picker always names the project — either the
   `<project>` binstub or `agent-worktrees --project <name>` — never relying on an
   ambient cwd.
+- **Provider invocation is attributable.** The agent-worktrees front door hands
+  the Manager an exact immutable runtime argv. A directly-invoked Manager
+  uses the deployment manifest as the provider identity attestation, then
+  follows the provider's marker/fallback order to its immutable runtime. It never
+  resolves the engine from an ambient same-named command on `PATH`.
 - **Unknown flags degrade, not crash.** A verb must treat an unrecognized
   forward-compat flag it does not know as a no-op where practical, so a newer
   Manager passing a new flag to an older engine still gets a valid response

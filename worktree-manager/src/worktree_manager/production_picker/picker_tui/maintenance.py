@@ -3,11 +3,10 @@
 
 Runs the real per-worktree op on a daemon thread (sequentially, matching the
 ``working… N/M`` UX) so the Textual render loop never blocks. **Local** worktrees
-run in-process via the ``__main__`` pure helpers (``reap_one`` / ``sync_one``) or
-the ``sessions`` primitive (``restart_worktree_copilot``); **remote** worktrees
-run over SSH per item against the project binstub's JSON CLI
+run through the provider's attributable JSON CLI; **remote** worktrees run over
+SSH per item against the project binstub's JSON CLI
 (``cleanup --worktree-id`` / ``sync --worktree-id`` / ``restart <id>`` /
-``finalize --worktree-id``). The engine polls each item's state from its render
+``finalize <id>``). The engine polls each item's state from its render
 tick.
 
 The executor is the *real* counterpart to the engine's mock progress walker
@@ -26,6 +25,8 @@ import threading
 
 from agent_procutil import no_window_flags
 
+from ... import engine_client
+from .. import context
 # Per-item lifecycle states (mirror the progress sub-dialog glyphs).
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
@@ -82,16 +83,20 @@ def _result_ok(op, res):
     return bool(res.get("updated")) or res.get("reason") == "up-to-date"
 
 
-def build_tasks(op, items, src, *, include_unused=False,
+def build_tasks(op, items, src, *, project=None, include_unused=False,
                 include_conversations=False):
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
     *items* are engine record dicts (``id4`` + ``raw.id`` + ``machine`` /
-    ``env``). Local items (machine/env == ``src.LOCAL``) call the in-process
-    ``__main__`` helper; remote items call the SSH CLI via
-    ``data_ssh.remote_op_argv``. A target that resolves to neither (unknown /
+    ``env``). Local items call the attributable provider JSON CLI; remote items
+    call the same project CLI over SSH via ``data_ssh.remote_op_argv``. A target
+    that resolves to neither (unknown /
     *not-ready, or no remote argv builder on the source) yields a failed task.
     """
+    if project is None:
+        project = context.project()
+    elif not project.strip():
+        raise ValueError("project must not be empty")
     local = getattr(src, "LOCAL", None)
     tasks = []
     for w in items:
@@ -100,33 +105,39 @@ def build_tasks(op, items, src, *, include_unused=False,
         m, e = w.get("machine"), w.get("env")
         is_local = (m, e) == local
         tasks.append((key, _make_task(
-            op, wt_id, m, e, is_local,
+            op, wt_id, m, e, is_local, project=project,
             include_unused=include_unused,
             include_conversations=include_conversations,
         )))
     return tasks
 
 
-def _make_task(op, wt_id, machine, env, is_local, *, include_unused,
+def _make_task(op, wt_id, machine, env, is_local, *, project, include_unused,
                include_conversations):
     def _run():
         if not wt_id:
             return {"ok": False, "reason": "no worktree id"}
         if is_local:
-            from .. import __main__ as cli
             if op == "cleanup":
-                return cli.reap_one(
-                    wt_id, include_unused=include_unused,
-                    include_conversations=include_conversations,
-                )
-            if op == "restart":
-                from .. import sessions
-                return sessions.restart_worktree_copilot(wt_id)
-            if op == "reclaim":
-                return cli.reclaim_one(wt_id)
-            if op == "finalize":
-                return cli.finalize_one(wt_id)
-            return cli.sync_one(wt_id)
+                args = ["cleanup", "--worktree-id", wt_id, "--clean", "--json"]
+                if include_unused:
+                    args.append("--include-unused")
+                if include_conversations:
+                    args.append("--include-conversations")
+            elif op == "restart":
+                args = ["restart", wt_id, "--json"]
+            elif op == "reclaim":
+                args = [
+                    "reclaim", "--worktree-id", wt_id,
+                    "--bare-only", "--yes", "--json",
+                ]
+            elif op == "finalize":
+                args = ["finalize", wt_id, "--json"]
+            else:
+                args = ["sync", "--worktree-id", wt_id, "--json"]
+            return engine_client.run_json(
+                project, args, timeout=120, allow_nonzero=True
+            )
         from . import data_ssh
         argv = data_ssh.remote_op_argv(
             machine, env, op, wt_id,
