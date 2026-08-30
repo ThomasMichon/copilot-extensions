@@ -142,6 +142,7 @@ def obscured_source(
     src.machines = lambda: desc
     src.bucket = derive.bucket
     src.for_machine = derive.for_machine
+    src.for_source = derive.for_source
     src.load = lambda: records
     return src
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import datetime as _dt
 import json
+import logging
 import os
 import signal
 import socket
@@ -36,7 +37,7 @@ import threading
 from agent_procutil import no_window_flags
 
 from .. import config as cfg
-from . import data_local, derive, roster
+from . import data_local, derive, roster, source_identity
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
@@ -45,6 +46,7 @@ from . import data_local, derive, roster
 LOCAL_LABEL = data_local.LOCAL_LABEL
 bucket = derive.bucket
 for_machine = derive.for_machine
+for_source = derive.for_source
 # Profiles-matrix axes are config-bound from machines.yaml (same roster).
 host_cols = roster.host_cols
 target_envs = roster.target_envs
@@ -60,6 +62,9 @@ _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 # for Windows targets so a Windows machine's WSL worktrees come back too.
 _LIST_ARGS = "list --json --classify --mux-details"
 _LIST_ARGS_WIN = _LIST_ARGS + " --include-other-platforms"
+SOURCE_KIND_MACHINE_SSH = source_identity.MACHINE_SSH_KIND
+machine_source_id = source_identity.machine_ssh_id
+_LOG = logging.getLogger(__name__)
 
 
 class Source:
@@ -67,11 +72,15 @@ class Source:
 
     ``machine``/``env`` are the display labels (``machines.yaml`` display name +
     short env label) and must match this module's ``machines()`` descriptors so
-    the engine's per-tab filtering and "this host" detection line up.
+    the engine's per-tab filtering and "this host" detection line up. Existing
+    local and remote machine sources share the ``machine-ssh`` kind; ``local``
+    records whether enumeration runs in-process rather than over SSH.
     """
 
     def __init__(self, machine, env, argv, *, local=False, ready=True,
-                 use_classify=True, timeout=20, alias="", shell="bash"):
+                 use_classify=True, timeout=20, alias="", shell="bash",
+                 source_kind=SOURCE_KIND_MACHINE_SSH, source_id=None,
+                 source_label=None):
         self.machine = machine        # display_name from machines.yaml
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
@@ -81,10 +90,34 @@ class Source:
         self.timeout = timeout
         self.alias = alias            # SSH alias (remote sources only)
         self.shell = shell            # pwsh | bash (for remote command wrapping)
+        self.source_kind = source_kind
+        self.source_id = source_identity.resolve_id(
+            source_kind, source_id, machine=machine, env=env
+        )
+        self.source_label = source_label or f"{machine} / {env}"
 
     @property
     def key(self):
+        """Legacy machine/environment key used by Picker-facing APIs."""
         return (self.machine, self.env)
+
+    @property
+    def cache_key(self):
+        """Canonical source identity used for loader-owned state."""
+        return self.source_id
+
+
+def _unique_sources(sources):
+    """Keep the first source for each canonical ID without crashing the Picker."""
+    unique = []
+    seen = set()
+    for source in sources:
+        if source.source_id in seen:
+            _LOG.warning("ignoring duplicate Picker source id %s", source.source_id)
+            continue
+        seen.add(source.source_id)
+        unique.append(source)
+    return unique
 
 
 def _local_identity() -> tuple[str, str]:
@@ -340,7 +373,7 @@ def _build_sources():
     if not any(s.local for s in out):
         out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
                           local=True, ready=True))
-    return out
+    return _unique_sources(out)
 
 
 def _wrap_remote(shell: str, alias: str, inner: str):
@@ -829,7 +862,14 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
     """
     runner = runner or _run
     if source.local:
-        return data_local.load(source.machine, source.env, classify=classify)
+        return data_local.load(
+            source.machine,
+            source.env,
+            classify=classify,
+            source_kind=source.source_kind,
+            source_id=source.source_id,
+            source_label=source.source_label,
+        )
 
     eff_timeout = source.timeout if timeout is None else timeout
     use_argv = argv if argv is not None else source.argv
@@ -866,7 +906,12 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
             f"unparseable output: {exc}", returncode=proc.returncode,
             stderr=(proc.stdout or "")[:2000], argv=use_argv,
         ) from exc
-    return [derive.norm(w, source.machine, source.env)
+    return [derive.norm(
+                w, source.machine, source.env,
+                source_kind=source.source_kind,
+                source_id=source.source_id,
+                source_label=source.source_label,
+            )
             for w in data.get("worktrees", [])]
 
 
@@ -881,13 +926,15 @@ class LiveLoader:
     """
 
     def __init__(self, sources=None):
-        all_sources = list(sources if sources is not None else _build_sources())
+        all_sources = _unique_sources(
+            list(sources if sources is not None else _build_sources())
+        )
         self._all_sources = all_sources
         self._sources = [s for s in all_sources if s.ready]
         self._lock = threading.Lock()
-        self._state = {}     # (machine, env) -> loading|ready|failed
-        self._records = {}   # (machine, env) -> [normalized record, ...]
-        self._error = {}     # (machine, env) -> str (last error)
+        self._state = {}     # source_id -> loading|ready|failed
+        self._records = {}   # source_id -> [normalized record, ...]
+        self._error = {}     # source_id -> str (last error)
         # In-flight prefetch ssh children, tracked so a picker exit can kill
         # them (otherwise a quick selection orphans them -- they reparent to
         # init and keep churning git-classification on the target machine,
@@ -907,9 +954,9 @@ class LiveLoader:
         # intentional reload (#1421, ordering fix).
         self._gen: dict = {}
         for s in all_sources:
-            self._state[s.key] = "loading" if s.ready else "failed"
-            self._records[s.key] = []
-            self._gen[s.key] = 0
+            self._state[s.cache_key] = "loading" if s.ready else "failed"
+            self._records[s.cache_key] = []
+            self._gen[s.cache_key] = 0
 
     def start(self):
         derive.NOW = _dt.datetime.now()
@@ -938,13 +985,17 @@ class LiveLoader:
         arrive. Unknown / not-ready sources are a no-op. Returns True when a
         matching source was found (#1421, live re-render).
         """
+        return self.reload_source(self._cache_key(machine, env))
+
+    def reload_source(self, source_id):
+        """Re-fetch one source by its canonical identity."""
         for s in self._sources:
-            if s.key == (machine, env):
+            if s.cache_key == source_id:
                 with self._lock:
-                    self._state[s.key] = "loading"
+                    self._state[s.cache_key] = "loading"
                     # Invalidate any in-flight silent repoll of this source so
                     # its (older) rows can't land after this reload (#1421).
-                    self._gen[s.key] = self._gen.get(s.key, 0) + 1
+                    self._gen[s.cache_key] = self._gen.get(s.cache_key, 0) + 1
                 threading.Thread(
                     target=self._load_one, args=(s,),
                     name=f"reload-{s.machine}-{s.env}", daemon=True,
@@ -973,12 +1024,12 @@ class LiveLoader:
             for s in self._sources:
                 if keys is not None and s.key not in keys:
                     continue
-                if self._state.get(s.key) != "ready":
+                if self._state.get(s.cache_key) != "ready":
                     continue
-                if s.key in self._refreshing:
+                if s.cache_key in self._refreshing:
                     continue
-                self._refreshing.add(s.key)
-                gen = self._gen.get(s.key, 0)
+                self._refreshing.add(s.cache_key)
+                gen = self._gen.get(s.cache_key, 0)
                 started += 1
                 threading.Thread(
                     target=self._refresh_one, args=(s, gen),
@@ -1004,12 +1055,12 @@ class LiveLoader:
                 # Commit only when still ready, not cancelled, and not
                 # superseded by a newer reload() (generation unchanged).
                 if (not self._cancelled.is_set()
-                        and self._state.get(source.key) == "ready"
-                        and self._gen.get(source.key, 0) == gen):
-                    self._records[source.key] = recs
+                        and self._state.get(source.cache_key) == "ready"
+                        and self._gen.get(source.cache_key, 0) == gen):
+                    self._records[source.cache_key] = recs
         finally:
             with self._lock:
-                self._refreshing.discard(source.key)
+                self._refreshing.discard(source.cache_key)
 
     def reconcile_remote_prs(self, keys=None):
         """Reconcile each ready REMOTE machine's own PR state, on that machine (#2102).
@@ -1034,13 +1085,14 @@ class LiveLoader:
                     continue
                 if keys is not None and s.key not in keys:
                     continue
-                if self._state.get(s.key) != "ready":
+                if self._state.get(s.cache_key) != "ready":
                     continue
-                if s.key in self._pr_reconciled_keys or s.key in self._refreshing:
+                if (s.cache_key in self._pr_reconciled_keys
+                        or s.cache_key in self._refreshing):
                     continue
-                self._pr_reconciled_keys.add(s.key)
-                self._refreshing.add(s.key)
-                gen = self._gen.get(s.key, 0)
+                self._pr_reconciled_keys.add(s.cache_key)
+                self._refreshing.add(s.cache_key)
+                gen = self._gen.get(s.cache_key, 0)
                 started += 1
                 threading.Thread(
                     target=self._reconcile_one, args=(s, gen),
@@ -1066,12 +1118,12 @@ class LiveLoader:
         else:
             with self._lock:
                 if (not self._cancelled.is_set()
-                        and self._state.get(source.key) == "ready"
-                        and self._gen.get(source.key, 0) == gen):
-                    self._records[source.key] = recs
+                        and self._state.get(source.cache_key) == "ready"
+                        and self._gen.get(source.cache_key, 0) == gen):
+                    self._records[source.cache_key] = recs
         finally:
             with self._lock:
-                self._refreshing.discard(source.key)
+                self._refreshing.discard(source.cache_key)
 
     def cancel(self):
         """Stop loading and kill any in-flight prefetch ssh children.
@@ -1177,7 +1229,7 @@ class LiveLoader:
         # streams in. Opt-in (see _stream_enabled) during the rollout window;
         # falls back to the two-phase path when disabled or when the remote is
         # too old to know --stream.
-        gen = self._gen.get(source.key, 0)
+        gen = self._gen.get(source.cache_key, 0)
         if _stream_enabled() and self._load_remote_stream(source, gen):
             return
         self._load_remote_two_phase(source)
@@ -1209,8 +1261,8 @@ class LiveLoader:
         except Exception as exc:
             self._log_fetch_failure(source, exc, t0, phase="stream")
             with self._lock:
-                self._state[source.key] = "failed"
-                self._error[source.key] = str(exc).strip() or type(exc).__name__
+                self._state[source.cache_key] = "failed"
+                self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
             return True
         timer = threading.Timer(deadline, lambda: _kill_proc_tree(proc))
         timer.daemon = True
@@ -1228,18 +1280,25 @@ class LiveLoader:
                     rid = wt.get("id")
                     if not rid:
                         continue
-                    rec = derive.norm(wt, source.machine, source.env)
+                    rec = derive.norm(
+                        wt,
+                        source.machine,
+                        source.env,
+                        source_kind=source.source_kind,
+                        source_id=source.source_id,
+                        source_label=source.source_label,
+                    )
                     with self._lock:
                         if self._cancelled.is_set():
                             break
-                        if self._gen.get(source.key, 0) != gen:
+                        if self._gen.get(source.cache_key, 0) != gen:
                             break   # superseded by a reload()
                         if rid not in by_id:
                             order.append(rid)
                         by_id[rid] = rec
-                        self._records[source.key] = [by_id[i] for i in order]
+                        self._records[source.cache_key] = [by_id[i] for i in order]
                         if not ready:
-                            self._state[source.key] = "ready"
+                            self._state[source.cache_key] = "ready"
                             ready = True
                 elif typ == "done":
                     done = True
@@ -1260,9 +1319,9 @@ class LiveLoader:
             # Fully or partially resolved (or an empty remote) -- keep the rows.
             with self._lock:
                 if (not self._cancelled.is_set()
-                        and self._gen.get(source.key, 0) == gen):
-                    self._records[source.key] = [by_id[i] for i in order]
-                    self._state[source.key] = "ready"
+                        and self._gen.get(source.cache_key, 0) == gen):
+                    self._records[source.cache_key] = [by_id[i] for i in order]
+                    self._state[source.cache_key] = "ready"
             note = "streamed" if done else "streamed (partial)"
             _ssh_log(f"  OK      {source.machine}/{source.env} {note} "
                      f"{len(order)} worktree(s) in {elapsed:.1f}s")
@@ -1278,8 +1337,8 @@ class LiveLoader:
             returncode=rc, stderr=err, argv=argv)
         self._log_fetch_failure(source, exc, t0, phase="stream", timeout=deadline)
         with self._lock:
-            self._state[source.key] = "failed"
-            self._error[source.key] = str(exc).strip() or type(exc).__name__
+            self._state[source.cache_key] = "failed"
+            self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
         return True
 
     def _load_remote_two_phase(self, source: Source):
@@ -1298,7 +1357,7 @@ class LiveLoader:
         A remote already known not to support ``--classify`` (an older
         agent-worktrees, ``use_classify`` cleared by a prior fetch) has nothing
         to classify, so it loads in a single pass -- there is no second phase."""
-        gen = self._gen.get(source.key, 0)
+        gen = self._gen.get(source.cache_key, 0)
         fast_argv = _drop_classify_arg(source.argv)
         two_phase = source.use_classify and fast_argv != source.argv
         # picker-cache-first-paint (dotfiles#948): when enabled, the fast phase
@@ -1316,8 +1375,8 @@ class LiveLoader:
             self._log_fetch_failure(source, exc, t0,
                                     phase="fast" if two_phase else "load")
             with self._lock:
-                self._state[source.key] = "failed"
-                self._error[source.key] = str(exc).strip() or type(exc).__name__
+                self._state[source.cache_key] = "failed"
+                self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
             return
         elapsed = (_dt.datetime.now() - t0).total_seconds()
         label = "fast, no classify" if two_phase else "single pass"
@@ -1326,8 +1385,8 @@ class LiveLoader:
         with self._lock:
             if self._cancelled.is_set():
                 return
-            self._records[source.key] = first
-            self._state[source.key] = "ready"
+            self._records[source.cache_key] = first
+            self._state[source.cache_key] = "ready"
         if not two_phase or self._cancelled.is_set():
             return
         # Phase 2: authoritative git classification on the longer classify budget
@@ -1345,9 +1404,9 @@ class LiveLoader:
                  f"{len(full)} worktree(s) in {elapsed2:.1f}s")
         with self._lock:
             if (not self._cancelled.is_set()
-                    and self._state.get(source.key) == "ready"
-                    and self._gen.get(source.key, 0) == gen):
-                self._records[source.key] = full
+                    and self._state.get(source.cache_key) == "ready"
+                    and self._gen.get(source.cache_key, 0) == gen):
+                self._records[source.cache_key] = full
 
     def _load_local_two_phase(self, source: Source):
         """Fast-then-fill for the local tab.
@@ -1359,21 +1418,21 @@ class LiveLoader:
         Phase 2 (``classify=True``) runs the full git classification and swaps
         the authoritative ``state`` in. A generation guard keeps a concurrent
         :meth:`reload` from being clobbered by this pass's phase 2 (#1421)."""
-        gen = self._gen.get(source.key, 0)
+        gen = self._gen.get(source.cache_key, 0)
         t0 = _dt.datetime.now()
         try:
             fast = _fetch(source, classify=False)
         except Exception as exc:
             self._log_fetch_failure(source, exc, t0, phase="local")
             with self._lock:
-                self._state[source.key] = "failed"
-                self._error[source.key] = str(exc).strip() or type(exc).__name__
+                self._state[source.cache_key] = "failed"
+                self._error[source.cache_key] = str(exc).strip() or type(exc).__name__
             return
         with self._lock:
             if self._cancelled.is_set():
                 return
-            self._records[source.key] = fast
-            self._state[source.key] = "ready"
+            self._records[source.cache_key] = fast
+            self._state[source.cache_key] = "ready"
         # Phase 2: authoritative git classification, swapped in on success.
         try:
             full = _fetch(source, classify=True)
@@ -1381,9 +1440,9 @@ class LiveLoader:
             return  # keep the honest phase-1 heuristic rows
         with self._lock:
             if (not self._cancelled.is_set()
-                    and self._state.get(source.key) == "ready"
-                    and self._gen.get(source.key, 0) == gen):
-                self._records[source.key] = full
+                    and self._state.get(source.cache_key) == "ready"
+                    and self._gen.get(source.cache_key, 0) == gen):
+                self._records[source.cache_key] = full
 
     def _log_load_header(self):
         """Enumerate every source this load pass will (or won't) resolve.
@@ -1442,8 +1501,15 @@ class LiveLoader:
             pass
 
     def state(self, machine, env):
+        """Compatibility lookup for a machine/environment source."""
+        return self.state_for_source(self._cache_key(machine, env))
+
+    def state_for_source(self, source_id):
         with self._lock:
-            return self._state.get((machine, env), "loading")
+            return self._state.get(source_id, "loading")
+
+    def _cache_key(self, machine, env):
+        return machine_source_id(machine, env)
 
     def records(self):
         """Flat list of every normalized worktree, keeping last-good rows in
@@ -1466,6 +1532,11 @@ class LiveLoader:
                     out.extend(recs)
             return out
 
+    def records_for_source(self, source_id):
+        """Return a copy of one canonical source's current rows."""
+        with self._lock:
+            return list(self._records.get(source_id, []))
+
     def counts(self):
         """(ready, loading, failed) machine counts for the status note."""
         with self._lock:
@@ -1477,5 +1548,9 @@ class LiveLoader:
         )
 
     def error(self, machine, env):
+        """Compatibility lookup for a machine/environment source."""
+        return self.error_for_source(self._cache_key(machine, env))
+
+    def error_for_source(self, source_id):
         with self._lock:
-            return self._error.get((machine, env))
+            return self._error.get(source_id)

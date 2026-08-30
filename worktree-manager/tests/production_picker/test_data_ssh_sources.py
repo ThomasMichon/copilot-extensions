@@ -6,12 +6,13 @@ as a disabled tab instead.
 """
 from __future__ import annotations
 
+import json as _json
 import types
 
 import pytest
 
 from agent_worktrees import config as cfg
-from worktree_manager.production_picker.picker_tui import data_ssh
+from worktree_manager.production_picker.picker_tui import data_ssh, derive
 
 
 def _install_roster(monkeypatch, entries, *, machine, local_id):
@@ -42,6 +43,144 @@ def _entry(key, display, envs, *, ssh_ready=True, copilot=True, alias="", hostna
 
 def _by_key(sources):
     return {(s.machine, s.env): s for s in sources}
+
+
+def test_machine_source_has_canonical_identity_and_legacy_key():
+    source = data_ssh.Source("Host-A", "WSL", None)
+
+    assert source.source_kind == "machine-ssh"
+    assert source.source_id == "machine-ssh:host-a:wsl"
+    assert source.source_label == "Host-A / WSL"
+    assert source.cache_key == source.source_id
+    assert source.key == ("Host-A", "WSL")
+
+
+def test_machine_source_identity_escapes_delimiters():
+    first = data_ssh.Source("alpha:beta", "gamma", None)
+    second = data_ssh.Source("alpha", "beta:gamma", None)
+
+    assert first.source_id == "machine-ssh:alpha%3Abeta:gamma"
+    assert second.source_id == "machine-ssh:alpha:beta%3Agamma"
+    assert first.source_id != second.source_id
+
+
+def test_machine_source_rejects_noncanonical_explicit_identity():
+    with pytest.raises(ValueError, match="machine source id must equal"):
+        data_ssh.Source(
+            "Host-A", "WSL", None, source_id="machine-ssh:other-host:linux"
+        )
+
+
+def test_non_machine_source_requires_matching_explicit_identity():
+    with pytest.raises(ValueError, match="require an explicit source id"):
+        data_ssh.Source("Virtual Target", "Provider", None, source_kind="provider-exec")
+
+    with pytest.raises(ValueError, match="provider-exec: namespace"):
+        data_ssh.Source(
+            "Virtual Target",
+            "Provider",
+            None,
+            source_kind="provider-exec",
+            source_id="machine-ssh:virtual-target:provider",
+        )
+
+    with pytest.raises(ValueError, match="include a namespace value"):
+        data_ssh.Source(
+            "Virtual Target",
+            "Provider",
+            None,
+            source_kind="provider-exec",
+            source_id="provider-exec:",
+        )
+
+
+def test_normalized_row_carries_source_identity():
+    row = derive.norm({"id": "example-1234"}, "Host-A", "WSL")
+    other = derive.norm(
+        {"id": "provider-5678"},
+        "Virtual Target",
+        "Provider",
+        source_kind="provider-exec",
+        source_id="provider-exec:example:target-1",
+        source_label="Virtual target",
+    )
+
+    assert row["machine"] == "Host-A"
+    assert row["env"] == "WSL"
+    assert row["source_kind"] == "machine-ssh"
+    assert row["source_id"] == "machine-ssh:host-a:wsl"
+    assert row["source"] == {
+        "kind": "machine-ssh",
+        "id": "machine-ssh:host-a:wsl",
+        "label": "Host-A / WSL",
+    }
+    assert derive.for_source([row, other], row["source_id"]) == derive.for_machine(
+        [row, other], "Host-A", "WSL"
+    )
+
+
+def test_loader_cache_isolated_by_canonical_source_id():
+    machine = data_ssh.Source("Host-A", "WSL", None)
+    provider = data_ssh.Source(
+        "Host-A",
+        "WSL",
+        None,
+        source_kind="provider-exec",
+        source_id="provider-exec:example:target-1",
+        source_label="Virtual target",
+    )
+
+    loader = data_ssh.LiveLoader([machine, provider])
+    with loader._lock:
+        loader._records[machine.source_id] = ["machine-row"]
+        loader._records[provider.source_id] = ["provider-row"]
+        loader._state[machine.source_id] = "ready"
+        loader._state[provider.source_id] = "failed"
+
+    assert set(loader._state) == {machine.source_id, provider.source_id}
+    assert loader.state("Host-A", "WSL") == "ready"
+    assert loader.state_for_source(provider.source_id) == "failed"
+    assert loader.records_for_source(machine.source_id) == ["machine-row"]
+    assert loader.records_for_source(provider.source_id) == ["provider-row"]
+
+
+def test_loader_ignores_duplicate_canonical_source_ids(caplog):
+    first = data_ssh.Source("Host-A", "WSL", None)
+    duplicate = data_ssh.Source("host-a", "wsl", None)
+
+    loader = data_ssh.LiveLoader([first, duplicate])
+
+    assert loader._all_sources == [first]
+    assert "ignoring duplicate Picker source id" in caplog.text
+
+
+def test_local_fetch_passes_source_metadata_to_normalizer(monkeypatch):
+    captured = {}
+
+    def fake_load(machine, env, **kwargs):
+        captured.update(machine=machine, env=env, **kwargs)
+        return []
+
+    monkeypatch.setattr(data_ssh.data_local, "load", fake_load)
+    source = data_ssh.Source(
+        "Virtual Target",
+        "Provider",
+        None,
+        local=True,
+        source_kind="provider-exec",
+        source_id="provider-exec:example:target-1",
+        source_label="Virtual target",
+    )
+
+    assert data_ssh._fetch(source) == []
+    assert captured == {
+        "machine": "Virtual Target",
+        "env": "Provider",
+        "classify": True,
+        "source_kind": "provider-exec",
+        "source_id": "provider-exec:example:target-1",
+        "source_label": "Virtual target",
+    }
 
 
 def test_local_machine_matched_by_hostname_field(monkeypatch):
@@ -318,8 +457,8 @@ def _ready_loader(monkeypatch, records):
     src = data_ssh.Source("M", "Win", ["ssh", "m", "list"], ready=True)
     loader = data_ssh.LiveLoader([src])
     with loader._lock:
-        loader._state[src.key] = "ready"
-        loader._records[src.key] = list(records)
+        loader._state[src.cache_key] = "ready"
+        loader._records[src.cache_key] = list(records)
     return loader, src
 
 
@@ -368,11 +507,11 @@ def test_repoll_silent_skips_non_ready_and_cancelled(monkeypatch):
         lambda source, runner=None: called.__setitem__("n", called["n"] + 1) or ["x"])
     # Not ready -> skipped.
     with loader._lock:
-        loader._state[src.key] = "loading"
+        loader._state[src.cache_key] = "loading"
     assert loader.repoll_silent() == 0
     # Cancelled -> whole pass is a no-op.
     with loader._lock:
-        loader._state[src.key] = "ready"
+        loader._state[src.cache_key] = "ready"
     loader._cancelled.set()
     assert loader.repoll_silent() == 0
     assert called["n"] == 0
@@ -534,7 +673,7 @@ def test_reconcile_remote_prs_skips_local(monkeypatch):
     local = data_ssh.Source("M", "Win", None, local=True, ready=True)
     loader = data_ssh.LiveLoader([local])
     with loader._lock:
-        loader._state[local.key] = "ready"
+        loader._state[local.cache_key] = "ready"
     called = {"n": 0}
     monkeypatch.setattr(
         data_ssh, "_fetch",
@@ -797,8 +936,6 @@ def test_remote_single_pass_when_classify_unsupported(monkeypatch, tmp_path):
 
 # ── remote NDJSON streaming load (Phase A) ────────────────────────────────────
 
-import json as _json
-
 
 class _FakeStreamProc:
     """Stand-in for a streaming Popen: yields pre-baked NDJSON lines on stdout."""
@@ -830,7 +967,9 @@ def _stream_src():
 def test_stream_paints_fast_then_classified(monkeypatch, tmp_path):
     monkeypatch.setattr(data_ssh, "_ssh_log_path", lambda: tmp_path / "l.log")
     # Keep the record identity trivial so we can assert the fast->classified swap.
-    monkeypatch.setattr(data_ssh.derive, "norm", lambda wt, m, e: dict(wt))
+    monkeypatch.setattr(
+        data_ssh.derive, "norm", lambda wt, m, e, **source: dict(wt)
+    )
     lines = [
         _nd({"type": "begin", "count": 2}),
         _nd({"type": "worktree", "phase": "fast", "wt": {"id": "A"}}),
@@ -845,7 +984,7 @@ def test_stream_paints_fast_then_classified(monkeypatch, tmp_path):
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(loader, "_spawn_stream", lambda argv: _FakeStreamProc(lines))
 
-    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    handled = loader._load_remote_stream(src, loader._gen[src.cache_key])
     assert handled is True
     assert loader.state("dev6", "Win") == "ready"
     recs = loader.records()
@@ -862,7 +1001,7 @@ def test_stream_empty_remote_resolves_ready(monkeypatch, tmp_path):
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(loader, "_spawn_stream", lambda argv: _FakeStreamProc(lines))
 
-    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    handled = loader._load_remote_stream(src, loader._gen[src.cache_key])
     assert handled is True
     assert loader.state("dev6", "Win") == "ready"        # empty is success
     assert loader.records() == []
@@ -876,7 +1015,7 @@ def test_stream_unsupported_returns_false_for_fallback(monkeypatch, tmp_path):
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(loader, "_spawn_stream", lambda argv: proc)
 
-    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    handled = loader._load_remote_stream(src, loader._gen[src.cache_key])
     assert handled is False                              # caller falls back
     assert loader.state("dev6", "Win") != "ready"
 
@@ -889,7 +1028,7 @@ def test_stream_hard_failure_marks_failed(monkeypatch, tmp_path):
     loader = data_ssh.LiveLoader([src])
     monkeypatch.setattr(loader, "_spawn_stream", lambda argv: proc)
 
-    handled = loader._load_remote_stream(src, loader._gen[src.key])
+    handled = loader._load_remote_stream(src, loader._gen[src.cache_key])
     assert handled is True                               # owned, not fallback
     assert loader.state("dev6", "Win") == "failed"
     assert "[stream]" in (tmp_path / "l.log").read_text("utf-8")
