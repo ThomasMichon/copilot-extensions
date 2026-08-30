@@ -3086,10 +3086,12 @@ read_runtime_marker_into() {
     actual="$(canonical_path "$path" true)"
     paths_equal "$actual" "$path" ||
         fail "$label is not at its exact canonical location '$path'."
+    byte_count="$(wc -c <"$actual" | tr -d '[:space:]')"
+    [[ "$byte_count" =~ ^[0-9]+$ && "$byte_count" -le 130 ]] ||
+        fail "$label exceeds the portable 128-character runtime version limit."
     raw="$(cat -- "$actual"; printf '\034')" ||
         fail "Cannot read ${label,,} '$actual'."
     raw="${raw%$'\034'}"
-    byte_count="$(wc -c <"$actual" | tr -d '[:space:]')"
     value="$raw"
     expected_size="${#value}"
     if [[ "$value" == *$'\r\n' ]]; then

@@ -4277,6 +4277,29 @@ def test_runtime_slot_cutover_rejects_malformed_markers(
     assert marker.read_bytes() == before
 
 
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_rejects_oversized_marker(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    marker = Path(layout["plugin_root"]) / "last-known-good"
+    marker.write_bytes(b"x" * 131)
+    before = marker.read_bytes()
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert marker.read_bytes() == before
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
 @pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize("marker_name", ("current-version", "last-known-good"))
