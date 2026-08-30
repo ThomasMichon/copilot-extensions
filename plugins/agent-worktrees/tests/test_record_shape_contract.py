@@ -37,7 +37,7 @@ _SESSION_STATE_SIGNAL_KEYS = (
     "live_intent", "live_pulse",
 )
 _INTERACTION_LAYER_KEYS = (
-    "id4", "title", "machine", "env", "machine_env",
+    "id4", "selection_id", "title", "machine", "env", "machine_env",
     "cleanup_bucket", "ff_eligible", "state",
 )
 
@@ -114,3 +114,21 @@ def test_signals_absent_default_off_not_missing():
     assert rec["session_bridge_live"] is False
     assert rec["last_session_id"] is None
     assert rec["live_pulse"] is None
+
+
+def test_machine_selection_identity_is_source_scoped_and_collision_safe():
+    first = derive.norm(
+        _raw(id="first-worktree-abcd"), "anomalous-potato", "win"
+    )
+    second = derive.norm(
+        _raw(id="second-worktree-abcd"), "emancipation-cube", "win"
+    )
+
+    assert first["id4"] == second["id4"] == "abcd"
+    assert first["selection_id"] == (
+        "machine-ssh:anomalous-potato:win\x1ffirst-worktree-abcd"
+    )
+    assert second["selection_id"] == (
+        "machine-ssh:emancipation-cube:win\x1fsecond-worktree-abcd"
+    )
+    assert first["selection_id"] != second["selection_id"]

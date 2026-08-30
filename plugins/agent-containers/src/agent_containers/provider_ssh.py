@@ -28,9 +28,19 @@ from typing import BinaryIO, cast
 
 from agent_procutil import no_window_flags
 
-from .config import RESTRICTED_PROFILE, STATE_DIR
-from .lease import ProviderAdmissionError, session_admission
-from .private_state import atomic_write_json, ensure_private_dir
+from .config import RESTRICTED_PROFILE, RUNTIME_DIR, STATE_DIR
+from .lease import (
+    ProviderAdmissionError,
+    get_lease,
+    provider_lease_guard,
+    session_admission,
+)
+from .private_state import (
+    atomic_write_json,
+    enforce_mode,
+    ensure_private_dir,
+    fsync_directory,
+)
 from .resolver import (
     ContainerResolver,
     LiveExecTarget,
@@ -72,6 +82,51 @@ def provider_module_path() -> Path:
     if not path.is_file():
         raise RuntimeError(f"Provider-exec transport module is missing: {path}")
     return path.resolve()
+
+
+def provider_command_argv() -> list[str]:
+    """Return an isolated command prefix that follows the active runtime."""
+    source = Path(__file__).resolve().with_name("provider_launcher.py")
+    if not source.is_file():
+        raise RuntimeError(f"Provider launcher source is missing: {source}")
+    runtime_root = Path(
+        os.environ.get("AGENT_RT_ROOT", str(RUNTIME_DIR))
+    ).expanduser()
+    launcher = runtime_root / "provider-launcher.py"
+    payload = source.read_bytes()
+    if not launcher.is_file() or launcher.read_bytes() != payload:
+        ensure_private_dir(launcher.parent)
+        tmp = launcher.with_name(
+            f".{launcher.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp"
+        )
+        fd = -1
+        try:
+            fd = os.open(
+                str(tmp),
+                os.O_CREAT | os.O_EXCL | os.O_WRONLY,
+                0o600,
+            )
+            with os.fdopen(fd, "wb") as stream:
+                fd = -1
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+            enforce_mode(tmp, 0o600)
+            os.replace(tmp, launcher)
+            enforce_mode(launcher, 0o600)
+            fsync_directory(launcher.parent)
+        finally:
+            if fd >= 0:
+                os.close(fd)
+            tmp.unlink(missing_ok=True)
+    base_executable = Path(
+        getattr(sys, "_base_executable", None) or sys.executable
+    ).resolve()
+    if not base_executable.is_file():
+        raise RuntimeError(
+            f"Provider base Python interpreter is missing: {base_executable}"
+        )
+    return [str(base_executable), "-I", str(launcher)]
 
 
 def _null_known_hosts() -> str:
@@ -125,7 +180,13 @@ def _validate_profile_venue(
     return venue
 
 
-def ssh_profile_spec(name: str, alias: str | None = None) -> dict:
+def ssh_profile_spec(
+    name: str,
+    alias: str | None = None,
+    *,
+    project: str | None = None,
+    label: str | None = None,
+) -> dict:
     """Return the agent-ssh module + normalized registry for one live target."""
     target = resolve_live_exec_target(name)
     if target.actual_profile != RESTRICTED_PROFILE:
@@ -167,16 +228,250 @@ def ssh_profile_spec(name: str, alias: str | None = None) -> dict:
     provider_binary = shutil.which("agent-containers")
     if provider_binary:
         registry["proxy_command_binary"] = provider_binary
-    return {
+    result = {
         "schema_version": 1,
         "module": str(provider_module_path()),
         "registry": registry,
         "venue": {**venue, "posture_verified": True},
     }
+    if project is not None:
+        project = project.strip()
+        if not project:
+            raise ValueError("project must be a non-empty name")
+        lease = get_lease(name)
+        if lease is None:
+            raise RuntimeError(
+                f"Container '{name}' must have an active lease before it can "
+                "be registered as a Picker source"
+            )
+        source_label = (label or profile_alias).strip()
+        if not source_label:
+            raise ValueError("label must be non-empty")
+        if len(source_label) > 80 or any(
+            ord(character) < 32 or ord(character) == 127
+            for character in source_label
+        ):
+            raise ValueError(
+                "label must be at most 80 characters without control characters"
+            )
+        assignment = {
+            "kind": "lease",
+            "effort": lease.effort,
+            "acquired_at": lease.acquired_at,
+        }
+        result["venue"] = {**result["venue"], "assignment": assignment}
+        result["worktree_source"] = {
+            "kind": "provider-exec",
+            "project": project,
+            "target_id": venue["target_id"],
+            "instance_id": venue["instance_id"],
+            "label": source_label,
+            "alias": profile_alias,
+            "shell": "bash",
+            "resolve": [
+                *provider_command_argv(),
+                "ssh-profile",
+                name,
+                "--alias",
+                profile_alias,
+                "--project",
+                project,
+                "--label",
+                source_label,
+                "--json",
+            ],
+            "connect": [
+                *provider_command_argv(),
+                "ssh-stdio",
+                name,
+            ],
+            "venue": result["venue"],
+            "capabilities": {
+                "list": True,
+                "messages": True,
+                "sessions": True,
+                "refresh": True,
+                "open": False,
+                "resume": False,
+                "stop": False,
+                "cleanup": False,
+                "sync": False,
+                "finalize": False,
+                "reclaim": False,
+                "repair": False,
+                "create": False,
+            },
+        }
+    return result
 
 
 def _profile_registry_path() -> Path:
     return STATE_DIR / "ssh-profiles" / "provider-exec.json"
+
+
+def _source_registry_path() -> Path:
+    root = Path(
+        os.environ.get("AGENT_WORKTREES_SOURCES_DIR", "~/.agent-worktrees/sources")
+    ).expanduser()
+    return root / "agent-containers.json"
+
+
+def _publish_worktree_source(source: dict) -> None:
+    path = _source_registry_path()
+    previous: dict = {}
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(
+                f"Picker source registry is unreadable: {path}"
+            ) from exc
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("schema_version") != 1
+            or loaded.get("provider") != "agent-containers"
+            or not isinstance(loaded.get("sources"), list)
+        ):
+            raise RuntimeError(f"Picker source registry is malformed: {path}")
+        previous = loaded
+    if any(
+        not isinstance(entry, dict)
+        or not isinstance(entry.get("project"), str)
+        or not isinstance(entry.get("target_id"), str)
+        for entry in previous.get("sources", [])
+    ):
+        raise RuntimeError(f"Picker source registry has invalid sources: {path}")
+    sources = [
+        entry
+        for entry in previous.get("sources", [])
+        if isinstance(entry, dict)
+        and not (
+            entry.get("project", "").casefold() == source["project"].casefold()
+            and entry.get("target_id") == source["target_id"]
+        )
+    ]
+    sources.append(source)
+    sources.sort(key=lambda entry: (entry["project"].casefold(), entry["target_id"]))
+    atomic_write_json(
+        path,
+        {
+            "schema_version": 1,
+            "provider": "agent-containers",
+            "sources": sources,
+        },
+        indent=2,
+    )
+
+
+def remove_worktree_source(name: str, project: str) -> bool:
+    """Remove one project-scoped Picker source without resolving the target."""
+    normalized_project = project.strip()
+    if not normalized_project:
+        raise ValueError("project must be a non-empty name")
+    target_id = f"container:{name}"
+    path = _source_registry_path()
+    with _profile_registry_lock():
+        if not path.is_file():
+            return False
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Picker source registry is unreadable: {path}") from exc
+        if (
+            not isinstance(loaded, dict)
+            or loaded.get("schema_version") != 1
+            or loaded.get("provider") != "agent-containers"
+            or not isinstance(loaded.get("sources"), list)
+        ):
+            raise RuntimeError(f"Picker source registry is malformed: {path}")
+        sources = loaded["sources"]
+        if any(
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("project"), str)
+            or not isinstance(entry.get("target_id"), str)
+            for entry in sources
+        ):
+            raise RuntimeError(f"Picker source registry has invalid sources: {path}")
+        kept = [
+            entry
+            for entry in sources
+            if not (
+                entry["project"].casefold() == normalized_project.casefold()
+                and entry["target_id"] == target_id
+            )
+        ]
+        if len(kept) == len(sources):
+            return False
+        atomic_write_json(
+            path,
+            {
+                "schema_version": 1,
+                "provider": "agent-containers",
+                "sources": kept,
+            },
+            indent=2,
+        )
+        return True
+
+
+def remove_stale_worktree_sources(target: str) -> int:
+    """Remove released Picker registrations by container or effort name."""
+    target_id = f"container:{target}"
+    path = _source_registry_path()
+    with _profile_registry_lock():
+        with provider_lease_guard() as leases:
+            active_assignments = {
+                f"container:{lease.container}": {
+                    "kind": "lease",
+                    "effort": lease.effort,
+                    "acquired_at": lease.acquired_at,
+                }
+                for lease in leases
+            }
+            if not path.is_file():
+                return 0
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(
+                    f"Picker source registry is unreadable: {path}"
+                ) from exc
+            if (
+                not isinstance(loaded, dict)
+                or loaded.get("schema_version") != 1
+                or loaded.get("provider") != "agent-containers"
+                or not isinstance(loaded.get("sources"), list)
+            ):
+                raise RuntimeError(f"Picker source registry is malformed: {path}")
+            sources = loaded["sources"]
+            if any(
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("target_id"), str)
+                for entry in sources
+            ):
+                raise RuntimeError(
+                    f"Picker source registry has invalid sources: {path}"
+                )
+
+            def stale_match(entry: dict) -> bool:
+                venue = entry.get("venue")
+                assignment = (
+                    venue.get("assignment") if isinstance(venue, dict) else None
+                )
+                matches_target = entry["target_id"] == target_id
+                matches_effort = (
+                    isinstance(assignment, dict)
+                    and assignment.get("effort") == target
+                )
+                if not (matches_target or matches_effort):
+                    return False
+                return active_assignments.get(entry["target_id"]) != assignment
+
+            kept = [entry for entry in sources if not stale_match(entry)]
+            removed = len(sources) - len(kept)
+            if removed:
+                atomic_write_json(path, {**loaded, "sources": kept}, indent=2)
+            return removed
 
 
 @contextmanager
@@ -218,6 +513,8 @@ def emit_ssh_profile(
     alias: str | None = None,
     *,
     print_only: bool = False,
+    project: str | None = None,
+    label: str | None = None,
 ) -> int:
     """Persist provider metadata and ask agent-ssh to publish the named alias."""
     agent_ssh = shutil.which("agent-ssh")
@@ -225,7 +522,11 @@ def emit_ssh_profile(
         raise RuntimeError(
             "agent-ssh is required to emit provider-exec profiles but is not on PATH"
         )
-    spec = ssh_profile_spec(name, alias)
+    spec = (
+        ssh_profile_spec(name, alias, project=project, label=label)
+        if project is not None or label is not None
+        else ssh_profile_spec(name, alias)
+    )
     provider_binary = spec["registry"].get("proxy_command_binary")
     if not provider_binary:
         raise RuntimeError(
@@ -307,6 +608,29 @@ def emit_ssh_profile(
             atomic_write_json(registry_path, previous, indent=2)
         elif not print_only and result.returncode != 0:
             registry_path.unlink(missing_ok=True)
+        elif not print_only and "worktree_source" in spec:
+            source = spec["worktree_source"]
+            assignment = source.get("venue", {}).get("assignment")
+            with provider_lease_guard() as leases:
+                lease = next(
+                    (lease for lease in leases if lease.container == name),
+                    None,
+                )
+                current_assignment = (
+                    {
+                        "kind": "lease",
+                        "effort": lease.effort,
+                        "acquired_at": lease.acquired_at,
+                    }
+                    if lease is not None
+                    else None
+                )
+                if assignment != current_assignment:
+                    raise RuntimeError(
+                        f"Container '{name}' lease assignment changed before "
+                        "Picker source publication"
+                    )
+                _publish_worktree_source(source)
         return result.returncode
 
 
@@ -704,14 +1028,31 @@ def _serve_ssh(
         output_thread.join(timeout=2)
 
 
-def run_ssh_stdio(name: str) -> int:
+def run_ssh_stdio(
+    name: str,
+    *,
+    expected_target_id: str | None = None,
+    expected_instance_id: str | None = None,
+    expected_assignment: dict | None = None,
+) -> int:
     """Serve one restricted SSH connection over this process's stdio."""
     try:
-        with session_admission(name):
+        if expected_target_id is not None and expected_target_id != f"container:{name}":
+            raise ProviderAdmissionError(
+                f"Container '{name}' target identity changed"
+            )
+        with session_admission(name, expected_assignment=expected_assignment):
             target = resolve_live_exec_target(name)
             if target.actual_profile != RESTRICTED_PROFILE:
                 raise RuntimeError(
                     f"Container '{name}' is not restricted; refusing provider-exec transport"
+                )
+            if (
+                expected_instance_id is not None
+                and target.container_id != expected_instance_id
+            ):
+                raise ProviderAdmissionError(
+                    f"Container '{name}' instance identity changed"
                 )
             return _serve_ssh(
                 target,

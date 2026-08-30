@@ -13,7 +13,7 @@ Usage (direct):
     agent-worktrees list [--json] [--tracking-status active|complete|...]
     agent-worktrees create [--json]       # programmatic: make a worktree, no launch
     agent-worktrees embody [--worktree-id <id> | --new] [--seed S]  # spawn mux+Copilot
-    agent-worktrees finalize [worktree-id] [--dry-run] [--json]
+    agent-worktrees finalize [worktree-id | --worktree-id ID] [--dry-run] [--json]
     agent-worktrees mark-complete [worktree-id] [--title T] [--title-only]
     agent-worktrees status [--json]
     agent-worktrees cleanup [--clean] [--include-unused] [--max-age-days N]
@@ -4346,7 +4346,18 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             if use_json:
                 return _json_error(str(e))
             raise
-        worktree_id = _infer_worktree_id(args.worktree_id, config)
+        positional_id = getattr(args, "worktree_id", None)
+        flagged_id = getattr(args, "worktree_id_flag", None)
+        if positional_id and flagged_id and positional_id != flagged_id:
+            msg = (
+                "Conflicting worktree IDs: positional worktree-id and "
+                "--worktree-id must match."
+            )
+            if use_json:
+                return _json_error(msg, 2)
+            output.err(msg)
+            return 2
+        worktree_id = _infer_worktree_id(flagged_id or positional_id, config)
         if not worktree_id:
             msg = (
                 "Could not determine worktree ID. Pass it explicitly "
@@ -15917,6 +15928,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate the branch's content is on upstream; prune the worktree only when idle",
     )
     p.add_argument("worktree_id", nargs="?", default=None)
+    p.add_argument("--worktree-id", dest="worktree_id_flag", default=None,
+                   help="Worktree ID to finalize (explicit automation form)")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--abandon", action="store_true",
                    help="Finalize past the obligation gate even when the worktree "

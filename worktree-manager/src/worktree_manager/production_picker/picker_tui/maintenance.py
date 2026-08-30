@@ -6,7 +6,7 @@ Runs the real per-worktree op on a daemon thread (sequentially, matching the
 run through the provider's attributable JSON CLI; **remote** worktrees run over
 SSH per item against the project binstub's JSON CLI
 (``cleanup --worktree-id`` / ``sync --worktree-id`` / ``restart <id>`` /
-``finalize <id>``). The engine polls each item's state from its render
+``finalize --worktree-id``). The engine polls each item's state from its render
 tick.
 
 The executor is the *real* counterpart to the engine's mock progress walker
@@ -27,6 +27,7 @@ from agent_procutil import no_window_flags
 
 from ... import engine_client
 from .. import context
+
 # Per-item lifecycle states (mirror the progress sub-dialog glyphs).
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
@@ -87,10 +88,11 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
                 include_conversations=False):
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
-    *items* are engine record dicts (``id4`` + ``raw.id`` + ``machine`` /
-    ``env``). Local items call the attributable provider JSON CLI; remote items
-    call the same project CLI over SSH via ``data_ssh.remote_op_argv``. A target
-    that resolves to neither (unknown /
+    *items* are engine record dicts (collision-safe ``selection_id`` +
+    ``raw.id`` + ``machine`` / ``env``). Local items
+    (machine/env == ``src.LOCAL``) call the attributable provider JSON CLI;
+    remote items call the same project CLI over SSH via
+    ``data_ssh.remote_op_argv``. A target that resolves to neither (unknown /
     *not-ready, or no remote argv builder on the source) yields a failed task.
     """
     if project is None:
@@ -101,19 +103,23 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
     tasks = []
     for w in items:
         wt_id = (w.get("raw") or {}).get("id")
-        key = w.get("id4") or wt_id
+        key = w.get("selection_id") or w.get("id4") or wt_id
         m, e = w.get("machine"), w.get("env")
-        is_local = (m, e) == local
+        source_id = w.get("source_id")
+        is_local = (
+            w.get("source_kind", "machine-ssh") == "machine-ssh"
+            and (m, e) == local
+        )
         tasks.append((key, _make_task(
-            op, wt_id, m, e, is_local, project=project,
+            op, wt_id, m, e, is_local, project=project, source_id=source_id,
             include_unused=include_unused,
             include_conversations=include_conversations,
         )))
     return tasks
 
 
-def _make_task(op, wt_id, machine, env, is_local, *, project, include_unused,
-               include_conversations):
+def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
+               include_unused=False, include_conversations=False):
     def _run():
         if not wt_id:
             return {"ok": False, "reason": "no worktree id"}
@@ -141,11 +147,15 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, include_unused,
         from . import data_ssh
         argv = data_ssh.remote_op_argv(
             machine, env, op, wt_id,
+            source_id=source_id,
             include_unused=include_unused,
             include_conversations=include_conversations,
         )
         if argv is None:
-            return {"ok": False, "reason": f"no remote route to {machine} {env}"}
+            return {
+                "ok": False,
+                "reason": f"source does not support {op}: {source_id or f'{machine} {env}'}",
+            }
         return _ssh_json(argv)
     return _run
 
