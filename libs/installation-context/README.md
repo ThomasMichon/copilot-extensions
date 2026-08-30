@@ -26,14 +26,15 @@ publishes only `installation-activation.json` after pinning the caller-observed
 namespace, install, and activation generations. The cross-runner actions do not
 otherwise migrate legacy state, launch a runtime, or wire an automatic caller.
 The Python module additionally exposes importable slot APIs. All three runners
-provide equivalent `slot-provision` and `slot-validate` CLI actions that create
-or validate only an immutable ownership marker in a cell-local version slot and
-never activate it. Agent Machines and Agent Index expose explicit installer
-adapter actions for these two transactions; their normal install/bootstrap
-paths do not call them. The adapters also bind the selected snapshot to their
-exact payload root and version. Every mutation requires an explicit `--context`
-/ `-Context`; it never adopts an ambient `COPILOT_EXTENSIONS_CONTEXT` as
-authorization.
+provide equivalent `slot-provision`, `slot-validate`, `slot-complete`, and
+`slot-completion-validate` CLI actions. Ownership publication reserves a
+cell-local version slot. Completion publication immutably binds that owned slot
+to strict build-completion evidence without activating it. Agent Machines and
+Agent Index expose explicit installer adapter actions for all four transactions;
+their normal install/bootstrap paths do not call them. The adapters bind the
+selected snapshot to their exact payload root and version. Every mutation
+requires an explicit `--context` / `-Context`; it never adopts an ambient
+`COPILOT_EXTENSIONS_CONTEXT` as authorization.
 
 JSON inputs use one strict language on every entry point: UTF-8 without BOM,
 case-sensitive and non-duplicated object names, escaped control characters, and
@@ -106,6 +107,24 @@ writes an actionable error to stderr and exits nonzero.
   -RuntimeVersion 1.0.0
 
 .\installation-context.ps1 slot-validate `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -ExpectedPayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -ExpectedPayloadVersion 1.0.0 `
+  -SnapshotId 1.0.0 `
+  -RuntimeVersion 1.0.0
+
+.\installation-context.ps1 slot-complete `
+  -Context $env:COPILOT_EXTENSIONS_CONTEXT `
+  -ExpectedMarketplaceId example--0123456789abcdef `
+  -ExpectedPluginId agent-example `
+  -ExpectedPayloadRoot $env:COPILOT_PLUGIN_ROOT `
+  -ExpectedPayloadVersion 1.0.0 `
+  -SnapshotId 1.0.0 `
+  -RuntimeVersion 1.0.0
+
+.\installation-context.ps1 slot-completion-validate `
   -Context $env:COPILOT_EXTENSIONS_CONTEXT `
   -ExpectedMarketplaceId example--0123456789abcdef `
   -ExpectedPluginId agent-example `
@@ -195,6 +214,24 @@ writes an actionable error to stderr and exits nonzero.
   --snapshot-id 1.0.0 \
   --runtime-version 1.0.0
 
+./installation-context.sh slot-complete \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
+./installation-context.sh slot-completion-validate \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
 ./installation-context.sh status \
   --payload-root "$COPILOT_PLUGIN_ROOT" \
   --plugin-id agent-example \
@@ -217,6 +254,24 @@ python installation_context.py slot-provision \
   --runtime-version 1.0.0
 
 python installation_context.py slot-validate \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
+python installation_context.py slot-complete \
+  --context "$COPILOT_EXTENSIONS_CONTEXT" \
+  --expected-marketplace-id example--0123456789abcdef \
+  --expected-plugin-id agent-example \
+  --expected-payload-root "$COPILOT_PLUGIN_ROOT" \
+  --expected-payload-version 1.0.0 \
+  --snapshot-id 1.0.0 \
+  --runtime-version 1.0.0
+
+python installation_context.py slot-completion-validate \
   --context "$COPILOT_EXTENSIONS_CONTEXT" \
   --expected-marketplace-id example--0123456789abcdef \
   --expected-plugin-id agent-example \
@@ -280,6 +335,83 @@ explicitly wires it. Results expose
 ownership, not an active or complete runtime. Runtime versions cannot be
 reassigned to another snapshot, and this foundation intentionally provides no
 automatic repair, release, or deletion of conflicting slots.
+
+After a build has populated an owned slot, its producer writes
+`<slot>/.install-complete.json`. Completion publication accepts that evidence
+only as an ordinary non-link file containing exactly `version`, `completed_at`,
+`pid`, and `payload_hash`. The version must equal the runtime version,
+`completed_at` must be a valid second-precision UTC RFC3339 timestamp, `pid`
+must be a JSON integer from `0` through `9223372036854775807`, and
+`payload_hash` must be lowercase 64-hex equal to the independently computed
+snapshot content digest. Booleans, fractions, exponent-form numbers, negative
+values, and overflow values are rejected. Malformed evidence is preserved and
+rejected.
+
+The snapshot content digest is SHA-256 over a deterministic record stream.
+Runners recursively walk `snapshotRoot` without following links or reparse
+points, reject every entry that is not a regular file or directory, include
+dotfiles, normalize relative paths to `/`, and order records by the UTF-8 path
+bytes. The root `snapshot-provenance.json` sidecar is the only excluded entry;
+a file with that name below a subdirectory remains content. Each regular file
+contributes exactly
+`F\0<UTF-8 relative path>\0<lowercase file SHA-256>\n`. Empty directories do
+not contribute. A link, reparse point, device, pipe, socket, or other
+non-regular entry fails closed.
+
+Hashing is bounded to 100,000 non-root entries, a 4,096-byte UTF-8 relative
+path, and 4,294,967,296 total regular-file bytes. Each boundary is inclusive.
+Files and directories both count as entries. The excluded root
+`snapshot-provenance.json` still counts as an entry and toward the path and
+regular-file byte limits; exclusion applies only to the digest record. Runners
+use an O(n log n) ordinal/byte-key sort and never retain file contents merely to
+sort them.
+
+Each pass captures every directory's identity and mutation-relevant metadata
+plus the exact child name/type manifest before hashing, then requires the same
+tree state afterward. File reads separately require stable opened identity and
+metadata. First publication calculates the desired digest and immediately
+recalculates it before the atomic no-replace write; any add, remove, rename,
+type change, directory replacement, or content change fails before a completion
+marker can appear.
+
+`slot-complete` and Python's `complete_runtime_slot` API require explicit
+context, marketplace/plugin identity, exact expected payload root/version,
+snapshot id, and runtime version. Under the genesis and installation locks they
+revalidate the current receipts, snapshot provenance, immutable slot ownership,
+and snapshot contents. On first publication only, they capture one complete
+strict build receipt, verify its payload hash against the snapshot content
+digest, and then publish
+`<slot>/.runtime-slot-completion.json` with schema
+`copilot.extensions/runtime-slot-completion/v1`. The deterministic receipt binds
+the source and installation identity, runtime root/version, snapshot provenance
+digest and content digest, ownership-marker digest, historical build-receipt
+path/digest, validated payload digest and pid, pinned receipt paths/generations,
+and the build's own completion timestamp.
+
+Publication is first-writer/no-replace and interruption-safe. Python and Bash
+publish with a same-directory temporary file plus a no-replace hard link;
+PowerShell uses a same-volume file move without overwrite. A matching existing
+receipt is idempotent (`created: false`); malformed or conflicting receipts are
+preserved and fail closed. `slot-completion-validate` and
+`validate_runtime_slot_completion` are read-only. First publication requires
+the current active snapshot and receipt generations, while historical
+validation permits monotonic receipt advancement and rejects regression. Once
+the immutable completion marker exists, validation and idempotent
+`slot-complete` replay do not require, read, or compare the current
+`.install-complete.json`; that legacy evidence is a one-time publication input.
+Rewriting or removing it cannot invalidate a completed slot. Publication uses
+the single captured receipt even if another process atomically replaces the
+legacy file after capture, so replacement cannot poison the marker or make
+post-publication validation depend on mutable evidence.
+The immutable `.runtime-slot-completion.json` is stricter: its named file
+identity and metadata must remain stable from open through parse. Concurrent
+atomic replacement fails closed and the reader never replaces the observed
+marker.
+Completion results always report `activated: false` and `operative: false`.
+They do not write `current-version`, `last-known-good`, activation, launcher,
+service, state, or other lifecycle artifacts. Cutover, health qualification,
+rollback, repair/release, uninstall, and normal-flow adoption remain later
+lifecycle transactions.
 Read-only callers may import `resolve_installation_mode` and
 `probe_legacy_entrypoint`. Their optional `os_profile`, `platform`,
 `wsl_distro`, `current_time`, `host`, and `pid_is_live` arguments are explicit
@@ -360,7 +492,7 @@ exemplar payloads. No exemplar installer or bootstrap calls `activation-cas`;
 the existing callers only protect legacy mutation and do not activate a
 namespaced root.
 
-Later slices still own snapshot consumption during provisioning, runtime-slot
-ownership, tombstone writing, migration, runtime-root activation and cutover,
-rollback/uninstall enforcement, payload-invocation schema changes, and dual-cell
+Later slices still own runtime-root activation and cutover, health qualification,
+tombstone writing, migration, rollback/uninstall enforcement,
+payload-invocation schema changes, repair/release, and operative dual-cell
 exemplars.

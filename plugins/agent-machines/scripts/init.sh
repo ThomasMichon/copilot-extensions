@@ -34,7 +34,7 @@ while [[ $# -gt 0 ]]; do
         --context) CONTEXT="${2:-}"; shift 2 ;;
         --expected-marketplace-id) EXPECTED_MARKETPLACE_ID="${2:-}"; shift 2 ;;
         --durable-home) DURABLE_HOME="${2:-}"; shift 2 ;;
-        stamp|provision|init|slot-provision|slot-validate) ACTION="$1"; shift ;;
+        stamp|provision|init|slot-provision|slot-validate|slot-complete|slot-completion-validate) ACTION="$1"; shift ;;
         *) shift ;;
     esac
 done
@@ -45,7 +45,10 @@ PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Cell-local slot actions authorize themselves from the explicit context
 # transaction below. Every legacy mutation still requires the legacy probe.
-if [[ "$ACTION" != "slot-provision" && "$ACTION" != "slot-validate" ]]; then
+if [[ "$ACTION" != "slot-provision" &&
+      "$ACTION" != "slot-validate" &&
+      "$ACTION" != "slot-complete" &&
+      "$ACTION" != "slot-completion-validate" ]]; then
     LEGACY_PROBE="$SCRIPT_DIR/installation-context/legacy-entrypoint-probe.sh"
     if [[ ! -f "$LEGACY_PROBE" ]]; then
         _fail 'Legacy mutation probe is unavailable'
@@ -69,7 +72,10 @@ set -- "${ORIGINAL_ARGS[@]}"
 # The dependency-light cell-slot runner does not need the legacy installer's
 # payload self-stage, whose staging root is itself legacy state.
 __cell_slot_direct=0
-if [[ "$ACTION" == "slot-provision" || "$ACTION" == "slot-validate" ]]; then
+if [[ "$ACTION" == "slot-provision" ||
+      "$ACTION" == "slot-validate" ||
+      "$ACTION" == "slot-complete" ||
+      "$ACTION" == "slot-completion-validate" ]]; then
     cd "$HOME"
     if [[ -z "${COPILOT_PLUGIN_INSTALL_STAGED:-}" ]]; then
         export COPILOT_PLUGIN_INSTALL_STAGED=cell-slot-action
@@ -246,7 +252,10 @@ VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
 VENV_PYTHON="$VENV_DIR/bin/python"
 # === end install-contract:v3 versioned-venv ===
 
-if [[ "$ACTION" == "slot-provision" || "$ACTION" == "slot-validate" ]]; then
+if [[ "$ACTION" == "slot-provision" ||
+      "$ACTION" == "slot-validate" ||
+      "$ACTION" == "slot-complete" ||
+      "$ACTION" == "slot-completion-validate" ]]; then
     [[ -n "$CONTEXT" ]] || {
         _fail "$ACTION requires --context; ambient COPILOT_EXTENSIONS_CONTEXT is not authorization"
         exit 2
@@ -290,18 +299,259 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
-    # Cheap payload fingerprint for the completion marker (#935): sha256 of
-    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Empty on any error.
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
-    if [[ -d "$PLUGIN_DIR/libs" ]]; then
-        local __f
-        while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
-        done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
-    fi
-    printf '%s' "$__parts" | sha256sum 2>/dev/null | awk '{print $1}' || true
+    (
+        # All non-root entries, including root snapshot-provenance.json, count
+        # toward these limits. The provenance file is omitted only from records.
+        local __max_entries="${1:-100000}"
+        local __max_path_bytes="${2:-4096}"
+        local __max_content_bytes="${3:-4294967296}"
+        local __sha_kind __kernel __work __before_index __before_state
+        local __after_index __after_state __records __path __relative
+        local __encoded __kind __metadata __size __count __total __fd
+        local __descriptor __opened __opened_after __current __file_digest
+        local __digest __find_fd __find_pid
+        local LC_ALL=C
+        [[ -d "$PLUGIN_DIR" && ! -L "$PLUGIN_DIR" ]] || {
+            _fail "Payload root must be an ordinary directory: $PLUGIN_DIR"
+            exit 1
+        }
+        command -v sort >/dev/null 2>&1 || {
+            _fail "Cannot sort payload contents because the sort utility is unavailable"
+            exit 1
+        }
+        if command -v sha256sum >/dev/null 2>&1; then
+            __sha_kind=sha256sum
+        elif command -v shasum >/dev/null 2>&1; then
+            __sha_kind=shasum
+        elif command -v openssl >/dev/null 2>&1; then
+            __sha_kind=openssl
+        else
+            _fail "No SHA-256 implementation is available (sha256sum, shasum, or openssl)"
+            exit 1
+        fi
+        __kernel="$(uname -s)" || {
+            _fail "Cannot identify the platform for payload validation"
+            exit 1
+        }
+        __work="$(mktemp -d "${TMPDIR:-/tmp}/payload-hash.XXXXXX")" || {
+            _fail "Cannot stage payload hash state"
+            exit 1
+        }
+        trap 'rm -rf -- "$__work"' EXIT
+        __before_index="$__work/before-index"
+        __before_state="$__work/before-state"
+        __after_index="$__work/after-index"
+        __after_state="$__work/after-state"
+        __records="$__work/records"
+
+        __payload_stat() {
+            local __target="$1" __follow="${2:-false}"
+            if [[ "$__kernel" == Darwin ]]; then
+                if [[ "$__follow" == true ]]; then
+                    stat -L -f '%HT|%d|%i|%z|%m|%c' "$__target" 2>/dev/null
+                else
+                    stat -f '%HT|%d|%i|%z|%m|%c' "$__target" 2>/dev/null
+                fi
+            else
+                local __args=(-c '%F|%d|%i|%s|%y|%z')
+                [[ "$__follow" == true ]] && __args=(-L "${__args[@]}")
+                stat "${__args[@]}" -- "$__target" 2>/dev/null
+            fi
+        }
+        __payload_is_directory() {
+            [[ "${1%%|*}" == directory || "${1%%|*}" == Directory ]]
+        }
+        __payload_is_regular() {
+            [[ "${1%%|*}" == "regular file" ||
+               "${1%%|*}" == "regular empty file" ||
+               "${1%%|*}" == "Regular File" ]]
+        }
+        __payload_size() {
+            local __rest="${1#*|}"
+            __rest="${__rest#*|}"
+            __rest="${__rest#*|}"
+            printf '%s' "${__rest%%|*}"
+        }
+        __payload_utf8() {
+            LC_ALL=C printf '%s' "$1" | od -An -v -tu1 | LC_ALL=C awk '
+                BEGIN { remaining=0; minimum=128; maximum=191; valid=1 }
+                {
+                    for (field=1; field<=NF; field++) {
+                        byte=$field+0
+                        if (remaining>0) {
+                            if (byte<minimum || byte>maximum) { valid=0; exit }
+                            remaining--; minimum=128; maximum=191; continue
+                        }
+                        if (byte<=127) continue
+                        if (byte>=194 && byte<=223) { remaining=1; continue }
+                        if (byte==224) { remaining=2; minimum=160; continue }
+                        if ((byte>=225 && byte<=236) || (byte>=238 && byte<=239)) {
+                            remaining=2; continue
+                        }
+                        if (byte==237) { remaining=2; maximum=159; continue }
+                        if (byte==240) { remaining=3; minimum=144; continue }
+                        if (byte>=241 && byte<=243) { remaining=3; continue }
+                        if (byte==244) { remaining=3; maximum=143; continue }
+                        valid=0; exit
+                    }
+                }
+                END { if (!valid || remaining!=0) exit 1 }
+            '
+        }
+        __payload_hex() {
+            LC_ALL=C printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'
+        }
+        __payload_decode() {
+            local __target="$1" __hex="$2" __esc="" __byte
+            while [[ -n "$__hex" ]]; do
+                __byte="${__hex:0:2}"
+                __esc+="\\x$__byte"
+                __hex="${__hex:2}"
+            done
+            printf -v "$__target" '%b' "$__esc"
+        }
+        __payload_index() {
+            local __index="$1" __state="$2" __unsorted_index="$__work/index-u"
+            local __unsorted_state="$__work/state-u" __root_metadata
+            : >"$__unsorted_index"
+            : >"$__unsorted_state"
+            __count=0
+            __total=0
+            __root_metadata="$(__payload_stat "$PLUGIN_DIR")" || {
+                _fail "Cannot inspect payload root: $PLUGIN_DIR"
+                return 1
+            }
+            __payload_is_directory "$__root_metadata" || {
+                _fail "Payload root must be an ordinary directory: $PLUGIN_DIR"
+                return 1
+            }
+            printf 'R\t\t%s\n' "$__root_metadata" >>"$__unsorted_state"
+            exec {__find_fd}< <(find "$PLUGIN_DIR" -mindepth 1 -print0)
+            __find_pid=$!
+            while IFS= read -r -d '' __path <&"$__find_fd"; do
+                __count=$((__count + 1))
+                ((__count <= __max_entries)) || {
+                    _fail "Payload content exceeds the $__max_entries-entry limit"
+                    return 1
+                }
+                __relative="${__path#"$PLUGIN_DIR"/}"
+                __payload_utf8 "$__relative" || {
+                    _fail "Payload content path is not valid UTF-8"
+                    return 1
+                }
+                ((${#__relative} <= __max_path_bytes)) || {
+                    _fail "Payload content relative path exceeds the $__max_path_bytes-byte UTF-8 limit: $__relative"
+                    return 1
+                }
+                [[ ! -L "$__path" ]] || {
+                    _fail "Payload content may not contain symbolic links or reparse points: $__relative"
+                    return 1
+                }
+                __metadata="$(__payload_stat "$__path")" || {
+                    _fail "Cannot inspect payload content: $__relative"
+                    return 1
+                }
+                __encoded="$(__payload_hex "$__relative")"
+                if __payload_is_directory "$__metadata"; then
+                    printf '%s\tD\n' "$__encoded" >>"$__unsorted_index"
+                    printf 'D\t%s\t%s\n' "$__encoded" "$__metadata" >>"$__unsorted_state"
+                    continue
+                fi
+                __payload_is_regular "$__metadata" || {
+                    _fail "Payload content entries must be ordinary files or directories: $__relative"
+                    return 1
+                }
+                __size="$(__payload_size "$__metadata")"
+                [[ "$__size" =~ ^[0-9]+$ ]] || {
+                    _fail "Cannot determine payload content size: $__relative"
+                    return 1
+                }
+                ((__size <= __max_content_bytes - __total)) || {
+                    _fail "Payload content exceeds the $__max_content_bytes-byte regular-file limit"
+                    return 1
+                }
+                __total=$((__total + __size))
+                printf '%s\tF\n' "$__encoded" >>"$__unsorted_index"
+                printf 'F\t%s\n' "$__encoded" >>"$__unsorted_state"
+            done
+            exec {__find_fd}<&-
+            wait "$__find_pid" || {
+                _fail "Cannot enumerate all payload contents beneath $PLUGIN_DIR"
+                return 1
+            }
+            printf 'T\t%s\t%s\n' "$__count" "$__total" >>"$__unsorted_state"
+            LC_ALL=C sort -t $'\t' -k1,1 "$__unsorted_index" >"$__index"
+            LC_ALL=C sort "$__unsorted_state" >"$__state"
+        }
+
+        __payload_index "$__before_index" "$__before_state" || exit 1
+        : >"$__records"
+        while IFS=$'\t' read -r __encoded __kind; do
+            [[ "$__kind" == F ]] || continue
+            __payload_decode __relative "$__encoded"
+            [[ "$__relative" == snapshot-provenance.json ]] && continue
+            __path="$PLUGIN_DIR/$__relative"
+            __metadata="$(__payload_stat "$__path")" || {
+                _fail "Cannot inspect payload content: $__relative"
+                exit 1
+            }
+            __payload_is_regular "$__metadata" && [[ ! -L "$__path" ]] || {
+                _fail "Payload content changed during hashing: $__relative"
+                exit 1
+            }
+            exec {__fd}<"$__path" || {
+                _fail "Cannot open payload content: $__relative"
+                exit 1
+            }
+            __descriptor="/proc/$BASHPID/fd/$__fd"
+            [[ -e "$__descriptor" ]] || __descriptor="/dev/fd/$__fd"
+            __opened="$(__payload_stat "$__descriptor" true)" || {
+                exec {__fd}<&-
+                _fail "Cannot inspect opened payload content: $__relative"
+                exit 1
+            }
+            [[ "$__opened" == "$__metadata" ]] || {
+                exec {__fd}<&-
+                _fail "Payload content changed during hashing: $__relative"
+                exit 1
+            }
+            case "$__sha_kind" in
+                sha256sum) __file_digest="$(sha256sum <&"$__fd" | awk '{print $1}')" ;;
+                shasum) __file_digest="$(shasum -a 256 <&"$__fd" | awk '{print $1}')" ;;
+                openssl) __file_digest="$(openssl dgst -sha256 <&"$__fd" | awk '{print $NF}')" ;;
+            esac
+            __opened_after="$(__payload_stat "$__descriptor" true)" || true
+            exec {__fd}<&-
+            __current="$(__payload_stat "$__path")" || true
+            [[ "$__opened_after" == "$__opened" &&
+               "$__current" == "$__metadata" &&
+               ! -L "$__path" ]] || {
+                _fail "Payload content changed during hashing: $__relative"
+                exit 1
+            }
+            [[ "$__file_digest" =~ ^[0-9a-fA-F]{64}$ ]] || {
+                _fail "SHA-256 output is invalid"
+                exit 1
+            }
+            __file_digest="${__file_digest,,}"
+            printf 'F\0%s\0%s\n' "$__relative" "$__file_digest" >>"$__records"
+        done <"$__before_index"
+        __payload_index "$__after_index" "$__after_state" || exit 1
+        cmp -s -- "$__before_state" "$__after_state" || {
+            _fail "Payload content tree changed during hashing"
+            exit 1
+        }
+        case "$__sha_kind" in
+            sha256sum) __digest="$(sha256sum "$__records" | awk '{print $1}')" ;;
+            shasum) __digest="$(shasum -a 256 "$__records" | awk '{print $1}')" ;;
+            openssl) __digest="$(openssl dgst -sha256 "$__records" | awk '{print $NF}')" ;;
+        esac
+        [[ "$__digest" =~ ^[0-9a-fA-F]{64}$ ]] || {
+            _fail "SHA-256 output is invalid"
+            exit 1
+        }
+        printf '%s' "${__digest,,}"
+    )
 }
 
 _versioned_slot_clean() {
@@ -328,13 +578,18 @@ _versioned_mark_complete() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || return 0
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py
-    py="$(_bootstrap_python)" || return 0
-    [[ -n "$py" ]] || return 0
+    py="$(_bootstrap_python)" || {
+        _fail "Cannot locate Python to write the runtime completion marker"
+        return 1
+    }
+    [[ -n "$py" ]] || {
+        _fail "Cannot locate Python to write the runtime completion marker"
+        return 1
+    }
     local ph
     ph="$(_payload_hash)"
-    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION")
-    if [[ -n "$ph" ]]; then args+=(--payload-hash "$ph"); fi
-    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /' || true
+    local args=("$vr" --root "$INSTALL_DIR" --link-name "$(basename "$LINK_DIR")" mark-complete "$SRC_VERSION" --payload-hash "$ph")
+    "$py" "${args[@]}" 2>&1 | sed 's/^/  ...    /'
 }
 
 echo ''

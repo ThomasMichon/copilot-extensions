@@ -15,7 +15,20 @@ TEMP_DIRS=()
 HELD_LOCK_DIRS=()
 HELD_LOCK_TOKENS=()
 RUNTIME_SLOT_LOCK_TIMEOUT_SECONDS=30
+RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS=300
+MAX_SNAPSHOT_ENTRIES=100000
+MAX_SNAPSHOT_PATH_BYTES=4096
+MAX_SNAPSHOT_CONTENT_BYTES=4294967296
 MAIN_BASHPID="$BASHPID"
+KERNEL_NAME=""
+declare -A VALIDATED_FILE_SHA256=()
+declare -A VALIDATED_FILE_IDENTITY=()
+declare -A VALIDATED_FILE_METADATA=()
+SAFE_FILE_FD=""
+SAFE_FILE_IDENTITY=""
+SAFE_FILE_METADATA=""
+CAPTURED_FILE_IDENTITY=""
+CAPTURED_FILE_METADATA=""
 
 cleanup() {
     local index path token
@@ -40,7 +53,7 @@ cleanup() {
     done
     return 0
 }
-trap cleanup EXIT
+trap 'cleanup 2>/dev/null' EXIT
 
 fail() {
     printf 'installation-context: %s\n' "$*" >&2
@@ -272,6 +285,9 @@ atomic_write_json() {
         assert_all_locks_owned
     fi
     mv -f -- "$temporary" "$path"
+    unset 'VALIDATED_FILE_SHA256[$path]'
+    unset 'VALIDATED_FILE_IDENTITY[$path]'
+    unset 'VALIDATED_FILE_METADATA[$path]'
 }
 
 lock_owner_matches() {
@@ -461,18 +477,452 @@ digest_record() {
     printf '%s' "${digest,,}"
 }
 
-digest_file() {
-    local path="$1" digest
+ensure_kernel_name() {
+    if [[ -z "$KERNEL_NAME" ]]; then
+        command -v uname >/dev/null 2>&1 ||
+            fail "Cannot identify the platform for safe file validation."
+        KERNEL_NAME="$(uname -s)" ||
+            fail "Cannot identify the platform for safe file validation."
+    fi
+}
+
+stat_file_metadata() {
+    local path="$1" follow="${2:-false}" result
+    ensure_kernel_name
+    if [[ "$KERNEL_NAME" == Darwin ]]; then
+        if [[ "$follow" == true ]]; then
+            stat -L -f '%HT|%d|%i|%z|%m|%c' "$path" 2>/dev/null
+        else
+            stat -f '%HT|%d|%i|%z|%m|%c' "$path" 2>/dev/null
+        fi
+        return
+    fi
+    local arguments=(-c '%F|%d|%i|%s|%y|%z')
+    if [[ "$follow" == true ]]; then
+        arguments=(-L "${arguments[@]}")
+    fi
+    stat "${arguments[@]}" -- "$path" 2>/dev/null
+}
+
+utf8_is_well_formed() {
+    LC_ALL=C printf '%s' "$1" |
+        od -An -v -tu1 |
+        LC_ALL=C awk '
+            BEGIN {
+                remaining = 0
+                minimum = 128
+                maximum = 191
+                valid = 1
+            }
+            {
+                for (field = 1; field <= NF; field++) {
+                    byte = $field + 0
+                    if (remaining > 0) {
+                        if (byte < minimum || byte > maximum) {
+                            valid = 0
+                            exit
+                        }
+                        remaining--
+                        minimum = 128
+                        maximum = 191
+                        continue
+                    }
+                    if (byte <= 127) {
+                        continue
+                    }
+                    if (byte >= 194 && byte <= 223) {
+                        remaining = 1
+                        continue
+                    }
+                    if (byte == 224) {
+                        remaining = 2
+                        minimum = 160
+                        continue
+                    }
+                    if ((byte >= 225 && byte <= 236) ||
+                        (byte >= 238 && byte <= 239)) {
+                        remaining = 2
+                        continue
+                    }
+                    if (byte == 237) {
+                        remaining = 2
+                        maximum = 159
+                        continue
+                    }
+                    if (byte == 240) {
+                        remaining = 3
+                        minimum = 144
+                        continue
+                    }
+                    if (byte >= 241 && byte <= 243) {
+                        remaining = 3
+                        continue
+                    }
+                    if (byte == 244) {
+                        remaining = 3
+                        maximum = 143
+                        continue
+                    }
+                    valid = 0
+                    exit
+                }
+            }
+            END {
+                if (!valid || remaining != 0) {
+                    exit 1
+                }
+            }
+        '
+}
+
+metadata_is_regular() {
+    local kind="${1%%|*}"
+    [[ "$kind" == "regular file" ||
+       "$kind" == "regular empty file" ||
+       "$kind" == "Regular File" ]]
+}
+
+metadata_is_directory() {
+    local kind="${1%%|*}"
+    [[ "$kind" == "directory" || "$kind" == "Directory" ]]
+}
+
+metadata_size() {
+    local metadata="$1" remainder
+    remainder="${metadata#*|}"
+    remainder="${remainder#*|}"
+    remainder="${remainder#*|}"
+    printf '%s' "${remainder%%|*}"
+}
+
+metadata_identity() {
+    local metadata="$1" remainder device inode
+    remainder="${metadata#*|}"
+    device="${remainder%%|*}"
+    remainder="${remainder#*|}"
+    inode="${remainder%%|*}"
+    printf '%s:%s' "$device" "$inode"
+}
+
+open_regular_file_once() {
+    local path="$1" label="$2" require_same_identity="${3:-false}"
+    local guard_blocking_open="${4:-true}"
+    local current current_identity opened opened_identity descriptor_path fd attempt
+    local open_watchdog="" open_parent_pid=""
+
+    [[ -e "$path" ]] || fail "$label must exist."
+    for ((attempt = 0; attempt < 64; attempt++)); do
+        [[ -e "$path" ]] || continue
+        [[ ! -L "$path" ]] ||
+            fail "$label may not be a symbolic link or reparse point."
+        if [[ "$guard_blocking_open" == true ]]; then
+            trap 'trap - USR1; return 97' USR1
+            open_parent_pid="$BASHPID"
+            (
+                sleep 2
+                kill -USR1 "$open_parent_pid" 2>/dev/null || true
+            ) &
+            open_watchdog=$!
+        fi
+        if ! exec {fd}<"$path"; then
+            if [[ -n "$open_watchdog" ]]; then
+                kill "$open_watchdog" 2>/dev/null || true
+                wait "$open_watchdog" 2>/dev/null || true
+                trap - USR1
+                open_watchdog=""
+            fi
+            continue
+        fi
+        if [[ -n "$open_watchdog" ]]; then
+            kill "$open_watchdog" 2>/dev/null || true
+            wait "$open_watchdog" 2>/dev/null || true
+            trap - USR1
+            open_watchdog=""
+        fi
+        descriptor_path="/proc/$BASHPID/fd/$fd"
+        if [[ ! -e "$descriptor_path" ]]; then
+            descriptor_path="/dev/fd/$fd"
+        fi
+        opened="$(stat_file_metadata "$descriptor_path" true)" || {
+            exec {fd}<&-
+            fail "Cannot inspect opened ${label,,} '$path'."
+        }
+        if ! metadata_is_regular "$opened"; then
+            exec {fd}<&-
+            fail "$label must be an ordinary file."
+        fi
+        [[ ! -L "$path" ]] || {
+            exec {fd}<&-
+            fail "$label may not be a symbolic link or reparse point."
+        }
+        current="$(stat_file_metadata "$path")" || {
+            exec {fd}<&-
+            continue
+        }
+        metadata_is_regular "$current" || {
+            exec {fd}<&-
+            fail "$label must be an ordinary file."
+        }
+        current_identity="$(metadata_identity "$current")"
+        opened_identity="$(metadata_identity "$opened")"
+        if [[ "$current_identity" == "$opened_identity" ]]; then
+            SAFE_FILE_FD="$fd"
+            SAFE_FILE_IDENTITY="$opened_identity"
+            SAFE_FILE_METADATA="$opened"
+            return
+        fi
+        if [[ "$require_same_identity" != true && "$attempt" -eq 63 ]]; then
+            SAFE_FILE_FD="$fd"
+            SAFE_FILE_IDENTITY="$opened_identity"
+            SAFE_FILE_METADATA="$opened"
+            return
+        fi
+        exec {fd}<&-
+    done
+    fail "$label changed while it was being opened."
+}
+
+finish_regular_file_once() {
+    local path="$1" label="$2" require_same_identity="${3:-false}"
+    local descriptor_path opened_after current
+
+    descriptor_path="/proc/$BASHPID/fd/$SAFE_FILE_FD"
+    if [[ ! -e "$descriptor_path" ]]; then
+        descriptor_path="/dev/fd/$SAFE_FILE_FD"
+    fi
+    opened_after="$(stat_file_metadata "$descriptor_path" true)" || {
+        exec {SAFE_FILE_FD}<&-
+        fail "Cannot inspect opened ${label,,} '$path'."
+    }
+    exec {SAFE_FILE_FD}<&-
+    [[ ! -L "$path" ]] ||
+        fail "$label may not be a symbolic link or reparse point."
+    current="$(stat_file_metadata "$path")" ||
+        fail "Cannot inspect ${label,,} '$path'."
+    metadata_is_regular "$current" || fail "$label must be an ordinary file."
+    if [[ "$require_same_identity" == true ]]; then
+        [[ "$(metadata_identity "$opened_after")" == "$SAFE_FILE_IDENTITY" &&
+           "$opened_after" == "$SAFE_FILE_METADATA" &&
+           "$(metadata_identity "$current")" == "$SAFE_FILE_IDENTITY" &&
+           "$current" == "$SAFE_FILE_METADATA" ]] ||
+            fail "$label changed while it was being read."
+    fi
+    SAFE_FILE_FD=""
+    SAFE_FILE_IDENTITY=""
+    SAFE_FILE_METADATA=""
+}
+
+capture_regular_file() {
+    local path="$1" label="$2" destination="$3" require_same_identity="${4:-false}"
+    local guard_blocking_open="${5:-true}"
+    open_regular_file_once \
+        "$path" "$label" "$require_same_identity" "$guard_blocking_open" ||
+        fail "$label could not be opened safely without blocking."
+    CAPTURED_FILE_IDENTITY="$SAFE_FILE_IDENTITY"
+    CAPTURED_FILE_METADATA="$SAFE_FILE_METADATA"
+    cat <&"$SAFE_FILE_FD" >"$destination" ||
+        fail "Cannot capture ${label,,} '$path'."
+    finish_regular_file_once "$path" "$label" "$require_same_identity"
+}
+
+capture_json_for_validation() {
+    local target="$1" path="$2" label="$3" capture digest
+    capture="$(mktemp "${TMPDIR:-/tmp}/installation-context-read.XXXXXX")" ||
+        fail "Cannot capture ${label,,}."
+    TEMP_FILES+=("$capture")
+    capture_regular_file "$path" "$label" "$capture" true
+    digest="$(digest_file "$capture")"
+    if [[ -n "${VALIDATED_FILE_SHA256[$path]-}" &&
+          ("${VALIDATED_FILE_SHA256[$path]}" != "$digest" ||
+           "${VALIDATED_FILE_IDENTITY[$path]}" != "$CAPTURED_FILE_IDENTITY" ||
+           "${VALIDATED_FILE_METADATA[$path]}" != "$CAPTURED_FILE_METADATA") ]]; then
+        fail "File '$path' changed after it was validated."
+    fi
+    VALIDATED_FILE_SHA256["$path"]="$digest"
+    VALIDATED_FILE_IDENTITY["$path"]="$CAPTURED_FILE_IDENTITY"
+    VALIDATED_FILE_METADATA["$path"]="$CAPTURED_FILE_METADATA"
+    printf -v "$target" '%s' "$capture"
+}
+
+digest_safe_file_fd_into() {
+    local target="$1" value
     if command -v sha256sum >/dev/null 2>&1; then
-        digest="$(sha256sum -- "$path" | awk '{print $1}')"
+        value="$(sha256sum <&"$SAFE_FILE_FD" | awk '{print $1}')" ||
+            fail "Cannot hash the opened file."
     elif command -v shasum >/dev/null 2>&1; then
-        digest="$(shasum -a 256 -- "$path" | awk '{print $1}')"
+        value="$(shasum -a 256 <&"$SAFE_FILE_FD" | awk '{print $1}')" ||
+            fail "Cannot hash the opened file."
     elif command -v openssl >/dev/null 2>&1; then
-        digest="$(openssl dgst -sha256 -- "$path" | awk '{print $NF}')"
+        value="$(openssl dgst -sha256 <&"$SAFE_FILE_FD" | awk '{print $NF}')" ||
+            fail "Cannot hash the opened file."
     else
         fail "No SHA-256 implementation is available (sha256sum, shasum, or openssl)."
     fi
-    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] || fail "SHA-256 output is invalid."
+    [[ "$value" =~ ^[0-9a-fA-F]{64}$ ]] ||
+        fail "SHA-256 output is invalid."
+    printf -v "$target" '%s' "${value,,}"
+}
+
+digest_file() {
+    local path="$1" digest current_identity opened_identity opened_metadata
+    local verification_digest verification_identity verification_metadata
+    if [[ -n "${VALIDATED_FILE_SHA256[$path]-}" ]]; then
+        open_regular_file_once "$path" "File '$path'" true
+        current_identity="$SAFE_FILE_IDENTITY"
+        opened_metadata="$SAFE_FILE_METADATA"
+        digest_safe_file_fd_into digest
+        finish_regular_file_once "$path" "File '$path'" true
+        [[ "$current_identity" == "${VALIDATED_FILE_IDENTITY[$path]}" &&
+           "$opened_metadata" == "${VALIDATED_FILE_METADATA[$path]}" &&
+           "$digest" == "${VALIDATED_FILE_SHA256[$path]}" ]] ||
+            fail "File '$path' changed after it was validated."
+        printf '%s' "$digest"
+        return
+    fi
+    open_regular_file_once "$path" "File '$path'" true
+    opened_identity="$SAFE_FILE_IDENTITY"
+    opened_metadata="$SAFE_FILE_METADATA"
+    digest_safe_file_fd_into digest
+    finish_regular_file_once "$path" "File '$path'" true
+    ensure_kernel_name
+    if [[ "$KERNEL_NAME" == Darwin ]]; then
+        open_regular_file_once "$path" "File '$path'" true
+        verification_identity="$SAFE_FILE_IDENTITY"
+        verification_metadata="$SAFE_FILE_METADATA"
+        digest_safe_file_fd_into verification_digest
+        finish_regular_file_once "$path" "File '$path'" true
+        [[ "$verification_identity" == "$opened_identity" &&
+           "$verification_metadata" == "$opened_metadata" &&
+           "$verification_digest" == "$digest" ]] ||
+            fail "File '$path' changed while it was being hashed."
+    fi
+    VALIDATED_FILE_SHA256["$path"]="$digest"
+    VALIDATED_FILE_IDENTITY["$path"]="$opened_identity"
+    VALIDATED_FILE_METADATA["$path"]="$opened_metadata"
+    printf '%s' "$digest"
+}
+
+hex_utf8() {
+    LC_ALL=C printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'
+}
+
+decode_hex_into() {
+    local target="$1" encoded="$2" escapes="" byte
+    while [[ -n "$encoded" ]]; do
+        byte="${encoded:0:2}"
+        escapes+="\\x$byte"
+        encoded="${encoded:2}"
+    done
+    printf -v "$target" '%b' "$escapes"
+}
+
+snapshot_tree_index() {
+    local root="$1" index_path="$2" state_path="$3"
+    local max_entries="$4" max_path_bytes="$5" max_content_bytes="$6"
+    local unsorted_index unsorted_state find_fd find_pid path relative encoded
+    local metadata kind size root_metadata entry_count=0 total_content_bytes=0
+    local LC_ALL=C
+    command -v sort >/dev/null 2>&1 ||
+        fail "Cannot sort snapshot contents because the sort utility is unavailable."
+    unsorted_index="$(mktemp "${TMPDIR:-/tmp}/installation-context-index.XXXXXX")" ||
+        fail "Cannot stage the snapshot content index."
+    unsorted_state="$(mktemp "${TMPDIR:-/tmp}/installation-context-state.XXXXXX")" ||
+        fail "Cannot stage the snapshot tree state."
+    TEMP_FILES+=("$unsorted_index" "$unsorted_state" "$index_path" "$state_path")
+    root_metadata="$(stat_file_metadata "$root")" ||
+        fail "Cannot inspect snapshot root '$root'."
+    metadata_is_directory "$root_metadata" ||
+        fail "Snapshot root must be an ordinary directory."
+    [[ ! -L "$root" ]] ||
+        fail "Snapshot root may not traverse a symbolic link or reparse point."
+    printf 'R\t\t%s\n' "$root_metadata" >"$unsorted_state"
+    exec {find_fd}< <(find "$root" -mindepth 1 -print0)
+    find_pid=$!
+    while IFS= read -r -d '' path <&"$find_fd"; do
+        entry_count=$((entry_count + 1))
+        ((entry_count <= max_entries)) ||
+            fail "Snapshot content exceeds the $max_entries-entry limit."
+        relative="${path#"$root"/}"
+        utf8_is_well_formed "$relative" ||
+            fail "Snapshot content path is not valid UTF-8."
+        ((${#relative} <= max_path_bytes)) ||
+            fail "Snapshot content relative path exceeds the $max_path_bytes-byte UTF-8 limit: '$relative'."
+        [[ ! -L "$path" ]] ||
+            fail "Snapshot content may not contain symbolic links or reparse points: '$relative'."
+        metadata="$(stat_file_metadata "$path")" ||
+            fail "Cannot inspect snapshot content '$relative'."
+        encoded="$(hex_utf8 "$relative")"
+        if metadata_is_directory "$metadata"; then
+            kind=D
+            paths_equal "$(canonical_path "$path" true)" "$path" ||
+                fail "Snapshot content may not traverse symbolic links or reparse points: '$relative'."
+            printf '%s\t%s\n' "$encoded" "$kind" >>"$unsorted_index"
+            printf '%s\t%s\t%s\n' "$kind" "$encoded" "$metadata" >>"$unsorted_state"
+            continue
+        fi
+        metadata_is_regular "$metadata" ||
+            fail "Snapshot content entries must be ordinary files or directories: '$relative'."
+        kind=F
+        size="$(metadata_size "$metadata")"
+        [[ "$size" =~ ^[0-9]+$ ]] ||
+            fail "Cannot determine snapshot content size: '$relative'."
+        ((size <= max_content_bytes - total_content_bytes)) ||
+            fail "Snapshot content exceeds the $max_content_bytes-byte regular-file limit."
+        total_content_bytes=$((total_content_bytes + size))
+        paths_equal "$(canonical_path "$path" true)" "$path" ||
+            fail "Snapshot content may not traverse symbolic links or reparse points: '$relative'."
+        printf '%s\t%s\n' "$encoded" "$kind" >>"$unsorted_index"
+        printf '%s\t%s\n' "$kind" "$encoded" >>"$unsorted_state"
+    done
+    exec {find_fd}<&-
+    if ! wait "$find_pid"; then
+        fail "Cannot enumerate all snapshot contents beneath '$root'."
+    fi
+    LC_ALL=C sort -t $'\t' -k1,1 "$unsorted_index" >"$index_path" ||
+        fail "Cannot sort snapshot contents beneath '$root'."
+    LC_ALL=C sort "$unsorted_state" >"$state_path" ||
+        fail "Cannot sort snapshot tree state beneath '$root'."
+}
+
+digest_snapshot_contents() {
+    local root="$1" max_entries="${2:-$MAX_SNAPSHOT_ENTRIES}"
+    local max_path_bytes="${3:-$MAX_SNAPSHOT_PATH_BYTES}"
+    local max_content_bytes="${4:-$MAX_SNAPSHOT_CONTENT_BYTES}"
+    local before_index before_state after_index after_state records
+    local encoded kind relative path file_digest digest
+    local LC_ALL=C
+    before_index="$(mktemp "${TMPDIR:-/tmp}/installation-context-before-index.XXXXXX")" ||
+        fail "Cannot stage the snapshot content index."
+    before_state="$(mktemp "${TMPDIR:-/tmp}/installation-context-before-state.XXXXXX")" ||
+        fail "Cannot stage the snapshot tree state."
+    after_index="$(mktemp "${TMPDIR:-/tmp}/installation-context-after-index.XXXXXX")" ||
+        fail "Cannot stage the snapshot content index."
+    after_state="$(mktemp "${TMPDIR:-/tmp}/installation-context-after-state.XXXXXX")" ||
+        fail "Cannot stage the snapshot tree state."
+    records="$(mktemp "${TMPDIR:-/tmp}/installation-context-records.XXXXXX")" ||
+        fail "Cannot stage the snapshot digest records."
+    TEMP_FILES+=("$before_index" "$before_state" "$after_index" "$after_state" "$records")
+    snapshot_tree_index \
+        "$root" "$before_index" "$before_state" \
+        "$max_entries" "$max_path_bytes" "$max_content_bytes"
+    while IFS=$'\t' read -r encoded kind; do
+        [[ "$kind" == F ]] || continue
+        decode_hex_into relative "$encoded"
+        [[ "$relative" == "snapshot-provenance.json" ]] && continue
+        path="$root/$relative"
+        open_regular_file_once "$path" "Snapshot content '$relative'" true
+        digest_safe_file_fd_into file_digest
+        finish_regular_file_once "$path" "Snapshot content '$relative'" true
+        printf 'F\0%s\0%s\n' "$relative" "$file_digest" >>"$records"
+    done <"$before_index"
+    snapshot_tree_index \
+        "$root" "$after_index" "$after_state" \
+        "$max_entries" "$max_path_bytes" "$max_content_bytes"
+    cmp -s -- "$before_state" "$after_state" ||
+        fail "Snapshot content tree changed during hashing."
+    digest="$(digest_file "$records")"
+    [[ "$digest" =~ ^[0-9a-fA-F]{64}$ ]] ||
+        fail "SHA-256 output is invalid."
     printf '%s' "${digest,,}"
 }
 
@@ -986,7 +1436,7 @@ NS_FINGERPRINT=""
 NS_GENERATION=""
 
 validate_namespace_receipt() {
-    local receipt_path="$1" durable_home="$2" actual cell_root marketplaces_root canonical_receipt
+    local receipt_path="$1" durable_home="$2" actual document cell_root marketplaces_root canonical_receipt
     local lexical_marketplaces lexical_cell
     local schema version receipt_id generation state source_prefix fingerprint slug receipt_marketplace_id
     is_absolute "$receipt_path" || fail "The namespace receipt pointer must be absolute."
@@ -1013,30 +1463,31 @@ validate_namespace_receipt() {
     canonical_receipt="$(canonical_path "$cell_root/namespace.json")"
     paths_equal "$actual" "$canonical_receipt" ||
         fail "namespace.json is not at its exact canonical receipt location '$canonical_receipt'."
-    json_optional_string_into schema "$actual" schema
-    version="$(json_optional_path "$actual" version)"
-    assert_json_type "$actual" schema string "namespace.json schema"
-    assert_json_type "$actual" version number "namespace.json version"
+    capture_json_for_validation document "$actual" "namespace.json"
+    json_optional_string_into schema "$document" schema
+    version="$(json_optional_path "$document" version)"
+    assert_json_type "$document" schema string "namespace.json schema"
+    assert_json_type "$document" version number "namespace.json version"
     [[ "$schema" == copilot-extensions.marketplace-namespace && "$version" == 1 ]] ||
         fail "Namespace receipt '$actual' has an unsupported schema or version."
-    json_optional_string_into receipt_marketplace_id "$actual" marketplaceId
+    json_optional_string_into receipt_marketplace_id "$document" marketplaceId
     [[ "$receipt_marketplace_id" == "$receipt_id" ]] ||
         fail "Namespace receipt '$actual' does not match its cell directory."
     [[ "$receipt_id" =~ ^(.+)--[0-9a-f]{16}$ ]] ||
         fail "Invalid source-derived marketplace id '$receipt_id'."
     slug="${BASH_REMATCH[1]}"
-    generation="$(json_optional_path "$actual" generation)"
-    json_optional_string_into state "$actual" state
-    assert_json_type "$actual" generation number "namespace.json generation"
-    assert_json_type "$actual" state string "namespace.json state"
+    generation="$(json_optional_path "$document" generation)"
+    json_optional_string_into state "$document" state
+    assert_json_type "$document" generation number "namespace.json generation"
+    assert_json_type "$document" state string "namespace.json state"
     assert_receipt_generation "$generation" "namespace.json generation"
     assert_receipt_state "$state" "namespace.json state"
     source_prefix=source
-    normalize_source "$actual" "$source_prefix" "" true
+    normalize_source "$document" "$source_prefix" "" true
     derive_identity "$slug"
     [[ "$MARKETPLACE_ID" == "$receipt_id" ]] ||
         fail "Namespace receipt '$actual' id does not match its normalized source."
-    json_optional_string_into fingerprint "$actual" "$(path_join source fingerprint)"
+    json_optional_string_into fingerprint "$document" "$(path_join source fingerprint)"
     [[ "$fingerprint" == "$SOURCE_FINGERPRINT" ]] ||
         fail "Namespace receipt '$actual' fingerprint does not match its normalized source."
     NS_MARKETPLACE_ID="$receipt_id"
@@ -1077,7 +1528,7 @@ CTX_SOURCE_FINGERPRINT=""
 validate_context_receipt() {
     local receipt_path="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
     local expected_payload="$5" expected_cell="$6"
-    local actual schema version marketplace_id plugin_id cell_root plugin_root canonical_receipt
+    local actual document schema version marketplace_id plugin_id cell_root plugin_root canonical_receipt
     local marketplaces_root plugins_root lexical_marketplaces lexical_cell lexical_plugins lexical_plugin
     local receipt_plugin_root generation state namespace_path payload_root payload_version payload_origin
     local roots_json="" name value resolved delimiter="" inherited_payload namespace_receipt
@@ -1091,14 +1542,15 @@ validate_context_receipt() {
     [[ ! -L "$receipt_path" ]] ||
         fail "install.json may not be a symbolic link or reparse point."
     actual="$(canonical_path "$receipt_path" true)"
-    json_optional_string_into schema "$actual" schema
-    version="$(json_optional_path "$actual" version)"
-    assert_json_type "$actual" schema string "install.json schema"
-    assert_json_type "$actual" version number "install.json version"
+    capture_json_for_validation document "$actual" "install.json"
+    json_optional_string_into schema "$document" schema
+    version="$(json_optional_path "$document" version)"
+    assert_json_type "$document" schema string "install.json schema"
+    assert_json_type "$document" version number "install.json version"
     [[ "$schema" == copilot-extensions.plugin-installation && "$version" == 1 ]] ||
         fail "install.json has an unsupported schema or version."
-    json_optional_string_into marketplace_id "$actual" marketplaceId
-    json_optional_string_into plugin_id "$actual" pluginId
+    json_optional_string_into marketplace_id "$document" marketplaceId
+    json_optional_string_into plugin_id "$document" pluginId
     [[ -n "$marketplace_id" && -n "$plugin_id" ]] || fail "install.json identity is incomplete."
     [[ "$marketplace_id" =~ ^[a-z0-9]+(-[a-z0-9]+)*--[0-9a-f]{16}$ ]] ||
         fail "Invalid source-derived marketplace id '$marketplace_id'."
@@ -1132,7 +1584,7 @@ validate_context_receipt() {
     canonical_receipt="$(canonical_path "$plugin_root/install.json")"
     paths_equal "$actual" "$canonical_receipt" ||
         fail "install.json is not at its exact canonical receipt location '$canonical_receipt'."
-    json_optional_string_into receipt_plugin_root "$actual" pluginRoot
+    json_optional_string_into receipt_plugin_root "$document" pluginRoot
     paths_equal "$receipt_plugin_root" "$plugin_root" ||
         fail "install.json pluginRoot does not match its canonical cell/plugin location."
     [[ -z "$expected_marketplace" || "$marketplace_id" == "$expected_marketplace" ]] ||
@@ -1141,34 +1593,34 @@ validate_context_receipt() {
         fail "Expected plugin '$expected_plugin', receipt names '$plugin_id'."
     [[ -z "$expected_cell" ]] || paths_equal "$cell_root" "$expected_cell" ||
         fail "Expected cell '$expected_cell', receipt belongs to '$cell_root'."
-    generation="$(json_optional_path "$actual" generation)"
-    json_optional_string_into state "$actual" state
-    assert_json_type "$actual" generation number "install.json generation"
-    assert_json_type "$actual" state string "install.json state"
+    generation="$(json_optional_path "$document" generation)"
+    json_optional_string_into state "$document" state
+    assert_json_type "$document" generation number "install.json generation"
+    assert_json_type "$document" state string "install.json state"
     assert_receipt_generation "$generation" "install.json generation"
     assert_receipt_state "$state" "install.json state"
     [[ ! -L "$cell_root/namespace.json" ]] ||
         fail "namespace.json may not be a symbolic link or reparse point."
     namespace_path="$(canonical_path "$cell_root/namespace.json")"
-    json_optional_string_into namespace_receipt "$actual" namespaceReceipt
+    json_optional_string_into namespace_receipt "$document" namespaceReceipt
     paths_equal "$namespace_receipt" "$namespace_path" ||
         fail "install.json namespaceReceipt is not the exact namespace receipt in the same cell."
     validate_namespace_receipt "$cell_root/namespace.json" "$durable_home"
     [[ "$NS_MARKETPLACE_ID" == "$marketplace_id" ]] ||
         fail "namespace.json marketplaceId does not match install.json."
-    json_optional_string_into payload_root "$actual" "$(path_join payload root)"
+    json_optional_string_into payload_root "$document" "$(path_join payload root)"
     is_absolute "$payload_root" || fail "payload.root must be absolute."
-    json_optional_string_into payload_version "$actual" "$(path_join payload version)"
+    json_optional_string_into payload_version "$document" "$(path_join payload version)"
     [[ -n "${payload_version//[[:space:]]/}" ]] || fail "payload.version must be a non-empty string."
-    json_optional_string_into payload_origin "$actual" "$(path_join payload origin)"
+    json_optional_string_into payload_origin "$document" "$(path_join payload origin)"
     case "$payload_origin" in installed|directory|staged|explicit) ;; *)
         fail "payload.origin must be installed, directory, staged, or explicit." ;;
     esac
-    payload_origin_receipt_type="$(json_optional_type_path "$actual" "$(path_join payload originReceipt)")"
+    payload_origin_receipt_type="$(json_optional_type_path "$document" "$(path_join payload originReceipt)")"
     if [[ -n "$payload_origin_receipt_type" && "$payload_origin_receipt_type" != null ]]; then
         [[ "$payload_origin_receipt_type" == string ]] ||
             fail "payload.originReceipt must be a string."
-        json_optional_string_into payload_origin_receipt "$actual" "$(path_join payload originReceipt)"
+        json_optional_string_into payload_origin_receipt "$document" "$(path_join payload originReceipt)"
         is_absolute "$payload_origin_receipt" ||
             fail "payload.originReceipt must be absolute."
     fi
@@ -1182,7 +1634,7 @@ validate_context_receipt() {
             fail "COPILOT_PLUGIN_ROOT conflicts with the validated payload root."
     fi
     for name in versions snapshots state run logs cache launchers; do
-        json_optional_string_into value "$actual" "$(path_join roots "$name")"
+        json_optional_string_into value "$document" "$(path_join roots "$name")"
         resolved="$(resolve_relative_root "$plugin_root" "$value" "$name")"
         if [[ "$name" == versions ]]; then
             versions_root="$resolved"
@@ -1632,7 +2084,7 @@ validate_snapshot_provenance() {
     local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
     local snapshot_id="$5" require_current_receipts="${6:-true}"
     local expected_payload_root="${7:-}" expected_payload_version="${8:-}"
-    local provenance schema version marketplace_id plugin_id source_prefix
+    local provenance actual_provenance schema version marketplace_id plugin_id source_prefix
     local fingerprint snapshot_recorded_id snapshot_recorded_root namespace_path install_path
     local namespace_generation install_generation namespace_state created_at created_epoch
     local payload_root payload_version payload_origin payload_origin_type payload_origin_receipt=""
@@ -1658,9 +2110,10 @@ validate_snapshot_provenance() {
     COPILOT_PLUGIN_ROOT="" validate_context_receipt \
         "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" "" ""
     resolve_snapshot_paths "$CTX_SNAPSHOTS_ROOT" "$snapshot_id"
-    provenance="$(canonical_path "$SNAPSHOT_PROVENANCE" true)"
-    paths_equal "$provenance" "$SNAPSHOT_PROVENANCE" ||
+    actual_provenance="$(canonical_path "$SNAPSHOT_PROVENANCE" true)"
+    paths_equal "$actual_provenance" "$SNAPSHOT_PROVENANCE" ||
         fail "Snapshot provenance is not at its exact canonical location '$SNAPSHOT_PROVENANCE'."
+    capture_json_for_validation provenance "$actual_provenance" "Snapshot provenance"
     [[ "$(json_type_path "$provenance" "")" == object ]] ||
         fail "Snapshot provenance must be a JSON object."
     json_optional_string_into schema "$provenance" schema
@@ -1792,7 +2245,7 @@ validate_snapshot_provenance() {
         \"action\":\"snapshot-validate\",
         \"status\":\"ready\",
         \"reason\":\"snapshot-provenance-valid\",
-        \"provenance\":$(json_quote "$provenance"),
+        \"provenance\":$(json_quote "$actual_provenance"),
         \"snapshotRoot\":$(json_quote "$SNAPSHOT_ROOT"),
         \"snapshotId\":$(json_quote "$snapshot_id"),
         \"marketplaceId\":$(json_quote "$marketplace_id"),
@@ -1909,7 +2362,10 @@ RUNTIME_VERSIONS_RELATIVE=""
 RUNTIME_VERSIONS_ROOT=""
 RUNTIME_SLOT_ROOT=""
 RUNTIME_OWNERSHIP_PATH=""
+RUNTIME_BUILD_PATH=""
+RUNTIME_COMPLETION_PATH=""
 SLOT_JSON=""
+COMPLETION_JSON=""
 
 resolve_runtime_slot_paths() {
     local runtime_version="$1" require_existing="${2:-false}"
@@ -1961,6 +2417,13 @@ resolve_runtime_slot_paths() {
         fail "Runtime slot ownership may not be a symbolic link or reparse point."
 }
 
+resolve_runtime_slot_completion_paths() {
+    RUNTIME_BUILD_PATH="$RUNTIME_SLOT_ROOT/.install-complete.json"
+    RUNTIME_COMPLETION_PATH="$RUNTIME_SLOT_ROOT/.runtime-slot-completion.json"
+    [[ ! -L "$RUNTIME_COMPLETION_PATH" ]] ||
+        fail "Runtime slot completion may not be a symbolic link or reparse point."
+}
+
 ensure_versions_root_chain() {
     local cursor="$CTX_PLUGIN_ROOT" part
     local parts=()
@@ -2002,7 +2465,7 @@ validate_runtime_slot_ownership() {
     local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
     local snapshot_id="$5" runtime_version="$6"
     local expected_payload_root="${7:-}" expected_payload_version="${8:-}"
-    local ownership actual schema version
+    local ownership actual ownership_document schema version
     local marketplace_id plugin_id source_fingerprint runtime_recorded_version
     local runtime_root snapshot_recorded_id snapshot_root snapshot_provenance
     local snapshot_recorded_sha256 snapshot_actual_sha256
@@ -2035,37 +2498,38 @@ validate_runtime_slot_ownership() {
         fail "Runtime slot ownership is not at its exact canonical location '$ownership'."
     [[ -f "$actual" && ! -L "$actual" ]] ||
         fail "Runtime slot ownership must be an ordinary file."
+    capture_json_for_validation ownership_document "$actual" "Runtime slot ownership"
 
-    assert_json_object_length "$actual" "" 10 "Runtime slot ownership"
-    assert_json_object_length "$actual" runtime 2 "Runtime slot ownership runtime identity"
-    assert_json_object_length "$actual" snapshot 4 "Runtime slot ownership snapshot identity"
-    assert_json_object_length "$actual" namespaceReceipt 2 "Runtime slot ownership namespace receipt"
-    assert_json_object_length "$actual" installReceipt 2 "Runtime slot ownership install receipt"
+    assert_json_object_length "$ownership_document" "" 10 "Runtime slot ownership"
+    assert_json_object_length "$ownership_document" runtime 2 "Runtime slot ownership runtime identity"
+    assert_json_object_length "$ownership_document" snapshot 4 "Runtime slot ownership snapshot identity"
+    assert_json_object_length "$ownership_document" namespaceReceipt 2 "Runtime slot ownership namespace receipt"
+    assert_json_object_length "$ownership_document" installReceipt 2 "Runtime slot ownership install receipt"
 
-    json_optional_string_into schema "$actual" schema
-    version="$(json_optional_path "$actual" version)"
-    assert_json_type "$actual" schema string "runtime slot ownership schema"
-    assert_json_type "$actual" version number "runtime slot ownership version"
+    json_optional_string_into schema "$ownership_document" schema
+    version="$(json_optional_path "$ownership_document" version)"
+    assert_json_type "$ownership_document" schema string "runtime slot ownership schema"
+    assert_json_type "$ownership_document" version number "runtime slot ownership version"
     [[ "$schema" == copilot-extensions.runtime-slot-ownership && "$version" == 1 ]] ||
         fail "Runtime slot ownership has an unsupported schema or version."
-    json_optional_string_into marketplace_id "$actual" marketplaceId
-    json_optional_string_into plugin_id "$actual" pluginId
-    json_optional_string_into source_fingerprint "$actual" sourceFingerprint
-    json_optional_string_into runtime_recorded_version "$actual" "$(path_join runtime version)"
-    json_optional_string_into runtime_root "$actual" "$(path_join runtime root)"
-    json_optional_string_into snapshot_recorded_id "$actual" "$(path_join snapshot id)"
-    json_optional_string_into snapshot_root "$actual" "$(path_join snapshot root)"
-    json_optional_string_into snapshot_provenance "$actual" "$(path_join snapshot provenance)"
-    json_optional_string_into snapshot_recorded_sha256 "$actual" \
+    json_optional_string_into marketplace_id "$ownership_document" marketplaceId
+    json_optional_string_into plugin_id "$ownership_document" pluginId
+    json_optional_string_into source_fingerprint "$ownership_document" sourceFingerprint
+    json_optional_string_into runtime_recorded_version "$ownership_document" "$(path_join runtime version)"
+    json_optional_string_into runtime_root "$ownership_document" "$(path_join runtime root)"
+    json_optional_string_into snapshot_recorded_id "$ownership_document" "$(path_join snapshot id)"
+    json_optional_string_into snapshot_root "$ownership_document" "$(path_join snapshot root)"
+    json_optional_string_into snapshot_provenance "$ownership_document" "$(path_join snapshot provenance)"
+    json_optional_string_into snapshot_recorded_sha256 "$ownership_document" \
         "$(path_join snapshot provenanceSha256)"
-    json_optional_string_into namespace_path "$actual" "$(path_join namespaceReceipt path)"
-    namespace_generation="$(json_optional_path "$actual" "$(path_join namespaceReceipt generation)")"
-    json_optional_string_into install_path "$actual" "$(path_join installReceipt path)"
-    install_generation="$(json_optional_path "$actual" "$(path_join installReceipt generation)")"
-    json_optional_string_into created_at "$actual" createdAt
-    assert_json_type "$actual" "$(path_join namespaceReceipt generation)" number \
+    json_optional_string_into namespace_path "$ownership_document" "$(path_join namespaceReceipt path)"
+    namespace_generation="$(json_optional_path "$ownership_document" "$(path_join namespaceReceipt generation)")"
+    json_optional_string_into install_path "$ownership_document" "$(path_join installReceipt path)"
+    install_generation="$(json_optional_path "$ownership_document" "$(path_join installReceipt generation)")"
+    json_optional_string_into created_at "$ownership_document" createdAt
+    assert_json_type "$ownership_document" "$(path_join namespaceReceipt generation)" number \
         "runtime slot ownership namespace generation"
-    assert_json_type "$actual" "$(path_join installReceipt generation)" number \
+    assert_json_type "$ownership_document" "$(path_join installReceipt generation)" number \
         "runtime slot ownership install generation"
     assert_receipt_generation "$namespace_generation" \
         "runtime slot ownership namespace generation"
@@ -2228,6 +2692,371 @@ provision_runtime_slot() {
     printf '%s\n' "$SLOT_JSON"
 }
 
+BUILD_COMPLETED_AT=""
+BUILD_PAYLOAD_SHA256=""
+BUILD_RECEIPT_SHA256=""
+BUILD_PID=""
+SNAPSHOT_CONTENT_SHA256=""
+COMPLETION_RECEIPT_JSON=""
+
+validate_build_completion() {
+    local runtime_version="$1"
+    local version completed_at pid payload_hash capture pid_length smallest
+
+    [[ -e "$RUNTIME_BUILD_PATH" ]] ||
+        fail "Build completion evidence must exist."
+    [[ ! -L "$RUNTIME_BUILD_PATH" ]] ||
+        fail "Build completion evidence may not be a symbolic link or reparse point."
+    [[ -f "$RUNTIME_BUILD_PATH" ]] ||
+        fail "Build completion evidence must be an ordinary file."
+    paths_equal "$(canonical_path "$RUNTIME_BUILD_PATH" true)" "$RUNTIME_BUILD_PATH" ||
+        fail "Build completion evidence is not at its exact canonical location '$RUNTIME_BUILD_PATH'."
+    capture="$(mktemp "$RUNTIME_SLOT_ROOT/.install-complete.capture.XXXXXX")" ||
+        fail "Cannot capture build completion evidence beneath '$RUNTIME_SLOT_ROOT'."
+    TEMP_FILES+=("$capture")
+    capture_regular_file \
+        "$RUNTIME_BUILD_PATH" "Build completion evidence" "$capture" false true
+    BUILD_RECEIPT_SHA256="$(digest_file "$capture")"
+    assert_json_object_length "$capture" "" 4 "Build completion evidence"
+    json_optional_string_into version "$capture" version
+    json_optional_string_into completed_at "$capture" completed_at
+    pid="$(json_optional_path "$capture" pid)"
+    json_optional_string_into payload_hash "$capture" payload_hash
+    assert_json_type "$capture" version string \
+        "build completion evidence version"
+    assert_json_type "$capture" completed_at string \
+        "build completion evidence completed_at"
+    assert_json_type "$capture" payload_hash string \
+        "build completion evidence payload_hash"
+    [[ "$version" == "$runtime_version" ]] ||
+        fail "Build completion evidence version must match the runtime version."
+    parse_utc_epoch "$completed_at" >/dev/null ||
+        fail "build completion completed_at must be RFC3339 UTC."
+    [[ "$(json_type_path "$capture" pid)" == number &&
+       "$pid" =~ ^(0|[1-9][0-9]*)$ ]] ||
+        fail "Build completion evidence pid must be an integer from 0 through 9223372036854775807."
+    pid_length="${#pid}"
+    if ((pid_length > 19)); then
+        fail "Build completion evidence pid must be an integer from 0 through 9223372036854775807."
+    fi
+    if ((pid_length == 19)); then
+        smallest="$(
+            printf '%s\n%s\n' "$pid" 9223372036854775807 |
+                LC_ALL=C sort |
+                head -n 1
+        )"
+        [[ "$smallest" == "$pid" ]] ||
+            fail "Build completion evidence pid must be an integer from 0 through 9223372036854775807."
+    fi
+    [[ "$payload_hash" =~ ^[0-9a-f]{64}$ ]] ||
+        fail "Build completion evidence payload_hash must be lowercase 64-hex."
+    [[ "$payload_hash" == "$SNAPSHOT_CONTENT_SHA256" ]] ||
+        fail "Build completion evidence payload_hash does not match the snapshot content digest."
+    BUILD_COMPLETED_AT="$completed_at"
+    BUILD_PAYLOAD_SHA256="$payload_hash"
+    BUILD_PID="$pid"
+    rm -f -- "$capture"
+}
+
+runtime_slot_completion_value() {
+    local ownership_sha provenance_sha
+    ownership_sha="$(digest_file "$RUNTIME_OWNERSHIP_PATH")"
+    provenance_sha="$(digest_file "$SNAPSHOT_PROVENANCE")"
+    COMPLETION_RECEIPT_JSON="{
+  \"schema\":\"copilot.extensions/runtime-slot-completion/v1\",
+  \"marketplaceId\":$(json_quote "$EXPECTED_MARKETPLACE_ID"),
+  \"pluginId\":$(json_quote "$EXPECTED_PLUGIN_ID"),
+  \"sourceFingerprint\":$(json_quote "$SNAPSHOT_SOURCE_FINGERPRINT"),
+  \"runtime\":{
+    \"version\":$(json_quote "$RUNTIME_VERSION"),
+    \"root\":$(json_quote "$RUNTIME_SLOT_ROOT")
+  },
+  \"snapshot\":{
+    \"id\":$(json_quote "$SNAPSHOT_ID"),
+    \"provenance\":$(json_quote "$SNAPSHOT_PROVENANCE"),
+    \"provenanceSha256\":$(json_quote "$provenance_sha"),
+    \"contentSha256\":$(json_quote "$SNAPSHOT_CONTENT_SHA256")
+  },
+  \"ownership\":{
+    \"path\":$(json_quote "$RUNTIME_OWNERSHIP_PATH"),
+    \"sha256\":$(json_quote "$ownership_sha")
+  },
+  \"build\":{
+    \"receipt\":$(json_quote "$RUNTIME_BUILD_PATH"),
+    \"receiptSha256\":$(json_quote "$BUILD_RECEIPT_SHA256"),
+    \"payloadSha256\":$(json_quote "$BUILD_PAYLOAD_SHA256"),
+    \"pid\":$BUILD_PID
+  },
+  \"namespaceReceipt\":{
+    \"path\":$(json_quote "$SNAPSHOT_NAMESPACE_RECEIPT"),
+    \"generation\":$SNAPSHOT_NAMESPACE_GENERATION
+  },
+  \"installReceipt\":{
+    \"path\":$(json_quote "$SNAPSHOT_INSTALL_RECEIPT"),
+    \"generation\":$SNAPSHOT_INSTALL_GENERATION
+  },
+  \"completedAt\":$(json_quote "$BUILD_COMPLETED_AT")
+}"
+}
+
+validate_runtime_slot_completion() {
+    local context="$1" durable_home="$2" expected_marketplace="$3" expected_plugin="$4"
+    local expected_payload_root="$5" expected_payload_version="$6"
+    local snapshot_id="$7" runtime_version="$8"
+    local actual actual_document schema marketplace_id plugin_id source_fingerprint
+    local runtime_recorded_version runtime_root snapshot_recorded_id
+    local snapshot_provenance snapshot_sha snapshot_content_sha ownership_path ownership_sha
+    local build_receipt build_receipt_sha payload_sha build_pid namespace_path
+    local namespace_generation install_path install_generation completed_at
+    local actual_provenance_sha actual_ownership_sha pid_length smallest
+
+    [[ -n "$context" ]] ||
+        fail "slot-completion-validate requires --context."
+    [[ -n "$expected_marketplace" ]] ||
+        fail "slot-completion-validate requires --expected-marketplace-id."
+    [[ -n "$expected_plugin" ]] ||
+        fail "slot-completion-validate requires --expected-plugin-id."
+    [[ -n "$expected_payload_root" ]] ||
+        fail "slot-completion-validate requires --expected-payload-root."
+    [[ -n "${expected_payload_version//[[:space:]]/}" ]] ||
+        fail "slot-completion-validate requires --expected-payload-version."
+    [[ -n "$snapshot_id" ]] ||
+        fail "slot-completion-validate requires --snapshot-id."
+    [[ -n "$runtime_version" ]] ||
+        fail "slot-completion-validate requires --runtime-version."
+
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" "" ""
+    validate_snapshot_provenance \
+        "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" \
+        "$snapshot_id" false "$expected_payload_root" "$expected_payload_version"
+    validate_runtime_slot_ownership \
+        "$context" "$durable_home" "$expected_marketplace" "$expected_plugin" \
+        "$snapshot_id" "$runtime_version" \
+        "$expected_payload_root" "$expected_payload_version"
+    resolve_runtime_slot_paths "$runtime_version" true
+    resolve_runtime_slot_completion_paths
+    SNAPSHOT_CONTENT_SHA256="$(digest_snapshot_contents "$SNAPSHOT_ROOT")"
+
+    [[ -e "$RUNTIME_COMPLETION_PATH" ]] ||
+        fail "Runtime slot completion must exist."
+    [[ -f "$RUNTIME_COMPLETION_PATH" && ! -L "$RUNTIME_COMPLETION_PATH" ]] ||
+        fail "Runtime slot completion must be an ordinary file."
+    actual="$(canonical_path "$RUNTIME_COMPLETION_PATH" true)"
+    paths_equal "$actual" "$RUNTIME_COMPLETION_PATH" ||
+        fail "Runtime slot completion is not at its exact canonical location '$RUNTIME_COMPLETION_PATH'."
+    capture_json_for_validation actual_document "$actual" "Runtime slot completion"
+
+    assert_json_object_length "$actual_document" "" 11 "Runtime slot completion"
+    assert_json_object_length "$actual_document" runtime 2 "Runtime slot completion runtime"
+    assert_json_object_length "$actual_document" snapshot 4 "Runtime slot completion snapshot"
+    assert_json_object_length "$actual_document" ownership 2 "Runtime slot completion ownership"
+    assert_json_object_length "$actual_document" build 4 "Runtime slot completion build"
+    assert_json_object_length "$actual_document" namespaceReceipt 2 \
+        "Runtime slot completion namespaceReceipt"
+    assert_json_object_length "$actual_document" installReceipt 2 \
+        "Runtime slot completion installReceipt"
+
+    json_optional_string_into schema "$actual_document" schema
+    json_optional_string_into marketplace_id "$actual_document" marketplaceId
+    json_optional_string_into plugin_id "$actual_document" pluginId
+    json_optional_string_into source_fingerprint "$actual_document" sourceFingerprint
+    json_optional_string_into runtime_recorded_version "$actual_document" "$(path_join runtime version)"
+    json_optional_string_into runtime_root "$actual_document" "$(path_join runtime root)"
+    json_optional_string_into snapshot_recorded_id "$actual_document" "$(path_join snapshot id)"
+    json_optional_string_into snapshot_provenance "$actual_document" "$(path_join snapshot provenance)"
+    json_optional_string_into snapshot_sha "$actual_document" "$(path_join snapshot provenanceSha256)"
+    json_optional_string_into snapshot_content_sha "$actual_document" "$(path_join snapshot contentSha256)"
+    json_optional_string_into ownership_path "$actual_document" "$(path_join ownership path)"
+    json_optional_string_into ownership_sha "$actual_document" "$(path_join ownership sha256)"
+    json_optional_string_into build_receipt "$actual_document" "$(path_join build receipt)"
+    json_optional_string_into build_receipt_sha "$actual_document" "$(path_join build receiptSha256)"
+    json_optional_string_into payload_sha "$actual_document" "$(path_join build payloadSha256)"
+    build_pid="$(json_optional_path "$actual_document" "$(path_join build pid)")"
+    json_optional_string_into namespace_path "$actual_document" "$(path_join namespaceReceipt path)"
+    namespace_generation="$(json_optional_path "$actual_document" "$(path_join namespaceReceipt generation)")"
+    json_optional_string_into install_path "$actual_document" "$(path_join installReceipt path)"
+    install_generation="$(json_optional_path "$actual_document" "$(path_join installReceipt generation)")"
+    json_optional_string_into completed_at "$actual_document" completedAt
+    assert_json_type "$actual_document" "$(path_join namespaceReceipt generation)" number \
+        "runtime slot completion namespaceReceipt generation"
+    assert_json_type "$actual_document" "$(path_join installReceipt generation)" number \
+        "runtime slot completion installReceipt generation"
+    assert_receipt_generation "$namespace_generation" \
+        "runtime slot completion namespaceReceipt generation"
+    assert_receipt_generation "$install_generation" \
+        "runtime slot completion installReceipt generation"
+    parse_utc_epoch "$completed_at" >/dev/null ||
+        fail "runtime slot completion completedAt must be RFC3339 UTC."
+    [[ "$snapshot_sha" =~ ^[0-9a-f]{64}$ &&
+       "$snapshot_content_sha" =~ ^[0-9a-f]{64}$ &&
+       "$ownership_sha" =~ ^[0-9a-f]{64}$ &&
+       "$build_receipt_sha" =~ ^[0-9a-f]{64}$ &&
+       "$payload_sha" =~ ^[0-9a-f]{64}$ ]] ||
+        fail "Runtime slot completion digests must be lowercase 64-hex."
+    [[ "$build_pid" =~ ^(0|[1-9][0-9]*)$ ]] ||
+        fail "Runtime slot completion build.pid must be an integer from 0 through 9223372036854775807."
+    pid_length="${#build_pid}"
+    if ((pid_length > 19)); then
+        fail "Runtime slot completion build.pid must be an integer from 0 through 9223372036854775807."
+    fi
+    if ((pid_length == 19)); then
+        smallest="$(
+            printf '%s\n%s\n' "$build_pid" 9223372036854775807 |
+                LC_ALL=C sort |
+                head -n 1
+        )"
+        [[ "$smallest" == "$build_pid" ]] ||
+            fail "Runtime slot completion build.pid must be an integer from 0 through 9223372036854775807."
+    fi
+
+    is_absolute "$runtime_root" &&
+        is_absolute "$snapshot_provenance" &&
+        is_absolute "$ownership_path" &&
+        is_absolute "$build_receipt" &&
+        is_absolute "$namespace_path" &&
+        is_absolute "$install_path" ||
+        fail "Runtime slot completion paths must be absolute."
+    actual_provenance_sha="$(digest_file "$SNAPSHOT_PROVENANCE")"
+    actual_ownership_sha="$(digest_file "$RUNTIME_OWNERSHIP_PATH")"
+    [[ "$schema" == copilot.extensions/runtime-slot-completion/v1 &&
+       "$marketplace_id" == "$expected_marketplace" &&
+       "$plugin_id" == "$expected_plugin" &&
+       "$source_fingerprint" == "$SNAPSHOT_SOURCE_FINGERPRINT" &&
+       "$runtime_recorded_version" == "$runtime_version" &&
+       "$runtime_root" == "$RUNTIME_SLOT_ROOT" &&
+       "$snapshot_recorded_id" == "$snapshot_id" &&
+       "$snapshot_provenance" == "$SNAPSHOT_PROVENANCE" &&
+       "$snapshot_sha" == "$actual_provenance_sha" &&
+       "$snapshot_content_sha" == "$SNAPSHOT_CONTENT_SHA256" &&
+       "$ownership_path" == "$RUNTIME_OWNERSHIP_PATH" &&
+       "$ownership_sha" == "$actual_ownership_sha" &&
+       "$build_receipt" == "$RUNTIME_BUILD_PATH" &&
+       "$payload_sha" == "$SNAPSHOT_CONTENT_SHA256" &&
+       "$namespace_path" == "$SNAPSHOT_NAMESPACE_RECEIPT" &&
+       "$namespace_generation" == "$SNAPSHOT_NAMESPACE_GENERATION" &&
+       "$install_path" == "$SNAPSHOT_INSTALL_RECEIPT" &&
+       "$install_generation" == "$SNAPSHOT_INSTALL_GENERATION" ]] ||
+        fail "Runtime slot completion does not match the validated snapshot, ownership, and installation receipts."
+
+    BUILD_COMPLETED_AT="$completed_at"
+    BUILD_PAYLOAD_SHA256="$payload_sha"
+    BUILD_RECEIPT_SHA256="$build_receipt_sha"
+    BUILD_PID="$build_pid"
+    runtime_slot_completion_value
+    COMPLETION_JSON="{
+      \"action\":\"slot-completion-validate\",
+      \"status\":\"ready\",
+      \"reason\":\"runtime-slot-completion-valid\",
+      \"slotRoot\":$(json_quote "$RUNTIME_SLOT_ROOT"),
+      \"runtimeVersion\":$(json_quote "$runtime_version"),
+      \"ownership\":$(json_quote "$RUNTIME_OWNERSHIP_PATH"),
+      \"completion\":$(json_quote "$actual"),
+      \"buildReceipt\":$(json_quote "$RUNTIME_BUILD_PATH"),
+      \"receipt\":$COMPLETION_RECEIPT_JSON,
+      \"snapshotId\":$(json_quote "$snapshot_id"),
+      \"snapshotProvenance\":$(json_quote "$SNAPSHOT_PROVENANCE"),
+      \"marketplaceId\":$(json_quote "$marketplace_id"),
+      \"pluginId\":$(json_quote "$plugin_id"),
+      \"sourceFingerprint\":$(json_quote "$source_fingerprint"),
+      \"namespaceReceipt\":$(json_quote "$SNAPSHOT_NAMESPACE_RECEIPT"),
+      \"installReceipt\":$(json_quote "$SNAPSHOT_INSTALL_RECEIPT"),
+      \"namespaceGeneration\":$SNAPSHOT_NAMESPACE_GENERATION,
+      \"installGeneration\":$SNAPSHOT_INSTALL_GENERATION,
+      \"completedAt\":$(json_quote "$BUILD_COMPLETED_AT"),
+      \"payloadSha256\":$(json_quote "$BUILD_PAYLOAD_SHA256"),
+      \"activated\":false,
+      \"operative\":false
+    }"
+}
+
+publish_completion_json_no_replace() {
+    local path="$1" content="$2" temporary
+    if ! temporary="$(mktemp "$RUNTIME_SLOT_ROOT/.runtime-slot-completion.XXXXXX")"; then
+        fail "Cannot stage runtime slot completion beneath '$RUNTIME_SLOT_ROOT'."
+    fi
+    TEMP_FILES+=("$temporary")
+    printf '%s\n' "$content" >"$temporary"
+    assert_all_locks_owned
+    if ln -- "$temporary" "$path" 2>/dev/null; then
+        rm -f -- "$temporary"
+        return 0
+    fi
+    rm -f -- "$temporary"
+    if [[ -e "$path" || -L "$path" ]]; then
+        return 1
+    fi
+    fail "Cannot publish runtime slot completion '$path' without replacement."
+}
+
+complete_runtime_slot() {
+    local genesis_lock install_lock created=false confirmed_snapshot_content_sha256
+    [[ -n "$CONTEXT" ]] || fail "slot-complete requires --context."
+    [[ -n "$EXPECTED_MARKETPLACE_ID" ]] ||
+        fail "slot-complete requires --expected-marketplace-id."
+    [[ -n "$EXPECTED_PLUGIN_ID" ]] ||
+        fail "slot-complete requires --expected-plugin-id."
+    [[ -n "$EXPECTED_PAYLOAD_ROOT" ]] ||
+        fail "slot-complete requires --expected-payload-root."
+    [[ -n "${EXPECTED_PAYLOAD_VERSION//[[:space:]]/}" ]] ||
+        fail "slot-complete requires --expected-payload-version."
+    [[ -n "$SNAPSHOT_ID" ]] || fail "slot-complete requires --snapshot-id."
+    [[ -n "$RUNTIME_VERSION" ]] || fail "slot-complete requires --runtime-version."
+
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" "" ""
+    genesis_lock="$DURABLE_HOME/marketplaces/.locks/$EXPECTED_MARKETPLACE_ID.genesis"
+    install_lock="$CTX_CELL_ROOT/.locks/$EXPECTED_PLUGIN_ID.install.lock"
+    acquire_lock "$genesis_lock" genesis "$EXPECTED_MARKETPLACE_ID" "" \
+        "$RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS"
+    acquire_lock "$install_lock" install "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
+        "$RUNTIME_SLOT_COMPLETION_LOCK_TIMEOUT_SECONDS"
+    COPILOT_PLUGIN_ROOT="" validate_context_receipt \
+        "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+        "$EXPECTED_PLUGIN_ID" "" "$CTX_CELL_ROOT"
+    resolve_runtime_slot_paths "$RUNTIME_VERSION" true
+    resolve_runtime_slot_completion_paths
+    if [[ -e "$RUNTIME_COMPLETION_PATH" || -L "$RUNTIME_COMPLETION_PATH" ]]; then
+        validate_runtime_slot_completion \
+            "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$EXPECTED_PAYLOAD_ROOT" \
+            "$EXPECTED_PAYLOAD_VERSION" "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+    else
+        validate_snapshot_provenance \
+            "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" true \
+            "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
+        validate_runtime_slot_ownership \
+            "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$SNAPSHOT_ID" "$RUNTIME_VERSION" \
+            "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION"
+        SNAPSHOT_CONTENT_SHA256="$(digest_snapshot_contents "$SNAPSHOT_ROOT")"
+        validate_build_completion "$RUNTIME_VERSION"
+        runtime_slot_completion_value
+        confirmed_snapshot_content_sha256="$(digest_snapshot_contents "$SNAPSHOT_ROOT")"
+        [[ "$confirmed_snapshot_content_sha256" == "$SNAPSHOT_CONTENT_SHA256" ]] ||
+            fail "Snapshot content changed before completion publication."
+        if publish_completion_json_no_replace \
+            "$RUNTIME_COMPLETION_PATH" "$COMPLETION_RECEIPT_JSON"; then
+            created=true
+        fi
+        validate_runtime_slot_completion \
+            "$CTX_INSTALL_RECEIPT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" \
+            "$EXPECTED_PLUGIN_ID" "$EXPECTED_PAYLOAD_ROOT" \
+            "$EXPECTED_PAYLOAD_VERSION" "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+    fi
+    release_lock
+    release_lock
+    COMPLETION_JSON="${COMPLETION_JSON/\"action\":\"slot-completion-validate\"/\"action\":\"slot-complete\"}"
+    if [[ "$created" == true ]]; then
+        COMPLETION_JSON="${COMPLETION_JSON/\"reason\":\"runtime-slot-completion-valid\"/\"reason\":\"runtime-slot-completion-published\"}"
+    else
+        COMPLETION_JSON="${COMPLETION_JSON/\"reason\":\"runtime-slot-completion-valid\"/\"reason\":\"runtime-slot-completion-current\"}"
+    fi
+    COMPLETION_JSON="${COMPLETION_JSON%\}},\"created\":$created}"
+    printf '%s\n' "$COMPLETION_JSON"
+}
+
 emit_source_identity() {
     printf '{'
     printf '"kind":%s,' "$(json_quote "$SOURCE_KIND")"
@@ -2346,12 +3175,19 @@ pid_is_live() {
 }
 
 parse_utc_epoch() {
-    local value="$1" epoch
+    local value="$1" epoch rendered
     [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] ||
         return 1
-    epoch="$(date -u -d "$value" +%s 2>/dev/null)" || return 1
-    [[ "$(date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" == "$value" ]] ||
+    if epoch="$(date -u -d "$value" +%s 2>/dev/null)"; then
+        rendered="$(date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" ||
+            return 1
+    elif epoch="$(date -j -u -f '%Y-%m-%dT%H:%M:%SZ' "$value" +%s 2>/dev/null)"; then
+        rendered="$(date -j -u -r "$epoch" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null)" ||
+            return 1
+    else
         return 1
+    fi
+    [[ "$rendered" == "$value" ]] || return 1
     printf '%s' "$epoch"
 }
 
@@ -3498,8 +4334,8 @@ run_status_action() {
 }
 
 ACTION="${1:-}"
-[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-validate || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
-    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|status|probe-legacy} [options]"
+[[ "$ACTION" == source-id || "$ACTION" == resolve || "$ACTION" == validate || "$ACTION" == stamp || "$ACTION" == activation-cas || "$ACTION" == snapshot-stamp || "$ACTION" == snapshot-validate || "$ACTION" == slot-provision || "$ACTION" == slot-validate || "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate || "$ACTION" == status || "$ACTION" == probe-legacy ]] ||
+    fail "Usage: installation-context.sh {source-id|resolve|validate|stamp|activation-cas|snapshot-stamp|snapshot-validate|slot-provision|slot-validate|slot-complete|slot-completion-validate|status|probe-legacy} [options]"
 shift
 
 SOURCE_JSON=""
@@ -3580,7 +4416,10 @@ done
     fail "Specify only one of --source-json and --source-file."
 [[ "$LEGACY_PROBE_JSON_SUPPLIED" != true || "$LEGACY_PROBE_FILE_SUPPLIED" != true ]] ||
     fail "Specify only one of --legacy-probe-json and --legacy-probe-file."
-if [[ "$ACTION" == slot-provision || "$ACTION" == slot-validate ]]; then
+if [[ "$ACTION" == slot-provision ||
+      "$ACTION" == slot-validate ||
+      "$ACTION" == slot-complete ||
+      "$ACTION" == slot-completion-validate ]]; then
     if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true && -z "$EXPECTED_PAYLOAD_ROOT" ]]; then
         fail "Expected snapshot payload root must be absolute."
     fi
@@ -3589,13 +4428,21 @@ if [[ "$ACTION" == slot-provision || "$ACTION" == slot-validate ]]; then
         fail "Expected snapshot payload version must be a non-empty string."
     fi
 elif [[ "$EXPECTED_PAYLOAD_VERSION_SUPPLIED" == true ]]; then
-    fail "--expected-payload-version is valid only for slot-provision and slot-validate."
+    fail "--expected-payload-version is valid only for runtime slot actions."
+fi
+if [[ "$ACTION" == slot-complete || "$ACTION" == slot-completion-validate ]]; then
+    [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true ]] ||
+        fail "$ACTION requires --expected-payload-root."
+    [[ "$EXPECTED_PAYLOAD_VERSION_SUPPLIED" == true ]] ||
+        fail "$ACTION requires --expected-payload-version."
 fi
 if [[ "$EXPECTED_PAYLOAD_ROOT_SUPPLIED" == true &&
       "$ACTION" != resolve &&
       "$ACTION" != validate &&
       "$ACTION" != slot-provision &&
       "$ACTION" != slot-validate &&
+      "$ACTION" != slot-complete &&
+      "$ACTION" != slot-completion-validate &&
       "$ACTION" != status &&
       "$ACTION" != probe-legacy ]]; then
     fail "--expected-payload-root is not valid for $ACTION."
@@ -3640,7 +4487,9 @@ if [[ "$ACTION" != activation-cas &&
       "$ACTION" != snapshot-stamp &&
       "$ACTION" != snapshot-validate &&
       "$ACTION" != slot-provision &&
-      "$ACTION" != slot-validate ]]; then
+      "$ACTION" != slot-validate &&
+      "$ACTION" != slot-complete &&
+      "$ACTION" != slot-completion-validate ]]; then
     CONTEXT="${CONTEXT:-${COPILOT_EXTENSIONS_CONTEXT:-}}"
 fi
 if [[ "$ACTION" == validate ]]; then
@@ -3676,6 +4525,20 @@ fi
 
 if [[ "$ACTION" == slot-provision ]]; then
     provision_runtime_slot
+    exit 0
+fi
+
+if [[ "$ACTION" == slot-completion-validate ]]; then
+    validate_runtime_slot_completion \
+        "$CONTEXT" "$DURABLE_HOME" "$EXPECTED_MARKETPLACE_ID" "$EXPECTED_PLUGIN_ID" \
+        "$EXPECTED_PAYLOAD_ROOT" "$EXPECTED_PAYLOAD_VERSION" \
+        "$SNAPSHOT_ID" "$RUNTIME_VERSION"
+    printf '%s\n' "$COMPLETION_JSON"
+    exit 0
+fi
+
+if [[ "$ACTION" == slot-complete ]]; then
+    complete_runtime_slot
     exit 0
 fi
 

@@ -5,9 +5,10 @@
 
 ## Status
 
-**Non-operative foundation.** The reviewed contract and cross-platform resolver
-foundation are in place before the installation root becomes operative. Phase 2
-payload-local shims continue using legacy runtime roots.
+**Non-operative foundation.** The reviewed contract, cross-platform resolver,
+immutable runtime-slot ownership, and immutable build-completion publication are
+in place before the installation root becomes operative. Phase 2 payload-local
+shims continue using legacy runtime roots.
 
 ## Goals
 
@@ -501,6 +502,75 @@ uninstall behavior.
   not write payloads,
   completion/current/LKG markers, activation receipts, launchers, services,
   state, or tombstones.
+- The Python, dependency-light Bash, and PowerShell runners also expose explicit
+  `slot-complete` and read-only `slot-completion-validate` transactions. Both
+  require a caller-supplied context, expected marketplace/plugin ids, exact
+  expected payload root/version, snapshot id, and runtime version; ambient
+  context never authorizes either action.
+- Completion accepts only the existing versioned-runtime
+  `<slot>/.install-complete.json` evidence as an ordinary non-link file with
+  exactly four fields: `version`, `completed_at`, `pid`, and `payload_hash`.
+  The runtime version must match exactly, the completion time is a valid
+  second-precision UTC RFC3339 timestamp, the pid is a JSON integer from `0`
+  through `9223372036854775807`, and the payload hash is lowercase 64-hex equal
+  to the independently computed snapshot content digest. Booleans, fractions,
+  exponent-form numbers, negative values, and overflow values are rejected.
+  Malformed evidence is preserved and rejected.
+- The snapshot content digest recursively covers every regular file, including
+  dotfiles, without following links or reparse points. Relative paths use `/`
+  and are ordered by UTF-8 bytes. The only exclusion is the root
+  `snapshot-provenance.json`; nested files with that name remain content. Each
+  file contributes
+  `F\0<UTF-8 relative path>\0<lowercase file SHA-256>\n`; empty directories do
+  not contribute. Links, reparse points, pipes, devices, sockets, and other
+  non-regular entries fail closed.
+- Digest traversal permits at most 100,000 non-root entries, 4,096 UTF-8 bytes
+  per relative path, and 4,294,967,296 total regular-file bytes, with inclusive
+  boundaries. Files and directories both count. The excluded root
+  `snapshot-provenance.json` also counts toward all three limits; only its
+  digest record is omitted. Sorting is O(n log n) by exact UTF-8 bytes and does
+  not buffer file contents.
+- Every digest pass records each directory identity, mutation-relevant metadata,
+  and exact entry-name/type membership before hashing and requires the same
+  state afterward. First completion publication then recomputes the complete
+  digest immediately before no-replace publication and requires equality.
+- Under the genesis lock and then the plugin installation lock, first
+  publication revalidates the current active receipt generations, exact current
+  snapshot provenance, immutable slot ownership, and snapshot contents. It
+  captures one complete strict build receipt and validates its payload hash
+  before it
+  no-replace publishes
+  `<slot>/.runtime-slot-completion.json` with schema
+  `copilot.extensions/runtime-slot-completion/v1`, binding marketplace/plugin
+  and source identity, canonical runtime root/version, snapshot provenance and
+  digest plus content digest, ownership marker and digest, historical build
+  receipt path/digest, validated payload digest and pid, pinned
+  namespace/install receipt paths and generations, and the build's own
+  `completed_at` value.
+- The completion receipt is deterministic across runners and immutable.
+  Matching replay returns `created: false`; malformed, copied, or conflicting
+  receipts are preserved and fail closed. Python and Bash use a same-directory
+  temporary file plus a no-replace hard link; PowerShell uses a same-volume
+  no-overwrite file move. Every runner reasserts both lock owners immediately
+  before publication.
+- Read-only completion validation and idempotent `slot-complete` replay accept
+  monotonic namespace/install generation advancement so an older immutable slot
+  remains attributable for later rollback, but reject generation regression,
+  foreign ownership or completion receipts, linked/reparse snapshot content,
+  snapshot mutation, and any identity mismatch. Once the completion marker
+  exists, neither path requires, reads, nor compares the current
+  `.install-complete.json`; legacy evidence crosses a one-time capture boundary
+  at first publication. Later rewrite or removal is irrelevant, and an atomic
+  replacement after capture cannot poison publication. New publication remains
+  stricter and requires current active receipts and snapshot provenance.
+- Immutable completion-marker reads require the named file identity and
+  metadata to remain stable through capture. Concurrent atomic replacement
+  fails closed without the reader replacing the observed marker.
+- Completion is still non-activating and non-operative. The transaction writes
+  no `current-version`, `last-known-good`, activation, launcher, service, state,
+  endpoint, task/unit, or tombstone artifact. Operative cutover, health
+  qualification, rollback, repair/release, uninstall, and adoption by normal
+  install/bootstrap flows remain later lifecycle boundaries.
 - Versioned-runtime receives the resolved `pluginRoot` explicitly.
 - `current-version`, `last-known-good`, process checks, and garbage collection
   never enumerate outside that plugin root.
@@ -546,10 +616,11 @@ session. This compatibility prerequisite coordinates with #1105 without moving
 agent-worktrees' own project state in Phase 3.
 
 Its pre-activation adapter requires an explicit context receipt and expected
-marketplace id, then reserves or validates only the payload version's empty
-owned slot after matching snapshot provenance to the exact installer payload
-root and version. Ambient context is not authorization, and this adapter does
-not complete the operative exemplar slice.
+marketplace id, then reserves, validates, completes, or validates completion of
+only the payload version's owned slot after matching snapshot provenance to the
+exact installer payload root and version. Completion reads the build evidence
+from that canonical slot. Ambient context is not authorization, and these
+adapter actions do not complete the operative exemplar slice.
 
 ### Service-bearing: agent-index
 
@@ -571,10 +642,10 @@ rollout, not permission to convert unrelated services in the same PR.
 It does not alter the Phase 2 payload-command contract. Its cell-scoped service
 identity is the reference implementation that #1108 generalizes.
 
-Its pre-activation adapter has the same explicit authorization and empty-slot
-boundary as Agent Machines, including exact snapshot payload root/version
-matching. It does not build the runtime or mutate service, engine, task/unit,
-endpoint, current/LKG, or activation identity.
+Its pre-activation adapter has the same explicit authorization, ownership, and
+completion boundary as Agent Machines, including exact snapshot payload
+root/version matching. It does not build the runtime or mutate service, engine,
+task/unit, endpoint, current/LKG, or activation identity.
 
 ## Delivery slices
 
@@ -593,9 +664,10 @@ endpoint, current/LKG, or activation identity.
    generation-pinned activation CAS from the
    [install contract](../../../docs/install-contract.md#installation-mode-governance)
    without automatically changing a runtime root.
-   A non-operative adapter sub-slice may wire both exemplars to
-   `slot-provision` / `slot-validate` before their separate operative
-   conversions; this does not complete slices 5 or 6.
+   Non-operative adapter sub-slices may wire both exemplars to
+   `slot-provision`, `slot-validate`, `slot-complete`, and
+   `slot-completion-validate` before their separate operative conversions; this
+   does not complete slices 5 or 6.
 5. **agent-machines exemplar** — make installation context explicitly operative
    for one CLI-only runtime and add dual-cell install/update/rollback tests.
 6. **agent-index exemplar** — namespace its service and durable state and add
@@ -624,6 +696,8 @@ other platform still derives a different marketplace id or root.
 | Context variable inherited into another cell | Canonical-path and expected-identity checks reject it |
 | Concurrent first use in both cells | One provision per cell; no cross-cell lock contention |
 | Concurrent first use in the same new cell | One genesis and one untorn receipt |
+| Build completion publication | Exact owned slot + current snapshot and generations; immutable deterministic receipt; no activation |
+| Historical completion validation after receipt advance | Same immutable slot remains attributable; generation regression fails |
 | One cell updates or rolls back | Other runtime/service remains unchanged and available |
 | Receipt changes during mutation | Generation check restarts; stale writer cannot overwrite |
 | Service runs while receipt/payload updates | Service keeps its pinned immutable slot |

@@ -43,6 +43,11 @@ $OutputEncoding = $utf8NoBom
 try { [Console]::OutputEncoding = $utf8NoBom } catch {}
 $script:HeldLocks = @()
 $script:RuntimeSlotLockTimeoutSeconds = 30
+$script:RuntimeSlotCompletionLockTimeoutSeconds = 300
+$script:ValidatedFileSha256 = @{}
+$script:SnapshotMaxEntries = 100000
+$script:SnapshotMaxPathBytes = 4096
+$script:SnapshotMaxContentBytes = 4294967296
 
 if ($env:OS -eq 'Windows_NT' -and -not ('CeFinalPath' -as [type])) {
     Add-Type -TypeDefinition @'
@@ -93,6 +98,128 @@ public static class CeFinalPath {
                 return result.Substring(4);
             }
             return result;
+        }
+    }
+}
+'@
+}
+
+if ($env:OS -eq 'Windows_NT' -and -not ('CeDirectoryState' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+using System.Text;
+
+public static class CeDirectoryState {
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint FILE_SHARE_DELETE = 0x00000004;
+    private const uint OPEN_EXISTING = 3;
+    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+    private const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+    private const int FILE_ATTRIBUTE_TAG_INFO_CLASS = 9;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string name, uint access, uint share, IntPtr security, uint creation,
+        uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(
+        SafeFileHandle handle, int infoClass, out FileAttributeTagInfo info,
+        uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle, out ByHandleFileInformation info);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(
+        SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+
+    public static string[] Inspect(string path) {
+        using (SafeFileHandle handle = CreateFile(
+            path, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            IntPtr.Zero, OPEN_EXISTING,
+            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS,
+            IntPtr.Zero)) {
+            if (handle.IsInvalid) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            FileAttributeTagInfo attributes;
+            if (!GetFileInformationByHandleEx(
+                    handle, FILE_ATTRIBUTE_TAG_INFO_CLASS, out attributes,
+                    (uint)Marshal.SizeOf(typeof(FileAttributeTagInfo)))) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                throw new IOException("path resolves to a reparse point");
+            }
+            if ((attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0) {
+                throw new IOException("path does not resolve to a directory");
+            }
+            ByHandleFileInformation information;
+            if (!GetFileInformationByHandle(handle, out information)) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            StringBuilder buffer = new StringBuilder(32768);
+            uint length = GetFinalPathNameByHandle(
+                handle, buffer, (uint)buffer.Capacity, 0);
+            if (length == 0 || length >= buffer.Capacity) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            string finalPath = buffer.ToString();
+            if (finalPath.StartsWith(
+                    @"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) {
+                finalPath = @"\\" + finalPath.Substring(8);
+            } else if (finalPath.StartsWith(
+                    @"\\?\", StringComparison.OrdinalIgnoreCase)) {
+                finalPath = finalPath.Substring(4);
+            }
+            string identity = string.Format(
+                "{0:x8}:{1:x8}{2:x8}",
+                information.VolumeSerialNumber,
+                information.FileIndexHigh,
+                information.FileIndexLow);
+            ulong size = ((ulong)information.FileSizeHigh << 32) |
+                information.FileSizeLow;
+            string metadata = string.Format(
+                "{0}|{1}|{2:x8}{3:x8}|{4:x8}{5:x8}|{6:x8}",
+                identity,
+                size,
+                information.LastWriteTime.dwHighDateTime,
+                information.LastWriteTime.dwLowDateTime,
+                information.CreationTime.dwHighDateTime,
+                information.CreationTime.dwLowDateTime,
+                information.FileAttributes);
+            return new string[] { identity, metadata, finalPath };
         }
     }
 }
@@ -163,6 +290,403 @@ public static class CePosixAccount {
             throw new Win32Exception("passwd entry is missing a home directory");
         }
         return home;
+    }
+}
+'@
+}
+
+if (-not ('CeSafeFile' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
+using System.Text;
+
+public sealed class CeSafeFile : IDisposable {
+    private const uint GENERIC_READ = 0x80000000;
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint FILE_SHARE_DELETE = 0x00000004;
+    private const uint OPEN_EXISTING = 3;
+    private const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+    private const uint FILE_FLAG_SEQUENTIAL_SCAN = 0x08000000;
+    private const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+    private const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+    private const int FILE_ATTRIBUTE_TAG_INFO_CLASS = 9;
+    private const int O_RDONLY = 0;
+    private const int O_NONBLOCK_LINUX = 0x800;
+    private const int O_NOFOLLOW_LINUX = 0x20000;
+    private const int O_NONBLOCK_DARWIN = 0x4;
+    private const int O_NOFOLLOW_DARWIN = 0x100;
+    private const uint S_IFMT = 0xF000;
+    private const uint S_IFREG = 0x8000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FileAttributeTagInfo {
+        public uint FileAttributes;
+        public uint ReparseTag;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ByHandleFileInformation {
+        public uint FileAttributes;
+        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
+        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public uint VolumeSerialNumber;
+        public uint FileSizeHigh;
+        public uint FileSizeLow;
+        public uint NumberOfLinks;
+        public uint FileIndexHigh;
+        public uint FileIndexLow;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LinuxTimespec {
+        public long Seconds;
+        public long Nanoseconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct LinuxStat {
+        public ulong Device;
+        public ulong Inode;
+        public ulong LinkCount;
+        public uint Mode;
+        public uint UserId;
+        public uint GroupId;
+        public uint Padding;
+        public ulong SpecialDevice;
+        public long Size;
+        public long BlockSize;
+        public long Blocks;
+        public LinuxTimespec Accessed;
+        public LinuxTimespec Modified;
+        public LinuxTimespec Changed;
+        public long Reserved0;
+        public long Reserved1;
+        public long Reserved2;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DarwinTimespec {
+        public long Seconds;
+        public long Nanoseconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DarwinStat {
+        public int Device;
+        public ushort Mode;
+        public ushort LinkCount;
+        public ulong Inode;
+        public uint UserId;
+        public uint GroupId;
+        public int SpecialDevice;
+        public DarwinTimespec Accessed;
+        public DarwinTimespec Modified;
+        public DarwinTimespec Changed;
+        public DarwinTimespec Created;
+        public long Size;
+        public long Blocks;
+        public int BlockSize;
+        public uint Flags;
+        public uint Generation;
+        public int Spare;
+        public long Reserved0;
+        public long Reserved1;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFile(
+        string name, uint access, uint share, IntPtr security, uint creation,
+        uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandleEx(
+        SafeFileHandle handle, int infoClass, out FileAttributeTagInfo info,
+        uint size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetFileInformationByHandle(
+        SafeFileHandle handle, out ByHandleFileInformation info);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint GetFinalPathNameByHandle(
+        SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+
+    [DllImport("libc", EntryPoint = "open", SetLastError = true)]
+    private static extern int PosixOpen(string path, int flags);
+
+    [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
+    private static extern int LinuxFstat(int descriptor, out LinuxStat information);
+
+    [DllImport("libc", EntryPoint = "fstat", SetLastError = true)]
+    private static extern int DarwinArm64Fstat(
+        int descriptor, out DarwinStat information);
+
+    [DllImport("libc", EntryPoint = "fstat$INODE64", SetLastError = true)]
+    private static extern int DarwinX64Fstat(
+        int descriptor, out DarwinStat information);
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern int LinuxLstat(string path, out LinuxStat information);
+
+    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
+    private static extern int DarwinArm64Lstat(
+        string path, out DarwinStat information);
+
+    [DllImport("libc", EntryPoint = "lstat$INODE64", SetLastError = true)]
+    private static extern int DarwinX64Lstat(
+        string path, out DarwinStat information);
+
+    public FileStream Stream { get; private set; }
+    public string Identity { get; private set; }
+    public string Metadata { get; private set; }
+    public string FinalPath { get; private set; }
+    public int Descriptor { get; private set; }
+
+    private CeSafeFile(
+        FileStream stream, string identity, string metadata,
+        string finalPath, int descriptor) {
+        Stream = stream;
+        Identity = identity;
+        Metadata = metadata;
+        FinalPath = finalPath;
+        Descriptor = descriptor;
+    }
+
+    private static void GetWindowsMetadata(
+        SafeFileHandle handle, out string identity, out string metadata) {
+        ByHandleFileInformation information;
+        if (!GetFileInformationByHandle(handle, out information)) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        identity = string.Format(
+            "{0:x8}:{1:x8}{2:x8}",
+            information.VolumeSerialNumber,
+            information.FileIndexHigh,
+            information.FileIndexLow);
+        ulong size = ((ulong)information.FileSizeHigh << 32) |
+            information.FileSizeLow;
+        metadata = string.Format(
+            "{0}|{1}|{2:x8}{3:x8}|{4:x8}{5:x8}|{6:x8}",
+            identity,
+            size,
+            information.LastWriteTime.dwHighDateTime,
+            information.LastWriteTime.dwLowDateTime,
+            information.CreationTime.dwHighDateTime,
+            information.CreationTime.dwLowDateTime,
+            information.FileAttributes);
+    }
+
+    private static int DarwinFstat(
+        int descriptor, out DarwinStat information) {
+        if (RuntimeInformation.ProcessArchitecture == Architecture.X64) {
+            return DarwinX64Fstat(descriptor, out information);
+        }
+        if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64) {
+            return DarwinArm64Fstat(descriptor, out information);
+        }
+        throw new PlatformNotSupportedException(
+            "Darwin safe-file validation requires x86-64 or arm64.");
+    }
+
+    private static int DarwinLstat(
+        string path, out DarwinStat information) {
+        if (RuntimeInformation.ProcessArchitecture == Architecture.X64) {
+            return DarwinX64Lstat(path, out information);
+        }
+        if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64) {
+            return DarwinArm64Lstat(path, out information);
+        }
+        throw new PlatformNotSupportedException(
+            "Darwin safe-file validation requires x86-64 or arm64.");
+    }
+
+    private static void GetPosixMetadata(
+        int descriptor, out string identity, out string metadata) {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) {
+            DarwinStat information;
+            if (DarwinFstat(descriptor, out information) != 0) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            if (((uint)information.Mode & S_IFMT) != S_IFREG) {
+                throw new IOException("path does not resolve to an ordinary file");
+            }
+            identity = string.Format(
+                "{0}:{1}", information.Device, information.Inode);
+            metadata = string.Format(
+                "{0}|{1}|{2}|{3}|{4}|{5}",
+                identity,
+                information.Size,
+                information.Modified.Seconds,
+                information.Modified.Nanoseconds,
+                information.Changed.Seconds,
+                information.Changed.Nanoseconds);
+            return;
+        }
+        LinuxStat linuxInformation;
+        if (LinuxFstat(descriptor, out linuxInformation) != 0) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        if ((linuxInformation.Mode & S_IFMT) != S_IFREG) {
+            throw new IOException("path does not resolve to an ordinary file");
+        }
+        identity = string.Format(
+            "{0}:{1}", linuxInformation.Device, linuxInformation.Inode);
+        metadata = string.Format(
+            "{0}|{1}|{2}|{3}|{4}|{5}",
+            identity,
+            linuxInformation.Size,
+            linuxInformation.Modified.Seconds,
+            linuxInformation.Modified.Nanoseconds,
+            linuxInformation.Changed.Seconds,
+            linuxInformation.Changed.Nanoseconds);
+    }
+
+    public static string[] InspectPosixPath(string path) {
+        string identity;
+        string metadata;
+        bool regular;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) {
+            DarwinStat information;
+            if (DarwinLstat(path, out information) != 0) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            regular = ((uint)information.Mode & S_IFMT) == S_IFREG;
+            identity = string.Format(
+                "{0}:{1}", information.Device, information.Inode);
+            metadata = string.Format(
+                "{0}|{1}|{2}|{3}|{4}|{5}",
+                identity,
+                information.Size,
+                information.Modified.Seconds,
+                information.Modified.Nanoseconds,
+                information.Changed.Seconds,
+                information.Changed.Nanoseconds);
+        } else {
+            LinuxStat information;
+            if (LinuxLstat(path, out information) != 0) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            regular = (information.Mode & S_IFMT) == S_IFREG;
+            identity = string.Format(
+                "{0}:{1}", information.Device, information.Inode);
+            metadata = string.Format(
+                "{0}|{1}|{2}|{3}|{4}|{5}",
+                identity,
+                information.Size,
+                information.Modified.Seconds,
+                information.Modified.Nanoseconds,
+                information.Changed.Seconds,
+                information.Changed.Nanoseconds);
+        }
+        return new string[] {
+            regular ? "1" : "0",
+            identity,
+            metadata
+        };
+    }
+
+    public string RefreshMetadata() {
+        string identity;
+        string metadata;
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
+            GetWindowsMetadata(Stream.SafeFileHandle, out identity, out metadata);
+        } else {
+            GetPosixMetadata(Descriptor, out identity, out metadata);
+        }
+        Identity = identity;
+        Metadata = metadata;
+        return metadata;
+    }
+
+    public static CeSafeFile Open(string path) {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) {
+            SafeFileHandle handle = CreateFile(
+                path, GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                IntPtr.Zero, OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN,
+                IntPtr.Zero);
+            if (handle.IsInvalid) {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            try {
+                FileAttributeTagInfo attributes;
+                if (!GetFileInformationByHandleEx(
+                        handle, FILE_ATTRIBUTE_TAG_INFO_CLASS, out attributes,
+                        (uint)Marshal.SizeOf(typeof(FileAttributeTagInfo)))) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                if ((attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0) {
+                    throw new IOException("path resolves to a reparse point");
+                }
+                if ((attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
+                    throw new IOException("path resolves to a directory");
+                }
+                StringBuilder buffer = new StringBuilder(32768);
+                uint length = GetFinalPathNameByHandle(
+                    handle, buffer, (uint)buffer.Capacity, 0);
+                if (length == 0 || length >= buffer.Capacity) {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                string finalPath = buffer.ToString();
+                if (finalPath.StartsWith(
+                        @"\\?\UNC\", StringComparison.OrdinalIgnoreCase)) {
+                    finalPath = @"\\" + finalPath.Substring(8);
+                } else if (finalPath.StartsWith(
+                        @"\\?\", StringComparison.OrdinalIgnoreCase)) {
+                    finalPath = finalPath.Substring(4);
+                }
+                string identity;
+                string metadata;
+                GetWindowsMetadata(handle, out identity, out metadata);
+                FileStream stream = new FileStream(
+                    handle, FileAccess.Read, 4096, false);
+                handle = null;
+                return new CeSafeFile(
+                    stream, identity, metadata, finalPath, -1);
+            }
+            finally {
+                if (handle != null) handle.Dispose();
+            }
+        }
+        bool darwin = RuntimeInformation.IsOSPlatform(OSPlatform.OSX);
+        int flags = O_RDONLY |
+            (darwin ? O_NONBLOCK_DARWIN | O_NOFOLLOW_DARWIN :
+                      O_NONBLOCK_LINUX | O_NOFOLLOW_LINUX);
+        int descriptor = PosixOpen(path, flags);
+        if (descriptor < 0) {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        SafeFileHandle safeHandle = new SafeFileHandle(
+            new IntPtr(descriptor), true);
+        try {
+            string identity;
+            string metadata;
+            GetPosixMetadata(descriptor, out identity, out metadata);
+            FileStream stream = new FileStream(
+                safeHandle, FileAccess.Read, 4096, false);
+            safeHandle = null;
+            return new CeSafeFile(
+                stream, identity, metadata, path, descriptor);
+        }
+        finally {
+            if (safeHandle != null) safeHandle.Dispose();
+        }
+    }
+
+    public void Dispose() {
+        if (Stream != null) {
+            Stream.Dispose();
+            Stream = null;
+        }
     }
 }
 '@
@@ -516,18 +1040,503 @@ function Get-UtcTimestamp {
     return [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [Globalization.CultureInfo]::InvariantCulture)
 }
 
-function Get-FileSha256([string]$Path) {
-    $stream = [IO.File]::OpenRead($Path)
+function Get-PosixFileIdentity([string]$Path, [switch]$Follow) {
+    if ($Follow) {
+        Fail 'Following named POSIX paths is unsupported for identity validation.'
+    }
+    if (-not (
+        [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [Runtime.InteropServices.OSPlatform]::Linux
+        ) -or
+        [Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [Runtime.InteropServices.OSPlatform]::OSX
+        )
+    )) {
+        Fail 'Opened-file validation is unavailable on this platform.'
+    }
+    try {
+        $parts = [CeSafeFile]::InspectPosixPath($Path)
+    }
+    catch {
+        Fail "Cannot inspect file '$Path': $($_.Exception.Message)"
+    }
+    return [pscustomobject][ordered]@{
+        regular = $parts[0] -ceq '1'
+        identity = $parts[1]
+        metadata = $parts[2]
+    }
+}
+
+function Open-RegularFileHandle(
+    [string]$Path,
+    [string]$Label,
+    [switch]$RequireExactPath
+) {
+    for ($attempt = 0; $attempt -lt 512; $attempt++) {
+        try {
+            $opened = [CeSafeFile]::Open($Path)
+        }
+        catch {
+            if ($attempt -lt 511) { continue }
+            Fail "Cannot open $($Label.ToLowerInvariant()) '$Path' safely: $($_.Exception.Message)"
+        }
+        try {
+            if ($env:OS -eq 'Windows_NT') {
+                if (-not (Paths-Equal $opened.FinalPath $Path)) {
+                    Fail "$Label may not traverse a symbolic link or reparse point."
+                }
+                return [pscustomobject][ordered]@{
+                    value = $opened
+                    identity = $opened.Identity
+                    metadata = $opened.Metadata
+                }
+            }
+            $named = Get-PosixFileIdentity $Path
+            if (-not $named.regular) {
+                Fail "$Label must be an ordinary file."
+            }
+            if ($named.identity -ceq $opened.Identity) {
+                return [pscustomobject][ordered]@{
+                    value = $opened
+                    identity = $opened.Identity
+                    metadata = $opened.Metadata
+                }
+            }
+            if (-not $RequireExactPath -and $attempt -eq 511) {
+                return [pscustomobject][ordered]@{
+                    value = $opened
+                    identity = $opened.Identity
+                    metadata = $opened.Metadata
+                }
+            }
+        }
+        catch {
+            $opened.Dispose()
+            throw
+        }
+        $opened.Dispose()
+    }
+    Fail "$Label changed while it was being opened."
+}
+
+function Assert-OpenedFileStillSafe(
+    [string]$Path,
+    [string]$Label,
+    [string]$OpenedIdentity,
+    [string]$OpenedMetadata,
+    [switch]$RequireSameIdentity
+) {
+    $entry = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $entry) {
+        Fail "$Label disappeared while it was being read."
+    }
+    if ($entry.PSIsContainer -or
+        (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Fail "$Label may not be a symbolic link, reparse point, or non-file object."
+    }
+    $current = Open-RegularFileHandle `
+        $Path `
+        $Label `
+        -RequireExactPath:$RequireSameIdentity
+    try {
+        if ($RequireSameIdentity -and
+            $current.identity -cne $OpenedIdentity) {
+            Fail "$Label changed while it was being read."
+        }
+        if ($RequireSameIdentity -and
+            $current.metadata -cne $OpenedMetadata) {
+            Fail "$Label changed while it was being read."
+        }
+    }
+    finally {
+        $current.value.Dispose()
+    }
+}
+
+function Read-RegularFileBytes(
+    [string]$Path,
+    [string]$Label,
+    [switch]$RequireSameIdentity
+) {
+    $opened = Open-RegularFileHandle `
+        $Path `
+        $Label `
+        -RequireExactPath:$RequireSameIdentity
+    $memory = [IO.MemoryStream]::new()
+    try {
+        $initialMetadata = $opened.metadata
+        $opened.value.Stream.CopyTo($memory)
+        $finalMetadata = $opened.value.RefreshMetadata()
+        if ($RequireSameIdentity -and $finalMetadata -cne $initialMetadata) {
+            Fail "$Label changed while it was being read."
+        }
+        Assert-OpenedFileStillSafe `
+            $Path `
+            $Label `
+            $opened.identity `
+            $initialMetadata `
+            -RequireSameIdentity:$RequireSameIdentity
+        return [pscustomobject][ordered]@{
+            bytes = [byte[]]$memory.ToArray()
+            identity = $opened.identity
+            metadata = $initialMetadata
+        }
+    }
+    finally {
+        $memory.Dispose()
+        $opened.value.Dispose()
+    }
+}
+
+function Get-FileSha256([string]$Path, [switch]$RequireSameIdentity) {
+    $cacheKey = [IO.Path]::GetFullPath($Path)
+    if ($script:ValidatedFileSha256.ContainsKey($cacheKey)) {
+        $cached = $script:ValidatedFileSha256[$cacheKey]
+        $current = Open-RegularFileHandle $Path 'File' -RequireExactPath
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $initialMetadata = $current.metadata
+            $digest = ([BitConverter]::ToString(
+                $sha.ComputeHash($current.value.Stream)
+            )).Replace(
+                '-',
+                ''
+            ).ToLowerInvariant()
+            $finalMetadata = $current.value.RefreshMetadata()
+            if ($finalMetadata -cne $initialMetadata) {
+                Fail "File '$Path' changed while it was being hashed."
+            }
+            Assert-OpenedFileStillSafe `
+                $Path `
+                'File' `
+                $current.identity `
+                $initialMetadata `
+                -RequireSameIdentity
+            if ($current.identity -cne $cached.identity -or
+                $initialMetadata -cne $cached.metadata -or
+                $digest -cne $cached.sha256) {
+                Fail "File '$Path' changed after it was validated."
+            }
+        }
+        finally {
+            $sha.Dispose()
+            $current.value.Dispose()
+        }
+        return $digest
+    }
+    $opened = Open-RegularFileHandle `
+        $Path `
+        'File' `
+        -RequireExactPath:$RequireSameIdentity
     $sha = [Security.Cryptography.SHA256]::Create()
     try {
-        return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace(
+        $initialMetadata = $opened.metadata
+        $digest = ([BitConverter]::ToString(
+            $sha.ComputeHash($opened.value.Stream)
+        )).Replace(
+            '-',
+            ''
+        ).ToLowerInvariant()
+        $finalMetadata = $opened.value.RefreshMetadata()
+        if ($finalMetadata -cne $initialMetadata) {
+            Fail "File '$Path' changed while it was being hashed."
+        }
+        Assert-OpenedFileStillSafe `
+            $Path `
+            'File' `
+            $opened.identity `
+            $initialMetadata `
+            -RequireSameIdentity
+        $script:ValidatedFileSha256[$cacheKey] = [pscustomobject][ordered]@{
+            sha256 = $digest
+            identity = $opened.identity
+            metadata = $initialMetadata
+        }
+        return $digest
+    }
+    finally {
+        $sha.Dispose()
+        $opened.value.Dispose()
+    }
+}
+
+function Get-BytesSha256([byte[]]$Bytes) {
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace(
             '-',
             ''
         ).ToLowerInvariant()
     }
     finally {
         $sha.Dispose()
-        $stream.Dispose()
+    }
+}
+
+function Get-SnapshotEntryKind($Entry, [string]$RelativePath) {
+    if (($Entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Fail "Snapshot content may not contain symbolic links or reparse points: '$RelativePath'."
+    }
+    if ($env:OS -eq 'Windows_NT') {
+        return $(if ($Entry.PSIsContainer) { 'directory' } else { 'file' })
+    }
+    $statCommand = Get-Command stat -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $statCommand) {
+        Fail 'Cannot classify snapshot content because the stat utility is unavailable.'
+    }
+    if ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [Runtime.InteropServices.OSPlatform]::Linux
+        )) {
+        $kind = & $statCommand.Source '--format=%F' '--' $Entry.FullName
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Cannot inspect snapshot content '$($Entry.FullName)'."
+        }
+        if ($kind -ceq 'directory') { return 'directory' }
+        if ($kind -ceq 'regular file' -or $kind -ceq 'regular empty file') {
+            return 'file'
+        }
+    }
+    elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+            [Runtime.InteropServices.OSPlatform]::OSX
+        )) {
+        $kind = & $statCommand.Source '-f' '%HT' $Entry.FullName
+        if ($LASTEXITCODE -ne 0) {
+            Fail "Cannot inspect snapshot content '$($Entry.FullName)'."
+        }
+        if ($kind -ceq 'Directory') { return 'directory' }
+        if ($kind -ceq 'Regular File') { return 'file' }
+    }
+    else {
+        Fail 'Snapshot content classification is unavailable on this platform.'
+    }
+    Fail "Snapshot content entries must be ordinary files or directories: '$RelativePath'."
+}
+
+function Get-SnapshotDirectoryState([string]$Path, [string]$RelativePath) {
+    $entry = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (-not $entry.PSIsContainer -or
+        (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Fail "Snapshot content may not traverse symbolic links or reparse points: '$RelativePath'."
+    }
+    if ($env:OS -eq 'Windows_NT') {
+        try {
+            $parts = [CeDirectoryState]::Inspect($Path)
+        }
+        catch {
+            Fail "Cannot inspect snapshot directory '$Path': $($_.Exception.Message)"
+        }
+        if (-not (Paths-Equal $parts[2] $Path)) {
+            Fail "Snapshot content may not traverse symbolic links or reparse points: '$RelativePath'."
+        }
+        return [pscustomobject][ordered]@{
+            identity = $parts[0]
+            metadata = $parts[1]
+        }
+    }
+    try {
+        $parts = [CeSafeFile]::InspectPosixPath($Path)
+    }
+    catch {
+        Fail "Cannot inspect snapshot directory '$Path': $($_.Exception.Message)"
+    }
+    if ((Get-SnapshotEntryKind $entry $RelativePath) -cne 'directory') {
+        Fail "Snapshot content changed during hashing: '$RelativePath'."
+    }
+    return [pscustomobject][ordered]@{
+        identity = $parts[1]
+        metadata = $parts[2]
+    }
+}
+
+function Get-SnapshotTreeState(
+    [string]$SnapshotRoot,
+    [long]$MaxEntries,
+    [long]$MaxPathBytes,
+    [long]$MaxContentBytes
+) {
+    if ($MaxEntries -lt 0 -or $MaxPathBytes -lt 0 -or $MaxContentBytes -lt 0) {
+        Fail 'Snapshot content limits must be non-negative integers.'
+    }
+    $files = [Collections.Generic.SortedDictionary[string, object]]::new(
+        [StringComparer]::Ordinal
+    )
+    $entries = [Collections.Generic.SortedDictionary[string, string]]::new(
+        [StringComparer]::Ordinal
+    )
+    $directoryStates = [Collections.Generic.SortedDictionary[string, string]]::new(
+        [StringComparer]::Ordinal
+    )
+    $directories = [Collections.Stack]::new()
+    $directories.Push([pscustomobject]@{
+        path = $SnapshotRoot
+        relative = ''
+    })
+    [long]$entryCount = 0
+    [long]$totalContentBytes = 0
+    while ($directories.Count -gt 0) {
+        $directory = $directories.Pop()
+        $before = Get-SnapshotDirectoryState $directory.path $directory.relative
+        $enumerator = [IO.Directory]::EnumerateFileSystemEntries(
+            $directory.path
+        ).GetEnumerator()
+        try {
+            while ($enumerator.MoveNext()) {
+                $entryPath = [string]$enumerator.Current
+                $entryName = [IO.Path]::GetFileName($entryPath)
+                $relative = $(if ($directory.relative) {
+                    $directory.relative + '/' + $entryName
+                } else {
+                    $entryName
+                })
+                try {
+                    $pathBytes = $strictUtf8.GetBytes($relative)
+                }
+                catch {
+                    Fail 'Snapshot content path is not valid UTF-8.'
+                }
+                if ($pathBytes.Length -gt $MaxPathBytes) {
+                    Fail "Snapshot content relative path exceeds the $MaxPathBytes-byte UTF-8 limit: '$relative'."
+                }
+                $entryCount++
+                if ($entryCount -gt $MaxEntries) {
+                    Fail "Snapshot content exceeds the $MaxEntries-entry limit."
+                }
+                $entry = Get-Item -LiteralPath $entryPath `
+                    -Force -ErrorAction Stop
+                $kind = Get-SnapshotEntryKind $entry $relative
+                $sortKey = ([BitConverter]::ToString($pathBytes)).Replace('-', '')
+                $entries.Add($sortKey, $kind)
+                if ($kind -ceq 'directory') {
+                    $directories.Push([pscustomobject]@{
+                        path = $entry.FullName
+                        relative = $relative
+                    })
+                    continue
+                }
+                [long]$fileLength = $entry.Length
+                if ($fileLength -gt ($MaxContentBytes - $totalContentBytes)) {
+                    Fail "Snapshot content exceeds the $MaxContentBytes-byte regular-file limit."
+                }
+                $totalContentBytes += $fileLength
+                if ($directory.relative -or
+                    $entry.Name -cne 'snapshot-provenance.json') {
+                    $files.Add($sortKey, [pscustomobject][ordered]@{
+                        path = $entry.FullName
+                        relativeBytes = $pathBytes
+                    })
+                }
+            }
+        }
+        finally {
+            if ($enumerator -is [IDisposable]) {
+                $enumerator.Dispose()
+            }
+        }
+        $after = Get-SnapshotDirectoryState $directory.path $directory.relative
+        if ($before.identity -cne $after.identity -or
+            $before.metadata -cne $after.metadata) {
+            Fail "Snapshot content tree changed during hashing: '$($directory.relative)'."
+        }
+        $directoryKey = if ($directory.relative) {
+            ([BitConverter]::ToString(
+                $strictUtf8.GetBytes($directory.relative)
+            )).Replace('-', '')
+        } else {
+            ''
+        }
+        $directoryStates.Add(
+            $directoryKey,
+            [string]$before.identity + '|' + [string]$before.metadata
+        )
+    }
+    return [pscustomobject][ordered]@{
+        files = $files
+        entries = $entries
+        directories = $directoryStates
+        entryCount = $entryCount
+        totalContentBytes = $totalContentBytes
+    }
+}
+
+function Assert-SnapshotTreeStateEqual($Before, $After) {
+    if ($Before.entryCount -ne $After.entryCount -or
+        $Before.totalContentBytes -ne $After.totalContentBytes -or
+        $Before.entries.Count -ne $After.entries.Count -or
+        $Before.directories.Count -ne $After.directories.Count) {
+        Fail 'Snapshot content tree changed during hashing.'
+    }
+    foreach ($pair in $Before.entries.GetEnumerator()) {
+        if (-not $After.entries.ContainsKey($pair.Key) -or
+            $After.entries[$pair.Key] -cne $pair.Value) {
+            Fail 'Snapshot content tree changed during hashing.'
+        }
+    }
+    foreach ($pair in $Before.directories.GetEnumerator()) {
+        if (-not $After.directories.ContainsKey($pair.Key) -or
+            $After.directories[$pair.Key] -cne $pair.Value) {
+            Fail 'Snapshot content tree changed during hashing.'
+        }
+    }
+}
+
+function Get-SnapshotContentSha256(
+    [string]$SnapshotRoot,
+    [long]$MaxEntries = $script:SnapshotMaxEntries,
+    [long]$MaxPathBytes = $script:SnapshotMaxPathBytes,
+    [long]$MaxContentBytes = $script:SnapshotMaxContentBytes
+) {
+    $before = Get-SnapshotTreeState `
+        $SnapshotRoot `
+        $MaxEntries `
+        $MaxPathBytes `
+        $MaxContentBytes
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($file in $before.files.Values) {
+            $entry = Get-Item -LiteralPath $file.path -Force
+            if ((Get-SnapshotEntryKind $entry (
+                    $strictUtf8.GetString($file.relativeBytes)
+                )) -cne 'file') {
+                Fail 'Snapshot content changed during hashing.'
+            }
+            $fileDigest = Get-FileSha256 $file.path -RequireSameIdentity
+            $prefix = [byte[]]@(0x46, 0x00)
+            $separator = [byte[]]@(0x00)
+            $digestBytes = [Text.Encoding]::ASCII.GetBytes($fileDigest)
+            $newline = [byte[]]@(0x0A)
+            [void]$sha.TransformBlock($prefix, 0, $prefix.Length, $null, 0)
+            [void]$sha.TransformBlock(
+                $file.relativeBytes,
+                0,
+                $file.relativeBytes.Length,
+                $null,
+                0
+            )
+            [void]$sha.TransformBlock($separator, 0, 1, $null, 0)
+            [void]$sha.TransformBlock(
+                $digestBytes,
+                0,
+                $digestBytes.Length,
+                $null,
+                0
+            )
+            [void]$sha.TransformBlock($newline, 0, 1, $null, 0)
+        }
+        $after = Get-SnapshotTreeState `
+            $SnapshotRoot `
+            $MaxEntries `
+            $MaxPathBytes `
+            $MaxContentBytes
+        Assert-SnapshotTreeStateEqual $before $after
+        [void]$sha.TransformFinalBlock([byte[]]@(), 0, 0)
+        return ([BitConverter]::ToString($sha.Hash)).Replace(
+            '-',
+            ''
+        ).ToLowerInvariant()
+    }
+    finally {
+        $sha.Dispose()
     }
 }
 
@@ -544,6 +1553,9 @@ function Write-AtomicJson([string]$Path, $Value, [switch]$SkipLockCheck) {
             Assert-AllLocksOwned
         }
         [CeAtomicFile]::Replace($temporary, $Path)
+        [void]$script:ValidatedFileSha256.Remove(
+            [IO.Path]::GetFullPath($Path)
+        )
     }
     finally {
         if (Test-Path -LiteralPath $temporary) {
@@ -980,14 +1992,34 @@ function ConvertFrom-StrictJson([string]$Value) {
 function Read-Json([string]$Path) {
     $canonical = Canonical-Path $Path -MustExist
     try {
-        $bytes = [IO.File]::ReadAllBytes($canonical)
+        $validated = Read-RegularFileBytes `
+            $canonical `
+            'JSON document' `
+            -RequireSameIdentity
+        $bytes = [byte[]]$validated.bytes
         if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
             $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
             Fail "UTF-8 BOM is not allowed in '$canonical'."
         }
         $text = $strictUtf8.GetString($bytes)
         [CeStrictJson]::Validate($text)
-        return ConvertFrom-StrictJson $text
+        $value = ConvertFrom-StrictJson $text
+        $cacheKey = [IO.Path]::GetFullPath($canonical)
+        $cacheEntry = [pscustomobject][ordered]@{
+            sha256 = Get-BytesSha256 $bytes
+            identity = $validated.identity
+            metadata = $validated.metadata
+        }
+        if ($script:ValidatedFileSha256.ContainsKey($cacheKey)) {
+            $previous = $script:ValidatedFileSha256[$cacheKey]
+            if ($previous.sha256 -cne $cacheEntry.sha256 -or
+                $previous.identity -cne $cacheEntry.identity -or
+                $previous.metadata -cne $cacheEntry.metadata) {
+                Fail "File '$canonical' changed after it was validated."
+            }
+        }
+        $script:ValidatedFileSha256[$cacheKey] = $cacheEntry
+        return $value
     }
     catch {
         Fail "Invalid JSON in '$canonical': $($_.Exception.Message)"
@@ -3734,6 +4766,19 @@ function Resolve-RuntimeSlotPaths(
     }
 }
 
+function Resolve-RuntimeSlotCompletionPaths(
+    $Validated,
+    [string]$RequestedRuntimeVersion
+) {
+    $paths = Resolve-RuntimeSlotPaths $Validated $RequestedRuntimeVersion $true
+    $buildReceipt = Join-Path $paths.slotRoot '.install-complete.json'
+    $completion = Join-Path $paths.slotRoot '.runtime-slot-completion.json'
+    Assert-NotReparsePoint $completion 'Runtime slot completion'
+    $paths | Add-Member -NotePropertyName buildReceipt -NotePropertyValue $buildReceipt
+    $paths | Add-Member -NotePropertyName completion -NotePropertyValue $completion
+    return $paths
+}
+
 function Ensure-VersionsRootChain($Validated, [string]$VersionsRelative) {
     $separatorPattern = $(if ($env:OS -eq 'Windows_NT') { '[\\/]' } else { '/' })
     $cursor = Canonical-Path ([string]$Validated.pluginRoot)
@@ -4112,6 +5157,478 @@ function Invoke-SlotProvision([string]$ResolvedDurableHome) {
     }
 }
 
+function Read-BuildCompletion(
+    [string]$Path,
+    [string]$RequestedRuntimeVersion,
+    [string]$SnapshotContentSha256
+) {
+    $entry = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $entry) { Fail 'Build completion evidence must exist.' }
+    if (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        Fail 'Build completion evidence may not be a symbolic link or reparse point.'
+    }
+    if ($entry.PSIsContainer) {
+        Fail 'Build completion evidence must be an ordinary file.'
+    }
+    $actual = Canonical-Path $Path -MustExist
+    if (-not (Paths-Equal $actual $Path)) {
+        Fail "Build completion evidence is not at its exact canonical location '$Path'."
+    }
+    try {
+        $validated = Read-RegularFileBytes $actual 'Build completion evidence'
+        $bytes = [byte[]]$validated.bytes
+        if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+            $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            Fail "UTF-8 BOM is not allowed in '$actual'."
+        }
+        $receipt = Read-JsonText (
+            $strictUtf8.GetString($bytes)
+        ) 'build completion evidence'
+    }
+    catch {
+        Fail "Invalid JSON in '$actual': $($_.Exception.Message)"
+    }
+    Assert-ExactPropertyCount $receipt 4 'Build completion evidence'
+    $version = Get-PropertyValue $receipt 'version'
+    if ($version -isnot [string] -or $version -cne $RequestedRuntimeVersion) {
+        Fail 'Build completion evidence version must match the runtime version.'
+    }
+    $completedAt = Read-ExactUtcTimestampValue (
+        Get-PropertyValue $receipt 'completed_at'
+    ) 'build completion completed_at'
+    $pidValue = Get-PropertyValue $receipt 'pid'
+    $pidIsInteger = (
+        $pidValue -is [byte] -or
+        $pidValue -is [int16] -or
+        $pidValue -is [int32] -or
+        $pidValue -is [int64]
+    )
+    if ($pidValue -is [bool] -or
+        -not $pidIsInteger -or
+        [long]$pidValue -lt 0 -or
+        [long]$pidValue -gt 9223372036854775807) {
+        Fail 'Build completion evidence pid must be an integer from 0 through 9223372036854775807.'
+    }
+    $payloadHash = Get-PropertyValue $receipt 'payload_hash'
+    if ($payloadHash -isnot [string] -or
+        $payloadHash -cnotmatch '^[0-9a-f]{64}$') {
+        Fail 'Build completion evidence payload_hash must be lowercase 64-hex.'
+    }
+    if ($payloadHash -cne $SnapshotContentSha256) {
+        Fail 'Build completion evidence payload_hash does not match the snapshot content digest.'
+    }
+    return [pscustomobject][ordered]@{
+        path = $actual
+        receiptSha256 = Get-BytesSha256 $bytes
+        payloadSha256 = $payloadHash
+        pid = [long]$pidValue
+        completedAt = $completedAt
+        value = $receipt
+    }
+}
+
+function New-RuntimeSlotCompletion(
+    $Validated,
+    $Snapshot,
+    $Ownership,
+    $Build,
+    [string]$RequestedRuntimeVersion,
+    [string]$SlotRoot,
+    [string]$SnapshotContentSha256
+) {
+    return [ordered]@{
+        schema = 'copilot.extensions/runtime-slot-completion/v1'
+        marketplaceId = [string]$Validated.marketplaceId
+        pluginId = [string]$Validated.pluginId
+        sourceFingerprint = [string]$Validated.sourceFingerprint
+        runtime = [ordered]@{
+            version = $RequestedRuntimeVersion
+            root = $SlotRoot
+        }
+        snapshot = [ordered]@{
+            id = [string]$Snapshot.snapshotId
+            provenance = [string]$Snapshot.provenance
+            provenanceSha256 = Get-FileSha256 ([string]$Snapshot.provenance)
+            contentSha256 = $SnapshotContentSha256
+        }
+        ownership = [ordered]@{
+            path = [string]$Ownership.ownership
+            sha256 = Get-FileSha256 ([string]$Ownership.ownership)
+        }
+        build = [ordered]@{
+            receipt = [string]$Build.path
+            receiptSha256 = [string]$Build.receiptSha256
+            payloadSha256 = [string]$Build.payloadSha256
+            pid = [long]$Build.pid
+        }
+        namespaceReceipt = [ordered]@{
+            path = [string]$Ownership.namespaceReceipt
+            generation = [long]$Ownership.namespaceGeneration
+        }
+        installReceipt = [ordered]@{
+            path = [string]$Ownership.installReceipt
+            generation = [long]$Ownership.installGeneration
+        }
+        completedAt = [string]$Build.completedAt
+    }
+}
+
+function Validate-RuntimeSlotCompletionCore(
+    $Validated,
+    $Snapshot,
+    $Ownership,
+    [string]$RequestedRuntimeVersion
+) {
+    $paths = Resolve-RuntimeSlotCompletionPaths $Validated $RequestedRuntimeVersion
+    $snapshotContentSha256 = Get-SnapshotContentSha256 ([string]$Snapshot.snapshotRoot)
+    $entry = Get-Item -LiteralPath $paths.completion -Force -ErrorAction SilentlyContinue
+    if ($null -eq $entry) { Fail 'Runtime slot completion must exist.' }
+    if ($entry.PSIsContainer -or
+        (($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        Fail 'Runtime slot completion must be an ordinary file.'
+    }
+    $actual = Canonical-Path $paths.completion -MustExist
+    if (-not (Paths-Equal $actual $paths.completion)) {
+        Fail "Runtime slot completion is not at its exact canonical location '$($paths.completion)'."
+    }
+    $receipt = Read-Json $actual
+    Assert-ExactPropertyCount $receipt 11 'Runtime slot completion'
+    $runtime = Get-PropertyValue $receipt 'runtime'
+    $recordedSnapshot = Get-PropertyValue $receipt 'snapshot'
+    $recordedOwnership = Get-PropertyValue $receipt 'ownership'
+    $recordedBuild = Get-PropertyValue $receipt 'build'
+    $namespaceReference = Get-PropertyValue $receipt 'namespaceReceipt'
+    $installReference = Get-PropertyValue $receipt 'installReceipt'
+    Assert-ExactPropertyCount $runtime 2 'Runtime slot completion runtime'
+    Assert-ExactPropertyCount $recordedSnapshot 4 'Runtime slot completion snapshot'
+    Assert-ExactPropertyCount $recordedOwnership 2 'Runtime slot completion ownership'
+    Assert-ExactPropertyCount $recordedBuild 4 'Runtime slot completion build'
+    Assert-ExactPropertyCount $namespaceReference 2 'Runtime slot completion namespaceReceipt'
+    Assert-ExactPropertyCount $installReference 2 'Runtime slot completion installReceipt'
+    if ((Get-StringProperty $receipt 'schema') -cne
+            'copilot.extensions/runtime-slot-completion/v1') {
+        Fail 'Runtime slot completion has an unsupported schema.'
+    }
+    [void](Read-ExactUtcTimestampValue (
+        Get-PropertyValue $receipt 'completedAt'
+    ) 'runtime slot completion completedAt')
+    $namespaceGeneration = Get-PropertyValue $namespaceReference 'generation'
+    $installGeneration = Get-PropertyValue $installReference 'generation'
+    Assert-ReceiptGeneration $namespaceGeneration 'runtime slot completion namespaceReceipt generation'
+    Assert-ReceiptGeneration $installGeneration 'runtime slot completion installReceipt generation'
+    $snapshotProvenanceSha256 = Get-StringProperty $recordedSnapshot 'provenanceSha256'
+    $recordedContentSha256 = Get-StringProperty $recordedSnapshot 'contentSha256'
+    $ownershipSha256 = Get-StringProperty $recordedOwnership 'sha256'
+    $buildReceiptSha256 = Get-StringProperty $recordedBuild 'receiptSha256'
+    $payloadSha256 = Get-StringProperty $recordedBuild 'payloadSha256'
+    foreach ($digest in @(
+        $snapshotProvenanceSha256,
+        $recordedContentSha256,
+        $ownershipSha256,
+        $buildReceiptSha256,
+        $payloadSha256
+    )) {
+        if ($digest -cnotmatch '^[0-9a-f]{64}$') {
+            Fail 'Runtime slot completion digests must be lowercase 64-hex.'
+        }
+    }
+    $buildPid = Get-PropertyValue $recordedBuild 'pid'
+    $pidIsInteger = (
+        $buildPid -is [byte] -or
+        $buildPid -is [int16] -or
+        $buildPid -is [int32] -or
+        $buildPid -is [int64]
+    )
+    if ($buildPid -is [bool] -or
+        -not $pidIsInteger -or
+        [long]$buildPid -lt 0 -or
+        [long]$buildPid -gt 9223372036854775807) {
+        Fail 'Runtime slot completion build.pid must be an integer from 0 through 9223372036854775807.'
+    }
+    $pathFields = @(
+        @($runtime, 'root', [string]$paths.slotRoot),
+        @($recordedSnapshot, 'provenance', [string]$Snapshot.provenance),
+        @($recordedOwnership, 'path', [string]$paths.ownership),
+        @($recordedBuild, 'receipt', [string]$paths.buildReceipt),
+        @($namespaceReference, 'path', [string]$Ownership.namespaceReceipt),
+        @($installReference, 'path', [string]$Ownership.installReceipt)
+    )
+    foreach ($field in $pathFields) {
+        $recordedPath = Get-StringProperty $field[0] ([string]$field[1])
+        if (-not (Test-FullyQualifiedPath $recordedPath)) {
+            Fail "Runtime slot completion $($field[1]) must be absolute."
+        }
+        if ($recordedPath -cne [string]$field[2]) {
+            Fail 'Runtime slot completion does not match the validated snapshot, ownership, and installation receipts.'
+        }
+    }
+    if ((Get-StringProperty $receipt 'marketplaceId') -cne
+            [string]$Validated.marketplaceId -or
+        (Get-StringProperty $receipt 'pluginId') -cne
+            [string]$Validated.pluginId -or
+        (Get-StringProperty $receipt 'sourceFingerprint') -cne
+            [string]$Validated.sourceFingerprint -or
+        (Get-StringProperty $runtime 'version') -cne
+            $RequestedRuntimeVersion -or
+        (Get-StringProperty $recordedSnapshot 'id') -cne
+            [string]$Snapshot.snapshotId -or
+        $snapshotProvenanceSha256 -cne
+            (Get-FileSha256 ([string]$Snapshot.provenance)) -or
+        $recordedContentSha256 -cne $snapshotContentSha256 -or
+        $ownershipSha256 -cne (Get-FileSha256 ([string]$paths.ownership)) -or
+        $payloadSha256 -cne $snapshotContentSha256 -or
+        [long]$namespaceGeneration -ne [long]$Ownership.namespaceGeneration -or
+        [long]$installGeneration -ne [long]$Ownership.installGeneration) {
+        Fail 'Runtime slot completion does not match the validated snapshot, ownership, and installation receipts.'
+    }
+    return [pscustomobject][ordered]@{
+        action = 'slot-completion-validate'
+        status = 'ready'
+        reason = 'runtime-slot-completion-valid'
+        slotRoot = [string]$paths.slotRoot
+        runtimeVersion = $RequestedRuntimeVersion
+        ownership = [string]$paths.ownership
+        completion = $actual
+        buildReceipt = [string]$paths.buildReceipt
+        receipt = $receipt
+        snapshotId = [string]$Snapshot.snapshotId
+        snapshotProvenance = [string]$Snapshot.provenance
+        marketplaceId = [string]$Validated.marketplaceId
+        pluginId = [string]$Validated.pluginId
+        sourceFingerprint = [string]$Validated.sourceFingerprint
+        namespaceReceipt = [string]$Ownership.namespaceReceipt
+        installReceipt = [string]$Ownership.installReceipt
+        namespaceGeneration = [long]$Ownership.namespaceGeneration
+        installGeneration = [long]$Ownership.installGeneration
+        completedAt = Get-StringProperty $receipt 'completedAt'
+        payloadSha256 = $payloadSha256
+        activated = $false
+        operative = $false
+    }
+}
+
+function Invoke-SlotCompletionValidate([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'slot-completion-validate requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'slot-completion-validate requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'slot-completion-validate requires -ExpectedPluginId.'
+    }
+    if (-not $ExpectedPayloadRoot) {
+        Fail 'slot-completion-validate requires -ExpectedPayloadRoot.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedPayloadVersion)) {
+        Fail 'slot-completion-validate requires -ExpectedPayloadVersion.'
+    }
+    if (-not $SnapshotId) {
+        Fail 'slot-completion-validate requires -SnapshotId.'
+    }
+    if (-not $RuntimeVersion) {
+        Fail 'slot-completion-validate requires -RuntimeVersion.'
+    }
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $snapshot = Validate-SnapshotProvenance `
+        $Context `
+        $ResolvedDurableHome `
+        $ExpectedMarketplaceId `
+        $ExpectedPluginId `
+        $SnapshotId `
+        $false `
+        $ExpectedPayloadRoot `
+        $ExpectedPayloadVersion
+    $ownership = Validate-RuntimeSlotOwnershipCore $validated $snapshot $RuntimeVersion
+    return Validate-RuntimeSlotCompletionCore `
+        $validated `
+        $snapshot `
+        $ownership `
+        $RuntimeVersion
+}
+
+function Publish-RuntimeSlotCompletion(
+    [string]$Path,
+    $Receipt
+) {
+    $temporary = Join-Path (
+        Split-Path -Parent $Path
+    ) ('.runtime-slot-completion.' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        Write-AtomicJson $temporary $Receipt
+        Assert-AllLocksOwned
+        try {
+            if ($env:OS -eq 'Windows_NT') {
+                $moveResult = [CeAtomicDirectory]::MoveWindows($temporary, $Path)
+            }
+            elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                    [Runtime.InteropServices.OSPlatform]::Linux
+                )) {
+                $moveResult = [CeAtomicDirectory]::MoveLinux($temporary, $Path)
+            }
+            elseif ([Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+                    [Runtime.InteropServices.OSPlatform]::OSX
+                )) {
+                $moveResult = [CeAtomicDirectory]::MoveDarwin($temporary, $Path)
+            }
+            else {
+                Fail 'Atomic no-replace completion publication is unavailable.'
+            }
+            if ($moveResult -eq 0) {
+                return $false
+            }
+            $temporary = ''
+            return $true
+        }
+        catch {
+            if ($null -ne (
+                Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+            )) {
+                return $false
+            }
+            Fail "Cannot publish runtime slot completion '$Path' without replacement: $($_.Exception.Message)"
+        }
+    }
+    finally {
+        if ($temporary -and (Test-Path -LiteralPath $temporary -PathType Leaf)) {
+            [IO.File]::Delete($temporary)
+        }
+    }
+}
+
+function Invoke-SlotComplete([string]$ResolvedDurableHome) {
+    if (-not $Context) { Fail 'slot-complete requires -Context.' }
+    if (-not $ExpectedMarketplaceId) {
+        Fail 'slot-complete requires -ExpectedMarketplaceId.'
+    }
+    if (-not $ExpectedPluginId) {
+        Fail 'slot-complete requires -ExpectedPluginId.'
+    }
+    if (-not $ExpectedPayloadRoot) {
+        Fail 'slot-complete requires -ExpectedPayloadRoot.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ExpectedPayloadVersion)) {
+        Fail 'slot-complete requires -ExpectedPayloadVersion.'
+    }
+    if (-not $SnapshotId) { Fail 'slot-complete requires -SnapshotId.' }
+    if (-not $RuntimeVersion) { Fail 'slot-complete requires -RuntimeVersion.' }
+
+    $validated = Invoke-WithoutPluginRoot {
+        Validate-ContextReceipt $Context $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' ''
+    }
+    $cellRoot = [string]$validated.cellRoot
+    $genesisLock = Join-Path (Join-Path $ResolvedDurableHome 'marketplaces/.locks') ($ExpectedMarketplaceId + '.genesis')
+    $installLock = Join-Path (Join-Path $cellRoot '.locks') ($ExpectedPluginId + '.install.lock')
+    $startingLockCount = $script:HeldLocks.Count
+    $operationFailed = $false
+    try {
+        Acquire-Lock $genesisLock 'genesis' $ExpectedMarketplaceId '' `
+            $script:RuntimeSlotCompletionLockTimeoutSeconds
+        Acquire-Lock $installLock 'install' $ExpectedMarketplaceId $ExpectedPluginId `
+            $script:RuntimeSlotCompletionLockTimeoutSeconds
+        $validated = Invoke-WithoutPluginRoot {
+            Validate-ContextReceipt $validated.installReceipt $ResolvedDurableHome $ExpectedMarketplaceId $ExpectedPluginId '' $cellRoot
+        }
+        $paths = Resolve-RuntimeSlotCompletionPaths $validated $RuntimeVersion
+        $created = $false
+        $completionEntry = Get-Item `
+            -LiteralPath $paths.completion `
+            -Force `
+            -ErrorAction SilentlyContinue
+        if ($null -ne $completionEntry) {
+            $snapshot = Validate-SnapshotProvenance `
+                $validated.installReceipt `
+                $ResolvedDurableHome `
+                $ExpectedMarketplaceId `
+                $ExpectedPluginId `
+                $SnapshotId `
+                $false `
+                $ExpectedPayloadRoot `
+                $ExpectedPayloadVersion
+            $ownership = Validate-RuntimeSlotOwnershipCore `
+                $validated `
+                $snapshot `
+                $RuntimeVersion
+        }
+        else {
+            $snapshot = Validate-SnapshotProvenance `
+                $validated.installReceipt `
+                $ResolvedDurableHome `
+                $ExpectedMarketplaceId `
+                $ExpectedPluginId `
+                $SnapshotId `
+                $true `
+                $ExpectedPayloadRoot `
+                $ExpectedPayloadVersion
+            $ownership = Validate-RuntimeSlotOwnershipCore `
+                $validated `
+                $snapshot `
+                $RuntimeVersion
+            $snapshotContentSha256 = Get-SnapshotContentSha256 (
+                [string]$snapshot.snapshotRoot
+            )
+            $build = Read-BuildCompletion `
+                $paths.buildReceipt `
+                $RuntimeVersion `
+                $snapshotContentSha256
+            $receipt = New-RuntimeSlotCompletion `
+                $validated `
+                $snapshot `
+                $ownership `
+                $build `
+                $RuntimeVersion `
+                ([string]$paths.slotRoot) `
+                $snapshotContentSha256
+            $confirmedSnapshotContentSha256 = Get-SnapshotContentSha256 (
+                [string]$snapshot.snapshotRoot
+            )
+            if ($confirmedSnapshotContentSha256 -cne $snapshotContentSha256) {
+                Fail 'Snapshot content changed before completion publication.'
+            }
+            $created = Publish-RuntimeSlotCompletion $paths.completion $receipt
+        }
+        $result = Validate-RuntimeSlotCompletionCore `
+            $validated `
+            $snapshot `
+            $ownership `
+            $RuntimeVersion
+        $result.action = 'slot-complete'
+        $result.reason = $(if ($created) {
+            'runtime-slot-completion-published'
+        } else {
+            'runtime-slot-completion-current'
+        })
+        $result | Add-Member -NotePropertyName created -NotePropertyValue $created
+        return $result
+    }
+    catch {
+        $operationFailed = $true
+        throw
+    }
+    finally {
+        $releaseError = $null
+        while ($script:HeldLocks.Count -gt $startingLockCount) {
+            try {
+                Release-Lock
+            }
+            catch {
+                Pop-HeldLock
+                if ($null -eq $releaseError) {
+                    $releaseError = $_.Exception
+                }
+                if ($operationFailed) {
+                    [Console]::Error.WriteLine(
+                        "installation-context: $($_.Exception.Message) while preserving the original slot completion failure."
+                    )
+                }
+            }
+        }
+        if (-not $operationFailed -and $null -ne $releaseError) {
+            throw $releaseError
+        }
+    }
+}
+
 function Stamp-Context($Resolved, [string]$ResolvedDurableHome) {
     if ([string]::IsNullOrWhiteSpace($PayloadVersion)) {
         Fail 'stamp requires -PayloadVersion.'
@@ -4347,12 +5864,19 @@ try {
         'snapshot-validate',
         'slot-provision',
         'slot-validate',
+        'slot-complete',
+        'slot-completion-validate',
         'status',
         'probe-legacy'
     ) 'Action'
     $expectedPayloadRootSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadRoot')
     $expectedPayloadVersionSupplied = $PSBoundParameters.ContainsKey('ExpectedPayloadVersion')
-    if ($Action -in @('slot-provision', 'slot-validate')) {
+    if ($Action -in @(
+        'slot-provision',
+        'slot-validate',
+        'slot-complete',
+        'slot-completion-validate'
+    )) {
         if ($expectedPayloadRootSupplied -and
             [string]::IsNullOrWhiteSpace($ExpectedPayloadRoot)) {
             Fail 'Expected snapshot payload root must be absolute.'
@@ -4363,7 +5887,15 @@ try {
         }
     }
     elseif ($expectedPayloadVersionSupplied) {
-        Fail '-ExpectedPayloadVersion is valid only for slot-provision and slot-validate.'
+        Fail '-ExpectedPayloadVersion is valid only for runtime slot actions.'
+    }
+    if ($Action -in @('slot-complete', 'slot-completion-validate')) {
+        if (-not $expectedPayloadRootSupplied) {
+            Fail "$Action requires -ExpectedPayloadRoot."
+        }
+        if (-not $expectedPayloadVersionSupplied) {
+            Fail "$Action requires -ExpectedPayloadVersion."
+        }
     }
     if ($expectedPayloadRootSupplied -and
         $Action -notin @(
@@ -4371,6 +5903,8 @@ try {
             'validate',
             'slot-provision',
             'slot-validate',
+            'slot-complete',
+            'slot-completion-validate',
             'status',
             'probe-legacy'
         )) {
@@ -4438,6 +5972,12 @@ try {
     }
     elseif ($Action -eq 'slot-validate') {
         $result = Invoke-SlotValidate $resolvedDurableHome
+    }
+    elseif ($Action -eq 'slot-complete') {
+        $result = Invoke-SlotComplete $resolvedDurableHome
+    }
+    elseif ($Action -eq 'slot-completion-validate') {
+        $result = Invoke-SlotCompletionValidate $resolvedDurableHome
     }
     elseif ($Action -eq 'validate') {
         $pointer = $Context
