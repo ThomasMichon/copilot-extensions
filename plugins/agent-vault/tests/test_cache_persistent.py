@@ -177,6 +177,115 @@ def test_get_refresh_bypasses_cache(enabled_cache, monkeypatch):
     assert get_cache().get("A/x", "password") == "fresh"  # cache updated with fresh value
 
 
+def test_get_refresh_replaces_newer_generation_from_legacy_daemon(
+    enabled_cache,
+    monkeypatch,
+):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "stale", 7)
+    monkeypatch.setattr(cli, "ensure_service", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda req, timeout=None: {"ok": True, "value": "fresh"},
+    )
+
+    assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 0
+    assert persistent.get("A/x", "password") == "fresh"
+
+
+def test_authoritative_generation_cannot_overwrite_newer_normal_record(
+    enabled_cache,
+):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "newer", 8)
+
+    assert persistent.reconcile_authoritative("A/x", "password", "older", 7)
+    assert persistent.get("A/x", "password") == "newer"
+
+
+def test_get_refresh_reconciles_post_commit_journal(
+    enabled_cache,
+    monkeypatch,
+):
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "old", 1)
+    assert persistent.begin_replace("A/x", "password", "committed", 10)
+    monkeypatch.setattr(cli, "ensure_service", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda req, timeout=None: {
+            "ok": True,
+            "value": "committed",
+            "generation": 2,
+        },
+    )
+
+    assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 0
+    assert persistent.get("A/x", "password") == "committed"
+    assert persistent.pending_replace("A/x", "password") is None
+
+
+def test_get_refresh_holds_replacement_lock_across_rpc_and_reconcile(
+    enabled_cache,
+    monkeypatch,
+):
+    persistent = get_cache()
+    events = []
+
+    @contextlib.contextmanager
+    def observed_lock():
+        events.append("lock-enter")
+        yield
+        events.append("lock-exit")
+
+    original_reconcile = persistent.reconcile_authoritative
+
+    def reconcile(*args, **kwargs):
+        events.append("reconcile")
+        return original_reconcile(*args, **kwargs)
+
+    monkeypatch.setattr(persistent, "replacement_lock", observed_lock)
+    monkeypatch.setattr(persistent, "reconcile_authoritative", reconcile)
+    monkeypatch.setattr(cache_mod, "get_cache", lambda: persistent)
+    monkeypatch.setattr(cli, "ensure_service", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda req, timeout=None: (
+            events.append("rpc") or {"ok": True, "value": "fresh"}
+        ),
+    )
+
+    assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 0
+    assert events == ["lock-enter", "rpc", "reconcile", "lock-exit"]
+
+
+def test_cache_only_migrates_legacy_raw_key_without_service(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    persistent = get_cache()
+    assert persistent.put("token", "password", "offline", 4)
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group="A"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "ensure_service",
+        lambda *a, **k: pytest.fail("cache-only read contacted the service"),
+    )
+
+    assert cli.cmd_get(_Args(entry="token", cache_only=True)) == 0
+    assert capsys.readouterr().out == "offline\n"
+    assert persistent.get("A/token", "password") == "offline"
+    assert persistent.get("token", "password") is None
+
+
 # ---------------------------------------------------------------------------
 # Password replacement transactions
 # ---------------------------------------------------------------------------
@@ -200,7 +309,7 @@ def test_cache_through_write_cannot_overwrite_pending_rotation(enabled_cache):
     assert persistent.pending_replace("A/x", "password")["candidate"] == "new"
 
 
-def test_legacy_read_cannot_overwrite_pending_rotation(
+def test_ordinary_legacy_read_cannot_overwrite_pending_rotation(
     enabled_cache,
     monkeypatch,
     capsys,
@@ -220,10 +329,57 @@ def test_legacy_read_cannot_overwrite_pending_rotation(
         lambda: SimpleNamespace(group=""),
     )
 
-    assert cli.cmd_get(_Args(entry="A/x", refresh=True)) == 0
+    assert cli.cmd_get(_Args(entry="A/x")) == 0
     assert capsys.readouterr().out == "old\n"
     assert persistent.get("A/x", "password") is None
     assert persistent.pending_replace("A/x", "password")["candidate"] == "new"
+
+
+def test_cache_populate_reconciles_legacy_response(
+    enabled_cache,
+    monkeypatch,
+    capsys,
+):
+    from agent_vault import extensions as ext
+
+    registry = ext.ExtensionRegistry()
+    registry._loaded = True
+    monkeypatch.setattr(ext, "_REGISTRY", registry)
+    persistent = get_cache()
+    assert persistent.put("A/x", "password", "stale", 7)
+    requests = []
+    monkeypatch.setattr(cli, "ensure_service", lambda *a, **k: True)
+    monkeypatch.setattr(
+        cli,
+        "send_command",
+        lambda request, timeout=None: (
+            requests.append(request) or {"ok": True, "value": "fresh"}
+        ),
+    )
+    monkeypatch.setattr(
+        cli.config,
+        "resolve_context",
+        lambda: SimpleNamespace(group=""),
+    )
+
+    args = SimpleNamespace(
+        entry=["A/x"],
+        manifest=None,
+        machine=None,
+        prompt=False,
+        verify=False,
+    )
+    assert cli.cmd_cache_populate(args) == 0
+    assert capsys.readouterr().out.endswith("Cached 1 credential(s), 0 failed\n")
+    assert requests == [
+        {
+            "action": "get",
+            "entry": "A/x",
+            "field": "password",
+            "refresh": True,
+        }
+    ]
+    assert persistent.get("A/x", "password") == "fresh"
 
 
 def test_failed_rotation_restores_prior_offline_value(enabled_cache, monkeypatch):

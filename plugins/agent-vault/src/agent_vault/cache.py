@@ -255,11 +255,21 @@ class PersistentCache:
         entry: str,
         field: str = "password",
         max_age_seconds: int | None = None,
+        *,
+        legacy_entry: str | None = None,
     ) -> str | None:
         """Return a cached value, or ``None`` on miss / disabled cache."""
         if not self.enabled:
             return None
-        rec = self._field_record(self._read_store(), entry, field)
+        store = self._read_store()
+        rec = self._field_record(store, entry, field)
+        if rec is None and legacy_entry and legacy_entry != entry:
+            rec = self._field_record(store, legacy_entry, field)
+            if rec is not None:
+                self.migrate_entry(legacy_entry, entry, field)
+                migrated = self._field_record(self._read_store(), entry, field)
+                if migrated is not None:
+                    rec = migrated
         if not isinstance(rec, dict) or "rotation" in rec:
             return None
         if max_age_seconds is not None:
@@ -428,6 +438,73 @@ class PersistentCache:
                     "cached_at_epoch": time.time(),
                     "generation": generation,
                 }
+                return self._write_store_unlocked(store)
+        except Exception:
+            return False
+
+    def reconcile_authoritative(
+        self,
+        entry: str,
+        field: str,
+        value: str,
+        generation: int | None = None,
+    ) -> bool:
+        """Apply a confirmed live value, clearing a pending replacement journal.
+
+        Unlike :meth:`put`, this path may replace a positive-generation record
+        when the authoritative source does not expose generations. A
+        generation-aware response still cannot overwrite a newer normal record.
+        """
+        if not self.enabled:
+            return False
+        try:
+            with self._store_lock():
+                store = self._read_store()
+                _, fields = self._fields_for_write(store, entry)
+                current = fields.get(field)
+                if (
+                    generation is not None
+                    and isinstance(current, dict)
+                    and "rotation" not in current
+                    and int(current.get("generation", 0)) > generation
+                ):
+                    return True
+                fields[field] = {
+                    "value": value,
+                    "cached_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    "cached_at_epoch": time.time(),
+                    "generation": generation if generation is not None else 0,
+                }
+                return self._write_store_unlocked(store)
+        except Exception:
+            return False
+
+    def migrate_entry(
+        self,
+        source_entry: str,
+        target_entry: str,
+        field: str,
+    ) -> bool:
+        """Move one legacy cache record when its normalized key is absent."""
+        if not self.enabled or source_entry == target_entry:
+            return False
+        try:
+            with self._store_lock():
+                store = self._read_store()
+                if self._field_record(store, target_entry, field) is not None:
+                    return True
+                entries = store.get("entries")
+                if not isinstance(entries, dict):
+                    return False
+                source_fields = entries.get(source_entry)
+                if not isinstance(source_fields, dict) or field not in source_fields:
+                    return False
+                record = source_fields[field]
+                _, target_fields = self._fields_for_write(store, target_entry)
+                target_fields[field] = record
+                del source_fields[field]
+                if not source_fields:
+                    del entries[source_entry]
                 return self._write_store_unlocked(store)
         except Exception:
             return False
