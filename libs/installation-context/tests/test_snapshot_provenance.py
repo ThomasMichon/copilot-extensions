@@ -4310,6 +4310,34 @@ def test_runtime_slot_cutover_rejects_linked_markers(
 
 
 @pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("marker_name", ("current-version", "last-known-good"))
+def test_runtime_slot_cutover_rejects_directory_markers(
+    runner: Runner,
+    marker_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    marker = Path(layout["plugin_root"]) / marker_name
+    marker.mkdir()
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=(marker_name == "last-known-good"),
+        expected_current_version=(
+            "3.4.5" if marker_name == "current-version" else None
+        ),
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert marker.is_dir()
+    assert list(marker.iterdir()) == []
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_cutover_serializes_concurrent_winners(
     runner: Runner,
     tmp_path: Path,

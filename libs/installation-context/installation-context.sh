@@ -300,6 +300,8 @@ atomic_write_text() {
     if ((${#HELD_LOCK_DIRS[@]} > 0)); then
         assert_all_locks_owned
     fi
+    [[ ! -d "$path" || -L "$path" ]] ||
+        fail "Cannot atomically replace text marker because the destination is a directory: '$path'."
     mv -f -- "$temporary" "$path"
     unset 'VALIDATED_FILE_SHA256[$path]'
     unset 'VALIDATED_FILE_IDENTITY[$path]'
