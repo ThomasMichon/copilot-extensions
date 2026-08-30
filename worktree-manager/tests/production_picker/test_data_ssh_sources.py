@@ -371,6 +371,60 @@ def test_build_sources_appends_provider_without_synthetic_machine(monkeypatch):
     assert tab["source_id"] == provider.source_id
 
 
+@pytest.mark.parametrize(
+    "venue_override",
+    [
+        {"ready": False},
+        {"posture_verified": False},
+    ],
+)
+def test_build_sources_disables_unready_or_unverified_provider(
+    monkeypatch,
+    venue_override,
+):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    venue = {
+        "ready": True,
+        "posture_verified": True,
+        "assignment": _assignment(),
+        **venue_override,
+    }
+    registered = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue=venue,
+        capabilities={"list": True},
+        resolve_argv=("/bin/provider", "resolve", "one"),
+        connect_argv=("/bin/provider", "connect", "one"),
+    )
+    monkeypatch.setattr(
+        data_ssh.provider_sources,
+        "load",
+        lambda _project: [registered],
+    )
+
+    provider = next(
+        source
+        for source in data_ssh._build_sources()
+        if source.source_kind == "provider-exec"
+    )
+
+    assert provider.ready is False
+    assert provider.argv is None
+
+
 def test_provider_resolve_refreshes_instance_and_rejects_unverified_posture():
     source = data_ssh.Source(
         "",

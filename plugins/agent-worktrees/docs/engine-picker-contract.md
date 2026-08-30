@@ -80,7 +80,9 @@ versa).
 
 Provider rows retain blank legacy `machine` and `env` fields; they are scoped by
 `source_id` and display `source_label` rather than inventing a physical-machine
-identity. Operations fail closed against the source capability map. The first
+identity. A source whose descriptor is not ready and posture-verified remains a
+disabled tab and is not contacted. Operations fail closed against the source
+capability map. The first
 provider-exec contract permits only listing, recent-message/session reads, and
 source refresh; unsupported create, launch, lifecycle, maintenance, profile,
 and contributed worktree actions are not rendered and cannot fall through to a

@@ -14,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent_containers import __main__ as containers_cli
+from agent_containers import lease as lease_mod
 from agent_containers import provider_launcher, provider_ssh
 from agent_containers.config import ContainersConfig, FleetConfig
 from agent_containers.resolver import LiveExecTarget
@@ -697,6 +699,25 @@ def test_remove_stale_picker_sources_by_container_or_effort(monkeypatch, tmp_pat
             },
         }
     ]
+
+
+def test_release_reports_busy_provider_admission(monkeypatch, capsys):
+    def blocked(_target):
+        raise lease_mod.ProviderAdmissionError("active provider session")
+
+    monkeypatch.setattr(lease_mod, "release", blocked)
+    monkeypatch.setattr(
+        provider_ssh,
+        "remove_stale_worktree_sources",
+        lambda _target: pytest.fail("blocked release must not clean registrations"),
+    )
+
+    result = containers_cli._cmd_release(
+        SimpleNamespace(target="sandbox-1")
+    )
+
+    assert result == 75
+    assert "Release blocked: active provider session" in capsys.readouterr().err
 
 
 def test_emit_profile_fails_when_agent_ssh_is_unavailable(monkeypatch):

@@ -810,10 +810,14 @@ def _cmd_borrow(args: argparse.Namespace) -> int:
 
 
 def _cmd_release(args: argparse.Namespace) -> int:
-    from .lease import release
+    from .lease import ProviderAdmissionError, release
     from .provider_ssh import remove_stale_worktree_sources
 
-    released = release(args.target)
+    try:
+        released = release(args.target)
+    except ProviderAdmissionError as exc:
+        print(f"Release blocked: {exc}", file=sys.stderr)
+        return _BUSY_EXIT
     try:
         removed = remove_stale_worktree_sources(args.target)
     except (OSError, RuntimeError) as exc:

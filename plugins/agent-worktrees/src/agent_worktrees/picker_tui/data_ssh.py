@@ -386,9 +386,13 @@ def _build_sources():
         out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
                           local=True, ready=True))
     for registered in provider_sources.load(project):
+        ready = bool(
+            registered.venue.get("ready")
+            and registered.venue.get("posture_verified")
+        )
         source = Source(
             "", "", None,
-            ready=True,
+            ready=ready,
             alias=registered.alias,
             shell=registered.shell,
             source_kind=registered.kind,
@@ -402,12 +406,13 @@ def _build_sources():
             resolve_argv=registered.resolve_argv,
             connect_argv=registered.connect_argv,
         )
-        source.argv = _provider_remote_argv(
-            source,
-            f"{project} {_list_args(source.shell, classify=True)}",
-            expected_instance_id=source.instance_id,
-            expected_assignment=source.venue.get("assignment"),
-        )
+        if ready:
+            source.argv = _provider_remote_argv(
+                source,
+                f"{project} {_list_args(source.shell, classify=True)}",
+                expected_instance_id=source.instance_id,
+                expected_assignment=source.venue.get("assignment"),
+            )
         out.append(source)
     return _unique_sources(out)
 
