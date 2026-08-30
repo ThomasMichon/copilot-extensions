@@ -61,6 +61,18 @@ kind:
    `conhost --headless` wrapper) for uniform pwsh launches, and a guard that
    flags a pwsh/python launch site that isn't headless.
 
+## Deferred Backlog Intake
+
+- [ ] Accept Windows-launch candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against current spawn, console, and
+  binstub behavior; return obsolete or unsafe candidates for explicit
+  disposition.
+- [ ] Place each accepted public tracker item in exactly one remaining slice,
+  extending this plan before implementation when necessary.
+- [ ] Use synthetic process trees and paths in all published evidence.
+
 ## Not in scope
 - **SAC signed-python** handling is already uniform across all 11 plugins.
 - **Uniform interpreter resolution** (its Windows `resolve-runtime.ps1` facet) is

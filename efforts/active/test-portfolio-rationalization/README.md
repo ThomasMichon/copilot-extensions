@@ -194,6 +194,18 @@ suites first.
 - [ ] Close or transfer every sub-issue, update reality documentation, mark the
   effort Done, and archive it.
 
+### Phase 7 — Reconcile deferred backlog
+
+- [ ] Accept test-portfolio candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current contracts, suite
+  topology, and budgets; return obsolete or unsafe candidates for explicit
+  disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- [ ] Use synthetic fixtures and reproducible public test cases.
+
 ## Validation Plan
 
 - [ ] The containment harness kills and reaps all descendants after success,

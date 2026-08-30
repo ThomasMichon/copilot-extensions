@@ -214,6 +214,18 @@ _Verbatim operator request; original spelling and punctuation preserved._
 - [ ] Mark the effort Done only when every Plan and Validation Plan item is
   complete or transferred to a named tracked objective.
 
+### Phase 7 - Reconcile deferred backlog
+
+- [ ] Accept finality and obligation candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current lifecycle, claim,
+  and follow-up contracts; return obsolete or unsafe candidates for explicit
+  disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- [ ] Keep fixtures synthetic and independent of any adopting worktree registry.
+
 ## Validation Plan
 
 - [ ] **Reopen:** adding a new claim or follow-up to a retained finalized

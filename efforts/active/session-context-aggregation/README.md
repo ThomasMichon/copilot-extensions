@@ -234,6 +234,18 @@ The detailed investigation and proposed architecture are in
 - [ ] Document diagnostics, rollback, partial-upgrade recovery, and how to
   identify the contributor that consumed or lost context budget.
 
+### Phase 6 - Reconcile deferred backlog
+
+- [ ] Accept context-aggregation candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current contributor,
+  budget, and compatibility contracts; return obsolete or unsafe candidates
+  for explicit disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+  extending this plan before implementation when necessary.
+- [ ] Keep fixtures synthetic and independent of installed consumer sets.
+
 ## Validation Plan
 
 - [ ] Reproduce the host defect with two direct producers and prove only one
