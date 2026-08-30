@@ -1944,7 +1944,10 @@ def _cmd_deploy(args: argparse.Namespace) -> None:
                 if resp.status != 200:
                     return False
                 body = json.loads(resp.read().decode("utf-8"))
-                return body.get("status") == "ok" and body.get("ready") is True
+                return (
+                    body.get("status") == "ok"
+                    and body.get("ready", True) is True
+                )
         except Exception:
             return False
 
