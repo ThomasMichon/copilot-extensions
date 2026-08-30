@@ -622,10 +622,9 @@ def remote_op_argv(machine, env, op, worktree_id, *, source_id=None,
                 f"--bare-only --yes --json"
             )
         elif op == "finalize":
-                # ``finalize`` takes the worktree id positionally (like
-                # ``restart``), not --worktree-id.
             inner = (
-                f"{project} finalize {_remote_arg(s.shell, worktree_id)} --json"
+                f"{project} finalize --worktree-id "
+                f"{_remote_arg(s.shell, worktree_id)} --json"
             )
         else:  # sync
             inner = (

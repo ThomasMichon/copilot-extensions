@@ -1117,15 +1117,13 @@ def test_remote_op_argv_restart_local_returns_none(monkeypatch):
         "anomalous-potato", "Win", "restart", "wt-xyz") is None
 
 
-def test_remote_op_argv_finalize_uses_positional_id_and_json(monkeypatch):
-    """The remote 'finalize' op runs ``<proj> finalize <id> --json`` -- the id
-    is positional (the ``finalize`` CLI has no ``--worktree-id`` flag)."""
+def test_remote_op_argv_finalize_uses_explicit_id_and_json(monkeypatch):
+    """The remote finalize op uses the automation-safe ``--worktree-id`` form."""
     _remote_roster(monkeypatch)
     argv = data_ssh.remote_op_argv("mantis-counter", "Linux", "finalize", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
-    assert "proj finalize wt-xyz --json" in inner
-    assert "--worktree-id" not in inner
+    assert "proj finalize --worktree-id wt-xyz --json" in inner
 
 
 def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):
