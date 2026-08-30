@@ -176,6 +176,203 @@ def _fixture_source():
     return src
 
 
+def test_provider_source_tab_scopes_by_canonical_source_id():
+    src = _fixture_source()
+    provider_id = "provider-exec:example:target-1"
+    provider_row = derive.norm(
+        {
+            "id": "provider-worktree-ffff",
+            "title": "Provider work",
+            "status": "active",
+            "state": "wip",
+            "session_count": 1,
+        },
+        "",
+        "",
+        source_kind="provider-exec",
+        source_id=provider_id,
+        source_label="Restricted target",
+        source_capabilities={
+            "messages": True,
+            "refresh": True,
+            "create": False,
+            "cleanup": False,
+            "sync": False,
+        },
+    )
+    original_load = src.load
+    machine_duplicate = derive.norm(
+        {
+            "id": "provider-worktree-ffff",
+            "title": "Machine work",
+            "status": "active",
+            "state": "wip",
+            "session_count": 1,
+        },
+        "anomalous-potato",
+        "Win",
+    )
+    src.load = lambda: [*original_load(), machine_duplicate, provider_row]
+    src.source_tabs = lambda: [
+        {
+            "label": "anomalous-potato Win",
+            "machine": "anomalous-potato",
+            "env": "Win",
+            "ready": True,
+            "source_kind": "machine-ssh",
+            "source_id": "machine-ssh:anomalous-potato:win",
+            "capabilities": {},
+        },
+        {
+            "label": "Restricted target",
+            "machine": "",
+            "env": "",
+            "ready": True,
+            "source_kind": "provider-exec",
+            "source_id": provider_id,
+            "capabilities": provider_row["source_capabilities"],
+        },
+    ]
+
+    screen = PickerScreen(src, live=False)
+    screen.setup()
+    screen.machine_idx = 2
+
+    assert screen._scope_data() == [provider_row]
+    assert screen.button_set() == []
+    assert ("BTN", 0) not in screen.stops()
+    assert ("BTN", 0) not in screen.region_heads()
+    assert screen._pivot_machine() is None
+    assert screen._session_action_verbs(provider_row) == ["Messages", "Refresh"]
+    screen.sel = ("M", 0)
+    screen._activate()
+    assert screen.sel == ("L", 0)
+    ok, message = screen._open_worktree_cli(
+        "provider-worktree-ffff",
+        provider_id,
+    )
+    assert ok is False
+    assert "read-only" in message
+    ok, message = screen._open_worktree_cli("provider-worktree-ffff")
+    assert ok is False
+    assert "ambiguous" in message
+
+
+def test_setup_uses_one_source_snapshot_for_tabs_and_loader():
+    src = _fixture_source()
+    snapshot = (object(),)
+    seen = []
+    snapshot_calls = 0
+
+    class _Loader:
+        def start(self):
+            seen.append(("start", None))
+
+        def records(self):
+            return []
+
+    def source_snapshot():
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        return snapshot
+
+    src.source_snapshot = source_snapshot
+    src.source_tabs = lambda sources: (
+        seen.append(("tabs", sources)) or [{
+            "label": "anomalous-potato Win",
+            "machine": "anomalous-potato",
+            "env": "Win",
+            "ready": True,
+            "source_kind": "machine-ssh",
+            "source_id": "machine-ssh:anomalous-potato:win",
+            "capabilities": {},
+        }]
+    )
+    src.make_loader = lambda sources: (
+        seen.append(("loader", sources)) or _Loader()
+    )
+
+    screen = PickerScreen(src, live=True)
+    screen.setup()
+
+    assert snapshot_calls == 1
+    assert ("tabs", snapshot) in seen
+    assert ("loader", snapshot) in seen
+
+
+def test_provider_selection_does_not_collide_with_machine_id4():
+    src = _fixture_source()
+    provider_id = "provider-exec:example:target-1"
+    provider_row = derive.norm(
+        {
+            "id": "provider-worktree-aaaa",
+            "title": "Provider work",
+            "status": "active",
+            "state": "wip",
+            "session_count": 1,
+        },
+        "",
+        "",
+        source_kind="provider-exec",
+        source_id=provider_id,
+        source_label="Restricted target",
+        source_capabilities={
+            "messages": True,
+            "refresh": True,
+            "create": False,
+            "cleanup": False,
+            "sync": False,
+        },
+    )
+    original_load = src.load
+    src.load = lambda: [*original_load(), provider_row]
+    src.source_tabs = lambda: [
+        {
+            "label": "anomalous-potato Win",
+            "machine": "anomalous-potato",
+            "env": "Win",
+            "ready": True,
+            "source_kind": "machine-ssh",
+            "source_id": "machine-ssh:anomalous-potato:win",
+            "capabilities": {},
+        },
+        {
+            "label": "Restricted target",
+            "machine": "",
+            "env": "",
+            "ready": True,
+            "source_kind": "provider-exec",
+            "source_id": provider_id,
+            "capabilities": provider_row["source_capabilities"],
+        },
+    ]
+
+    screen = PickerScreen(src, live=False)
+    screen.setup()
+    screen.ready_source_ids = lambda: {
+        "machine-ssh:anomalous-potato:win",
+        provider_id,
+    }
+    screen.ready_envs = lambda: {("anomalous-potato", "Win")}
+    screen.machine_idx = 0
+    rows = screen.list_records()
+    provider_index = rows.index(provider_row)
+    screen.sel = ("L", provider_index)
+    screen._wt_track_focus()
+
+    assert screen.wt_sel == {provider_row["selection_id"]}
+    assert screen._submenu_target() is provider_row
+    assert screen._session_action_verbs(screen._submenu_target()) == [
+        "Messages",
+        "Refresh",
+    ]
+
+    opened = []
+    screen._open_cleanup = lambda *, ids=None: opened.append(ids)
+    screen._run_maint_action("Cleanup", screen.wt_sel.ids)
+    assert opened == [set()]
+
+
 def test_maintenance_eliminated_from_nav():
     """#1427: Maintenance is a hidden anchor -- off the left rail and not under
     Configuration; the Worktrees pivot carries bulk Clean/Sync buttons instead."""
@@ -303,7 +500,10 @@ def test_clean_modal_impact_list_reflects_buckets():
             union = dlg._union()
             assert union                          # bulk default: safe buckets on
             rows = dlg._impact_fn(union)
-            assert {r[0] for r in rows} == union
+            id4_by_key = {
+                row["selection_id"]: row["id4"] for row in scr.cleanup_rows()
+            }
+            assert {r[0] for r in rows} == {id4_by_key[key] for key in union}
             # Toggle the "Unused" bucket OFF through the real pipeline; the union
             # (and thus the impact list) narrows.
             ui = next(i for i, o in enumerate(dlg._dlg["opts"])
@@ -315,7 +515,9 @@ def test_clean_modal_impact_list_reflects_buckets():
             await pilot.pause()
             after = dlg._union()
             assert after < union
-            assert {r[0] for r in dlg._impact_fn(after)} == after
+            assert {r[0] for r in dlg._impact_fn(after)} == {
+                id4_by_key[key] for key in after
+            }
 
     asyncio.run(run())
 
@@ -344,7 +546,7 @@ def test_clean_modal_confirm_runs_on_union():
             await pilot.pause()
             assert not _scope_dlg_open(scr)       # modal dismissed
             assert scr.progress is not None       # run built
-            assert {it["id4"] for it in scr.progress["items"]} == union
+            assert {it["key"] for it in scr.progress["items"]} == union
 
     asyncio.run(run())
 
@@ -415,7 +617,11 @@ def test_progress_screen_armed_run_advances_and_closes():
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
             await pilot.pause()
-            scr._open_cleanup(ids={"cl00"})       # clean bucket only -> armed
+            clean_key = next(
+                row["selection_id"] for row in scr.cleanup_rows()
+                if row["id4"] == "cl00"
+            )
+            scr._open_cleanup(ids={clean_key})    # clean bucket only -> armed
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
@@ -455,7 +661,7 @@ def test_worktrees_space_toggles_selection():
             await pilot.pause()
             recs = scr.list_records()
             assert recs
-            wid = recs[0]["id4"]
+            wid = recs[0]["selection_id"]
             scr.sel = ("L", 0)
             scr._dispatch_key("space")
             assert wid in scr.wt_sel
@@ -571,8 +777,10 @@ def test_worktrees_enter_with_multi_selection_opens_bulk_menu():
             cleanable = [i for i, r in enumerate(recs) if scr._cleanable(r)]
             if len(cleanable) < 2:
                 return
-            scr.wt_sel.replace({recs[cleanable[0]]["id4"],
-                                recs[cleanable[1]]["id4"]})
+            scr.wt_sel.replace({
+                recs[cleanable[0]]["selection_id"],
+                recs[cleanable[1]]["selection_id"],
+            })
             scr.sel = ("L", cleanable[0])
             scr._dispatch_key("enter")               # -> bulk action menu
             await pilot.pause()
@@ -632,7 +840,7 @@ def test_submenu_offers_finalize_for_convo_unused():
             for bucket in ("conversation", "unused"):
                 rec = next(r for r in recs if r["cleanup_bucket"] == bucket)
                 scr.sel = ("L", recs.index(rec))
-                scr.wt_sel.replace({rec["id4"]})
+                scr.wt_sel.replace({rec["selection_id"]})
                 scr._open_submenu()
                 await pilot.pause()
                 menu = _sub_menu(scr)
@@ -643,7 +851,7 @@ def test_submenu_offers_finalize_for_convo_unused():
             # A 'clean' (merged) worktree does NOT get Finalize.
             clean = next(r for r in recs if r["cleanup_bucket"] == "clean")
             scr.sel = ("L", recs.index(clean))
-            scr.wt_sel.replace({clean["id4"]})
+            scr.wt_sel.replace({clean["selection_id"]})
             scr._open_submenu()
             await pilot.pause()
             menu = _sub_menu(scr)
@@ -670,7 +878,11 @@ def test_bulk_menu_offers_stop_and_finalize():
             unused = next(r for r in recs if r["cleanup_bucket"] == "unused")
             active = next(r for r in recs if r["cleanup_bucket"] == "active")
             active["mux_live"] = True             # make it a live session
-            scr.wt_sel.replace({convo["id4"], unused["id4"], active["id4"]})
+            scr.wt_sel.replace({
+                convo["selection_id"],
+                unused["selection_id"],
+                active["selection_id"],
+            })
             scr._open_wt_action_menu()
             await pilot.pause()
             menu = _maint_menu(scr)
@@ -771,14 +983,16 @@ def test_worktrees_checkbox_always_shown():
 
             # Select one -> that row shows ☑, the rest ☐.
             target = recs[0]["id4"]
-            scr.wt_sel.replace({target})
+            scr.wt_sel.replace({recs[0]["selection_id"]})
             scr.sel = ("L", 1)
             b = boxes()
             assert b.get(target) == "☑"
             assert all(b[k] == "☐" for k in b if k != target)
 
             # Multiple selected -> multiple ☑, still with focus on a selected row.
-            scr.wt_sel.replace({recs[0]["id4"], recs[1]["id4"]})
+            scr.wt_sel.replace({
+                recs[0]["selection_id"], recs[1]["selection_id"]
+            })
             scr.sel = ("L", 0)
             b = boxes()
             assert b.get(recs[0]["id4"]) == "☑"
@@ -810,7 +1024,7 @@ def test_arrow_moves_focus_and_selection_follows():
     """P3-1: plain Up/Down move focus AND collapse selection to just the focused
     row (single-select tracks focus)."""
     async def body(scr):
-        ids = [r["id4"] for r in scr.list_records()]
+        ids = [r["selection_id"] for r in scr.list_records()]
         scr.sel = ("L", 0)
         scr._wt_track_focus()             # seed: focus follows to row 0
         assert scr.wt_sel == {ids[0]}
@@ -843,7 +1057,7 @@ def test_shift_arrow_extends_range_from_anchor():
     """P3-2: Shift+Down/Up extend a contiguous range from the anchor row set when
     the gesture began."""
     async def body(scr):
-        ids = [r["id4"] for r in scr.list_records()]
+        ids = [r["selection_id"] for r in scr.list_records()]
         assert len(ids) >= 4
         scr.sel = ("L", 1)                # anchor seeds here on first shift move
         scr._dispatch_key("shift+down")
@@ -875,7 +1089,7 @@ def test_space_is_additive_and_reseats_anchor():
     extends the contiguous range from *that* row (range-replace, dropping the
     earlier non-contiguous add -- the native list model)."""
     async def body(scr):
-        ids = [r["id4"] for r in scr.list_records()]
+        ids = [r["selection_id"] for r in scr.list_records()]
         scr.sel = ("L", 0)
         scr._dispatch_key("space")           # additive select row 0
         scr.sel = ("L", 2)
@@ -893,7 +1107,7 @@ def test_ctrl_arrow_moves_focus_only():
     """P3-4: Ctrl+Up/Down move focus without disturbing the selection or the
     range anchor."""
     async def body(scr):
-        ids = [r["id4"] for r in scr.list_records()]
+        ids = [r["selection_id"] for r in scr.list_records()]
         scr.sel = ("L", 0)
         scr._dispatch_key("space")           # build a selection at row 0
         scr._dispatch_key("ctrl+down")       # move focus only
@@ -910,7 +1124,7 @@ def test_escape_collapses_selection_before_quit():
     """P3-5: Esc with >1 selected collapses to the focused row and does NOT open
     the quit-confirm; a second Esc (nothing to collapse) reaches it (#1429)."""
     async def body(scr):
-        ids = [r["id4"] for r in scr.list_records()]
+        ids = [r["selection_id"] for r in scr.list_records()]
         scr.sel = ("L", 1)
         scr._dispatch_key("shift+down")
         scr._dispatch_key("shift+down")      # rows 1..3 selected
@@ -944,7 +1158,7 @@ def test_tab_preserves_selection_and_remembers_focus():
     """P3-6: Tab out of and back into the list keeps the selection and restores
     the last-focused row."""
     async def body(scr):
-        ids = [r["id4"] for r in scr.list_records()]
+        ids = [r["selection_id"] for r in scr.list_records()]
         scr.sel = ("L", 2)
         scr._dispatch_key("space")           # select row 2, focus row 2
         # Tab out to another region, then keep tabbing back around to the list.
@@ -974,7 +1188,7 @@ def test_selection_survives_reload_and_focus_rehomes_by_index():
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             recs = scr.list_records()
-            ids = [r["id4"] for r in recs]
+            ids = [r["selection_id"] for r in recs]
             assert len(ids) >= 3
             # Select the first three rows; focus the last of them.
             scr.wt_sel.replace(set(ids[:3]))
@@ -986,7 +1200,7 @@ def test_selection_survives_reload_and_focus_rehomes_by_index():
             src.load = lambda: [r for r in base() if r["raw"]["id"] != gone]
             scr._refresh_after_maint({"recs": [{"machine": "anomalous-potato",
                                                 "env": "Win"}]})
-            survivors = {r["id4"] for r in scr.list_records()}
+            survivors = {r["selection_id"] for r in scr.list_records()}
             assert ids[0] not in survivors               # deleted row is gone
             assert scr.wt_sel == {ids[1], ids[2]}         # survivors stay selected
             assert ids[0] not in scr.wt_sel               # dropped from selection
@@ -1007,7 +1221,7 @@ def test_reconcile_wt_sel_noop_on_empty_reload():
             scr = app.query_one(PickerScreen)
             scr.machine_idx = scr.local_index()
             await pilot.pause()
-            ids = [r["id4"] for r in scr.list_records()]
+            ids = [r["selection_id"] for r in scr.list_records()]
             scr.wt_sel.replace(set(ids[:2]))
             scr.data = []                     # nothing loaded yet
             scr._reconcile_wt_sel()
@@ -1029,7 +1243,7 @@ def test_live_reconcile_deferred_until_reload_settles():
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             recs = scr.list_records()
-            ids = [r["id4"] for r in recs]
+            ids = [r["selection_id"] for r in recs]
             scr.wt_sel.replace(set(ids[:3]))
             # Fake a live loader whose reload is still in flight.
             state_holder = {"s": "loading"}
@@ -1085,7 +1299,7 @@ def test_machine_rotate_clears_and_resets_selection():
             scr.t0 = 0                     # all machine tabs ready
             scr.machine_idx = 0            # start on All -> both machines visible
             await pilot.pause()
-            both = {r["id4"] for r in scr.list_records()}
+            both = {r["selection_id"] for r in scr.list_records()}
             assert len(both) == 2
 
             # Focus in the table -> rotate resets to a top-row single-select.
@@ -1095,11 +1309,11 @@ def test_machine_rotate_clears_and_resets_selection():
             scr._rotate_machine(1)         # All -> anomalous-potato Win
             recs = scr.list_records()
             assert scr.sel == ("L", 0)
-            assert scr.wt_sel == {recs[0]["id4"]}
+            assert scr.wt_sel == {recs[0]["selection_id"]}
             assert scr.wt_anchor == 0
 
             # Focus outside the table -> rotate just clears the selection.
-            scr.wt_sel.replace({recs[0]["id4"]})
+            scr.wt_sel.replace({recs[0]["selection_id"]})
             scr.sel = ("BTN", 0)
             scr._rotate_machine(1)         # anomalous-potato Win -> emancipation-cube Win
             assert not scr.wt_sel
@@ -1139,7 +1353,7 @@ def test_worktrees_gutter_always_shows_checkbox():
             assert unsel[1] == " "
 
             # Selected: ☑ + margin, columns unshifted.
-            scr.wt_sel.replace({recs[0]["id4"]})
+            scr.wt_sel.replace({recs[0]["selection_id"]})
             shown = first_l_row()
             assert shown[0] == "☑"
             assert shown[1] == " "
@@ -1161,7 +1375,7 @@ def test_ctrl_space_toggles_selection():
             scr.machine_idx = scr.local_index()
             await pilot.pause()
             recs = scr.list_records()
-            wid = recs[0]["id4"]
+            wid = recs[0]["selection_id"]
             scr.sel = ("L", 0)
             scr.wt_sel.clear()
             scr._dispatch_key("ctrl+at")            # canonical Textual key
@@ -1188,6 +1402,7 @@ def test_worktrees_row_highlight_states():
             await pilot.pause()
             recs = scr.list_records()
             ids = [r["id4"] for r in recs]
+            keys = [r["selection_id"] for r in recs]
 
             def styles(id4_target):
                 for v in scr.build_body(118):
@@ -1198,7 +1413,7 @@ def test_worktrees_row_highlight_states():
 
             # Focused AND selected -> green invert.
             scr.sel = ("L", 0)
-            scr.wt_sel.replace({ids[0]})
+            scr.wt_sel.replace({keys[0]})
             assert "reverse green3" in styles(ids[0])
 
             # Focused, not selected -> plain (white) invert, not green.
@@ -1209,7 +1424,7 @@ def test_worktrees_row_highlight_states():
             assert "reverse green3" not in s0
 
             # Selected but focus moved off it -> grey background, no invert.
-            scr.wt_sel.replace({ids[0]})
+            scr.wt_sel.replace({keys[0]})
             scr.sel = ("L", 1)
             s0 = styles(ids[0])
             assert "on grey30" in s0
@@ -1597,8 +1812,9 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
             assert len(opts["Conversation-only"]) == 1    # cv00
             assert len(opts["All eligible"]) == 4         # clean(2)+unused+convo
             # Unsafe buckets are never offered.
+            keys = {w["id4"]: w["selection_id"] for w in scr.cleanup_rows()}
             for unsafe in ("dr00", "op00", "ac00"):
-                assert unsafe not in opts["All eligible"]
+                assert keys[unsafe] not in opts["All eligible"]
             await pilot.press("escape")
             await pilot.pause()
 
@@ -1607,10 +1823,12 @@ def test_cleanup_dialog_buckets_and_sync_eligibility():
             dlg = _scope_dlg(scr)
             assert dlg is not None
             sopts = {o["label"]: o["ids"] for o in dlg._dlg["opts"]}
-            assert sopts["Eligible"] == {"el00"}          # only the FF-eligible
+            rows = {w["id4"]: w for w in scr.cleanup_rows()}
+            assert sopts["Eligible"] == {
+                rows["el00"]["selection_id"]
+            }                                               # only the FF-eligible
 
             # Disposition chips reflect the buckets.
-            rows = {w["id4"]: w for w in scr.cleanup_rows()}
             assert rows["cl00"]["dispo_level"] == "SAFE"
             assert rows["ac00"]["dispo_level"] == "UNSAFE"
             assert rows["op00"]["dispo_level"] == ""      # open PR: healthy
@@ -1638,21 +1856,26 @@ def test_bulk_clean_defaults_to_safe_set_selection_stays_conservative():
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
+            keys = {w["id4"]: w["selection_id"] for w in scr.cleanup_rows()}
             on = {o["label"] for o in dlg._dlg["opts"] if o["on"]}
             assert on == {"Merged & finalized", "Unused", "Conversation-only"}
-            assert dlg._union() == {"cl00", "el00", "un00", "cv00"}
+            assert dlg._union() == {
+                keys["cl00"], keys["el00"], keys["un00"], keys["cv00"]
+            }
             await pilot.press("escape")
             await pilot.pause()
 
             # Explicit selection: only the already-merged bucket is pre-checked
             # (the operator already hand-picked the scope).
-            scr._open_cleanup(ids={"cl00", "un00", "cv00"})
+            scr._open_cleanup(ids={
+                keys["cl00"], keys["un00"], keys["cv00"]
+            })
             await pilot.pause()
             dlg = _scope_dlg(scr)
             assert dlg is not None
             on2 = {o["label"] for o in dlg._dlg["opts"] if o["on"]}
             assert on2 == {"Merged & finalized"}
-            assert dlg._union() == {"cl00"}
+            assert dlg._union() == {keys["cl00"]}
 
     asyncio.run(run())
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,35 @@ def test_resolve_new_accepts_owner_ref():
 def test_resolve_owner_ref_defaults_none():
     args = m.build_parser().parse_args(["resolve", "--json", "--new"])
     assert getattr(args, "owner_ref", "MISSING") is None
+
+
+@pytest.mark.parametrize(
+    ("argv", "positional_id", "flagged_id"),
+    [
+        (["finalize", "wt-positional"], "wt-positional", None),
+        (["finalize", "--worktree-id", "wt-flagged"], None, "wt-flagged"),
+    ],
+)
+def test_finalize_accepts_positional_and_explicit_worktree_id(
+    argv, positional_id, flagged_id
+):
+    args = m.build_parser().parse_args(argv)
+
+    assert args.worktree_id == positional_id
+    assert args.worktree_id_flag == flagged_id
+
+
+def test_finalize_rejects_conflicting_worktree_ids(monkeypatch, capsys):
+    monkeypatch.setattr(m.cfg, "load_config", lambda _path=None: object())
+    args = SimpleNamespace(
+        config=None,
+        json=False,
+        worktree_id="wt-positional",
+        worktree_id_flag="wt-flagged",
+    )
+
+    assert m.cmd_finalize(args) == 2
+    assert "Conflicting worktree IDs" in capsys.readouterr().out
 
 
 def test_get_pr_keys_registered():

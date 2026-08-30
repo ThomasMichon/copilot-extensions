@@ -7,12 +7,20 @@ as a disabled tab instead.
 from __future__ import annotations
 
 import json as _json
+import os
+import shlex
+import stat
 import types
 
 import pytest
 
 from agent_worktrees import config as cfg
-from worktree_manager.production_picker.picker_tui import data_ssh, derive
+from worktree_manager.production_picker.picker_tui import (
+    data_ssh,
+    derive,
+    provider_sources,
+    source_identity,
+)
 
 
 def _install_roster(monkeypatch, entries, *, machine, local_id):
@@ -26,6 +34,7 @@ def _install_roster(monkeypatch, entries, *, machine, local_id):
         data_ssh.cfg, "load_machines_yaml", lambda _anchor: entries)
     monkeypatch.setattr(data_ssh, "_local_identity", lambda: local_id)
     monkeypatch.setattr(data_ssh, "_project", lambda: "proj")
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [])
 
 
 def _entry(key, display, envs, *, ssh_ready=True, copilot=True, alias="", hostname=""):
@@ -45,6 +54,40 @@ def _by_key(sources):
     return {(s.machine, s.env): s for s in sources}
 
 
+def _assignment(effort="example-effort", acquired_at=1_700_000_000.0):
+    return {
+        "kind": "lease",
+        "effort": effort,
+        "acquired_at": acquired_at,
+    }
+
+
+def _provider_descriptor(**overrides):
+    descriptor = {
+        "kind": "provider-exec",
+        "project": "proj",
+        "target_id": "container:one",
+        "instance_id": "instance-1",
+        "label": "Restricted target",
+        "alias": "restricted-target",
+        "shell": "bash",
+        "resolve": ["/bin/provider", "resolve", "one"],
+        "connect": ["/bin/provider", "connect", "one"],
+        "venue": {
+            "provider": "agent-containers",
+            "target_id": "container:one",
+            "instance_id": "instance-1",
+            "transport": "provider-exec",
+            "ready": True,
+            "posture_verified": True,
+            "assignment": _assignment(),
+        },
+        "capabilities": {"list": True},
+    }
+    descriptor.update(overrides)
+    return descriptor
+
+
 def test_machine_source_has_canonical_identity_and_legacy_key():
     source = data_ssh.Source("Host-A", "WSL", None)
 
@@ -62,6 +105,12 @@ def test_machine_source_identity_escapes_delimiters():
     assert first.source_id == "machine-ssh:alpha%3Abeta:gamma"
     assert second.source_id == "machine-ssh:alpha:beta%3Agamma"
     assert first.source_id != second.source_id
+
+
+def test_provider_source_identity_is_stable_and_namespaced():
+    assert source_identity.provider_exec_id(
+        "Example Provider", "container:target-1"
+    ) == "provider-exec:example%20provider:container%3Atarget-1"
 
 
 def test_machine_source_rejects_noncanonical_explicit_identity():
@@ -117,6 +166,738 @@ def test_normalized_row_carries_source_identity():
     assert derive.for_source([row, other], row["source_id"]) == derive.for_machine(
         [row, other], "Host-A", "WSL"
     )
+
+
+def test_machine_selection_identity_is_source_scoped_and_collision_safe():
+    first = derive.norm({"id": "first-worktree-abcd"}, "Host-A", "WSL")
+    second = derive.norm({"id": "second-worktree-abcd"}, "Host-B", "WSL")
+
+    assert first["id4"] == second["id4"] == "abcd"
+    assert first["selection_id"] == (
+        "machine-ssh:host-a:wsl\x1ffirst-worktree-abcd"
+    )
+    assert second["selection_id"] == (
+        "machine-ssh:host-b:wsl\x1fsecond-worktree-abcd"
+    )
+    assert first["selection_id"] != second["selection_id"]
+
+
+def test_provider_row_carries_lineage_posture_and_no_machine_identity():
+    row = derive.norm(
+        {"id": "provider-5678"},
+        "",
+        "",
+        source_kind="provider-exec",
+        source_id="provider-exec:example:target-1",
+        source_label="Restricted target",
+        source_metadata={
+            "provider": "example",
+            "target_id": "target-1",
+            "instance_id": "instance-2",
+            "venue": {"ready": True, "posture_verified": True},
+        },
+        source_capabilities={"messages": True, "resume": False},
+    )
+
+    assert row["machine"] == ""
+    assert row["env"] == ""
+    assert row["machine_env"] == "Restricted target"
+    assert row["source"]["instance_id"] == "instance-2"
+    assert row["source"]["venue"]["posture_verified"] is True
+    assert row["source_capabilities"] == {"messages": True, "resume": False}
+
+
+def test_provider_registry_filters_project_and_isolates_invalid_files(tmp_path, caplog):
+    registry_path = tmp_path / "agent-containers.json"
+    registry_path.write_text(
+        _json.dumps({
+            "schema_version": 1,
+            "provider": "agent-containers",
+            "sources": [
+                {
+                    "kind": "provider-exec",
+                    "project": "proj",
+                    "target_id": "container:one",
+                    "instance_id": "instance-1",
+                    "label": "Restricted target",
+                    "alias": "restricted-target",
+                    "shell": "bash",
+                    "resolve": ["/bin/agent-containers", "namespace-resolve", "one"],
+                    "connect": ["/bin/agent-containers", "ssh-stdio", "one"],
+                    "venue": {
+                        "provider": "agent-containers",
+                        "target_id": "container:one",
+                        "instance_id": "instance-1",
+                        "transport": "provider-exec",
+                        "ready": True,
+                        "posture_verified": True,
+                        "assignment": _assignment(),
+                    },
+                    "capabilities": {"list": True, "resume": False},
+                },
+                {
+                    "kind": "provider-exec",
+                    "project": "other",
+                    "target_id": "container:two",
+                    "instance_id": "instance-2",
+                    "label": "Other target",
+                    "alias": "other-target",
+                    "shell": "bash",
+                    "resolve": ["/bin/agent-containers", "namespace-resolve", "two"],
+                    "connect": ["/bin/agent-containers", "ssh-stdio", "two"],
+                    "venue": {
+                        "provider": "agent-containers",
+                        "target_id": "container:two",
+                        "instance_id": "instance-2",
+                        "transport": "provider-exec",
+                        "ready": True,
+                        "posture_verified": True,
+                        "assignment": _assignment("other-effort"),
+                    },
+                    "capabilities": {"list": True},
+                },
+                {
+                    "kind": "provider-exec",
+                    "project": "proj",
+                    "target_id": "container:broken",
+                },
+            ],
+        }),
+        encoding="utf-8",
+    )
+    registry_path.chmod(0o600)
+    broken_path = tmp_path / "broken.json"
+    broken_path.write_text("{", encoding="utf-8")
+    broken_path.chmod(0o600)
+
+    sources = provider_sources.load("PROJ", tmp_path)
+
+    assert [source.source_id for source in sources] == [
+        "provider-exec:agent-containers:container%3Aone"
+    ]
+    assert sources[0].alias == "restricted-target"
+    assert "ignoring invalid Picker source registry" in caplog.text
+    assert "ignoring invalid Picker source" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("override", "message"),
+    [
+        ({"shell": []}, "shell must be bash or pwsh"),
+        (
+            {"label": "bad\nlabel"},
+            "label must be at most 80 characters without control characters",
+        ),
+        (
+            {"capabilities": {"list": True, "open": True}},
+            "unsupported capabilities: open",
+        ),
+    ],
+)
+def test_provider_registry_rejects_invalid_read_boundary(
+    tmp_path,
+    caplog,
+    override,
+    message,
+):
+    registry_path = tmp_path / "provider.json"
+    registry_path.write_text(
+        _json.dumps({
+            "schema_version": 1,
+            "provider": "agent-containers",
+            "sources": [_provider_descriptor(**override)],
+        }),
+        encoding="utf-8",
+    )
+    registry_path.chmod(0o600)
+
+    assert provider_sources.load("proj", tmp_path) == []
+    assert message in caplog.text
+
+
+def test_provider_registry_rejects_every_ambiguous_duplicate(tmp_path, caplog):
+    payload = {
+        "schema_version": 1,
+        "provider": "agent-containers",
+        "sources": [_provider_descriptor()],
+    }
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    first_path.write_text(_json.dumps(payload), encoding="utf-8")
+    second_path.write_text(_json.dumps(payload), encoding="utf-8")
+    first_path.chmod(0o600)
+    second_path.chmod(0o600)
+
+    assert provider_sources.load("proj", tmp_path) == []
+    assert "rejecting ambiguous duplicate Picker source id" in caplog.text
+
+
+@pytest.mark.skipif(not hasattr(os, "getuid"), reason="POSIX ownership")
+def test_provider_registry_rejects_group_writable_directory(tmp_path, caplog):
+    tmp_path.chmod(tmp_path.stat().st_mode | stat.S_IWGRP)
+
+    assert provider_sources.load("proj", tmp_path) == []
+    assert "source registry must not be group/world-writable" in caplog.text
+
+
+def test_build_sources_appends_provider_without_synthetic_machine(monkeypatch):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    registered = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue={
+            "ready": True,
+            "posture_verified": True,
+            "assignment": _assignment(),
+        },
+        capabilities={"list": True, "messages": True, "resume": False},
+        resolve_argv=("agent-containers", "namespace-resolve", "one"),
+        connect_argv=("/bin/agent-containers", "ssh-stdio", "one"),
+    )
+    monkeypatch.setattr(
+        data_ssh.provider_sources,
+        "load",
+        lambda project: [registered] if project == "proj" else [],
+    )
+
+    sources = data_ssh._build_sources()
+    provider = next(source for source in sources if source.source_kind == "provider-exec")
+    tab = next(tab for tab in data_ssh.source_tabs() if tab["source_kind"] == "provider-exec")
+
+    assert provider.machine == ""
+    assert provider.env == ""
+    assert provider.alias == "restricted-target"
+    assert any(part.startswith("ProxyCommand=") for part in provider.argv)
+    assert provider.argv[-2] == "restricted-target"
+    assert tab["label"] == "Restricted target"
+    assert tab["source_id"] == provider.source_id
+
+
+@pytest.mark.parametrize(
+    "venue_override",
+    [
+        {"ready": False},
+        {"posture_verified": False},
+    ],
+)
+def test_build_sources_disables_unready_or_unverified_provider(
+    monkeypatch,
+    venue_override,
+):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    venue = {
+        "ready": True,
+        "posture_verified": True,
+        "assignment": _assignment(),
+        **venue_override,
+    }
+    registered = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue=venue,
+        capabilities={"list": True},
+        resolve_argv=("/bin/provider", "resolve", "one"),
+        connect_argv=("/bin/provider", "connect", "one"),
+    )
+    monkeypatch.setattr(
+        data_ssh.provider_sources,
+        "load",
+        lambda _project: [registered],
+    )
+
+    provider = next(
+        source
+        for source in data_ssh._build_sources()
+        if source.source_kind == "provider-exec"
+    )
+
+    assert provider.ready is False
+    assert provider.argv is None
+
+
+def test_provider_resolve_refreshes_instance_and_rejects_unverified_posture():
+    source = data_ssh.Source(
+        "",
+        "",
+        ["ssh"],
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="old-instance",
+        venue={"assignment": _assignment()},
+        resolve_argv=["provider", "resolve", "one"],
+        connect_argv=["/bin/provider", "connect", "one"],
+    )
+
+    def runner(_argv, _timeout):
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=_json.dumps({
+                "venue": {
+                    "provider": "agent-containers",
+                    "target_id": "container:one",
+                    "instance_id": "new-instance",
+                    "ready": True,
+                    "posture_verified": True,
+                    "assignment": _assignment(),
+                }
+            }),
+            stderr="",
+        )
+
+    assert data_ssh._resolve_provider_source(source, runner) is True
+    assert source.instance_id == "new-instance"
+
+    def unverified(_argv, _timeout):
+        payload = {
+            "venue": {
+                **source.venue,
+                "instance_id": "new-instance",
+                "posture_verified": False,
+            }
+        }
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=_json.dumps(payload),
+            stderr="",
+        )
+
+    with pytest.raises(RuntimeError, match="trust posture"):
+        data_ssh._resolve_provider_source(source, unverified)
+
+    def reassigned(_argv, _timeout):
+        payload = {
+            "venue": {
+                **source.venue,
+                "assignment": _assignment("replacement-effort"),
+            }
+        }
+        return types.SimpleNamespace(
+            returncode=0,
+            stdout=_json.dumps(payload),
+            stderr="",
+        )
+
+    with pytest.raises(RuntimeError, match="lease assignment changed"):
+        data_ssh._resolve_provider_source(source, reassigned)
+
+
+def test_loader_invalidates_rows_before_loading_replaced_instance(monkeypatch):
+    source = data_ssh.Source(
+        "",
+        "",
+        ["ssh"],
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="old-instance",
+        venue={"assignment": _assignment()},
+        resolve_argv=["/bin/provider", "resolve", "one"],
+    )
+    loader = data_ssh.LiveLoader([source])
+    loader._records[source.source_id] = ["stale-row"]
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_args: True)
+    observed = []
+    monkeypatch.setattr(
+        data_ssh,
+        "_fetch",
+        lambda *_args, **_kwargs: observed.append(
+            list(loader._records[source.source_id])
+        ) or [],
+    )
+
+    loader._load_one(source)
+
+    assert observed == [[]]
+
+
+def test_provider_repoll_replaces_instance_rows_and_returns_ready(monkeypatch):
+    source = data_ssh.Source(
+        "",
+        "",
+        ["ssh"],
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="old-instance",
+        venue={"assignment": _assignment()},
+        resolve_argv=["/bin/provider", "resolve", "one"],
+    )
+    loader = data_ssh.LiveLoader([source])
+    loader._records[source.source_id] = ["stale-row"]
+    loader._state[source.source_id] = "ready"
+    loader._refreshing.add(source.source_id)
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_args: True)
+    monkeypatch.setattr(data_ssh, "_fetch", lambda *_args, **_kwargs: ["fresh-row"])
+
+    loader._refresh_one(source, 0)
+
+    assert loader.records_for_source(source.source_id) == ["fresh-row"]
+    assert loader.state_for_source(source.source_id) == "ready"
+
+
+def test_provider_repoll_clears_rows_when_live_resolve_fails(monkeypatch):
+    source = data_ssh.Source(
+        "",
+        "",
+        ["ssh"],
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="old-instance",
+        venue={"assignment": _assignment()},
+        resolve_argv=["/bin/provider", "resolve", "one"],
+    )
+    loader = data_ssh.LiveLoader([source])
+    loader._records[source.source_id] = ["stale-row"]
+    loader._state[source.source_id] = "ready"
+    loader._refreshing.add(source.source_id)
+
+    def fail(*_args):
+        raise RuntimeError("provider target is not ready")
+
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", fail)
+
+    loader._refresh_one(source, 0)
+
+    assert loader.records_for_source(source.source_id) == []
+    assert loader.state_for_source(source.source_id) == "failed"
+
+
+def test_provider_repoll_keeps_same_instance_rows_on_list_failure(monkeypatch):
+    source = data_ssh.Source(
+        "",
+        "",
+        ["ssh"],
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        venue={"assignment": _assignment()},
+        resolve_argv=["/bin/provider", "resolve", "one"],
+    )
+    loader = data_ssh.LiveLoader([source])
+    loader._records[source.source_id] = ["last-good"]
+    loader._state[source.source_id] = "ready"
+    loader._refreshing.add(source.source_id)
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_args: False)
+
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("temporary SSH failure")
+
+    monkeypatch.setattr(data_ssh, "_fetch", fail)
+
+    loader._refresh_one(source, 0)
+
+    assert loader.records_for_source(source.source_id) == ["last-good"]
+    assert loader.state_for_source(source.source_id) == "ready"
+
+
+def test_provider_routes_reads_but_suppresses_mutations(monkeypatch):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    registered = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue={
+            "ready": True,
+            "posture_verified": True,
+            "assignment": _assignment(),
+        },
+        capabilities={
+            "messages": True,
+            "sessions": True,
+            "refresh": True,
+            "resume": False,
+            "cleanup": True,
+        },
+        resolve_argv=("agent-containers", "namespace-resolve", "one"),
+        connect_argv=("/bin/agent-containers", "ssh-stdio", "one"),
+    )
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [registered])
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", lambda *_args: False)
+    source_id = registered.source_id
+    fingerprint = data_ssh._provider_transport_fingerprint(registered)
+
+    messages = data_ssh.recent_messages_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+        limit=4,
+    )
+    sessions = data_ssh.list_sessions_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    )
+
+    assert messages and messages[-2] == "restricted-target"
+    proxy = next(part for part in messages if part.startswith("ProxyCommand="))
+    assert "--expected-target-id container:one" in proxy
+    assert "--expected-instance-id instance-1" in proxy
+    assert "example-effort" in proxy
+    assert "ControlMaster=no" in messages
+    assert "ControlPath=none" in messages
+    assert "recent-messages --worktree wt-1 --limit 4 --json" in messages[-1]
+    assert sessions and "list-sessions --worktree wt-1 --json" in sessions[-1]
+    assert data_ssh.profiles_argv("", "", action="apply", set_json="[]") is None
+    assert data_ssh.remote_op_argv(
+        "", "", "cleanup", "wt-1", source_id=source_id
+    ) is None
+
+    hostile_id = "wt-1; touch /tmp/not-executed"
+    hostile = data_ssh.recent_messages_argv(
+        "",
+        "",
+        hostile_id,
+        source_id=source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    )
+    outer = shlex.split(hostile[-1])
+    assert outer[:2] == ["bash", "-lc"]
+    assert shlex.split(outer[2])[3] == hostile_id
+    assert data_ssh._remote_arg("pwsh", "wt'; Write-Error pwned") == (
+        "'wt''; Write-Error pwned'"
+    )
+
+
+def test_provider_read_route_requires_matching_live_instance(monkeypatch):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    registered = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue={
+            "ready": True,
+            "posture_verified": True,
+            "assignment": _assignment(),
+        },
+        capabilities={"list": True, "messages": True, "sessions": True},
+        resolve_argv=("/bin/provider", "resolve", "one"),
+        connect_argv=("/bin/provider", "connect", "one"),
+    )
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [registered])
+    fingerprint = data_ssh._provider_transport_fingerprint(registered)
+
+    def replace(source, _runner):
+        source.instance_id = "instance-2"
+        return True
+
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", replace)
+
+    assert data_ssh.recent_messages_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=registered.source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    ) is None
+    assert data_ssh.list_sessions_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=registered.source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    ) is None
+
+
+def test_provider_read_route_requires_displayed_lease_assignment(monkeypatch):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    registered = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue={
+            "ready": True,
+            "posture_verified": True,
+            "assignment": _assignment(),
+        },
+        capabilities={"list": True, "messages": True, "sessions": True},
+        resolve_argv=("/bin/provider", "resolve", "one"),
+        connect_argv=("/bin/provider", "connect", "one"),
+    )
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [registered])
+    fingerprint = data_ssh._provider_transport_fingerprint(registered)
+
+    def reassign(source, _runner):
+        source.venue["assignment"] = _assignment("replacement-effort")
+        return False
+
+    monkeypatch.setattr(data_ssh, "_resolve_provider_source", reassign)
+
+    assert data_ssh.recent_messages_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=registered.source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    ) is None
+    assert data_ssh.list_sessions_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=registered.source_id,
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=fingerprint,
+    ) is None
+
+
+def test_provider_proxy_command_escapes_openssh_percent_tokens():
+    source = data_ssh.Source(
+        "",
+        "",
+        None,
+        source_kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue={"assignment": _assignment("100%home")},
+        connect_argv=["/bin/provider", "connect", "one"],
+    )
+
+    argv = data_ssh._provider_remote_argv(
+        source,
+        "proj list --json",
+        expected_instance_id="instance-1",
+        expected_assignment=_assignment("100%home"),
+    )
+
+    proxy = next(part for part in argv if part.startswith("ProxyCommand="))
+    assert "100%%home" in proxy
+
+
+def test_provider_read_route_rejects_rewritten_transport(monkeypatch):
+    _install_roster(
+        monkeypatch,
+        {},
+        machine="local",
+        local_id=("local", "linux"),
+    )
+    displayed = provider_sources.ProviderSource(
+        kind="provider-exec",
+        source_id="provider-exec:agent-containers:container%3Aone",
+        label="Restricted target",
+        project="proj",
+        provider="agent-containers",
+        target_id="container:one",
+        instance_id="instance-1",
+        alias="restricted-target",
+        shell="bash",
+        venue={
+            "ready": True,
+            "posture_verified": True,
+            "assignment": _assignment(),
+        },
+        capabilities={"list": True, "messages": True},
+        resolve_argv=("/bin/provider", "resolve", "one"),
+        connect_argv=("/bin/provider", "connect", "one"),
+    )
+    rewritten = provider_sources.ProviderSource(
+        **{
+            **displayed.__dict__,
+            "connect_argv": ("/bin/other-provider", "connect", "one"),
+        }
+    )
+    monkeypatch.setattr(data_ssh.provider_sources, "load", lambda _project: [rewritten])
+    monkeypatch.setattr(
+        data_ssh,
+        "_resolve_provider_source",
+        lambda *_args: pytest.fail("rewritten transport must fail before resolve"),
+    )
+
+    assert data_ssh.recent_messages_argv(
+        "",
+        "",
+        "wt-1",
+        source_id=displayed.source_id,
+        expected_instance_id=displayed.instance_id,
+        expected_assignment=_assignment(),
+        expected_transport_fingerprint=data_ssh._provider_transport_fingerprint(
+            displayed
+        ),
+    ) is None
 
 
 def test_loader_cache_isolated_by_canonical_source_id():
@@ -336,15 +1117,13 @@ def test_remote_op_argv_restart_local_returns_none(monkeypatch):
         "anomalous-potato", "Win", "restart", "wt-xyz") is None
 
 
-def test_remote_op_argv_finalize_uses_positional_id_and_json(monkeypatch):
-    """The remote 'finalize' op runs ``<proj> finalize <id> --json`` -- the id
-    is positional (the ``finalize`` CLI has no ``--worktree-id`` flag)."""
+def test_remote_op_argv_finalize_uses_explicit_id_and_json(monkeypatch):
+    """The remote finalize op uses the automation-safe ``--worktree-id`` form."""
     _remote_roster(monkeypatch)
     argv = data_ssh.remote_op_argv("mantis-counter", "Linux", "finalize", "wt-xyz")
     assert argv is not None and argv[0] == "ssh"
     inner = argv[-1]
-    assert "proj finalize wt-xyz --json" in inner
-    assert "--worktree-id" not in inner
+    assert "proj finalize --worktree-id wt-xyz --json" in inner
 
 
 def test_recent_messages_argv_remote_builds_worktree_scoped_cli(monkeypatch):

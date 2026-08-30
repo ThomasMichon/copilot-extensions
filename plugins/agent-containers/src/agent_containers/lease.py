@@ -352,6 +352,19 @@ def list_leases(ttl: float = DEFAULT_TTL, prune: bool = True) -> list[Lease]:
         return list(leases.values())
 
 
+@contextmanager
+def provider_lease_guard(
+    ttl: float = DEFAULT_TTL,
+) -> Iterator[tuple[Lease, ...]]:
+    """Hold lease state stable while a provider registry mutation completes."""
+    with _lease_lock():
+        leases = _read_leases()
+        cleaned = _prune(leases, ttl)
+        if len(cleaned) != len(leases):
+            _write_leases(cleaned)
+        yield tuple(cleaned.values())
+
+
 def borrow(
     config: ContainersConfig,
     effort: str,
@@ -369,6 +382,15 @@ def borrow(
     (refreshes the heartbeat).
     """
     with _lease_lock():
+        admissions = _read_live_records(
+            _SESSION_ADMISSIONS_FILE,
+            SessionAdmission,
+            SESSION_ADMISSION_TTL,
+        )
+        admitted = {
+            admission.container
+            for admission in admissions.values()
+        }
         leases = _prune(_read_leases(), ttl)
         holds = _read_live_records(
             _DEPLOY_HOLDS_FILE,
@@ -397,6 +419,10 @@ def borrow(
                     f"{hold.operation} is in progress"
                 )
             held = leases.get(container)
+            if container in admitted and held is None:
+                raise ProviderAdmissionError(
+                    f"Container '{container}' has an active provider session"
+                )
             if held and held.effort != effort:
                 raise RuntimeError(
                     f"Container '{container}' is leased by effort "
@@ -423,7 +449,11 @@ def borrow(
                 # Prefer running, then startable; skip those already leased.
                 free = [
                     c for c in members
-                    if c.name not in leases and c.name not in holds
+                    if (
+                        c.name not in leases
+                        and c.name not in holds
+                        and c.name not in admitted
+                    )
                 ]
                 if not free:
                     raise RuntimeError(
@@ -461,6 +491,21 @@ def release(target: str, ttl: float = DEFAULT_TTL) -> bool:
         ]
         if not to_remove:
             return False
+        admissions = _read_live_records(
+            _SESSION_ADMISSIONS_FILE,
+            SessionAdmission,
+            SESSION_ADMISSION_TTL,
+        )
+        active = sorted({
+            admission.container
+            for admission in admissions.values()
+            if admission.container in to_remove
+        })
+        if active:
+            raise ProviderAdmissionError(
+                "Cannot release active provider session lease(s): "
+                + ", ".join(active)
+            )
         for c in to_remove:
             del leases[c]
             log.info("Released lease on '%s'", c)
@@ -679,7 +724,11 @@ def deploy_hold(
 
 
 @contextmanager
-def session_admission(container: str) -> Iterator[SessionAdmission]:
+def session_admission(
+    container: str,
+    *,
+    expected_assignment: dict | None = None,
+) -> Iterator[SessionAdmission]:
     """Admit one provider launch only when no destructive hold is present."""
     token = uuid.uuid4().hex
     key = f"{container}:{token}"
@@ -693,6 +742,22 @@ def session_admission(container: str) -> Iterator[SessionAdmission]:
         heartbeat_at=time.time(),
     )
     with _lease_lock():
+        if expected_assignment is not None:
+            leases = _prune(_read_leases(), DEFAULT_TTL)
+            lease = leases.get(container)
+            actual_assignment = (
+                {
+                    "kind": "lease",
+                    "effort": lease.effort,
+                    "acquired_at": lease.acquired_at,
+                }
+                if lease is not None
+                else None
+            )
+            if actual_assignment != expected_assignment:
+                raise ProviderAdmissionError(
+                    f"Container '{container}' lease assignment changed"
+                )
         holds = _read_live_records(
             _DEPLOY_HOLDS_FILE,
             DeployHold,

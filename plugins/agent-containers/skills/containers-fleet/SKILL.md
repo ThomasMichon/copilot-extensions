@@ -190,6 +190,34 @@ directory. The `ssh-stdio` ProxyCommand is an internal one-connection protocol
 adapter: it holds lifecycle admission for the whole SSH connection and always
 uses the fleet-owned `exec_user`, never the SSH username. Use
 `ssh-profile <name> --json` for read-only metadata inspection.
+
+To expose the target as a project-scoped, read-only Worktree Picker source:
+
+```bash
+<catalog argv[0]> ssh-profile restricted-worker-1 \
+  --alias sandbox \
+  --project <project> \
+  --label "Restricted target"
+```
+
+This writes a provider-owned descriptor under
+`~/.agent-worktrees/sources/agent-containers.json`. The Picker validates the
+descriptor, re-resolves live instance/lease/readiness/trust metadata through
+the provider command, and reads worktrees, recent messages, and sessions
+through the descriptor's isolated absolute provider-owned connection command. The
+transport rechecks target, instance, and lease assignment during admission,
+and active reads prevent lease release or expired-lease reassignment.
+The registered command follows the active versioned runtime through an
+owner-private isolated launcher, and releasing the target removes its Picker
+registrations. Registration requires an active provider lease. Create,
+open/resume, and lifecycle operations remain disabled until a later capability
+contract explicitly enables them.
+
+Remove a retired registration without resolving or starting the target:
+
+```bash
+<catalog argv[0]> source-remove restricted-worker-1 --project <project>
+```
 The adapter is single-channel and intended for shell/exec use, not SFTP or VS
 Code Remote-SSH. PTY and targeted disconnect cleanup require compatible
 util-linux `script` and `setsid` helpers in the restricted image.

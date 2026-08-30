@@ -327,6 +327,8 @@ def norm(
     source_kind=source_identity.MACHINE_SSH_KIND,
     source_id=None,
     source_label=None,
+    source_metadata=None,
+    source_capabilities=None,
 ):
     """Normalize one raw worktree dict into the engine's record shape."""
     source_id = source_identity.resolve_id(
@@ -391,15 +393,25 @@ def norm(
     # a bound-but-un-muxed Copilot is the more urgent signal than a follow-up.
     if bare_orphan:
         disp_title = f"⚠ {disp_title}"
+    source = source_identity.metadata(source_kind, source_id, source_label)
+    source.update(source_metadata or {})
+    capabilities = dict(source_capabilities or {})
+    id4 = w["id"][-4:]
     return {
-        "id4": w["id"][-4:],
+        "id4": id4,
+        "selection_id": f"{source_id}\x1f{w['id']}",
         "machine": machine,
         "env": env,
-        "machine_env": f"{machine} {env}",
+        "machine_env": (
+            f"{machine} {env}".strip()
+            if source_kind == source_identity.MACHINE_SSH_KIND
+            else source_label
+        ),
         "source_kind": source_kind,
         "source_id": source_id,
         "source_label": source_label,
-        "source": source_identity.metadata(source_kind, source_id, source_label),
+        "source": source,
+        "source_capabilities": capabilities,
         "title": disp_title,
         "follow_up": follow_up,
         "summary": summary,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import stat
+import threading
 import time
 
 import pytest
@@ -100,6 +101,91 @@ def test_release_by_effort(fleet):
 
 def test_release_missing_returns_false(fleet):
     assert lease_mod.release("nope") is False
+
+
+def test_provider_lease_guard_blocks_release_until_registry_write_finishes(fleet):
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    started = threading.Event()
+    result = []
+
+    def release():
+        started.set()
+        result.append(lease_mod.release("myrepo-1"))
+
+    with lease_mod.provider_lease_guard() as leases:
+        assert [lease.container for lease in leases] == ["myrepo-1"]
+        worker = threading.Thread(target=release)
+        worker.start()
+        assert started.wait(timeout=1)
+        worker.join(timeout=0.05)
+        assert worker.is_alive()
+
+    worker.join(timeout=1)
+    assert not worker.is_alive()
+    assert result == [True]
+
+
+def test_session_admission_binds_lease_and_blocks_release(fleet):
+    lease = lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    assignment = {
+        "kind": "lease",
+        "effort": lease.effort,
+        "acquired_at": lease.acquired_at,
+    }
+
+    with lease_mod.session_admission(
+        "myrepo-1",
+        expected_assignment=assignment,
+    ):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="Cannot release active provider session",
+        ):
+            lease_mod.release("myrepo-1")
+
+    assert lease_mod.release("myrepo-1") is True
+
+
+def test_session_admission_rejects_changed_lease_assignment(fleet):
+    lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+
+    with pytest.raises(
+        lease_mod.ProviderAdmissionError,
+        match="lease assignment changed",
+    ):
+        with lease_mod.session_admission(
+            "myrepo-1",
+            expected_assignment={
+                "kind": "lease",
+                "effort": "effort-b",
+                "acquired_at": 1.0,
+            },
+        ):
+            pass
+
+
+def test_expired_lease_cannot_be_reassigned_during_session_admission(fleet):
+    lease = lease_mod.borrow(fleet, "effort-a", container="myrepo-1")
+    assignment = {
+        "kind": "lease",
+        "effort": lease.effort,
+        "acquired_at": lease.acquired_at,
+    }
+
+    with lease_mod.session_admission(
+        "myrepo-1",
+        expected_assignment=assignment,
+    ):
+        with pytest.raises(
+            lease_mod.ProviderAdmissionError,
+            match="active provider session",
+        ):
+            lease_mod.borrow(
+                fleet,
+                "effort-b",
+                container="myrepo-1",
+                ttl=-1,
+            )
 
 
 def test_reclaim_after_ttl(fleet):
@@ -270,12 +356,19 @@ def test_unconfirmed_action_hold_survives_owner_exit_until_expiry(fleet):
     with lease_mod.deploy_hold(
         "myrepo-1",
         "remove",
-        max_lifetime=0.05,
+        max_lifetime=60,
     ) as hold:
         lease_mod.mark_deploy_hold_uncertain("myrepo-1", hold.token)
 
     assert lease_mod.get_deploy_hold("myrepo-1") is not None
-    time.sleep(0.06)
+    records = json.loads(
+        lease_mod._DEPLOY_HOLDS_FILE.read_text(encoding="utf-8")
+    )
+    records["myrepo-1"]["expires_at"] = time.time() - 1
+    lease_mod._DEPLOY_HOLDS_FILE.write_text(
+        json.dumps(records),
+        encoding="utf-8",
+    )
     assert lease_mod.get_deploy_hold("myrepo-1") is None
 
 

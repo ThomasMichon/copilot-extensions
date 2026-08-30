@@ -60,6 +60,21 @@ this plugin and work standalone; without agent-bridge only bridge addressing
   the direct `docker exec` boundary and receive no SSH key projection. Their
   venue metadata advertises `transport: provider-exec`; a named profile can be
   published with `agent-containers ssh-profile <name> [--alias <alias>]`.
+  Add `--project <project> [--label <label>]` to register the same stable
+  leased provider target as a project-scoped Worktree Picker source. The provider
+  publishes a validated descriptor under `~/.agent-worktrees/sources/`; the
+  Picker refreshes current instance, lease assignment, readiness, and trust
+  metadata through the descriptor's isolated absolute provider command before reading
+  worktrees through an explicit provider-owned `ProxyCommand`. The transport
+  atomically rechecks the target, instance, and assignment at connection
+  admission, and an active read prevents lease release or expired-lease
+  reassignment. Registered commands use an owner-private stable launcher that
+  follows the active runtime in Python isolated mode. Releasing a target removes
+  its Picker registrations. The initial contract is read-only:
+  list, recent-message, session, and refresh operations are advertised, while
+  create and lifecycle actions remain explicitly disabled. Remove a retired
+  registration with `agent-containers source-remove <name> --project <project>`;
+  removal does not require the target to still exist or be running.
   The resulting OpenSSH `ProxyCommand` runs `agent-containers ssh-stdio <name>`,
   which hosts SSH protocol only for that child process's stdio lifetime and
   opens no listener.
@@ -110,6 +125,10 @@ agent-containers lifecycle-clear [name]
 agent-containers exec <name>         # run the ACP launch command (testing)
 agent-containers ssh-profile <name> [--alias <alias>]
                                       # publish a named restricted SSH target
+agent-containers ssh-profile <name> --project <project> [--label <label>]
+                                      # also register a read-only Picker source
+agent-containers source-remove <name> --project <project>
+                                      # remove that Picker source registration
 agent-containers ssh-profile <name> --json
                                       # inspect provider/profile metadata only
 agent-containers config-migrate      # stamp/migrate machine-local containers.yaml

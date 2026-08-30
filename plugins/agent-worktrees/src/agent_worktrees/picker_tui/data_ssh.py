@@ -26,9 +26,11 @@ from __future__ import annotations
 
 import base64
 import datetime as _dt
+import hashlib
 import json
 import logging
 import os
+import shlex
 import signal
 import socket
 import subprocess
@@ -37,7 +39,7 @@ import threading
 from agent_procutil import no_window_flags
 
 from .. import config as cfg
-from . import data_local, derive, roster, source_identity
+from . import data_local, derive, provider_sources, roster, source_identity
 
 # Shared display surface so the engine treats this exactly like ``data_local``.
 # ``LOCAL`` is resolved from the actual local source below (so it carries the
@@ -63,6 +65,7 @@ _ENV_LABEL = {"windows": "Win", "wsl": "WSL", "linux": "Linux"}
 _LIST_ARGS = "list --json --classify --mux-details"
 _LIST_ARGS_WIN = _LIST_ARGS + " --include-other-platforms"
 SOURCE_KIND_MACHINE_SSH = source_identity.MACHINE_SSH_KIND
+SOURCE_KIND_PROVIDER_EXEC = source_identity.PROVIDER_EXEC_KIND
 machine_source_id = source_identity.machine_ssh_id
 _LOG = logging.getLogger(__name__)
 
@@ -80,7 +83,9 @@ class Source:
     def __init__(self, machine, env, argv, *, local=False, ready=True,
                  use_classify=True, timeout=20, alias="", shell="bash",
                  source_kind=SOURCE_KIND_MACHINE_SSH, source_id=None,
-                 source_label=None):
+                 source_label=None, provider="", target_id="", instance_id="",
+                 venue=None, capabilities=None, resolve_argv=None,
+                 connect_argv=None):
         self.machine = machine        # display_name from machines.yaml
         self.env = env                # Win | WSL | Linux
         self.argv = argv              # subprocess argv (None for the local src)
@@ -95,6 +100,13 @@ class Source:
             source_kind, source_id, machine=machine, env=env
         )
         self.source_label = source_label or f"{machine} / {env}"
+        self.provider = provider
+        self.target_id = target_id
+        self.instance_id = instance_id
+        self.venue = dict(venue or {})
+        self.capabilities = dict(capabilities or {})
+        self.resolve_argv = list(resolve_argv or [])
+        self.connect_argv = list(connect_argv or [])
 
     @property
     def key(self):
@@ -373,6 +385,35 @@ def _build_sources():
     if not any(s.local for s in out):
         out.append(Source(data_local.LOCAL[0], data_local.LOCAL[1], None,
                           local=True, ready=True))
+    for registered in provider_sources.load(project):
+        ready = bool(
+            registered.venue.get("ready")
+            and registered.venue.get("posture_verified")
+        )
+        source = Source(
+            "", "", None,
+            ready=ready,
+            alias=registered.alias,
+            shell=registered.shell,
+            source_kind=registered.kind,
+            source_id=registered.source_id,
+            source_label=registered.label,
+            provider=registered.provider,
+            target_id=registered.target_id,
+            instance_id=registered.instance_id,
+            venue=registered.venue,
+            capabilities=registered.capabilities,
+            resolve_argv=registered.resolve_argv,
+            connect_argv=registered.connect_argv,
+        )
+        if ready:
+            source.argv = _provider_remote_argv(
+                source,
+                f"{project} {_list_args(source.shell, classify=True)}",
+                expected_instance_id=source.instance_id,
+                expected_assignment=source.venue.get("assignment"),
+            )
+        out.append(source)
     return _unique_sources(out)
 
 
@@ -380,7 +421,92 @@ def _wrap_remote(shell: str, alias: str, inner: str):
     """SSH argv that runs *inner* under the right login shell on *alias*."""
     if shell == "pwsh":
         return _ssh_argv(alias, _pwsh_remote(inner))
-    return _ssh_argv(alias, f"bash -lc '{inner}'")
+    return _ssh_argv(alias, f"bash -lc {shlex.quote(inner)}")
+
+
+def _remote_arg(shell: str, value: object) -> str:
+    """Quote one argument for the remote login shell."""
+    text = str(value)
+    if shell == "pwsh":
+        return "'" + text.replace("'", "''") + "'"
+    return shlex.quote(text)
+
+
+def _provider_remote_argv(
+    source: Source,
+    inner: str,
+    *,
+    expected_instance_id: str,
+    expected_assignment: dict,
+):
+    """Build SSH argv whose ProxyCommand verifies the displayed provider row."""
+    if not source.connect_argv:
+        raise ValueError("provider source omitted connection command")
+    assignment_json = json.dumps(
+        expected_assignment,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    connect_argv = [
+        *source.connect_argv,
+        "--expected-target-id",
+        source.target_id,
+        "--expected-instance-id",
+        expected_instance_id,
+        "--expected-assignment",
+        assignment_json,
+    ]
+    proxy_command = (
+        subprocess.list2cmdline(connect_argv)
+        if os.name == "nt"
+        else shlex.join(connect_argv)
+    ).replace("%", "%%")
+    remote = (
+        _pwsh_remote(inner)
+        if source.shell == "pwsh"
+        else f"bash -lc {shlex.quote(inner)}"
+    )
+    return [
+        "ssh",
+        *_SSH_HARDENING,
+        "-o",
+        f"ProxyCommand={proxy_command}",
+        "-o",
+        "StrictHostKeyChecking=no",
+        "-o",
+        f"UserKnownHostsFile={'NUL' if os.name == 'nt' else '/dev/null'}",
+        "-o",
+        "GlobalKnownHostsFile=none",
+        "-o",
+        "ClearAllForwardings=yes",
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "ControlPersist=no",
+        "-o",
+        "PubkeyAuthentication=no",
+        "-o",
+        "PasswordAuthentication=no",
+        source.alias,
+        remote,
+    ]
+
+
+def _provider_transport_fingerprint(source) -> str:
+    payload = {
+        "alias": source.alias,
+        "shell": source.shell,
+        "resolve": list(source.resolve_argv),
+        "connect": list(source.connect_argv),
+    }
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _stream_argv(source):
@@ -436,8 +562,19 @@ def _stream_enabled() -> bool:
         "1", "true", "yes", "on")
 
 
-def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
-                   include_conversations=False, force=False):
+def _find_source(machine=None, env=None, *, source_id=None):
+    for source in _build_sources():
+        if source_id is not None:
+            if source.source_id == source_id:
+                return source
+        elif (machine or env) and source.machine == machine and source.env == env:
+            return source
+    return None
+
+
+def remote_op_argv(machine, env, op, worktree_id, *, source_id=None,
+                   include_unused=False, include_conversations=False,
+                   force=False):
     """Build the SSH argv to run one maintenance op on a remote machine/env.
 
     ``op`` is ``"cleanup"``, ``"sync"``, ``"restart"``, or ``"finalize"``.
@@ -446,40 +583,69 @@ def remote_op_argv(machine, env, op, worktree_id, *, include_unused=False,
     the project binstub's JSON per-worktree CLI.
     """
     project = _project()
-    for s in _build_sources():
-        if s.machine == machine and s.env == env:
-            if s.local or not s.ready or not s.alias:
-                return None
-            if op == "cleanup":
-                flags = " --clean --json"
-                if force:
-                    flags += " --force"
-                if include_unused:
-                    flags += " --include-unused"
-                if include_conversations:
-                    flags += " --include-conversations"
-                inner = f"{project} cleanup --worktree-id {worktree_id}{flags}"
-            elif op == "restart":
+    s = _find_source(machine, env, source_id=source_id)
+    if s is not None:
+        if s.source_kind != SOURCE_KIND_MACHINE_SSH:
+            return None
+        if (
+            s.local
+            or not s.ready
+            or not s.alias
+            or not s.capabilities.get(op, s.source_kind == SOURCE_KIND_MACHINE_SSH)
+        ):
+            return None
+        if op == "cleanup":
+            flags = " --clean --json"
+            if force:
+                flags += " --force"
+            if include_unused:
+                flags += " --include-unused"
+            if include_conversations:
+                flags += " --include-conversations"
+            inner = (
+                f"{project} cleanup --worktree-id "
+                f"{_remote_arg(s.shell, worktree_id)}{flags}"
+            )
+        elif op == "restart":
                 # ``restart`` takes the worktree id positionally (not
                 # --worktree-id); the remote graceful double-Ctrl-C / mux
                 # kill-session runs there and reports a single JSON object.
-                inner = f"{project} restart {worktree_id} --json"
-            elif op == "reclaim":
+            inner = (
+                f"{project} restart {_remote_arg(s.shell, worktree_id)} --json"
+            )
+        elif op == "reclaim":
                 # ``reclaim`` reaps the bound Copilot process(es) for the
                 # worktree's session (bare orphans only), reported as JSON.
-                inner = (f"{project} reclaim --worktree-id {worktree_id} "
-                         f"--bare-only --yes --json")
-            elif op == "finalize":
-                # ``finalize`` takes the worktree id positionally (like
-                # ``restart``), not --worktree-id.
-                inner = f"{project} finalize {worktree_id} --json"
-            else:  # sync
-                inner = f"{project} sync --worktree-id {worktree_id} --json"
-            return _wrap_remote(s.shell, s.alias, inner)
+            inner = (
+                f"{project} reclaim --worktree-id "
+                f"{_remote_arg(s.shell, worktree_id)} "
+                f"--bare-only --yes --json"
+            )
+        elif op == "finalize":
+            inner = (
+                f"{project} finalize --worktree-id "
+                f"{_remote_arg(s.shell, worktree_id)} --json"
+            )
+        else:  # sync
+            inner = (
+                f"{project} sync --worktree-id "
+                f"{_remote_arg(s.shell, worktree_id)} --json"
+            )
+        return _wrap_remote(s.shell, s.alias, inner)
     return None
 
 
-def recent_messages_argv(machine, env, worktree_id, *, limit=3):
+def recent_messages_argv(
+    machine,
+    env,
+    worktree_id,
+    *,
+    source_id=None,
+    expected_instance_id=None,
+    expected_assignment=None,
+    expected_transport_fingerprint=None,
+    limit=3,
+):
     """Build the SSH argv to fetch a remote worktree's recent session messages.
 
     Runs ``<project> recent-messages --worktree <id> --limit N --json`` on the
@@ -487,17 +653,61 @@ def recent_messages_argv(machine, env, worktree_id, *, limit=3):
     unknown / not-ready target (the caller loads local worktrees in-process).
     """
     project = _project()
-    for s in _build_sources():
-        if s.machine == machine and s.env == env:
-            if s.local or not s.ready or not s.alias:
+    s = _find_source(machine, env, source_id=source_id)
+    if s is not None:
+        if s.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+            if (
+                not expected_transport_fingerprint
+                or _provider_transport_fingerprint(s)
+                != expected_transport_fingerprint
+            ):
                 return None
-            inner = (f"{project} recent-messages --worktree {worktree_id} "
-                     f"--limit {int(limit)} --json")
-            return _wrap_remote(s.shell, s.alias, inner)
+            try:
+                _resolve_provider_source(s, _run)
+            except (OSError, RuntimeError, ValueError):
+                return None
+            if (
+                not expected_instance_id
+                or s.instance_id != expected_instance_id
+                or not isinstance(expected_assignment, dict)
+                or s.venue.get("assignment") != expected_assignment
+            ):
+                return None
+        if (
+            s.local
+            or not s.ready
+            or not s.alias
+            or not s.capabilities.get(
+                "messages", s.source_kind == SOURCE_KIND_MACHINE_SSH
+            )
+        ):
+            return None
+        inner = (
+            f"{project} recent-messages --worktree "
+            f"{_remote_arg(s.shell, worktree_id)} "
+            f"--limit {int(limit)} --json"
+        )
+        if s.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+            return _provider_remote_argv(
+                s,
+                inner,
+                expected_instance_id=expected_instance_id,
+                expected_assignment=expected_assignment,
+            )
+        return _wrap_remote(s.shell, s.alias, inner)
     return None
 
 
-def list_sessions_argv(machine, env, worktree_id):
+def list_sessions_argv(
+    machine,
+    env,
+    worktree_id,
+    *,
+    source_id=None,
+    expected_instance_id=None,
+    expected_assignment=None,
+    expected_transport_fingerprint=None,
+):
     """Build the SSH argv to list a remote worktree's Copilot sessions.
 
     Runs ``<project> list-sessions --worktree <id> --json`` on the remote host
@@ -506,12 +716,47 @@ def list_sessions_argv(machine, env, worktree_id):
     not-ready target (the caller loads local worktrees in-process).
     """
     project = _project()
-    for s in _build_sources():
-        if s.machine == machine and s.env == env:
-            if s.local or not s.ready or not s.alias:
+    s = _find_source(machine, env, source_id=source_id)
+    if s is not None:
+        if s.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+            if (
+                not expected_transport_fingerprint
+                or _provider_transport_fingerprint(s)
+                != expected_transport_fingerprint
+            ):
                 return None
-            inner = f"{project} list-sessions --worktree {worktree_id} --json"
-            return _wrap_remote(s.shell, s.alias, inner)
+            try:
+                _resolve_provider_source(s, _run)
+            except (OSError, RuntimeError, ValueError):
+                return None
+            if (
+                not expected_instance_id
+                or s.instance_id != expected_instance_id
+                or not isinstance(expected_assignment, dict)
+                or s.venue.get("assignment") != expected_assignment
+            ):
+                return None
+        if (
+            s.local
+            or not s.ready
+            or not s.alias
+            or not s.capabilities.get(
+                "sessions", s.source_kind == SOURCE_KIND_MACHINE_SSH
+            )
+        ):
+            return None
+        inner = (
+            f"{project} list-sessions --worktree "
+            f"{_remote_arg(s.shell, worktree_id)} --json"
+        )
+        if s.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+            return _provider_remote_argv(
+                s,
+                inner,
+                expected_instance_id=expected_instance_id,
+                expected_assignment=expected_assignment,
+            )
+        return _wrap_remote(s.shell, s.alias, inner)
     return None
 
 
@@ -525,6 +770,8 @@ def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
     project = _project()
     for s in _build_sources():
         if s.machine == machine and s.env == env:
+            if s.source_kind != SOURCE_KIND_MACHINE_SSH:
+                return None
             if s.local or not s.ready or not s.alias:
                 return None
             if action == "get":
@@ -538,7 +785,12 @@ def profiles_argv(machine, env, *, action, set_json=None, no_mirror=False):
     return None
 
 
-def machines():
+def source_snapshot():
+    """Capture one source-registry/roster view for a Picker setup pass."""
+    return tuple(_build_sources())
+
+
+def machines(sources=None):
     """Ordered machine-tab descriptors: (label, machine, env, reachable).
 
     ``reachable`` is true only for the local source (always) and for a remote
@@ -549,7 +801,33 @@ def machines():
     """
     return [
         (f"{s.machine} {s.env}", s.machine, s.env, s.ready)
-        for s in _build_sources()
+        for s in (sources if sources is not None else _build_sources())
+        if s.source_kind == SOURCE_KIND_MACHINE_SSH
+    ]
+
+
+def source_tabs(sources=None):
+    """Ordered Picker tab descriptors for physical and provider sources."""
+    return [
+        {
+            "label": (
+                f"{source.machine} {source.env}"
+                if source.source_kind == SOURCE_KIND_MACHINE_SSH
+                else source.source_label
+            ),
+            "machine": source.machine,
+            "env": source.env,
+            "ready": source.ready,
+            "source_kind": source.source_kind,
+            "source_id": source.source_id,
+            "source_label": source.source_label,
+            "provider": source.provider,
+            "target_id": source.target_id,
+            "instance_id": source.instance_id,
+            "venue": dict(source.venue),
+            "capabilities": dict(source.capabilities),
+        }
+        for source in (sources if sources is not None else _build_sources())
     ]
 
 
@@ -665,9 +943,9 @@ def load(machine: str | None = None, env: str | None = None):
     return data_local.load(LOCAL[0], LOCAL[1])
 
 
-def make_loader():
+def make_loader(sources=None):
     """Build the background per-machine loader the engine drives in live mode."""
-    return LiveLoader(_build_sources())
+    return LiveLoader(sources if sources is not None else _build_sources())
 
 
 def _extract_json(text: str):
@@ -839,6 +1117,44 @@ def _remote_cmd_str(argv) -> str:
         return str(argv)
 
 
+def _resolve_provider_source(source: Source, runner) -> bool:
+    """Refresh provider venue metadata and report instance replacement."""
+    if source.source_kind != SOURCE_KIND_PROVIDER_EXEC:
+        return False
+    proc = runner(source.resolve_argv, min(source.timeout, 10))
+    if proc.returncode != 0:
+        lines = (proc.stderr or proc.stdout or "").strip().splitlines()
+        raise RuntimeError(lines[-1] if lines else f"provider resolve exit {proc.returncode}")
+    payload = _extract_json(proc.stdout)
+    venue = payload.get("venue")
+    if not isinstance(venue, dict):
+        raise RuntimeError("provider resolve omitted venue metadata")
+    if (
+        venue.get("provider") != source.provider
+        or venue.get("target_id") != source.target_id
+    ):
+        raise RuntimeError("provider resolve returned a different target identity")
+    instance_id = venue.get("instance_id")
+    if not isinstance(instance_id, str) or not instance_id:
+        raise RuntimeError("provider resolve omitted instance identity")
+    if venue.get("ready") is not True:
+        raise RuntimeError("provider target is not ready")
+    if venue.get("posture_verified") is not True:
+        raise RuntimeError("provider target trust posture is not verified")
+    if venue.get("assignment") != source.venue.get("assignment"):
+        raise RuntimeError("provider target lease assignment changed")
+    changed = bool(source.instance_id and source.instance_id != instance_id)
+    source.instance_id = instance_id
+    source.venue = dict(venue)
+    source.argv = _provider_remote_argv(
+        source,
+        f"{_project()} {_list_args(source.shell, classify=source.use_classify)}",
+        expected_instance_id=instance_id,
+        expected_assignment=venue["assignment"],
+    )
+    return changed
+
+
 def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
            timeout=None):
     """Run one source's list command and return normalized worktree records.
@@ -911,6 +1227,18 @@ def _fetch(source: Source, runner=None, *, classify: bool = True, argv=None,
                 source_kind=source.source_kind,
                 source_id=source.source_id,
                 source_label=source.source_label,
+                source_metadata={
+                    "provider": source.provider,
+                    "target_id": source.target_id,
+                    "instance_id": source.instance_id,
+                    "venue": dict(source.venue),
+                    "transport_fingerprint": (
+                        _provider_transport_fingerprint(source)
+                        if source.source_kind == SOURCE_KIND_PROVIDER_EXEC
+                        else ""
+                    ),
+                },
+                source_capabilities=source.capabilities,
             )
             for w in data.get("worktrees", [])]
 
@@ -942,6 +1270,9 @@ class LiveLoader:
         self._procs = []
         self._procs_lock = threading.Lock()
         self._cancelled = threading.Event()
+        self._source_locks = {
+            source.cache_key: threading.Lock() for source in all_sources
+        }
         # Keys with a silent background refresh in flight (#1421) -- a per-source
         # guard so a slow machine isn't re-hit every poll interval.
         self._refreshing: set = set()
@@ -972,7 +1303,7 @@ class LiveLoader:
         # spinner until its records arrive, exactly like the remotes.
         for s in self._sources:
             threading.Thread(
-                target=self._load_one, args=(s,),
+                target=self._load_one, args=(s, self._gen.get(s.cache_key, 0)),
                 name=f"load-{s.machine}-{s.env}", daemon=True,
             ).start()
 
@@ -996,8 +1327,9 @@ class LiveLoader:
                     # Invalidate any in-flight silent repoll of this source so
                     # its (older) rows can't land after this reload (#1421).
                     self._gen[s.cache_key] = self._gen.get(s.cache_key, 0) + 1
+                    gen = self._gen[s.cache_key]
                 threading.Thread(
-                    target=self._load_one, args=(s,),
+                    target=self._load_one, args=(s, gen),
                     name=f"reload-{s.machine}-{s.env}", daemon=True,
                 ).start()
                 return True
@@ -1022,7 +1354,11 @@ class LiveLoader:
         started = 0
         with self._lock:
             for s in self._sources:
-                if keys is not None and s.key not in keys:
+                if (
+                    keys is not None
+                    and s.key not in keys
+                    and s.source_id not in keys
+                ):
                     continue
                 if self._state.get(s.cache_key) != "ready":
                     continue
@@ -1044,20 +1380,59 @@ class LiveLoader:
         ``gen`` is the source's generation captured when the refresh started;
         the fetched rows are committed only if the generation is unchanged --
         i.e. no :meth:`reload` superseded this refresh while it ran (#1421)."""
+        with self._source_locks[source.cache_key]:
+            self._refresh_one_serial(source, gen)
+
+    def _refresh_one_serial(self, source: Source, gen: int):
+        """Serialized implementation of :meth:`_refresh_one`."""
         try:
             if self._cancelled.is_set():
                 return
-            recs = _fetch(source, runner=self._spawn)
-        except Exception:
-            return  # keep last-good records; no state flip
-        else:
+            changed = False
+            if source.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+                try:
+                    changed = _resolve_provider_source(source, self._spawn)
+                except Exception as exc:
+                    with self._lock:
+                        self._records[source.cache_key] = []
+                        self._state[source.cache_key] = "failed"
+                        self._error[source.cache_key] = (
+                            str(exc).strip() or type(exc).__name__
+                        )
+                    return
+            if changed:
+                with self._lock:
+                    self._records[source.cache_key] = []
+                    self._state[source.cache_key] = "loading"
+            try:
+                recs = _fetch(source, runner=self._spawn)
+            except Exception as exc:
+                if source.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+                    with self._lock:
+                        if changed:
+                            self._state[source.cache_key] = "failed"
+                            self._records[source.cache_key] = []
+                        if (
+                            changed
+                            or self._gen.get(source.cache_key, 0) == gen
+                        ):
+                            self._error[source.cache_key] = (
+                                str(exc).strip() or type(exc).__name__
+                            )
+                return
             with self._lock:
                 # Commit only when still ready, not cancelled, and not
                 # superseded by a newer reload() (generation unchanged).
-                if (not self._cancelled.is_set()
-                        and self._state.get(source.cache_key) == "ready"
-                        and self._gen.get(source.cache_key, 0) == gen):
+                if (
+                    not self._cancelled.is_set()
+                    and (
+                        changed
+                        or self._state.get(source.cache_key) == "ready"
+                    )
+                    and self._gen.get(source.cache_key, 0) == gen
+                ):
                     self._records[source.cache_key] = recs
+                    self._state[source.cache_key] = "ready"
         finally:
             with self._lock:
                 self._refreshing.discard(source.cache_key)
@@ -1083,7 +1458,13 @@ class LiveLoader:
             for s in self._sources:
                 if s.local:
                     continue
-                if keys is not None and s.key not in keys:
+                if s.source_kind != SOURCE_KIND_MACHINE_SSH:
+                    continue
+                if (
+                    keys is not None
+                    and s.key not in keys
+                    and s.source_id not in keys
+                ):
                     continue
                 if self._state.get(s.cache_key) != "ready":
                     continue
@@ -1219,17 +1600,62 @@ class LiveLoader:
             if proc in self._procs:
                 self._procs.remove(proc)
 
-    def _load_one(self, source: Source):
+    def _load_one(self, source: Source, gen: int | None = None):
+        if gen is None:
+            gen = self._gen.get(source.cache_key, 0)
+        with self._source_locks[source.cache_key]:
+            self._load_one_serial(source, gen)
+
+    def _load_one_serial(self, source: Source, gen: int):
         if source.local:
             # Local tab: fast-then-fill so rows paint immediately (see below).
             self._load_local_two_phase(source)
+            return
+        try:
+            changed = _resolve_provider_source(source, self._spawn)
+        except Exception as exc:
+            with self._lock:
+                self._records[source.cache_key] = []
+                self._state[source.cache_key] = "failed"
+                self._error[source.cache_key] = (
+                    str(exc).strip() or type(exc).__name__
+                )
+            return
+        if changed:
+            with self._lock:
+                self._records[source.cache_key] = []
+        if source.source_kind == SOURCE_KIND_PROVIDER_EXEC:
+            try:
+                recs = _fetch(source, runner=self._spawn)
+            except Exception as exc:
+                with self._lock:
+                    if self._gen.get(source.cache_key, 0) != gen:
+                        return
+                    has_last_good = (
+                        not changed
+                        and bool(self._records.get(source.cache_key))
+                    )
+                    self._state[source.cache_key] = (
+                        "ready" if has_last_good else "failed"
+                    )
+                    self._error[source.cache_key] = (
+                        str(exc).strip() or type(exc).__name__
+                    )
+                return
+            with self._lock:
+                if (
+                    not self._cancelled.is_set()
+                    and self._gen.get(source.cache_key, 0) == gen
+                ):
+                    self._records[source.cache_key] = recs
+                    self._state[source.cache_key] = "ready"
+                    self._error[source.cache_key] = ""
             return
         # Remote tab: try single-connection NDJSON streaming -- fast rows paint
         # as they arrive, then each upgrades in place as its classified row
         # streams in. Opt-in (see _stream_enabled) during the rollout window;
         # falls back to the two-phase path when disabled or when the remote is
         # too old to know --stream.
-        gen = self._gen.get(source.cache_key, 0)
         if _stream_enabled() and self._load_remote_stream(source, gen):
             return
         self._load_remote_two_phase(source)
@@ -1287,6 +1713,13 @@ class LiveLoader:
                         source_kind=source.source_kind,
                         source_id=source.source_id,
                         source_label=source.source_label,
+                        source_metadata={
+                            "provider": source.provider,
+                            "target_id": source.target_id,
+                            "instance_id": source.instance_id,
+                            "venue": dict(source.venue),
+                        },
+                        source_capabilities=source.capabilities,
                     )
                     with self._lock:
                         if self._cancelled.is_set():

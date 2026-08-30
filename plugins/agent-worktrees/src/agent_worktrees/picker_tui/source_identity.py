@@ -4,6 +4,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 MACHINE_SSH_KIND = "machine-ssh"
+PROVIDER_EXEC_KIND = "provider-exec"
 
 
 def machine_ssh_id(machine: str, env: str) -> str:
@@ -11,6 +12,17 @@ def machine_ssh_id(machine: str, env: str) -> str:
     machine_part = quote(machine.strip().casefold(), safe="-._~")
     env_part = quote(env.strip().casefold(), safe="-._~")
     return f"{MACHINE_SSH_KIND}:{machine_part}:{env_part}"
+
+
+def provider_exec_id(provider: str, target_id: str) -> str:
+    """Return the canonical identity for one provider-owned execution target."""
+    provider_value = provider.strip()
+    target_value = target_id.strip()
+    if not provider_value or not target_value:
+        raise ValueError("provider and target_id must be non-empty")
+    provider_part = quote(provider_value.casefold(), safe="-._~")
+    target_part = quote(target_value, safe="-._~")
+    return f"{PROVIDER_EXEC_KIND}:{provider_part}:{target_part}"
 
 
 def resolve_id(

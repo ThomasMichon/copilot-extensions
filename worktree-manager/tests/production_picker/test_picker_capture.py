@@ -119,7 +119,9 @@ def test_native_list_multiselect_grid_parity(monkeypatch, tmp_path):
     _isolate_pivots(monkeypatch, tmp_path)
 
     async def _mark(scr, pilot):
-        scr.wt_sel.replace({"aaaa", "bbbb"})
+        scr.wt_sel.replace({
+            row["selection_id"] for row in scr.list_records()[:2]
+        })
         scr.refresh()
         await pilot.pause()
 
