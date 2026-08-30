@@ -222,6 +222,8 @@ def _command(
     expected_install_generation: int | str = 2,
     expected_payload_root: Path | None = None,
     expected_payload_version: str | None = None,
+    expected_current_version: str | None = None,
+    expect_current_absent: bool = False,
 ) -> list[str]:
     _, prefix, style = runner
     command = [
@@ -238,7 +240,7 @@ def _command(
         _flag(style, "snapshot-id"),
         snapshot_id,
     ]
-    if action == "snapshot-stamp":
+    if action in {"snapshot-stamp", "slot-cutover"}:
         command.extend(
             [
                 _flag(style, "expected-namespace-generation"),
@@ -252,6 +254,7 @@ def _command(
         "slot-validate",
         "slot-complete",
         "slot-completion-validate",
+        "slot-cutover",
     }:
         command.extend(
             [
@@ -273,6 +276,16 @@ def _command(
                     expected_payload_version,
                 ]
             )
+    if action == "slot-cutover":
+        if expected_current_version is not None:
+            command.extend(
+                [
+                    _flag(style, "expected-current-version"),
+                    expected_current_version,
+                ]
+            )
+        elif expect_current_absent or expected_current_version is None:
+            command.append(_flag(style, "expect-current-absent"))
     return command
 
 
@@ -287,6 +300,8 @@ def _run(
     expected_install_generation: int | str = 2,
     expected_payload_root: Path | None = None,
     expected_payload_version: str | None = None,
+    expected_current_version: str | None = None,
+    expect_current_absent: bool = False,
     environment_overrides: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
@@ -306,6 +321,8 @@ def _run(
             expected_install_generation=expected_install_generation,
             expected_payload_root=expected_payload_root,
             expected_payload_version=expected_payload_version,
+            expected_current_version=expected_current_version,
+            expect_current_absent=expect_current_absent,
         ),
         capture_output=True,
         text=True,
@@ -449,9 +466,12 @@ def _build_receipt(
     pid: object = 123,
     payload_hash: object | None = None,
 ) -> Path:
+    install = json.loads(Path(layout["install"]).read_text(encoding="utf-8"))
+    versions_root = (
+        Path(layout["plugin_root"]) / str(install["roots"]["versions"])
+    )
     path = (
-        Path(layout["plugin_root"])
-        / "versions"
+        versions_root
         / runtime_version
         / ".install-complete.json"
     )
@@ -490,6 +510,32 @@ def _run_completion(
         expected_payload_root=expected_payload_root or Path(layout["payload"]),
         expected_payload_version=expected_payload_version or _payload_version(layout),
         environment_overrides=environment_overrides,
+        check=check,
+    )
+
+
+def _run_cutover(
+    runner: Runner,
+    layout: dict[str, Path | str],
+    *,
+    runtime_version: str = "3.4.5",
+    expected_namespace_generation: int | str = 1,
+    expected_install_generation: int | str = 2,
+    expected_current_version: str | None = None,
+    expect_current_absent: bool = False,
+    check: bool = True,
+) -> subprocess.CompletedProcess[str]:
+    return _run(
+        runner,
+        "slot-cutover",
+        layout,
+        runtime_version=runtime_version,
+        expected_namespace_generation=expected_namespace_generation,
+        expected_install_generation=expected_install_generation,
+        expected_payload_root=Path(layout["payload"]),
+        expected_payload_version=_payload_version(layout),
+        expected_current_version=expected_current_version,
+        expect_current_absent=expect_current_absent,
         check=check,
     )
 
@@ -4075,6 +4121,501 @@ def test_python_api_publishes_and_validates_runtime_slot_completion(
     assert validated["receipt"] == first["receipt"]
     assert validated["activated"] is False
     assert validated["operative"] is False
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_tracks_selected_last_known_good(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    plugin_root = Path(layout["plugin_root"])
+    _prepare_completion_slot(layout, runtime_version="1.0.0")
+    _run_completion(runner, "slot-complete", layout, runtime_version="1.0.0")
+
+    initial = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            runtime_version="1.0.0",
+            expect_current_absent=True,
+        ).stdout
+    )
+
+    assert initial["currentVersion"] == "1.0.0"
+    assert initial["lastKnownGoodVersion"] == "1.0.0"
+    assert initial["activated"] is False
+    assert initial["operative"] is False
+
+    _prepare_completion_slot(layout, runtime_version="2.0.0")
+    _run_completion(runner, "slot-complete", layout, runtime_version="2.0.0")
+    updated = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            runtime_version="2.0.0",
+            expected_current_version="1.0.0",
+        ).stdout
+    )
+
+    assert updated["previousVersion"] == "1.0.0"
+    assert updated["currentVersion"] == "2.0.0"
+    assert updated["lastKnownGoodVersion"] == "2.0.0"
+    assert (plugin_root / "current-version").read_text(encoding="utf-8") == "2.0.0\n"
+    assert (plugin_root / "last-known-good").read_text(encoding="utf-8") == "2.0.0\n"
+
+    before_repeat = {
+        name: (plugin_root / name).read_bytes()
+        for name in ("current-version", "last-known-good")
+    }
+    repeated = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            runtime_version="2.0.0",
+            expected_current_version="2.0.0",
+        ).stdout
+    )
+    assert repeated["cutoverChanged"] is False
+    assert repeated["reason"] == "runtime-slot-cutover-current"
+    assert {
+        name: (plugin_root / name).read_bytes()
+        for name in ("current-version", "last-known-good")
+    } == before_repeat
+
+    rolled_back = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            runtime_version="1.0.0",
+            expected_current_version="2.0.0",
+        ).stdout
+    )
+
+    assert rolled_back["previousVersion"] == "2.0.0"
+    assert rolled_back["currentVersion"] == "1.0.0"
+    assert rolled_back["lastKnownGoodVersion"] == "1.0.0"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize(
+    ("stale_kind", "expected_namespace_generation", "expected_current_version"),
+    (
+        ("generation-changed", 3, "1.0.0"),
+        ("current-version-changed", 1, "9.9.9"),
+    ),
+)
+def test_runtime_slot_cutover_cas_mismatch_does_not_mutate_markers(
+    runner: Runner,
+    stale_kind: str,
+    expected_namespace_generation: int,
+    expected_current_version: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    plugin_root = Path(layout["plugin_root"])
+    _prepare_completion_slot(layout, runtime_version="1.0.0")
+    _run_completion(runner, "slot-complete", layout, runtime_version="1.0.0")
+    _run_cutover(
+        runner,
+        layout,
+        runtime_version="1.0.0",
+        expect_current_absent=True,
+    )
+    before = {
+        name: (plugin_root / name).read_bytes()
+        for name in ("current-version", "last-known-good")
+    }
+    _prepare_completion_slot(layout, runtime_version="2.0.0")
+    _run_completion(runner, "slot-complete", layout, runtime_version="2.0.0")
+
+    result = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            runtime_version="2.0.0",
+            expected_namespace_generation=expected_namespace_generation,
+            expected_current_version=expected_current_version,
+        ).stdout
+    )
+
+    assert result["status"] == "revalidation-required"
+    assert result["reason"] == stale_kind
+    assert result["cutoverChanged"] is False
+    assert {
+        name: (plugin_root / name).read_bytes()
+        for name in ("current-version", "last-known-good")
+    } == before
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("marker_name", ("current-version", "last-known-good"))
+def test_runtime_slot_cutover_rejects_malformed_markers(
+    runner: Runner,
+    marker_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    marker = Path(layout["plugin_root"]) / marker_name
+    marker.write_text("3.4.5\n\n", encoding="utf-8")
+    before = marker.read_bytes()
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=(marker_name == "last-known-good"),
+        expected_current_version=(
+            "3.4.5" if marker_name == "current-version" else None
+        ),
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "exactly one runtime version" in result.stderr.lower()
+    assert marker.read_bytes() == before
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_rejects_oversized_marker(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    marker = Path(layout["plugin_root"]) / "last-known-good"
+    marker.write_bytes(b"x" * 131)
+    before = marker.read_bytes()
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert marker.read_bytes() == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX symbolic-link behavior")
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("marker_name", ("current-version", "last-known-good"))
+def test_runtime_slot_cutover_rejects_linked_markers(
+    runner: Runner,
+    marker_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    marker = Path(layout["plugin_root"]) / marker_name
+    target = tmp_path / f"outside-{marker_name}"
+    target.write_text("3.4.5\n", encoding="utf-8")
+    marker.symlink_to(target)
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=(marker_name == "last-known-good"),
+        expected_current_version=(
+            "3.4.5" if marker_name == "current-version" else None
+        ),
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "symbolic link or reparse point" in result.stderr.lower()
+    assert marker.is_symlink()
+    assert target.read_text(encoding="utf-8") == "3.4.5\n"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("marker_name", ("current-version", "last-known-good"))
+def test_runtime_slot_cutover_rejects_directory_markers(
+    runner: Runner,
+    marker_name: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    marker = Path(layout["plugin_root"]) / marker_name
+    marker.mkdir()
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=(marker_name == "last-known-good"),
+        expected_current_version=(
+            "3.4.5" if marker_name == "current-version" else None
+        ),
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert marker.is_dir()
+    assert list(marker.iterdir()) == []
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_serializes_concurrent_winners(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    for version in ("1.0.0", "2.0.0", "3.0.0"):
+        _prepare_completion_slot(layout, runtime_version=version)
+        _run_completion(runner, "slot-complete", layout, runtime_version=version)
+    _run_cutover(
+        runner,
+        layout,
+        runtime_version="1.0.0",
+        expect_current_absent=True,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        completed = list(
+            executor.map(
+                lambda version: _run_cutover(
+                    runner,
+                    layout,
+                    runtime_version=version,
+                    expected_current_version="1.0.0",
+                ),
+                ("2.0.0", "3.0.0"),
+            )
+        )
+    results = [json.loads(result.stdout) for result in completed]
+
+    assert sorted(result["status"] for result in results) == [
+        "ready",
+        "revalidation-required",
+    ]
+    winner = next(result for result in results if result["status"] == "ready")
+    loser = next(
+        result for result in results
+        if result["status"] == "revalidation-required"
+    )
+    assert loser["reason"] == "current-version-changed"
+    assert winner["lastKnownGoodVersion"] == winner["runtimeVersion"]
+    assert (
+        Path(layout["plugin_root"]) / "current-version"
+    ).read_text(encoding="utf-8").strip() == winner["runtimeVersion"]
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_requires_immutable_completion(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _stamp_with_python(layout)
+    _provision_slot_with_python(layout)
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "runtime slot completion must exist" in result.stderr.lower()
+    assert not (Path(layout["plugin_root"]) / "current-version").exists()
+    assert not (Path(layout["plugin_root"]) / "last-known-good").exists()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_requires_active_current_receipts(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["state"] = "removing"
+    _write_json(install_path, install)
+
+    result = _run_cutover(
+        runner,
+        layout,
+        expect_current_absent=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "requires active namespace and install receipts" in result.stderr.lower()
+    assert not (Path(layout["plugin_root"]) / "current-version").exists()
+    assert not (Path(layout["plugin_root"]) / "last-known-good").exists()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_normalizes_expected_generations(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+
+    result = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            expected_namespace_generation="01",
+            expected_install_generation="002",
+            expect_current_absent=True,
+        ).stdout
+    )
+
+    assert result["status"] == "ready"
+    assert result["namespaceGeneration"] == 1
+    assert result["installGeneration"] == 2
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_accepts_existing_crlf_markers(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    plugin_root = Path(layout["plugin_root"])
+    for name in ("current-version", "last-known-good"):
+        (plugin_root / name).write_bytes(b"3.4.5\r\n")
+
+    result = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            expected_current_version="3.4.5",
+        ).stdout
+    )
+
+    assert result["status"] == "ready"
+    assert result["cutoverChanged"] is False
+    for name in ("current-version", "last-known-good"):
+        assert (plugin_root / name).read_bytes() == b"3.4.5\r\n"
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+def test_runtime_slot_cutover_uses_versions_root_parent(
+    runner: Runner,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    install_path = Path(layout["install"])
+    install = json.loads(install_path.read_text(encoding="utf-8"))
+    install["roots"]["versions"] = "runtime/versions"
+    _write_json(install_path, install)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+
+    result = json.loads(
+        _run_cutover(
+            runner,
+            layout,
+            expect_current_absent=True,
+        ).stdout
+    )
+
+    runtime_root = Path(layout["plugin_root"]) / "runtime"
+    assert Path(result["currentMarker"]) == runtime_root / "current-version"
+    assert Path(result["lastKnownGoodMarker"]) == runtime_root / "last-known-good"
+    assert (runtime_root / "current-version").read_text(encoding="utf-8") == "3.4.5\n"
+    assert not (Path(layout["plugin_root"]) / "current-version").exists()
+
+
+@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("expectation_shape", ("both", "neither"))
+def test_runtime_slot_cutover_cli_requires_exactly_one_current_expectation(
+    runner: Runner,
+    expectation_shape: str,
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(runner, "slot-complete", layout)
+    command = _command(
+        runner,
+        "slot-cutover",
+        layout,
+        expected_payload_root=Path(layout["payload"]),
+        expected_payload_version=_payload_version(layout),
+        expected_current_version=(
+            "3.4.5" if expectation_shape == "both" else None
+        ),
+    )
+    absent_flag = _flag(runner[2], "expect-current-absent")
+    if expectation_shape == "both":
+        command.append(absent_flag)
+    else:
+        command.remove(absent_flag)
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=os.environ.copy(),
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+
+def test_python_api_requires_exact_runtime_slot_cutover_expectation(
+    tmp_path: Path,
+) -> None:
+    layout = _receipt_layout(tmp_path)
+    _prepare_completion_slot(layout)
+    _run_completion(RUNNERS[0], "slot-complete", layout)
+    module = _load_python_module()
+    arguments = {
+        "context": layout["install"],
+        "expected_marketplace_id": layout["marketplace_id"],
+        "expected_plugin_id": layout["plugin_id"],
+        "expected_payload_root": layout["payload"],
+        "expected_payload_version": "1.0.0",
+        "snapshot_id": "1.0.0",
+        "runtime_version": "3.4.5",
+        "expected_namespace_generation": 1,
+        "expected_install_generation": 2,
+        "durable_home": layout["durable"],
+        "environment": {},
+    }
+
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Specify exactly one",
+    ):
+        module.cutover_runtime_slot(**arguments)
+    with pytest.raises(
+        module.InstallationContextError,
+        match="Specify exactly one",
+    ):
+        module.cutover_runtime_slot(
+            **arguments,
+            expected_current_version="1.0.0",
+            expect_current_absent=True,
+        )
+    with pytest.raises(
+        module.InstallationContextError,
+        match="signed 64-bit maximum",
+    ):
+        module.cutover_runtime_slot(
+            **{
+                **arguments,
+                "expected_namespace_generation": 9223372036854775808,
+            },
+            expect_current_absent=True,
+        )
 
 
 @pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
