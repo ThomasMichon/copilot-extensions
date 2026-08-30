@@ -153,8 +153,9 @@ task is still queued and unowned, no `reserving`/`spawned` reservation exists,
 and at least three (or the explicitly higher threshold) failed attempts remain.
 It changes those rows to `rearmed`, appends the operator reason to their audit
 detail and the task event trail, then makes exactly one fresh reservation
-attempt eligible. A racing claim or reservation wins the SQLite write lock and
-causes the rearm to fail without mutation.
+attempt eligible. If a racing claim or reservation acquires the SQLite write lock
+first, the rearm fails without mutation; if the rearm linearizes first, the
+later claim or reservation observes the rearmed state normally.
 
 Dead-letter visibility is set-oriented: a supervisor logs one bounded,
 actionable summary when its blocked task set changes, rather than repeating one
