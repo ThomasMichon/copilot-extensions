@@ -507,6 +507,25 @@ class DispatchClient:
             self._http.post(f"/spawn-reservations/{key}/settle", json={"detail": detail})
         )
 
+    def rearm_spawn(
+        self,
+        task_id: str,
+        *,
+        permitted: bool = False,
+        reason: str | None = None,
+        min_failures: int = 3,
+    ) -> dict:
+        return self._unwrap(
+            self._http.post(
+                f"/spawn-reservations/tasks/{task_id}/rearm",
+                json={
+                    "permitted": permitted,
+                    "reason": reason,
+                    "min_failures": min_failures,
+                },
+            )
+        )
+
     def list_reservations(
         self,
         *,

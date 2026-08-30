@@ -159,7 +159,22 @@ def test_build_server_registers_tools():
     } <= names
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= names
     assert "dispatch_wakes" in names
+    assert "dispatch_rearm_spawn" in names
     complete = next(t for t in registered if t.name == "dispatch_complete")
     result_schema = complete.input_schema["properties"]["result"]
     variants = result_schema.get("anyOf", [result_schema])
     assert {variant.get("type") for variant in variants} == {"array", "object"}
+
+
+def test_rearm_spawn(tools, server_url):
+    task = tools.create("work")
+    client = DispatchClient(server_url)
+    for _ in range(3):
+        reservation = client.reserve_spawn(task["id"])["reservation"]
+        client.fail_spawn(reservation["key"], detail="down")
+
+    result = tools.rearm_spawn(
+        task["id"], permit=True, reason="transport repaired"
+    )
+
+    assert result["rearmed"] == 3
