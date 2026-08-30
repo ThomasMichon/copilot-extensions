@@ -131,6 +131,18 @@ needs; P1 establishes the final shared launch inputs; P2 freezes those contracts
 as executable evidence before P3/P4 alter lifecycle and failure behavior; P5 is
 last so naming follows the proven abstraction rather than predicting it.
 
+## Deferred Backlog Intake
+
+- [ ] Accept venue-parity candidates only through
+  [`migration-intake`](../migration-intake/README.md)'s deduplication and
+  ownership gate.
+- [ ] Revalidate accepted technical scope against the current transport,
+  lifecycle, and authentication contracts; return obsolete or unsafe candidates
+  for explicit disposition.
+- [ ] Place each accepted public tracker item in exactly one workstream,
+  extending this plan before implementation when necessary.
+- [ ] Use synthetic venue identities and redact environment-specific evidence.
+
 ## Validation Plan
 
 - **Container repro is the acceptance gate.** For each shared-core change, a fleet

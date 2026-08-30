@@ -217,6 +217,17 @@ reachable when their ownership is explicit.
 - [ ] Turn the report-only guards blocking after all runtime plugins conform.
 - [ ] Document rollback and retention of legacy state and inactive cells.
 
+### Phase 7 — Reconcile deferred backlog
+
+- [ ] Accept installation and marketplace candidates only through
+      [`migration-intake`](../migration-intake/README.md)'s deduplication and
+      ownership gate.
+- [ ] Revalidate accepted technical scope against the current installation-cell
+      contract; return obsolete or unsafe candidates for explicit disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+      extending this plan before implementation when necessary.
+- [ ] Keep examples synthetic and distribution-neutral.
+
 ## Validation Plan
 
 - [ ] Run two marketplace cells containing the same plugin name and version

@@ -267,6 +267,18 @@ mount, credential relay, merge authority, or deployment authority.
 - [ ] Update architecture, transport, command catalogs, install contracts, and
       public operator docs.
 
+### Phase 9 — Reconcile deferred backlog
+
+- [ ] Accept restricted-venue candidates only through
+      [`migration-intake`](../migration-intake/README.md)'s deduplication and
+      ownership gate.
+- [ ] Revalidate accepted technical scope against the current provider,
+      transport, and security contracts; return obsolete or unsafe candidates
+      for explicit disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+      extending this plan before implementation when necessary.
+- [ ] Use synthetic venue identities and scrubbed evidence in reproductions.
+
 ## Validation Plan
 
 - [ ] Provider list/resolve returns one stable target identity and effective

@@ -11,6 +11,10 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266 |
+| [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
+| [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
+| [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Draft | See effort |
+| [Review Automation Reliability](active/review-automation-reliability/README.md) | Draft | See effort |
 | [Worktree Finality and Obligations](active/worktree-finality-and-obligations/README.md) | Draft | #1312 |
 | [Marketplace-Scoped Installations](active/marketplace-scoped-installations/README.md) | Active | #1096 |
 | [Native-Construct Convergence](active/native-construct-convergence/README.md) | Active | #985 |

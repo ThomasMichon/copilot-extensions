@@ -171,6 +171,18 @@ realized in `main`; unchecked items are the remaining delta.
       git-referenced presets. Closes installer §`health-doctoring-and-validation`,
       §`plugin-updating-and-alignment`, §`git-referenced-presets`.
 
+### Phase 8 — Reconcile deferred backlog
+
+- [ ] Accept manager and worktree-control candidates only through
+      [`migration-intake`](../migration-intake/README.md)'s deduplication and
+      ownership gate.
+- [ ] Revalidate accepted technical scope against the current installer, picker,
+      and engine contracts; return obsolete or unsafe candidates for explicit
+      disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+      extending this plan before implementation when necessary.
+- [ ] Keep configuration examples synthetic and repository-neutral.
+
 ## Validation
 
 - **Headless render + golden checks.** The Manager Picker's `capture_svg` renders

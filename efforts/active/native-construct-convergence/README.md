@@ -111,6 +111,18 @@ preserves every existing harness capability before it lands.
       native-convergence §Concepts/native-cloud-steering and
       §Features/`ride-native-identity-and-steering`.
 
+### Phase E — Reconcile deferred backlog
+
+- [ ] Accept native-convergence candidates only through
+      [`migration-intake`](../migration-intake/README.md)'s deduplication and
+      ownership gate.
+- [ ] Revalidate accepted technical scope against released host capabilities and
+      the current architecture; return obsolete or unsafe candidates for explicit
+      disposition.
+- [ ] Place each accepted public tracker item in exactly one existing phase,
+      extending this plan before implementation when necessary.
+- [ ] Keep reproductions limited to public host behavior and synthetic data.
+
 ## Validation
 
 - **No-regression gate per phase.** Before a phase lands, exercise the harness
