@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import subprocess
@@ -661,7 +662,12 @@ def cmd_get(args):
     # Tier 0: the persistent on-disk cache. Consulted first unless --refresh,
     # and authoritatively (no daemon contact) when --cache-only.
     if cache.enabled and not refresh:
-        cached = cache.get(cache_entry, field, max_age_seconds=max_cache_age)
+        cached = cache.get(
+            cache_entry,
+            field,
+            max_age_seconds=max_cache_age,
+            legacy_entry=entry,
+        )
         if cached is not None:
             print(cached)
             return 0
@@ -681,15 +687,32 @@ def cmd_get(args):
     }
     if getattr(args, "prompt", False):
         request["allow_prompt"] = True
-    resp = send_command(request, timeout=None)
-    if resp and resp.get("ok"):
-        value = resp["value"]
-        if cache.enabled:
-            generation = resp.get("generation")
-            if generation is None:
-                cache.put(cache_entry, field, value)
-            else:
-                cache.put(cache_entry, field, value, int(generation))
+    authoritative = refresh or max_cache_age is not None
+    read_lock = (
+        cache.replacement_lock()
+        if authoritative
+        else contextlib.nullcontext()
+    )
+    succeeded = False
+    with read_lock:
+        resp = send_command(request, timeout=None)
+        if resp and resp.get("ok"):
+            value = resp["value"]
+            succeeded = True
+            if cache.enabled:
+                generation = resp.get("generation")
+                if authoritative:
+                    cache.reconcile_authoritative(
+                        cache_entry,
+                        field,
+                        value,
+                        int(generation) if generation is not None else None,
+                    )
+                elif generation is None:
+                    cache.put(cache_entry, field, value)
+                else:
+                    cache.put(cache_entry, field, value, int(generation))
+    if succeeded:
         print(value)
         return 0
 
@@ -916,6 +939,7 @@ def cmd_set_password(args):
         args.entry,
         config.resolve_context().group,
     )
+    persistent.migrate_entry(args.entry, cache_entry, "password")
     with persistent.replacement_lock():
         pending = persistent.pending_replace(cache_entry, "password")
         if pending is not None:
@@ -1384,24 +1408,38 @@ def cmd_cache_populate(args):
     for entry, field in pairs:
         action = "has" if args.verify else "get"
         request = {"action": action, "entry": entry, "field": field}
+        if not args.verify:
+            request["refresh"] = True
         if args.prompt and not args.verify:
             request["allow_prompt"] = True
-        resp = send_command(request, timeout=None if args.prompt else 15.0)
-        present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
-        if present:
-            ok += 1
-            # Warm the persistent cache too, so the value survives daemon
-            # restarts and answers later --cache-only reads.
-            if not args.verify and cache.enabled and resp.get("value") is not None:
+        read_lock = (
+            cache.replacement_lock()
+            if not args.verify
+            else contextlib.nullcontext()
+        )
+        with read_lock:
+            resp = send_command(request, timeout=None if args.prompt else 15.0)
+            present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
+            if (
+                present
+                and not args.verify
+                and cache.enabled
+                and resp.get("value") is not None
+            ):
                 cache_entry = config.normalize_entry(
                     entry,
                     config.resolve_context().group,
                 )
+                cache.migrate_entry(entry, cache_entry, field)
                 generation = resp.get("generation")
-                if generation is None:
-                    cache.put(cache_entry, field, resp["value"])
-                else:
-                    cache.put(cache_entry, field, resp["value"], int(generation))
+                cache.reconcile_authoritative(
+                    cache_entry,
+                    field,
+                    resp["value"],
+                    int(generation) if generation is not None else None,
+                )
+        if present:
+            ok += 1
         else:
             missing.append(f"{entry} [{field}]")
 
