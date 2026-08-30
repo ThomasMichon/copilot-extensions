@@ -138,7 +138,7 @@ def _version_key(version: str):
     if supported:
         major, minor, patch, dev = supported.groups()
         return (
-            0,
+            1,
             int(major),
             int(minor),
             int(patch),
@@ -146,7 +146,7 @@ def _version_key(version: str):
             int(dev or 0),
         )
     tokens = re.split(r"(\d+)", version.casefold())
-    return (1, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
+    return (0, tuple((1, int(t)) if t.isdigit() else (0, t) for t in tokens))
 
 
 def _runtime_candidates(root: Path) -> list[Path]:

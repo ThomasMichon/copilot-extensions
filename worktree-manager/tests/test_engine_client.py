@@ -348,6 +348,41 @@ def test_installed_engine_command_rejects_marker_path_escape(
     ]
 
 
+def test_installed_engine_command_prefers_versions_over_stray_directories(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / ".agent-worktrees"
+    versions = root / "versions"
+    legitimate = versions / "1.2.3"
+    legit_python = (
+        legitimate / ("Scripts/python.exe" if ec.os.name == "nt" else "bin/python")
+    )
+    legit_python.parent.mkdir(parents=True)
+    legit_python.write_text("", encoding="utf-8")
+    (legitimate / ".install-complete.json").write_text("{}", encoding="utf-8")
+
+    stray = versions / "zzz"
+    stray_python = stray / (
+        "Scripts/python.exe" if ec.os.name == "nt" else "bin/python"
+    )
+    stray_python.parent.mkdir(parents=True)
+    stray_python.write_text("", encoding="utf-8")
+    (stray / ".install-complete.json").write_text("{}", encoding="utf-8")
+
+    (root / "current-version").write_text("missing", encoding="utf-8")
+    (root / "deploy-manifest.json").write_text(
+        json.dumps({
+            "service": "agent-worktrees",
+            "source": {"plugin": "agent-worktrees", "version": "1.2.3"},
+        }),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    assert ec.installed_engine_command() == [
+        str(legit_python), "-m", "agent_worktrees"
+    ]
+
+
 def test_run_json_can_preserve_structured_nonzero_result(monkeypatch):
     payload = {"ok": False, "reason": "in use"}
     _install_fake(
