@@ -403,10 +403,10 @@ watchdog (#1757), a stranded survivor self-heals even if no deploy is re-run.
 uvicorn process alive while its loopback listener no longer serves. The
 independent health watchdog treats a sustained Windows failure as terminal
 after a short bounded grace, schedules a detached replacement from the same
-versioned runtime, and then hard-exits the wedged frontend to release the
-singleton lock. Session Hosts remain independent and the replacement frontend
-reattaches them from the durable ledger; recovery does not wait for a later CLI
-command to notice the dead endpoint.
+versioned runtime with the original `start` flags, and then hard-exits the
+wedged frontend to release the singleton lock. Session Hosts remain independent
+and the replacement frontend reattaches them from the durable ledger; recovery
+does not wait for a later CLI command to notice the dead endpoint.
 
 ### Installer wiring (both platforms)
 

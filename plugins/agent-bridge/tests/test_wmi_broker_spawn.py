@@ -116,13 +116,17 @@ def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
         m, "_spawn_detached_argv", lambda argv: captured.setdefault("argv", argv)
     )
 
-    m._spawn_watchdog_replacement(delay=1.5)
+    m._spawn_watchdog_replacement(
+        delay=1.5,
+        start_args=["start", "--passive", "--idle-shutdown", "30"],
+    )
 
     argv = captured["argv"]
     assert argv[0] == r"C:\venv\pythonw.exe"
     assert argv[1] == "-c"
     assert "agent_bridge" in argv[2]
     assert argv[3] == "1.5"
+    assert argv[4:] == ["start", "--passive", "--idle-shutdown", "30"]
 
 
 def test_watchdog_dead_schedules_replacement_before_exit(monkeypatch):

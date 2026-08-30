@@ -1143,19 +1143,29 @@ def _spawn_detached_daemon() -> None:
     _spawn_detached_argv(_daemon_launch_argv())
 
 
-def _spawn_watchdog_replacement(*, delay: float = 1.0) -> None:
+def _spawn_watchdog_replacement(
+    *, delay: float = 1.0, start_args: list[str] | None = None
+) -> None:
     """Schedule a fresh daemon after the wedged Windows process releases its lock.
 
     The helper is detached before the watchdog hard-exits. It waits briefly so
-    the kernel can release the singleton, then replaces itself with the normal
-    ``agent-bridge start`` entrypoint from this versioned runtime.
+    the kernel can release the singleton, then replaces itself with the same
+    ``agent-bridge start`` invocation from this versioned runtime, preserving
+    flags such as ``--passive`` and ``--idle-shutdown``.
     """
     code = (
         "import os,sys,time;"
         "time.sleep(float(sys.argv[1]));"
-        "os.execv(sys.executable,[sys.executable,'-m','agent_bridge','start'])"
+        "os.execv(sys.executable,[sys.executable,'-m','agent_bridge',*sys.argv[2:]])"
     )
-    argv = [windowless_python(sys.executable), "-c", code, str(delay)]
+    original_args = list(sys.argv[1:] if start_args is None else start_args)
+    argv = [
+        windowless_python(sys.executable),
+        "-c",
+        code,
+        str(delay),
+        *original_args,
+    ]
     _spawn_detached_argv(argv)
 
 
