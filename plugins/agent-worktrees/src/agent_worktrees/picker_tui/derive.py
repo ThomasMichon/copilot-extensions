@@ -399,11 +399,7 @@ def norm(
     id4 = w["id"][-4:]
     return {
         "id4": id4,
-        "selection_id": (
-            id4
-            if source_kind == source_identity.MACHINE_SSH_KIND
-            else f"{source_id}\x1f{w['id']}"
-        ),
+        "selection_id": f"{source_id}\x1f{w['id']}",
         "machine": machine,
         "env": env,
         "machine_env": (

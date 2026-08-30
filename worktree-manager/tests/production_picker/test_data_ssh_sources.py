@@ -168,6 +168,20 @@ def test_normalized_row_carries_source_identity():
     )
 
 
+def test_machine_selection_identity_is_source_scoped_and_collision_safe():
+    first = derive.norm({"id": "first-worktree-abcd"}, "Host-A", "WSL")
+    second = derive.norm({"id": "second-worktree-abcd"}, "Host-B", "WSL")
+
+    assert first["id4"] == second["id4"] == "abcd"
+    assert first["selection_id"] == (
+        "machine-ssh:host-a:wsl\x1ffirst-worktree-abcd"
+    )
+    assert second["selection_id"] == (
+        "machine-ssh:host-b:wsl\x1fsecond-worktree-abcd"
+    )
+    assert first["selection_id"] != second["selection_id"]
+
+
 def test_provider_row_carries_lineage_posture_and_no_machine_identity():
     row = derive.norm(
         {"id": "provider-5678"},

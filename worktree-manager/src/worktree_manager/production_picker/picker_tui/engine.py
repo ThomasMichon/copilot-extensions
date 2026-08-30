@@ -787,7 +787,7 @@ class _PickerNativeData(OptionList):
         self._sections = []       # option index -> section label active there
         self._section_texts = {}  # section label -> its header Text (for sticky)
         self._kinds = []          # option index -> VRow kind ('section' etc.)
-        self._l_rows = {}         # worktree row id4 -> (option index, rec, li)
+        self._l_rows = {}         # worktree row key -> (option index, rec, li)
         self._sig = None          # last data signature (rebuild only on change)
         self._syncing = False
         self._suppress_activate = False   # one-shot: gutter click toggled, don't open
@@ -845,12 +845,12 @@ class _PickerNativeData(OptionList):
                 self._stops.append(stop)
                 self._sections.append(cur_label)
                 self._kinds.append(kind)
-                # Map worktree rows id4 -> (option index, rec, li) so a
+                # Map worktree rows by their collision-safe selection key so a
                 # selection-only change repaints just those rows in place
                 # instead of a full rebuild (#171).
                 rec = getattr(vr, "data", None)
                 if stop is not None and stop[0] == "L" and rec is not None:
-                    rid = rec.get("id4")
+                    rid = scr._row_key(rec)
                     if rid is not None:
                         self._l_rows[rid] = (idx, rec, stop[1])
             if opts:
@@ -4142,7 +4142,8 @@ class PickerScreen(Widget):
         """Build (and, when ``armed``, start) a maintenance progress run over
         ``recs`` for a single ``op`` (restart / finalize). An unarmed run shows
         the confirm gate first (see ``_key_progress`` / ``ProgressScreen``)."""
-        items = [{"id4": r.get("id4"), "title": r.get("title", ""),
+        items = [{"key": self._row_key(r), "id4": r.get("id4"),
+                  "title": r.get("title", ""),
                   "machine_env": r.get("machine_env", ""), "state": "pending"}
                  for r in recs]
         scope = (recs[0].get("id4", "") if len(recs) == 1
@@ -7869,10 +7870,7 @@ class WorktreesView:
         native list passes a sentinel (focus is the amber cursor, not baked in)."""
         eng = self._eng
         focused = sel == ("L", li)
-        is_sel = (
-            eng._row_key(rec) in eng.wt_sel
-            or rec["id4"] in eng.wt_sel
-        )
+        is_sel = eng._row_key(rec) in eng.wt_sel
         # Always show the per-row checkbox glyph (#88 NF5-5): with mouse support
         # the box is a discoverable, clickable multi-select affordance, so it
         # renders at rest rather than only when a set is already held.
