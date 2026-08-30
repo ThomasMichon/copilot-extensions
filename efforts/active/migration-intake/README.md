@@ -30,6 +30,8 @@ small residual whose destination cannot be known before validation.
 - **Delegates:** domain owners own implementation after routing.
 - **Handoff:** a routed item leaves this effort only when its canonical effort
   and public tracker entry are explicit.
+- **Public coordination token:** the reviewed plan PR until issue publication
+  is authorized; implementation does not begin under the temporary token.
 
 ## Context
 

@@ -31,6 +31,8 @@ actions are derived views rather than separately maintained inventories.
 - **Delegates:** module owners implement only their declared resource type.
 - **Handoff:** each module contributes validation, plan/apply behavior, and
   observable status to the shared control plane.
+- **Public coordination token:** the reviewed plan PR until a dedicated issue
+  is authorized; implementation does not begin under the temporary token.
 
 ## Context
 

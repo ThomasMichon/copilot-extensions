@@ -30,6 +30,8 @@ switch or leaking one operation's credentials into another.
 - **Delegates:** command owners adopt the shared resolver without redefining it.
 - **Handoff:** each slice lands with contract tests and explicit unsupported
   behavior.
+- **Public coordination token:** the reviewed plan PR until a dedicated issue
+  is authorized; implementation does not begin under the temporary token.
 
 ## Context
 

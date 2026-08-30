@@ -31,6 +31,8 @@ cannot be mistaken for successful publication.
 - **Delegates:** adapters implement provider seams without owning orchestration.
 - **Handoff:** every slice reports durable state transitions and evidence to the
   host contract.
+- **Public coordination token:** the reviewed plan PR until a dedicated issue
+  is authorized; implementation does not begin under the temporary token.
 
 ## Context
 
