@@ -292,7 +292,11 @@ async def run_host(
     if state_path is not None:
         _write_host_state(state_path, state)
         if not host.child_alive:
-            _publish_child_exit(host.child_exit_code or 0)
+            exit_code = host.child_exit_code
+            if exit_code is None:
+                exit_code = child.returncode
+            if exit_code is not None:
+                _publish_child_exit(exit_code)
     if ready is not None:
         ready.set()
     try:
