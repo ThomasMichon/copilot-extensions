@@ -1178,6 +1178,8 @@ class PickerScreen(Widget):
         self.msgview = None           # recent-messages viewer overlay (#session-viewer)
         self._msgview_lock = threading.Lock()
         self._provider_loader = None
+        self._provider_loader_lock = threading.Lock()
+        self._provider_cancelled = False
         # Clean/Sync scope + New-worktree options are native ModalScreens now
         # (#88 F4): no self.cleanup / self.optmenu state attrs -- see
         # ScopeDlgScreen and _open_cleanup / _open_sync / _open_optmenu.
@@ -1496,7 +1498,9 @@ class PickerScreen(Widget):
                 loader.cancel()
             except Exception:
                 pass
-        provider_loader = getattr(self, "_provider_loader", None)
+        with self._provider_loader_lock:
+            self._provider_cancelled = True
+            provider_loader = self._provider_loader
         if provider_loader is not None and provider_loader is not loader:
             try:
                 provider_loader.cancel()
@@ -4123,11 +4127,14 @@ class PickerScreen(Widget):
         loader = getattr(self, "loader", None)
         if loader is not None:
             return loader._spawn
-        if self._provider_loader is None:
-            from . import data_ssh
+        with self._provider_loader_lock:
+            if self._provider_cancelled:
+                raise RuntimeError("picker provider runner is cancelled")
+            if self._provider_loader is None:
+                from . import data_ssh
 
-            self._provider_loader = data_ssh.LiveLoader([])
-        return self._provider_loader._spawn
+                self._provider_loader = data_ssh.LiveLoader([])
+            return self._provider_loader._spawn
 
     def _replace_row(self, wt_id, row):
         """Swap a single freshly-normalized row into ``self.data`` by worktree id

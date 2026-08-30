@@ -3774,6 +3774,17 @@ def test_screen_on_unmount_cancels_loader():
     assert cancelled == {"fleet": True, "provider": True}
 
 
+def test_provider_runner_cannot_be_created_after_unmount():
+    from worktree_manager.production_picker.picker_tui import data_local
+    from worktree_manager.production_picker.picker_tui.engine import PickerScreen
+
+    screen = PickerScreen(data_local, live=False)
+    screen.on_unmount()
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        screen._provider_runner()
+
+
 def test_update_indicator_focus_glyph_and_refresh():
     """The launcher-stage update state drives the version glyph, the focusable
     refresh stop, and the refresh decision (#1430)."""

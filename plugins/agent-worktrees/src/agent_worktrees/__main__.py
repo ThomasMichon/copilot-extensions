@@ -7166,6 +7166,14 @@ def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
         pass
 
 
+def _list_error(args: argparse.Namespace, message: str) -> int:
+    """Render list argument errors in the caller's selected output mode."""
+    if getattr(args, "json", False) or getattr(args, "stream", False):
+        return _json_error(message)
+    output.err(message)
+    return 1
+
+
 def _build_list_json_payload(
     args: argparse.Namespace,
     records,
@@ -7267,10 +7275,10 @@ def cmd_list(args: argparse.Namespace) -> int:
         try:
             records = _filter_list_worktree(records, worktree_id)
         except ValueError as error:
-            return _json_error(str(error))
+            return _list_error(args, str(error))
     if getattr(args, "refresh", False):
         if not worktree_id:
-            return _json_error("--refresh requires --worktree-id")
+            return _list_error(args, "--refresh requires --worktree-id")
         if records:
             _refresh_list_record(records[0])
 

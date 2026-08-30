@@ -189,6 +189,24 @@ def test_filter_list_worktree_rejects_ambiguous_suffix():
         m._filter_list_worktree(records, "same")
 
 
+def test_list_error_respects_plain_and_json_modes(monkeypatch):
+    from agent_worktrees import __main__ as m
+
+    errors = []
+    envelopes = []
+    monkeypatch.setattr(m.output, "err", errors.append)
+    monkeypatch.setattr(m, "_json_error", lambda message: envelopes.append(message) or 1)
+
+    assert m._list_error(
+        types.SimpleNamespace(json=False, stream=False), "plain") == 1
+    assert errors == ["plain"]
+    assert envelopes == []
+
+    assert m._list_error(
+        types.SimpleNamespace(json=True, stream=False), "json") == 1
+    assert envelopes == ["json"]
+
+
 def test_list_payload_includes_bridge_live_signal(monkeypatch):
     from agent_worktrees import __main__ as m
     from agent_worktrees import reclaim, sessions, tracking
