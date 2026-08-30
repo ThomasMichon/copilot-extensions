@@ -1552,6 +1552,7 @@ class SessionManager:
             # Surface a mid-session transport drop (loopback socket down, host +
             # child alive) as ``disconnected`` so the reattach driver fires (P1).
             streams.on_transport_lost = client.mark_transport_lost
+            streams.on_child_exit = client.mark_host_child_exited
             # Retain the host control channel so the manager can push STATUS
             # (reapable) / DETACH (graceful) for host self-reap (#51).
             client.session_host_client = sock
@@ -1565,6 +1566,12 @@ class SessionManager:
                     ),
                     timeout=self._timeouts.session_start,
                 )
+                if streams.child_exit_code is not None:
+                    client.mark_host_child_exited(streams.child_exit_code)
+                    raise ConnectionError(
+                        "Session Host child exited during ACP startup "
+                        f"(code={streams.child_exit_code})"
+                    )
                 session_cwd = remote_cwd or target.cwd or _default_cwd(target)
                 if load_session_id:
                     await asyncio.wait_for(
@@ -2701,6 +2708,25 @@ class SessionManager:
                 with contextlib.suppress(Exception):
                     await sock.close()
 
+        def _settle_dead_child(exit_code: int) -> None:
+            client_obj = session.client
+            if client_obj is not None:
+                client_obj.mark_host_child_exited(exit_code)
+            self._reap_host_record(
+                rec, f"Session Host child exited (code={exit_code})"
+            )
+            session.client = None
+            session.status = SessionStatus.STOPPED
+            self._db.update_session_status(
+                rec.session_id, SessionStatus.STOPPED.value, time.time()
+            )
+            if session.event_log:
+                session.event_log.append("session_state_changed", {
+                    "status": SessionStatus.STOPPED.value,
+                    "host_child_exited": True,
+                    "exit_code": exit_code,
+                })
+
         try:
             await self._ensure_forward(rec)
             sock = await SessionHostClient.connect(port=rec.port)
@@ -2717,6 +2743,7 @@ class SessionManager:
                 effort_override=session.effort_override,
             )
             streams.on_transport_lost = client.mark_transport_lost
+            streams.on_child_exit = client.mark_host_child_exited
             # Retain the host control channel so the manager can push STATUS
             # (reapable) / DETACH (graceful) for host self-reap (#51).
             client.session_host_client = sock
@@ -2727,6 +2754,11 @@ class SessionManager:
                 ),
                 timeout=self._timeouts.session_start,
             )
+            if streams.child_exit_code is not None:
+                client.mark_host_child_exited(streams.child_exit_code)
+                await _close_partial_reattach()
+                _settle_dead_child(streams.child_exit_code)
+                return False
             client.adopt_session(session.acp_session_id)
             session.client = client
             session.status = new_status
@@ -2741,7 +2773,14 @@ class SessionManager:
             await _close_partial_reattach()
             raise
         except Exception:
+            child_exit_code = (
+                streams.child_exit_code if streams is not None else None
+            )
             await _close_partial_reattach()
+            if child_exit_code is not None:
+                session.client = client
+                _settle_dead_child(child_exit_code)
+                return False
             log.warning(
                 "Failed to reattach session %s to host pid=%s%s",
                 rec.session_id, rec.host_pid,
@@ -3052,6 +3091,28 @@ class SessionManager:
             if session is None or not session.acp_session_id:
                 continue
             client = session.client
+            if (
+                client is not None
+                and client.host_child_exit_code is not None
+            ):
+                with contextlib.suppress(Exception):
+                    await client.shutdown()
+                self._reap_host_record(
+                    rec,
+                    "Session Host child exit observed by attached client",
+                )
+                session.client = None
+                session.status = SessionStatus.STOPPED
+                self._db.update_session_status(
+                    rec.session_id, SessionStatus.STOPPED.value, time.time()
+                )
+                if session.event_log:
+                    session.event_log.append("session_state_changed", {
+                        "status": SessionStatus.STOPPED.value,
+                        "host_child_exited": True,
+                        "exit_code": client.host_child_exit_code,
+                    })
+                continue
             # A live, running client needs nothing; surface a stall and move on.
             if client is not None and client.is_running:
                 if session.liveness_state(now) == "stalled":

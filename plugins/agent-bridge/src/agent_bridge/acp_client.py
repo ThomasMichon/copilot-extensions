@@ -548,6 +548,7 @@ class AcpClient:
         # goal 1's intentional-only reaping. See session_host/.
         self._host_mode = False
         self._host_child_pid: int | None = None
+        self._host_child_exit_code: int | None = None
         self._host_closer: Any = None  # async () -> None, called on shutdown
         # In host mode, tracks whether the relayed transport to the Session Host
         # is still up. A loopback/forwarded socket drop (host + child survive)
@@ -555,6 +556,7 @@ class AcpClient:
         # ``is_running`` report the child as unreachable so the session's
         # liveness derives ``disconnected`` and the reattach driver fires (P1).
         self._host_transport_alive = True
+        self._connection_loss_error: str | None = None
         # Set when the transport is marked lost, so an in-flight ``send_prompt``
         # can be woken instead of hanging forever awaiting a reply from a dead
         # reader -- the wedged-``running`` root cause (issue #22).
@@ -569,6 +571,10 @@ class AcpClient:
     @property
     def acp_session_id(self) -> str | None:
         return self._acp_session_id
+
+    @property
+    def host_child_exit_code(self) -> int | None:
+        return self._host_child_exit_code if self._host_mode else None
 
     @property
     def is_running(self) -> bool:
@@ -587,9 +593,28 @@ class AcpClient:
         """
         if self._host_mode:
             self._host_transport_alive = False
+            if self._connection_loss_error is None:
+                self._connection_loss_error = "ACP transport lost"
             # Wake any in-flight prompt so the turn terminates instead of
             # hanging on a reply that will never arrive (issue #22).
             self._transport_lost_event.set()
+
+    def mark_host_child_exited(self, exit_code: int) -> None:
+        """Latch a terminal Session Host child exit and wake any prompt.
+
+        Unlike a transport loss, child death cannot be repaired by reconnecting
+        this client. The marker may arrive before host-mode initialization, so
+        it intentionally persists across :meth:`start_streams`.
+        """
+        first_notice = self._host_child_exit_code is None
+        self._host_child_exit_code = exit_code
+        self._host_transport_alive = False
+        self._connection_loss_error = (
+            f"Session Host child exited (code={exit_code})"
+        )
+        self._transport_lost_event.set()
+        if first_notice:
+            self._emit("host_child_exit", {"exit_code": exit_code})
 
     @property
     def active_background_tasks(self) -> list[str]:
@@ -643,10 +668,14 @@ class AcpClient:
         (goal 1's intentional-only reaping). ``reader`` carries agent->client
         ACP; ``writer`` carries client->agent ACP.
         """
+        child_already_exited = self._host_child_exit_code is not None
         self._host_mode = True
         self._host_child_pid = child_pid
         self._host_closer = closer
-        self._host_transport_alive = True
+        if not child_already_exited:
+            self._host_transport_alive = True
+            self._connection_loss_error = None
+            self._transport_lost_event.clear()
         await self._init_connection(writer, reader)
 
     async def _init_connection(
@@ -936,7 +965,8 @@ class AcpClient:
             if prompt_fut.done():
                 return prompt_fut.result()
             raise ConnectionResetError(
-                "ACP transport lost while a prompt was in flight"
+                f"{self._connection_loss_error or 'ACP transport lost'} "
+                "while a prompt was in flight"
             )
         finally:
             for fut in (prompt_fut, lost_fut):

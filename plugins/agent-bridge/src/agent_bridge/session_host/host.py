@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from typing import Protocol, runtime_checkable
 
 from . import osutil
@@ -72,7 +73,8 @@ class SessionHost:
 
     def __init__(self, child: ChildProcess, *, nonce: str = "",
                  unexpected_reap_seconds: float = 60.0,
-                 active_reap_seconds: float = 0.0) -> None:
+                 active_reap_seconds: float = 0.0,
+                 on_child_exit: Callable[[int], None] | None = None) -> None:
         self._child = child
         self._nonce = nonce or ""
         self._frames: dict[int, bytes] = {}
@@ -80,6 +82,7 @@ class SessionHost:
         self._ack_cursor = 0
         self._front: _Front | None = None
         self._child_exit: int | None = None
+        self._on_child_exit = on_child_exit
         self._child_done = asyncio.Event()
         self._server: asyncio.base_events.Server | None = None
         self._reader_task: asyncio.Task | None = None
@@ -153,6 +156,10 @@ class SessionHost:
     def child_alive(self) -> bool:
         return self._child.returncode is None
 
+    @property
+    def child_exit_code(self) -> int | None:
+        return self._child_exit
+
     # -- child reader ------------------------------------------------------
     async def _reader_loop(self) -> None:
         stdout = self._child.stdout
@@ -174,8 +181,14 @@ class SessionHost:
         except ProcessLookupError:
             self._child_exit = -1
         self._child_done.set()
+        if self._on_child_exit is not None:
+            try:
+                self._on_child_exit(self._child_exit)
+            except Exception:
+                log.warning("failed to publish child exit state", exc_info=True)
         front = self._front
         if front is not None and not front.closed:
+            await self._flush_front(front)
             await self._safe_send(front, proto.MsgType.LIVENESS,
                                   proto.pack_liveness(False, self._child_exit or 0))
 
@@ -251,10 +264,13 @@ class SessionHost:
             front, proto.MsgType.HELLO,
             proto.pack_u64(self._max_seq) + proto.pack_u64(self._child.pid or 0),
         )
-        if not self.child_alive:
+        # Replay every buffered frame before the terminal liveness marker. The
+        # client ends iteration on LIVENESS(dead), so sending it first would
+        # silently discard the child's final unacknowledged output on reattach.
+        await self._flush_front(front)
+        if self._child_done.is_set():
             await self._safe_send(front, proto.MsgType.LIVENESS,
                                   proto.pack_liveness(False, self._child_exit or 0))
-        await self._flush_front(front)
 
         try:
             while not self._closing:

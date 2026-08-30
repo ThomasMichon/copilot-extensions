@@ -764,7 +764,7 @@ print("__REAPED__")
                     remote_port,
                 )
             )
-        if state_name not in {"running", "stopped"}:
+        if state_name not in {"running", "stopped", "child_exited"}:
             raise ConnectionError(
                 f"Remote Session Host state is unknown for {session_id}: "
                 f"{state_name!r}"
@@ -815,7 +815,7 @@ print("__REAPED__")
         should_reap = (
             state_name == "stopped"
             or not host_alive
-            or not child_alive
+            or (not child_alive and state_name != "child_exited")
         )
         if should_reap and (host_alive or child_alive):
             # Any asymmetric survivor is unsafe: a child without its Host is

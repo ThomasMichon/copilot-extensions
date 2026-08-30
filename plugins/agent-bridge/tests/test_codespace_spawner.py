@@ -357,6 +357,33 @@ async def test_remote_authority_reaps_asymmetric_survivor(
 
 
 @pytest.mark.asyncio
+async def test_remote_authority_preserves_host_for_terminal_replay(monkeypatch):
+    _patch_common(monkeypatch)
+    state = {
+        "version": 2,
+        "session_id": "sess1",
+        "pid": 111,
+        "child_pid": 222,
+        "port": 51000,
+        "nonce": "secure-nonce",
+        "state": "child_exited",
+        "child_exit_code": 7,
+        "boot_id": "boot-one",
+        "host_start_ticks": "100",
+        "child_start_ticks": "101",
+    }
+    transport = _FakeTransport(state, liveness="1:0")
+
+    rec = await sp.CodeSpaceSpawner(transport).recover_record("sess1")
+
+    assert rec is not None
+    assert rec.session_id == "sess1"
+    assert rec.host_pid == 111
+    assert rec.child_pid == 222
+    assert not any("kill -TERM -- -111" in command for command in transport.runs)
+
+
+@pytest.mark.asyncio
 async def test_poll_state_ignores_stale_replacement_record():
     class StaleThenLive(_FakeTransport):
         def __init__(self):
