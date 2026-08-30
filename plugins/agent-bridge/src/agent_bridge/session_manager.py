@@ -3106,6 +3106,12 @@ class SessionManager:
                 self._db.update_session_status(
                     rec.session_id, SessionStatus.STOPPED.value, time.time()
                 )
+                if session.event_log:
+                    session.event_log.append("session_state_changed", {
+                        "status": SessionStatus.STOPPED.value,
+                        "host_child_exited": True,
+                        "exit_code": client.host_child_exit_code,
+                    })
                 continue
             # A live, running client needs nothing; surface a stall and move on.
             if client is not None and client.is_running:

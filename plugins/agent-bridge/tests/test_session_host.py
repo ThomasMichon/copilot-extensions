@@ -302,7 +302,7 @@ async def test_reattach_replays_buffer_before_dead_liveness():
     try:
         child.feed_frame(b'{"final":true}')
         child.finish(4)
-        await asyncio.sleep(0.05)
+        await asyncio.wait_for(host._child_done.wait(), timeout=5)
 
         client = await SessionHostClient.connect(port=port)
         await client.attach(0)
