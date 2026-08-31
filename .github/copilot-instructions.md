@@ -39,7 +39,9 @@ pyproject.toml}`. Shared libraries live under `libs/`.
   undefined names, and syntax errors. The repo carries pre-existing style debt.
 - **Use `uv`** for dependency operations — never bare `pip`.
 - **Tests: `pytest` per plugin.** Runtime plugins with a `tests/` suite should
-  have new/changed behavior covered by tests.
+  have new/changed behavior covered by tests. Keep required PR CI
+  change-scoped and contract-focused; route exhaustive or subprocess-heavy
+  cross-products to scheduled/manual workflows as defined in `TESTING.md`.
 - **Commit messages:** imperative mood ("Fix Unicode crash on cp1252
   consoles"); reference this repo's GitHub issue numbers where applicable; keep
   the `Co-authored-by` trailer on Copilot-assisted commits.
@@ -105,6 +107,11 @@ Directives for the **automatic code-review agent** when reviewing a pull request
   valuable thing to catch.
 - **Tests for runtime logic.** Flag PRs that change a runtime plugin's logic
   without adding or updating that plugin's `tests/`.
+- **Test portfolio growth.** Flag new exhaustive matrices, repeated process
+  startup, or specialized suites added unconditionally to required PR CI.
+  Require path gating, a focused smoke contract, and a scheduled/manual
+  exhaustive lane. Do not recommend pooling where real process boundaries are
+  the behavior under test.
 - **Cross-platform parity.** When a PR edits an installer/launcher `.sh` (or
   `.ps1`), flag a missing matching change to its `.ps1` (or `.sh`) counterpart.
 - **Identifier neutrality.** Flag any newly introduced internal

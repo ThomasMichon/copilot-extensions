@@ -58,6 +58,29 @@ scenario-style test that validates several related observable features over
 many process-launching micro-tests that repeat the same setup and failure
 boundary.
 
+## Test portfolio invariants
+
+Required pull-request CI is a fast regression gate, not the complete test
+inventory. Its design target is a wall time below five minutes under normal
+runner variance. This is not the runner's timeout: containment budgets such as
+the 15-minute per-plugin ceiling remain safety limits for unusually slow or
+explicit runs. A suite that cannot fit the required pull-request CI target must
+provide a contract-focused smoke lane and move its exhaustive cross-products to
+a scheduled or manually dispatched workflow.
+
+- Gate specialized suites by changed paths so unrelated pull requests do not
+  pay their cost.
+- Keep one canonical implementation broad; sample external adapters at genuine
+  divergence seams such as parsing, interoperability, security boundaries,
+  atomicity, concurrency, and wrapper wiring.
+- Preserve an explicit exhaustive mode for adapter implementation changes.
+- Reuse bounded processes or in-process APIs when process startup is not the
+  behavior under test. Concurrency and process-lifecycle tests must bypass
+  pooling so they still exercise real process boundaries.
+- When adding a large or subprocess-heavy family, state which lane owns it and
+  measure required pull-request CI wall time. Do not make the default lane grow
+  merely because the tests are individually valid.
+
 The installation-context foundation follows a reference-versus-adapter model
 for its most expensive matrices. The default suite exercises the complete
 snapshot-provenance and installation-governance case corpora against the
