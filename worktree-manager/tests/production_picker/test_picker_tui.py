@@ -2415,6 +2415,7 @@ def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
             return True
 
     pipe, tty = _Pipe(), _Tty()
+    monkeypatch.setattr(sys, "stdin", tty)
     monkeypatch.setattr(sys, "__stdout__", pipe)
     monkeypatch.setattr(sys, "stderr", tty)
     monkeypatch.setattr(eng, "PickerApp", _FakeApp)
@@ -2446,7 +2447,8 @@ def test_run_tui_picker_no_redirect_in_real_terminal(monkeypatch):
         def isatty(self):
             return True
 
-    tty_out, tty_err = _Tty(), _Tty()
+    tty_in, tty_out, tty_err = _Tty(), _Tty(), _Tty()
+    monkeypatch.setattr(sys, "stdin", tty_in)
     monkeypatch.setattr(sys, "__stdout__", tty_out)
     monkeypatch.setattr(sys, "stderr", tty_err)
     monkeypatch.setattr(eng, "PickerApp", _FakeApp)
@@ -2459,6 +2461,9 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
     """An unhandled exception in the picker is persisted to a crash log (the
     launcher never captures the picker's stderr, so it would otherwise be lost)
     and re-raised so the terminal + exit code are unchanged."""
+    import io
+    import sys
+
     import pytest
 
     from agent_worktrees import config as cfg
@@ -2479,6 +2484,11 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
         def run(self):
             raise Boom("kaboom during shift+select")
 
+    class _Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", _Tty())
     monkeypatch.setattr(eng, "PickerApp", _FakeApp)
 
     with pytest.raises(Boom):
@@ -2490,6 +2500,19 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
     assert "kaboom during shift+select" in text
     assert "Traceback (most recent call last)" in text
     assert "live=True" in text
+
+
+def test_run_tui_picker_rejects_noninteractive_stdin(monkeypatch):
+    """A closed or redirected stdin must fail instead of busy-looping on EOF."""
+    import io
+    import sys
+
+    import worktree_manager.production_picker.picker_tui as pkg
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+
+    with pytest.raises(RuntimeError, match="interactive terminal"):
+        pkg.run_tui_picker(source=object(), live=False)
 
 
 def test_picker_crash_log_prunes_to_newest(monkeypatch, tmp_path):

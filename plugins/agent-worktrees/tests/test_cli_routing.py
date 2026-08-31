@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import __main__ as m
+
+
+def test_picker_rejects_noninteractive_stdin(monkeypatch):
+    from agent_worktrees import picker_tui
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+
+    with pytest.raises(RuntimeError, match="interactive terminal"):
+        picker_tui.run_tui_picker(source=object())
 
 
 def test_extract_project_flag_space():

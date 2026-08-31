@@ -62,6 +62,9 @@ def run_tui_picker(source=None, live=False, mock_mode=None):
     """
     import sys
 
+    if sys.stdin is None or not sys.stdin.isatty():
+        raise RuntimeError("Worktree Picker requires an interactive terminal on stdin.")
+
     from .engine import PickerApp
 
     if source is None:
