@@ -116,6 +116,11 @@ def test_windows_staging_probe_detects_explicit_plugin_dir(
     assert AGGREGATE_CONTEXT._has_unlisted_staged_plugins() is True
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows startup allowance")
+def test_windows_contributors_receive_process_start_grace() -> None:
+    assert AGGREGATE_CONTEXT.PROCESS_START_GRACE_SECONDS == 2
+
+
 def _run(
     tmp_path: Path,
     plugins: list[tuple[str, Path]],
