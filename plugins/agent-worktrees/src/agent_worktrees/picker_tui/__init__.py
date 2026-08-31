@@ -21,6 +21,16 @@ from __future__ import annotations
 import os
 
 
+def _interactive_stdin(stream) -> bool:
+    """Return whether ``stream`` can safely drive an interactive TUI."""
+    if stream is None:
+        return False
+    try:
+        return bool(stream.isatty())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
+
+
 def new_picker_enabled(config=None) -> bool:
     """True when the TUI picker should be used instead of the legacy ANSI one.
 
@@ -61,6 +71,9 @@ def run_tui_picker(source=None, live=False, mock_mode=None):
     ``stdout_to_stderr`` redirect.
     """
     import sys
+
+    if not _interactive_stdin(sys.stdin):
+        raise RuntimeError("Worktree Picker requires an interactive terminal on stdin.")
 
     from .engine import PickerApp
 
