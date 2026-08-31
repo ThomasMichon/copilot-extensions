@@ -140,8 +140,7 @@ def _has_unlisted_staged_plugins() -> bool:
         if not powershell:
             return True
         script = """
-param([int]$ProcessId)
-$current = $ProcessId
+$current = [int]$env:COPILOT_CONTEXT_PARENT_PID
 for ($i = 0; $i -lt 8 -and $current -gt 0; $i++) {
     $process = Get-CimInstance Win32_Process -Filter "ProcessId=$current" `
         -ErrorAction Stop
@@ -151,6 +150,8 @@ for ($i = 0; $i -lt 8 -and $current -gt 0; $i++) {
     $current = [int]$process.ParentProcessId
 }
 """
+        environment = os.environ.copy()
+        environment["COPILOT_CONTEXT_PARENT_PID"] = str(os.getppid())
         try:
             result = subprocess.run(
                 [
@@ -158,13 +159,12 @@ for ($i = 0; $i -lt 8 -and $current -gt 0; $i++) {
                     "-NoProfile",
                     "-Command",
                     script,
-                    "-ProcessId",
-                    str(os.getppid()),
                 ],
                 capture_output=True,
                 text=True,
                 timeout=3,
                 check=True,
+                env=environment,
             )
         except (OSError, subprocess.SubprocessError):
             return True
