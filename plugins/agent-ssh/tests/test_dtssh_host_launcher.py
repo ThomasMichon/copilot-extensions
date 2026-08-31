@@ -70,7 +70,7 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
         "$nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))"
         in text
     )
-    assert "[Math]::Max(1, $PressureCheckSec)" in text
+    assert text.count("Start-Sleep -Seconds ([Math]::Max(1, $PressureCheckSec))") >= 2
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")

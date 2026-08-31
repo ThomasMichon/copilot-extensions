@@ -583,6 +583,7 @@ try {
             $nextSessionClassificationAt = [datetime]::MinValue
             if (-not $tunnelId) { $tunnelId = Resolve-TunnelId $Alias; if ($tunnelId) { Write-Log "resolved tunnel id after start: $tunnelId" } }
             $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
+            Start-Sleep -Seconds ([Math]::Max(1, $PressureCheckSec))
             continue
         }
 
