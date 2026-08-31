@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -210,9 +211,12 @@ def resolve_repo(
 
 
 def _git_path(repo_path: Path, argument: str) -> Path | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
     try:
-        result = subprocess.run(
-            ["git", "-C", str(repo_path), "rev-parse", argument],
+        result = subprocess.run(  # noqa: S603 - resolved executable, fixed argv
+            [git, "-C", str(repo_path), "rev-parse", argument],
             capture_output=True,
             text=True,
             timeout=5,
@@ -242,7 +246,7 @@ def resolve_cwd_repo(
     top_level = _git_path(current, "--show-toplevel")
     if top_level is None:
         raise ManifestError(
-            "current directory is not inside a Git repository; pass --repo "
+            f"{current} is not inside a Git repository; pass --repo "
             "<name-or-path> or --all-projects"
         )
     current_common = _git_path(top_level, "--git-common-dir")

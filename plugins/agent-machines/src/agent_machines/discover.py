@@ -330,7 +330,8 @@ def candidate_repos(
             )
         folded = canonical_name.casefold()
         existing = candidates.get(folded)
-        required_by = tuple(sorted(set((existing.required_by if existing else ()) + (project_name,))))
+        prior_owners = existing.required_by if existing else ()
+        required_by = tuple(sorted(set((*prior_owners, project_name))))
         candidates[folded] = RepoCandidate(
             name=canonical_name,
             path=path,

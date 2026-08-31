@@ -386,7 +386,7 @@ def test_resolve_cwd_repo_standalone_falls_back_to_top_level(tmp_path):
 
 
 def test_resolve_cwd_repo_outside_git_fails(tmp_path):
-    with pytest.raises(ManifestError, match="pass --repo.*or --all-projects"):
+    with pytest.raises(ManifestError, match=r"pass --repo.*or --all-projects"):
         resolve_cwd_repo(tmp_path, {}, {})
 
 

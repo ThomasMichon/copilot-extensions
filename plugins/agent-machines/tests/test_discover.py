@@ -3,8 +3,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from agent_machines import discover
-from agent_machines import reconcile, validator
+from agent_machines import discover, reconcile, validator
 from agent_machines.manifest import ManifestError
 
 from ._helpers import base_package, enable_plugin, write_package
@@ -294,7 +293,7 @@ def test_bound_supplemental_repo_requires_canonical_registration(tmp_path):
         }
     }
 
-    with pytest.raises(ManifestError, match="no canonical repos.yaml entry"):
+    with pytest.raises(ManifestError, match=r"no canonical repos\.yaml entry"):
         discover.discover(machine="box-1", registry=reg, projects=projects)
 
 
