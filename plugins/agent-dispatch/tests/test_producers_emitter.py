@@ -93,6 +93,23 @@ def test_run_tick_preserves_literal_braces_in_existing_commands():
     assert calls[0] == ["review-emitter", "--query", '{"state":"open"}']
 
 
+def test_run_tick_expands_runtime_python_token():
+    client = FakeClient()
+    calls = []
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    emitter.run_tick(
+        client,
+        _spec(command=["{python}", "reviewer.py"]),
+        holder="host-a",
+        runner=runner,
+    )
+    assert calls[0][0] == emitter.sys.executable
+
+
 @pytest.mark.parametrize(
     "spec, needle",
     [
@@ -122,6 +139,21 @@ def test_run_tick_authors_json_tasks_with_emitter_provenance():
     assert result["created"][0]["source"] == "emitter"
     assert result["created"][0]["origin_ref"] == "review-inbox"
     assert result["created"][0]["evaluator_ref"] == "review-loop"
+
+
+def test_run_tick_accepts_empty_json_task_list_as_noop():
+    client = FakeClient()
+
+    def runner(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout="[]")
+
+    result = emitter.run_tick(
+        client,
+        _spec(task_output="json"),
+        holder="host-a",
+        runner=runner,
+    )
+    assert result["created"] == []
 
 
 def test_registered_side_load_uses_same_task_contract_and_association():

@@ -1,0 +1,15 @@
+{
+  "name": "copilot-extensions-review-evaluator",
+  "kind": "evaluator",
+  "spec": {
+    "repo": "github.com/ThomasMichon/copilot-extensions",
+    "labels": [
+      "internal:evaluator-only"
+    ],
+    "evaluator_ref": "copilot-extensions-review-lifecycle",
+    "evaluator_spec": {
+      "rules": []
+    },
+    "interval": 30
+  }
+}

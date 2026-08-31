@@ -28,7 +28,7 @@ import stat
 import tempfile
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING
 
 from dropin_registry import Finding, ScanAuthority, WarningTracker
@@ -277,7 +277,18 @@ def read_declaration_file(path: str | Path) -> ProfileDeclaration:
         raise RegistrarIndeterminateError(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
-    data = _decode(text, p.suffix, where=str(p))
+    data = dict(_decode(text, p.suffix, where=str(p)))
+    if data.get("kind") == "emitter" and isinstance(data.get("spec"), Mapping):
+        spec = dict(data["spec"])
+        cwd = spec.get("cwd")
+        is_absolute = (
+            Path(cwd).is_absolute()
+            or PurePosixPath(cwd).is_absolute()
+            or PureWindowsPath(cwd).is_absolute()
+        ) if isinstance(cwd, str) else False
+        if isinstance(cwd, str) and cwd and not is_absolute:
+            spec["cwd"] = str((p.parent / cwd).resolve())
+            data["spec"] = spec
     return load_declaration(data)
 
 

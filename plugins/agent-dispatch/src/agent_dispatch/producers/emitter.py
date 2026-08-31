@@ -102,7 +102,16 @@ def lease_scope(spec: dict[str, Any]) -> str:
 
 
 def _render_command(command: list[str], *, change_ref: str | None = None) -> list[str]:
-    return [part.replace("{change_ref}", change_ref or "") for part in command]
+    values = {
+        "{change_ref}": change_ref or "",
+        "{python}": sys.executable,
+    }
+    rendered = []
+    for part in command:
+        for token, value in values.items():
+            part = part.replace(token, value)
+        rendered.append(part)
+    return rendered
 
 
 def _task_specs(stdout: str) -> list[dict[str, Any]]:
@@ -111,8 +120,8 @@ def _task_specs(stdout: str) -> list[dict[str, Any]]:
     except ValueError as exc:
         raise EmitterError(f"emitter task output is not valid JSON: {exc}") from exc
     rows = value if isinstance(value, list) else [value]
-    if not rows or any(not isinstance(row, dict) for row in rows):
-        raise EmitterError("emitter task output must be an object or non-empty list")
+    if any(not isinstance(row, dict) for row in rows):
+        raise EmitterError("emitter task output must be an object or list")
     for row in rows:
         if not isinstance(row.get("title"), str) or not row["title"]:
             raise EmitterError("each emitted task needs a non-empty 'title'")
@@ -222,7 +231,7 @@ def run_tick(
     started_at = clock()
     try:
         completed = runner(
-            list(spec["command"]),
+            _render_command(spec["command"]),
             cwd=spec.get("cwd"),
             env=env,
             timeout=spec.get("timeout_seconds"),
