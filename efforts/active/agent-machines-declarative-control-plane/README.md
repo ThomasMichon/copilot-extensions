@@ -9,6 +9,7 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418
+- **Sub-issues:** #1455
 
 ## Guiding Intent
 
@@ -76,6 +77,9 @@ fleet, topology, or operating environment.
 
 ### Phase 3 - Reconcile through bounded modules
 
+- [ ] Make `plan`, `validate`, and `restore` default to the package-owning
+  repository containing CWD, with `--repo` for another single repository and
+  explicit `--all-projects` for the machine union (#1455).
 - [ ] Give each resource module plan, apply, verify, and report operations with
   explicit privilege and restart boundaries.
 - [ ] Order actions from declared dependencies and preserve idempotence across
@@ -101,6 +105,8 @@ fleet, topology, or operating environment.
   derived views.
 - [ ] Plan and apply touch only resources named by the selected scope and report
   every skipped or blocked dependency.
+- [ ] CWD-repo, explicit-repo, and all-projects fixtures prove that bootstrap
+  cannot execute packages from unrelated repositories (#1455).
 - [ ] Interrupted reconciliation resumes safely and a second successful run is
   a no-op.
 - [ ] Platform-specific modules share the same resource lifecycle and expose
@@ -125,3 +131,8 @@ behavioral parity is demonstrated.
 - Added a focused discovery slice that composes declared supplemental
   repositories into one provenance-preserving package union while retaining
   standalone behavior.
+
+### 2026-08-31 - Explicit reconciliation scope
+
+- Added #1455 to make repository-local reconciliation the safe default while
+  preserving the machine-wide union as an explicit `--all-projects` operation.
