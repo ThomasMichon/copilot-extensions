@@ -390,6 +390,13 @@ def test_resolve_cwd_repo_outside_git_fails(tmp_path):
         resolve_cwd_repo(tmp_path, {}, {})
 
 
+def test_resolve_cwd_repo_reports_missing_git(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_machines.layout.shutil.which", lambda name: None)
+
+    with pytest.raises(ManifestError, match="git is required"):
+        resolve_cwd_repo(tmp_path, {}, {})
+
+
 def test_unavailable_adopted_repo_is_advisory(tmp_path):
     missing = tmp_path / "missing"
     registry = {

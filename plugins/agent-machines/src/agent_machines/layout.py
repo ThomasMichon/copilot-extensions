@@ -243,6 +243,11 @@ def resolve_cwd_repo(
     directory and basename.
     """
     current = (cwd or Path.cwd()).resolve()
+    if shutil.which("git") is None:
+        raise ManifestError(
+            "git is required to resolve repository scope; install Git or pass "
+            "--all-projects"
+        )
     top_level = _git_path(current, "--show-toplevel")
     if top_level is None:
         raise ManifestError(

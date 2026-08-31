@@ -102,6 +102,20 @@ def test_reconcile_unknown_repo_fails(monkeypatch):
         cli._collect_reconcile_packages(_args(repo="missing"), "box")
 
 
+def test_reconcile_explicit_non_git_directory_is_specific(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli._discover, "resolve_registered_repo", lambda name: None)
+    monkeypatch.setattr(
+        cli._layout,
+        "resolve_cwd_repo",
+        lambda path: (_ for _ in ()).throw(
+            ManifestError(f"{path} is not inside a Git repository")
+        ),
+    )
+
+    with pytest.raises(ManifestError, match=r"repo path .* is not a Git repository"):
+        cli._collect_reconcile_packages(_args(repo=str(tmp_path)), "box")
+
+
 def test_scope_flags_are_mutually_exclusive():
     with pytest.raises(SystemExit):
         cli.main(["plan", "--repo", "one", "--all-projects"])

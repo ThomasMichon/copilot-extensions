@@ -56,7 +56,14 @@ def _collect_reconcile_packages(
                 raise ManifestError(
                     f"repo {selector!r} is neither a directory nor a registered repo name"
                 )
-            repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo(repo_path)
+            try:
+                repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo(repo_path)
+            except ManifestError as exc:
+                if "is not inside a Git repository" not in str(exc):
+                    raise
+                raise ManifestError(
+                    f"repo path {selector!r} is not a Git repository"
+                ) from exc
     else:
         repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo()
     return (
@@ -307,6 +314,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="perform the migration (default is a dry-run preview)",
     )
+
     def add_reconcile_scope(command: argparse.ArgumentParser) -> None:
         scope = command.add_mutually_exclusive_group()
         scope.add_argument(
