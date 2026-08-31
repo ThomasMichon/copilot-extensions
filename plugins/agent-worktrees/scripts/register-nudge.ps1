@@ -14,7 +14,9 @@
 #>
 $ErrorActionPreference = 'SilentlyContinue'
 
-$ContextOnly = $args -contains '--context-only'
+$AwaitContext = $args -contains '--await-context'
+$ContextOnly = ($args -contains '--context-only') -or $AwaitContext
+$SideEffectOnly = $args -contains '--side-effect-only'
 $Payload = ''
 if ([Console]::IsInputRedirected) {
     try { $Payload = [Console]::In.ReadToEnd() } catch { }
@@ -52,17 +54,7 @@ function Get-LaunchKey([string]$InputPayload, [string]$Version) {
             $Timestamp -isnot [ValueType]) {
             return ''
         }
-        $IdentityPython = Get-Command python -ErrorAction SilentlyContinue
-        if (-not $IdentityPython) {
-            $IdentityPython = Get-Command py -ErrorAction SilentlyContinue
-        }
-        $CanonicalCwd = if ($IdentityPython) {
-            (
-                & $IdentityPython.Source -c (
-                    'import os,sys;print(os.path.realpath(sys.argv[1]),end="")'
-                ) $Cwd 2>$null
-            ).Trim()
-        } elseif (Test-Path -LiteralPath $Cwd -PathType Container) {
+        $CanonicalCwd = if (Test-Path -LiteralPath $Cwd -PathType Container) {
             (Resolve-Path -LiteralPath $Cwd).Path
         } else {
             [IO.Path]::GetFullPath($Cwd)
@@ -103,12 +95,21 @@ function Publish-Context([string]$Output) {
             launchKey = $LaunchKey
             output = $Output
         } | ConvertTo-Json -Compress
-        Set-Content -LiteralPath $ContextFile -Value $State -Encoding UTF8
+        $Temporary = "$ContextFile.$PID.tmp"
+        Set-Content -LiteralPath $Temporary -Value $State -Encoding UTF8
+        Move-Item -LiteralPath $Temporary -Destination $ContextFile -Force
     }
-    [Console]::Out.Write($Output)
+    [Console]::Out.Write($(if ($SideEffectOnly) { '{}' } else { $Output }))
 }
 
 if ($ContextOnly) {
+    if ($AwaitContext -and $LaunchKey -and $ContextFile) {
+        $Deadline = [DateTime]::UtcNow.AddSeconds(3)
+        while (-not (Test-Path -LiteralPath $ContextFile -PathType Leaf) -and
+            [DateTime]::UtcNow -lt $Deadline) {
+            Start-Sleep -Milliseconds 50
+        }
+    }
     if (-not $LaunchKey -or -not $ContextFile -or
         -not (Test-Path -LiteralPath $ContextFile -PathType Leaf)) {
         Publish-Context '{}'

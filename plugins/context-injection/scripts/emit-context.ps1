@@ -10,7 +10,7 @@ $python = Get-Command python -ErrorAction SilentlyContinue
 if (-not $python) { $python = Get-Command py -ErrorAction SilentlyContinue }
 if (-not $python) {
     [Console]::Error.WriteLine(
-        '[zz-context-injection] Python is unavailable; context aggregation disabled'
+        '[context-injection] Python is unavailable; context aggregation disabled'
     )
     [Console]::Out.Write('{}')
     exit 0
@@ -25,7 +25,7 @@ try {
     }
     else {
         [Console]::Error.WriteLine(
-            '[zz-context-injection] aggregator failed; direct context retained'
+            '[context-injection] aggregator failed; direct context retained'
         )
         [Console]::Out.Write('{}')
     }

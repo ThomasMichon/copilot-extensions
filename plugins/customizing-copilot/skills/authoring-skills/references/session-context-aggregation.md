@@ -39,11 +39,27 @@ For context output, prefer one of these ownership models:
 
 - the runtime defines how every value for that event and field is merged; or
 - one attributable owner performs composition, and producers route through
-  that owner or return the same owned aggregate without relying on ambient
-  plugin order.
+  that owner and emit no competing value after ownership is proven.
 
-Do not use a plugin's name, its position in `enabledPlugins`, or current
-inventory order to make an aggregator "last."
+Repository settings enable the plugin; they do not own aggregation policy.
+Repository adoption selects one exact source-qualified authority through
+`.context-injection/config.yaml`. Adoption is data, not a boolean:
+
+```yaml
+schema: copilot-extensions.context-injection
+version: 1
+authority: context-injection@copilot-extensions
+engine:
+  schema: copilot-extensions.context-injection-engine
+  version: 2
+```
+
+The authority must be that exact enabled marketplace plugin, and its adjacent
+engine contract must match. The runtime reads the plugin-owned config only
+after persisted repository-trust proof and rejects unknown keys, malformed or
+unsupported YAML shapes, and path escape. Missing, malformed, ambiguous,
+inactive, or incompatible proof disables aggregation and restores
+producer-local direct emission.
 
 For `sessionStart` and `subagentStart`, the loss of all but one
 `additionalContext` value is tracked in
@@ -71,6 +87,10 @@ The referenced file is data, not executable configuration:
   "schema": "copilot-extensions.session-context-contributors",
   "version": 1,
   "complete": true,
+  "sessionStart": {
+    "sideEffects": "restart-safe-idempotent",
+    "context": "authority-aware"
+  },
   "contributors": [
     {
       "id": "ambient-policy",
@@ -88,27 +108,51 @@ The referenced file is data, not executable configuration:
 Every contributor is side-effect-free, read-only, re-entrant, and safe to run
 in addition to its plugin's direct hook. Commands are payload-relative argv
 arrays, never shell text, repository-provided commands, or `PATH` lookups. The
+contributor `id` uses lowercase ASCII letters, digits, and interior hyphens,
+with a maximum length of 64 characters. The
 `order` field is composition order inside an owning aggregator; it says nothing
 about host plugin execution order. `timeoutSeconds` is an integer from 1
 through 10, and `maxBytes` is an integer from 1 through 65536. The Bash and
 PowerShell command paths must remain within the payload, exist in an inspectable
 payload, and end in `.sh` and `.ps1` respectively.
 
-Split mixed hooks before declaring them. Bootstrap, registration,
-reconciliation, and other side effects remain direct and use `complete: true`
-with an empty `contributors` list when the plugin cannot emit context.
+Split mixed hooks before declaring them. Bootstrap, registration, and other
+side effects remain direct. A side-effect-only hook declares
+`sideEffects: "restart-safe-idempotent"`, `context: "none"`, and an empty
+`contributors` list. A context-only hook declares `sideEffects: "none"` and
+`context: "authority-aware"`. A mixed plugin uses both declarations but keeps
+the direct side-effect command separate from the pure contributor command.
+
+An authority-aware producer asks the selected engine to rendezvous. It
+suppresses its direct `additionalContext` only when the exact repository
+authority is proven active and compatible; every earlier failure invokes its
+original pure contributor directly. After proof, a producer computes or waits
+for the shared result but emits `{}`. Only the selected authority, invoking the
+engine without `--producer`, emits the cached aggregate. Post-proof
+contributor, admission, or aggregate failures publish one shared cached `{}`
+instead of returning to caller-specific fallback.
+
+Rendezvous identity is the pair `(sessionId, canonical resolved cwd)`. Repeated
+authority calls for that exact pair return byte-identical cached output, while
+either component changing selects a different result. The authority may run
+before, after, or concurrently with producers; producer hooks remain empty, so
+exactly one hook emits non-empty context. Producer and authority hooks must set
+their host-level `timeoutSec` to at least the engine's 25-second rendezvous
+deadline; use 30 seconds to leave time for wrapper output. This host timeout is
+separate from the pure contributor's `timeoutSeconds` field.
 
 The declaration makes ownership and possible outputs inspectable. It does not
-prove that an aggregator runs last, and it cannot turn ambient plugin order into
-an arbitration mechanism.
+assign host execution order. The rendezvous and single non-empty authority make
+that order irrelevant on compatible hosts, which must preserve an earlier
+non-empty `additionalContext` when another hook returns `{}`. Treat that
+output-composition behavior as a versioned compatibility requirement, never as
+an inference from observed hook order.
 
 ## Review rule
 
 Flag any customization that:
 
-- treats `enabledPlugins` key order, lexical names, catalog order, or observed
-  plugin order as output precedence;
-- requires one plugin to be the last context emitter; or
+- treats observed hook order as output ownership; or
 - emits competing values without runtime-defined field semantics or one
   attributable composition owner.
 

@@ -75,14 +75,16 @@ def _hook_entry() -> dict[str, object]:
 def test_manifest_registers_cross_platform_session_start_hook() -> None:
     entry = _hook_entry()
     assert entry["type"] == "command"
-    assert entry["timeoutSec"] == 5
+    assert entry["timeoutSec"] == 30
     assert "COPILOT_PLUGIN_ROOT" in entry["powershell"]
     assert "PLUGIN_ROOT" in entry["powershell"]
     assert "CLAUDE_PLUGIN_ROOT" in entry["powershell"]
+    assert "invoke-context-contributor.ps1" in entry["powershell"]
     assert "emit-guidance.ps1" in entry["powershell"]
     assert "COPILOT_PLUGIN_ROOT" in entry["bash"]
     assert "PLUGIN_ROOT" in entry["bash"]
     assert "CLAUDE_PLUGIN_ROOT" in entry["bash"]
+    assert "invoke-context-contributor.sh" in entry["bash"]
     assert "emit-guidance.sh" in entry["bash"]
 
 
@@ -153,7 +155,7 @@ def test_hook_commands_use_plugin_root() -> None:
             text=True,
             env=environment,
         )
-        assert _context(result) == _context(_run_powershell())
+        assert _context(result) == _context(_run_powershell("--aggregate"))
 
     if os.name != "nt" and shutil.which("bash"):
         result = subprocess.run(
@@ -163,7 +165,7 @@ def test_hook_commands_use_plugin_root() -> None:
             text=True,
             env=environment,
         )
-        assert _context(result) == _context(_run_bash())
+        assert _context(result) == _context(_run_bash("--aggregate"))
 
 
 def test_hook_commands_accept_compatibility_root_aliases() -> None:
@@ -183,7 +185,7 @@ def test_hook_commands_accept_compatibility_root_aliases() -> None:
                 text=True,
                 env=environment,
             )
-            assert _context(result).startswith("[owner: delegation-guidance@")
+            assert _context(result) == _context(_run_powershell("--aggregate"))
 
         if os.name != "nt" and shutil.which("bash"):
             result = subprocess.run(

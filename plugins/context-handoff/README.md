@@ -69,20 +69,15 @@ this plugin:
 ## Verify
 
 A session where the plugin hook loaded receives an owner marker beginning with
-`[owner: context-handoff@...]` in `additionalContext`. When an adjacent
-agent-worktrees payload is present, the same hook result also preserves that
-payload's exact command in an honestly attributed
-`adjacent-compatibility` catalog. Adjacency is a payload-presence check, not an
-assertion that agent-worktrees is enabled in the current session; the catalog
-reports `ready` only when both its command and installer are present, otherwise
-`unavailable`. This is a deliberate best-effort exception to
-the normal "do not add another producer" rule while Copilot CLI
-[#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234) remains
-open: if this hook's result survives the runtime race, it does not strand the
-agent without the worktree command, but it cannot preserve every sibling
-plugin's context or guarantee that this kernel wins. The #1234 effort owns the
-holistic aggregation fix; once deterministic aggregation is available, this
-adjacent catalog should be removed in favor of agent-worktrees' own catalog.
+`[owner: context-handoff@...]` in `additionalContext`. Without an adopted
+aggregate authority, an adjacent agent-worktrees payload also contributes that
+payload's exact command in an honestly attributed `adjacent-compatibility`
+catalog. Adjacency is a payload-presence check, not an assertion that
+agent-worktrees is enabled in the current session; the catalog reports `ready`
+only when both its command and installer are present, otherwise `unavailable`.
+With the exact compatible `context-injection@copilot-extensions` authority
+adopted, this plugin contributes only its compact continuity kernel and
+agent-worktrees contributes its own catalog to the deterministic aggregate.
 The POSIX compatibility catalog requires a system
 `python3` or `python`; without one, the valid continuity kernel still emits by
 itself. A standalone context-handoff installation also emits only its own
