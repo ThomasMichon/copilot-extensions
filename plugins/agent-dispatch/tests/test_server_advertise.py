@@ -89,6 +89,19 @@ def test_clear_endpoint_removes_non_utf8_record(tmp_path):
     assert not rendezvous.endpoint_file(run).exists()
 
 
+def test_clear_endpoint_rechecks_owner_before_unlink(monkeypatch, tmp_path):
+    run = tmp_path / "run"
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41001", pid=1001)
+    owner = rendezvous.read_endpoint(run)
+    successor = rendezvous.Endpoint("tcp", "127.0.0.1:41002", pid=2002)
+    records = iter((owner, successor))
+    monkeypatch.setattr(rendezvous, "read_endpoint", lambda _runtime_dir: next(records))
+
+    rendezvous.clear_endpoint(run, owner_pid=1001)
+
+    assert rendezvous.endpoint_file(run).exists()
+
+
 def test_server_bind_port_defaults_to_zero(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_PORT", raising=False)
     assert server._server_bind_port() == 0

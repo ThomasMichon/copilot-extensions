@@ -25,6 +25,18 @@ def test_clear_endpoint_preserves_successor_owned_record(tmp_path):
     assert endpoint.tcp_host_port == ("127.0.0.1", 41002)
 
 
+def test_clear_endpoint_rechecks_owner_before_unlink(monkeypatch, tmp_path):
+    rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+    owner = rendezvous.read_endpoint(tmp_path)
+    successor = rendezvous.Endpoint("tcp", "127.0.0.1:41002", pid=2002)
+    records = iter((owner, successor))
+    monkeypatch.setattr(rendezvous, "read_endpoint", lambda _runtime_dir: next(records))
+
+    rendezvous.clear_endpoint(tmp_path, owner_pid=1001)
+
+    assert rendezvous.endpoint_file(tmp_path).exists()
+
+
 def test_posix_prefers_unix_socket():
     assert advertised_endpoint(
         is_windows=False,

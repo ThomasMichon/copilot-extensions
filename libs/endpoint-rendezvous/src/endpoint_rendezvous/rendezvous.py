@@ -286,6 +286,9 @@ def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> 
     pid = owner_pid if owner_pid is not None else os.getpid()
     if record is not None and record.pid is not None and record.pid != pid:
         return
+    record = read_endpoint(runtime_dir)
+    if record is not None and record.pid is not None and record.pid != pid:
+        return
     with contextlib.suppress(OSError):
         path.unlink()
 

@@ -159,6 +159,18 @@ def test_clear_endpoint_removes_non_utf8_record(tmp_path):
     assert not endpoint_file(tmp_path).exists()
 
 
+def test_clear_endpoint_rechecks_owner_before_unlink(monkeypatch, tmp_path):
+    write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+    owner = read_endpoint(tmp_path)
+    successor = Endpoint("tcp", "127.0.0.1:41002", pid=2002)
+    records = iter((owner, successor))
+    monkeypatch.setattr(rv, "read_endpoint", lambda _runtime_dir: next(records))
+
+    clear_endpoint(tmp_path, owner_pid=1001)
+
+    assert endpoint_file(tmp_path).exists()
+
+
 # --- read robustness --------------------------------------------------------
 
 
