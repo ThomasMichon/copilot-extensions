@@ -43,7 +43,11 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "function Get-EstimatedPreAuthConnCount" in text
     assert "$preAuthConns -ge $PreAuthReapThreshold" in text
     assert "if (-not $sessionPressure)" in text
-    assert "PRESSURE REAP deferred: sshd session classification unavailable" in text
+    assert "$forceHealthCheck = (" in text
+    assert "$estConns -lt 0 -or" in text
+    assert "$shouldClassifySessions -and -not $sessionPressure" in text
+    assert "forcing banner health check" in text
+    assert "$forceHealthCheck -or (Get-Date) -ge $nextHealthCheckAt" in text
     assert "$sessionPressure.ActiveRoots -gt 0" in text
     assert "PRESSURE REAP deferred:" in text
     assert "PRESSURE REAP:" in text

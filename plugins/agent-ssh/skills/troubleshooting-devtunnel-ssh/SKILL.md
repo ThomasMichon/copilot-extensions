@@ -82,8 +82,10 @@ launcher estimates pre-auth pressure by subtracting only sshd session roots
 proven authenticated by Win32 OpenSSH's post-auth `-z` child from the total
 Established count. It checks that estimate on a short local cadence and
 recycles below OpenSSH's default `MaxStartups` drop onset while deferring if a
-command-bearing or actively forwarding session exists or session
-classification is unavailable.
+command-bearing or actively forwarding session exists. If connection counting
+or session classification is unavailable, it falls back to banner checks on
+the same fast cadence rather than killing an unclassified active session or
+waiting for the slower relay-health interval.
 Updated dtssh builds that include
 `MaxStartups`/`LoginGraceTime`/`ClientAlive*` in their generated `sshd_config`
 reduce the root cause; the launcher health checks remain the in-box guard.

@@ -593,6 +593,10 @@ try {
             $sessionPressure = Get-DedicatedSshdSessionPressure $Port
         }
         $preAuthConns = Get-EstimatedPreAuthConnCount $estConns $sessionPressure
+        $forceHealthCheck = (
+            $estConns -lt 0 -or
+            ($shouldClassifySessions -and -not $sessionPressure)
+        )
         if ($PreAuthWarnThreshold -gt 0 -and $preAuthConns -ge $PreAuthWarnThreshold) {
             Write-Log "pre-auth pressure: ~$preAuthConns unauthenticated connection(s) on :$Port (>= $PreAuthWarnThreshold; $estConns total Established; MaxStartups wedge risk)" 'WARN'
         }
@@ -630,7 +634,7 @@ try {
             $preAuthConns -ge $PreAuthReapThreshold
         ) {
             if (-not $sessionPressure) {
-                Write-Log "PRESSURE REAP deferred: sshd session classification unavailable" 'WARN'
+                Write-Log "PRESSURE REAP deferred: sshd session classification unavailable; forcing banner health check" 'WARN'
             } elseif ($sessionPressure.ActiveRoots -gt 0) {
                 Write-Log "PRESSURE REAP deferred: $($sessionPressure.ActiveRoots) command-bearing SSH session(s) active" 'WARN'
             } else {
@@ -644,7 +648,7 @@ try {
             }
         }
 
-        if ((Get-Date) -ge $nextHealthCheckAt) {
+        if ($forceHealthCheck -or (Get-Date) -ge $nextHealthCheckAt) {
             # Health = relay connected AND the dedicated sshd is actually
             # SERVING. The banner probe distinguishes a listening-but-wedged
             # sshd from a usable one.
