@@ -165,7 +165,7 @@ def test_hook_commands_use_plugin_root() -> None:
             text=True,
             env=environment,
         )
-        assert _context(result) == _context(_run_bash())
+        assert _context(result) == _context(_run_bash("--aggregate"))
 
 
 def test_hook_commands_accept_compatibility_root_aliases() -> None:
