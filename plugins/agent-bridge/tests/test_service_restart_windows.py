@@ -25,6 +25,19 @@ class _Completed:
         self.stderr = stderr
 
 
+def _fast_time(monkeypatch):
+    import time as _time
+
+    now = {"value": 0.0}
+    monkeypatch.setattr(_time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(
+        _time,
+        "sleep",
+        lambda seconds: now.__setitem__("value", now["value"] + seconds),
+    )
+    return now
+
+
 def test_win_task_exists_true_on_rc0(monkeypatch):
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed(0, "TaskName: Agent Bridge"))
     assert m._win_task_exists() is True
@@ -60,13 +73,13 @@ def test_win_task_exists_false_on_oserror(monkeypatch):
 def test_service_start_falls_back_when_task_start_leaves_daemon_down(monkeypatch):
     """A scheduled-task start that never brings the daemon up must fall back to
     the direct detached spawn (the S4U on-demand-restart failure, #227)."""
-    import time as _time
-
-    monkeypatch.setattr(_time, "sleep", lambda *_a: None)
+    _fast_time(monkeypatch)
     monkeypatch.setattr(m, "_systemd_available", lambda: False)
     monkeypatch.setattr(m.sys, "platform", "win32")
     monkeypatch.setattr(m, "_win_task_exists", lambda: True)
     monkeypatch.setattr(m, "_service_port", lambda: 12345)
+    monkeypatch.setattr(m, "_active_endpoint", lambda: None)
+    monkeypatch.setattr(m, "_read_pid_file", lambda: None)
     # The task-run schtasks call is a no-op that changes nothing.
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed(0))
 
@@ -86,13 +99,13 @@ def test_service_start_falls_back_when_task_start_leaves_daemon_down(monkeypatch
 def test_service_start_no_double_spawn_on_direct_path(monkeypatch):
     """When there is no systemd/task manager, the direct spawn runs once and the
     fallback branch is not taken (no double spawn)."""
-    import time as _time
-
-    monkeypatch.setattr(_time, "sleep", lambda *_a: None)
+    _fast_time(monkeypatch)
     monkeypatch.setattr(m, "_systemd_available", lambda: False)
     monkeypatch.setattr(m.sys, "platform", "win32")
     monkeypatch.setattr(m, "_win_task_exists", lambda: False)
     monkeypatch.setattr(m, "_service_port", lambda: 12345)
+    monkeypatch.setattr(m, "_active_endpoint", lambda: None)
+    monkeypatch.setattr(m, "_read_pid_file", lambda: None)
 
     calls = {"n": 0}
 
@@ -116,3 +129,75 @@ def test_service_start_early_returns_when_already_running(monkeypatch):
     )
     m._service_start()
     assert spawned["n"] == 0
+
+
+def test_service_start_waits_for_slow_live_daemon_without_fallback(monkeypatch):
+    _fast_time(monkeypatch)
+    monkeypatch.setattr(m, "_systemd_available", lambda: False)
+    monkeypatch.setattr(m.sys, "platform", "win32")
+    monkeypatch.setattr(m, "_win_task_exists", lambda: True)
+    monkeypatch.setattr(m, "_service_port", lambda: 54321)
+    monkeypatch.setattr(m, "_active_endpoint", lambda: None)
+    monkeypatch.setattr(m, "_read_pid_file", lambda: 222)
+    monkeypatch.setattr(
+        m, "_pid_is_agent_bridge", lambda pid, _timeout=15: pid == 222
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed(0))
+
+    probes = {"count": 0}
+
+    def _health():
+        probes["count"] += 1
+        return probes["count"] >= 82
+
+    monkeypatch.setattr(m, "_service_is_running", _health)
+    spawned = {"count": 0}
+    monkeypatch.setattr(
+        m,
+        "_spawn_detached_daemon",
+        lambda: spawned.__setitem__("count", spawned["count"] + 1),
+    )
+
+    m._service_start()
+
+    assert probes["count"] == 82
+    assert spawned["count"] == 0
+
+
+def test_service_start_waits_for_new_pid_when_route_still_names_dead_daemon(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+
+    _fast_time(monkeypatch)
+    monkeypatch.setattr(m, "_systemd_available", lambda: False)
+    monkeypatch.setattr(m.sys, "platform", "win32")
+    monkeypatch.setattr(m, "_win_task_exists", lambda: True)
+    monkeypatch.setattr(m, "_service_port", lambda: 54321)
+    monkeypatch.setattr(
+        m, "_active_endpoint", lambda: SimpleNamespace(pid=111, port=54321)
+    )
+    monkeypatch.setattr(m, "_read_pid_file", lambda: 222)
+    monkeypatch.setattr(
+        m, "_pid_is_agent_bridge", lambda pid, _timeout=15: pid == 222
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Completed(0))
+
+    probes = {"count": 0}
+
+    def _health():
+        probes["count"] += 1
+        return probes["count"] >= 42
+
+    monkeypatch.setattr(m, "_service_is_running", _health)
+    spawned = {"count": 0}
+    monkeypatch.setattr(
+        m,
+        "_spawn_detached_daemon",
+        lambda: spawned.__setitem__("count", spawned["count"] + 1),
+    )
+
+    m._service_start()
+
+    assert probes["count"] == 42
+    assert spawned["count"] == 0

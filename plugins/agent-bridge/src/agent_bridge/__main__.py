@@ -692,10 +692,12 @@ _INSTALL_DIR = os.path.expanduser(
 _PID_FILE = os.path.join(_INSTALL_DIR, "agent-bridge.pid")
 _WIN_TASK_NAME = "Agent Bridge"
 _SYSTEMD_UNIT = "agent-bridge.service"
+_SERVICE_START_TIMEOUT_S = 120
+_SERVICE_LAUNCH_GRACE_S = 15
 
 
-def _active_endpoint_port() -> int | None:
-    """The live daemon's port from the routing table (``active.json``), or None.
+def _active_endpoint():
+    """The daemon endpoint recorded in ``active.json``, or ``None``.
 
     Post-#694 the daemon binds an OS-assigned **dynamic** port and advertises it
     via ``active.json`` -- the config's ``port`` is 0 (the dynamic sentinel), so
@@ -705,17 +707,21 @@ def _active_endpoint_port() -> int | None:
     #1713 liveness bug: ``service status`` FAILing on 9280, and ``service start``
     warning "health check did not pass" against a daemon that did come up). Read
     the routing table first -- ``verify_listener=False`` so a mid-startup port is
-    still reported (the caller does its own health probe). Returns None when there
-    is no routing table (a fixed-port or never-started deployment).
+    still reported (the caller does its own health probe).
     """
     try:
         from zdd.routing import read_active_endpoint
 
-        ep = read_active_endpoint(_INSTALL_DIR, verify_listener=False)
-        if ep is not None and ep.port:
-            return int(ep.port)
+        return read_active_endpoint(_INSTALL_DIR, verify_listener=False)
     except Exception:
-        pass
+        return None
+
+
+def _active_endpoint_port() -> int | None:
+    """The routed daemon port, or ``None`` when no route has been published."""
+    endpoint = _active_endpoint()
+    if endpoint is not None and endpoint.port:
+        return int(endpoint.port)
     return None
 
 
@@ -764,6 +770,68 @@ def _read_pid_file() -> int | None:
             return int((fh.read() or "").strip())
     except (OSError, ValueError):
         return None
+
+
+def _service_pid() -> int | None:
+    """Resolve the daemon PID from routing before stale service side files."""
+    endpoint = _active_endpoint()
+    if endpoint is not None and endpoint.pid:
+        return int(endpoint.pid)
+    port_pid = _pid_on_port(_service_port())
+    if port_pid:
+        return port_pid
+    return _read_pid_file()
+
+
+def _wait_for_service_start(
+    *,
+    timeout: int = _SERVICE_START_TIMEOUT_S,
+    launch_grace: int = _SERVICE_LAUNCH_GRACE_S,
+) -> bool:
+    """Wait for liveness while a confirmed daemon process is still starting.
+
+    Older builds publish their dynamic route only after slow initialization, so
+    a fixed 15-second health wait can warn and launch a duplicate while the
+    first daemon is healthy-but-not-ready. Wait up to the startup watchdog
+    budget once either the routed PID or launcher pid-file identifies a live
+    bridge process; fall back promptly when no process appears within the
+    platform-manager launch grace.
+    """
+    import time
+
+    timeout = max(1, timeout)
+    launch_grace = max(1, launch_grace)
+    deadline = time.monotonic() + timeout
+    no_process_deadline = time.monotonic() + launch_grace
+    saw_live_process = False
+    while time.monotonic() < deadline:
+        if _service_is_running():
+            return True
+        endpoint = _active_endpoint()
+        candidates = {
+            endpoint.pid if endpoint is not None else None,
+            _read_pid_file(),
+        }
+        candidates.discard(None)
+        probe_timeout = max(
+            0.1, min(1.0, deadline - time.monotonic())
+        )
+        live_process = any(
+            _pid_is_agent_bridge(int(pid), probe_timeout)
+            for pid in candidates
+        )
+        if live_process:
+            saw_live_process = True
+            no_process_deadline = time.monotonic() + launch_grace
+        elif saw_live_process:
+            if time.monotonic() >= no_process_deadline:
+                return False
+        elif time.monotonic() >= no_process_deadline:
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(1.0, remaining))
+    return _service_is_running()
 
 
 def _print_reconcile_status() -> None:
@@ -922,7 +990,7 @@ def _ensure_retired_daemon_exited(
     return not _pid_is_agent_bridge(pid), True
 
 
-def _pid_is_agent_bridge(pid: int) -> bool:
+def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
     """True if *pid* is a live process running the ``agent_bridge`` module.
 
     Confirms a lock-recorded pid really is a (possibly wedged) daemon before we
@@ -939,7 +1007,7 @@ def _pid_is_agent_bridge(pid: int) -> bool:
                 ["powershell", "-NoProfile", "-Command",
                  "(Get-CimInstance Win32_Process -Filter "
                  f"'ProcessId={pid}' -ErrorAction SilentlyContinue).CommandLine"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=timeout,
             )
             return "agent_bridge" in (out.stdout or "")
         # POSIX: read the process command line (Linux /proc; fall back to ps).
@@ -948,7 +1016,7 @@ def _pid_is_agent_bridge(pid: int) -> bool:
                 return b"agent_bridge" in fh.read()
         except OSError:
             out = sp.run(["ps", "-p", str(pid), "-o", "command="],
-                         capture_output=True, text=True, timeout=15)
+                         capture_output=True, text=True, timeout=timeout)
             return "agent_bridge" in (out.stdout or "")
     except (OSError, sp.TimeoutExpired, ValueError):
         return False
@@ -1290,8 +1358,6 @@ def _ensure_daemon() -> bool:
 
 def _service_start() -> None:
     import subprocess as sp
-    import time
-
     if _service_is_running():
         print(f"[OK] agent-bridge already running (port {_service_port()})")
         return
@@ -1308,12 +1374,9 @@ def _service_start() -> None:
         # No systemd unit / scheduled task: spawn a detached daemon directly.
         _spawn_detached_daemon()
 
-    # Wait for health.
-    for _ in range(15):
-        time.sleep(1)
-        if _service_is_running():
-            print(f"[OK] agent-bridge started (port {_service_port()})")
-            return
+    if _wait_for_service_start():
+        print(f"[OK] agent-bridge started (port {_service_port()})")
+        return
 
     # The platform manager (systemd / scheduled task) issued a start but the
     # daemon never came up -- notably an **S4U / RunLevel-Limited** boot task,
@@ -1324,11 +1387,9 @@ def _service_start() -> None:
     # (dotfiles#227). Skip when we already spawned directly above.
     if used_platform_manager:
         _spawn_detached_daemon()
-        for _ in range(15):
-            time.sleep(1)
-            if _service_is_running():
-                print(f"[OK] agent-bridge started (port {_service_port()})")
-                return
+        if _wait_for_service_start():
+            print(f"[OK] agent-bridge started (port {_service_port()})")
+            return
 
     print("[WARN] agent-bridge start issued but health check did not pass yet "
           "-- check ~/.agent-bridge/agent-bridge-err.log", file=sys.stderr)
@@ -1399,7 +1460,7 @@ def _cmd_service(args: argparse.Namespace) -> None:
         _service_start()
     elif action == "status":
         _cmd_status(args)
-        pid = _read_pid_file() or _pid_on_port(_service_port())
+        pid = _service_pid()
         if pid:
             print(f"  PID:  {pid}")
         print(f"  Port: {_service_port()}")

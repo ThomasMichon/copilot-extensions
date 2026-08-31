@@ -12,6 +12,7 @@ start`` warning "health check did not pass" against a daemon that came up).
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from agent_bridge import __main__ as m
 from agent_bridge.models import default_port
@@ -42,6 +43,32 @@ def test_service_port_prefers_dynamic_active_endpoint(monkeypatch, tmp_path):
     monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
     assert m._service_port() == 54321
     assert m._service_port() != default_port()
+
+
+def test_service_pid_prefers_routed_pid_over_stale_pid_file(
+    monkeypatch, tmp_path
+):
+    (tmp_path / "config.yaml").write_text("port: 0\n", encoding="utf-8")
+    _write_active(tmp_path, 54321, pid=222)
+    (tmp_path / "agent-bridge.pid").write_text("111", encoding="utf-8")
+    monkeypatch.setattr(m, "_INSTALL_DIR", str(tmp_path))
+    monkeypatch.setattr(m, "_PID_FILE", str(tmp_path / "agent-bridge.pid"))
+    monkeypatch.setattr(m, "_pid_on_port", lambda _port: 333)
+
+    assert m._service_pid() == 222
+
+
+def test_service_status_prints_routed_pid(monkeypatch, capsys):
+    monkeypatch.setattr(m, "_cmd_status", lambda _args: None)
+    monkeypatch.setattr(m, "_service_pid", lambda: 222)
+    monkeypatch.setattr(m, "_service_port", lambda: 54321)
+    monkeypatch.setattr(m, "_print_reconcile_status", lambda: None)
+
+    m._cmd_service(SimpleNamespace(service_action="status"))
+
+    output = capsys.readouterr().out
+    assert "PID:  222" in output
+    assert "Port: 54321" in output
 
 
 def test_service_port_falls_back_to_config_fixed_port(monkeypatch, tmp_path):
