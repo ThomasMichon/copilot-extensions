@@ -166,8 +166,11 @@ def test_concurrent_registrations_resolve_their_own_launch_settings(tmp_path: Pa
     second_spec = json.loads(second.stdout)
     assert first_spec["workspace_folder"] == "/worktree/one"
     assert second_spec["workspace_folder"] == "/worktree/two"
-    assert first_spec["spawn_command"][3] == "id-cr-one"
-    assert second_spec["spawn_command"][3] == "id-cr-two"
+    docker_command = ["bash", _bash_path(tmp_path / "bin" / "docker")]
+    assert first_spec["spawn_command"][:2] == docker_command
+    assert second_spec["spawn_command"][:2] == docker_command
+    assert first_spec["spawn_command"][2:5] == ["exec", "-i", "id-cr-one"]
+    assert second_spec["spawn_command"][2:5] == ["exec", "-i", "id-cr-two"]
     assert first_spec["spawn_command"][-1].endswith("/plugins/one")
     assert second_spec["spawn_command"][-1].endswith("/plugins/two")
     assert provider_script.is_file()

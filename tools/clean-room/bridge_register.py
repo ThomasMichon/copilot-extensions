@@ -231,21 +231,30 @@ def _load_registration(container: str) -> dict[str, str] | None:
     }
 
 
-def _docker(args: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
-    command = ["docker"]
+def _docker_command() -> list[str]:
     configured = os.environ.get("CLEAN_ROOM_DOCKER_COMMAND_JSON")
-    if configured is not None:
-        try:
-            parsed = json.loads(configured)
-        except json.JSONDecodeError:
-            return -1, "", "CLEAN_ROOM_DOCKER_COMMAND_JSON is malformed"
-        if (
-            not isinstance(parsed, list)
-            or not parsed
-            or not all(isinstance(part, str) and part for part in parsed)
-        ):
-            return -1, "", "CLEAN_ROOM_DOCKER_COMMAND_JSON is invalid"
-        command = parsed
+    if configured is None:
+        return ["docker"]
+    try:
+        parsed = json.loads(configured)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            "CLEAN_ROOM_DOCKER_COMMAND_JSON is malformed"
+        ) from exc
+    if (
+        not isinstance(parsed, list)
+        or not parsed
+        or not all(isinstance(part, str) and part for part in parsed)
+    ):
+        raise ValueError("CLEAN_ROOM_DOCKER_COMMAND_JSON is invalid")
+    return parsed
+
+
+def _docker(args: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
+    try:
+        command = _docker_command()
+    except ValueError as exc:
+        return -1, "", str(exc)
     try:
         r = subprocess.run(
             [*command, *args],
@@ -307,7 +316,15 @@ def _registration_cwd_exists(registration: dict[str, str]) -> bool:
 def _spawn_command(container: str, acp_command: str) -> list[str]:
     # The container carries COPILOT_GITHUB_TOKEN in its env (docker-run -e), so
     # the exec'd Copilot is authenticated with no token on the command line.
-    return ["docker", "exec", "-i", container, "bash", "-lc", acp_command]
+    return [
+        *_docker_command(),
+        "exec",
+        "-i",
+        container,
+        "bash",
+        "-lc",
+        acp_command,
+    ]
 
 
 # --- provider protocol (the agent-bridge namespace-* CLI seam) -------------

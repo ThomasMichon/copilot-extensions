@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.7.5-dev706"
+    "version": "1.7.5-dev707"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.5.3-dev683",
+      "version": "1.5.3-dev684",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -90,7 +90,7 @@
     {
       "name": "copilot-extensions-harness",
       "description": "Operator harness for the copilot-extensions repo - portable contribution, diagnosis, deployment, and clean-room validation guidance plus an ambient pointer to the general-purpose, organization-neutral contribution boundary.",
-      "version": "0.1.0-dev30",
+      "version": "0.1.0-dev31",
       "source": "plugins/copilot-extensions-harness"
     },
     {
@@ -131,7 +131,7 @@
     },
     {
       "name": "context-injection",
-      "description": "Deterministic session-start context aggregation for Copilot CLI plugins. Resolves the active plugin stack, runs declared pure context contributors, and emits one final additionalContext value while affected hosts retain only the last hook result.",
+      "description": "Authority-aware session-start context aggregation for Copilot CLI plugins. Proves trusted repository adoption and the staged active plugin stack, runs declared pure contributors through an engine-v2 rendezvous, and leaves direct side effects independent while only the authority emits the aggregate.",
       "version": "0.1.0-dev8",
       "source": "plugins/context-injection"
     }
