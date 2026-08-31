@@ -25,6 +25,7 @@ MAX_CONTRIBUTORS = 128
 MAX_TIMEOUT_SECONDS = 10
 MAX_TOTAL_TIMEOUT_SECONDS = 20
 MAX_WORKERS = 16
+PROCESS_START_GRACE_SECONDS = 2 if os.name == "nt" else 0
 COMMAND_CATALOG_BUDGET_BYTES = 32 * 1024
 DEFAULT_AUTHORITY_SOURCE = "zz-context-injection@copilot-extensions"
 IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$")
@@ -538,7 +539,10 @@ def _run(
             )
             process.communicate(
                 input=hook_input,
-                timeout=contributor.timeout_seconds,
+                timeout=(
+                    contributor.timeout_seconds
+                    + PROCESS_START_GRACE_SECONDS
+                ),
             )
         except (OSError, subprocess.TimeoutExpired):
             if "process" in locals() and process.poll() is None:
