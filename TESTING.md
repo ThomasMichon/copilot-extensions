@@ -61,10 +61,12 @@ boundary.
 ## Test portfolio invariants
 
 Required pull-request CI is a fast regression gate, not the complete test
-inventory. Keep its wall time below five minutes under normal runner variance.
-A suite that cannot fit that budget must provide a contract-focused smoke lane
-and move its exhaustive cross-products to a scheduled or manually dispatched
-workflow.
+inventory. Its design target is a wall time below five minutes under normal
+runner variance. This is not the runner's timeout: containment budgets such as
+the 15-minute per-plugin ceiling remain safety limits for unusually slow or
+explicit runs. A suite that cannot fit the required-CI target must provide a
+contract-focused smoke lane and move its exhaustive cross-products to a
+scheduled or manually dispatched workflow.
 
 - Gate specialized suites by changed paths so unrelated pull requests do not
   pay their cost.
