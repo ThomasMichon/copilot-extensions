@@ -398,8 +398,8 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
             try:
                 stale.unlink()
             except OSError as exc:
-                output.err(f"Could not retire {stale}: {exc}")
-                return False
+                output.warn(f"Could not retire obsolete {stale}: {exc}")
+                continue
             output.changed(f"retired {stale}")
 
     # Deploy the session-conduct data fragments (scripts/conduct/*.md) that the

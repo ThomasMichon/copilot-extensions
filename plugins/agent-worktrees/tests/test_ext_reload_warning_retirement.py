@@ -57,6 +57,37 @@ def test_installer_retires_previously_deployed_assets(
         assert not (deployed / name).exists()
 
 
+def test_locked_retired_asset_warns_without_failing_update(
+    tmp_path: Path, monkeypatch, capsys,
+) -> None:
+    repo = tmp_path / "repo"
+    assets = repo / "plugins" / "agent-worktrees" / "bin"
+    assets.mkdir(parents=True)
+    for name in ("launch-session.cmd", "launch-session.ps1", "pane-wrapper.ps1"):
+        (assets / name).write_text("wrapper\n", encoding="utf-8")
+
+    install = tmp_path / "install"
+    deployed = install / "bin"
+    deployed.mkdir(parents=True)
+    locked = deployed / RETIRED_ASSETS[0]
+    locked.write_text("stale\n", encoding="utf-8")
+
+    original_unlink = Path.unlink
+
+    def unlink(path: Path, *args, **kwargs) -> None:
+        if path == locked:
+            raise PermissionError("temporarily locked")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(installer, "install_dir", lambda: install)
+    monkeypatch.setattr(installer.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    assert installer.deploy_wrappers(repo)
+    assert locked.exists()
+    assert "Could not retire obsolete" in capsys.readouterr().out
+
+
 def test_remove_managed_instruction_retires_marked(tmp_path: Path) -> None:
     proj = tmp_path / ".proj"
     path = _warning_file(proj)
