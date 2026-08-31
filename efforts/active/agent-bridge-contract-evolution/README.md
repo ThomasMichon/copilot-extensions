@@ -14,6 +14,8 @@
   `session-contract-survives-default-changes`, and
   `readers-expand-before-writers`
 - **Umbrella issue:** [#1460](https://github.com/ThomasMichon/copilot-extensions/issues/1460)
+- **Sub-issues:** [#1468](https://github.com/ThomasMichon/copilot-extensions/issues/1468)
+  (contract registry and baseline fixtures)
 - **Related issues:** [#1266](https://github.com/ThomasMichon/copilot-extensions/issues/1266)
   (AHP host convergence) ·
   [#1448](https://github.com/ThomasMichon/copilot-extensions/issues/1448)
@@ -105,15 +107,21 @@ are in [design.md](design.md).
 
 ### Phase 0 — Freeze the compatibility floor
 
+The first implementation stretch is carved into
+[`agent-bridge-contract-baseline`](../agent-bridge-contract-baseline/README.md)
+under #1468. It lands the registry, fixtures, and CI checker without changing
+runtime behavior.
+
 - [ ] Add a machine-readable registry for every live and durable bridge
       contract, including owner, semantic generation, supported range, optional
       capabilities, state records, fixtures, release provenance, support window,
       bridge-contract rollback window, and removal gate.
 - [ ] Freeze fixtures for the current and previous supported HTTP, Session Host,
       provider, relay, claim, route, target, authority, and event shapes.
-- [ ] Register AHP from the exact provenance and fixtures supplied by #1266, and
-      register delegation control from the contract supplied by #1448; do not
-      flatten either into an invented universal protocol.
+- [ ] Register AHP from the exact provenance and fixtures supplied by #1308
+      under the #1266 lane, and register delegation control from the contract
+      supplied by #1448; do not flatten either into an invented universal
+      protocol.
 - [ ] Make CI reject an unregistered contract change or a contract-generation assertion
       without fixtures and source/release provenance. Event/history identity,
       projection references, and rebuild-generation semantics are registered
@@ -245,6 +253,15 @@ faces:
 The detailed contract map is [design.md](design.md).
 
 ## Journal
+
+### 2026-08-31 — First implementation stretch carved
+
+- Opened #1468 and carved
+  [`agent-bridge-contract-baseline`](../agent-bridge-contract-baseline/README.md)
+  as the behavior-neutral implementation of Phase 0.
+- Kept AHP corpus ownership in #1308, delegation semantics in #1448, event
+  identity in #1138, and provider/worktree record semantics with their owning
+  plugins.
 
 ### 2026-08-31 — Kickoff and convergence reconciliation
 
