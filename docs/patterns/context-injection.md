@@ -35,30 +35,73 @@ a legacy compatibility path, not the target design.
 
 ### Inject a concise plugin-owned kernel
 
-A plugin that owns ambient policy should register a `sessionStart` command hook.
-The hook reads the launch payload and emits exactly one JSON object. The
+A plugin that owns ambient policy declares a pure payload-relative contributor
+and registers an authority-aware `sessionStart` producer wrapper. The
+contributor reads the launch payload and emits exactly one JSON object. The
 injected kernel begins with a stable owner marker -- at minimum the plugin name,
-and preferably the plugin name plus version -- so diagnostics and budget reports
-can attribute the bytes:
+and preferably the plugin name plus version -- so diagnostics and budget
+reports can attribute the bytes:
 
 ```json
 {"additionalContext":"[owner: example-plugin@1.2.3]\n<concise guidance kernel>"}
 ```
 
-Until Copilot CLI issue #1234 deterministically aggregates multiple non-empty
-results, registrations remain plugin-specific risk decisions. `context-handoff`
-is the explicit best-effort exception: its continuity kernel registers now and
-temporarily carries an adjacent agent-worktrees command catalog when its result
-wins the runtime race. Plugins whose richer policy can remain in a static
-fallback, including `efforts`, may continue to defer registration.
+On affected Copilot CLI versions, the repository adopts the exact direct
+`context-injection@copilot-extensions` marketplace authority and engine-v2
+contract. Before exact authority proof, the wrapper invokes its own contributor
+directly. After proof, it joins the shared
+`(sessionId, canonical resolved cwd)` rendezvous and emits `{}`; only the
+authority emits the cached aggregate. Authority-first, producer-first, and
+concurrent execution therefore have one possible non-empty output. Missing,
+malformed, ambiguous, inactive, or incompatible authority proof preserves
+standalone output.
 
-Locate a payload-owned producer from the plugin-root environment that Copilot
-CLI supplies to plugin hooks (`COPILOT_PLUGIN_ROOT`, with `PLUGIN_ROOT` and
-`CLAUDE_PLUGIN_ROOT` as compatibility aliases). Do not use the session cwd or
-target repository to rediscover the plugin's own code. The start payload's
-`cwd` is for applicability gating; the plugin root is for locating the
-producer. A missing root or producer emits a diagnostic to stderr and fails
-open with `{}`.
+Store rendezvous state in a per-user runtime or cache directory. On POSIX,
+require a current-user-owned `0700` root and `0600` lock/result files; reject
+unsafe or symlinked paths.
+
+Host settings only enable `context-injection@copilot-extensions`. Adoption is
+plugin-owned repository configuration in `.context-injection/config.yaml`:
+
+```yaml
+schema: copilot-extensions.context-injection
+version: 1
+authority: context-injection@copilot-extensions
+engine:
+  schema: copilot-extensions.context-injection-engine
+  version: 2
+```
+
+Read that file only after exact persisted repository-trust proof. Reject
+unknown or duplicate keys, malformed or unsupported YAML shapes, path escape,
+and incompatible schema/version values. A host-settings key must not duplicate
+or override this authority declaration.
+
+The plugin's `session-context.json` complete-declares its behavior:
+
+- context-only producers use `sideEffects: none` and
+  `context: authority-aware`;
+- mixed plugins use `sideEffects: restart-safe-idempotent` and
+  `context: authority-aware`, keep direct idempotent side-effect commands
+  separate, and declare only pure contributor commands; and
+- side-effect-only plugins use `context: none` with no contributors.
+
+The authority never reruns direct hooks. Producer and authority hook
+registrations use a 30-second host timeout, leaving wrapper overhead beyond the
+engine's 25-second rendezvous deadline. Bash and PowerShell wrappers must have
+the same bytes and behavior across every contributing payload.
+If a pure contributor consumes output computed by a direct side-effect hook,
+the direct hook atomically publishes an explicit completion snapshot and the
+contributor waits for it within its own deadline. A missing snapshot never
+authorizes the contributor to replay the side effect.
+
+Locate the wrapper and payload-owned contributor from the plugin-root
+environment that Copilot CLI supplies to plugin hooks (`COPILOT_PLUGIN_ROOT`,
+with `PLUGIN_ROOT` and `CLAUDE_PLUGIN_ROOT` as compatibility aliases). Do not
+use the session cwd or target repository to rediscover the plugin's own code.
+The start payload's `cwd` is for applicability gating; the plugin root is for
+locating the wrapper and contributor. A missing root or wrapper emits `{}`; a
+present wrapper owns exact authority resolution and direct fallback.
 
 The kernel contains only policy that must remain active throughout the session.
 Detailed mechanics stay in an on-demand skill or a dedicated file named by a

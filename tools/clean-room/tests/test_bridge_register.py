@@ -12,6 +12,14 @@ import pytest
 _SCRIPT = Path(__file__).resolve().parents[1] / "bridge_register.py"
 
 
+def _bash_path(path: Path) -> str:
+    resolved = path.resolve()
+    if os.name != "nt":
+        return resolved.as_posix()
+    relative = resolved.relative_to(resolved.anchor).as_posix()
+    return f"/mnt/{resolved.drive[0].lower()}/{relative}"
+
+
 def _fake_docker_path(tmp_path: Path) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(exist_ok=True)
@@ -22,6 +30,7 @@ def _fake_docker_path(tmp_path: Path) -> str:
         "if [ \"$1\" = exec ]; then [ \"$5\" != -- ]; exit $?; fi\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     docker.chmod(0o755)
     return f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
@@ -40,6 +49,11 @@ def _run(
     }
     if path is not None:
         env["PATH"] = path
+        docker = tmp_path / "bin" / "docker"
+        if docker.is_file():
+            env["CLEAN_ROOM_DOCKER_COMMAND_JSON"] = json.dumps(
+                ["bash", _bash_path(docker)]
+            )
     return subprocess.run(
         [
             sys.executable,
@@ -169,6 +183,7 @@ def test_stale_registration_does_not_attach_to_replacement_container(tmp_path: P
         "if [ \"$1\" = inspect ]; then printf 'replacement-%s true\\n' \"$4\"; exit 0; fi\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     manifest = json.loads(
         (tmp_path / "providers.d" / "cleanroom.json").read_text(encoding="utf-8")
@@ -195,6 +210,7 @@ def test_stopped_registered_container_is_not_available(tmp_path: Path):
         "if [ \"$1\" = inspect ]; then printf 'id-%s false\\n' \"$4\"; exit 0; fi\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     manifest = json.loads(
         (tmp_path / "providers.d" / "cleanroom.json").read_text(encoding="utf-8")
@@ -231,6 +247,7 @@ def test_missing_registered_cwd_is_not_available(tmp_path: Path):
         "if [ \"$1\" = exec ]; then exit 1; fi\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     manifest = json.loads(
         (tmp_path / "providers.d" / "cleanroom.json").read_text(encoding="utf-8")
@@ -268,6 +285,7 @@ def test_unregister_does_not_delete_replacement_registration(tmp_path: Path):
         "if [ \"$1\" = exec ]; then exit 0; fi\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     _register(tmp_path, "cr-reused", path=path)
     registration_path = tmp_path / "cleanroom.d" / "cr-reused.json"
@@ -310,6 +328,7 @@ def test_stale_unregister_requires_recorded_container_to_be_gone(tmp_path: Path)
         "printf 'Error: No such object: %s\\n' \"$4\" >&2\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     result = _run(
         tmp_path,
@@ -335,6 +354,7 @@ def test_stale_unregister_fails_closed_when_docker_is_unavailable(tmp_path: Path
         "printf 'Cannot connect to the Docker daemon\\n' >&2\n"
         "exit 1\n",
         encoding="utf-8",
+        newline="\n",
     )
     result = _run(
         tmp_path,

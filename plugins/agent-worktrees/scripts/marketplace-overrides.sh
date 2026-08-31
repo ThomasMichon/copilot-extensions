@@ -5,6 +5,13 @@ set -uo pipefail
 
 context_only=0
 [[ "${1:-}" == "--context-only" ]] && context_only=1
+await_context=0
+if [[ "${1:-}" == "--await-context" ]]; then
+    context_only=1
+    await_context=1
+fi
+side_effect_only=0
+[[ "${1:-}" == "--side-effect-only" ]] && side_effect_only=1
 payload=""
 if [[ ! -t 0 ]]; then
     payload="$(cat)"
@@ -68,11 +75,21 @@ publish() {
         } > "$context_file.tmp" 2>/dev/null &&
             mv -f "$context_file.tmp" "$context_file" 2>/dev/null || true
     fi
-    printf '%s' "$output"
+    if (( side_effect_only )); then
+        printf '{}'
+    else
+        printf '%s' "$output"
+    fi
     exit 0
 }
 
 if (( context_only )); then
+    attempts=0
+    while (( await_context && attempts < 60 )) &&
+        [[ -n "$launch_key" && ! -f "$context_file" ]]; do
+        sleep 0.05
+        attempts=$((attempts + 1))
+    done
     [[ -n "$launch_key" && -f "$context_file" ]] || publish '{}'
     stored_key="$(sed -n '1p' "$context_file" 2>/dev/null || true)"
     [[ "$stored_key" == "$launch_key" ]] || publish '{}'

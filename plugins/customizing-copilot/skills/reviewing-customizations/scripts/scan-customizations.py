@@ -193,7 +193,18 @@ SESSION_CONTEXT_SCHEMA = "copilot-extensions.session-context-contributors"
 SESSION_CONTEXT_VERSION = 1
 SESSION_CONTEXT_MAX_TIMEOUT_SECONDS = 10
 SESSION_CONTEXT_MAX_BYTES = 65536
-AGGREGATE_AUTHORITY_NAME = "zz-context-injection"
+AGGREGATE_AUTHORITY_NAME = "context-injection"
+SESSION_CONTEXT_ADOPTION_SCHEMA = "copilot-extensions.context-injection"
+SESSION_CONTEXT_ADOPTION_CONFIG = Path(".context-injection/config.yaml")
+SESSION_CONTEXT_ADOPTION_MAX_BYTES = 4096
+SESSION_CONTEXT_ENGINE_SCHEMA = (
+    "copilot-extensions.context-injection-engine"
+)
+SESSION_CONTEXT_ENGINE_VERSION = 2
+ADOPTED_AUTHORITY_SOURCE = "context-injection@copilot-extensions"
+SESSION_CONTEXT_IDENTIFIER = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+)
 SESSION_CONTEXT_ROLES = {
     "authority": "aggregate-authority",
     "contributor": "complete-declared-contributor",
@@ -581,6 +592,8 @@ class SessionContextEntry:
     session_start: str
     declaration: str
     possible_non_empty: str
+    side_effects: str
+    context_behavior: str
 
 
 def _editable_plugin_footprint(root: Path, source: PluginSource) -> Path:
@@ -633,41 +646,56 @@ def _session_start_state(footprint: Path) -> str:
 
 def _session_context_declaration(
     footprint: Path,
-) -> tuple[str, int]:
+) -> tuple[str, int, str, str]:
     """Return declaration state and contributor count without exposing commands."""
     manifest = _load_json(footprint / "plugin.json")
     if not manifest:
         manifest = _load_json(footprint / ".claude-plugin" / "plugin.json")
     configured = manifest.get("sessionContext")
     if not isinstance(configured, str) or not configured.strip():
-        return "missing", 0
+        return "missing", 0, "undeclared", "undeclared"
     try:
         payload_root = footprint.resolve()
         path = (footprint / configured).resolve(strict=True)
         path.relative_to(payload_root)
     except (OSError, ValueError):
-        return "incomplete", 0
+        return "incomplete", 0, "undeclared", "undeclared"
     declaration = _load_json(path)
     if (
         declaration.get("schema") != SESSION_CONTEXT_SCHEMA
         or declaration.get("version") != SESSION_CONTEXT_VERSION
         or declaration.get("complete") is not True
     ):
-        return "incomplete", 0
+        return "incomplete", 0, "undeclared", "undeclared"
     contributors = declaration.get("contributors")
     if not isinstance(contributors, list):
-        return "incomplete", 0
+        return "incomplete", 0, "undeclared", "undeclared"
+    session_start = declaration.get("sessionStart")
+    side_effects = "undeclared"
+    context_behavior = "undeclared"
+    if session_start is not None:
+        if (
+            not isinstance(session_start, dict)
+            or set(session_start) != {"sideEffects", "context"}
+            or session_start.get("sideEffects")
+            not in {"none", "restart-safe-idempotent"}
+            or session_start.get("context")
+            not in {"none", "authority-aware", "aggregate-authority"}
+        ):
+            return "incomplete", 0, "undeclared", "undeclared"
+        side_effects = session_start["sideEffects"]
+        context_behavior = session_start["context"]
     seen: set[str] = set()
     for contributor in contributors:
         if not isinstance(contributor, dict):
-            return "incomplete", 0
+            return "incomplete", 0, side_effects, context_behavior
         contributor_id = contributor.get("id")
         order = contributor.get("order", 500)
         timeout = contributor.get("timeoutSeconds", 5)
         max_bytes = contributor.get("maxBytes", 8192)
         if (
             not isinstance(contributor_id, str)
-            or not contributor_id.strip()
+            or not SESSION_CONTEXT_IDENTIFIER.fullmatch(contributor_id)
             or contributor_id in seen
             or contributor.get("pure") is not True
             or not isinstance(order, int)
@@ -676,7 +704,7 @@ def _session_context_declaration(
             or not isinstance(max_bytes, int)
             or not 1 <= max_bytes <= SESSION_CONTEXT_MAX_BYTES
         ):
-            return "incomplete", 0
+            return "incomplete", 0, side_effects, context_behavior
         seen.add(contributor_id)
         for platform, suffix in (("bash", ".sh"), ("powershell", ".ps1")):
             argv = contributor.get(platform)
@@ -685,18 +713,136 @@ def _session_context_declaration(
                 or not argv
                 or not all(isinstance(part, str) and part for part in argv)
             ):
-                return "incomplete", 0
+                return "incomplete", 0, side_effects, context_behavior
             relative = Path(argv[0])
             if relative.is_absolute():
-                return "incomplete", 0
+                return "incomplete", 0, side_effects, context_behavior
             try:
                 command = (payload_root / relative).resolve(strict=True)
                 command.relative_to(payload_root)
             except (OSError, ValueError):
-                return "incomplete", 0
+                return "incomplete", 0, side_effects, context_behavior
             if command.suffix.lower() != suffix or not command.is_file():
-                return "incomplete", 0
-    return "complete", len(contributors)
+                return "incomplete", 0, side_effects, context_behavior
+    if (
+        contributors
+        and context_behavior not in {"undeclared", "authority-aware"}
+    ):
+        return "incomplete", 0, side_effects, context_behavior
+    if not contributors and context_behavior == "aggregate-authority":
+        return "complete", 0, side_effects, context_behavior
+    if not contributors and context_behavior == "authority-aware":
+        return "complete", 0, side_effects, context_behavior
+    if not contributors and context_behavior not in {"undeclared", "none"}:
+        return "incomplete", 0, side_effects, context_behavior
+    return "complete", len(contributors), side_effects, context_behavior
+
+
+def _context_injection_origin(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    plugin, separator, marketplace = value.partition("@")
+    if (
+        not separator
+        or plugin != AGGREGATE_AUTHORITY_NAME
+        or not SESSION_CONTEXT_IDENTIFIER.fullmatch(marketplace)
+    ):
+        return None
+    return f"{marketplace}/{plugin}"
+
+
+def _load_session_context_adoption(path: Path) -> dict | None:
+    try:
+        content = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if len(content.encode("utf-8")) > SESSION_CONTEXT_ADOPTION_MAX_BYTES:
+        return None
+    parsed: dict[str, object] = {}
+    parent: str | None = None
+    for line in content.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if "\t" in line:
+            return None
+        indent = len(line) - len(line.lstrip(" "))
+        if indent not in {0, 2}:
+            return None
+        match = re.fullmatch(r"([a-z][a-zA-Z0-9]*):(.*)", line[indent:])
+        if match is None:
+            return None
+        key, suffix = match.groups()
+        if suffix and not suffix.startswith(" "):
+            return None
+        raw_value = suffix.strip()
+        if indent == 0:
+            if key in parsed:
+                return None
+            if not raw_value:
+                parsed[key] = {}
+                parent = key
+                continue
+            parent = None
+            target = parsed
+        else:
+            if parent is None or not isinstance(parsed.get(parent), dict):
+                return None
+            target = parsed[parent]
+            if key in target:
+                return None
+        if not raw_value or raw_value[0] in "\"'[{&*!|>":
+            return None
+        value: object = int(raw_value) if raw_value.isascii() and raw_value.isdigit() else raw_value
+        target[key] = value
+    return parsed
+
+
+def _session_context_adoption(root: Path) -> tuple[str, str]:
+    path = root / SESSION_CONTEXT_ADOPTION_CONFIG
+    if not path.is_file():
+        return "missing", ""
+    try:
+        resolved = path.resolve(strict=True)
+        resolved.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return "invalid", ""
+    configured = _load_session_context_adoption(resolved)
+    if configured is None:
+        return "invalid", ""
+    if (
+        set(configured) != {"schema", "version", "authority", "engine"}
+        or configured.get("schema") != SESSION_CONTEXT_ADOPTION_SCHEMA
+        or configured.get("version") != 1
+        or configured.get("authority") != ADOPTED_AUTHORITY_SOURCE
+        or not isinstance(configured.get("engine"), dict)
+        or set(configured["engine"]) != {"schema", "version"}
+        or configured["engine"].get("schema") != SESSION_CONTEXT_ENGINE_SCHEMA
+        or configured["engine"].get("version") != SESSION_CONTEXT_ENGINE_VERSION
+    ):
+        return "invalid", ""
+    authority = _context_injection_origin(configured.get("authority"))
+    if authority is None:
+        return "invalid", ""
+    return "complete", authority
+
+
+def _compatible_context_engine(footprint: Path) -> bool:
+    manifest = _load_json(footprint / "plugin.json")
+    if not manifest:
+        manifest = _load_json(footprint / ".claude-plugin" / "plugin.json")
+    configured = manifest.get("sessionContextEngine")
+    if not isinstance(configured, str) or not configured.strip():
+        return False
+    try:
+        payload_root = footprint.resolve()
+        contract_path = (footprint / configured).resolve(strict=True)
+        contract_path.relative_to(payload_root)
+    except (OSError, ValueError):
+        return False
+    return _load_json(contract_path) == {
+        "schema": SESSION_CONTEXT_ENGINE_SCHEMA,
+        "version": SESSION_CONTEXT_ENGINE_VERSION,
+    }
 
 
 def scan_session_context(
@@ -709,24 +855,52 @@ def scan_session_context(
     This reads manifests and hook registrations only. It never executes hooks
     and never includes hook commands or emitted context in its result.
     """
+    adoption_state, adopted_authority = _session_context_adoption(root)
     entries: list[SessionContextEntry] = []
     authority_entries: list[SessionContextEntry] = []
     known_session_start: list[SessionContextEntry] = []
     unknown_entries: list[SessionContextEntry] = []
+    footprints: dict[str, Path] = {}
 
     for source in plugin_sources:
         footprint = _editable_plugin_footprint(root, source)
+        footprints[source.origin] = footprint
         session_start = _session_start_state(footprint)
-        declaration, contributor_count = _session_context_declaration(footprint)
-        is_authority = source.plugin_name == AGGREGATE_AUTHORITY_NAME
+        (
+            declaration,
+            contributor_count,
+            side_effects,
+            context_behavior,
+        ) = _session_context_declaration(footprint)
+        is_adopted_authority = (
+            adoption_state == "complete"
+            and source.origin == adopted_authority
+        )
+        is_legacy_authority = (
+            adoption_state != "complete"
+            and source.plugin_name == AGGREGATE_AUTHORITY_NAME
+        )
+        is_declared_authority = context_behavior == "aggregate-authority"
 
-        if is_authority:
+        if (
+            is_adopted_authority
+            or is_legacy_authority
+            or is_declared_authority
+        ):
             role = SESSION_CONTEXT_ROLES["authority"]
             possible_non_empty = "yes" if session_start == "yes" else "unknown"
         elif declaration == "complete" and contributor_count:
             role = SESSION_CONTEXT_ROLES["contributor"]
             possible_non_empty = "yes"
-        elif declaration == "complete":
+        elif (
+            declaration == "complete"
+            and side_effects == "restart-safe-idempotent"
+            and context_behavior == "none"
+        ) or (
+            adoption_state != "complete"
+            and declaration == "complete"
+            and not contributor_count
+        ):
             role = SESSION_CONTEXT_ROLES["side_effect"]
             possible_non_empty = "no"
         else:
@@ -740,10 +914,22 @@ def scan_session_context(
             session_start=session_start,
             declaration=declaration,
             possible_non_empty=possible_non_empty,
+            side_effects=side_effects,
+            context_behavior=context_behavior,
         )
-        if session_start != "no" or is_authority:
+        if (
+            session_start != "no"
+            or contributor_count
+            or is_adopted_authority
+            or is_legacy_authority
+            or is_declared_authority
+        ):
             entries.append(entry)
-        if is_authority:
+        if (
+            is_adopted_authority
+            or is_legacy_authority
+            or is_declared_authority
+        ):
             authority_entries.append(entry)
         if session_start == "yes":
             known_session_start.append(entry)
@@ -759,6 +945,14 @@ def scan_session_context(
             )
 
     authority_proven = False
+    if adoption_state == "invalid":
+        report.add(
+            BLOCKING,
+            "session-context-authority",
+            ".github/copilot/settings.json",
+            "repository session-context aggregation adoption is malformed or "
+            "incomplete",
+        )
     if len(authority_entries) > 1:
         identities = ", ".join(
             sorted(entry.identity for entry in authority_entries)
@@ -770,30 +964,94 @@ def scan_session_context(
             "multiple aggregate authorities are active: "
             f"{identities}",
         )
-    for authority in authority_entries:
-        authority_complete = (
-            authority.session_start == "yes"
-            and authority.declaration == "complete"
+    if adoption_state == "complete":
+        authority = next(
+            (
+                entry
+                for entry in authority_entries
+                if entry.identity == adopted_authority
+            ),
+            None,
         )
-        if not authority_complete:
+        invalid_reasons: list[str] = []
+        if len(authority_entries) != 1:
+            invalid_reasons.append(
+                "the aggregate authority is missing or ambiguous"
+            )
+        if authority is None:
+            invalid_reasons.append("the exact aggregate authority is not active")
+        elif (
+            authority.session_start != "yes"
+            or authority.declaration != "complete"
+            or authority.context_behavior != "aggregate-authority"
+        ):
+            invalid_reasons.append(
+                "the aggregate authority lacks a complete declaration"
+            )
+        authority_footprint = footprints.get(adopted_authority)
+        if authority_footprint is None:
+            invalid_reasons.append(
+                "the aggregate authority payload is unavailable"
+            )
+        elif not _compatible_context_engine(authority_footprint):
+            invalid_reasons.append(
+                "the aggregate authority engine is incompatible"
+            )
+        unsafe = [
+            entry
+            for entry in entries
+            if entry.identity != adopted_authority
+            and (
+                entry.declaration != "complete"
+                or (
+                    entry.role == SESSION_CONTEXT_ROLES["contributor"]
+                    and entry.session_start != "yes"
+                )
+                or (
+                    entry.role == SESSION_CONTEXT_ROLES["contributor"]
+                    and entry.context_behavior != "authority-aware"
+                )
+                or entry.role == SESSION_CONTEXT_ROLES["legacy"]
+            )
+        ]
+        if unsafe:
+            invalid_reasons.append(
+                "enabled session-start plugins are unclassified, incomplete, "
+                "or not authority-aware: "
+                + ", ".join(sorted(entry.identity for entry in unsafe))
+            )
+        if invalid_reasons:
+            report.add(
+                BLOCKING,
+                "session-context-authority",
+                "<plugin-stack>",
+                "; ".join(invalid_reasons),
+            )
+        else:
+            authority_proven = True
+    else:
+        for authority in authority_entries:
+            authority_complete = (
+                authority.session_start == "yes"
+                and authority.declaration == "complete"
+            )
+            if not authority_complete:
+                report.add(
+                    BLOCKING,
+                    "session-context-authority",
+                    f"<plugin:{authority.identity}>",
+                    f"`{authority.identity}` is `{authority.role}` but does not "
+                    "have a complete session-start declaration",
+                )
             report.add(
                 BLOCKING,
                 "session-context-authority",
                 f"<plugin:{authority.identity}>",
-                f"`{authority.identity}` is `{authority.role}` but does not "
-                "have a complete session-start declaration",
+                f"`{authority.identity}` is `{authority.role}`, but no complete "
+                "repository adoption selects it as the exact authority",
             )
-        report.add(
-            BLOCKING,
-            "session-context-ordering",
-            f"<plugin:{authority.identity}>",
-            f"`{authority.identity}` is `{authority.role}`, but relative plugin "
-            "execution order is not an author-facing priority contract; "
-            "`enabledPlugins` JSON key order, lexical names, and current "
-            "inventory order cannot prove that it runs last",
-        )
 
-    if authority_entries:
+    if authority_entries and not authority_proven:
         incomplete = [
             entry for entry in known_session_start
             if entry.declaration != "complete"
@@ -814,10 +1072,15 @@ def scan_session_context(
             )
 
     possible_outputs = [
-        entry for entry in known_session_start
-        if entry.role != SESSION_CONTEXT_ROLES["side_effect"]
+        entry
+        for entry in known_session_start
+        if (
+            entry.role == SESSION_CONTEXT_ROLES["authority"]
+            if authority_proven
+            else entry.role != SESSION_CONTEXT_ROLES["side_effect"]
+        )
     ]
-    if len(possible_outputs) > 1:
+    if len(possible_outputs) > 1 and not authority_proven:
         identities = ", ".join(
             sorted(
                 f"{entry.identity} ({entry.role})"
@@ -833,8 +1096,10 @@ def scan_session_context(
             f"owner that does not rely on a last-writer race: {identities}",
         )
 
-    if authority_entries:
-        disposition = "unsupported-order-dependent-authority"
+    if authority_proven:
+        disposition = "repository-authority-proven"
+    elif authority_entries:
+        disposition = "unproven-aggregate-authority"
     elif unknown_entries:
         disposition = "indeterminate-stand-down"
     elif len(possible_outputs) > 1:
@@ -851,7 +1116,12 @@ def scan_session_context(
                 "role": entry.role,
                 "session_start": entry.session_start,
                 "declaration": entry.declaration,
-                "possible_non_empty": entry.possible_non_empty,
+                "possible_non_empty": (
+                    "no"
+                    if authority_proven
+                    and entry.role == SESSION_CONTEXT_ROLES["contributor"]
+                    else entry.possible_non_empty
+                ),
             }
             for entry in sorted(entries, key=lambda item: item.identity)
         ],

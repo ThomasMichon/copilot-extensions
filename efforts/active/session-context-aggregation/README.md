@@ -2,10 +2,10 @@
 
 - **Slug:** `session-context-aggregation`
 - **Repo:** copilot-extensions
-- **Branch(es):** independent per-phase PRs; the architecture and migration
-  contract land before any producer disables its direct context hook
+- **Branch(es):** one coherent engine-v2 producer-migration campaign, preserving
+  standalone fallback throughout
 - **Created:** 2026-08-28
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** closes
   [`visions/plugin-services/installation-cells`](../../../visions/plugin-services/installation-cells/README.md)
   §Features/`attributable-agent-capabilities` and
@@ -25,19 +25,22 @@ preserve several different `additionalContext` results.
 
 The coordinator is also the suite's durable composition layer after the host
 bug is fixed: plugins own their rules and command definitions, while
-`zz-context-injection` owns the shared declaration schema, active-stack
+`context-injection` owns the shared declaration schema, active-stack
 discovery, ordering, provenance, budget admission, and compact rendering of
 repeated structures such as command glossaries.
 
 The workaround must remain safe during partial rollout. A migrated producer
 retains its standalone direct path and additionally publishes a pure context
-contributor. If the host provides a supported, testable way to guarantee one
-configured aggregator runs after every competing context hook, that final hook
-re-runs the active contributors and its complete aggregate wins the host's
-last-result behavior. If no such ordering guarantee exists, the rollout falls
-back to the session broker design in which every migrated hook returns the same
-cached aggregate bytes. In either mode, uncertainty restores existing direct
-behavior rather than disabling a producer.
+contributor. Trusted plugin-owned `.context-injection/config.yaml` adoption
+selects the exact direct marketplace authority
+`context-injection@copilot-extensions` and binds its engine schema and version;
+host settings only enable the plugin.
+Before exact authority proof, a producer emits its contributor directly. After
+proof, producers join the shared `(sessionId, canonical cwd)` rendezvous but
+emit `{}`; only the authority emits the cached aggregate. This makes execution
+order irrelevant. Authority uncertainty restores existing direct behavior
+rather than disabling a producer, while post-proof failures remain one shared
+cached `{}` result.
 
 ## Participants
 
@@ -65,10 +68,13 @@ varies with completion timing. This makes independently correct command
 catalogs, policy kernels, contribution boundaries, and session guidance
 disappear nondeterministically.
 
-The suite currently has 14 plugins with `sessionStart` registrations and 42
-individual hooks. Not all are context producers: bootstrap, registration, and
-other side-effect hooks may remain direct and return `{}`. This effort concerns
-only hooks that emit agent context.
+The initial marketplace-owned inventory had 16 plugins with `sessionStart`
+registrations, 43 individual hooks, and 21 pure context contributors. Four
+plugins are context-only, eleven are mixed context plus restart-safe-idempotent
+side effects, and `context-injection` is the aggregate authority. Splitting two
+agent-worktrees mixed hooks into one pure contributor leaves 42 direct hooks in
+the migrated stack. Side-effect hooks remain direct and return `{}`; only pure
+contributors run through the authority.
 
 Reusable foundations already exist:
 
@@ -104,7 +110,7 @@ The detailed investigation and proposed architecture are in
 > That hook will look to the current repo, resolve the complete stack of plugins
 > active for the CWD (same resolver flow as agent-bridge, which we will need to
 > vendor or make ps1/sh versions of), and then enumerate every plugin looking for
-> some declarative, poprietary "hook", which specifies an equivalent script to
+> some declarative, proprietary "hook", which specifies an equivalent script to
 > use to emit instructions. Then, all relevant plugins which use
 > additionalContext change to this plugin's requirements. Worth an investigation
 > and effort.
@@ -113,64 +119,65 @@ The detailed investigation and proposed architecture are in
 
 ### Phase 0 - Architecture and inventory
 
-- [ ] Inventory every suite-owned `sessionStart` hook and classify it as context
+- [x] Inventory every suite-owned `sessionStart` hook and classify it as context
   contribution, side effect, bootstrap/readiness, or mixed behavior.
-- [ ] Specify the single-aggregator authority model, contributor schema,
+- [x] Specify the single-aggregator authority model, contributor schema,
   session rendezvous, deterministic ordering, aggregate byte budget, diagnostics,
   and failure semantics.
-- [ ] Characterize which hook result the affected host versions retain and
+- [x] Characterize which hook result the affected host versions retain and
   record the version range. Do not rely on completion timing as a correctness
   mechanism.
-- [ ] Determine whether affected host versions expose a supported,
-  cross-platform, source-qualified way to guarantee one plugin hook executes
-  after all other plugin hooks. Distinguish a documented contract from
-  incidental alphabetical, installation, marketplace, or settings-object order.
-- [ ] If a guaranteed-last seam exists, specify how exactly one
-  `context-injection` authority claims it and how review tooling rejects a
-  second claimant. Otherwise retain the byte-identical session broker as the
-  required compatibility architecture.
-- [ ] Reconcile the design with context-injection, a-la-carte independence,
+- [x] Do not depend on a cross-plugin execution order. Use one source-qualified
+  direct marketplace authority whose producer-empty rendezvous protocol makes
+  alphabetical, installation, marketplace, and settings-object order
+  irrelevant.
+- [x] Specify how exactly one `context-injection@copilot-extensions` authority
+  is adopted and how review tooling rejects a second claimant, an incompatible
+  engine, or any context producer that is not authority-aware.
+- [x] Reconcile the design with context-injection, a-la-carte independence,
   marketplace installation cells, and the absence of host-enforced transitive
   plugin dependencies.
-- [ ] Name the payload-only coordinator `context-injection` and specify the
+- [x] Name the payload-only coordinator `context-injection` and specify the
   authoring rule that only it may directly emit session-start context when it
   is active; producer hooks must use its broker or retain their standalone
   direct fallback.
-- [ ] Land the reviewed design before creating the aggregator plugin or changing
+- [x] Land the reviewed design before creating the aggregator plugin or changing
   any producer's activation behavior.
 
 ### Phase 1 - Session-exact plugin resolution
 
-- [ ] Extract or extend a pure reference resolver that computes the effective
+- [x] Extract or extend a pure reference resolver that computes the effective
   plugin set for one session cwd: user settings plus that repository's settings,
   with local overrides and exact source-qualified enablement.
-- [ ] Resolve installed remote-marketplace payloads, directory marketplaces,
-  and staged payloads without PATH lookup, marketplace wildcard scans, network
-  fetches, or activation of unrelated runtimes.
+- [x] Resolve staged payloads from raw ACP process ancestry without shell
+  evaluation, PATH lookup, marketplace wildcard scans, network fetches, or
+  activation of unrelated runtimes.
+- [x] Complete installed remote-marketplace and directory-marketplace parity
+  across the dependency-light platform implementations.
 - [ ] Provide dependency-light PowerShell and POSIX implementations generated
   from one contract and validated against shared fixtures.
-- [ ] Fail safely on ambiguous marketplace identity, missing payloads, malformed
+- [x] Fail safely on ambiguous marketplace identity, missing payloads, malformed
   settings, path escapes, duplicate identities, and uncertain authority.
 
 ### Phase 2 - Aggregator and contributor contract
 
-- [ ] Add a payload-only aggregator plugin with exactly one context-emitting
+- [x] Add a payload-only aggregator plugin with exactly one context-emitting
   `sessionStart` hook and no installer-owned runtime.
-- [ ] Define a versioned payload-relative contributor manifest with stable
+- [x] Define a versioned payload-relative contributor manifest with stable
   contributor ids, platform commands, ordering class, timeout, byte allowance,
   applicability, and fail-open policy.
-- [ ] Invoke only contributors declared by exact active payloads; accept only
+- [x] Invoke only contributors declared by exact active payloads; accept only
   `{}` or one string `additionalContext` field; isolate stderr and reject noisy,
   oversized, malformed, or timed-out output.
-- [ ] Emit one deterministic aggregate with attributable owner boundaries and
+- [x] Emit one deterministic aggregate with attributable owner boundaries and
   bounded diagnostics; one contributor failure must not suppress valid siblings.
-- [ ] Expose one payload-local broker command used by the aggregator hook and
+- [x] Expose one payload-local broker command used by the aggregator hook and
   every migrated producer hook. For a given `sessionId`, every successful caller
   receives byte-identical aggregate JSON.
-- [ ] Build a fresh child environment for each contributor: replace plugin-root
+- [x] Build a fresh child environment for each contributor: replace plugin-root
   variables with the contributor's validated payload root, strip the
   aggregator's payload/data identity, and pass only validated cell context.
-- [ ] Enforce an aggregate wall-clock deadline below the registered host-hook
+- [x] Enforce an aggregate wall-clock deadline below the registered host-hook
   timeout, with bounded parallelism or admission based on declared worst-case
   cost.
 - [ ] Provide a bounded status/doctor surface that reports selected authority,
@@ -182,44 +189,45 @@ The detailed investigation and proposed architecture are in
 
 ### Phase 3 - Version-skew-safe broker adoption
 
-- [ ] Define an explicit aggregator authority selection that permits at most one
-  source-qualified aggregator for a session, is selected only by user-local
-  policy, and treats multiple candidates as ambiguous.
-- [ ] Add a generated, dependency-light producer wrapper that resolves only the
+- [x] Define repository adoption of the exact source-qualified
+  `context-injection@copilot-extensions` authority and bind its engine schema
+  and version in trusted `.context-injection/config.yaml`, without allowing
+  host settings or another source to replace it.
+- [x] Add a generated, dependency-light producer wrapper that resolves only the
   configured aggregator authority and invokes that payload's broker. Do not
   vendor a second contributor-admission implementation into each producer.
-- [ ] Make the broker return the byte-identical session aggregate only when the
+- [x] Make the broker publish one deterministic pair-key result only when the
   active set, trust, staged-plugin visibility, contributor consent, declared
-  total bytes, and declared wall-clock cost are all authoritative and admissible.
-  Otherwise it directs the producer wrapper to run its original context script.
-- [ ] Prove all rollout combinations: no aggregator/old producer,
+  total bytes, and declared wall-clock cost are all authoritative and
+  admissible. Before proof, direct the producer wrapper to its original context
+  script; after proof, every producer emits `{}`.
+- [x] Prove all rollout combinations: no aggregator/old producer,
   aggregator/old producer, no aggregator/new producer, compatible
   aggregator/new producer, incompatible aggregator/new producer, and ambiguous
   aggregators.
-- [ ] For a guaranteed-last implementation, prove migrated producers keep their
-  ordinary direct emissions and that the final aggregator deterministically
-  supersedes them with the complete aggregate; prove the ordinary direct path
-  still operates when the aggregator is absent or disabled.
-- [ ] Pilot one runtime command-catalog producer and one payload-only policy
+- [x] Prove authority-first, producer-first, and concurrent execution all yield
+  exactly one non-empty result with identical authority bytes; prove the
+  ordinary direct path still operates when authority proof is unavailable.
+- [x] Pilot one runtime command-catalog producer and one payload-only policy
   producer before broad conversion.
 
 ### Phase 4 - Suite migration
 
-- [ ] Convert every suite-owned context producer to the contributor contract
+- [x] Convert every suite-owned context producer to the contributor contract
   while leaving non-context `sessionStart` side effects direct.
-- [ ] Update runtime-agent-plugin and context-injection patterns,
+- [x] Update runtime-agent-plugin and context-injection patterns,
   `customizing-copilot:authoring-skills`, marketplace guards, and
   producer-coverage tests with the single-emitter rule and the required
   standalone fallback.
-- [ ] Extend `customizing-copilot:reviewing-customizations` to inventory the
+- [x] Extend `customizing-copilot:reviewing-customizations` to inventory the
   declared session-context role without executing hooks and report a blocking
   finding when a configured stack can emit different non-empty session-start
   context results rather than one byte-identical brokered aggregate.
-- [ ] Make consumer enablement explicit because current Copilot plugin manifests
+- [x] Make consumer enablement explicit because current Copilot plugin manifests
   do not enforce transitive dependency installation.
-- [ ] Replace direct producer commands only after the brokered wrapper and its
+- [x] Replace direct producer commands only after the brokered wrapper and its
   standalone fallback are deployed and clean-room validated for that producer.
-- [ ] Update `a-la-carte-independence` and
+- [x] Update `a-la-carte-independence` and
   `marketplace-installation-cells` for the optional coordinator, cross-cell
   contributor consent, and child-environment reconstruction rules.
 
@@ -248,13 +256,13 @@ The detailed investigation and proposed architecture are in
 
 ## Validation Plan
 
-- [ ] Reproduce the host defect with two direct producers and prove only one
+- [x] Reproduce the host defect with two direct producers and prove only one
   context result survives.
 - [ ] Enable the aggregator with two migrated contributors and prove both arrive
   through one `additionalContext` response on Windows and Linux/WSL.
-- [ ] Prove old and new producer versions never create a context-loss window
+- [x] Prove old and new producer versions never create a context-loss window
   during aggregator-first, producer-first, interrupted, and rolled-back updates.
-- [ ] Prove one malformed, hanging, crashing, or oversized contributor does not
+- [x] Prove one malformed, hanging, crashing, or oversized contributor does not
   block session startup or suppress healthy contributors.
 - [ ] Prove ordering and aggregate bytes are identical across PowerShell and
   POSIX fixtures, including Unicode and newline normalization.
@@ -262,27 +270,38 @@ The detailed investigation and proposed architecture are in
   define POSIX behavior without requiring `jq` or Python.
 - [ ] Prove source-qualified identity and containment with two marketplaces that
   ship the same plugin and contributor ids.
-- [ ] Prove staged `--plugin-dir`, installed remote marketplaces, directory
-  marketplaces, user-global enablement, repository enablement, local overrides,
-  and disabled plugins resolve correctly.
-- [ ] Prove the brokered producer wrapper falls back to direct emission when the aggregator is
+- [x] Prove staged `--plugin-dir`, repository source qualification, disabled
+  staged payloads, enabled-but-unstaged payloads, duplicate roots/identities,
+  source ambiguity, and pre-proof direct fallback resolve correctly.
+- [x] Complete installed remote-marketplace, directory-marketplace, user-global
+  enablement, and local-override parity.
+- [x] Prove the brokered producer wrapper falls back to direct emission when the aggregator is
   absent, ambiguous, incompatible, missing its payload, or cannot authoritatively
   resolve the host's effective plugin set.
-- [ ] Prove every broker caller for one `sessionId` returns byte-identical JSON,
+- [x] Prove every broker caller for one `sessionId` returns byte-identical JSON,
   including concurrent callers, leader failure, stale cache, and retry.
-- [ ] Prove a contributor receives its own validated plugin-root identity rather
+- [x] Prove a contributor receives its own validated plugin-root identity rather
   than the aggregator's environment.
-- [ ] Prove aggregation fails back to direct producers for ACP/staged-plugin
+- [x] Prove aggregation fails back to direct producers for ACP/staged-plugin
   launches without an authoritative staged inventory and for untrusted
   repository-scoped settings.
-- [ ] Prove aggregate admission fails back to direct producers when declared
+- [x] Prove aggregate admission fails back to direct producers when declared
   maximum bytes or execution cost cannot fit the configured budget/deadline.
-- [ ] Prove bootstrap and side-effect hooks still execute directly and are not
+- [x] Prove bootstrap and side-effect hooks still execute directly and are not
   duplicated by the aggregator.
 - [ ] Add a clean-room scenario proving all migrated producers return the same
   aggregate and that a remaining legacy producer is reported as a degraded,
   still-lossy partial-migration state rather than claimed safe.
-- [ ] Run the customization coherence scan and the repository's plugin,
+- [x] Add a synthetic clean-room completeness witness that installs the
+  unpublished direct authority, two authority-aware canary producers, and a
+  restart-safe-idempotent/context-none side-effect hook through a supported
+  local marketplace; prove authority-first, producer-first, concurrent,
+  two-session, and two-CWD broker permutations before Tier E.
+- [x] Establish model-visible completeness through fresh agent-bridge ACP
+  sessions: two variant-A sessions and one variant-B session each returned both
+  expected canaries once, used no tools, and left one idempotent side-effect
+  marker under independent clean-room judgment.
+- [x] Run the customization coherence scan and the repository's plugin,
   marketplace-isolation, generated-file, and documentation consistency guards.
 
 ## Proposal
@@ -308,9 +327,10 @@ See [`design.md`](design.md).
   prevent an unrelated repository hook from competing with the aggregate.
 - Plan review found that duplicated deferral decisions could still create a
   stand-down-then-drop window. Revised the direction to one aggregator-owned
-  broker keyed by hook `sessionId`: every migrated hook receives the same
-  aggregate bytes, while an unavailable or non-authoritative broker sends the
-  producer through its standalone direct path.
+  broker keyed by `(sessionId, canonical cwd)`: every migrated producer joins
+  the same rendezvous but emits `{}` after proof, while an unavailable or
+  non-authoritative broker sends the producer through its standalone direct
+  path.
 - Added hard design gates for ACP and staged-plugin visibility, folder trust,
   child payload environment reconstruction, cross-cell contributor consent,
   aggregate admission, wall-clock deadlines, and the still-lossy nature of
@@ -319,30 +339,29 @@ See [`design.md`](design.md).
   hooks last, but does not define ordering among plugins or a plugin hook
   priority field. The current plugin manifest also has no host-enforced
   dependency field; dependency support remains an upstream feature request.
-- Revised the proposal to prefer a simpler guaranteed-last mode if an
-  executable cross-platform/version matrix proves a supported ordering seam:
-  producers keep their direct emissions as backup, while the final
-  `context-injection` hook re-runs pure contributors and supersedes them with
-  the aggregate. The byte-identical broker remains the compatibility design
-  when no such guarantee can be established.
-- Live Copilot CLI 1.0.82-1 probes with three synthetic `--plugin-dir` payloads
-  showed hook execution follows argument order and the final non-empty result
-  wins. Three trusted repository-settings probes with different
-  `enabledPlugins` insertion orders all executed by plugin name
-  (`a-first`, `m-middle`, `z-last`), including across two marketplaces; the
-  lexically final plugin won.
-- Verified the fail-open seam on the same host: when the final plugin emitted
-  `{}`, the preceding non-empty context remained model-visible. A late
-  aggregator can therefore stand down without erasing direct producer output.
+- Rejected hook order as an ownership mechanism. The direct
+  `context-injection@copilot-extensions` authority discovers and runs every
+  pure contributor itself. Proven producers join its pair-key rendezvous and
+  emit `{}`, so authority-first, producer-first, and concurrent execution have
+  the same single non-empty result.
+- Live Copilot CLI 1.0.82-1 probes with synthetic `--plugin-dir` and trusted
+  repository-settings payloads confirmed that result selection depends on
+  implementation-specific ordering. Argument order, plugin names,
+  marketplaces, and `enabledPlugins` insertion order are not supported
+  ownership contracts.
+- Verified the fail-open seam on the same host: an empty context result did not
+  erase a preceding non-empty result. The direct-authority protocol records
+  this output-composition behavior as a host-version compatibility precondition
+  rather than inferring ownership from execution order.
 - Confirmed repository folder trust is exact-path rather than inherited from a
   trusted parent worktree: an ignored nested test repository's settings were
   not loaded. The aggregator must independently reject untrusted repository
   settings rather than assuming parent trust.
-- Began the rollout scaffold as `zz-context-injection`: exact
-  source-qualified authority, lexical-final verification, complete-declaration
-  gate, pure contributor execution, intentional byte/time admission, and conservative
-  stand-down. The scaffold remains inert on existing stacks until producer
-  declarations land.
+- Began the rollout scaffold as `context-injection`: exact source-qualified
+  direct authority, compatible-engine proof, complete-declaration gate, pure
+  contributor execution, pair-key rendezvous, intentional byte/time admission,
+  and conservative direct fallback. The scaffold remains inert on existing
+  stacks until producer declarations land.
 - Corrected the initial budget premise: the official 10 KB join cap is stated
   for `postToolUse`, not `sessionStart`. Copilot CLI 1.0.82-1 delivered a
   synthetic 20 KB startup context including an end marker. The coordinator now
@@ -354,3 +373,88 @@ See [`design.md`](design.md).
   rules and command glossaries. Producers remain authoritative for content;
   the coordinator deduplicates shared framing and renders one attributable,
   budgeted aggregate.
+
+### 2026-08-31 - Agent-bridge completeness witness
+
+- Added the organization-neutral `context-injection-eval` clean-room scenario.
+  A disposable local marketplace carries the unpublished authority, two
+  high-entropy synthetic canary producers per CWD, and one complete-declared
+  `restart-safe-idempotent` / `context: none` side-effect-only hook.
+- Kept ACP loading on the supported installed local-marketplace path. The
+  scenario uses no `--plugin-dir` staging exception; a separate
+  `payload_fingerprint_dirs` field lets the runner hash live local-marketplace
+  payloads without changing the launch path.
+- Tier P passed authority-first, producer-first, concurrent, two-session, and
+  two-CWD permutations. Counts-only evidence records two expected contributors,
+  both token hashes once per authority output, distinct session/CWD identity
+  hashes, and one PASS verdict.
+- Authorization succeeded for three fresh Copilot CLI 1.0.82 sessions driven
+  through agent-bridge: two in variant A and one in variant B. Every literal
+  response was the empty-token form, no transcript used tools or read files,
+  and the side-effect hook produced zero markers.
+- The clean-room judge independently scored both A and B packets
+  `FAIL / scenario-transport-gap`. The first break is installed local-plugin
+  loading or `sessionStart` delivery through the stock ACP transport, not
+  authentication and not the deterministic broker. No model-visible
+  completeness claim is made.
+- Preserved the counts-only Tier-P evidence, Tier-E evidence, transcripts,
+  post-check reports, and judge verdicts in the machine-local clean-room results
+  directory outside the repository. No raw ambient context was copied into the
+  structured evidence.
+
+### 2026-08-31 - Staged activation correction and successful rerun
+
+- Superseded the earlier `FAIL / scenario-transport-gap` interpretation. The
+  scenario omitted the explicit `--plugin-dir` activation arguments required by
+  ACP and copilot-extensions plugin hooks, so that artifact is an invalid
+  scenario false negative, not a product or agent-bridge transport verdict. Its
+  machine-local evidence remains preserved only as historical evidence.
+- Replaced the engine's staged-launch stand-down with an authoritative raw-argv
+  inventory resolver. It canonicalizes and deduplicates contained plugin roots,
+  source-qualifies manifests against repository enablement, ignores
+  enabled-but-unstaged payloads, requires the staged authority, and restores
+  producer-local direct output before proof on every ambiguity or path failure.
+- Corrected the eval fixture after proving that every explicit `--plugin-dir`
+  payload is host-loaded even when its repository identity is false. The final
+  manifest stages only four stable roots: authority, variant-selected alpha,
+  variant-selected beta, and the side-effect-only plugin.
+- Tier P passed staged authority-first, producer-first, concurrent, two-session,
+  and two-CWD permutations. Focused engine, scanner, declaration, scenario, and
+  runner contract gates also passed.
+- Independent clean-room judges passed both final packets. Across two fresh
+  variant-A sessions and one fresh variant-B session, each transcript contained
+  both expected canaries exactly once in the strict response, used no tools,
+  invented no canaries, and produced exactly one well-formed idempotent
+  side-effect marker per session.
+- Preserved final counts-only evidence and both judge verdicts in machine-local
+  clean-room result directories outside the repository. Tracked files contain
+  no raw canaries.
+
+### 2026-08-31 - Complete marketplace-owned producer migration
+
+- Inventoried the complete marketplace-owned stack: initially 16 plugins, 43
+  `sessionStart` hooks, and 21 pure contributors; the migrated stack has 42
+  direct hooks after splitting agent-worktrees' mixed behavior. Classified four
+  plugins as context-only, eleven as mixed context plus
+  restart-safe-idempotent side effects, and `context-injection` as the
+  aggregate authority.
+- Added byte-identical Bash and PowerShell engine-v2 producer wrappers to all
+  15 contributing plugins. Each wrapper preserves payload-relative identity and
+  standalone direct fallback, then emits `{}` after exact authority proof and
+  pair-key rendezvous.
+- Split agent-worktrees' context from its direct registration, nudge, and
+  marketplace-reconciliation mutations. Those hooks now expose explicit
+  context-free modes; the aggregator invokes only the pure read-only
+  contributor commands.
+- Added a marketplace-derived synchronization tool and complete-stack tests
+  that reject undeclared hooks, legacy direct context emitters, wrapper drift,
+  insufficient host timeouts, contributor identity mismatches, and side-effect
+  re-entry.
+- Updated the context-injection, runtime-plugin, a-la-carte, installation-cell,
+  authoring, review, and architecture guidance to make the single-emitter and
+  standalone-fallback contracts explicit.
+- Corrected adoption ownership before publication: host settings now only
+  enable the plugin, while exact authority and engine selection live in trusted
+  `.context-injection/config.yaml`. Runtime, scanner, clean-room fixtures, and
+  tests reject the retired settings key plus malformed, unknown, escaping, or
+  incompatible v1 configuration.

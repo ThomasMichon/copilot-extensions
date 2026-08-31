@@ -6,7 +6,7 @@
         "type": "command",
         "bash": "root=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}\"; if [ -n \"$root\" ] && [ -f \"$root/scripts/emit-context.sh\" ]; then bash \"$root/scripts/emit-context.sh\"; else printf '{}'; fi",
         "powershell": "$root = $env:COPILOT_PLUGIN_ROOT; if (-not $root) { $root = $env:PLUGIN_ROOT }; if (-not $root) { $root = $env:CLAUDE_PLUGIN_ROOT }; if ($root) { $script = Join-Path (Join-Path $root 'scripts') 'emit-context.ps1'; if (Test-Path -LiteralPath $script -PathType Leaf) { & $script } else { [Console]::Out.Write('{}') } } else { [Console]::Out.Write('{}') }",
-        "timeoutSec": 25
+        "timeoutSec": 30
       }
     ]
   }

@@ -1,0 +1,60 @@
+{
+  "name": "context-injection-eval",
+  "description": "Tier-E completeness witness for session-start context aggregation. A supported local marketplace installs the unpublished context-injection authority, two synthetic authority-aware producers, and one restart-safe idempotent side-effect-only hook into a disposable repository. Deterministic Tier-P permutations prove broker ordering; agent-bridge then proves whether a fresh model session receives every canary without reconstructing it from files.",
+  "tier": "E",
+  "family": "F1",
+  "image": "base",
+  "prereqs": {
+    "present": ["git", "python3", "node", "uv"],
+    "provisioned_by_flow": []
+  },
+  "auth": {
+    "copilot": "required",
+    "gh": "none",
+    "ado": "none"
+  },
+  "starting_state": {
+    "setup": "setup.sh",
+    "installed_plugins": [
+      "context-injection",
+      "synthetic-a-alpha",
+      "synthetic-a-beta",
+      "synthetic-b-alpha",
+      "synthetic-b-beta",
+      "synthetic-side-effect"
+    ],
+    "notes": "CR_CONTEXT_VARIANT selects repository A or B. Both repositories adopt the exact context-injection@copilot-extensions authority and engine version 2 through trusted .context-injection/config.yaml; host settings only enable plugins. The selected repository enables two unique canary producers plus one restart-safe-idempotent/context:none side-effect hook."
+  },
+  "tier_p_precondition": "python3 /home/operator/scenario/fixture.py verify-tier-p --root /home/operator/context-injection-eval",
+  "prompt": "Return exactly one compact JSON object with this schema: {\"tokens\":[\"TOKEN\", \"TOKEN\"]}. Output no analysis, preamble, explanation, Markdown, or code fence before or after that object. Replace the examples with every session-injected token matching CRCTX_CANARY_[A-Z]+_[A-Z]+_[0-9a-f]+, sorted lexically. Include each injected token exactly once and include no other token. Do not call tools, read files, inspect settings, or run diagnostics to discover or reconstruct missing tokens. If no matching token is present in your session instructions, return exactly {\"tokens\":[]}.",
+  "expected_outcome": {
+    "steps": [
+      "Receive two distinct high-entropy CRCTX_CANARY tokens through sessionStart context aggregation.",
+      "Return one compact machine-checkable JSON object containing both tokens in lexical order.",
+      "Use no tools and read no files to reconstruct missing context.",
+      "Run the side-effect-only sessionStart hook once per fresh session while it contributes no context."
+    ],
+    "affirmative_ready": "Every expected canary occurs exactly once in the transcript, no invented canary occurs, the strict JSON response occurs exactly once, and side-effect evidence has one idempotent marker per fresh session.",
+    "pass_if": "all model-visible canary and side-effect checks pass for every fresh run; the counts-only evidence contains distinct session identity hashes and the expected CWD hash.",
+    "false_pass_if": "the agent reads fixture files, settings, plugin payloads, or diagnostics to reconstruct tokens; any expected token is missing or duplicated; an invented token appears; the response is not the strict JSON object; or the side-effect-only plugin contributes context."
+  },
+  "eval": {
+    "acp_cwd_file": "/home/operator/context-injection-eval/acp-cwd",
+    "acp_plugin_dirs": [
+      "/home/operator/context-injection-eval/marketplace/plugins/context-injection",
+      "/home/operator/context-injection-eval/marketplace/plugins/selected-alpha",
+      "/home/operator/context-injection-eval/marketplace/plugins/selected-beta",
+      "/home/operator/context-injection-eval/marketplace/plugins/synthetic-side-effect"
+    ],
+    "payload_fingerprint_dirs": [
+      "/home/operator/context-injection-eval/marketplace/plugins"
+    ]
+  },
+  "runs": {
+    "count": 2,
+    "aggregate": "unanimous",
+    "per_turn_timeout_s": 300,
+    "max_credits": 4
+  },
+  "post_check": "post_check.sh"
+}

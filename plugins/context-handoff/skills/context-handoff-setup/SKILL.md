@@ -34,21 +34,16 @@ For the `/handoff` authoring workflow itself, see the **context-handoff** skill.
 ## How it loads
 
 When `context-handoff@copilot-extensions` is enabled, the CLI reads the
-plugin-declared `hooks.json` and invokes `scripts/emit-guidance.sh` or
-`scripts/emit-guidance.ps1` at session start. The hook needs only the enabled
-plugin payload. If an adjacent agent-worktrees payload exists, the producer
-also includes a bounded catalog for that exact adjacent command with
-`adjacent-compatibility` provenance. Adjacency checks payload presence rather
-than current-session enablement; the command is `ready` only when its command
-and installer are both present, otherwise `unavailable`. This is a deliberate
-best-effort exception while the current Copilot CLI hook-aggregation defect
-(#1234) is owned by a separate effort: when this result survives, the agent
-retains the exact worktree command, but the plugin cannot guarantee that its
-kernel wins or preserve every competing plugin's context. The POSIX
-compatibility catalog requires a system `python3` or `python`; the continuity
-kernel still emits without it. Once #1234 provides deterministic aggregation,
-remove this compatibility catalog and rely on agent-worktrees' own producer.
-Standalone context-handoff installations remain independent.
+plugin-declared `hooks.json` and invokes its engine-v2 producer wrapper at
+session start. Before aggregate-authority proof, the wrapper runs
+`scripts/emit-guidance.sh` or `scripts/emit-guidance.ps1` directly. That
+standalone output retains the bounded adjacent agent-worktrees compatibility
+catalog when its exact payload is present. After proof of the compatible
+`context-injection@copilot-extensions` authority, context-handoff contributes
+only its compact continuity kernel and agent-worktrees contributes its own
+catalog to the deterministic aggregate. The POSIX standalone compatibility
+catalog requires a system `python3` or `python`; the continuity kernel still
+emits without it. Standalone context-handoff installations remain independent.
 
 Separately, the CLI scans
 `~/.copilot/installed-plugins/copilot-extensions/context-handoff/extensions/`

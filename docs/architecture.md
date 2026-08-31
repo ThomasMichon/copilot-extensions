@@ -10,7 +10,7 @@ the installation-cell migration. **Ten are payload-only** — `efforts` (skills)
 (skills), `copilot-extensions-harness` (skills + contribution-boundary hook),
 `wsl-setup` (skills), and
 `harness-knowledge` (skills), `ai-attribution` (hook + skill), and
-`delegation-guidance` (hook + skill), and `zz-context-injection` (aggregation hook)
+`delegation-guidance` (hook + skill), and `context-injection` (aggregation hook)
 deploy entirely from the marketplace
 payload with no installer. For per-plugin internals, follow the links in each
 section.
@@ -46,7 +46,7 @@ section.
 | [harness-knowledge](../plugins/harness-knowledge/) | Stateless-harness → knowledge-repo binding skill (`binding-knowledge`) | Marketplace payload (skill + configurator script) | Loaded on demand when a harness-setup prompt matches; no runtime to install |
 | [ai-attribution](../plugins/ai-attribution/) | Ambient publication-policy hook + publication/setup skills | Marketplace payload (hooks + dependency-free scripts + skills/docs/examples) | The hook emits a concise payload-cwd-gated policy kernel at session start; setup reconciles the static fallback; detailed publication workflow loads on demand; no runtime to install |
 | [delegation-guidance](../plugins/delegation-guidance/) | Ambient coordinator-first routing hook + `delegating-work` skill | Marketplace payload (hook + scripts + skill) | The hook emits a concise owner-marked kernel at session start; detailed routing loads on demand; no runtime to install |
-| [zz-context-injection](../plugins/zz-context-injection/) | Compatibility session-context aggregator scaffold | Marketplace payload (hook + scripts + contributor schema) | On affected hosts, verifies exact authority, trust, final plugin order, complete declarations, and aggregate admission before emitting; otherwise preserves existing direct hooks |
+| [context-injection](../plugins/context-injection/) | Compatibility session-context aggregator | Marketplace payload (hook + scripts + contributor schema) | On affected hosts, verifies one exact source-qualified marketplace authority, trust, compatible engine, complete declarations, and aggregate admission before emitting; otherwise every authority-aware producer preserves its standalone path |
 
 Every runtime plugin is itself a **Python package** — its `src/` package plus
 any vendored `libs/` — installed by its own `scripts/install.*` / `scripts/init.*`
@@ -60,8 +60,11 @@ lives in [install-contract.md](install-contract.md).
 
 Every runtime `agent-*` plugin also carries `payload-invocation.json`, generated
 POSIX/PowerShell/CMD shims under its payload `bin/` or manifest `outputDir`, and
-`emit-command-catalog` hooks. Agent-facing skills resolve logical commands
-through that attributable session glossary rather than ambient `PATH`.
+an `emit-command-catalog` pure contributor. Its authority-aware `sessionStart`
+wrapper emits the catalog directly before aggregate-authority proof and `{}` after
+proof; the selected `context-injection` authority then emits the deterministic
+aggregate. Agent-facing skills resolve logical commands through that
+attributable session glossary rather than ambient `PATH`.
 `~/.local/bin/agent-*` remains a legacy management compatibility surface while
 runtime roots are still unqualified; repo/project binstubs remain the intended
 machine-global command surface.
@@ -97,7 +100,7 @@ flowchart TB
       AV["agent-vault/<br/>scripts • src"]
       AI["agent-index/<br/>scripts • src"]
       AK["agent-machines/<br/>scripts • src"]
-      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ • zz-context-injection/<br/>(payload-only: skills / hooks / extension)"]
+      PO["efforts/ • visions/ • context-handoff/ • customizing-copilot/ • copilot-extensions-harness/ • wsl-setup/ • harness-knowledge/ • ai-attribution/ • delegation-guidance/ • context-injection/<br/>(payload-only: skills / hooks / extension)"]
     end
     subgraph RT["Local runtimes"]
       RW["~/.agent-worktrees/<br/>versions/ • current-version • bin"]
@@ -153,7 +156,7 @@ flowchart TB
 
 > The `PO` node — `efforts`, `visions`, `context-handoff`, `customizing-copilot`,
 > `copilot-extensions-harness`, `wsl-setup`, `harness-knowledge`, and
-> `ai-attribution`, `delegation-guidance`, and `zz-context-injection` — deploy entirely from the
+> `ai-attribution`, `delegation-guidance`, and `context-injection` — deploy entirely from the
 > marketplace payload — no installer, no `~/.agent-*` runtime, no binstub.
 
 ### Agent-facing invocation and command glossaries
@@ -168,6 +171,13 @@ Static prose may refer to a sibling's logical command, but never to that
 sibling's payload or runtime path. The sibling owns and emits its mapping. A
 missing or ambiguous mapping is unavailable, not a reason to fall back to
 `PATH`.
+
+The complete marketplace-owned startup stack is declared rather than inferred:
+15 contributing plugins publish 21 pure contributors, and
+`context-injection` is the sole aggregate authority. Four contributors are
+context-only; eleven plugins keep restart-safe idempotent side effects direct
+while publishing only their read-only context through the authority-aware
+wrapper. The authority never reruns those direct side effects.
 
 Command glossaries are static breadcrumbs. They contain command ownership and,
 at most, stable bounded machine/repository pivots. Worktrees, sessions, leases,
