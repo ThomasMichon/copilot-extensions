@@ -209,7 +209,12 @@ def run_tick(
         ttl=spec.get("lease_ttl"),
     )
     if not lease.get("granted"):
-        return {"held": False, "lease": lease.get("lease"), "scope": scope}
+        return {
+            "held": False,
+            "lease": lease.get("lease"),
+            "scope": scope,
+            "created": [],
+        }
 
     env = None
     if spec.get("env"):

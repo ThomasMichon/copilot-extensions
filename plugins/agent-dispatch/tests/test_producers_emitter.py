@@ -73,6 +73,7 @@ def test_run_tick_idles_when_another_holder_owns_lease():
     assert result["held"] is False
     assert called is False
     assert result["lease"]["holder"] == "other"
+    assert result["created"] == []
 
 
 def test_run_tick_preserves_literal_braces_in_existing_commands():
