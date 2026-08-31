@@ -246,7 +246,7 @@ declarative expansion follows only after that composition is proven.
 ### 2026-08-31 — First runtime slice
 
 - Merged [PR 1445](https://github.com/ThomasMichon/copilot-extensions/pull/1445)
-  and deployed `agent-dispatch` `0.1.0-dev243` on cloud1.
+  and deployed `agent-dispatch` `0.1.0-dev243` on a validation host.
 - The stock reviewer now has explicit `land=self|author` semantics with the
   backward-compatible self-land default, distinct landing/resolution labels,
   an author-owned non-response suspension contract, and a canonical
