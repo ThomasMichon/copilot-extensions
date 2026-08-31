@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import io
 from pathlib import Path
 import sys
 import threading
@@ -2502,14 +2503,27 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
     assert "live=True" in text
 
 
-def test_run_tui_picker_rejects_noninteractive_stdin(monkeypatch):
+@pytest.mark.parametrize("stdin", [None, io.StringIO(), object()])
+def test_run_tui_picker_rejects_noninteractive_stdin(monkeypatch, stdin):
     """A closed or redirected stdin must fail instead of busy-looping on EOF."""
-    import io
     import sys
 
     import worktree_manager.production_picker.picker_tui as pkg
 
-    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(sys, "stdin", stdin)
+
+    with pytest.raises(RuntimeError, match="interactive terminal"):
+        pkg.run_tui_picker(source=object(), live=False)
+
+
+def test_run_tui_picker_rejects_closed_stdin(monkeypatch):
+    import sys
+
+    import worktree_manager.production_picker.picker_tui as pkg
+
+    stdin = io.StringIO()
+    stdin.close()
+    monkeypatch.setattr(sys, "stdin", stdin)
 
     with pytest.raises(RuntimeError, match="interactive terminal"):
         pkg.run_tui_picker(source=object(), live=False)

@@ -14,10 +14,22 @@ import pytest
 from agent_worktrees import __main__ as m
 
 
-def test_picker_rejects_noninteractive_stdin(monkeypatch):
+@pytest.mark.parametrize("stdin", [None, io.StringIO(), object()])
+def test_picker_rejects_noninteractive_stdin(monkeypatch, stdin):
     from agent_worktrees import picker_tui
 
-    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    monkeypatch.setattr(sys, "stdin", stdin)
+
+    with pytest.raises(RuntimeError, match="interactive terminal"):
+        picker_tui.run_tui_picker(source=object())
+
+
+def test_picker_rejects_closed_stdin(monkeypatch):
+    from agent_worktrees import picker_tui
+
+    stdin = io.StringIO()
+    stdin.close()
+    monkeypatch.setattr(sys, "stdin", stdin)
 
     with pytest.raises(RuntimeError, match="interactive terminal"):
         picker_tui.run_tui_picker(source=object())
