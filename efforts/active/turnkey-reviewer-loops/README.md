@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees and pull requests
 - **Created:** 2026-08-30
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-dispatch` — `loop-recipes`,
   `side-load-through-an-emitter`, `registered-supervision`,
   `pools-are-filters-with-a-cap`, `a-loop-runs-with-or-without-a-service`
@@ -78,49 +78,49 @@ The missing capability is composition, not another bespoke reviewer.
 - [ ] Specify one repository-owned declaration that composes discovery or
       side-load input, reviewer recipe parameters, agent/body selection, pool
       filters/cap, evaluator behavior, and operator controls.
-- [ ] Bind evaluator ownership to the producing emitter and stamp that
+- [x] Bind evaluator ownership to the producing emitter and stamp that
       association on emitted tasks; pools select tasks only through ordinary
       attribute filters and never become the evaluator owner.
-- [ ] Define a stable reviewer-work identity keyed to the target change, not
+- [x] Define a stable reviewer-work identity keyed to the target change, not
       every effective recipe/config parameter, so an upgrade or guidance edit
       cannot fork a live review while a later review generation remains
       possible after terminal completion.
 - [ ] Declare the acting forge identity and its permissions. An identity that
       cannot approve or land must degrade to a visible recorded outcome rather
       than looping indefinitely.
-- [ ] Keep credentials outside the repository declaration and resolve them
+- [x] Keep credentials outside the repository declaration and resolve them
       through the runtime's existing secret/auth boundaries; declarations may
       name an identity but never carry tokens.
-- [ ] Define the untrusted-change boundary: external/fork code is read as data
+- [x] Define the untrusted-change boundary: external/fork code is read as data
       and is not executed by default; credentials are least-privilege; any
       repository opt-in to sandboxed tests or `land=self` is explicit.
-- [ ] Keep forge access and repository policy behind declared commands/agents;
+- [x] Keep forge access and repository policy behind declared commands/agents;
       agent-dispatch remains a generic task-loop engine.
 - [ ] Define lifecycle/status output that joins declaration, emitted task,
       current worker, card/steer state, and terminal result without a second
       store.
-- [ ] Document compatibility with the existing low-level registrar,
+- [x] Document compatibility with the existing low-level registrar,
       emitter/evaluator, recipe, and supervised-lane primitives.
 
 ### Phase 2 — Generalize the stock reviewer recipe
 
-- [ ] Add an explicit landing model (`self` or `author`, defaulting to the
+- [x] Add an explicit landing model (`self` or `author`, defaulting to the
       existing `self` behavior) with model-specific goal, done criteria,
       charter, suspend points, and resolution semantics.
-- [ ] Stamp a discriminating landing/resolution token on the task so an
+- [x] Stamp a discriminating landing/resolution token on the task so an
       evaluator cannot mistake a `land=author` review-delivered completion for
       a self-land follow-up.
-- [ ] Define the non-response path for `land=author` (continued suspension,
+- [x] Define the non-response path for `land=author` (continued suspension,
       superseding change, or explicit expiry/abandon) so dormant reviews do not
       hold worker capacity or remain ambiguous forever.
 - [ ] Make review guidance, target reference, and optional result/card contract
       declarative inputs without embedding any forge or repository policy.
-- [ ] Add on-demand emitter side-load: a registered emitter accepts one change
+- [x] Add on-demand emitter side-load: a registered emitter accepts one change
       reference and authors the same provenance/evaluator-bound task it would
       create during discovery.
-- [ ] Preserve `recipes render|kick` as the explicitly self-tracked low-level
+- [x] Preserve `recipes render|kick` as the explicitly self-tracked low-level
       path and add side-load CLI/local-MCP/hosted-MCP parity.
-- [ ] Add focused tests for both landing models, parameter validation, dedup,
+- [x] Add focused tests for both landing models, parameter validation, dedup,
       completion semantics, and backward-compatible defaults.
 
 ### Phase 3 — Prove the raw composition on copilot-extensions
@@ -174,12 +174,12 @@ The missing capability is composition, not another bespoke reviewer.
 
 - [ ] Schema and expansion tests prove one declaration deterministically
       materializes the intended emitter/evaluator/pool set.
-- [ ] Recipe tests cover `land=self`, `land=author`, invalid combinations, CLI,
+- [x] Recipe tests cover `land=self`, `land=author`, invalid combinations, CLI,
       local MCP, and hosted MCP.
 - [ ] Landing-model tests prove `land=author` completion cannot trigger a
       self-land/conflict evaluator rule and that its non-response path releases
       active worker capacity.
-- [ ] Dedup tests preserve one live target identity across version/config drift
+- [x] Dedup tests preserve one live target identity across version/config drift
       while allowing a deterministic later review generation after terminal
       completion.
 - [ ] Emitter tests prove discovery and side-load author byte-equivalent task
@@ -242,3 +242,26 @@ declarative expansion follows only after that composition is proven.
   discovery watermarks, and inactive-declaration diagnostics. Reordered the
   work to self-host the raw composition before extracting the turn-key schema,
   with a second public repository reserved for portability validation.
+
+### 2026-08-31 — First runtime slice
+
+- Merged [PR 1445](https://github.com/ThomasMichon/copilot-extensions/pull/1445)
+  and deployed `agent-dispatch` `0.1.0-dev243` on a validation host.
+- The stock reviewer now has explicit `land=self|author` semantics with the
+  backward-compatible self-land default, distinct landing/resolution labels,
+  an author-owned non-response suspension contract, and a canonical
+  forge-qualified target identity.
+- Live reviewer dedup now survives recipe/config drift, recognizes both old and
+  new keys during mixed-version rollout, and releases the identity after a
+  terminal generation so a later review may be created.
+- Registered command emitters can author JSON task contracts during discovery
+  and side-load one change on demand. CLI, local MCP, and coordinator-hosted MCP
+  route side-load to the registered machine/environment; agent-dispatch stamps
+  emitter provenance and the producer-owned evaluator association.
+- Evaluators query by their exact producer association before applying the
+  result limit and defensively recheck it for version-skewed coordinators.
+  Unscoped evaluators consume only unassociated tasks; worker pools remain
+  ordinary filters.
+- The final rebased suite passed 1,440 tests locally; the updated PR's
+  agent-dispatch CI passed, and the Copilot review finding about a
+  shape-inconsistent lease-denied emitter result was fixed before merge.
