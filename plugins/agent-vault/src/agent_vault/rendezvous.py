@@ -358,14 +358,24 @@ def write_endpoint(
     return target
 
 
-def clear_endpoint(runtime_dir: Path | str) -> None:
-    """Remove the rendezvous file on graceful shutdown (best-effort).
+def clear_endpoint(runtime_dir: Path | str, *, owner_pid: int | None = None) -> None:
+    """Remove the rendezvous file unless another PID owns it (best-effort).
 
-    A client must still treat a *present-but-stale* file as "not running", because
-    a crash skips this cleanup -- see :func:`is_stale`.
+    A record owned by a different PID is preserved because it may belong to a
+    successor that has already advertised during handoff. A client must still
+    treat a *present-but-stale* file as "not running", because a crash skips this
+    cleanup -- see :func:`is_stale`.
     """
+    path = endpoint_file(runtime_dir)
+    record = read_endpoint(runtime_dir)
+    pid = owner_pid if owner_pid is not None else os.getpid()
+    if record is not None and record.pid is not None and record.pid != pid:
+        return
+    record = read_endpoint(runtime_dir)
+    if record is not None and record.pid is not None and record.pid != pid:
+        return
     with contextlib.suppress(OSError):
-        endpoint_file(runtime_dir).unlink()
+        path.unlink()
 
 
 def read_endpoint(runtime_dir: Path | str) -> Endpoint | None:
