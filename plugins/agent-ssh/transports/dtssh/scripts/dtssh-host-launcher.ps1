@@ -587,6 +587,7 @@ try {
         $shouldClassifySessions = (
             ($IdleSessionWarnThreshold -gt 0 -and $estConns -ge $IdleSessionWarnThreshold) -or
             ($IdleSessionReapThreshold -gt 0 -and $estConns -ge $IdleSessionReapThreshold) -or
+            ($PreAuthWarnThreshold -gt 0 -and $estConns -ge $PreAuthWarnThreshold) -or
             ($PreAuthReapThreshold -gt 0 -and $estConns -ge $PreAuthReapThreshold)
         )
         if ($shouldClassifySessions) {

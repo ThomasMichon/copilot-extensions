@@ -40,6 +40,7 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "SESSION REAP:" in text
     assert "$PreAuthWarnThreshold -gt 0" in text
     assert "$shouldClassifySessions = (" in text
+    assert "$estConns -ge $PreAuthWarnThreshold" in text
     assert "function Get-EstimatedPreAuthConnCount" in text
     assert "$preAuthConns -ge $PreAuthReapThreshold" in text
     assert "if (-not $sessionPressure)" in text
