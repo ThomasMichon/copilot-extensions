@@ -105,8 +105,11 @@ The accepted dispositions are:
 4. Apply declarative resources second (packages/files; see below).
 5. Run repo-local modules third.
 
-`agent-machines restore` runs the validator before both dry-runs and applies. If
-the validator reports any error, restore refuses to continue.
+`plan`, `validate`, and `restore` default to the package-owning repository
+containing CWD. `--repo` selects one other repository; `--all-projects`
+explicitly selects the full machine union. `agent-machines restore` runs the
+validator over the selected scope before both dry-runs and applies. If the
+validator reports any error, restore refuses to continue.
 
 ## Managed Copilot surfaces
 

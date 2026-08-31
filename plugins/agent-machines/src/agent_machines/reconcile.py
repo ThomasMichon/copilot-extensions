@@ -50,10 +50,10 @@ class Plan:
 
 
 def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
-    """Map each contributing repo name to its checkout root (``$REPO(<name>)``)."""
+    """Map each repo name to its canonical location-class anchor."""
     paths: dict[str, Path] = {}
     for pkg in resolved:
-        root = pkg.repo_root()
+        root = pkg.repo_anchor()
         if root is not None:
             paths.setdefault(pkg.source_repo, root)
     return paths

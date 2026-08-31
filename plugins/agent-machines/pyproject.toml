@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-machines"
-version = "0.1.0-dev65"
+version = "0.1.0-dev66"
 description = "Portable restore-machinestate for Copilot CLI -- converge a machine to in-repo requirement packages."
 readme = "README.md"
 license = "MIT"
@@ -47,6 +47,7 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]  # asserts are expected in tests
+"tests/test_layout.py" = ["S101", "S603", "S607"]  # fixed git fixture commands
 # Vendored byte-identical primitive (install-contract); its subprocess calls to
 # mklink are intentional and it must not diverge from the canonical source.
 "scripts/versioned_runtime.py" = ["S603", "S607"]

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,11 +12,19 @@ from agent_machines.layout import (
     inspect_layouts,
     inspect_repo_layout,
     migrate_repo_layout,
+    resolve_cwd_repo,
     resolve_repo,
 )
 from agent_machines.manifest import ManifestError
 
 from ._helpers import base_package, write_package
+
+GIT = shutil.which("git")
+
+
+def _git(*args: str) -> None:
+    assert GIT is not None
+    subprocess.run([GIT, *args], check=True)
 
 
 def test_doctor_reports_canonical_layout(tmp_path):
@@ -295,6 +305,111 @@ def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
 
     assert name == "knowledge"
     assert path == registered
+
+
+@pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
+def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path):
+    anchor = tmp_path / "anchor"
+    _git("init", "-q", str(anchor))
+    _git("-C", str(anchor), "config", "user.email", "test@example.com")
+    _git("-C", str(anchor), "config", "user.name", "Test")
+    (anchor / "file.txt").write_text("x", encoding="utf-8")
+    _git("-C", str(anchor), "add", "file.txt")
+    _git("-C", str(anchor), "commit", "-qm", "init")
+    worktree = tmp_path / "worktree"
+    _git(
+        "-C",
+        str(anchor),
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "test",
+        str(worktree),
+    )
+    registry = {
+        "repos": {
+            "canonical": {
+                "windows": str(anchor),
+                "linux": str(anchor),
+                "wsl": str(anchor),
+            }
+        }
+    }
+    projects = {"projects": {"canonical": {}}}
+
+    name, path, anchor_path = resolve_cwd_repo(worktree, registry, projects)
+
+    assert name == "canonical"
+    assert path == worktree.resolve()
+    assert anchor_path == anchor.resolve()
+
+
+@pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
+def test_resolve_cwd_repo_matches_registered_nonadopted_worktree(tmp_path):
+    anchor = tmp_path / "anchor"
+    _git("init", "-q", str(anchor))
+    _git("-C", str(anchor), "config", "user.email", "test@example.com")
+    _git("-C", str(anchor), "config", "user.name", "Test")
+    (anchor / "file.txt").write_text("x", encoding="utf-8")
+    _git("-C", str(anchor), "add", "file.txt")
+    _git("-C", str(anchor), "commit", "-qm", "init")
+    worktree = tmp_path / "worktree"
+    _git(
+        "-C",
+        str(anchor),
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "test",
+        str(worktree),
+    )
+    registry = {
+        "repos": {
+            "supplemental": {
+                "windows": str(anchor),
+                "linux": str(anchor),
+                "wsl": str(anchor),
+            }
+        }
+    }
+
+    name, path, anchor_path = resolve_cwd_repo(worktree, registry, {})
+
+    assert name == "supplemental"
+    assert path == worktree.resolve()
+    assert anchor_path == anchor.resolve()
+
+
+@pytest.mark.skipif(GIT is None, reason="git is required for repository fixture")
+def test_resolve_cwd_repo_standalone_falls_back_to_top_level(tmp_path):
+    repo = tmp_path / "standalone"
+    _git("init", "-q", str(repo))
+    nested = repo / "nested"
+    nested.mkdir()
+
+    name, path, anchor_path = resolve_cwd_repo(nested, {}, {})
+
+    assert name == "standalone"
+    assert path == repo.resolve()
+    assert anchor_path == repo.resolve()
+
+
+@pytest.mark.skipif(GIT is None, reason="git is required for repository fixture")
+def test_resolve_cwd_repo_outside_git_fails(tmp_path):
+    with pytest.raises(ManifestError, match=r"pass --repo.*or --all-projects"):
+        resolve_cwd_repo(tmp_path, {}, {})
+
+
+def test_resolve_cwd_repo_reports_missing_git(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent_machines.layout.shutil.which", lambda name: None)
+
+    with pytest.raises(
+        ManifestError,
+        match=r"pass --repo <registered-name>.*--all-projects",
+    ):
+        resolve_cwd_repo(tmp_path, {}, {})
 
 
 def test_unavailable_adopted_repo_is_advisory(tmp_path):

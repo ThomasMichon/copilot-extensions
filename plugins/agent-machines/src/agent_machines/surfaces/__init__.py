@@ -64,7 +64,7 @@ def collect_specs(packages: list[RequirementPackage], prefix: str) -> list[dict[
 def _repo_paths(packages: list[RequirementPackage]) -> dict[str, Any]:
     paths: dict[str, Any] = {}
     for pkg in packages:
-        root = pkg.repo_root()
+        root = pkg.repo_anchor()
         if root is not None:
             paths.setdefault(pkg.source_repo, root)
     return paths
@@ -100,4 +100,3 @@ def apply_surfaces(
         if specs:
             results.append(_trusted.apply(specs, repo_paths, home=home, dry_run=dry_run))
     return results
-

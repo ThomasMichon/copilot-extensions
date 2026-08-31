@@ -26,7 +26,11 @@ def _fake_result(stdout: str) -> reconcile.RestoreResult:
 
 
 def _patch(monkeypatch, result: reconcile.RestoreResult) -> None:
-    monkeypatch.setattr(cli, "_collect_packages", lambda machine: [])
+    monkeypatch.setattr(
+        cli,
+        "_collect_reconcile_packages",
+        lambda args, machine: ([], "repo:acme"),
+    )
     monkeypatch.setattr(cli._reconcile, "resolve_union", lambda packages, machine: [])
     monkeypatch.setattr(cli._validator, "validate", lambda resolved, *a, **k: [])
     monkeypatch.setattr(cli._reconcile, "restore", lambda *a, **k: result)
@@ -75,6 +79,7 @@ def test_json_emits_structured_result_with_stdout(monkeypatch, capsys):
     assert data["modules"][0]["name"] == "probe"
     assert data["modules"][0]["stdout_tail"] == "[OK] did the thing"
     assert "plan" in data
+    assert data["scope"] == "repo:acme"
 
 
 def _resource_error_result() -> reconcile.RestoreResult:
