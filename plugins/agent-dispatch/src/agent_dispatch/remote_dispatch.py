@@ -162,6 +162,10 @@ def build_remote_create_argv(
         argv += ["--target-worktree", args.target_worktree]
     if getattr(args, "source", None):
         argv += ["--source", args.source]
+    if getattr(args, "origin_ref", None):
+        argv += ["--origin-ref", args.origin_ref]
+    if getattr(args, "evaluator_ref", None):
+        argv += ["--evaluator-ref", args.evaluator_ref]
     if getattr(args, "dedup_key", None):
         argv += ["--dedup-key", args.dedup_key]
     if getattr(args, "goal", None):

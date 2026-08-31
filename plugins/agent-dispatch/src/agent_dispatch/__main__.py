@@ -736,6 +736,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             target_repo=args.target_repo,
             source=args.source,
             origin_ref=args.origin_ref,
+            evaluator_ref=args.evaluator_ref,
             dedup_key=args.dedup_key,
             goal=args.goal,
             done_criteria=args.done_criteria,
@@ -2087,6 +2088,23 @@ def _cmd_schedule(args: argparse.Namespace) -> int:
 def _cmd_emitter(args: argparse.Namespace) -> int:
     from .producers import emitter
 
+    if args.emitter_command == "side-load":
+        try:
+            with _client(args) as client:
+                registration = client.get_registration(args.registration)
+                machine, env = _registration_scope(args)
+                return _emit(
+                    emitter.run_side_load(
+                        client,
+                        registration,
+                        args.change_ref,
+                        current_machine=machine,
+                        current_env=env,
+                    )
+                )
+        except (emitter.EmitterError, DispatchError) as exc:
+            print(f"agent-dispatch emitter side-load: {exc}", file=sys.stderr)
+            return 2
     spec = emitter.load_spec(args.spec)
     if args.emitter_command == "serve":
         url, token = _resolve_client_target(args)
@@ -2233,6 +2251,13 @@ def _build_registration_spec(args: argparse.Namespace) -> dict:
                 "--kind evaluator (a supervised-lane does not run an evaluator)"
             )
         spec["evaluator"] = args.evaluator
+    if getattr(args, "evaluator_ref", None):
+        if kind != "evaluator":
+            raise SystemExit(
+                "supervise register: --evaluator-ref is only valid with "
+                "--kind evaluator"
+            )
+        spec["evaluator_ref"] = args.evaluator_ref
     spec["interval"] = getattr(args, "interval", 30.0)
     if kind == "evaluator" and not spec.get("evaluator"):
         raise SystemExit(
@@ -2693,6 +2718,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             capacity_gate=capacity_gate,
             evaluator=evaluator,
             redrive_fn=redrive_fn,
+            evaluator_ref=getattr(args, "evaluator_ref", None),
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
@@ -3033,6 +3059,7 @@ def _recipe_create_namespace(
         dedup_key=getattr(args, "dedup_key", None) or _recipe_dedup_key(rendered),
         source="recipe",
         origin_ref=rendered.recipe,
+        evaluator_ref=None,
         # spawn passthrough (a recipe worker wants a full checkout -> embody body)
         spawn=getattr(args, "spawn", False),
         spawn_backend=getattr(args, "spawn_backend", "embody"),
@@ -3390,6 +3417,7 @@ def _create_args_parent() -> argparse.ArgumentParser:
     cp.add_argument("--target-repo")
     cp.add_argument("--source")
     cp.add_argument("--origin-ref")
+    cp.add_argument("--evaluator-ref")
     cp.add_argument("--dedup-key")
     cp.add_argument(
         "--goal",
@@ -4130,6 +4158,17 @@ def build_parser() -> argparse.ArgumentParser:
     ep.add_argument("spec", help="path to the JSON command-emitter spec")
     ep.add_argument("--holder", required=True, help="this producer's machine identity")
     ep.set_defaults(func=_cmd_emitter)
+    ep = emitter_sub.add_parser(
+        "side-load",
+        help="send one change reference through a registered emitter's on-demand path",
+    )
+    ep.add_argument("registration", help="emitter registration id")
+    ep.add_argument("change_ref", help="target change reference for the emitter")
+    ep.add_argument(
+        "--env",
+        help="registration environment (default: AGENT_DISPATCH_ENV or 'default')",
+    )
+    ep.set_defaults(func=_cmd_emitter)
 
     p = sub.add_parser(
         "webhook",
@@ -4253,6 +4292,10 @@ def build_parser() -> argparse.ArgumentParser:
              "its decisions (emit a follow-up task) -- the service-driven loop-"
              "advancement pass (emitters-and-evaluators). See 'evaluate'.",
     )
+    p.add_argument(
+        "--evaluator-ref",
+        help="consume only terminal tasks stamped with this producer-owned evaluator id",
+    )
     p.set_defaults(func=_cmd_supervise)
     # Registration management subcommands (registered-supervision). Optional: the
     # bare `supervise` (no subcommand) remains the transitional foreground loop,
@@ -4309,6 +4352,10 @@ def build_parser() -> argparse.ArgumentParser:
                     help="agent-bridge agent name for headless embody bodies")
     rp.add_argument("--evaluator", metavar="SPEC",
                     help="path to an evaluator spec (JSON) folded into the lane spec")
+    rp.add_argument(
+        "--evaluator-ref",
+        help="producer-owned evaluator identity; consume only tasks stamped with it",
+    )
     rp.add_argument("--interval", type=float, default=30.0,
                     help="serve loop poll interval in seconds (default: 30)")
     rp.add_argument("--ensure", action="store_true",

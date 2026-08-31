@@ -134,6 +134,15 @@ def canonicalize_remote(url: str | None) -> str | None:
     return canonical or None
 
 
+def canonical_reviewer_target(repo: str, change: str) -> str:
+    """Canonical forge-qualified identity for one review target."""
+    raw_repo = repo.strip()
+    canonical = canonicalize_remote(raw_repo) or raw_repo
+    if "://" not in raw_repo and "@" not in raw_repo and raw_repo.count("/") == 1:
+        canonical = f"github.com/{canonical}"
+    return f"{canonical}#{change.strip().lstrip('#')}"
+
+
 def resolve_repo() -> str | None:
     """Canonical remote (lane key) for the repo the caller is working in.
 

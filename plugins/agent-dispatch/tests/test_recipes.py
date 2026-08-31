@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -41,6 +42,8 @@ def test_render_reviewer_fills_templates_and_default_base():
     # the recipe label is always present, plus the recipe's own labels
     assert "recipe:reviewer" in r.labels
     assert "kind:review" in r.labels
+    assert "landing:self" in r.labels
+    assert "resolution:reviewer-self" in r.labels
     # the shared safety clauses ride along in the charter
     assert "resolved state" in r.prompt
     assert r.resolution == "pull-request-merged-or-abandoned"
@@ -50,6 +53,23 @@ def test_render_explicit_base_overrides_default():
     r = recipes.render_recipe("reviewer", {"repo": "o/n", "pr": "42", "base": "release"})
     assert "release" in r.prompt
     assert "the default branch" not in r.prompt
+
+
+def test_render_reviewer_author_landing_has_distinct_contract():
+    r = recipes.render_recipe(
+        "reviewer", {"repo": "o/n", "pr": "42", "land": "author"}
+    )
+    assert "landing:author" in r.labels
+    assert "resolution:reviewer-author" in r.labels
+    assert r.resolution == "review-delivered-then-author-resolved-or-expired"
+    assert "Never merge on the author's behalf" in r.prompt
+
+
+def test_render_reviewer_rejects_unknown_landing_model():
+    with pytest.raises(recipes.RecipeError, match="self.*author"):
+        recipes.render_recipe(
+            "reviewer", {"repo": "o/n", "pr": "42", "land": "bot"}
+        )
 
 
 def test_charter_points_at_the_concrete_hibernate_and_resolve_verbs():
@@ -104,7 +124,7 @@ def test_cmd_list_emits_all_recipes(capsys):
     out = json.loads(capsys.readouterr().out)
     assert {r["name"] for r in out} == {"reviewer", "conflict-resolution", "goal-driven"}
     reviewer = next(r for r in out if r["name"] == "reviewer")
-    assert reviewer["resolution"] == "pull-request-merged-or-abandoned"
+    assert reviewer["resolution"] == "review-delivered-or-pull-request-resolved"
     assert any(p["name"] == "pr" and p["required"] for p in reviewer["params"])
 
 
@@ -141,7 +161,7 @@ def test_kick_dry_run_previews_without_creating(capsys):
     assert out["dry_run"] is True
     assert out["title"] == "review o/n#7 to resolution"
     # a reserved-work dedup key is derived from recipe + params
-    assert out["dedup_key"] == "recipe:reviewer:base=the default branch:pr=7:repo=o/n"
+    assert out["dedup_key"] == "recipe:reviewer:target=github.com/o/n#7"
 
 
 def test_kick_delegates_to_create_with_recipe_fields(monkeypatch):
@@ -167,6 +187,7 @@ def test_kick_delegates_to_create_with_recipe_fields(monkeypatch):
     assert "recipe:conflict-resolution" in ns.label
     assert ns.source == "recipe"
     assert ns.origin_ref == "conflict-resolution"
+    assert ns.evaluator_ref is None
     assert ns.dedup_key == "recipe:conflict-resolution:base=the default branch:pr=9:repo=o/n"
     assert ns.repo == "o/n"
     assert ns.spawn is True
@@ -274,8 +295,8 @@ def test_mcp_recipe_kick_enqueues_with_recipe_fields():
     assert sink["source"] == "recipe"
     assert sink["origin_ref"] == "reviewer"
     assert "recipe:reviewer" in sink["labels"]
-    assert sink["dedup_key"] == "recipe:reviewer:base=the default branch:pr=5:repo=o/n"
-    assert sink["goal"].startswith("Drive pull request o/n#5")
+    assert sink["dedup_key"] == "recipe:reviewer:target=github.com/o/n#5"
+    assert sink["goal"] == "Review pull request o/n#5 under the self landing model."
 
 
 def test_mcp_recipe_kick_missing_param_raises():
@@ -300,3 +321,72 @@ def test_cli_and_mcp_derive_the_same_dedup_key():
     rendered = recipes.render_recipe("goal-driven", {"goal": "document X"})
     assert _recipe_dedup_key(rendered) == recipes.dedup_key_for(rendered)
 
+
+def test_local_mcp_emitter_side_load_routes_to_remote_owner(monkeypatch):
+    from agent_dispatch import remote_dispatch
+    from agent_dispatch.mcp_server import DispatchTools
+
+    calls = []
+
+    class Client:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def get_registration(self, _rid):
+            return {
+                "id": "emitter-reviews",
+                "kind": "emitter",
+                "machine": "host-b",
+                "env": "staging",
+            }
+
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "browse_remote",
+        lambda machine, argv, timeout=None: (
+            calls.append((machine, argv, timeout))
+            or SimpleNamespace(
+                returncode=0,
+                stdout='{"registration_id":"emitter-reviews","created":[]}',
+                stderr="",
+            )
+        ),
+    )
+    tools = DispatchTools(client_factory=Client)
+    out = tools.emitter_side_load("emitter-reviews", "o/n#7")
+    assert out["registration_id"] == "emitter-reviews"
+    assert calls[0][0] == "host-b"
+    assert calls[0][1][-2:] == ["--env", "staging"]
+
+
+def test_reviewer_dedup_ignores_config_drift():
+    first = recipes.render_recipe(
+        "reviewer", {"repo": "o/n", "pr": "5", "land": "self"}
+    )
+    changed = recipes.render_recipe(
+        "reviewer",
+        {"repo": "o/n", "pr": "5", "land": "author", "base": "release"},
+    )
+    assert recipes.dedup_key_for(first) == recipes.dedup_key_for(changed)
+
+
+def test_reviewer_dedup_canonicalizes_equivalent_target_references():
+    short = recipes.render_recipe("reviewer", {"repo": "o/n", "pr": "#5"})
+    remote = recipes.render_recipe(
+        "reviewer", {"repo": "https://github.com/o/n.git", "pr": "5"}
+    )
+    assert recipes.dedup_key_for(short) == recipes.dedup_key_for(remote)
+
+
+def test_reviewer_dedup_preserves_forge_identity():
+    github = recipes.render_recipe(
+        "reviewer", {"repo": "https://github.com/o/n.git", "pr": "5"}
+    )
+    gitlab = recipes.render_recipe(
+        "reviewer", {"repo": "https://gitlab.com/o/n.git", "pr": "5"}
+    )
+    assert recipes.dedup_key_for(github) != recipes.dedup_key_for(gitlab)

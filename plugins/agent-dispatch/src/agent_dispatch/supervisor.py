@@ -520,6 +520,7 @@ class Supervisor:
         turn_state_fn: TurnStateFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
         evaluator: Any | None = None,
+        evaluator_ref: str | None = None,
         evaluate_limit: int = 100,
     ):
         self.client = client
@@ -613,6 +614,7 @@ class Supervisor:
         #: ``dedup_key`` (dedup-before-create), and an in-process guard fires each
         #: task's terminal event at most once.
         self.evaluator = evaluator
+        self.evaluator_ref = evaluator_ref
         #: Max terminal tasks scanned per evaluator pass (newest first).
         self.evaluate_limit = max(1, int(evaluate_limit))
         #: Task ids whose terminal lifecycle event has already been dispatched to
@@ -1277,6 +1279,7 @@ class Supervisor:
             terminal = self.client.list(
                 repo=self.repo,
                 status=[Status.COMPLETED, Status.ABANDONED],
+                evaluator_ref=self.evaluator_ref or "",
                 limit=self.evaluate_limit,
             )
         except DispatchError:
@@ -1287,6 +1290,11 @@ class Supervisor:
         for task in terminal:
             tid = task.get("id")
             if not tid or tid in self._evaluated:
+                continue
+            # Query-side filtering keeps the result limit fair on upgraded
+            # coordinators; this defensive check preserves isolation when a
+            # version-skewed coordinator ignores the new query parameter.
+            if task.get("evaluator_ref") != self.evaluator_ref:
                 continue
             self._evaluated.add(tid)  # fire once per process, success or not
             event = {"type": f"task.{task.get('status')}", "task": task}

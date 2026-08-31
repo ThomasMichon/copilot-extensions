@@ -17,6 +17,7 @@ Requires the optional ``mcp`` extra (``pip install 'agent-dispatch[mcp]'``).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Annotated, Any
 
@@ -99,6 +100,7 @@ class DispatchTools:
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
+        evaluator_ref: str | None = None,
         dedup_key: str | None = None,
         goal: str | None = None,
         done_criteria: str | None = None,
@@ -142,6 +144,7 @@ class DispatchTools:
                 target_machine=target_machine,
                 target_worktree=target_worktree,
                 target_repo=target_repo,
+                evaluator_ref=evaluator_ref,
                 dedup_key=dedup_key,
                 goal=goal,
                 done_criteria=done_criteria,
@@ -248,6 +251,52 @@ class DispatchTools:
                 target_machine=target_machine,
                 target_worktree=target_worktree,
                 target_repo=target_repo,
+            )
+
+    def emitter_side_load(self, registration_id: str, change_ref: str) -> dict:
+        """Run one registered emitter's on-demand path.
+
+        Unlike ``recipe_kick``, this preserves emitter provenance and stamps the
+        producer-selected evaluator association on every authored task.
+        """
+        from . import remote_dispatch
+        from .producers.emitter import run_side_load
+
+        with self._client_factory() as c:
+            registration = c.get_registration(registration_id)
+            owner = registration.get("machine")
+            if remote_dispatch.is_peer_machine(owner):
+                completed = remote_dispatch.browse_remote(
+                    owner,
+                    [
+                        "agent-dispatch",
+                        "emitter",
+                        "side-load",
+                        registration_id,
+                        change_ref,
+                        "--env",
+                        str(registration.get("env") or "default"),
+                    ],
+                    timeout=120,
+                )
+                if completed.returncode != 0:
+                    raise ValueError(
+                        remote_dispatch.diagnose_remote_failure(
+                            owner, completed.returncode, completed.stderr
+                        )
+                    )
+                try:
+                    return json.loads(completed.stdout)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"remote side-load returned invalid JSON: {exc}"
+                    ) from exc
+            return run_side_load(
+                c,
+                registration,
+                change_ref,
+                current_machine=remote_dispatch.local_machine(),
+                current_env=str(registration.get("env") or "default"),
             )
 
     def list(
@@ -466,6 +515,7 @@ def build_server(tools: DispatchTools | None = None) -> Any:
     mcp.tool(name="dispatch_recipe_list")(t.recipe_list)
     mcp.tool(name="dispatch_recipe_render")(t.recipe_render)
     mcp.tool(name="dispatch_recipe_kick")(t.recipe_kick)
+    mcp.tool(name="dispatch_emitter_side_load")(t.emitter_side_load)
     mcp.tool(name="dispatch_list")(t.list)
     mcp.tool(name="dispatch_show")(t.show)
     mcp.tool(name="dispatch_events")(t.events)

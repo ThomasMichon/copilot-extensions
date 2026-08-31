@@ -891,6 +891,63 @@ def test_dedup_key_prevents_duplicate(q):
     assert len(q.list()) == 1
 
 
+def test_dedup_key_allows_new_generation_after_terminal(q):
+    first = q.create("first", dedup_key="k1")
+    q.abandon(first.id, permitted=True, reason="superseded")
+    second = q.create("second", dedup_key="k1")
+    assert second.id != first.id
+    assert len([t for t in q.list() if t.dedup_key == "k1"]) == 2
+
+
+def test_stable_reviewer_dedup_collides_with_active_legacy_key(q):
+    legacy = q.create(
+        "legacy review",
+        source="recipe",
+        origin_ref="reviewer",
+        dedup_key="recipe:reviewer:base=release:v2:pr=7:repo=o/n",
+    )
+    current = q.create(
+        "current review",
+        source="recipe",
+        origin_ref="reviewer",
+        dedup_key="recipe:reviewer:target=github.com/o/n#7",
+    )
+    assert current.id == legacy.id
+
+
+def test_stable_reviewer_dedup_ignores_terminal_legacy_key(q):
+    legacy = q.create(
+        "legacy review",
+        source="recipe",
+        origin_ref="reviewer",
+        dedup_key="recipe:reviewer:base=main:pr=7:repo=o/n",
+    )
+    q.abandon(legacy.id, permitted=True, reason="done")
+    current = q.create(
+        "current review",
+        source="recipe",
+        origin_ref="reviewer",
+        dedup_key="recipe:reviewer:target=github.com/o/n#7",
+    )
+    assert current.id != legacy.id
+
+
+def test_legacy_reviewer_dedup_collides_with_active_stable_key(q):
+    stable = q.create(
+        "stable review",
+        source="recipe",
+        origin_ref="reviewer",
+        dedup_key="recipe:reviewer:target=github.com/o/n#7",
+    )
+    legacy = q.create(
+        "legacy client review",
+        source="recipe",
+        origin_ref="reviewer",
+        dedup_key="recipe:reviewer:base=release:pr=7:repo=o/n",
+    )
+    assert legacy.id == stable.id
+
+
 # -- yield / abandon ---------------------------------------------------------
 
 

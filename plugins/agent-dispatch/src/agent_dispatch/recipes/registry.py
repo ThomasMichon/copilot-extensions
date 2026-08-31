@@ -9,8 +9,9 @@ driven by a standing domain service.
 
 The three first-class archetypes:
 
-* **reviewer** -- drive a change (a pull request) to merged-or-abandoned: review,
-  post feedback or approve, suspend on a verdict, resume on update, own the merge.
+* **reviewer** -- review a pull request under an explicit landing model: either
+  own the merge (``land=self``) or hand feedback back to the author
+  (``land=author``).
 * **conflict-resolution** -- take the last mile of a PR an automated producer
   opened but nobody is driving: check out its branch, rebase the target in,
   resolve conflicts, force-push back over the same PR, answer review/build
@@ -27,6 +28,8 @@ from __future__ import annotations
 import re
 import string
 from dataclasses import dataclass, field
+
+from ..identity import canonical_reviewer_target
 
 
 class RecipeError(RuntimeError):
@@ -153,24 +156,36 @@ _register(
                 "base", "base branch the change targets", required=False,
                 default="the default branch",
             ),
+            RecipeParam(
+                "land", "who owns landing: 'self' or 'author'", required=False,
+                default="self",
+            ),
         ),
         title_template="review {repo}#{pr} to resolution",
-        goal_template="Drive pull request {repo}#{pr} to a merged or abandoned resolution.",
+        goal_template="Review pull request {repo}#{pr} under the {land} landing model.",
         done_criteria=(
-            "The pull request is merged, or it is closed/abandoned with the reason "
-            "recorded. A verdict alone is not done -- you own it until it resolves."
+            "For land=self, the pull request is merged or closed/abandoned with the "
+            "reason recorded. For land=author, the review verdict and actionable "
+            "feedback are posted and recorded; then suspend for author response, and "
+            "complete only when the change is merged, superseded/closed, or explicitly "
+            "expired/abandoned after the configured non-response policy."
         ),
         charter_template=(
-            "You are reviewing pull request {repo}#{pr} (base {base}). Work with the "
-            "full target-repo source (a local checkout, container, or codespace) and "
+            "You are reviewing pull request {repo}#{pr} (base {base}) under "
+            "`land={land}`. Work with the full target-repo source (a local checkout, "
+            "container, or codespace) and "
             "act through the repo's own review/merge tools.\n\n"
-            "Loop: read the change, post specific feedback or approve, and drive it "
-            "toward merge. " + _SUSPEND_CLAUSE + " When the change updates, resume and "
-            "re-review only what moved. Take ownership of the merge when the change is "
-            "ready and it is yours to land.\n\n" + _RESOLUTION_CLAUSE
+            "Loop: read the change and post specific feedback or approve. Under "
+            "`land=self`, drive it toward merge and take ownership of landing when "
+            "ready. Under `land=author`, the author owns updates and landing: record "
+            "the delivered verdict, suspend without holding worker capacity, and "
+            "resume only when the change updates or the non-response policy expires. "
+            "Never merge on the author's behalf in that model. " + _SUSPEND_CLAUSE
+            + " When the change updates, resume and re-review only what moved.\n\n"
+            + _RESOLUTION_CLAUSE
         ),
         suspend_on=("change-updated", "review-posted"),
-        resolution="pull-request-merged-or-abandoned",
+        resolution="review-delivered-or-pull-request-resolved",
         requires=(),
         labels=("kind:review",),
     )
@@ -298,8 +313,24 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
         raise RecipeError(
             f"recipe {name!r} is missing required parameter(s): {', '.join(missing)}"
         )
+    if recipe.name == "reviewer" and values["land"] not in {"self", "author"}:
+        raise RecipeError(
+            "recipe 'reviewer' parameter 'land' must be 'self' or 'author'"
+        )
 
-    labels = tuple(dict.fromkeys((f"recipe:{recipe.name}", *recipe.labels)))
+    extra_labels: tuple[str, ...] = ()
+    resolution = recipe.resolution
+    if recipe.name == "reviewer":
+        land = values["land"]
+        extra_labels = (f"landing:{land}", f"resolution:reviewer-{land}")
+        resolution = (
+            "pull-request-merged-or-abandoned"
+            if land == "self"
+            else "review-delivered-then-author-resolved-or-expired"
+        )
+    labels = tuple(
+        dict.fromkeys((f"recipe:{recipe.name}", *recipe.labels, *extra_labels))
+    )
     return RenderedRecipe(
         recipe=recipe.name,
         title=_fill(recipe.title_template, values),
@@ -307,7 +338,7 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
         done_criteria=_fill(recipe.done_criteria, values),
         prompt=_fill(recipe.charter_template, values),
         suspend_on=recipe.suspend_on,
-        resolution=recipe.resolution,
+        resolution=resolution,
         requires=recipe.requires,
         labels=labels,
         params={k: values[k] for k in values},
@@ -315,11 +346,19 @@ def render_recipe(name: str, params: dict[str, str]) -> RenderedRecipe:
 
 
 def dedup_key_for(rendered: RenderedRecipe) -> str:
-    """A reserved-work dedup key derived from the recipe + its (effective)
-    parameters, so re-kicking the same recipe for the same target **collides**
-    rather than forking the work -- the dedup-before-create half of the
-    *no-overlapping-live-workers* invariant. Single source for the CLI and MCP
-    kick paths.
+    """Return the stable live-work identity for a rendered recipe.
+
+    Reviewer identity is keyed only to the target change. Guidance, base-branch
+    wording, landing model, and other config may evolve without forking a live
+    review. The queue permits the same key again only after the prior generation
+    becomes terminal.
     """
+    if rendered.recipe == "reviewer":
+        return (
+            "recipe:reviewer:target="
+            + canonical_reviewer_target(
+                rendered.params["repo"], rendered.params["pr"]
+            )
+        )
     parts = ":".join(f"{k}={rendered.params[k]}" for k in sorted(rendered.params))
     return f"recipe:{rendered.recipe}:{parts}"

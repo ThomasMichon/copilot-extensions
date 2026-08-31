@@ -5,6 +5,7 @@ from __future__ import annotations
 import socket
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -87,17 +88,129 @@ def test_mcp_endpoint_lists_tools(coord):
     names = sorted(t.name for t in tools)
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 26
+    assert len(names) == 27
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= set(
         names
     )
     assert "dispatch_wakes" in names
     assert "dispatch_result" in names
     assert "dispatch_rearm_spawn" in names
+    assert "dispatch_emitter_side_load" in names
     complete = next(t for t in tools if t.name == "dispatch_complete")
     result_schema = complete.input_schema["properties"]["result"]
     variants = result_schema.get("anyOf", [result_schema])
     assert {variant.get("type") for variant in variants} == {"array", "object"}
+
+
+def test_hosted_emitter_side_load_routes_to_registration_owner(tmp_path, monkeypatch):
+    import asyncio
+
+    from agent_dispatch import remote_dispatch
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    queue.register_registration(
+        "emitter",
+        {
+            "id": "reviews",
+            "command": ["review-source", "discover"],
+            "interval_seconds": 60,
+            "side_load": {"command": ["review-source", "{change_ref}"]},
+        },
+        reg_id="emitter-reviews",
+        machine="host-b",
+    )
+    calls = []
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    monkeypatch.setattr(
+        remote_dispatch,
+        "browse_remote",
+        lambda machine, argv, timeout=None: (
+            calls.append((machine, argv, timeout))
+            or SimpleNamespace(
+                returncode=0,
+                stdout='{"registration_id":"emitter-reviews","created":[]}',
+                stderr="",
+            )
+        ),
+    )
+    url, stop = _boot(create_app(queue))
+    try:
+        result = asyncio.new_event_loop().run_until_complete(
+            _call(
+                url,
+                "dispatch_emitter_side_load",
+                {"registration_id": "emitter-reviews", "change_ref": "o/n#7"},
+            )
+        )
+    finally:
+        stop()
+    assert not result.is_error
+    assert calls == [
+        (
+            "host-b",
+            [
+                "agent-dispatch",
+                "emitter",
+                "side-load",
+                "emitter-reviews",
+                "o/n#7",
+                "--env",
+                "default",
+            ],
+            120,
+        )
+    ]
+
+
+def test_hosted_emitter_side_load_can_create_proposed_task(tmp_path, monkeypatch):
+    import asyncio
+
+    from agent_dispatch import remote_dispatch
+
+    queue = TaskQueue(tmp_path / "tasks.db")
+    queue.register_registration(
+        "emitter",
+        {
+            "id": "reviews",
+            "command": ["review-source", "discover"],
+            "interval_seconds": 60,
+            "side_load": {"command": ["review-source", "{change_ref}"]},
+        },
+        reg_id="emitter-reviews",
+        machine="host-a",
+    )
+    monkeypatch.setattr(remote_dispatch, "local_machine", lambda: "host-a")
+    from agent_dispatch.producers import emitter
+
+    original_side_load = emitter.run_side_load
+    monkeypatch.setattr(
+        emitter,
+        "run_side_load",
+        lambda client, registration, change_ref, **kwargs: original_side_load(
+            client,
+            registration,
+            change_ref,
+            **kwargs,
+            runner=lambda *_args, **_kwargs: SimpleNamespace(
+                returncode=0,
+                stdout='{"title":"review","repo":"o/n","proposed":true}',
+                stderr="",
+            ),
+        ),
+    )
+    url, stop = _boot(create_app(queue))
+    try:
+        result = asyncio.new_event_loop().run_until_complete(
+            _call(
+                url,
+                "dispatch_emitter_side_load",
+                {"registration_id": "emitter-reviews", "change_ref": "o/n#7"},
+            )
+        )
+    finally:
+        stop()
+    assert not result.is_error
+    assert queue.list(status="proposed")[0].source == "emitter"
 
 
 def test_mcp_rearm_spawn(coord):

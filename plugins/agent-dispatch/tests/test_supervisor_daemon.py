@@ -196,6 +196,7 @@ def test_build_command_headless_default_emits_no_backend_flag():
 def test_build_command_evaluator_inline_spec():
     reg = _reg("e", kind="evaluator", spec={
         "evaluator_spec": {"states": {}}, "all_repos": True, "labels": ["code-review"],
+        "evaluator_ref": "review-loop",
     })
     materialized = {}
 
@@ -207,6 +208,7 @@ def test_build_command_evaluator_inline_spec():
     assert cmd[:4] == ["PY", "-m", "agent_dispatch", "supervise"]
     assert "--evaluator" in cmd and "/run/evaluator.json" in cmd
     assert "--all-repos" in cmd
+    assert cmd[cmd.index("--evaluator-ref") + 1] == "review-loop"
     assert materialized["evaluator"] == {"states": {}}
 
 

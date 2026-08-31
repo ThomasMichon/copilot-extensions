@@ -162,6 +162,13 @@ def validate_registration(kind: str, spec: dict) -> None:
                 "evaluator registration needs a 'repo' (the lane) or "
                 "'all_repos': true"
             )
+        evaluator_ref = spec.get("evaluator_ref")
+        if evaluator_ref is not None and (
+            not isinstance(evaluator_ref, str) or not evaluator_ref
+        ):
+            raise RegistrationError(
+                "evaluator 'evaluator_ref' must be a non-empty string"
+            )
 
 
 def _scope_key(kind: str, spec: dict) -> str:

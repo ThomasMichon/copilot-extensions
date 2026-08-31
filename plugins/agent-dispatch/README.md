@@ -487,7 +487,8 @@ never required. See
 
 A **recipe** is a packaged *shape* of long-running agentic work -- a charter
 template plus the suspend/resume rhythm and the resolution it drives toward. Three
-archetypes ship in-box: **reviewer** (drive a pull request to merged-or-abandoned),
+archetypes ship in-box: **reviewer** (review under an explicit `land=self|author`
+model),
 **conflict-resolution** (take the last mile of a stalled change), and
 **goal-driven** (drive an arbitrary goal through PRs). A recipe is a *first-class,
 directly-invokable* capability: you can kick a one-off from the CLI with only a
@@ -499,7 +500,7 @@ agent-dispatch recipes list                       # the available recipes + thei
 agent-dispatch recipes describe reviewer          # full descriptor (templates, suspend-on, resolution)
 
 # render a recipe's fields without creating anything (inspect / dry-read):
-agent-dispatch recipes render reviewer --param repo=owner/name --param pr=42
+agent-dispatch recipes render reviewer --param repo=owner/name --param pr=42 --param land=author
 
 # carve an ad-hoc task from a recipe (and, with --spawn, embody a worker to drive it):
 agent-dispatch recipes kick reviewer --param repo=owner/name --param pr=42 --repo owner/name --spawn
@@ -509,13 +510,66 @@ agent-dispatch recipes kick reviewer --param repo=owner/name --param pr=42 --dry
 `kick` reuses the ordinary `create` path, so it inherits lane resolution, dedup,
 and the `--spawn`/`--spawn-backend` embodiment (default `embody`: a CLI autopilot
 in a fresh worktree with a full checkout -- the right body for a recipe). A
-**reserved-work `dedup_key`** is derived from the recipe + its parameters, so
-re-kicking the same recipe for the same target collides rather than forking the
-work (override with `--dedup-key`). The rendered charter reaffirms the two safety
+**reserved-work `dedup_key`** is derived from the recipe target. For reviewers,
+the identity is the repository + pull-request reference only, so landing-policy,
+base-branch, or guidance drift cannot fork a live review. Once that generation
+is terminal, the queue releases the key and permits a later review generation
+(override with `--dedup-key`). The rendered charter reaffirms the two safety
 invariants -- *drive the worktree to a clean resolved state on abandon* and *report
 what you did* -- so a worker carries them even on the ad-hoc, no-service path. See
 [`visions/plugins/agent-dispatch`](../../visions/plugins/agent-dispatch/README.md)
 (§Concepts/*The recipe*, §Features/*loop-recipes* + *recipes-run-ad-hoc*).
+
+The reviewer defaults to backward-compatible `land=self`: the reviewer owns
+landing and is not done at a verdict. With `land=author`, the reviewer posts and
+records its verdict, then suspends without holding worker capacity while the
+author owns updates and landing. It resumes on change, supersession/closure, or
+an explicit expiry/abandon decision. Tasks carry distinct `landing:*` and
+`resolution:reviewer-*` labels so evaluators cannot apply self-land completion
+rules to an author-land review.
+
+### Registered emitter side-load
+
+`recipes kick` is deliberately self-tracked (`source=recipe`). To send a single
+change through a standing producer, declare an emitter `side_load.command` with
+a `{change_ref}` placeholder and use its registered handle:
+
+```json
+{
+  "id": "repository-reviews",
+  "command": ["review-source", "discover"],
+  "interval_seconds": 300,
+  "task_output": "json",
+  "evaluator_ref": "repository-review-lifecycle",
+  "side_load": {
+    "command": ["review-source", "side-load", "{change_ref}"]
+  }
+}
+```
+
+```bash
+agent-dispatch emitter side-load <registration-id> owner/name#42
+```
+
+With `task_output=json`, discovery and side-load commands emit one task object
+or a list of task objects on stdout. Each object contains `title` plus ordinary
+create fields (`repo`, `prompt`, `labels`, `dedup_key`, and so on).
+agent-dispatch authors the tasks and forcibly stamps `source=emitter`,
+`origin_ref=<emitter id>`, and the declaration's `evaluator_ref`; command output
+cannot spoof that provenance. The same operation is exposed as
+`dispatch_emitter_side_load` by local and coordinator-hosted MCP.
+
+An evaluator registration may declare the same `evaluator_ref`. Its service
+consumes only terminal tasks stamped by that producer association; supervised
+pools continue to select ordinary task attributes and never own evaluator
+judgment.
+
+The repository declaration names an acting identity and commands, never
+credentials. Tokens remain in the existing runtime/auth boundary. Change
+content is untrusted data: side-load/discovery commands must not execute target
+branch code by default, and any sandboxed test or `land=self` permission is an
+explicit repository policy. An identity that cannot approve or land records a
+visible blocked/terminal outcome instead of retrying indefinitely.
 
 ### Driving a recipe loop (`agent-dispatch recipes drive`)
 
@@ -791,7 +845,7 @@ agent-dispatch supervise --all-repos --max-concurrent 3
 agent-dispatch supervise --label sweep --headless-label sweep   # embody 'sweep' headless-ACP
 agent-dispatch supervise --pool host-a,host-b --origin origin --headless --label sweep
 agent-dispatch supervise --no-reactive --interval 30            # fixed polling only
-agent-dispatch supervise --evaluator eval.json        # + advance loops across terminal events
+agent-dispatch supervise --evaluator eval.json --evaluator-ref repository-review-lifecycle
 agent-dispatch reservations list --state spawned      # what's in flight
 agent-dispatch reservations fail <key>                # release a confirmed-dead spawn
 ```
@@ -847,7 +901,9 @@ its decisions — emitting a follow-up task. This is the **service-driven** half
 loop (reviewer done → conflict-resolution follow-up; goal met → the next goal)
 with no bespoke module. It's idempotent — each task fires once per process and the
 emitted follow-up's `dedup_key` guards duplicates across restarts — and best-effort
-(a bad evaluator or failed create is logged, never crashing the cycle).
+(a bad evaluator or failed create is logged, never crashing the cycle). Add
+`--evaluator-ref <id>` (or the same field in an evaluator registration) to
+consume only tasks explicitly associated by their producing emitter.
 
 Tasks embody as a mux-wrapped **CLI autopilot** by default. Mark **self-contained
 sweep** labels with `--headless-label L` (repeatable, `--headless-agent` to name the
@@ -886,9 +942,10 @@ Point a Copilot sub-agent (or any MCP client) at it:
 }
 ```
 
-It exposes the queue as 25 tools: `dispatch_create` / `dispatch_approve` /
+It exposes the queue plus producer operations as tools: `dispatch_create` / `dispatch_approve` /
 `dispatch_find` / `dispatch_sweep` / `dispatch_recipe_list` /
-`dispatch_recipe_render` / `dispatch_recipe_kick` / `dispatch_list` /
+`dispatch_recipe_render` / `dispatch_recipe_kick` /
+`dispatch_emitter_side_load` / `dispatch_list` /
 `dispatch_show` / `dispatch_events` / `dispatch_wakes` / `dispatch_payload` /
 `dispatch_result` / `dispatch_worktree_status` / `dispatch_claim` / `dispatch_start` /
 `dispatch_yield` / `dispatch_suspend` / `dispatch_resume` /

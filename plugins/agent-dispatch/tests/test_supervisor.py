@@ -30,8 +30,13 @@ class QueueBackedClient:
     def __exit__(self, *_exc):
         return False
 
-    def list(self, *, repo=None, status=None, limit=200, **_kw):
-        return [asdict(t) for t in self._q.list(repo=repo, status=status, limit=limit)]
+    def list(self, *, repo=None, status=None, limit=200, **kw):
+        return [
+            asdict(t)
+            for t in self._q.list(
+                repo=repo, status=status, limit=limit, **kw
+            )
+        ]
 
     def create(self, title, *, repo=None, proposed=False, **kwargs):
         status = Status.PROPOSED if proposed else Status.QUEUED
@@ -1747,8 +1752,8 @@ _REVIEWER_DONE_RULE = {
 }
 
 
-def _complete(q, title, *, labels=None):
-    t = q.create(title, labels=labels or [])
+def _complete(q, title, *, labels=None, **fields):
+    t = q.create(title, labels=labels or [], **fields)
     q.claim_one("m/wt-1", task_id=t.id, machine="m", worktree="wt-1")
     q.start(t.id, "m/wt-1")
     q.complete(t.id, "m/wt-1")
@@ -1789,6 +1794,64 @@ def test_evaluator_ignores_non_matching_terminal(q, client):
     )
     assert sup.advance_via_evaluator() == 0
     assert _conflict_followups(q) == []
+
+
+def test_evaluator_ref_consumes_only_producer_associated_tasks(q, client):
+    _complete(
+        q, "mine", labels=["recipe:reviewer"], evaluator_ref="review-loop"
+    )
+    _complete(
+        q, "other", labels=["recipe:reviewer"], evaluator_ref="other-loop"
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+        evaluator_ref="review-loop",
+    )
+    assert sup.advance_via_evaluator() == 1
+    assert [t.title for t in _conflict_followups(q)] == [
+        "unstick follow-up for mine"
+    ]
+
+
+def test_unscoped_evaluator_does_not_consume_associated_tasks(q, client):
+    _complete(
+        q, "associated", labels=["recipe:reviewer"], evaluator_ref="review-loop"
+    )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+    )
+    assert sup.advance_via_evaluator() == 0
+    assert _conflict_followups(q) == []
+
+
+def test_evaluator_filter_applies_before_terminal_result_limit(q, client):
+    mine = _complete(
+        q, "mine", labels=["recipe:reviewer"], evaluator_ref="review-loop"
+    )
+    for index in range(3):
+        _complete(
+            q,
+            f"other-{index}",
+            labels=["recipe:reviewer"],
+            evaluator_ref="other-loop",
+        )
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        evaluator=_spec_evaluator([_REVIEWER_DONE_RULE]),
+        evaluator_ref="review-loop",
+        evaluate_limit=1,
+    )
+    assert sup.advance_via_evaluator() == 1
+    followup = _conflict_followups(q)[0]
+    assert followup.dedup_key == f"eval:conflict:{mine.id}"
 
 
 def test_evaluator_fires_each_task_once_per_process(q, client):
