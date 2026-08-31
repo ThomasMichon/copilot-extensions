@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator, Sequence
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -651,3 +651,45 @@ class DispatchClient:
             for line in resp.iter_lines():
                 if line.startswith("data:"):
                     yield json.loads(line[len("data:") :].strip())
+
+
+class ResolvingDispatchClient:
+    """Resolve and open a fresh coordinator client for every operation.
+
+    Long-running supervisors may outlive a zero-downtime coordinator generation.
+    A client retained from process startup can keep an old TCP connection alive
+    after the advertised dynamic endpoint changes, then fail permanently when
+    that retiring generation closes. Re-resolving per operation makes the
+    supervisor follow the same live rendezvous as every ordinary CLI command.
+    """
+
+    def __init__(self, factory: Callable[[], DispatchClient]):
+        self._factory = factory
+
+    def close(self) -> None:
+        """No-op; each delegated operation owns and closes its client."""
+
+    def __enter__(self) -> ResolvingDispatchClient:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
+    def __getattr__(self, name: str) -> Any:
+        # Proxy only real DispatchClient methods, so attribute semantics stay
+        # normal: a missing/typo name raises AttributeError (and hasattr() is
+        # honest) instead of silently returning a callable that fails only when
+        # invoked. Generator methods (e.g. stream_events) are intentionally not
+        # used through this wrapper -- the per-operation client would close
+        # before iteration -- and the supervisor never calls them.
+        target = getattr(DispatchClient, name, None)
+        if not callable(target):
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            with self._factory() as client:
+                return getattr(client, name)(*args, **kwargs)
+
+        return call

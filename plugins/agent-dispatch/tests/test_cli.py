@@ -178,6 +178,25 @@ def _args(argv):
     return build_parser().parse_args(argv)
 
 
+def test_spawn_route_default_is_local_discovery():
+    from agent_dispatch import __main__ as m
+
+    assert m._spawn_route(_args(["create", "x", "--spawn"])) == ""
+
+
+def test_spawn_route_shared_is_moniker():
+    from agent_dispatch import __main__ as m
+
+    assert m._spawn_route(_args(["--shared", "create", "x", "--spawn"])) == " --shared"
+
+
+def test_spawn_route_raw_url_fails_loud():
+    from agent_dispatch import __main__ as m
+
+    with pytest.raises(SystemExit, match="cannot be pinned to a raw --url"):
+        m._spawn_route(_args(["--url", "http://x:9847", "create", "y", "--spawn"]))
+
+
 def test_resolve_target_explicit_url_wins(monkeypatch):
     monkeypatch.setenv("AGENT_DISPATCH_SHARED_URL", "https://coordinator.example/dispatch")
     args = _args(["--url", "http://direct:9847", "--shared", "list"])

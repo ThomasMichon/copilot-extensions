@@ -463,6 +463,19 @@ to **local** (non-pool) spawn. In fleet (`--pool`) mode the body choice is
 `--embody-backend cli` makes them CLI on the pool host; the legacy `--headless`
 flag remains an explicit force), and the per-label flags are ignored.
 
+The local supervisor and every worker use the ordinary `agent-dispatch` client
+discovery path. The supervisor resolves a fresh client for every coordinator
+operation, and a spawned worker's prompt carries only the task id plus a
+**routing intent** -- discovery for the default local coordinator, or the
+`--shared` moniker -- never a raw coordinator URL. A zero-downtime coordinator
+cutover may change its dynamic loopback port while a long-running supervisor
+still has an old keep-alive connection; neither that connection nor a worker
+seed may pin newly-issued work to the retired address. A raw `--url` target
+cannot be handed to a locally-spawned worker (it would bake a raw,
+possibly-dynamic endpoint into the body); route by the default local
+coordinator, `--shared`, or fleet mode (`--pool`/`--origin`, which routes by
+machine alias).
+
 ### Lease heartbeat (built) — the live-worker safety net
 
 Each cycle the supervisor also **holds the lease of every confirmed-alive
