@@ -125,7 +125,10 @@ class PowerShellTestHost:
     def _terminate(self) -> None:
         if self._process.poll() is None:
             self._process.kill()
-            self._process.wait(timeout=5)
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
 
     def _close_pipes(self) -> None:
         for stream in (
