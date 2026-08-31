@@ -13,21 +13,24 @@ isolation and still disappear. Adding retries, changing hook order, or making
 individual producers faster cannot create a correctness guarantee.
 
 The workaround therefore needs one suite-owned aggregator to produce one
-combined value. The simplest safe shape is available if the host can guarantee
-that one source-qualified plugin hook runs after every competing context hook:
-existing producer hooks keep their ordinary direct emissions, while the final
-aggregator re-runs their pure pseudo-hooks and supersedes those partial values
-with the complete aggregate. This preserves standalone behavior without putting
-a broker call in every producer hook.
+combined value. Trusted plugin-owned `.context-injection/config.yaml` adoption
+selects the exact direct marketplace authority
+`context-injection@copilot-extensions` and binds its engine schema and version;
+host settings only enable the plugin. The authority discovers and runs every
+declared pure contributor.
+Once that authority is proven, participating producer hooks rendezvous on the
+same result but emit `{}`. The authority is therefore the only possible
+non-empty emitter regardless of hook execution order. Compatible host versions
+must preserve an earlier non-empty `additionalContext` when another hook returns
+`{}`; this is a versioned output-composition precondition, not an ordering
+assumption.
 
 Current public documentation guarantees only that plugin hooks are loaded after
 policy, repository, user, and inline hook sources. It defines no hook priority,
 plugin dependency, `loadAfter`, or cross-plugin ordering field. Alphabetical
 plugin names, marketplace order, installation order, and JSON object order are
-therefore hypotheses to test, not contracts to build on. If no supported and
-version-stable guaranteed-last seam can be proven, migrated producer hooks must
-instead call the same session broker and return the same aggregate during the
-compatibility period.
+therefore not contracts to build on. The producer-empty protocol makes those
+unknowns irrelevant rather than trying to infer an ordering seam.
 
 Neither design should absorb bootstrap, registration, service reconciliation,
 or other side effects that happen to run at `sessionStart`; those hooks continue
@@ -78,18 +81,19 @@ Add a payload-only plugin named `context-injection`, containing:
 - contributor schema validation; and
 - tests and clean-room fixtures.
 
-The selected aggregator is source-qualified by user-local policy. Repository
-configuration cannot select or replace it. Configuration allows at most one
-authority for a session. If the authority is absent, ambiguous, incompatible,
-or cannot prove the host's effective plugin set, migrated producers retain their
-direct path.
+Trusted `.context-injection/config.yaml` repository configuration selects exactly
+`context-injection@copilot-extensions` and binds the compatible engine contract;
+it cannot nominate a same-named authority from another source. Configuration
+allows at most one aggregate authority for a session. If that authority is
+absent, ambiguous, incompatible, or cannot prove the host's effective plugin
+set, migrated producers retain their direct path.
 
-The preferred execution mode is `guaranteed-last`: the selected authority must
-prove, for the current host version and launch shape, that its hook is ordered
-after all competing plugin context hooks. Only that hook emits the aggregate;
-producer hooks remain unchanged apart from publishing their pure contributor
-declarations. If the proof is unavailable, the authority stands down from this
-mode and the implementation uses the brokered-result mode below.
+The runtime reads that plugin-owned configuration only after exact persisted
+repository-trust proof. Its version-1 YAML shape is closed: unknown or duplicate
+keys, malformed indentation, unsupported values, path escape, and incompatible
+schema or engine versions all restore producer-local direct behavior. Host
+settings carry enablement and marketplace discovery only; they cannot select
+or override the authority.
 
 This is explicit cross-cell interoperability, not implicit marketplace
 federation. The aggregator may compose contributors from several active cells
@@ -191,73 +195,68 @@ declines aggregation and producer wrappers use their direct paths. Once admitted
 a successful contributor is never omitted merely because a lower-priority
 fragment consumed the budget first.
 
-### 4. Guaranteed-last primary mode
-
-When host ordering can be proven from a supported contract, the selected
-`context-injection` hook runs last, resolves the active plugin stack, executes
-each declared pure contributor, and emits the aggregate. Existing producer
-hooks continue to emit their ordinary context as a backup path. Under the
-affected last-result host behavior, those earlier partial results are discarded
-in favor of the final complete aggregate.
-
-This mode requires more than observing one favorable run. Tests must cover
-fresh install, update, enable/disable, multiple marketplaces, directory
-marketplaces, staged payloads, Windows, POSIX, new sessions, and resumes across
-every host version claimed compatible. The mechanism must be source-qualified
-and must reject a second guaranteed-last claimant. Any ordering ambiguity makes
-the aggregator fail open to the existing direct hooks.
-
-### 5. Brokered-result compatibility mode
+### 4. Authority-owned rendezvous
 
 The hook payload supplies `sessionId`. The aggregator hook and every migrated
 producer hook call one payload-local broker owned by the selected aggregator.
-The broker computes or reads one session-local result and returns byte-identical
-aggregate JSON to every caller. The affected host may preserve any one of these
-identical non-empty results without losing a migrated sibling.
+The broker computes or reads one pair-key result. The authority returns its
+byte-identical aggregate JSON; proven producers return `{}` after the result is
+published or read.
 
 ```text
 producer wrapper
-  -> resolve configured source-qualified aggregator authority
-  -> invoke that exact payload's broker with original hook input
-  -> broker returns shared aggregate, or an explicit direct-fallback disposition
-  -> on direct fallback, invoke this plugin's original producer
+  -> resolve the configured source-qualified aggregate authority
+  -> invoke that exact payload's broker with the original hook input
+  -> before proof, invoke this plugin's original producer
+  -> after proof, compute or read the shared result and emit {}
+
+authority hook
+  -> invoke the same broker without a producer identity
+  -> compute or read the shared result
+  -> emit the cached aggregate
 ```
 
 The producer wrapper contains only the dependency-light authority locator and
 fallback path. It does not carry a second implementation of active-set
 resolution, contributor admission, budgets, or compatibility decisions.
 
-The broker uses a session-local, ownership-checked rendezvous or deterministic
-recomputation. Concurrent callers may elect a worker and cache the result, but
-every caller must be able to recover from a stale owner and return the same
-completed aggregate. Returning the same aggregate from several hooks is safe;
-returning different partial aggregates is not.
+The broker uses an ownership-checked rendezvous keyed by
+`(sessionId, canonical resolved cwd)`. Concurrent callers may elect a worker
+and cache the result, but every caller must read the same completed bytes.
+Producer callers remain empty after proof; only the authority returns aggregate
+bytes. Post-proof failures publish one shared cached `{}` and do not re-enter a
+caller-specific direct fallback.
 
-### 5a. Authoring and review enforcement
+The rendezvous root is per-user. POSIX roots are current-user-owned `0700`
+directories, lock and result files are `0600`, and unsafe or symlinked paths
+stand down rather than exposing or accepting shared state.
+
+### 5. Authoring and review enforcement
 
 `customizing-copilot:authoring-skills` must define the host workaround
 explicitly: while affected host versions retain only one session-start
-`additionalContext` result, `context-injection` is the only plugin allowed to
-claim guaranteed-last aggregate authority. A migrated producer declares its
-pure context contributor and retains its original direct hook as the backup
-path. If guaranteed-last ordering cannot be proven, the producer instead calls
-the selected coordinator's broker and invokes its original direct producer only
-when that broker returns the explicit fallback disposition. Hooks that only
-reconcile state, register providers, or perform other side effects remain
-independent and return `{}`.
+`additionalContext` result, the exact direct
+`context-injection@copilot-extensions` authority is the sole aggregate emitter.
+A migrated producer declares its pure context contributor and retains its
+original direct hook as the pre-proof backup path. After proof it joins the
+selected coordinator's rendezvous and emits `{}`. Hooks that only reconcile
+state, register providers, or perform other side effects remain independent,
+restart-safe-idempotent, complete-declared, and return `{}`.
+When a pure contributor consumes context computed by one of those hooks, the
+direct hook atomically publishes an explicit completion snapshot. The
+contributor may wait for that snapshot within its bounded deadline but never
+replays the side effect.
 
 `customizing-copilot:reviewing-customizations` must enforce this mechanically
 without executing hooks. It reads the versioned contributor declaration and
 the configured plugin stack, classifies session-start entries as aggregator,
 migrated wrapper, known legacy direct emitter, or unknown, and reports a
-blocking finding when more than one possible non-empty result is not proven to
-be either superseded by one proven guaranteed-last aggregate or the
-byte-identical output of one compatible broker. A legacy direct emitter
-alongside an aggregate is permitted only when the scanner can prove the
-aggregate owns the supported final-order seam; otherwise it remains blocking
-during partial migration. An unknown output remains a warning rather than being
-assumed safe. The scanner reports identities and roles only, never hook commands
-or emitted context.
+blocking finding unless exactly one compatible authority is selected and every
+consumed session-start context producer is complete and authority-aware.
+Side-effect-only hooks must be explicitly complete-declared with no
+contributors. An unknown output remains a warning rather than being assumed
+safe. The scanner reports identities and roles only, never hook commands or
+emitted context.
 
 This creates version-skew states:
 
@@ -267,14 +266,15 @@ This creates version-skew states:
 | present | old | emits directly | ignores undeclared producer |
 | absent | migrated | broker lookup fails; emits directly | none |
 | incompatible | migrated | broker returns fallback; emits directly | stands down |
-| compatible | migrated | returns shared aggregate | returns the same aggregate |
+| compatible | migrated | rendezvous; emits `{}` | emits the shared aggregate |
 | ambiguous | migrated | broker returns fallback; emits directly | all candidates stand down |
 
-Aggregator-first deployment and producer-first deployment do not create a new
-context-loss state. Full deterministic delivery begins only when every
+Aggregator-first and producer-first execution do not create a context-loss
+state because the aggregator independently discovers every contributor and all
+proven producers are empty. Full deterministic delivery begins only when every
 competing context producer in the loaded set is migrated or the host bug is
-fixed. A remaining legacy or repository-owned producer can still win the host
-race and hide the aggregate; diagnostics must label this partial state degraded.
+fixed. A remaining legacy or repository-owned producer keeps authority proof
+from succeeding.
 
 The wrapper must not search PATH or enumerate wildcard same-named payloads. It
 resolves the configured source-qualified authority and validates its exact
@@ -283,15 +283,20 @@ payload before invoking the broker.
 ### 6. Host-set authority and trust gates
 
 Settings-derived reconstruction is not always the host's effective plugin set.
-ACP dispatch may use staged `--plugin-dir` payloads while ignoring
-`enabledPlugins`, and repository-scoped settings are folder-trust-gated.
+ACP dispatch uses explicit staged `--plugin-dir` payloads, and
+repository-scoped settings are folder-trust-gated.
 
-Aggregation therefore activates only when the launch source and available host
-inputs prove that settings-derived resolution is authoritative. V1 must:
+Aggregation therefore selects its inventory by launch mode. For a staged ACP
+launch it reads the repeated `--plugin-dir` values from the raw Copilot process
+ancestry without shell evaluation, validates every root and manifest, and uses
+only staged roots whose manifest names resolve to exactly one effective
+source-qualified repository identity. For a non-staged launch it uses the
+ordinary settings and installed-payload resolver. V1 must:
 
 - ignore repository-scoped enablement unless persisted folder trust is proven;
-- stand down for ACP or staged-plugin launches unless the host supplies a
-  complete attributable staged-payload inventory;
+- reject malformed, missing, ambiguous, duplicate, escaping, or conflicting
+  staged roots before authority proof;
+- require the configured authority payload itself in the staged inventory;
 - never invoke an installed plugin merely because settings name it when the host
   did not load it; and
 - send every migrated producer through direct fallback when the authority check
@@ -307,10 +312,11 @@ registered wrapper timeout. Admission considers declared worst-case cost and
 uses bounded parallelism where platform parity permits it. Safety and command
 discovery classes run before ordinary guidance.
 
-All callers return the same completed aggregate. A contributor that crashes,
-times out, or emits malformed output is represented by a bounded omission notice
-in that aggregate. The broker itself must recover stale computation ownership;
-one crashed caller cannot leave every sibling returning `{}`.
+All callers rendezvous on the same completed result. Only the authority emits
+it; producers emit `{}` after proof. A contributor that crashes, times out, or
+emits malformed output is represented by one shared cached failure result. The
+broker itself must recover stale computation ownership; one crashed caller
+cannot send later producers back through caller-specific direct fallback.
 
 The aggregate budget is a configured share below the host's full context cap,
 leaving headroom for repository instructions, nonmigrated hooks, and future
@@ -365,14 +371,21 @@ model is at least as explicit as the host's own hook contract.
 
 ### Staged payload visibility
 
-The host may stage plugins through `--plugin-dir` without recording them in
-ordinary user or repository settings. The aggregator needs a trustworthy input
-or environment seam for those roots. It must not rediscover them by scanning
-temporary directories.
+The host stages plugins through repeated `--plugin-dir` arguments on the
+Copilot ACP process. The aggregator reads that complete raw argv list from
+process ancestry, never by evaluating the ancestor shell command or scanning
+temporary directories. It canonicalizes and deduplicates existing roots,
+requires each plugin manifest to remain contained by its root, and
+source-qualifies manifest names against the repository's effective
+`enabledPlugins` identities.
 
-If the host exposes no complete staged-plugin inventory, v1 must stand down and
-ensure staged contributors retain direct emission. It must also avoid invoking
-installed settings-declared plugins that the staged launch did not load.
+When that staged inventory exists, it is the host-loaded set. Disabled staged
+payloads are excluded, settings-enabled but unstaged payloads are not invoked,
+and the configured authority must be present among the staged roots. Any
+malformed argument, missing value, path failure, duplicate identity, or source
+ambiguity stands down before authority proof and preserves producer-local
+direct emission. Launches with no staged arguments retain ordinary
+settings/installed-payload resolution.
 
 ### Aggregator absence and consumer setup
 
@@ -398,8 +411,9 @@ Use two contributors with different delivery shapes:
 2. `ai-attribution` policy kernel - payload-only, cwd-gated, and already
    dependency-free on both platforms.
 
-The proof succeeds when the aggregator hook and both migrated producer hooks
-return byte-identical aggregates containing both fragments, every child sees its
-own payload identity, and every version-skew or indeterminate-authority state
-preserves the standalone direct path. The proof must explicitly report that an
-unmigrated competing hook can still hide the aggregate under the affected host.
+The proof succeeds when authority-first, producer-first, and concurrent calls
+all produce exactly one non-empty hook result with byte-identical authority
+bytes containing both fragments, every child sees its own payload identity, and
+every version-skew or indeterminate-authority state preserves the standalone
+direct path. The same session id with another canonical cwd and the same cwd
+with another session id must not reuse a result.

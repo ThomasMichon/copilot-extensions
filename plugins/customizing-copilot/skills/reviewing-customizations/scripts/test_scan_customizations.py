@@ -40,12 +40,36 @@ def _skill(dir_: Path, name: str, *, triggers: list[str] | None = None,
     )
 
 
-def _settings(repo: Path, enabled: dict, marketplaces: dict) -> None:
+def _settings(
+    repo: Path,
+    enabled: dict,
+    marketplaces: dict,
+    *,
+    aggregation: object | None = None,
+) -> None:
     p = repo / ".github" / "copilot" / "settings.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({
+    payload = {
         "enabledPlugins": enabled, "extraKnownMarketplaces": marketplaces,
-    }), encoding="utf-8")
+    }
+    p.write_text(json.dumps(payload), encoding="utf-8")
+    if aggregation is not None:
+        config = repo / ".context-injection" / "config.yaml"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        if not isinstance(aggregation, dict):
+            config.write_text(f"{aggregation!r}\n", encoding="utf-8")
+        else:
+            lines: list[str] = []
+            for key, value in aggregation.items():
+                if isinstance(value, dict):
+                    lines.append(f"{key}:")
+                    lines.extend(
+                        f"  {nested_key}: {nested_value}"
+                        for nested_key, nested_value in value.items()
+                    )
+                else:
+                    lines.append(f"{key}: {value}")
+            config.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _marketplace(
@@ -87,6 +111,8 @@ def _session_plugin(
     declaration: str = "complete",
     session_start: bool = True,
     create_commands: bool = True,
+    side_effects: str | None = None,
+    context_behavior: str | None = None,
 ) -> Path:
     plugin = root / marketplace / name
     plugin.mkdir(parents=True, exist_ok=True)
@@ -118,10 +144,20 @@ def _session_plugin(
         encoding="utf-8",
     )
     if declaration != "missing":
+        if side_effects is None:
+            side_effects = (
+                "none" if contributors else "restart-safe-idempotent"
+            )
+        if context_behavior is None:
+            context_behavior = "authority-aware" if contributors else "none"
         payload = {
             "schema": scan.SESSION_CONTEXT_SCHEMA,
             "version": scan.SESSION_CONTEXT_VERSION,
             "complete": declaration == "complete",
+            "sessionStart": {
+                "sideEffects": side_effects,
+                "context": context_behavior,
+            },
             "contributors": contributors or [],
         }
         (plugin / "session-context.json").write_text(
@@ -151,6 +187,45 @@ def _pure_contributor(name: str = "ambient") -> dict:
     }
 
 
+def _adoption(
+    authority: str = "context-injection@copilot-extensions",
+) -> dict:
+    return {
+        "schema": scan.SESSION_CONTEXT_ADOPTION_SCHEMA,
+        "version": 1,
+        "authority": authority,
+        "engine": {
+            "schema": scan.SESSION_CONTEXT_ENGINE_SCHEMA,
+            "version": scan.SESSION_CONTEXT_ENGINE_VERSION,
+        },
+    }
+
+
+def _aggregate_authority(
+    root: Path,
+    marketplace: str = "copilot-extensions",
+) -> Path:
+    authority = _session_plugin(
+        root,
+        marketplace,
+        "context-injection",
+        side_effects="none",
+        context_behavior="aggregate-authority",
+    )
+    manifest_path = authority / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["sessionContextEngine"] = "engine.json"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    (authority / "engine.json").write_text(
+        json.dumps({
+            "schema": scan.SESSION_CONTEXT_ENGINE_SCHEMA,
+            "version": scan.SESSION_CONTEXT_ENGINE_VERSION,
+        }),
+        encoding="utf-8",
+    )
+    return authority
+
+
 def _isolate_user_settings(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(scan.Path, "home", lambda: tmp_path / "empty-home")
 
@@ -163,9 +238,10 @@ def _scan_contributor_with_authority(
         repo,
         {
             "ambient-policy@copilot-extensions": True,
-            "zz-context-injection@copilot-extensions": True,
+            "context-injection@copilot-extensions": True,
         },
         {},
+        aggregation=_adoption(),
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
     report = scan.Report()
@@ -1034,36 +1110,17 @@ def test_suite_identity_uses_editable_plugin_source(
     assert scan._editable_plugin_footprint(repo, sources[0]) == editable
 
 
-def test_session_context_inventory_rejects_order_dependent_authority(
+def test_session_context_rejects_unadopted_aggregate_authority(
     tmp_path: Path, monkeypatch,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
     repo = tmp_path / "repo"
     repo.mkdir()
     installed = tmp_path / "installed"
-    _session_plugin(
-        installed,
-        "copilot-extensions",
-        "ambient-policy",
-        contributors=[_pure_contributor()],
-    )
-    _session_plugin(
-        installed,
-        "copilot-extensions",
-        "provider-registration",
-    )
-    _session_plugin(
-        installed,
-        "copilot-extensions",
-        "zz-context-injection",
-    )
+    _aggregate_authority(installed)
     _settings(
         repo,
-        {
-            "ambient-policy@copilot-extensions": True,
-            "provider-registration@copilot-extensions": True,
-            "zz-context-injection@copilot-extensions": True,
-        },
+        {"context-injection@copilot-extensions": True},
         {},
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
@@ -1071,137 +1128,259 @@ def test_session_context_inventory_rejects_order_dependent_authority(
 
     inventory = scan.scan_session_context(repo, sources, report)
 
-    assert inventory["disposition"] == "unsupported-order-dependent-authority"
+    assert inventory["disposition"] == "unproven-aggregate-authority"
     assert inventory["authority_proven"] is False
-    assert {
-        entry["identity"]: entry["role"]
-        for entry in inventory["plugins"]
-    } == {
-        "copilot-extensions/ambient-policy":
-            "complete-declared-contributor",
-        "copilot-extensions/provider-registration":
-            "complete-declared-side-effect-only",
-        "copilot-extensions/zz-context-injection":
-            "aggregate-authority",
-    }
     assert any(
-        finding.check == "session-context-ordering"
+        finding.check == "session-context-authority"
         and finding.severity == scan.BLOCKING
+        and "no complete repository adoption" in finding.message
         for finding in report.findings
     )
-    assert any(
-        finding.check == "session-context-collision"
-        and finding.severity == scan.BLOCKING
-        for finding in report.findings
-    )
-    rendered = json.dumps(inventory)
-    assert "do-not-report-this-command" not in rendered
-    assert "scripts/emit-context" not in rendered
 
 
-def test_session_context_rejects_declared_tail_adapter(
+def test_session_context_accepts_exact_direct_authority(
     tmp_path: Path, monkeypatch,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
     repo = tmp_path / "repo"
     repo.mkdir()
-    adapter = _session_plugin(
-        repo,
-        ".ai",
-        "zz-context-injection",
-    )
     installed = tmp_path / "installed"
-    official = _session_plugin(
+    authority = _aggregate_authority(installed)
+    contributor = _session_plugin(
         installed,
         "copilot-extensions",
-        "zz-context-injection",
+        "ambient-policy",
+        contributors=[_pure_contributor()],
     )
-    manifest_path = adapter / "plugin.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["sessionContextAuthority"] = {
-        "mode": "tail-adapter",
-        "engine": "zz-context-injection@copilot-extensions",
-    }
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    side_effect = _session_plugin(
+        installed,
+        "copilot-extensions",
+        "provider-registration",
+    )
+    mixed = _session_plugin(
+        installed,
+        "copilot-extensions",
+        "mixed-capability",
+        contributors=[_pure_contributor("mixed")],
+        side_effects="restart-safe-idempotent",
+        context_behavior="authority-aware",
+    )
+    _settings(
+        repo,
+        {
+            "context-injection@copilot-extensions": True,
+            "ambient-policy@copilot-extensions": True,
+            "provider-registration@copilot-extensions": True,
+            "mixed-capability@copilot-extensions": True,
+        },
+        {},
+        aggregation=_adoption(),
+    )
     sources = [
         scan.PluginSource(
-            skills_root=official / "skills",
-            origin="copilot-extensions/zz-context-injection",
-            controlled=False,
+            skills_root=authority / "skills",
+            origin="copilot-extensions/context-injection",
         ),
         scan.PluginSource(
-            skills_root=adapter / "skills",
-            origin="aperture/zz-context-injection",
-            controlled=True,
+            skills_root=contributor / "skills",
+            origin="copilot-extensions/ambient-policy",
+        ),
+        scan.PluginSource(
+            skills_root=side_effect / "skills",
+            origin="copilot-extensions/provider-registration",
+        ),
+        scan.PluginSource(
+            skills_root=mixed / "skills",
+            origin="copilot-extensions/mixed-capability",
+        ),
+    ]
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, sources, report)
+
+    assert inventory["authority_proven"] is True
+    assert inventory["disposition"] == "repository-authority-proven"
+    assert report.blocking == 0
+    roles = {
+        entry["identity"]: entry["role"]
+        for entry in inventory["plugins"]
+    }
+    assert roles["copilot-extensions/context-injection"] == (
+        "aggregate-authority"
+    )
+    assert roles["copilot-extensions/ambient-policy"] == (
+        "complete-declared-contributor"
+    )
+    assert roles["copilot-extensions/provider-registration"] == (
+        "complete-declared-side-effect-only"
+    )
+    assert roles["copilot-extensions/mixed-capability"] == (
+        "complete-declared-contributor"
+    )
+    possible_non_empty = {
+        entry["identity"]: entry["possible_non_empty"]
+        for entry in inventory["plugins"]
+    }
+    assert possible_non_empty["copilot-extensions/context-injection"] == "yes"
+    assert possible_non_empty["copilot-extensions/ambient-policy"] == "no"
+    assert possible_non_empty["copilot-extensions/mixed-capability"] == "no"
+    rendered = json.dumps(inventory)
+    assert "do-not-report-this-command" not in rendered
+    assert "scripts/emit-context" not in rendered
+
+
+@pytest.mark.parametrize(
+    "participant_case",
+    [
+        "unclassified",
+        "incomplete",
+        "direct",
+        "side-effect-incomplete",
+        "contributor-without-hook",
+        "invalid-contributor-id",
+    ],
+)
+def test_adopted_stack_rejects_unsafe_session_start_participant(
+    tmp_path: Path,
+    monkeypatch,
+    participant_case: str,
+):
+    _isolate_user_settings(tmp_path, monkeypatch)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    installed = tmp_path / "installed"
+    authority = _aggregate_authority(installed)
+    participant_options: dict = {}
+    if participant_case == "unclassified":
+        participant_options["declaration"] = "missing"
+    elif participant_case == "incomplete":
+        participant_options["declaration"] = "incomplete"
+    elif participant_case == "direct":
+        participant_options.update(
+            contributors=[_pure_contributor()],
+            context_behavior="none",
         )
+    elif participant_case == "contributor-without-hook":
+        participant_options.update(
+            contributors=[_pure_contributor()],
+            session_start=False,
+        )
+    elif participant_case == "invalid-contributor-id":
+        participant_options["contributors"] = [
+            _pure_contributor("bad/id")
+        ]
+    else:
+        participant_options.update(
+            side_effects="none",
+            context_behavior="none",
+        )
+    participant = _session_plugin(
+        installed,
+        "copilot-extensions",
+        "participant",
+        **participant_options,
+    )
+    _settings(repo, {}, {}, aggregation=_adoption())
+    sources = [
+        scan.PluginSource(
+            skills_root=authority / "skills",
+            origin="copilot-extensions/context-injection",
+        ),
+        scan.PluginSource(
+            skills_root=participant / "skills",
+            origin="copilot-extensions/participant",
+        ),
     ]
     report = scan.Report()
 
     inventory = scan.scan_session_context(repo, sources, report)
 
     assert inventory["authority_proven"] is False
-    assert inventory["disposition"] == "unsupported-order-dependent-authority"
+    assert inventory["disposition"] == "unproven-aggregate-authority"
     assert any(
         finding.check == "session-context-authority"
-        and "multiple aggregate authorities" in finding.message
+        and "unclassified, incomplete, or not authority-aware"
+        in finding.message
         for finding in report.findings
     )
-    assert sum(
-        finding.check == "session-context-ordering"
-        for finding in report.findings
-    ) == 2
 
 
-def test_session_context_rejects_external_self_declared_tail_adapter(
+def test_adopted_stack_rejects_malformed_repository_config(
     tmp_path: Path,
 ):
     repo = tmp_path / "repo"
     repo.mkdir()
-    installed = tmp_path / "installed"
-    adapter = _session_plugin(
-        installed,
-        "external",
-        "zz-context-injection",
-    )
-    manifest_path = adapter / "plugin.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["sessionContextAuthority"] = {
-        "mode": "tail-adapter",
-        "engine": "zz-context-injection@copilot-extensions",
-    }
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    source = scan.PluginSource(
-        skills_root=adapter / "skills",
-        origin="external/zz-context-injection",
-        controlled=False,
-    )
+    _settings(repo, {}, {}, aggregation=True)
     report = scan.Report()
 
-    inventory = scan.scan_session_context(repo, [source], report)
+    inventory = scan.scan_session_context(repo, [], report)
 
     assert inventory["authority_proven"] is False
     assert any(
-        finding.check == "session-context-ordering"
+        finding.check == "session-context-authority"
+        and finding.severity == scan.BLOCKING
+        for finding in report.findings
+    )
+
+
+def test_adopted_stack_rejects_unknown_repository_config_key(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    adoption = _adoption()
+    adoption["unexpected"] = "rejected"
+    _settings(repo, {}, {}, aggregation=adoption)
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, [], report)
+
+    assert inventory["authority_proven"] is False
+    assert any(
+        finding.check == "session-context-authority"
+        and finding.severity == scan.BLOCKING
+        for finding in report.findings
+    )
+
+
+def test_adopted_stack_rejects_invalid_source_qualified_identity(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _settings(
+        repo,
+        {},
+        {},
+        aggregation=_adoption(
+            authority="context-injection@repo_context"
+        ),
+    )
+    report = scan.Report()
+
+    inventory = scan.scan_session_context(repo, [], report)
+
+    assert inventory["authority_proven"] is False
+    assert any(
+        finding.check == "session-context-authority"
         and finding.severity == scan.BLOCKING
         for finding in report.findings
     )
 
 
 @pytest.mark.parametrize("authority_first", [False, True])
-def test_enabled_plugins_key_order_never_proves_context_authority(
+def test_enabled_plugins_key_order_does_not_affect_context_authority(
     tmp_path: Path, monkeypatch, authority_first: bool,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
     repo = tmp_path / "repo"
     repo.mkdir()
     installed = tmp_path / "installed"
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
     _session_plugin(installed, "copilot-extensions", "ambient-policy")
     enabled_items = [
         ("ambient-policy@copilot-extensions", True),
-        ("zz-context-injection@copilot-extensions", True),
+        ("context-injection@copilot-extensions", True),
     ]
     if authority_first:
         enabled_items.reverse()
@@ -1209,19 +1388,16 @@ def test_enabled_plugins_key_order_never_proves_context_authority(
         repo,
         dict(enabled_items),
         {},
+        aggregation=_adoption(),
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
     report = scan.Report()
 
     inventory = scan.scan_session_context(repo, sources, report)
 
-    assert inventory["authority_proven"] is False
-    assert any(
-        finding.check == "session-context-ordering"
-        and finding.severity == scan.BLOCKING
-        and "`enabledPlugins` JSON key order" in finding.message
-        for finding in report.findings
-    )
+    assert inventory["authority_proven"] is True
+    assert inventory["disposition"] == "repository-authority-proven"
+    assert report.blocking == 0
 
 
 def test_session_context_rejects_second_authority(
@@ -1231,25 +1407,24 @@ def test_session_context_rejects_second_authority(
     repo = tmp_path / "repo"
     repo.mkdir()
     installed = tmp_path / "installed"
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
-    _session_plugin(
-        installed, "other-market", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
+    _aggregate_authority(installed, "other-market")
     _settings(
         repo,
         {
-            "zz-context-injection@copilot-extensions": True,
-            "zz-context-injection@other-market": True,
+            "context-injection@copilot-extensions": True,
+            "context-injection@other-market": True,
         },
         {},
+        aggregation=_adoption(),
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
     report = scan.Report()
 
-    scan.scan_session_context(repo, sources, report)
+    inventory = scan.scan_session_context(repo, sources, report)
 
+    assert inventory["authority_proven"] is False
+    assert inventory["disposition"] == "unproven-aggregate-authority"
     finding = next(
         finding for finding in report.findings
         if finding.check == "session-context-authority"
@@ -1271,16 +1446,15 @@ def test_known_session_start_without_declaration_blocks_authority(
         "legacy-policy",
         declaration="missing",
     )
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
     _settings(
         repo,
         {
             "legacy-policy@copilot-extensions": True,
-            "zz-context-injection@copilot-extensions": True,
+            "context-injection@copilot-extensions": True,
         },
         {},
+        aggregation=_adoption(),
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
     report = scan.Report()
@@ -1315,16 +1489,15 @@ def test_impure_contributor_is_incomplete_and_blocks_authority(
         "ambient-policy",
         contributors=[contributor],
     )
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
     _settings(
         repo,
         {
             "ambient-policy@copilot-extensions": True,
-            "zz-context-injection@copilot-extensions": True,
+            "context-injection@copilot-extensions": True,
         },
         {},
+        aggregation=_adoption(),
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
     report = scan.Report()
@@ -1369,9 +1542,7 @@ def test_invalid_contributor_bounds_are_incomplete_and_block_authority(
         "ambient-policy",
         contributors=[contributor],
     )
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
 
     inventory, report = _scan_contributor_with_authority(repo, installed)
 
@@ -1421,9 +1592,7 @@ def test_invalid_contributor_command_is_incomplete_and_blocks_authority(
         (plugin / "scripts" / "emit-context.txt").write_text(
             "", encoding="utf-8"
         )
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
 
     inventory, report = _scan_contributor_with_authority(repo, installed)
 
@@ -1469,7 +1638,7 @@ def test_unknown_external_plugin_output_is_warning_only(
     assert warning.severity == scan.WARNING
 
 
-def test_unknown_external_keeps_order_dependent_stack_blocked(
+def test_unknown_external_keeps_adopted_stack_unproven(
     tmp_path: Path, monkeypatch,
 ):
     _isolate_user_settings(tmp_path, monkeypatch)
@@ -1482,24 +1651,23 @@ def test_unknown_external_keeps_order_dependent_stack_blocked(
         "ambient-policy",
         contributors=[_pure_contributor()],
     )
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
     _settings(
         repo,
         {
             "ambient-policy@copilot-extensions": True,
             "opaque@external-market": True,
-            "zz-context-injection@copilot-extensions": True,
+            "context-injection@copilot-extensions": True,
         },
         {},
+        aggregation=_adoption(),
     )
     sources = scan.assemble_enabled_plugins(repo, installed_root=installed)
     report = scan.Report()
 
     inventory = scan.scan_session_context(repo, sources, report)
 
-    assert inventory["disposition"] == "unsupported-order-dependent-authority"
+    assert inventory["disposition"] == "unproven-aggregate-authority"
     assert report.blocking > 0
     assert any(
         finding.check == "session-context-unknown"
@@ -1507,12 +1675,7 @@ def test_unknown_external_keeps_order_dependent_stack_blocked(
         for finding in report.findings
     )
     assert any(
-        finding.check == "session-context-ordering"
-        and finding.severity == scan.BLOCKING
-        for finding in report.findings
-    )
-    assert any(
-        finding.check == "session-context-collision"
+        finding.check == "session-context-authority"
         and finding.severity == scan.BLOCKING
         for finding in report.findings
     )
@@ -1886,13 +2049,12 @@ def test_json_from_settings_includes_identity_role_inventory(
     repo.mkdir()
     home = tmp_path / "home"
     installed = home / ".copilot" / "installed-plugins"
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
     _settings(
         repo,
-        {"zz-context-injection@copilot-extensions": True},
+        {"context-injection@copilot-extensions": True},
         {},
+        aggregation=_adoption(),
     )
     copilot = home / ".copilot"
     copilot.mkdir(parents=True, exist_ok=True)
@@ -1907,18 +2069,18 @@ def test_json_from_settings_includes_identity_role_inventory(
     output = capsys.readouterr().out
     payload = json.loads(output)
     assert payload["session_context"] == {
-        "disposition": "unsupported-order-dependent-authority",
-        "authority_proven": False,
+        "disposition": "repository-authority-proven",
+        "authority_proven": True,
         "plugins": [{
-            "identity": "copilot-extensions/zz-context-injection",
+            "identity": "copilot-extensions/context-injection",
             "role": "aggregate-authority",
             "session_start": "yes",
             "declaration": "complete",
             "possible_non_empty": "yes",
         }],
     }
-    assert any(
-        finding["check"] == "session-context-ordering"
+    assert not any(
+        finding["check"] == "session-context-authority"
         and finding["severity"] == scan.BLOCKING
         for finding in payload["findings"]
     )
@@ -1931,12 +2093,10 @@ def test_from_settings_ignores_untrusted_repository_settings(
     repo.mkdir()
     home = tmp_path / "home"
     installed = home / ".copilot" / "installed-plugins"
-    _session_plugin(
-        installed, "copilot-extensions", "zz-context-injection"
-    )
+    _aggregate_authority(installed)
     _settings(
         repo,
-        {"zz-context-injection@copilot-extensions": True},
+        {"context-injection@copilot-extensions": True},
         {},
     )
     monkeypatch.setattr(scan.Path, "home", lambda: home)

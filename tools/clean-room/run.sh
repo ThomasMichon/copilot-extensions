@@ -452,6 +452,9 @@ open(os.path.join(eval_dir, "prompt.txt"), "w", encoding="utf-8").write(full)
 prompt_hash = hashlib.sha256(full.encode("utf-8")).hexdigest()[:16]
 ev = m.get("eval") or {}
 acp_dirs = [str(d) for d in (ev.get("acp_plugin_dirs") or []) if d]
+fingerprint_dirs = [
+    str(d) for d in (ev.get("payload_fingerprint_dirs") or []) if d
+]
 acp_cwd = str(ev.get("acp_cwd") or "")
 acp_cwd_file = str(ev.get("acp_cwd_file") or "")
 for acp_dir in acp_dirs:
@@ -461,6 +464,14 @@ for acp_dir in acp_dirs:
     ):
         raise ValueError(
             "eval.acp_plugin_dirs entries must be absolute in-container POSIX paths"
+        )
+for fingerprint_dir in fingerprint_dirs:
+    if (
+        not fingerprint_dir.startswith("/")
+        or any(character in fingerprint_dir for character in "\0\r\n\t")
+    ):
+        raise ValueError(
+            "eval.payload_fingerprint_dirs entries must be absolute in-container POSIX paths"
         )
 if acp_cwd and (
     not acp_cwd.startswith("/")
@@ -478,13 +489,14 @@ for k, v in (("tier", m.get("tier", "")), ("setup_rel", setup_rel), ("run_count"
              ("per_turn", per_turn), ("aggregate", aggregate), ("post_check", post_check),
              ("tierp", tierp), ("family", m.get("family", "")), ("prompt_hash", prompt_hash),
              ("acp_dirs", json.dumps(acp_dirs, separators=(",", ":"))),
+             ("fingerprint_dirs", json.dumps(fingerprint_dirs, separators=(",", ":"))),
              ("acp_cwd", acp_cwd),
              ("acp_cwd_file", acp_cwd_file)):
     print(f"{k}\t{v}")
 PY
 )" || { echo "eval: failed to parse manifest.json" >&2; exit 2; }
 
-    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS_JSON="[]" ACP_CWD="" ACP_CWD_FILE=""
+    local TIER="" SETUP_REL="" RUN_COUNT=1 PER_TURN=0 AGG="unanimous" POST_CHECK="" TIERP="" FAMILY="" PROMPT_HASH="" ACP_DIRS_JSON="[]" FINGERPRINT_DIRS_JSON="[]" ACP_CWD="" ACP_CWD_FILE=""
     local _k _v
     while IFS=$'\t' read -r _k _v; do
         case "$_k" in
@@ -492,6 +504,7 @@ PY
             per_turn) PER_TURN="$_v" ;; aggregate) AGG="$_v" ;; post_check) POST_CHECK="$_v" ;;
             tierp) TIERP="$_v" ;; family) FAMILY="$_v" ;; prompt_hash) PROMPT_HASH="$_v" ;;
             acp_dirs) ACP_DIRS_JSON="$_v" ;; acp_cwd) ACP_CWD="$_v" ;;
+            fingerprint_dirs) FINGERPRINT_DIRS_JSON="$_v" ;;
             acp_cwd_file) ACP_CWD_FILE="$_v" ;;
         esac
     done <<< "$parsed"
@@ -559,6 +572,11 @@ for value in json.loads(sys.argv[1]):
 
     # --- reproducibility fingerprints (prompt hash computed above) -----------
     local docs_hash copilot_ver
+    local docs_dirs_json="$FINGERPRINT_DIRS_JSON"
+    if [ "$docs_dirs_json" = "[]" ]; then docs_dirs_json="$ACP_DIRS_JSON"; fi
+    if [ "$docs_dirs_json" = "[]" ]; then
+        docs_dirs_json='["/home/operator/.copilot/installed-plugins"]'
+    fi
     docs_hash="$(docker exec "$CONTAINER" python3 -c '
 import hashlib
 import json
@@ -566,8 +584,6 @@ import pathlib
 import sys
 
 roots = [pathlib.Path(value) for value in json.loads(sys.argv[1])]
-if not roots:
-    roots = [pathlib.Path.home() / ".copilot" / "installed-plugins"]
 for root in roots:
     if not root.is_dir():
         raise SystemExit(f"evaluated payload root is not a directory: {root}")
@@ -590,7 +606,7 @@ for index, root in enumerate(roots):
             digest.update(f"{path.stat().st_mode & 0o777:o}\0".encode("ascii"))
             digest.update(path.read_bytes())
 print(digest.hexdigest()[:16])
-' "$ACP_DIRS_JSON")" || {
+' "$docs_dirs_json")" || {
         echo "eval: could not fingerprint the evaluated plugin payloads" >&2
         exit 1
     }
@@ -635,7 +651,7 @@ print(digest.hexdigest()[:16])
     copilot_ver="$(docker exec "$CONTAINER" /bin/bash -lc 'copilot --version 2>/dev/null' 2>/dev/null | head -1)"
     CR_SCENARIO_NAME="$SCENARIO_NAME" CR_FAMILY="$FAMILY" CR_IMAGE="$IMAGE" CR_RUN_COUNT="$RUN_COUNT" \
     CR_AGG="$AGG" CR_COPILOT_VER="$copilot_ver" CR_PROMPT_HASH="$PROMPT_HASH" CR_DOCS_HASH="$docs_hash" \
-    CR_ACP_DIRS_JSON="$ACP_DIRS_JSON" \
+    CR_ACP_DIRS_JSON="$ACP_DIRS_JSON" CR_FINGERPRINT_DIRS_JSON="$docs_dirs_json" \
     CR_PER_TURN="${PER_TURN:-0}" CR_TIERP="$TIERP" CR_SKIP_TIER_P="${SKIP_TIER_P:-0}" \
     CR_BRIDGE_CLEANUP_ERROR="$bridge_cleanup_error" \
     "$(_py)" - "$recs" > "$eval_dir/eval-run.json" <<'PY'
@@ -658,6 +674,7 @@ meta = {
     "runs": runs, "run_count": int(e["CR_RUN_COUNT"]), "aggregate_policy": e["CR_AGG"],
     "copilot_version": e["CR_COPILOT_VER"], "prompt_hash": e["CR_PROMPT_HASH"], "docs_hash": e["CR_DOCS_HASH"],
     "acp_plugin_dirs": json.loads(e["CR_ACP_DIRS_JSON"]),
+    "payload_fingerprint_dirs": json.loads(e["CR_FINGERPRINT_DIRS_JSON"]),
     "per_turn_timeout_s": int(e["CR_PER_TURN"]),
     "tier_p_precondition": tierp_field,
     "bridge_cleanup_error": e["CR_BRIDGE_CLEANUP_ERROR"],

@@ -167,7 +167,38 @@ payload path or runtime layout.
 
 ## 4. Emit the session command glossary
 
-Every runtime plugin wires two independent `sessionStart` command hooks:
+Every runtime plugin complete-declares its `sessionStart` behavior in
+`session-context.json`. Runtime bootstrap remains a direct,
+restart-safe-idempotent hook that emits `{}`. The read-only command glossary is
+a pure contributor invoked through the engine-v2 producer wrapper:
+
+```json
+{
+  "schema": "copilot-extensions.session-context-contributors",
+  "version": 1,
+  "complete": true,
+  "sessionStart": {
+    "sideEffects": "restart-safe-idempotent",
+    "context": "authority-aware"
+  },
+  "contributors": [
+    {
+      "id": "command-catalog",
+      "pure": true,
+      "order": 300,
+      "timeoutSeconds": 10,
+      "maxBytes": 8192,
+      "bash": ["scripts/emit-command-catalog.sh"],
+      "powershell": ["scripts/emit-command-catalog.ps1"]
+    }
+  ]
+}
+```
+
+`hooks.json` keeps the bootstrap hook direct and registers one synchronized
+wrapper hook for the contributor. The wrapper receives the exact
+`plugin@marketplace` identity, contributor id, and payload-relative command,
+and its host timeout is 30 seconds:
 
 ```json
 {
@@ -176,30 +207,36 @@ Every runtime plugin wires two independent `sessionStart` command hooks:
     "sessionStart": [
       {
         "type": "command",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; s=\"$r/scripts/bootstrap-check.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; $s = Join-Path $r 'scripts\\bootstrap-check.ps1'; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
+        "bash": "<payload-root>/scripts/bootstrap-check.sh",
+        "powershell": "<payload-root>\\scripts\\bootstrap-check.ps1",
         "timeoutSec": 15
       },
       {
         "type": "command",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-$PWD}\"; s=\"$r/scripts/emit-command-catalog.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = (Get-Location).Path }; $s = Join-Path $r 'scripts\\emit-command-catalog.ps1'; if (Test-Path $s) { & $s } else { [Console]::Out.Write('{}') }",
-        "timeoutSec": 10
+        "bash": "<payload-root>/scripts/invoke-context-contributor.sh agent-example@copilot-extensions command-catalog scripts/emit-command-catalog.sh",
+        "powershell": "<payload-root>\\scripts\\invoke-context-contributor.ps1 agent-example@copilot-extensions command-catalog scripts\\emit-command-catalog.ps1",
+        "timeoutSec": 30
       }
     ]
   }
 }
 ```
 
-The bootstrap hook prepares only this plugin. The catalog hook emits structured
-entries for every command declared by this payload:
+Use the repository synchronizer rather than copying those schematic hook
+commands literally. Before exact aggregate-authority proof, the wrapper runs
+this plugin's contributor directly. After proof, it joins the pair-key
+rendezvous and emits `{}`; only `context-injection` emits the aggregate.
+
+The bootstrap hook prepares only this plugin and never runs through the
+aggregator. The catalog contributor emits structured entries for every command
+declared by this payload:
 
 ```text
 id · argv · shell · purpose · availability=ready|unavailable
 ```
 
-Both hooks prefer the
-runtime-supplied plugin root; payload CWD is only the compatibility fallback.
+Both direct hooks and producer wrappers prefer the runtime-supplied plugin
+root; payload CWD is only the compatibility fallback.
 Some migrated plugins additionally fall back to their own runtime-deployed
 bootstrap helper; that remains self-owned and must not resolve another plugin.
 
@@ -329,7 +366,8 @@ actual canonical entrypoint (`install` or `init`).
 - [ ] Runtime versions are immutable and marker-resolved.
 - [ ] Vendored runtime primitives are synchronized and bootstrap family is classified.
 - [ ] Every agent-facing command is generated from one payload manifest.
-- [ ] Bootstrap and command-glossary hooks are attributable on both platforms.
+- [ ] Direct bootstrap and authority-aware command-glossary hooks are attributable on both platforms.
+- [ ] `session-context.json` is complete and side effects are absent from pure contributors.
 - [ ] Catalog `availability` is handled fail-closed.
 - [ ] Skills use logical commands and never another plugin's direct path.
 - [ ] Initial context contains no fast-changing resource snapshot.

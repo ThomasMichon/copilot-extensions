@@ -232,9 +232,26 @@ def _load_registration(container: str) -> dict[str, str] | None:
 
 
 def _docker(args: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
+    command = ["docker"]
+    configured = os.environ.get("CLEAN_ROOM_DOCKER_COMMAND_JSON")
+    if configured is not None:
+        try:
+            parsed = json.loads(configured)
+        except json.JSONDecodeError:
+            return -1, "", "CLEAN_ROOM_DOCKER_COMMAND_JSON is malformed"
+        if (
+            not isinstance(parsed, list)
+            or not parsed
+            or not all(isinstance(part, str) and part for part in parsed)
+        ):
+            return -1, "", "CLEAN_ROOM_DOCKER_COMMAND_JSON is invalid"
+        command = parsed
     try:
         r = subprocess.run(
-            ["docker", *args], capture_output=True, text=True, timeout=timeout,
+            [*command, *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return -1, "", str(exc)

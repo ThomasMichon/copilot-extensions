@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -165,39 +166,53 @@ def main() -> int:
 
     scripts = root / "scripts"
     deadline = time.monotonic() + 3.5
-    fragments = {
-        "marketplace": _run(
+    jobs = {
+        "marketplace": (
             scripts / "marketplace-overrides",
             payload,
-            "--context-only",
-            deadline=deadline,
+            ("--await-context",),
+            3.4,
         ),
-        "binding": _compact_binding(
-            _run(
-                scripts / "register-session",
-                payload,
-                "--context-only",
-                deadline=deadline,
-            )
+        "binding": (
+            scripts / "register-session",
+            payload,
+            ("--await-context",),
+            3.4,
         ),
-        "machine": _compact_machine(
-            _run(scripts / "session-machine", payload, deadline=deadline)
+        "machine": (scripts / "session-machine", payload, (), 1.0),
+        "conduct": (
+            scripts / "session-conduct",
+            payload,
+            ("--aggregate",),
+            2.0,
         ),
-        "conduct": _strip_owner(
-            _run(
-                scripts / "session-conduct",
-                payload,
-                "--aggregate",
-                deadline=deadline,
-                timeout=2.0,
-            )
-        ),
-        "nudge": _run(
+        "nudge": (
             scripts / "register-nudge",
             payload,
-            "--context-only",
-            deadline=deadline,
+            ("--await-context",),
+            3.4,
         ),
+    }
+    with ThreadPoolExecutor(max_workers=len(jobs)) as executor:
+        futures = {
+            name: executor.submit(
+                _run,
+                script,
+                job_payload,
+                *args,
+                deadline=deadline,
+                timeout=timeout,
+            )
+            for name, (script, job_payload, args, timeout) in jobs.items()
+        }
+        raw_fragments = {
+            name: future.result() for name, future in futures.items()
+        }
+    fragments = {
+        **raw_fragments,
+        "binding": _compact_binding(raw_fragments["binding"]),
+        "machine": _compact_machine(raw_fragments["machine"]),
+        "conduct": _strip_owner(raw_fragments["conduct"]),
     }
     sys.stdout.write(_compose(version, fragments))
     return 0

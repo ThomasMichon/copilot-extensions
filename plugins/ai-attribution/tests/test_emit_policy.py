@@ -112,6 +112,7 @@ def _run_hook_wrapper(
     home: Path,
     *,
     payload: str | None = None,
+    plugin_root: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     hook_command = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"][
         "sessionStart"
@@ -122,10 +123,13 @@ def _run_hook_wrapper(
         command = [powershell, "-NoProfile", "-Command", hook_command]
     else:
         command = ["bash", "-c", hook_command]
+    environment = _environment(home)
+    if plugin_root is not None:
+        environment["COPILOT_PLUGIN_ROOT"] = str(plugin_root)
     return subprocess.run(
         command,
         cwd=cwd,
-        env=_environment(home),
+        env=environment,
         input=payload or json.dumps({"cwd": str(cwd), "source": "copilot-cli"}),
         capture_output=True,
         text=True,
@@ -206,7 +210,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev4] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev5] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -253,7 +257,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev4]"
+            "[owner: ai-attribution@0.1.0-dev5]"
         )
 
 
@@ -382,7 +386,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev4]"
+                "[owner: ai-attribution@0.1.0-dev5]"
             )
         else:
             assert result.stdout == "{}"
@@ -1047,7 +1051,12 @@ def test_hook_wrapper_finds_non_default_marketplace(
         / "ai-attribution"
     )
     shutil.copytree(PLUGIN, installed)
-    result = _run_hook_wrapper(shell_key, repo, home)
+    result = _run_hook_wrapper(
+        shell_key,
+        repo,
+        home,
+        plugin_root=installed,
+    )
     assert _context(result).startswith("[owner: ai-attribution@")
     assert result.stderr == ""
 
@@ -1069,7 +1078,12 @@ def test_powershell_wrapper_uses_components_under_posix_pwsh(
         / "ai-attribution"
     )
     shutil.copytree(PLUGIN, installed)
-    result = _run_hook_wrapper("powershell", repo, home)
+    result = _run_hook_wrapper(
+        "powershell",
+        repo,
+        home,
+        plugin_root=installed,
+    )
     assert _context(result).startswith("[owner: ai-attribution@")
     assert result.stderr == ""
 
@@ -1109,9 +1123,7 @@ def test_hook_wrapper_rejects_missing_non_leaf_or_ambiguous_payloads(
             shutil.copytree(PLUGIN, installed)
     result = _run_hook_wrapper(shell_key, tmp_path, home, payload="{}")
     assert result.stdout == "{}"
-    assert result.stderr.count("\n") == 1
-    expected = "ambiguous" if condition == "ambiguous" else "missing"
-    assert f"hook script is {expected}; no policy context emitted" in result.stderr
+    assert result.stderr == ""
 
 
 @pytest.mark.guard
@@ -1119,12 +1131,12 @@ def test_hook_wrapper_uses_cross_platform_path_components() -> None:
     command = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"][
         "sessionStart"
     ][0]["powershell"]
-    assert "'.copilot\\\\installed-plugins'" not in command
-    assert "'ai-attribution\\\\scripts\\\\emit-policy.ps1'" not in command
-    assert command.count("Join-Path") >= 5
-    assert "Test-Path -LiteralPath $_ -PathType Leaf" in command
-    assert "$scripts.Count -eq 1" in command
-    assert "Sort-Object" in command
+    assert "COPILOT_PLUGIN_ROOT" in command
+    assert "PLUGIN_ROOT" in command
+    assert "CLAUDE_PLUGIN_ROOT" in command
+    assert command.count("Join-Path") >= 2
+    assert "invoke-context-contributor.ps1" in command
+    assert "Test-Path -LiteralPath $w -PathType Leaf" in command
 
 
 @pytest.mark.guard

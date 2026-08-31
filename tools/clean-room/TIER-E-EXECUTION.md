@@ -157,7 +157,8 @@ Extends the §4 scenario contract in ARCHITECTURE.md. A Tier-E scenario director
   // absolute in-container POSIX path and is shell-quoted by the runner.
   "eval": {
     "acp_cwd_file": "/home/operator/worktree-path",
-    "acp_plugin_dirs": ["/home/operator/.copilot/installed-plugins/example"]
+    "acp_plugin_dirs": ["/home/operator/.copilot/installed-plugins/example"],
+    "payload_fingerprint_dirs": ["/home/operator/live-marketplace/plugins"]
   },
 
   // WHAT the driven agent is told to do (stated-purpose prose). Inline or prompt.md.

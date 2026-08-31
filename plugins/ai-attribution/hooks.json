@@ -4,9 +4,9 @@
     "sessionStart": [
       {
         "type": "command",
-        "powershell": "$root = Join-Path (Join-Path $env:USERPROFILE '.copilot') 'installed-plugins'; $scripts = @(); if (Test-Path -LiteralPath $root -PathType Container) { $scripts = @(Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object { Join-Path (Join-Path (Join-Path $_.FullName 'ai-attribution') 'scripts') 'emit-policy.ps1' } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Sort-Object) }; if ($scripts.Count -eq 1) { & $scripts[0] } else { $reason = if ($scripts.Count -eq 0) { 'missing' } else { 'ambiguous' }; [Console]::Error.WriteLine(\"[ai-attribution] hook script is $reason; no policy context emitted\"); [Console]::Out.Write('{}') }",
-        "bash": "scripts=(); for s in \"$HOME\"/.copilot/installed-plugins/*/ai-attribution/scripts/emit-policy.sh; do [ -f \"$s\" ] && scripts+=(\"$s\"); done; if [ \"${#scripts[@]}\" -eq 1 ]; then bash \"${scripts[0]}\"; else if [ \"${#scripts[@]}\" -eq 0 ]; then reason=missing; else reason=ambiguous; fi; printf '%s\\n' \"[ai-attribution] hook script is $reason; no policy context emitted\" >&2; printf '{}'; fi",
-        "timeoutSec": 10
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; $w = Join-Path (Join-Path $r 'scripts') 'invoke-context-contributor.ps1'; if (Test-Path -LiteralPath $w -PathType Leaf) { & $w 'ai-attribution@copilot-extensions' 'publication-policy' 'scripts/emit-policy.ps1' '--aggregate' } else { [Console]::Out.Write('{}') }",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; w=\"$r/scripts/invoke-context-contributor.sh\"; if [ -f \"$w\" ]; then bash \"$w\" ai-attribution@copilot-extensions publication-policy scripts/emit-policy.sh --aggregate; else printf '{}'; fi",
+        "timeoutSec": 30
       }
     ]
   }

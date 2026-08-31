@@ -55,6 +55,16 @@ absolute-command manifest is the only seam that survives. Two rules keep it clea
 declared surface (its CLI, its service endpoint, its resolver), never by poking the
 sibling's runtime files or assuming its internal layout.
 
+**Optional session-context composition.** `context-injection` is an optional
+coordinator, not a prerequisite for any contributor. Each context-producing
+plugin retains a payload-relative standalone path. Its producer wrapper uses
+that path until the repository proves the exact compatible
+`context-injection@copilot-extensions` authority; after proof, the producer
+joins the pair-key rendezvous and emits `{}`, while only the authority emits the
+aggregate. Missing, incompatible, ambiguous, or inactive coordination restores
+standalone behavior. Direct bootstrap and reconciliation side effects never run
+through the coordinator.
+
 ## Rationale
 
 À-la-carte independence is what lets the marketplace be a *menu* rather than a

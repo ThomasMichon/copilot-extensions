@@ -606,6 +606,7 @@ function Invoke-Eval {
     $acpCwd = ''
     $acpCwdFile = ''
     $acpPluginDirs = @()
+    $payloadFingerprintDirs = @()
     if ($manifest.eval -and $manifest.eval.acp_plugin_dirs) {
         $acpPluginDirs = @($manifest.eval.acp_plugin_dirs) | Where-Object { $_ }
         foreach ($acpPluginDir in $acpPluginDirs) {
@@ -629,6 +630,18 @@ function Invoke-Eval {
     }
     if ($acpCwd -and $acpCwdFile) {
         throw 'eval.acp_cwd and eval.acp_cwd_file are mutually exclusive'
+    }
+    if ($manifest.eval -and $manifest.eval.payload_fingerprint_dirs) {
+        $payloadFingerprintDirs = @(
+            $manifest.eval.payload_fingerprint_dirs
+        ) | Where-Object { $_ }
+        foreach ($payloadFingerprintDir in $payloadFingerprintDirs) {
+            $payloadFingerprintDir = [string]$payloadFingerprintDir
+            if (-not $payloadFingerprintDir.StartsWith('/') -or
+                $payloadFingerprintDir -match "[`0`r`n`t]") {
+                throw 'eval.payload_fingerprint_dirs entries must be absolute in-container POSIX paths'
+            }
+        }
     }
     # Tier-P precondition: an in-box command that must exit 0 before we spend the
     # drive (a broken CLI surface would fail the eval for the wrong reason).
@@ -715,6 +728,14 @@ print(cwd)
     # and a doc change that flips it is visible.
     $promptHash = Get-Sha256Short $fullPrompt
     $acpDirsJson = ConvertTo-Json -InputObject @($acpPluginDirs) -Compress
+    $fingerprintDirs = @($payloadFingerprintDirs)
+    if ($fingerprintDirs.Count -eq 0) {
+        $fingerprintDirs = @($acpPluginDirs)
+    }
+    if ($fingerprintDirs.Count -eq 0) {
+        $fingerprintDirs = @('/home/operator/.copilot/installed-plugins')
+    }
+    $fingerprintDirsJson = ConvertTo-Json -InputObject $fingerprintDirs -Compress
     $docsHashScript = @'
 import hashlib
 import json
@@ -722,8 +743,6 @@ import pathlib
 import sys
 
 roots = [pathlib.Path(value) for value in json.loads(sys.argv[1])]
-if not roots:
-    roots = [pathlib.Path.home() / ".copilot" / "installed-plugins"]
 for root in roots:
     if not root.is_dir():
         raise SystemExit(f"evaluated payload root is not a directory: {root}")
@@ -747,7 +766,7 @@ for index, root in enumerate(roots):
             digest.update(path.read_bytes())
 print(digest.hexdigest()[:16])
 '@
-    $docsHash = (& docker exec $Container python3 -c $docsHashScript $acpDirsJson |
+    $docsHash = (& docker exec $Container python3 -c $docsHashScript $fingerprintDirsJson |
         Select-Object -First 1)
     if ($LASTEXITCODE -ne 0 -or $docsHash -notmatch '^[0-9a-f]{16}$') {
         throw 'eval: could not fingerprint the evaluated plugin payloads'
@@ -813,6 +832,7 @@ print(digest.hexdigest()[:16])
         prompt_hash      = $promptHash
         docs_hash        = $docsHash
         acp_plugin_dirs  = @($acpPluginDirs)
+        payload_fingerprint_dirs = @($fingerprintDirs)
         per_turn_timeout_s = $perTurnTimeout
         tier_p_precondition = if ($SkipTierPGate) { "$tierPCmd (SKIPPED)" } else { $tierPCmd }
         bridge_cleanup_error = $bridgeCleanupError

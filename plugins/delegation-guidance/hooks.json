@@ -4,9 +4,9 @@
     "sessionStart": [
       {
         "type": "command",
-        "powershell": "$root = $env:COPILOT_PLUGIN_ROOT; if (-not $root) { $root = $env:PLUGIN_ROOT }; if (-not $root) { $root = $env:CLAUDE_PLUGIN_ROOT }; if ($root) { $s = Join-Path (Join-Path $root 'scripts') 'emit-guidance.ps1'; if (Test-Path -LiteralPath $s -PathType Leaf) { & $s } else { '{}' } } else { '{}' }",
-        "bash": "root=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}\"; if [ -n \"$root\" ]; then s=\"$root/scripts/emit-guidance.sh\"; if [ -f \"$s\" ]; then bash \"$s\"; else printf '{}'; fi; else printf '{}'; fi",
-        "timeoutSec": 5
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; $w = Join-Path (Join-Path $r 'scripts') 'invoke-context-contributor.ps1'; if (Test-Path -LiteralPath $w -PathType Leaf) { & $w 'delegation-guidance@copilot-extensions' 'delegation-guidance' 'scripts/emit-guidance.ps1' '--aggregate' } else { [Console]::Out.Write('{}') }",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; w=\"$r/scripts/invoke-context-contributor.sh\"; if [ -f \"$w\" ]; then bash \"$w\" delegation-guidance@copilot-extensions delegation-guidance scripts/emit-guidance.sh --aggregate; else printf '{}'; fi",
+        "timeoutSec": 30
       }
     ]
   }
