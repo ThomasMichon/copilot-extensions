@@ -24,6 +24,7 @@ def _configure_status(tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "bin_dir", lambda: tmp_path / "bin")
     monkeypatch.setattr(installer, "local_bin", lambda: tmp_path / "local-bin")
     monkeypatch.setattr(installer, "read_projects_registry", lambda: {"projects": {}})
+    monkeypatch.setattr(installer.platform, "system", lambda: "Windows")
     return active_python
 
 

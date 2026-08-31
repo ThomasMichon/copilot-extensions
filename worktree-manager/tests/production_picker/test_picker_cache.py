@@ -113,9 +113,44 @@ class TestOverlayCachedState:
 
 
 class TestRefreshOneGuard:
-    def test_missing_record_returns_none(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(data_local.cfg, "tracking_dir", lambda: tmp_path)
+    def test_missing_record_returns_none(self, monkeypatch):
+        monkeypatch.setattr(
+            data_local.engine_client,
+            "list_worktree_rows",
+            lambda *_args, **_kwargs: [],
+        )
+        monkeypatch.setattr(data_local.context, "project", lambda: "example")
         assert data_local.refresh_one("no-such-wt") is None
+
+
+def test_local_load_uses_cache_only_then_classified_provider_reads(monkeypatch):
+    calls = []
+    monkeypatch.setattr(data_local.context, "project", lambda: "example")
+    monkeypatch.setattr(
+        data_local.engine_client,
+        "list_worktree_rows",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or [{"id": "wt-a"}],
+    )
+
+    fast = data_local.load("machine", "Win", classify=False)
+    full = data_local.load("machine", "Win", classify=True)
+
+    assert fast[0]["raw"]["id"] == "wt-a"
+    assert full[0]["raw"]["id"] == "wt-a"
+    assert calls == [
+        (("example",), {
+            "classify": False,
+            "mux_details": False,
+            "cache_only": True,
+            "runner": None,
+        }),
+        (("example",), {
+            "classify": True,
+            "mux_details": True,
+            "cache_only": False,
+            "runner": None,
+        }),
+    ]
 
 
 class TestWorktreeHasLiveSession:
