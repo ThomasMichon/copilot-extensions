@@ -25,6 +25,7 @@ def test_pr_reminder_for_builds_self_merge_reminder():
     assert r is not None
     assert r.profile == "pr-self-merge"
     assert "pr-merge" in r.next_step and "--now" in r.next_step
+    assert "self-approve" not in r.next_step
 
 
 def test_pr_reminder_for_fails_open_on_bad_config():

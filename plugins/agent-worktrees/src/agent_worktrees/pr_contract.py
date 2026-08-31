@@ -675,7 +675,7 @@ __all__ = [
 PROFILE_DIRECT = "direct"                  # no PR flow: land straight to default branch
 PROFILE_PR_HUMAN_MERGE = "pr-human-merge"  # PR-gated, a human approves/merges
 PROFILE_PR_AGENT_MERGE = "pr-agent-merge"  # PR-gated, author signals merge consent
-PROFILE_PR_SELF_MERGE = "pr-self-merge"    # PR-gated, submitter self-approves + merges directly
+PROFILE_PR_SELF_MERGE = "pr-self-merge"    # PR-gated, submitter merges directly
 
 #: Every pr-* author verb, for describing applicability.
 _ALL_PR_VERBS = ("create-pr", "pr-watch", "pr-status", "pr-merge", "pr-complete")
@@ -701,7 +701,8 @@ class PRFlowProfile:
 
     - ``reviewer`` / ``review_blocking`` / ``review_latency_hint`` -- who
       reviews, whether it gates the merge, and roughly how long it takes.
-    - ``self_approve`` -- may the submitter approve their own PR.
+    - ``self_approve`` -- legacy provider capability used to select the
+      submitter-direct profile; it never tells a GitHub author to cast a review.
     - ``conflict_retriggers_review`` -- a post-approval rebase+push re-reviews.
     - ``rebase_owner`` -- who keeps the PR mergeable (``"submitter"`` / ``""``).
     """
@@ -770,11 +771,12 @@ def classify_pr_flow(
     anchor is current before treating an empty label as "human-merge".
 
     A fourth shape, **pr-self-merge**, sits between agent-consent and
-    human-merge: PR-required, but the **submitter self-approves and merges
-    directly** (no consent label, no separate human) -- selected by
-    ``self_approve`` or ``merge_actor == "submitter-direct"``. This is the shape
-    of a PR-required owner repo with a non-blocking bot review; the full pr-*
-    family applies (``pr-merge --now`` performs the direct merge).
+    human-merge: PR-required, but the **submitter performs the merge directly**
+    (no consent label) -- selected by ``self_approve`` or
+    ``merge_actor == "submitter-direct"``. Review approval remains governed by
+    the provider/repository policy; in particular, GitHub authors cannot approve
+    their own PRs. The full pr-* family applies (``pr-merge --now`` performs the
+    mediated direct merge once required checks/reviews permit it).
     """
     _matrix = dict(
         reviewer=reviewer,
@@ -829,8 +831,8 @@ def classify_pr_flow(
             applicable_verbs=_ALL_PR_VERBS,
             summary=(
                 f"PR-gated ({provider or 'provider'}); the submitter "
-                f"self-approves and merges directly (`pr-merge <#> --now`). "
-                f"Full pr-* family applies."
+                f"merges directly (`pr-merge <#> --now`) once required "
+                f"checks/reviews permit it. Full pr-* family applies."
             ),
             **_matrix,
         )
@@ -947,7 +949,15 @@ def _review_phrase(flow: PRFlowProfile) -> str:
 def _merge_instruction(flow: PRFlowProfile) -> str:
     """The sanctioned way THIS repo merges -- always an agent-worktrees verb."""
     if flow.profile == PROFILE_PR_SELF_MERGE:
-        return "self-approve, then merge with `pr-merge <#> --now`"
+        return (
+            "merge with `pr-merge <#> --now` once required checks/reviews "
+            "allow it"
+            + (
+                " (GitHub authors cannot approve their own PRs)"
+                if flow.provider.lower() == "github"
+                else ""
+            )
+        )
     if flow.profile == PROFILE_PR_AGENT_MERGE:
         label = flow.automerge_label or "the consent label"
         return (f"after an approval, consent with `pr-merge <#>` (applies "
@@ -1038,9 +1048,17 @@ def pr_reminder(
             return PRReminder(
                 flow.profile, verb, state, ok,
                 headline=(reason or "this repo merges directly (self-merge)"),
-                next_step="merge now with `pr-merge <#> --now` (squash)",
-                waiting_on=("merged",),
-                use_instead=("pr-merge --now",),
+                next_step=merge,
+                waiting_on=(
+                    ("approved", "merged")
+                    if flow.review_blocking
+                    else ("merged",)
+                ),
+                use_instead=(
+                    ("pr-watch", "pr-status")
+                    if flow.review_blocking
+                    else ("pr-merge --now",)
+                ),
                 cautions=cautions,
             )
         return PRReminder(
@@ -1054,7 +1072,13 @@ def pr_reminder(
     if verb in ("create-pr", "pr-create"):
         nxt = merge if not review else f"wait for {review}, then {merge}"
         c = cautions
-        if flow.reviewer and flow.profile != PROFILE_PR_SELF_MERGE:
+        if (
+            flow.reviewer
+            and (
+                flow.review_blocking
+                or flow.profile != PROFILE_PR_SELF_MERGE
+            )
+        ):
             # #3581 nudge: review is triggered by the repo's own process
             # (webhook / auto-assign). Actually *requesting* a reviewer is
             # org- and platform-specific, so it is left to manual action --
@@ -1107,15 +1131,15 @@ def pr_reminder(
                 use_instead=(),
                 cautions=cautions,
             )
-        if flow.profile == PROFILE_PR_SELF_MERGE:
-            nxt = "merge now with `pr-merge <#> --now` (squash)"
-        else:  # agent-merge consent path
-            nxt = merge
         return PRReminder(
             flow.profile, verb, state, ok,
             headline="merge step",
-            next_step=nxt,
-            waiting_on=("merged",),
+            next_step=merge,
+            waiting_on=(
+                ("approved", "merged")
+                if flow.review_blocking
+                else ("merged",)
+            ),
             use_instead=(),
             cautions=cautions,
         )

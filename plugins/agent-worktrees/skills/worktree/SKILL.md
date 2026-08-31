@@ -392,7 +392,9 @@ The **profile** tells you how the repo lands work and which `pr-*` verbs apply:
   approval the author runs `pr-merge` to signal consent and the review gate
   merges. The full `pr-*` family applies.
 - **`pr-self-merge`** -- PR-gated and the submitter is authorized to merge
-  directly: use `create-pr` / `pr-watch` / `pr-status`, then
+  directly once the provider's required checks/reviews allow it. On GitHub,
+  never attempt to approve your own PR; `submitter-direct` names the merge
+  actor, not the review actor. Use `create-pr` / `pr-watch` / `pr-status`, then
   `pr-merge <pr> --now` when the PR is ready. Bare `pr-merge` deliberately
   refuses in this profile.
 

@@ -162,17 +162,17 @@ class PRProvider(Protocol):
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
     ) -> str:
-        """Directly merge a PR **now** (the submitter-direct self-merge primitive).
+        """Directly merge a PR **now** (the submitter-direct merge primitive).
 
         The mechanism behind ``pr-merge <#> --now``: a first-class, provider-generic
-        "merge this PR immediately" for a **submitter-self-merge** repo (the owner
-        of a PR-required repo whose bot review is non-blocking), so an agent never
-        has to fall back to a raw provider CLI. Distinct from
+        "merge this PR" for a **submitter-direct** repo, so an agent never has to
+        fall back to a raw provider CLI. Distinct from
         :meth:`request_auto_complete`, which signals *consent* and lets a review
         gate merge later; ``merge_pull`` performs the merge itself.
 
         - **github** runs ``gh pr merge <n> --squash`` (``--admin`` when ``admin``
-          is set -- the owner's sanctioned self-merge past a non-blocking gate).
+          is set for the owner's sanctioned merge past a non-blocking gate).
+          Blocking review policy must use ``admin=False``.
           Deliberately does **not** delete the source branch, so ``finalize`` can
           still affirm the merge against the (still-present) head.
         - **gitea / azure-devops** are unsupported today (return a message).

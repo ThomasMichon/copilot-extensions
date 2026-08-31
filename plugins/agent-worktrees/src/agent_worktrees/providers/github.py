@@ -391,13 +391,12 @@ class GitHubProvider:
         self, repo: str, number: int, *, squash: bool = True, admin: bool = False,
         api_base: str = "", token: str | None = None,
     ) -> str:
-        """Directly merge PR ``number`` via ``gh pr merge`` (submitter self-merge).
+        """Directly merge PR ``number`` via ``gh pr merge``.
 
-        The ``pr-merge <#> --now`` primitive: the owner of a PR-required repo with
-        a non-blocking bot review merges their own PR immediately. ``--squash``
-        keeps the non-interactive merge method explicit; ``--admin`` (when set) is
-        the owner's sanctioned merge past the non-blocking gate. The source branch
-        is deliberately **not** deleted, so ``finalize`` can affirm the merge.
+        The ``pr-merge <#> --now`` submitter-direct primitive. ``--squash`` keeps
+        the non-interactive merge method explicit; ``--admin`` is used only when
+        the configured review is non-blocking. The source branch is deliberately
+        **not** deleted, so ``finalize`` can affirm the merge.
         """
         _ = api_base
         args = ["gh", "pr", "merge", str(number), "--repo", repo]
