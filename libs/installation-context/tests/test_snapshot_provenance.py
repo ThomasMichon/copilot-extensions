@@ -84,7 +84,6 @@ ALL_RUNNERS: tuple[Runner, ...] = (
         else ()
     ),
 )
-RUNNERS = ALL_RUNNERS
 PARITY_RUNNERS = ALL_RUNNERS
 EXHAUSTIVE_ADAPTERS = (
     os.environ.get("INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS") == "1"
@@ -93,6 +92,12 @@ REFERENCE_RUNNERS = (
     ALL_RUNNERS
     if EXHAUSTIVE_ADAPTERS
     else ALL_RUNNERS[:1]
+)
+RUNNERS = REFERENCE_RUNNERS
+FAST_PARITY_RUNNERS = (
+    ALL_RUNNERS
+    if EXHAUSTIVE_ADAPTERS
+    else tuple(runner for runner in ALL_RUNNERS if runner[0] != "posix")
 )
 ADAPTER_RUNNERS = (
     ALL_RUNNERS
@@ -3085,7 +3090,7 @@ def test_python_cli_provisions_and_validates_runtime_slot(tmp_path: Path) -> Non
     assert json.loads(validate.stdout)["reason"] == "runtime-slot-ownership-valid"
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_completion_publishes_validates_and_replays_without_activation(
     runner: Runner,
     tmp_path: Path,
@@ -3152,7 +3157,7 @@ def test_runtime_slot_completion_publishes_validates_and_replays_without_activat
     assert all(not path.exists() for path in watched)
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
     runner: Runner,
     tmp_path: Path,
@@ -3268,7 +3273,7 @@ def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     fake_find.chmod(0o755)
 
     result = _run_completion(
-        RUNNERS[1],
+        ALL_RUNNERS[1],
         "slot-complete",
         layout,
         environment_overrides={
@@ -3634,7 +3639,7 @@ def test_posix_slot_completion_reconfirms_tree_before_publication(
     fake_find.chmod(0o755)
 
     result = _run_completion(
-        RUNNERS[1],
+        ALL_RUNNERS[1],
         "slot-complete",
         layout,
         environment_overrides={
@@ -4142,8 +4147,10 @@ def test_slot_validate_semantics_ignore_completion_artifacts(
     assert target.read_text(encoding="utf-8") == "{}\n"
 
 
-@pytest.mark.parametrize("producer", RUNNERS, ids=lambda runner: f"from-{runner[0]}")
-@pytest.mark.parametrize("consumer", RUNNERS, ids=lambda runner: f"to-{runner[0]}")
+@pytest.mark.parametrize(
+    ("producer", "consumer"),
+    INTEROPERABILITY_PAIRS,
+)
 def test_runtime_slot_completion_interoperates_across_runners(
     producer: Runner,
     consumer: Runner,
@@ -4161,7 +4168,7 @@ def test_runtime_slot_completion_interoperates_across_runners(
     assert validated["receipt"] == published["receipt"]
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_completion_serializes_concurrent_publishers(
     runner: Runner,
     tmp_path: Path,
@@ -4203,7 +4210,7 @@ def test_posix_completion_rejects_non_utf8_snapshot_path(tmp_path: Path) -> None
     finally:
         os.close(descriptor)
 
-    result = _run_completion(RUNNERS[1], "slot-complete", layout, check=False)
+    result = _run_completion(ALL_RUNNERS[1], "slot-complete", layout, check=False)
 
     assert result.returncode != 0
     assert "snapshot content path is not valid utf-8" in result.stderr.lower()
@@ -4325,7 +4332,7 @@ def test_posix_completion_accepts_bsd_date_interface(tmp_path: Path) -> None:
 
     result = json.loads(
         _run_completion(
-            RUNNERS[1],
+            ALL_RUNNERS[1],
             "slot-complete",
             layout,
             environment_overrides={
@@ -4366,7 +4373,7 @@ def test_python_api_publishes_and_validates_runtime_slot_completion(
     assert validated["operative"] is False
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_cutover_tracks_selected_last_known_good(
     runner: Runner,
     tmp_path: Path,
@@ -4440,7 +4447,7 @@ def test_runtime_slot_cutover_tracks_selected_last_known_good(
     assert rolled_back["lastKnownGoodVersion"] == "1.0.0"
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     ("stale_kind", "expected_namespace_generation", "expected_current_version"),
     (
@@ -4603,7 +4610,7 @@ def test_runtime_slot_cutover_rejects_directory_markers(
     assert list(marker.iterdir()) == []
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_cutover_serializes_concurrent_winners(
     runner: Runner,
     tmp_path: Path,
@@ -4862,7 +4869,7 @@ def test_python_api_requires_exact_runtime_slot_cutover_expectation(
         )
 
 
-@pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 @pytest.mark.parametrize(
     "action",
     ("slot-complete", "slot-completion-validate"),
