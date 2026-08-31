@@ -308,7 +308,10 @@ def build_command(
                 "evaluator registration needs 'evaluator_spec' (inline) or "
                 "'evaluator' (a path)"
             )
-        return base + ["supervise", "--evaluator", str(eval_ref), *_lane_flags(spec)]
+        argv = base + ["supervise", "--evaluator", str(eval_ref)]
+        if spec.get("evaluator_ref"):
+            argv += ["--evaluator-ref", str(spec["evaluator_ref"])]
+        return argv + _lane_flags(spec)
 
     if kind == RegistrationKind.SCHEDULE:
         entry = spec.get("schedules") and spec or {"schedules": [spec]}

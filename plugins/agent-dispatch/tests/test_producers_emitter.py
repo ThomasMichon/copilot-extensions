@@ -13,6 +13,7 @@ class FakeClient:
     def __init__(self, *, granted: bool = True):
         self.granted = granted
         self.calls = []
+        self.created = []
 
     def acquire_schedule_lease(self, scope, holder, **kwargs):
         self.calls.append((scope, holder, kwargs))
@@ -20,6 +21,11 @@ class FakeClient:
             "granted": self.granted,
             "lease": {"scope": scope, "holder": holder if self.granted else "other"},
         }
+
+    def create(self, title, **kwargs):
+        task = {"id": f"t-{len(self.created) + 1}", "title": title, **kwargs}
+        self.created.append(task)
+        return task
 
 
 def _spec(**over):
@@ -67,6 +73,24 @@ def test_run_tick_idles_when_another_holder_owns_lease():
     assert result["held"] is False
     assert called is False
     assert result["lease"]["holder"] == "other"
+    assert result["created"] == []
+
+
+def test_run_tick_preserves_literal_braces_in_existing_commands():
+    client = FakeClient()
+    calls = []
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    emitter.run_tick(
+        client,
+        _spec(command=["review-emitter", "--query", '{"state":"open"}']),
+        holder="host-a",
+        runner=runner,
+    )
+    assert calls[0] == ["review-emitter", "--query", '{"state":"open"}']
 
 
 @pytest.mark.parametrize(
@@ -82,3 +106,107 @@ def test_validate_spec_rejects_malformed_specs(spec, needle):
     with pytest.raises(emitter.EmitterError) as exc:
         emitter.validate_spec(spec)
     assert needle in str(exc.value)
+
+
+def test_run_tick_authors_json_tasks_with_emitter_provenance():
+    client = FakeClient()
+    spec = _spec(task_output="json", evaluator_ref="review-loop")
+
+    def runner(*_args, **_kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"title":"review o/n#7","repo":"o/n","dedup_key":"review:o/n#7"}',
+        )
+
+    result = emitter.run_tick(client, spec, holder="host-a", runner=runner)
+    assert result["created"][0]["source"] == "emitter"
+    assert result["created"][0]["origin_ref"] == "review-inbox"
+    assert result["created"][0]["evaluator_ref"] == "review-loop"
+
+
+def test_registered_side_load_uses_same_task_contract_and_association():
+    client = FakeClient()
+    registration = {
+        "id": "emitter-reg",
+        "kind": "emitter",
+        "spec": _spec(
+            task_output="json",
+            evaluator_ref="review-loop",
+            side_load={"command": ["review-emitter", "side-load", "{change_ref}"]},
+        ),
+    }
+    calls = []
+
+    def runner(command, **_kwargs):
+        calls.append(command)
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"title":"review o/n#9","repo":"o/n","dedup_key":"review:o/n#9"}',
+            stderr="",
+        )
+
+    out = emitter.run_side_load(
+        client, registration, "o/n#9", runner=runner
+    )
+    assert calls == [["review-emitter", "side-load", "o/n#9"]]
+    assert out["created"][0]["source"] == "emitter"
+    assert out["created"][0]["origin_ref"] == "review-inbox"
+    assert out["created"][0]["evaluator_ref"] == "review-loop"
+
+
+def test_registered_side_load_rejects_wrong_host():
+    registration = {
+        "id": "emitter-reg",
+        "kind": "emitter",
+        "machine": "host-a",
+        "env": "default",
+        "spec": _spec(
+            side_load={"command": ["review-emitter", "{change_ref}"]}
+        ),
+    }
+    with pytest.raises(emitter.EmitterError, match="host-a"):
+        emitter.run_side_load(
+            FakeClient(),
+            registration,
+            "o/n#9",
+            current_machine="host-b",
+        )
+
+
+def test_unassociated_emitter_cannot_spoof_evaluator_ref():
+    client = FakeClient()
+    spec = _spec(task_output="json")
+    emitter._author_tasks(
+        client,
+        spec,
+        '{"title":"x","repo":"o/n","evaluator_ref":"other-loop"}',
+    )
+    assert client.created[0]["evaluator_ref"] is None
+
+
+def test_registered_side_load_accepts_null_env():
+    client = FakeClient()
+    registration = {
+        "id": "emitter-reg",
+        "kind": "emitter",
+        "env": "default",
+        "spec": _spec(
+            env=None,
+            side_load={"command": ["review-emitter", "{change_ref}"]},
+        ),
+    }
+
+    def runner(*_args, **_kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"title":"x","repo":"o/n"}',
+            stderr="",
+        )
+
+    assert emitter.run_side_load(
+        client,
+        registration,
+        "o/n#9",
+        current_env="default",
+        runner=runner,
+    )["created"]

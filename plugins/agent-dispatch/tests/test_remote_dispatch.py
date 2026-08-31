@@ -15,7 +15,8 @@ def _args(**kw) -> argparse.Namespace:
         title="do X", prompt="", spawn=True, proposed=False,
         spawn_backend="embody", target_machine="emancipation-cube",
         label=None, require=None, affinity=None, target_repo=None,
-        target_worktree=None, source=None, dedup_key=None, verify_timeout=0,
+        target_worktree=None, source=None, origin_ref=None, evaluator_ref=None,
+        dedup_key=None, verify_timeout=0,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -82,6 +83,20 @@ def test_build_remote_argv_no_payload_flag_without_payload():
         _args(), repo="r", has_payload=False
     )
     assert "--payload-file" not in argv
+
+
+def test_build_remote_argv_preserves_producer_association():
+    argv = remote_dispatch.build_remote_create_argv(
+        _args(
+            source="emitter",
+            origin_ref="review-source",
+            evaluator_ref="review-loop",
+        ),
+        repo="r",
+        has_payload=False,
+    )
+    assert argv[argv.index("--origin-ref") + 1] == "review-source"
+    assert argv[argv.index("--evaluator-ref") + 1] == "review-loop"
 
 
 def test_dispatch_to_remote_builds_ssh_command(monkeypatch):

@@ -291,6 +291,7 @@ class CreateBody(BaseModel):
     target_repo: str | None = None
     source: str | None = None
     origin_ref: str | None = None
+    evaluator_ref: str | None = None
     dedup_key: str | None = None
     goal: str | None = None
     done_criteria: str | None = None
@@ -902,6 +903,7 @@ def create_app(
         target_machine: str | None = None,
         target_repo: str | None = None,
         label: str | None = None,
+        evaluator_ref: str | None = None,
         q: str | None = None,
         sweep: bool = False,
         limit: int = 200,
@@ -922,6 +924,7 @@ def create_app(
             target_machine=target_machine,
             target_repo=target_repo,
             label=label,
+            evaluator_ref=evaluator_ref,
             limit=limit,
         )
         return [_bulk_task_dict(t) for t in tasks]
