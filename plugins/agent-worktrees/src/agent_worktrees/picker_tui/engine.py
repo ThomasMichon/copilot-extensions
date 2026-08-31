@@ -426,6 +426,9 @@ def target_rows(target_envs):
     return rows
 
 # Clarify each worktree action in the sub-menu (test-chamber #1343).
+BARE_RESUME_ACTION = "Bare resume (deprecated)"
+
+
 ACTION_DESC = {
     "Open": "Attach the worktree's live terminal (PSMux/TMux); launch one if "
             "none. Arrow to the No Mux row below to launch without the wrapper, "
@@ -441,10 +444,11 @@ ACTION_DESC = {
     "Stop": "Stop this worktree's Mux/Copilot wrapper now (graceful "
             "double-Ctrl-C, then a hard mux kill) so a following Open "
             "starts a fresh TMux/PSMux + Copilot.",
-    "Bare resume": "Two-step restore: create this worktree's Mux, but launch "
-                   "Copilot in HOME with no --resume (dodges a CLI bug that "
-                   "fails to start in a repo/worktree cwd). Finish with a "
-                   "manual /resume <id> (id shown above).",
+    BARE_RESUME_ACTION: "Deprecated advanced recovery: create this worktree's "
+                        "Mux, but launch Copilot in HOME with no --resume. "
+                        "Finish with a manual /resume <id> (id shown above). "
+                        "Prefer normal Resume unless diagnosing a cwd-specific "
+                        "startup failure.",
     "Reclaim": "Kill the exact Copilot process(es) holding this session's lock "
                "(bare orphans a mux Stop cannot reach) AND delete any residual "
                "inuse.<pid>.lock, so it can be re-Opened or Bare-resumed "
@@ -4419,7 +4423,8 @@ class PickerScreen(Widget):
         3. **bound / residue, no mux** (¬M ∧ (Pa ∨ Lf ∨ stale)) -> ``Reclaim``
            (kills bound proc(es) AND deletes residual ``inuse.*.lock``). Resume/
            Bare-resume are suppressed here -- Reclaim first, then resume.
-        4. **resumable** (¬M ∧ ¬bound ∧ H ∧ D) -> ``Resume`` + ``Bare resume``.
+        4. **resumable** (¬M ∧ ¬bound ∧ H ∧ D) -> ``Resume`` + deprecated
+           advanced ``Bare resume``.
         5. **sessionless** (¬M ∧ ¬bound ∧ ¬H ∧ D) -> ``Open`` (cold start).
            Refresh (always) also attempts to recover a *lost* head session so a
            falsely-sessionless worktree becomes resumable on the next paint.
@@ -4455,13 +4460,13 @@ class PickerScreen(Widget):
             acts = []
         elif not rec.get("sessionless"):
             # A stopped worktree with prior history (not positively sessionless)
-            # -> Resume (relaunch + resume its last conversation). "Bare resume"
-            # (create the mux but launch Copilot in HOME with no --resume, then
-            # a manual ``/resume <id>``) is offered only when we have a concrete
-            # head-session id to hand the operator.
+            # -> Resume (relaunch + resume its last conversation). Deprecated
+            # advanced Bare resume (create the mux but launch Copilot in HOME
+            # with no --resume, then a manual ``/resume <id>``) is offered only
+            # when we have a concrete head-session id to hand the operator.
             acts = ["Resume"]
             if rec.get("last_session_id"):
-                acts.append("Bare resume")
+                acts.append(BARE_RESUME_ACTION)
         else:
             # Sessionless: cold-start Open (resuming nothing would silently
             # blank-start, #1026). A worktree that only *looks* sessionless
@@ -4652,8 +4657,8 @@ class PickerScreen(Widget):
             # resumed without the mux wrapper for troubleshooting), not just
             # Open. no_mux is inert unless the toggle was flipped.
             self._decide(self._resume_decision(rec, no_mux=no_mux))
-        elif cur == "Bare resume":
-            # Two-step restore: mux + Copilot in HOME, no --resume (#outage).
+        elif cur == BARE_RESUME_ACTION:
+            # Deprecated advanced recovery: mux + Copilot in HOME, no --resume.
             self._decide(self._resume_decision(rec, bare_resume=True))
         elif cur == "Messages":
             # Read-only peek at the worktree's latest session messages.

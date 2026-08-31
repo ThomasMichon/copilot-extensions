@@ -23,7 +23,6 @@ SPEC.loader.exec_module(MODULE)
 
 def test_compose_prioritizes_binding_and_conduct_within_budget() -> None:
     fragments = {
-        "extension": "extension-" + ("x" * 500),
         "marketplace": "marketplace-" + ("x" * 500),
         "binding": "[agent-worktrees] This Copilot session is bound.",
         "machine": "Machine: Example\nProject: example",
@@ -88,7 +87,6 @@ def test_payload_wrappers_emit_identical_bounded_context(tmp_path: Path) -> None
         encoding="utf-8",
     )
     for name in (
-        "session-ext-reload",
         "marketplace-overrides",
         "register-session",
         "session-machine",
