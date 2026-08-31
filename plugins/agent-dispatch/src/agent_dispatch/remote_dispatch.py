@@ -185,6 +185,10 @@ def build_remote_create_argv(
         argv += ["--evaluator-ref", args.evaluator_ref]
     if getattr(args, "target_worktree", None):
         argv += ["--target-worktree", args.target_worktree]
+    if getattr(args, "exclusive_key", None):
+        argv += ["--exclusive-key", args.exclusive_key]
+    if getattr(args, "supersede_exclusive_key", False):
+        argv += ["--supersede-exclusive-key"]
     if getattr(args, "source", None):
         argv += ["--source", args.source]
     if getattr(args, "origin_ref", None):

@@ -209,6 +209,27 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     assert "--verify-timeout" not in cmd
 
 
+def test_spawn_embodied_worker_can_target_existing_worktree(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", fake_run)
+
+    embody.spawn_embodied_worker(
+        "task-9", worker_id="embody-1", worktree_id="wt-reviewer",
+    )
+
+    cmd = captured["cmd"]
+    assert "--new" not in cmd
+    assert cmd[cmd.index("--worktree-id") + 1] == "wt-reviewer"
+
+
 def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
     captured = {}
     monkeypatch.setattr(

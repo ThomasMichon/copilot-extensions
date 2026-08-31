@@ -814,6 +814,8 @@ def _cmd_create(args: argparse.Namespace) -> int:
             target_machine=args.target_machine,
             target_worktree=args.target_worktree,
             target_repo=args.target_repo,
+            exclusive_key=args.exclusive_key,
+            supersede_exclusive_key=args.supersede_exclusive_key,
             source=args.source,
             origin_ref=args.origin_ref,
             evaluator_ref=args.evaluator_ref,
@@ -968,8 +970,10 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         )
         return
 
-    key = resp["reservation"]["key"]
-    spawned = _do_spawn(args, task, route=route)
+    reservation = resp["reservation"]
+    key = reservation["key"]
+    spawn_task = {**task, "spawn_worktree": reservation.get("worktree")}
+    spawned = _do_spawn(args, spawn_task, route=route)
     try:
         with _client(args) as c:
             if spawned is None:
@@ -1043,6 +1047,10 @@ def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
                     task["id"],
                     worker_id=worker_id,
                     route=route,
+                    worktree_id=(
+                        task.get("target_worktree")
+                        or task.get("spawn_worktree")
+                    ),
                     verify_timeout=getattr(args, "verify_timeout", 0) or 0,
                 )
             except embody.EmbodyUnavailable as exc:
@@ -4127,6 +4135,16 @@ def _create_args_parent() -> argparse.ArgumentParser:
     )
     cp.add_argument("--target-worktree")
     cp.add_argument("--target-repo")
+    cp.add_argument(
+        "--exclusive-key",
+        help="logical resource whose spawned worker must be singleton across tasks",
+    )
+    cp.add_argument(
+        "--supersede-exclusive-key",
+        action="store_true",
+        help="when creating a task with --exclusive-key, abandon older queued/"
+             "proposed tasks carrying the same key",
+    )
     cp.add_argument("--source")
     cp.add_argument("--origin-ref")
     cp.add_argument("--evaluator-ref")
