@@ -133,6 +133,7 @@ class RequirementPackage:
     resources: list[dict[str, Any]] = field(default_factory=list)
     source_repo: str = ""
     source_path: Path | None = None
+    source_anchor: Path | None = None
 
     def applies_to(self, machine: str) -> bool:
         """True when this package targets ``machine`` (empty/``*`` gate = all).
@@ -158,6 +159,10 @@ class RequirementPackage:
                 return parent.parent.parent
         return None
 
+    def repo_anchor(self) -> Path | None:
+        """Return the canonical checkout used for repository location classes."""
+        return self.source_anchor or self.repo_root()
+
 
 def _require(mapping: dict[str, Any], key: str, path: Path) -> Any:
     if key not in mapping:
@@ -165,7 +170,11 @@ def _require(mapping: dict[str, Any], key: str, path: Path) -> Any:
     return mapping[key]
 
 
-def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
+def load_package(
+    path: Path,
+    source_repo: str = "",
+    source_anchor: Path | None = None,
+) -> RequirementPackage:
     """Parse and validate a requirement-package YAML file."""
     try:
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -341,6 +350,7 @@ def load_package(path: Path, source_repo: str = "") -> RequirementPackage:
         resources=resources,
         source_repo=source_repo,
         source_path=path,
+        source_anchor=source_anchor,
     )
 
 
@@ -383,4 +393,5 @@ def resolve_for_machine(pkg: RequirementPackage, machine: str) -> RequirementPac
         resources=copy.deepcopy(pkg.resources),
         source_repo=pkg.source_repo,
         source_path=pkg.source_path,
+        source_anchor=pkg.source_anchor,
     )

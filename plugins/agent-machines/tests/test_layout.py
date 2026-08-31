@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,7 @@ from agent_machines.layout import (
     inspect_layouts,
     inspect_repo_layout,
     migrate_repo_layout,
+    resolve_cwd_repo,
     resolve_repo,
 )
 from agent_machines.manifest import ManifestError
@@ -295,6 +297,97 @@ def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
 
     assert name == "knowledge"
     assert path == registered
+
+
+def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path, monkeypatch):
+    anchor = tmp_path / "anchor"
+    subprocess.run(["git", "init", "-q", str(anchor)], check=True)
+    subprocess.run(
+        ["git", "-C", str(anchor), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(anchor), "config", "user.name", "Test"],
+        check=True,
+    )
+    (anchor / "file.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(anchor), "add", "file.txt"], check=True)
+    subprocess.run(["git", "-C", str(anchor), "commit", "-qm", "init"], check=True)
+    worktree = tmp_path / "worktree"
+    subprocess.run(
+        ["git", "-C", str(anchor), "worktree", "add", "-q", "-b", "test", str(worktree)],
+        check=True,
+    )
+    registry = {
+        "repos": {
+            "canonical": {
+                "windows": str(anchor),
+                "linux": str(anchor),
+                "wsl": str(anchor),
+            }
+        }
+    }
+    projects = {"projects": {"canonical": {}}}
+
+    name, path, anchor_path = resolve_cwd_repo(worktree, registry, projects)
+
+    assert name == "canonical"
+    assert path == worktree.resolve()
+    assert anchor_path == anchor.resolve()
+
+
+def test_resolve_cwd_repo_matches_registered_nonadopted_worktree(tmp_path):
+    anchor = tmp_path / "anchor"
+    subprocess.run(["git", "init", "-q", str(anchor)], check=True)
+    subprocess.run(
+        ["git", "-C", str(anchor), "config", "user.email", "test@example.com"],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(anchor), "config", "user.name", "Test"],
+        check=True,
+    )
+    (anchor / "file.txt").write_text("x", encoding="utf-8")
+    subprocess.run(["git", "-C", str(anchor), "add", "file.txt"], check=True)
+    subprocess.run(["git", "-C", str(anchor), "commit", "-qm", "init"], check=True)
+    worktree = tmp_path / "worktree"
+    subprocess.run(
+        ["git", "-C", str(anchor), "worktree", "add", "-q", "-b", "test", str(worktree)],
+        check=True,
+    )
+    registry = {
+        "repos": {
+            "supplemental": {
+                "windows": str(anchor),
+                "linux": str(anchor),
+                "wsl": str(anchor),
+            }
+        }
+    }
+
+    name, path, anchor_path = resolve_cwd_repo(worktree, registry, {})
+
+    assert name == "supplemental"
+    assert path == worktree.resolve()
+    assert anchor_path == anchor.resolve()
+
+
+def test_resolve_cwd_repo_standalone_falls_back_to_top_level(tmp_path):
+    repo = tmp_path / "standalone"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    nested = repo / "nested"
+    nested.mkdir()
+
+    name, path, anchor_path = resolve_cwd_repo(nested, {}, {})
+
+    assert name == "standalone"
+    assert path == repo.resolve()
+    assert anchor_path == repo.resolve()
+
+
+def test_resolve_cwd_repo_outside_git_fails(tmp_path):
+    with pytest.raises(ManifestError, match="pass --repo.*or --all-projects"):
+        resolve_cwd_repo(tmp_path, {}, {})
 
 
 def test_unavailable_adopted_repo_is_advisory(tmp_path):

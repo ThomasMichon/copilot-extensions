@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -206,6 +207,52 @@ def resolve_repo(
     raise ManifestError(
         f"repo {value!r} is neither a directory nor an adopted project name"
     )
+
+
+def _git_path(repo_path: Path, argument: str) -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_path), "rev-parse", argument],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    path = Path(result.stdout.strip())
+    if not path.is_absolute():
+        path = repo_path / path
+    return path.resolve()
+
+
+def resolve_cwd_repo(
+    cwd: Path | None = None,
+    registry: dict | None = None,
+    projects: dict | None = None,
+) -> tuple[str, Path, Path]:
+    """Resolve the package-owning repository containing ``cwd``.
+
+    Registered linked worktrees match their anchor by Git common-directory
+    identity, while a standalone repository falls back to its Git top-level
+    directory and basename.
+    """
+    current = (cwd or Path.cwd()).resolve()
+    top_level = _git_path(current, "--show-toplevel")
+    if top_level is None:
+        raise ManifestError(
+            "current directory is not inside a Git repository; pass --repo "
+            "<name-or-path> or --all-projects"
+        )
+    current_common = _git_path(top_level, "--git-common-dir")
+    for candidate in discover.registered_repos(registry):
+        candidate_common = _git_path(candidate.path, "--git-common-dir")
+        if current_common is not None and candidate_common == current_common:
+            return candidate.name, top_level, candidate.path.resolve()
+        if candidate.path.resolve() == top_level:
+            return candidate.name, top_level, candidate.path.resolve()
+    return top_level.name, top_level, top_level
 
 
 def inspect_layouts(

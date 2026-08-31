@@ -93,15 +93,21 @@ agent-machines discover                 # packages gated to this machine
 agent-machines doctor                   # layout health across adopted repos
 agent-machines migrate --repo myrepo    # preview legacy -> canonical moves
 agent-machines migrate --repo myrepo --apply
-agent-machines plan                     # read-only surfaces/modules + drift key
-agent-machines validate                 # detect cross-package conflicts
-agent-machines restore                  # dry-run preview; refuses on validator errors
+agent-machines plan                     # current repo (from CWD)
+agent-machines validate                 # current repo conflict validation
+agent-machines restore                  # current repo dry-run preview
+agent-machines restore --all-projects   # full machine-scoped union
+agent-machines restore --repo myrepo    # another single repo
 agent-machines restore --only ssh       # preview one surface/module
 agent-machines restore --only ssh --apply
 agent-machines restore --json           # structured plan/surface/module result
 agent-machines version
 ```
 
+`plan`, `validate`, and `restore` default to the package-owning Git repository
+containing CWD. Use `--repo <name-or-path>` for another single repository, or
+`--all-projects` for the full adopted-project plus supplemental-repository
+machine union. A CWD outside Git fails rather than silently broadening scope.
 `restore` defaults to a dry-run. `--apply` writes changes. `--only` filters by
 logical surface (`settings`, `permissions`, `trustedFolders`) or module name.
 Module stdout is shown by default in dry-runs, hidden during apply unless

@@ -72,6 +72,16 @@ def test_repo_root_resolves_canonical_all_and_machine_paths(tmp_path):
     assert load_package(machine_path).repo_root() == tmp_path
 
 
+def test_repo_anchor_can_differ_from_package_execution_root(tmp_path):
+    worktree = tmp_path / "worktree"
+    anchor = tmp_path / "anchor"
+    path = write_package(worktree, "all.yaml", base_package())
+    pkg = load_package(path, source_repo="acme", source_anchor=anchor)
+
+    assert pkg.repo_root() == worktree
+    assert pkg.repo_anchor() == anchor
+
+
 def test_repo_root_resolves_legacy_path(tmp_path):
     path = write_package(tmp_path, "legacy.yaml", base_package(), legacy=True)
     assert load_package(path).repo_root() == tmp_path

@@ -180,6 +180,84 @@ def _repo_requires_external_state(repo_path: Path) -> bool:
     return bool(config.get("stateless") or config.get("requires_external_state_root"))
 
 
+def adopted_project_repos(
+    registry: dict | None = None,
+    projects: dict | None = None,
+) -> list[RepoCandidate]:
+    """Resolve adopted project roots without evaluating supplemental bindings."""
+    proj = projects if projects is not None else read_projects()
+    reg = registry if registry is not None else read_registry()
+    if not isinstance(proj, dict) or not isinstance(reg, dict):
+        return []
+    project_entries = proj.get("projects") or {}
+    if not isinstance(project_entries, dict):
+        return []
+    repos = reg.get("repos") or {}
+    srcroot = reg.get("srcroot") or {}
+    if not isinstance(repos, dict):
+        repos = {}
+    if not isinstance(srcroot, dict):
+        srcroot = {}
+    plat = current_platform()
+    candidates: dict[str, RepoCandidate] = {}
+    for raw_name in project_entries:
+        name = str(raw_name)
+        registered = _registered_repo_entry(repos, name)
+        canonical_name = registered[0] if registered else name
+        entry = registered[1] if registered else {}
+        path = resolve_repo_path(canonical_name, entry, srcroot, plat)
+        if path is not None:
+            candidates.setdefault(
+                canonical_name.casefold(),
+                RepoCandidate(name=canonical_name, path=path),
+            )
+    return list(candidates.values())
+
+
+def resolve_registered_repo(
+    name: str,
+    registry: dict | None = None,
+) -> tuple[str, Path] | None:
+    """Resolve one canonical repos.yaml entry without requiring project adoption."""
+    reg = registry if registry is not None else read_registry()
+    if not isinstance(reg, dict):
+        return None
+    repos = reg.get("repos") or {}
+    srcroot = reg.get("srcroot") or {}
+    if not isinstance(repos, dict):
+        return None
+    if not isinstance(srcroot, dict):
+        srcroot = {}
+    registered = _registered_repo_entry(repos, name)
+    if registered is None:
+        return None
+    canonical_name, entry = registered
+    path = resolve_repo_path(canonical_name, entry, srcroot, current_platform())
+    return (canonical_name, path) if path is not None else None
+
+
+def registered_repos(registry: dict | None = None) -> list[RepoCandidate]:
+    """Resolve every canonical repos.yaml entry without relationship evaluation."""
+    reg = registry if registry is not None else read_registry()
+    if not isinstance(reg, dict):
+        return []
+    repos = reg.get("repos") or {}
+    srcroot = reg.get("srcroot") or {}
+    if not isinstance(repos, dict):
+        return []
+    if not isinstance(srcroot, dict):
+        srcroot = {}
+    plat = current_platform()
+    candidates: list[RepoCandidate] = []
+    for raw_name, raw_entry in repos.items():
+        name = str(raw_name)
+        entry = raw_entry if isinstance(raw_entry, dict) else {}
+        path = resolve_repo_path(name, entry, srcroot, plat)
+        if path is not None:
+            candidates.append(RepoCandidate(name=name, path=path))
+    return candidates
+
+
 def candidate_repos(
     registry: dict | None = None,
     projects: dict | None = None,
@@ -209,18 +287,10 @@ def candidate_repos(
     plat = current_platform()
     global_config = read_global_config()
 
-    candidates: dict[str, RepoCandidate] = {}
-    for raw_name in project_entries:
-        name = str(raw_name)
-        registered = _registered_repo_entry(repos, name)
-        canonical_name = registered[0] if registered else name
-        entry = registered[1] if registered else {}
-        path = resolve_repo_path(canonical_name, entry, srcroot, plat)
-        if path is not None:
-            candidates.setdefault(
-                canonical_name.casefold(),
-                RepoCandidate(name=canonical_name, path=path),
-            )
+    candidates = {
+        candidate.name.casefold(): candidate
+        for candidate in adopted_project_repos(reg, proj)
+    }
 
     for raw_project_name, project in project_entries.items():
         project_name = str(raw_project_name)
@@ -349,14 +419,23 @@ def package_files_in_repo(repo_path: Path, machine: str) -> list[Path]:
     return _yaml_files(repo_path / LEGACY_MACHINE_STATE_DIR)
 
 
-def packages_in_repo(repo_path: Path, repo_name: str, machine: str) -> list[RequirementPackage]:
+def packages_in_repo(
+    repo_path: Path,
+    repo_name: str,
+    machine: str,
+    source_anchor: Path | None = None,
+) -> list[RequirementPackage]:
     """Load and gate-filter the requirement packages carried by ``repo_path``."""
     out: list[RequirementPackage] = []
     names: dict[str, Path] = {}
     canonical = (repo_path / MACHINE_STATE_ROOT).is_dir()
     machine_root = repo_path / MACHINE_STATE_ROOT / MACHINES_PACKAGES_DIR
     for pkg_file in package_files_in_repo(repo_path, machine):
-        pkg = load_package(pkg_file, source_repo=repo_name)
+        pkg = load_package(
+            pkg_file,
+            source_repo=repo_name,
+            source_anchor=source_anchor or repo_path,
+        )
         machine_scoped = canonical and pkg_file.parent.parent == machine_root
         applies = pkg.applies_to(machine)
         if machine_scoped and not applies:
