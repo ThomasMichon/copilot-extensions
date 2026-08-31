@@ -27,7 +27,7 @@ def _interactive_stdin(stream) -> bool:
         return False
     try:
         return bool(stream.isatty())
-    except (AttributeError, OSError, ValueError):
+    except (AttributeError, OSError, TypeError, ValueError):
         return False
 
 

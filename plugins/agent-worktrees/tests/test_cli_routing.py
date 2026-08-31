@@ -14,7 +14,10 @@ import pytest
 from agent_worktrees import __main__ as m
 
 
-@pytest.mark.parametrize("stdin", [None, io.StringIO(), object()])
+@pytest.mark.parametrize(
+    "stdin",
+    [None, io.StringIO(), object(), SimpleNamespace(isatty=True)],
+)
 def test_picker_rejects_noninteractive_stdin(monkeypatch, stdin):
     from agent_worktrees import picker_tui
 

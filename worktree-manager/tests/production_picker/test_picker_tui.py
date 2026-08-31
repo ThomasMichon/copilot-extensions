@@ -2503,7 +2503,10 @@ def test_run_tui_picker_writes_crash_log(monkeypatch, tmp_path):
     assert "live=True" in text
 
 
-@pytest.mark.parametrize("stdin", [None, io.StringIO(), object()])
+@pytest.mark.parametrize(
+    "stdin",
+    [None, io.StringIO(), object(), types.SimpleNamespace(isatty=True)],
+)
 def test_run_tui_picker_rejects_noninteractive_stdin(monkeypatch, stdin):
     """A closed or redirected stdin must fail instead of busy-looping on EOF."""
     import sys
