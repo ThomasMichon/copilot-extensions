@@ -252,7 +252,7 @@ def serve(cfg: Config | None = None, *, passive: bool = False) -> None:
         if fed_runner is not None:
             fed_runner.stop()
         _clear_routing()
-        clear_endpoint(run_dir())
+        clear_endpoint(run_dir(), owner_pid=os.getpid())
         sock.close()
 
 
