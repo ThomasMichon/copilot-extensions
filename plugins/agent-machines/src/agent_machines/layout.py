@@ -185,24 +185,8 @@ def inspect_repo_layout(repo_path: Path, repo_name: str, machine: str) -> Layout
 def _adopted_repos(
     registry: dict | None = None,
     projects: dict | None = None,
-) -> list[tuple[str, Path]]:
-    reg = registry if registry is not None else discover.read_registry()
-    proj = projects if projects is not None else discover.read_projects()
-    repos = reg.get("repos") or {}
-    srcroot = reg.get("srcroot") or {}
-    platform = discover.current_platform()
-    targets: list[tuple[str, Path]] = []
-    for name in (proj.get("projects") or {}):
-        entry = repos.get(name) or {}
-        path = discover.resolve_repo_path(
-            name,
-            entry if isinstance(entry, dict) else {},
-            srcroot,
-            platform,
-        )
-        if path is not None:
-            targets.append((str(name), path))
-    return targets
+) -> list[discover.RepoCandidate]:
+    return discover.candidate_repos(registry, projects)
 
 
 def resolve_repo(
@@ -210,8 +194,9 @@ def resolve_repo(
     registry: dict | None = None,
     projects: dict | None = None,
 ) -> tuple[str, Path]:
-    for name, path in _adopted_repos(registry, projects):
-        if name == value:
+    for candidate in _adopted_repos(registry, projects):
+        if candidate.name.casefold() == value.casefold():
+            name, path = candidate.name, candidate.path
             if not path.is_dir():
                 raise ManifestError(f"registered repo {name!r} is unavailable at {path}")
             return name, path
@@ -234,16 +219,23 @@ def inspect_layouts(
         return [inspect_repo_layout(path, name, machine)]
 
     reports: list[LayoutReport] = []
-    for name, path in _adopted_repos(registry, projects):
+    for candidate in _adopted_repos(registry, projects):
+        name, path = candidate.name, candidate.path
         if not path.is_dir():
+            required = candidate.required
+            owners = ", ".join(candidate.required_by)
             reports.append(LayoutReport(
                 name,
                 str(path),
                 "unavailable",
                 findings=[LayoutFinding(
-                    "advisory",
-                    "repo-unavailable",
-                    f"registered repo path does not exist: {path}",
+                    "error" if required else "advisory",
+                    "supplemental-repo-unavailable" if required else "repo-unavailable",
+                    (
+                        f"supplemental repo required by {owners} does not exist: {path}"
+                        if required
+                        else f"registered repo path does not exist: {path}"
+                    ),
                 )],
             ))
             continue

@@ -29,9 +29,18 @@ deferred the venv build.
 
 Discovery is implemented in `src\agent_machines\discover.py`:
 
-1. Candidate repos come from `~/.agent-worktrees/projects.yaml`.
+1. Adopted project roots come from `~/.agent-worktrees/projects.yaml`.
 2. Their paths are resolved from `~/.agent-worktrees/repos.yaml`.
-3. Each repo contributes `*.yaml` / `*.yml` files from
+3. For projects whose committed config declares `stateless` or
+   `requires_external_state_root`, the project-local `knowledge_repo` binding
+   (falling back to machine-global config) adds that canonically registered
+   repository as a required supplemental source. Independently adopted duplicates are collapsed
+   case-insensitively under the registry's canonical name; an unresolved active
+   binding is an error rather than an empty package set.
+   Canonical registration may resolve through an explicit platform path or the
+   registry's declared source root; filesystem discovery without a registry
+   entry is not accepted.
+4. Each repo contributes `*.yaml` / `*.yml` files from
    `.agent-machines/all/` plus `.agent-machines/machines/<machine>/`; package
    gates then apply as an additional filter.
 
@@ -90,7 +99,8 @@ The accepted dispositions are:
 `src\agent_machines\reconcile.py` owns the restore flow:
 
 1. Resolve each package for the target machine.
-2. Compute a drift key from the resolved package union.
+2. Compute a drift key from the full resolved package union, including source
+   provenance, surfaces, resources, and modules.
 3. Apply Copilot surfaces first.
 4. Apply declarative resources second (packages/files; see below).
 5. Run repo-local modules third.

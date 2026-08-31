@@ -46,6 +46,7 @@ class Plan:
     package_names: list[str]
     modules: list[dict[str, str]] = field(default_factory=list)
     resources: list[dict[str, Any]] = field(default_factory=list)
+    package_sources: list[dict[str, str]] = field(default_factory=list)
 
 
 def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
@@ -71,8 +72,17 @@ def resolve_union(
 def manifest_hash(resolved: list[RequirementPackage]) -> str:
     """A reproducible content hash over the resolved package union."""
     payload = [
-        {"package": pkg.name, "manage": pkg.manage, "exclude": pkg.exclude}
-        for pkg in sorted(resolved, key=lambda p: p.name)
+        {
+            "package": pkg.name,
+            "source_repo": pkg.source_repo,
+            "manage": pkg.manage,
+            "exclude": pkg.exclude,
+            "aliases": pkg.aliases,
+            "bootstrap_floor": pkg.bootstrap_floor,
+            "modules": pkg.modules,
+            "resources": pkg.resources,
+        }
+        for pkg in sorted(resolved, key=lambda p: (p.source_repo, p.name))
     ]
     blob = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:16]
@@ -112,6 +122,10 @@ def plan(packages: list[RequirementPackage], machine: str, plat: str | None = No
         package_names=sorted(pkg.name for pkg in resolved),
         modules=module_list,
         resources=resource_list,
+        package_sources=[
+            {"package": pkg.name, "source_repo": pkg.source_repo}
+            for pkg in sorted(resolved, key=lambda item: (item.source_repo, item.name))
+        ],
     )
 
 
@@ -120,6 +134,7 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "machine": p.machine,
         "drift_key": p.drift_key,
         "packages": p.package_names,
+        "package_sources": p.package_sources,
         "surfaces": [dataclasses.asdict(s) for s in p.surfaces],
         "modules": p.modules,
         "resources": p.resources,
