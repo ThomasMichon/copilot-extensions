@@ -194,11 +194,17 @@ def candidate_repos(
     """
     proj = projects if projects is not None else read_projects()
     reg = registry if registry is not None else read_registry()
+    if not isinstance(proj, dict) or not isinstance(reg, dict):
+        return []
     project_entries = proj.get("projects") or {}
     if not isinstance(project_entries, dict):
         return []
     repos = reg.get("repos") or {}
     srcroot = reg.get("srcroot") or {}
+    if not isinstance(repos, dict):
+        repos = {}
+    if not isinstance(srcroot, dict):
+        srcroot = {}
     plat = current_platform()
     global_config = read_global_config()
 

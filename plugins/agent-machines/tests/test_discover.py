@@ -394,6 +394,23 @@ def test_discover_missing_registry_degrades(tmp_path, monkeypatch):
     assert discover.discover(machine="box-1") == []
 
 
+@pytest.mark.parametrize(
+    ("registry", "projects"),
+    [
+        ([], _projects("acme")),
+        (_registry("C:/src"), []),
+        ({"repos": [], "srcroot": []}, _projects("acme")),
+        (_registry("C:/src"), {"projects": []}),
+    ],
+)
+def test_discover_malformed_registry_shapes_degrade(registry, projects):
+    assert discover.discover(
+        machine="box-1",
+        registry=registry,
+        projects=projects,
+    ) == []
+
+
 def test_require_enable_filters_unenabled(tmp_path):
     srcroot = tmp_path / "Src"
     repo = srcroot / "acme"
