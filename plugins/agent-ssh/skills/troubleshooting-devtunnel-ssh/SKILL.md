@@ -44,6 +44,7 @@ when the `devtunnel` CLI can resolve it.
 | `ssh dt-<host>` unknown / not in SSH config | Client never ran `dtssh discover`, or the host isn't hosting | Run `dtssh discover`; on the host confirm `dtssh host --persist` (Startup launcher) is running. |
 | Connects to the tunnel but no host answers | Host has 0 connections — the interactive session isn't up (sessions are user-side) | Log on to the host once (RDP/console) so its Startup launcher starts `dtssh host`, then disconnect — the listener persists. |
 | `ssh <alias>` closes pre-banner (`Connection closed by UNKNOWN port 65535`) from **every** client *and* from the host itself, while `dtssh host` is running, `:2222` is listening, and the tunnel shows host connections > 0 | **sshd pre-auth WEDGE** — half-open/idle pre-auth connections piled up past OpenSSH's `MaxStartups` (default 10:30:100), so sshd accepts TCP but drops new handshakes before the banner. Confirm with `install-host.ps1 status` or the banner test below and a high Established count on :2222. | Restart the host to reap the pileup: `install-host.ps1 stop; install-host.ps1 start` (or stop the `dtssh host` PID + the launcher pwsh, then relaunch). The self-healing launcher detects this via a banner probe and auto-restarts within ~`HealthCheckSec × ConsecutiveFailures`; it also preemptively restarts at a pathological Established-count threshold. |
+| Every completed short `ssh <alias> "<command>"` leaves one Established :2222 connection and two `sshd-session.exe` processes | **dtssh relay teardown leak** — released dtssh proxy clients can exit without closing the host-side forwarded socket. Confirm that no matching client `dtssh proxy` remains, while the host count continues to grow one-for-one with completed commands. | Update agent-ssh so the watchdog classifies idle/no-command session trees and recycles only when no command-bearing session or active forwarded TCP channel exists. Restart the host to drain the current pile. Track the root fix in upstream dtssh; `ClientAlive*` bounds authenticated leftovers and correct proxy disposal prevents them. |
 | `Permission denied` / not admitted | Client and host are on **different** Entra identities (owner-only tunnel) | Sign both into dtssh with the **same** account (`dtssh login`); verify with `devtunnel user show`. |
 | `ga_init unable to resolve user` in OpenSSH logs | You're hitting a **manual** Windows `sshd` that can't resolve an Entra-only cloud account (`S-1-12-1-*`) | This is exactly what dtssh avoids — use `dtssh host` (its own loopback listener runs as the real user), not a hand-rolled OpenSSH host. |
 | Lands but `psmux.exe` "cannot execute" over SSH | WinGet `Links\*.exe` App-Execution-Alias shims don't run over non-interactive SSH | Invoke the real exe under `…\WinGet\Packages\…` or wrap in `pwsh -Command`. |
@@ -68,15 +69,17 @@ try {
   "BANNER: " + [Text.Encoding]::ASCII.GetString($b, 0, $s.Read($b, 0, 64)); $c.Close()
 } catch { "NOT SERVING: $_" }
 
-# Wedge tell-tale: a large pile of Established pre-auth connections on :2222
+# Wedge/leak tell-tale: a large pile of Established connections on :2222
 (Get-NetTCPConnection -LocalPort 2222 -State Established -ErrorAction SilentlyContinue).Count
 ```
 
 If it reads NOT SERVING (or a high Established count), restart the host —
 `install-host.ps1 stop; install-host.ps1 start` — which reaps the pileup.
 `install-host.ps1 status` performs this banner check for you. The launcher
-also **preemptively reaps** the pileup (restarts) once the Established count on
-:2222 crosses a pathological threshold. Updated dtssh builds that include
+also classifies idle/no-command sshd session trees and **defers** its
+released-build cleanup while a command-bearing SSH session is active. The
+aggregate Established-count restart remains a last-resort saturation guard.
+Updated dtssh builds that include
 `MaxStartups`/`LoginGraceTime`/`ClientAlive*` in their generated `sshd_config`
 reduce the root cause; the launcher health checks remain the in-box guard.
 

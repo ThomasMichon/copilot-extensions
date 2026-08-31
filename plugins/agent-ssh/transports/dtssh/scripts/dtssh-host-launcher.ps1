@@ -102,22 +102,28 @@
     (default 45) — lets the relay register the host before we judge it.
 
 .PARAMETER PreAuthWarnThreshold
-    Established-connection count on :$Port above which the launcher logs a soft
+    Established-connection count on :$Port at which the launcher logs a soft
     pre-saturation warning (default 80 — below OpenSSH's default MaxStartups full
     cutoff of 100). Advisory only: the banner probe, not this count, drives
     restarts, so legitimate concurrent sessions are never force-killed by the
-    count alone.
+    count alone. Set to 0 to disable.
 
 .PARAMETER PreAuthReapThreshold
     Established-connection count on :$Port at which the launcher PREEMPTIVELY
     restarts the host to reap the pile-up (default 128), before saturation fully
-    wedges the port. This is the active counterpart to the advisory warn
-    threshold: it fires only at a count that is pathological for a single-user
-    interactive host (legitimate concurrent sessions number a handful), so the
-    collateral of a restart is acceptable to keep the box reachable. Belt-and-
-    suspenders alongside the banner probe (which only restarts AFTER reach is
-    already broken) and the upstream sshd_config fix (dtssh adds
-    MaxStartups/LoginGraceTime; bmiddha/devtunnel-ssh#13). Set to 0 to disable.
+    wedges the port. This remains an unconditional last-resort fallback if an
+    active session never settles or process-tree classification is unavailable.
+    Set to 0 to disable.
+
+.PARAMETER IdleSessionWarnThreshold
+    Top-level dedicated-sshd session-tree count at which the launcher logs
+    released-build relay leakage (default 8). Set to 0 to disable.
+
+.PARAMETER IdleSessionReapThreshold
+    Idle session-tree count at which the launcher recycles the host (default
+    16), but only when no command-bearing session tree is active. Idle
+    forwarding-only sessions may be included; active forwarded TCP
+    channels are classified command-bearing and protected.
 
 .PARAMETER NoMonitor
     Legacy one-shot mode: start `dtssh host` hidden and exit, with no health
@@ -137,6 +143,8 @@ param(
     [int]$GracePeriodSec      = 45,
     [int]$PreAuthWarnThreshold = 80,
     [int]$PreAuthReapThreshold = 128,
+    [int]$IdleSessionWarnThreshold = 8,
+    [int]$IdleSessionReapThreshold = 16,
     [switch]$NoMonitor
 )
 
@@ -346,6 +354,89 @@ function Get-EstablishedConnCount {
     } catch { return -1 }
 }
 
+function Get-DedicatedSshdSessionPressure {
+    <#
+      Classify the dedicated sshd's top-level session trees. A completed short
+      dtssh command can leave the relay socket and its two sshd-session
+      processes alive after every client process has exited. Those leaked trees
+      have no command descendants. Interactive shells, commands, and SFTP
+      sessions retain a non-sshd descendant and are classified active.
+
+      A forwarding-only `ssh -N` session also has no command descendant, so the
+      idle count is deliberately not called "provably stale". A tree that owns
+      an Established TCP connection other than its inbound :$ProbePort socket
+      is classified active, protecting an in-flight forwarded stream. Reaping
+      is gated on zero command-bearing/forwarding roots; idle persistent
+      forwards reconnect after the host recycle.
+    #>
+    param([int]$ProbePort)
+
+    try {
+        $listener = Get-NetTCPConnection -LocalPort $ProbePort -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if (-not $listener) { return $null }
+
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        $byId = @{}
+        foreach ($proc in $processes) { $byId[[int]$proc.ProcessId] = $proc }
+
+        $children = @{}
+        foreach ($proc in $processes) {
+            $parent = [int]$proc.ParentProcessId
+            $parentProc = $byId[$parent]
+            if ($parentProc -and $proc.CreationDate -lt $parentProc.CreationDate) {
+                continue  # stale ParentProcessId after PID reuse
+            }
+            if (-not $children.ContainsKey($parent)) { $children[$parent] = @() }
+            $children[$parent] = @($children[$parent]) + $proc
+        }
+
+        $forwardingPids = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($connection in @(
+            Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue
+        )) {
+            if ($connection.LocalPort -ne $ProbePort) {
+                [void]$forwardingPids.Add([int]$connection.OwningProcess)
+            }
+        }
+
+        $roots = @($children[[int]$listener.OwningProcess] |
+            Where-Object { $_.Name -eq 'sshd-session.exe' })
+        $idle = 0
+        $active = 0
+        foreach ($root in $roots) {
+            $queue = [System.Collections.Generic.Queue[int]]::new()
+            $queue.Enqueue([int]$root.ProcessId)
+            $seen = [System.Collections.Generic.HashSet[int]]::new()
+            $hasCommandDescendant = $false
+            while ($queue.Count -gt 0) {
+                $current = $queue.Dequeue()
+                if (-not $seen.Add($current)) { continue }
+                if ($forwardingPids.Contains($current)) {
+                    $hasCommandDescendant = $true
+                }
+                if (-not $children.ContainsKey($current)) { continue }
+                foreach ($child in @($children[$current])) {
+                    $queue.Enqueue([int]$child.ProcessId)
+                    if ($child.Name -notin @('sshd-session.exe', 'conhost.exe')) {
+                        $hasCommandDescendant = $true
+                    }
+                }
+            }
+            if ($hasCommandDescendant) { $active++ } else { $idle++ }
+        }
+
+        return [pscustomobject]@{
+            TotalRoots  = $roots.Count
+            IdleRoots   = $idle
+            ActiveRoots = $active
+        }
+    } catch {
+        Write-Log "sshd session-tree classification failed: $_" 'WARN'
+        return $null
+    }
+}
+
 function Start-HostProc {
     <# Start `dtssh host --persist` as a hidden monitored child; return the Process. #>
     Clear-DedicatedSshd   # free :$Port — a prior child may have orphaned its sshd
@@ -453,19 +544,52 @@ try {
 
         # Soft pre-saturation early-warning (advisory; does not force a restart).
         $estConns = Get-EstablishedConnCount $Port
-        if ($estConns -ge $PreAuthWarnThreshold) {
+        if ($PreAuthWarnThreshold -gt 0 -and $estConns -ge $PreAuthWarnThreshold) {
             Write-Log "pre-auth pressure: $estConns established connection(s) on :$Port (>= $PreAuthWarnThreshold; MaxStartups wedge risk)" 'WARN'
         }
 
-        # Active reap: at a pathological Established count, preemptively restart to
-        # drain the pile-up BEFORE MaxStartups saturates and sshd starts dropping
-        # handshakes pre-banner. The banner probe below only fires once reach is
-        # already broken; this heads that off. Gated high enough that it can't trip
-        # on legitimate concurrent sessions. (Root-cause prevention lives upstream —
-        # dtssh emitting MaxStartups/LoginGraceTime, bmiddha/devtunnel-ssh#13 — this
-        # protects boxes still on an unpatched dtssh and is cheap insurance after.)
-        if ($PreAuthReapThreshold -gt 0 -and $estConns -ge $PreAuthReapThreshold) {
-            Write-Log "SATURATION REAP: $estConns established connection(s) on :$Port (>= $PreAuthReapThreshold) — restarting host to drain pre-auth pile-up before it wedges" 'WARN'
+        # Released dtssh builds can leak one host-side forwarded connection and
+        # sshd-session tree per completed command. Recycle once that idle
+        # population is abnormal, but never while a command-bearing session is
+        # active. The upstream relay teardown / ClientAlive fixes remain the
+        # root solution; this keeps released binaries bounded.
+        $sessionPressure = $null
+        if ($IdleSessionWarnThreshold -gt 0 -or $IdleSessionReapThreshold -gt 0) {
+            $sessionPressure = Get-DedicatedSshdSessionPressure $Port
+        }
+        if (
+            $sessionPressure -and
+            $IdleSessionWarnThreshold -gt 0 -and
+            $sessionPressure.IdleRoots -ge $IdleSessionWarnThreshold
+        ) {
+            Write-Log "relay-session pressure: $($sessionPressure.IdleRoots) idle/no-command root(s), $($sessionPressure.ActiveRoots) command-bearing root(s)" 'WARN'
+        }
+        if (
+            $sessionPressure -and
+            $IdleSessionReapThreshold -gt 0 -and
+            $sessionPressure.IdleRoots -ge $IdleSessionReapThreshold
+        ) {
+            if ($sessionPressure.ActiveRoots -gt 0) {
+                Write-Log "SESSION REAP deferred: $($sessionPressure.ActiveRoots) command-bearing SSH session(s) active" 'WARN'
+            } else {
+                Write-Log "SESSION REAP: $($sessionPressure.IdleRoots) idle/no-command SSH root(s) (>= $IdleSessionReapThreshold) — restarting host to drain released-build relay leakage" 'WARN'
+                Stop-HostProc $hostProc.Id
+                Start-Sleep -Seconds 3
+                $hostProc = Start-HostProc
+                $failCount = 0
+                Start-Sleep -Seconds $GracePeriodSec
+                continue
+            }
+        }
+
+        # Last-resort hard ceiling. Preserve the previous unconditional
+        # saturation behavior: if classification is wrong or an active session
+        # never settles, eventual reachability still wins over a full wedge.
+        if (
+            $PreAuthReapThreshold -gt 0 -and
+            $estConns -ge $PreAuthReapThreshold
+        ) {
+            Write-Log "SATURATION REAP: $estConns established connection(s) on :$Port (>= $PreAuthReapThreshold) — restarting host to drain the pile-up before it wedges" 'WARN'
             Stop-HostProc $hostProc.Id
             Start-Sleep -Seconds 3
             $hostProc = Start-HostProc
