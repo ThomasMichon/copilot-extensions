@@ -53,7 +53,9 @@ Copilot starts.
 
 The Worktree Picker launcher runs this command after resolving the selected
 worktree and before starting Copilot. `--cwd` supplies the real worktree during
-Bare resume, where the launch process itself starts from the user's home.
+the deprecated advanced **Bare resume** recovery path, where the launch process
+itself starts from the user's home. Prefer normal Resume; Bare resume remains
+only as a temporary diagnostic fallback.
 
 ## Local marketplace source overrides
 

@@ -3633,10 +3633,9 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
         opts = decision.get("options") or {}
         if opts.get("no_mux"):
             args.no_mux = True
-        # two-step-restore "Bare resume": create the worktree's mux, but launch
-        # Copilot in the HOME dir with no --resume (dodges a CLI bug that fails
-        # to start Copilot inside a repo/worktree cwd). The operator finishes
-        # with a manual ``/resume <id>`` (the sub-menu shows the id).
+        # Deprecated advanced "Bare resume": create the worktree's mux, but
+        # launch Copilot in HOME with no --resume. The operator finishes with a
+        # manual ``/resume <id>`` (the sub-menu shows the id).
         if opts.get("bare_resume"):
             args.bare_resume = True
         wt_id = _resolve_worktree_id(wt_id)
@@ -3793,10 +3792,9 @@ def _resolve_resume(
         work_dir=record.worktree_path,
     )
 
-    # two-step-restore "Bare resume": launch Copilot in the HOME dir instead of
-    # the worktree cwd, and skip --resume, so a CLI bug that fails to start
-    # Copilot inside a repo/worktree directory is dodged. The mux session is
-    # still named ``wt-<id>`` (correct worktree identity), and the plan carries
+    # Deprecated advanced "Bare resume": launch Copilot in HOME instead of the
+    # worktree cwd and skip --resume. The mux session is still named
+    # ``wt-<id>`` (correct worktree identity), and the plan carries
     # ``status_path`` (the real worktree) so the status bar renders the
     # worktree's locus + git disposition despite the HOME pane cwd; the operator
     # restores the conversation with a manual ``/resume <id>``.
@@ -10956,21 +10954,6 @@ def _gh_env_for_repo(target: str) -> tuple[dict[str, str], str | None, bool]:
     return env, login, injected
 
 
-# ── Temporary: extension-reload "Loading…/Resuming…" hang warning ──────────
-# A warning about the CAR extension-reload generation-race hang
-# (github/copilot-agent-runtime#13492; fix: #13494). Migrated off the per-project
-# COPILOT_CUSTOM_INSTRUCTIONS_DIRS file to the ``session-ext-reload`` sessionStart
-# hook (dotfiles#1055): the canonical text now lives in
-# ``scripts/ext-reload-hang.md`` (deployed to ~/.agent-worktrees/bin/ and emitted
-# as additionalContext). That hook is NOT strictly cwd-gated -- it also fires at
-# cwd=~/ so it reaches a **Bare resume** session, the exact scenario this warning
-# covers, which is why it could not ride the cwd-gated session-conduct injector.
-#
-# TEMPORARY: retire the whole feature (fragment, both session-ext-reload scripts,
-# their hooks.json entry + installer copy, and the retirement call below) once the
-# #13494 fix has shipped and rolled out everywhere.
-
-
 def _deploy_copilot_instructions(
     proj_dir: Path, entry: cfg.MachineEntry,
     project: str = "",
@@ -10989,9 +10972,7 @@ def _deploy_copilot_instructions(
     So this function no longer *writes* those files; it retires any stale copy we
     previously deployed (marker-guarded, so unmarked user files are never
     touched). ``entry`` is retained for call-site compatibility but unused. The
-    ext-reload-hang warning is now delivered via the ``session-ext-reload``
-    sessionStart hook too (dotfiles#1055), so its per-project file is retired here
-    as well.
+    retired extension-reload warning's old per-project file is also removed here.
     """
     # Machine identity migrated to the session-machine sessionStart hook
     # (dotfiles#1056): retire the stale per-project file + nested AGENTS.md.
@@ -11007,8 +10988,7 @@ def _deploy_copilot_instructions(
     # (dotfiles#1053): retire any stale per-project file we used to deploy.
     _remove_managed_instruction(proj_dir, "account-conduct.instructions.md")
 
-    # Temporary: the ext-reload hang warning migrated to the session-ext-reload
-    # sessionStart hook (dotfiles#1055); retire any stale per-project file.
+    # Retire any stale per-project copy of the removed extension-reload warning.
     _remove_managed_instruction(proj_dir, "ext-reload-hang.instructions.md")
 
     # Clean up stale ssh.instructions.md from previous versions

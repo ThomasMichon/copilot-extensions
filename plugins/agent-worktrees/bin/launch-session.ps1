@@ -643,7 +643,7 @@ Set-Location $plan.work_dir
 
 # Compose the paired private knowledge repo's plugin settings into the harness
 # worktree before Copilot starts and performs plugin discovery. status_path is
-# the real worktree during Bare resume (work_dir is HOME).
+# the real worktree during deprecated Bare resume (work_dir is HOME).
 $refreshedVenvPython = Resolve-RuntimePython
 if (-not $refreshedVenvPython) {
     $runtimeMessage = (
@@ -1053,9 +1053,9 @@ if (-not $noMux) {
     Write-SetupLog "psmux: looking for session $sessName"
 
     # Path the status-bar updater renders from. Normally the pane cwd, but for
-    # two-step "Bare resume" the pane launches in HOME (to dodge the worktree-
-    # cwd start bug) while the bar must still show the worktree's identity + git
-    # disposition -- so prefer the plan's status_path (the real worktree) and
+    # deprecated Bare resume the pane launches in HOME while the bar must still
+    # show the worktree's identity + git disposition -- so prefer the plan's
+    # status_path (the real worktree) and
     # fall back to work_dir for every other launch.
     $muxStatusPath = if ($plan.PSObject.Properties['status_path'] -and $plan.status_path) {
         [string]$plan.status_path
