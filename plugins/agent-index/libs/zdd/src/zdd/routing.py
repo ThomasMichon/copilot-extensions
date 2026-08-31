@@ -271,7 +271,7 @@ def _publish_active_unlocked(
     version: str | None = None,
     generation: int | None = None,
     demote_existing: bool = False,
-) -> Endpoint:
+) -> tuple[Endpoint, Endpoint | None]:
     path = routing_table_path(config_dir)
     current = read_table(config_dir) or {}
     gen = generation if generation is not None else _next_generation(current)
@@ -281,11 +281,13 @@ def _publish_active_unlocked(
     )
     table: dict = {"active": new_active.to_dict()}
 
+    demoted = None
     if demote_existing:
         prev_raw = current.get("active")
         prev = Endpoint.from_dict(prev_raw) if isinstance(prev_raw, dict) else None
         if prev is not None and prev.port != port:
             table["previous"] = prev.to_dict()
+            demoted = prev
 
     table["epoch"] = datetime.now(timezone.utc).isoformat()
     _atomic_write(path, table)
@@ -293,7 +295,7 @@ def _publish_active_unlocked(
         "Published active endpoint %s:%d (gen %d, pid %s)",
         new_active.client_host, port, gen, pid,
     )
-    return new_active
+    return new_active, demoted
 
 
 def publish_active(
@@ -312,6 +314,35 @@ def publish_active(
     *different* port, it is recorded as ``previous`` (the cutover flip). When it
     is the same port (a plain restart re-announcing itself) it is simply
     replaced. ``generation`` defaults to one past the highest recorded value.
+    """
+    with _routing_lock(config_dir):
+        active, _previous = _publish_active_unlocked(
+            config_dir,
+            bind=bind,
+            port=port,
+            pid=pid,
+            version=version,
+            generation=generation,
+            demote_existing=demote_existing,
+        )
+        return active
+
+
+def publish_active_with_previous(
+    config_dir: str | os.PathLike[str],
+    *,
+    bind: str,
+    port: int,
+    pid: int | None = None,
+    version: str | None = None,
+    generation: int | None = None,
+    demote_existing: bool = False,
+) -> tuple[Endpoint, Endpoint | None]:
+    """Publish an active endpoint and return the endpoint it atomically demoted.
+
+    The returned predecessor is captured under the same routing lock as the
+    table mutation, so a caller never has to re-read ``previous`` and risk
+    observing a different generation after a concurrent publication.
     """
     with _routing_lock(config_dir):
         return _publish_active_unlocked(
