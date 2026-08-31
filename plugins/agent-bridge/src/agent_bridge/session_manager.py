@@ -606,6 +606,11 @@ class Session:
         self.target = target
         self.client: AcpClient | None = None
         self.status = SessionStatus.CREATED
+        # Status read from durable storage during daemon startup before
+        # rehydrate converts an adoptable session to STOPPED. Used only by the
+        # startup reattach path to decide whether a surviving Session Host needs
+        # an explicit driver nudge.
+        self.restart_status: str | None = None
         self.turn_count = 0
         self.context_size: int | None = None
         self.context_used: int | None = None
@@ -1292,6 +1297,7 @@ class SessionManager:
             session.created_at = row["created_at"]
             session.updated_at = row["updated_at"]
             session.acp_session_id = row.get("acp_session_id")
+            session.restart_status = status
 
             # Mark formerly-active sessions as stopped
             interrupted_on_restart = False
@@ -1895,7 +1901,11 @@ class SessionManager:
                 attached = await asyncio.wait_for(
                     self._reattach_one(
                         rec, session, new_status=SessionStatus.IDLE,
-                        send_resume=getattr(rec, "resume_on_reattach", False),
+                        send_resume=(
+                            getattr(rec, "resume_on_reattach", False)
+                            or session.restart_status
+                            == SessionStatus.STARTING.value
+                        ),
                         # A failed remote attach may be a transient SSH/control-plane
                         # outage while the far-side host, child, and auth relay are
                         # still serving tools. Retain its record and relay ownership;

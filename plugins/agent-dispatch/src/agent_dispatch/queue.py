@@ -3184,10 +3184,19 @@ class TaskQueue:
                 )
             conn.execute(
                 "UPDATE spawn_reservations SET state = ?, updated_at = ?, "
-                "session_handle = COALESCE(?, session_handle), "
-                "worktree = COALESCE(?, worktree), "
+                "session_handle = CASE WHEN ? IS NOT NULL THEN ? ELSE session_handle END, "
+                "worktree = CASE WHEN ? IS NOT NULL THEN ? ELSE worktree END, "
                 "detail = COALESCE(?, detail) WHERE key = ?",
-                (to_state, ts, session_handle, worktree, detail, key),
+                (
+                    to_state,
+                    ts,
+                    session_handle,
+                    session_handle,
+                    worktree,
+                    worktree,
+                    detail,
+                    key,
+                ),
             )
             if to_state in SpawnState.RELEASABLE:
                 conn.execute(

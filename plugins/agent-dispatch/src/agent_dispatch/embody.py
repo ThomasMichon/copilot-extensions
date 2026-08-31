@@ -70,8 +70,12 @@ def parse_handle(result: subprocess.CompletedProcess) -> dict[str, str | None]:
     if not isinstance(data, dict):
         return handle
     launch = data.get("launch") if isinstance(data.get("launch"), dict) else {}
+    worktree_obj = data.get("worktree") if isinstance(data.get("worktree"), dict) else {}
     handle["worktree"] = (
-        data.get("worktree_id") or data.get("worktree") or launch.get("worktree_id")
+        data.get("worktree_id")
+        or worktree_obj.get("id")
+        or (data.get("worktree") if isinstance(data.get("worktree"), str) else None)
+        or launch.get("worktree_id")
     )
     handle["session"] = (
         data.get("session_id") or data.get("session") or launch.get("session")
