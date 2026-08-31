@@ -96,8 +96,8 @@ are in [design.md](design.md).
 
 ## Request
 
-> Ah, right. We should make sure this is is reconciled upsream with other vision
-> build-outs of agent-bridge in copilot-extensions. We have a covergence epic
+> Ah, right. We should make sure this is reconciled upstream with other vision
+> build-outs of agent-bridge in copilot-extensions. We have a convergence epic
 > for AHP Agent Host Protocol and a convergence nudging toward alignment with
 > Copilot sub-agent ergonomics. Let's fit this in nicely.
 
