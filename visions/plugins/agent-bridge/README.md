@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-27
+- **Last revised:** 2026-08-30
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -34,6 +34,15 @@ session, choose the right control pattern, send work or a side message, reconnec
 by cursor, see who owns what, and recover from interruptions without inventing a
 private tunnel or a private session ledger.
 
+Delegation through that substrate should feel as direct as native sub-agent
+control even though the execution model is broader: create an agent, retain its
+identity, read its accumulated work, steer it with another message, wait for an
+attention boundary, and cancel or retire it deliberately. Because an external
+bridge cannot wake a caller whose invocation has already disappeared, attention
+delivery is an explicit relationship: an attached caller or retained subscriber
+is released when the target needs it, while a detached caller is told honestly
+that no future wake-up is implied.
+
 ## Concepts & Components
 
 ### bridge daemon
@@ -50,6 +59,16 @@ the mesh. It lets a caller start, send to, wait on, inspect, interrupt, stop,
 resume, and observe sessions without choosing a different tool for each venue or
 transport.
 
+### delegation control and attention boundary
+
+The bridge presents one task-shaped control model across every venue: create,
+identify, read, steer, wait, interrupt, stop, resume, and end. A caller may
+retain an **attention subscription** whose completion means the target has
+reached a state requiring caller action, not merely that a successful turn
+finished. Completion, failure, an input or permission request, unrecoverable
+loss of reachability, and a policy decision the bridge cannot safely make alone
+are attention boundaries.
+
 ### authenticated local control plane
 
 The bridge exposes authenticated local control and reconnectable event delivery
@@ -62,10 +81,12 @@ instead of making a long turn depend on a single live socket.
 The bridge exposes bridge-owned agent, session, chat, and event state to clients
 through the Agent Host Protocol (AHP). AHP is the upstream client-to-host
 contract; ACP remains the downstream contract used to drive an agent runtime.
-When the bridge federates a native-host-owned session, that native host remains
-authoritative and the bridge acts as a proxy or fidelity-declared projection.
-The bridge maps between roles without pretending the protocols have identical
-identity, lifecycle, replay semantics, or ownership.
+ACP-compatible agent runtimes and AHP-compatible native hosts are both
+first-class participants, with convergence advancing at both boundaries in
+parallel. When the bridge federates a native-host-owned session, that native
+host remains authoritative and the bridge acts as a proxy or fidelity-declared
+projection. The bridge maps between roles without pretending the protocols have
+identical identity, lifecycle, replay semantics, or ownership.
 
 ### session host
 
@@ -98,9 +119,13 @@ target's process.
 ### live-session registry
 
 Interactive sessions may register themselves with a bridge and receive an
-attributed inbox. A registered interactive session becomes visible through the
-ordinary session/event surface, while the bridge remains honest that it does not
-own that process or the permissions mediated by its human-facing terminal.
+attributed inbox only through an admission path that preserves one session
+identity, one ordered input stream, and one model turn for each accepted prompt.
+A registered interactive session becomes visible through the ordinary
+session/event surface, while the bridge remains honest that it does not own that
+process or the permissions mediated by its human-facing terminal. A lower-
+fidelity adapter may expose presence or notifications without being trusted to
+inject prompt turns.
 
 ### mesh federation
 
@@ -126,6 +151,31 @@ control surfaces: start or resume sessions, submit turns, stream events, inspect
 state and context usage, interrupt the current turn without ending the session,
 and intentionally stop or end the session.
 
+### task-shaped-delegation-control
+
+A caller uses the same compact lifecycle vocabulary whether the target is a
+local process, a remote workspace, a native host, or another ACP-producing
+runtime. Placement, transport, and process ownership enrich the target without
+forcing the caller to learn a different delegation model for each one.
+
+### attention-boundary-subscriptions
+
+An attached caller or retained subscriber can wait for **anything requiring
+attention**. The subscription settles with a bounded, structured reason and the
+latest durable position when the target completes, fails, asks for input or
+permission, remains unreachable beyond its reconnect policy, or reaches another
+caller- or policy-defined attention boundary. Ordinary transport churn resumes
+by cursor instead of settling the wait. Detached submission remains valid, but
+never claims an asynchronous wake-up channel that the caller did not retain.
+
+### bounded-delegated-results
+
+A caller can retrieve a bounded account of a delegated target's accumulated
+work: its current state, latest result, and incremental work since a retained
+position. The raw event stream remains available for fidelity and recovery, but
+ordinary delegation does not require ingesting the entire transcript or every
+tool event.
+
 ### standards-compatible-host-control
 
 An AHP client can discover agents, create or subscribe to sessions and chats,
@@ -133,6 +183,13 @@ drive turns, reconnect to ordered state, and mediate supported tool or input
 requests without binding to agent-bridge's private REST vocabulary. Existing
 CLI, REST, and ACP faces remain usable while clients converge on the standard
 host boundary.
+
+### agent-and-host-protocol-convergence
+
+The bridge can drive an agent runtime through ACP while exposing or federating
+host-owned sessions through AHP, and can adopt additional compatible runtimes
+without changing its delegation semantics. Protocol roles remain explicit even
+when one conversation crosses both boundaries.
 
 ### cursor-stable-event-replay
 
@@ -165,6 +222,17 @@ The bridge can deliver attributed messages to sessions that already exist:
 bridge-owned sessions, peer-owned sessions, and registered interactive sessions.
 Prompts, notifications, requests, replies, and broadcasts preserve sender
 identity so agent-to-agent traffic never masquerades as operator input.
+
+### single-stream-message-admission
+
+Every accepted prompt is admitted exactly once to the authoritative controller
+for its session lineage and enters one serialized conversation stream. A busy
+authoritative target durably queues the prompt in order until it can admit the
+next turn. Message delivery may be retried, routed through an adapter, or follow
+a deliberate session handoff, but those transitions cannot fork persistent
+model streams or append competing responses to the same conversation. This is
+the coordination layer's concretization of the parent fabric's ordered,
+exactly-once message-delivery promise.
 
 ### three-control-patterns
 
@@ -243,7 +311,18 @@ normal maintenance path.
 A hosted session has one controller for turn submission, while many consumers may
 read or request work through that controller. The bridge serializes competing
 turns into one transcript so callers converge on shared state instead of staging
-a custody fight.
+a custody fight. One accepted prompt produces at most one model turn across the
+session's succession chain; no adapter may create a second hidden controller
+behind the same session identity.
+
+### attention-requires-a-live-relationship
+
+The bridge releases an attached caller or retained subscriber at each attention
+boundary selected by the caller or governing policy. A deliberate session
+handoff carries the subscription to the successor unless handoff itself requires
+a caller decision. If a caller deliberately detaches without retaining such a
+relationship, the bridge preserves the target and its durable state but does not
+pretend it can later wake that caller's model loop.
 
 ### any-agent-delivery
 
@@ -269,6 +348,15 @@ A richer route is chosen only after the specific machine, namespace, worktree,
 agent, and session combination proves serviceable. If a peer path, live
 injection, or namespace route is unavailable, the bridge falls back to a safe
 simpler path or refuses clearly.
+
+### prompt-injection-requires-single-stream-proof
+
+A route may inject a prompt into an existing interactive session only when it
+can prove authoritative session identity, serialized admission, and exactly-one
+turn creation. Queueing through that authoritative controller is the normal
+answer when the target is busy. If the route cannot establish those guarantees,
+it may expose presence, status, or attributed notification delivery, but must
+not present itself as a reliable prompt inbox.
 
 ### transparent-acp-passthrough
 
@@ -379,6 +467,9 @@ machine may deliberately gate outbound reach until policy allows it.
   routes over declared reachability.
 - **Not a web UX.** A rich UI/front may consume the bridge, but the bridge is the
   runtime and headless control plane underneath it.
+- **Not a scheduler inside the caller.** The bridge can hold an attached
+  invocation or subscription until attention is required, but cannot promise to
+  wake a caller that detached without retaining an attention subscription.
 - **Not a private reimplementation of a native local host.** The bridge exposes
   a standards-compatible host boundary and retains its differentiated
   multi-venue coordination value. Released native hosts are feature-detected
@@ -398,7 +489,8 @@ machine may deliberately gate outbound reach until policy allows it.
 - Parent vision: [agent-fabric](../../agent-fabric/README.md) — §Concepts/
   *agent-bridge — the coordination layer*.
 - Sibling leaf: [agent-dispatch](../agent-dispatch/README.md) — the delegation
-  layer that records claimable work and may embody workers through this runtime.
+  layer that records claimable work, may embody workers through this runtime,
+  and can hibernate a genuinely asynchronous wait until work needs attention.
 - Sibling leaf: [agent-ssh](../agent-ssh/README.md) — the connectivity layer the
   bridge's cross-machine reach rides on.
 - Venue provider: [agent-codespaces](../agent-codespaces/README.md) — a remote
@@ -408,6 +500,12 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-08-30** — Extended the delegation model with native-sub-agent-like
+  control semantics over the bridge's broader execution substrate: explicit
+  attention subscriptions, honest detached operation, and a single-stream
+  prompt-admission invariant. Clarified that ACP agent-runtime convergence and
+  AHP native-host convergence advance in parallel without collapsing their
+  ownership roles. Tracked by #1433.
 - **2026-08-27** — Extended the vision to distinguish the upstream AHP
   client-to-host contract from downstream ACP agent control. Added the
   standards-compatible host surface and the released-surface convergence
