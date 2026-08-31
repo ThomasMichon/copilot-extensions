@@ -53,6 +53,19 @@ def test_autopilot_prompt_threads_shared_moniker_route():
     assert "http://" not in prompt
 
 
+def test_autopilot_prompt_pins_cross_repo_task_lane():
+    prompt = embody.autopilot_worker_prompt(
+        "abc123",
+        worker_id="w9",
+        repo="github.com/o/n",
+    )
+    assert (
+        "agent-dispatch claim --task abc123 --evaluation "
+        "--repo github.com/o/n"
+    ) in prompt
+    assert "agent-dispatch list --repo github.com/o/n" in prompt
+
+
 def test_autopilot_prompt_carries_goal_loop_contract():
     prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
     # The seed reads the durable goal + done-criteria + prior progress log and

@@ -422,7 +422,10 @@ def make_headless_spawn(
     def spawn(task: dict) -> tuple[bool, dict]:
         worker_id = f"headless-{uuid.uuid4().hex[:8]}"
         seed = embody.autopilot_worker_prompt(
-            task["id"], worker_id=worker_id, route=route
+            task["id"],
+            worker_id=worker_id,
+            route=route,
+            repo=task.get("repo"),
         )
         try:
             result = bridge.spawn_worker(
