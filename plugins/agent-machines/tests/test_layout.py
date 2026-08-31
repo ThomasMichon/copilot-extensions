@@ -405,7 +405,10 @@ def test_resolve_cwd_repo_outside_git_fails(tmp_path):
 def test_resolve_cwd_repo_reports_missing_git(tmp_path, monkeypatch):
     monkeypatch.setattr("agent_machines.layout.shutil.which", lambda name: None)
 
-    with pytest.raises(ManifestError, match="git is required"):
+    with pytest.raises(
+        ManifestError,
+        match=r"pass --repo <registered-name>.*--all-projects",
+    ):
         resolve_cwd_repo(tmp_path, {}, {})
 
 

@@ -253,8 +253,8 @@ def resolve_cwd_repo(
     current = (cwd or Path.cwd()).resolve()
     if shutil.which("git") is None:
         raise GitUnavailableError(
-            "git is required to resolve repository scope; install Git or pass "
-            "--all-projects"
+            "git is required to infer repository scope from a path; install Git, "
+            "pass --repo <registered-name>, or pass --all-projects"
         )
     top_level = _git_path(current, "--show-toplevel")
     if top_level is None:
