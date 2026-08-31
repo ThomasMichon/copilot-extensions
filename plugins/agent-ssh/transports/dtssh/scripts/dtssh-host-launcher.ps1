@@ -554,7 +554,11 @@ try {
         # active. The upstream relay teardown / ClientAlive fixes remain the
         # root solution; this keeps released binaries bounded.
         $sessionPressure = Get-DedicatedSshdSessionPressure $Port
-        if ($sessionPressure -and $sessionPressure.IdleRoots -ge $IdleSessionWarnThreshold) {
+        if (
+            $sessionPressure -and
+            $IdleSessionWarnThreshold -gt 0 -and
+            $sessionPressure.IdleRoots -ge $IdleSessionWarnThreshold
+        ) {
             Write-Log "relay-session pressure: $($sessionPressure.IdleRoots) idle/no-command root(s), $($sessionPressure.ActiveRoots) command-bearing root(s)" 'WARN'
         }
         if (

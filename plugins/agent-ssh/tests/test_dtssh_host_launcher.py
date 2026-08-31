@@ -21,6 +21,7 @@ LAUNCHER = (
 PWSH = shutil.which("pwsh")
 
 
+@pytest.mark.guard
 def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     text = LAUNCHER.read_text(encoding="utf-8")
 
@@ -39,6 +40,7 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
 
 
 @pytest.mark.skipif(PWSH is None, reason="PowerShell is unavailable")
+@pytest.mark.guard
 def test_session_pressure_classifies_idle_command_and_forwarding_roots() -> None:
     text = LAUNCHER.read_text(encoding="utf-8")
     start = text.index("function Get-DedicatedSshdSessionPressure")
