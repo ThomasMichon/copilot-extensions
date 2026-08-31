@@ -676,6 +676,18 @@ class ResolvingDispatchClient:
         self.close()
 
     def __getattr__(self, name: str) -> Any:
+        # Proxy only real DispatchClient methods, so attribute semantics stay
+        # normal: a missing/typo name raises AttributeError (and hasattr() is
+        # honest) instead of silently returning a callable that fails only when
+        # invoked. Generator methods (e.g. stream_events) are intentionally not
+        # used through this wrapper -- the per-operation client would close
+        # before iteration -- and the supervisor never calls them.
+        target = getattr(DispatchClient, name, None)
+        if not callable(target):
+            raise AttributeError(
+                f"{type(self).__name__!r} object has no attribute {name!r}"
+            )
+
         def call(*args: Any, **kwargs: Any) -> Any:
             with self._factory() as client:
                 return getattr(client, name)(*args, **kwargs)

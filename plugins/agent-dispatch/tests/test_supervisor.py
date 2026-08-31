@@ -490,6 +490,20 @@ def test_resolving_client_uses_fresh_client_for_each_operation():
     assert created == [1, 2]
 
 
+def test_resolving_client_rejects_unknown_attribute():
+    from agent_dispatch.client import ResolvingDispatchClient
+
+    client = ResolvingDispatchClient(lambda: None)
+    # Only real DispatchClient methods proxy; a typo/unknown name is an honest
+    # AttributeError (hasattr stays truthful) rather than a silent callable.
+    assert hasattr(client, "reserve_spawn")
+    assert not hasattr(client, "definitely_not_a_method")
+    import pytest
+
+    with pytest.raises(AttributeError):
+        client.definitely_not_a_method
+
+
 # -- headless-ACP embody backend ---------------------------------------------
 
 
