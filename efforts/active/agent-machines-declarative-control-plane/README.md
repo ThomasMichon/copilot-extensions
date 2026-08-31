@@ -119,7 +119,7 @@ behavioral parity is demonstrated.
 - Established the generic machine-resource, derived-projection, reconciliation,
   and drift-observation campaign.
 
-### 2026-08-30 - Relationship-aware package discovery
+### 2026-08-31 - Relationship-aware package discovery
 
 - Activated the effort now that #1418 provides the public coordination token.
 - Added a focused discovery slice that composes declared supplemental
