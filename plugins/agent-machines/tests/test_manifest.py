@@ -89,8 +89,12 @@ def test_repo_anchor_normalizes_relative_path(tmp_path, monkeypatch):
     worktree = tmp_path / "worktree"
     path = write_package(worktree, "all.yaml", base_package())
     pkg = load_package(path, source_repo="acme", source_anchor=Path("anchor"))
+    expected = (tmp_path / "anchor").resolve()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
 
-    assert pkg.repo_anchor() == (tmp_path / "anchor").resolve()
+    assert pkg.repo_anchor() == expected
 
 
 def test_repo_root_resolves_legacy_path(tmp_path):

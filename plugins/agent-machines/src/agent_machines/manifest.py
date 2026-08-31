@@ -351,7 +351,11 @@ def load_package(
         resources=resources,
         source_repo=source_repo,
         source_path=path,
-        source_anchor=source_anchor,
+        source_anchor=(
+            source_anchor.expanduser().resolve()
+            if source_anchor is not None
+            else None
+        ),
     )
 
 
