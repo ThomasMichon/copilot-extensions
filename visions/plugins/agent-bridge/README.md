@@ -6,7 +6,7 @@
   machines, and venue providers.
 - **Scope:** leaf (a per-plugin vision under the [agent-fabric](../../agent-fabric/README.md) branch)
 - **Status:** Draft
-- **Last revised:** 2026-08-30
+- **Last revised:** 2026-08-31
 - **Reality docs:** [`plugins/agent-bridge/README.md`](../../../plugins/agent-bridge/README.md) ·
   [`plugins/agent-bridge/docs/architecture.md`](../../../plugins/agent-bridge/docs/architecture.md)
 
@@ -43,6 +43,13 @@ delivery is an explicit relationship: an attached caller or retained subscriber
 is released when the target needs it, while a detached caller is told honestly
 that no future wake-up is implied.
 
+The bridge's contracts must also evolve without requiring every participant to
+update in lockstep. Clients, daemons, session hosts, providers, relays, and
+durable records may be on different supported generations at the same time.
+Compatibility is therefore selected explicitly before work begins, retained for
+the lifetime of each session instance, and retired only when no live,
+recoverable, or rollback reference still depends on it.
+
 ## Concepts & Components
 
 ### bridge daemon
@@ -75,6 +82,17 @@ The bridge exposes authenticated local control and reconnectable event delivery
 for tools, UI/fronts, and other agents. Prompt submission and event consumption
 are separate concerns so a consumer can reconnect to the same session history
 instead of making a long turn depend on a single live socket.
+
+### negotiated contract envelope
+
+Each live boundary advertises the semantic generations and optional
+capabilities it can actually uphold. A new session selects one compatible
+envelope before ownership, launch, relay, or message-admission effects begin and
+retains that selection for recovery. Where an external released protocol governs
+the boundary, that protocol's own handshake and capability model are the
+negotiation; the bridge records the outcome internally rather than adding a
+second handshake or generic capability bit. Implementation package versions
+remain useful evidence, but never stand in for negotiated semantics.
 
 ### AHP host face
 
@@ -264,6 +282,15 @@ in-flight work is drained, cancelled-and-resumed, or handed off deliberately; an
 older hosts remain bounded but alive long enough for their children to reach a
 safe stop.
 
+### version-skew-safe-contract-evolution
+
+The bridge can add and adopt new protocol generations, optional capabilities,
+provider behavior, and durable metadata while current and previous supported
+participants coexist. New behavior is negotiated and canaried for new sessions;
+existing sessions keep the adapter and authority model they selected; retirement
+waits for evidence that no live session, recoverable record, or rollback path
+still requires the older contract.
+
 ### reach-active-worktrees-and-configured-repos
 
 A caller can address agents in active worktrees and in configured projects the
@@ -348,6 +375,27 @@ A richer route is chosen only after the specific machine, namespace, worktree,
 agent, and session combination proves serviceable. If a peer path, live
 injection, or namespace route is unavailable, the bridge falls back to a safe
 simpler path or refuses clearly.
+
+### negotiate-before-side-effects
+
+A new session or ownership transition selects a mutually supported semantic
+contract before it claims a venue, launches a child, adopts a relay, publishes a
+route, or admits a prompt. An unsupported capability fails or degrades with an
+explicit reason before partially authoritative resources are created.
+
+### session-contract-survives-default-changes
+
+Changing the preferred contract for new sessions does not reinterpret an
+existing session. Its selected adapter, source authority, identity, and
+ownership semantics survive frontend replacement, provider updates, and
+rollback until that session ends or a separately proven handoff changes them.
+
+### readers-expand-before-writers
+
+New behavior is never preferred before every supported reader and recovery path
+can interpret it safely. No supported older writer may erase ownership,
+authorization, or identity evidence merely because it does not understand newer
+metadata.
 
 ### prompt-injection-requires-single-stream-proof
 
@@ -470,6 +518,9 @@ machine may deliberately gate outbound reach until policy allows it.
 - **Not a scheduler inside the caller.** The bridge can hold an attached
   invocation or subscription until attention is required, but cannot promise to
   wake a caller that detached without retaining an attention subscription.
+- **Not package-version lockstep.** Correctness does not depend on every client,
+  daemon, host, provider, or venue plugin converging on the same build before a
+  supported feature can be used safely.
 - **Not a private reimplementation of a native local host.** The bridge exposes
   a standards-compatible host boundary and retains its differentiated
   multi-venue coordination value. Released native hosts are feature-detected
@@ -500,6 +551,11 @@ machine may deliberately gate outbound reach until policy allows it.
 
 ## Provenance
 
+- **2026-08-31** — Added explicit version-skew-safe contract evolution as the
+  shared foundation beneath AHP host convergence and native-sub-agent-like
+  delegation control. The foundation owns negotiation, session pinning,
+  reader-before-writer rollout, and evidence-gated retirement; each convergence
+  retains ownership of its public semantics. Tracked by #1460.
 - **2026-08-30** — Extended the delegation model with native-sub-agent-like
   control semantics over the bridge's broader execution substrate: explicit
   attention subscriptions, honest detached operation, and a single-stream

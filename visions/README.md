@@ -16,7 +16,7 @@ author a new one.
 | Construct | Question | Tense | Home |
 |-----------|----------|-------|------|
 | **Vision** | "What should this *ultimately* be?" | should-be (standing) | `visions/` (revised in place) |
-| **Effort** | "What are we doing now?" | should-be (a campaign) | a driver/control repo, or a future in-repo `efforts/` |
+| **Effort** | "What are we doing now?" | should-be (a campaign) | a driver/control repo, or this repo's adopted `efforts/` |
 | **Doc** | "How does it *actually* work?" | is (truth) | `docs/`, per-plugin `docs/` |
 | **Issue** | "What discrete thing?" | to-do | GitHub issues on this repo |
 
@@ -38,7 +38,7 @@ never edited to record that cycle; it changes only when the **intent** changes.
 | [native-convergence](native-convergence/README.md) | branch | **Native-construct convergence** — how the harness converges onto Copilot CLI's *own* native constructs (worktrees, workspaces, session boundary, catalogued projects, source/worktree roots, cloud steering over the agent-host protocol): delegate the primitive, align vocabulary + layout, ride native identity/steering, keep the durable value the CLI lacks — never regressing a capability, never hard-depending on an unreleased construct. |
 | [plugins/agent-worktrees](plugins/agent-worktrees/README.md) | leaf | The **isolation & session ground layer's tracking authority** — worktree + session state as a single-owner **live store**, live tracking derived from agent-worktrees' own transports (session state/mux/process/lock/SSH) with an **extension-free polling backbone**, an optional losable warm-cache accelerator, and **optional, non-load-bearing** event producers (its own native-session-event extension — source of the crisp rest/idle signal — and agent-bridge's ACP tool/message eventing) (child of agent-fabric). |
 | [picker](picker/README.md) | leaf | The **Worktree Picker** — the interactive terminal *front door* for viewing, joining, and creating a project's worktree-backed agents, and the fabric's unified presentation surface; **delivered by the optional Installer & Configurator control-plane** (child of agent-fabric). |
-| [plugins/agent-bridge](plugins/agent-bridge/README.md) | leaf | The **coordination layer** — hosts, addresses, observes, messages, resumes, and hands off live Copilot sessions across projects, worktrees, machines, and venue providers (child of agent-fabric). |
+| [plugins/agent-bridge](plugins/agent-bridge/README.md) | leaf | The **coordination layer** — hosts, addresses, observes, messages, resumes, and hands off live Copilot sessions across projects, worktrees, machines, and venue providers, while evolving those contracts safely across supported version skew (child of agent-fabric). |
 | [plugins/agent-codespaces](plugins/agent-codespaces/README.md) | leaf | The **CodeSpace venue provider** — provisions GitHub Codespaces for a repo, sets them up to run agents headlessly, reaches them over one secured transport, lends the host's identity via the credential relay (borrow-not-bottle), presents them to the fabric under the one coordination contract, and stewards them as a **finite, budget-bounded, shared pool** — leased, reused, state-tracked (in-use/idle/clean/stale), stale-cycled, and telemetry-captured (child of agent-fabric). |
 | [plugins/agent-containers](plugins/agent-containers/README.md) | leaf | The **local-container venue provider** — provisions repo-shaped container agents under one fabric contract while separating trusted-development fleets from restricted low-trust sandboxes whose credentials, filesystem, network, tools, and resources are bounded by construction (child of agent-fabric). |
 | [venue-parity](venue-parity/README.md) | leaf | **Venue parity** — one dispatch core in agent-bridge with **thin, symmetric venue transports** (`agent-codespaces`/`agent-containers`) that differ only in lifecycle, GitHub-token bootstrap, and cold-boot/idle; same model/skills/cwd/auth/monitoring in every venue, one SSH transport, one auth-relay back-channel; local containers as the first-class repro/hardening harness (child of agent-fabric). |
@@ -65,7 +65,7 @@ Two placement lanes, depth = specificity:
   Use these for intent that spans plugins — the service model, the install
   contract, the credential-relay trust model.
 - **Per-plugin visions** mirror the code layout: `visions/plugins/<name>/`
-  (e.g. a future `visions/plugins/agent-bridge/`). Use these when a vision maps
+  (e.g. [`visions/plugins/agent-bridge/`](plugins/agent-bridge/README.md)). Use these when a vision maps
   1:1 to a single plugin, so the vision↔`plugins/<name>/docs/architecture.md`
   diff is straightforward.
 

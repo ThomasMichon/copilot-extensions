@@ -5,7 +5,7 @@
 - **Branch(es):** serial per-phase PR worktrees to `main`
 - **Created:** 2026-08-27
 - **Status:** Draft
-- **Vision:** **vision-extending**
+- **Vision:** **vision-closing**
   [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
   with an upstream AHP host face; **vision-closing**
   [`visions/native-convergence`](../../../visions/native-convergence/README.md)
@@ -13,6 +13,8 @@
 - **Umbrella issue:** [#1266](https://github.com/ThomasMichon/copilot-extensions/issues/1266)
 - **Related issues/dependencies:** [#989](https://github.com/ThomasMichon/copilot-extensions/issues/989)
   (native live-session steering) ·
+  [#1460](https://github.com/ThomasMichon/copilot-extensions/issues/1460)
+  (version-skew-safe contract foundation) ·
   [#1138](https://github.com/ThomasMichon/copilot-extensions/issues/1138)
   (immutable event identity)
 
@@ -49,7 +51,12 @@ CLI/REST consumers.
 - **Delegates:** protocol research, conformance fixtures, and independent
   implementation reviews may use isolated worktrees
 - **Handoff:** each phase lands its contract, tests, and effort journal update
-  before the next phase changes the same state model
+  before the next phase changes the same state model; shared compatibility
+  mechanics land through
+  [`agent-bridge-contract-evolution`](../agent-bridge-contract-evolution/README.md)
+  rather than being reimplemented inside the AHP adapter. Any phase that changes
+  the bridge-owned durable ledger waits for #1460's registry and reader/fencing
+  review.
 
 ## Context
 
@@ -77,6 +84,16 @@ draft behavior to leak through one mutable schema.
 The detailed current-state comparison and ownership decisions are in
 [compatibility-baseline.md](compatibility-baseline.md).
 
+This effort owns the exact AHP contract: JSON-RPC channels, standard
+initialization and capabilities, resource identity, snapshots, actions, and
+client reconciliation. The sibling
+[`agent-bridge-contract-evolution`](../agent-bridge-contract-evolution/README.md)
+effort owns generic mixed-version machinery such as contract provenance,
+tolerant durable readers, session-pinned selections, writer fencing, and
+coherent cutover generations. AHP consumes that foundation without replacing
+its exact version-specific semantics with a bridge-invented generic capability
+model.
+
 ## Request
 
 Converge agent-bridge toward AHP compatibility so callers can use a standard
@@ -89,6 +106,11 @@ rather than binding to private implementation details.
 
 ### Phase 0 — Freeze the target contract
 
+- [ ] Supply the exact AHP release provenance and fixtures that #1460 registers
+      in the shared contract inventory, while keeping AHP's standard capability
+      and state-prerequisite rules authoritative. If the registry has not landed
+      yet, pin them locally here and register them before the first AHP writer is
+      enabled.
 - [ ] Pin the released AHP 0.8 tag, generated JSON schemas, exported method
       maps, and reducer fixtures as test inputs; record an explicit precedence
       rule for disagreements among tagged prose, types, SDKs, and fixtures.
@@ -105,6 +127,9 @@ rather than binding to private implementation details.
 
 - [ ] Add an attributable AHP server command/endpoint alongside existing CLI,
       REST/SSE, ACP, and Session Host surfaces.
+- [ ] Do not enable an AHP state writer until #1460's tolerant-reader,
+      old-writer-fencing, and rollback prerequisites cover every shared durable
+      record the adapter will change.
 - [ ] Implement JSON-RPC framing, channel routing, `ping`, `initialize`,
       version selection, implementation metadata, client capabilities, and the
       exact named agent capabilities defined by the selected version.
@@ -130,6 +155,11 @@ rather than binding to private implementation details.
       only by the exact `multipleChats` capability fields.
 - [ ] Reject duplicate AHP resource creation and prohibit silent ACP
       conversation recreation beneath an unchanged AHP identity.
+- [ ] Define how a deliberate bridge successor appears at the AHP boundary:
+      either preserve the AHP URI under a proven identity-preserving handoff,
+      create an explicit successor resource, or settle the client relationship
+      with an observable identity transition. Never change the conversation
+      beneath an unchanged URI implicitly.
 - [ ] Map asynchronous creation, ready/failure, archive, disposal, turn
       cancellation, and terminal outcomes without exposing internal
       stop/resume mechanics as different AHP semantics.
@@ -245,6 +275,9 @@ rather than binding to private implementation details.
       outcome.
 - [ ] Existing ACP, CLI, REST/SSE, workspace-provider, remote-target, and
       Session Host suites remain green throughout migration.
+- [ ] The current and previous supported bridge generations can each serve or
+      reject the AHP edge according to the registered contract without
+      partially creating a session or changing its authority.
 - [ ] Clean-room tests prove the AHP endpoint is local-first, discoverable,
       independently installable, and functional without sibling plugins.
 - [ ] A client can switch between agent-bridge and a compatible released native
@@ -260,6 +293,14 @@ baseline as AHP versions evolve, but implementation must not begin from an
 uncited or version-neutral interpretation of the protocol.
 
 ## Journal
+
+### 2026-08-31 — Compatibility-foundation reconciliation
+
+- Kept AHP semantics in this effort while moving generic contract provenance,
+  durable-state tolerance, session pinning, writer fencing, cutover authority,
+  and mixed-version gates to the shared #1460 foundation.
+- Made #1266 and native-sub-agent delegation convergence sibling consumers of
+  the same compatibility machinery rather than parallel implementations.
 
 ### 2026-08-27 — Kickoff
 
