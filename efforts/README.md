@@ -10,9 +10,9 @@ that pattern to this repository.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Agent-Bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
+| [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266 |
-| [Agent-Bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Draft | #1448 |
+| [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Draft | #1448 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
 | [Account-Aware Operations](active/account-aware-operations/README.md) | Draft | See effort |
 | [Agent Machines Declarative Control Plane](active/agent-machines-declarative-control-plane/README.md) | Draft | See effort |
