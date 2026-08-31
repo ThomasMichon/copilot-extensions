@@ -45,6 +45,40 @@ def test_advertise_endpoint_reflects_bound_host(monkeypatch, tmp_path):
     assert ep.tcp_host_port == ("172.19.240.1", 52731)
 
 
+def test_clear_endpoint_removes_owned_record(tmp_path):
+    run = tmp_path / "run"
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41001", pid=1001)
+
+    rendezvous.clear_endpoint(run, owner_pid=1001)
+
+    assert rendezvous.read_endpoint(run) is None
+
+
+def test_clear_endpoint_preserves_successor_owned_record(tmp_path):
+    run = tmp_path / "run"
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41002", pid=2002)
+
+    rendezvous.clear_endpoint(run, owner_pid=1001)
+
+    ep = rendezvous.read_endpoint(run)
+    assert ep is not None
+    assert ep.pid == 2002
+    assert ep.tcp_host_port == ("127.0.0.1", 41002)
+
+
+def test_clear_endpoint_cutover_retains_newest_successor_record(tmp_path):
+    run = tmp_path / "run"
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41001", pid=1001)
+    rendezvous.write_endpoint(run, "tcp", "127.0.0.1:41002", pid=2002)
+
+    rendezvous.clear_endpoint(run, owner_pid=1001)
+
+    ep = rendezvous.read_endpoint(run)
+    assert ep is not None
+    assert ep.pid == 2002
+    assert ep.tcp_host_port == ("127.0.0.1", 41002)
+
+
 def test_server_bind_port_defaults_to_zero(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_PORT", raising=False)
     assert server._server_bind_port() == 0

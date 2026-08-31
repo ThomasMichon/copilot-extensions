@@ -120,6 +120,37 @@ def test_clear_endpoint(tmp_path):
     clear_endpoint(tmp_path)  # idempotent, no raise
 
 
+def test_clear_endpoint_removes_owned_record(tmp_path):
+    write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+
+    clear_endpoint(tmp_path, owner_pid=1001)
+
+    assert read_endpoint(tmp_path) is None
+
+
+def test_clear_endpoint_preserves_successor_owned_record(tmp_path):
+    write_endpoint(tmp_path, "tcp", "127.0.0.1:41002", pid=2002)
+
+    clear_endpoint(tmp_path, owner_pid=1001)
+
+    ep = read_endpoint(tmp_path)
+    assert ep is not None
+    assert ep.pid == 2002
+    assert ep.tcp_host_port == ("127.0.0.1", 41002)
+
+
+def test_clear_endpoint_cutover_retains_newest_successor_record(tmp_path):
+    write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+    write_endpoint(tmp_path, "tcp", "127.0.0.1:41002", pid=2002)
+
+    clear_endpoint(tmp_path, owner_pid=1001)
+
+    ep = read_endpoint(tmp_path)
+    assert ep is not None
+    assert ep.pid == 2002
+    assert ep.tcp_host_port == ("127.0.0.1", 41002)
+
+
 # --- read robustness --------------------------------------------------------
 
 
@@ -332,4 +363,3 @@ def test_write_endpoint_persists_alt(tmp_path):
     assert back is not None
     assert back.transport == "pipe"
     assert [(e.transport, e.address) for e in back.alt] == [("tcp", "127.0.0.1:40404")]
-
