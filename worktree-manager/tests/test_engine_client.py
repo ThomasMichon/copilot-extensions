@@ -154,6 +154,126 @@ def test_empty_worktrees_list(monkeypatch):
     assert ec.list_worktrees("dotfiles") == []
 
 
+def test_list_worktree_rows_preserves_picker_fields(monkeypatch):
+    payload = {
+        "version": 1,
+        "worktrees": [{
+            "id": "wt-ab12",
+            "session_bridge_live": True,
+            "live_intent": "Reviewing",
+        }],
+    }
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, stdout=json.dumps(payload)))
+
+    rows = ec.list_worktree_rows(
+        "dotfiles", classify=False, mux_details=True, cache_only=True)
+
+    assert rows == payload["worktrees"]
+
+
+def test_list_worktree_rows_uses_supplied_cancellable_runner(monkeypatch):
+    seen = {}
+
+    def runner(cmd, timeout):
+        seen["cmd"] = cmd
+        seen["timeout"] = timeout
+        return _fake_completed(
+            cmd, stdout=json.dumps({"version": 1, "worktrees": []}))
+
+    _install_fake(
+        monkeypatch,
+        lambda cmd, kw: pytest.fail("subprocess.run must not be used"),
+    )
+
+    assert ec.list_worktree_rows("dotfiles", runner=runner) == []
+    assert seen["cmd"][:1] == ["/fake/agent-worktrees"]
+    assert seen["timeout"] == ec._DEFAULT_TIMEOUT
+
+
+def test_refresh_worktree_uses_exact_provider_contract(monkeypatch):
+    seen = {}
+
+    def handler(cmd, kw):
+        seen["cmd"] = cmd
+        return _fake_completed(
+            cmd,
+            stdout=json.dumps({"version": 1, "worktrees": [{"id": "wt-ab12"}]}),
+        )
+
+    _install_fake(monkeypatch, handler)
+    rows = ec.list_worktree_rows(
+        "dotfiles",
+        classify=True,
+        mux_details=True,
+        fresh=True,
+        worktree_id="ab12",
+        refresh=True,
+    )
+
+    assert rows == [{"id": "wt-ab12"}]
+    assert seen["cmd"][-8:] == [
+        "list", "--json", "--classify", "--mux-details", "--fresh",
+        "--worktree-id", "ab12", "--refresh",
+    ]
+
+
+def test_refresh_worktree_falls_back_for_older_provider(monkeypatch):
+    calls = []
+
+    def handler(cmd, kw):
+        calls.append(cmd)
+        if "--refresh" in cmd:
+            return _fake_completed(
+                cmd,
+                returncode=2,
+                stderr="unrecognized arguments: --worktree-id ab12 --refresh",
+            )
+        if "backfill-sessions" in cmd:
+            return _fake_completed(cmd, stdout="Backfilled 1 session")
+        return _fake_completed(
+            cmd,
+            stdout=json.dumps({
+                "version": 1,
+                "worktrees": [{"id": "wt-ab12"}, {"id": "wt-cd34"}],
+            }),
+        )
+
+    _install_fake(monkeypatch, handler)
+    assert ec.list_worktree_rows(
+        "dotfiles",
+        classify=True,
+        mux_details=True,
+        fresh=True,
+        worktree_id="ab12",
+        refresh=True,
+    ) == [{"id": "wt-ab12"}]
+    assert len(calls) == 3
+    assert "backfill-sessions" in calls[1]
+    assert "--refresh" not in calls[2]
+
+
+def test_list_worktree_sessions_parses_rows(monkeypatch):
+    payload = {"version": 1, "sessions": [{"id": "session-1", "is_head": True}]}
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, stdout=json.dumps(payload)))
+
+    assert ec.list_worktree_sessions("dotfiles", "wt-ab12") == payload["sessions"]
+
+
+def test_recent_worktree_messages_returns_envelope(monkeypatch):
+    payload = {
+        "version": 1,
+        "session_id": "session-1",
+        "messages": [{"role": "assistant", "text": "done"}],
+    }
+    _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
+        cmd, stdout=json.dumps(payload)))
+
+    assert ec.recent_worktree_messages(
+        "dotfiles", "wt-ab12", limit=5) == payload
+
+
 def test_inherited_provider_argv_wins(monkeypatch):
     monkeypatch.setenv(
         ec.ENGINE_ARGV_ENV,

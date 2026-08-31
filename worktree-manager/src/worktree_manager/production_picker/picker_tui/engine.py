@@ -1177,6 +1177,9 @@ class PickerScreen(Widget):
         # _open_submenu. (The overlay left the manual registry entirely.)
         self.msgview = None           # recent-messages viewer overlay (#session-viewer)
         self._msgview_lock = threading.Lock()
+        self._provider_loader = None
+        self._provider_loader_lock = threading.Lock()
+        self._provider_cancelled = False
         # Clean/Sync scope + New-worktree options are native ModalScreens now
         # (#88 F4): no self.cleanup / self.optmenu state attrs -- see
         # ScopeDlgScreen and _open_cleanup / _open_sync / _open_optmenu.
@@ -1493,6 +1496,14 @@ class PickerScreen(Widget):
         if loader is not None:
             try:
                 loader.cancel()
+            except Exception:
+                pass
+        with self._provider_loader_lock:
+            self._provider_cancelled = True
+            provider_loader = self._provider_loader
+        if provider_loader is not None and provider_loader is not loader:
+            try:
+                provider_loader.cancel()
             except Exception:
                 pass
         # D2: tear down any held streaming pivot channel (a ``subscribe`` stream
@@ -4088,7 +4099,8 @@ class PickerScreen(Widget):
             if rec.get("source_kind", "machine-ssh") == "machine-ssh":
                 try:
                     from . import data_local
-                    row = data_local.refresh_one(wt_id, m, e)
+                    row = data_local.refresh_one(
+                        wt_id, m, e, runner=self._provider_runner())
                 except Exception:
                     row = None
             if row is not None:
@@ -4109,6 +4121,20 @@ class PickerScreen(Widget):
                 pass
 
         threading.Thread(target=work, name="wt-refresh", daemon=True).start()
+
+    def _provider_runner(self):
+        """Return the Picker-owned tracked runner for local provider commands."""
+        with self._provider_loader_lock:
+            if self._provider_cancelled:
+                raise RuntimeError("picker provider runner is cancelled")
+            loader = getattr(self, "loader", None)
+            if loader is not None:
+                return loader._spawn
+            if self._provider_loader is None:
+                from . import data_ssh
+
+                self._provider_loader = data_ssh.LiveLoader([])
+            return self._provider_loader._spawn
 
     def _replace_row(self, wt_id, row):
         """Swap a single freshly-normalized row into ``self.data`` by worktree id
@@ -4741,9 +4767,9 @@ class PickerScreen(Widget):
         conversation turns of the worktree's latest session so the operator can
         tell what it was doing (and whether it still needs follow-up) without
         opening it. The load runs off the render thread -- local worktrees call
-        the summary layer in-process; remote worktrees run ``recent-messages``
-        over SSH. Never blocks or crashes the UI: a failure resolves to an error
-        line in the overlay.
+        the attributable provider CLI; remote worktrees run the same
+        ``recent-messages`` contract over SSH. Never blocks or crashes the UI:
+        a failure resolves to an error line in the overlay.
 
         Migrated to a native Textual ``ModalScreen`` (#88 F4): this builds the
         engine-owned ``self.msgview`` dict, starts the daemon loader thread
@@ -4766,23 +4792,19 @@ class PickerScreen(Widget):
     def _load_worktree_sessions(self, rec, wt_id, m, e):
         """Fetch the worktree's Copilot session registry (id + title + head).
 
-        Best-effort, off the render thread: local worktrees read the registry
-        in-process; remote worktrees run ``list-sessions`` over SSH. Returns a
+        Best-effort, off the render thread: local worktrees call the provider
+        CLI; remote worktrees run ``list-sessions`` over SSH. Returns a
         list of session dicts (each carries ``id``, ``name``, ``is_head``,
         ``state``) or ``[]`` on any error -- the session list is a diagnostic
         aid, never worth failing the overlay over.
         """
         try:
             if (m, e) == getattr(self.src, "LOCAL", None):
-                from .. import config as _cfg
-                from .. import sessions as _sessions
-                from .. import tracking as _tracking
-                records = _tracking.list_records(_cfg.tracking_dir())
-                record = next(
-                    (r for r in records if r.worktree_id == wt_id), None)
-                if record is None:
-                    return []
-                return _sessions.list_worktree_sessions(record)
+                from worktree_manager import engine_client
+                from .. import context
+
+                return engine_client.list_worktree_sessions(
+                    context.project(), wt_id, runner=self._provider_runner())
             from . import data_ssh, maintenance
             argv = data_ssh.list_sessions_argv(
                 m,
@@ -4814,17 +4836,15 @@ class PickerScreen(Widget):
             if not wt_id:
                 payload = {"error": "no worktree id"}
             elif (m, e) == getattr(self.src, "LOCAL", None):
-                from .. import config as _cfg
-                from .. import sessions as _sessions
-                from .. import tracking as _tracking
-                records = _tracking.list_records(_cfg.tracking_dir())
-                record = next(
-                    (r for r in records if r.worktree_id == wt_id), None)
-                if record is None:
-                    payload = {"error": f"worktree {wt_id} not found locally"}
-                else:
-                    payload = _sessions.recent_worktree_messages(
-                        record, limit=limit)
+                from worktree_manager import engine_client
+                from .. import context
+
+                payload = engine_client.recent_worktree_messages(
+                    context.project(),
+                    wt_id,
+                    limit=limit,
+                    runner=self._provider_runner(),
+                )
             else:
                 from . import data_ssh, maintenance
                 argv = data_ssh.recent_messages_argv(
