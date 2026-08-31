@@ -1568,6 +1568,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
             target_machine=args.target_machine,
             target_repo=args.target_repo,
             label=args.label,
+            evaluator_ref=args.evaluator_ref,
             limit=args.limit,
         )
     from . import tracking
@@ -3897,6 +3898,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--target-machine")
     p.add_argument("--target-repo")
     p.add_argument("--label")
+    p.add_argument("--evaluator-ref")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument(
         "--machine",

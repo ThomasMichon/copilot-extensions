@@ -1,0 +1,15 @@
+{
+  "name": "copilot-extensions-review-workers",
+  "labels": [
+    "self-hosted-review"
+  ],
+  "repos": "github.com/ThomasMichon/copilot-extensions",
+  "concurrency": 1,
+  "interval": 30,
+  "max_attempts": 3,
+  "body": {
+    "type": "headless",
+    "agent": "copilot-extensions-reviewer"
+  },
+  "description": "Bounded worker pool for the repository's self-hosted reviewer loop"
+}

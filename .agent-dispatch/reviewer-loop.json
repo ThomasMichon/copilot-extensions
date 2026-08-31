@@ -1,0 +1,20 @@
+{
+  "repository": "ThomasMichon/copilot-extensions",
+  "lane": "github.com/ThomasMichon/copilot-extensions",
+  "acting_identity": "ThomasMichon",
+  "landing": "author",
+  "allow_forks": true,
+  "discover_updated_since": "2026-08-31T00:00:00Z",
+  "excluded_author_associations": [
+    "OWNER",
+    "MEMBER",
+    "COLLABORATOR"
+  ],
+  "excluded_authors": [
+    "dependabot[bot]",
+    "github-actions[bot]",
+    "copilot-pull-request-reviewer"
+  ],
+  "task_label": "self-hosted-review",
+  "guidance": "plugins/copilot-extensions-harness/references/reviewer-guidance.md"
+}

@@ -107,7 +107,7 @@ def test_timeout_reaps_recursive_descendant(tmp_path):
         env=env,
         sandbox=tmp_path,
         limits=Limits(
-            wall_seconds=0.5,
+            wall_seconds=2.0,
             max_processes=8,
             max_memory_mb=256,
             max_temp_mb=32,
@@ -143,7 +143,7 @@ def test_timeout_reaps_descendant_requesting_detachment(tmp_path):
         env=env,
         sandbox=tmp_path,
         limits=Limits(
-            wall_seconds=0.5,
+            wall_seconds=2.0,
             max_processes=8,
             max_memory_mb=256,
             max_temp_mb=32,

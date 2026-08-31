@@ -158,6 +158,8 @@ def build_remote_create_argv(
         argv += ["--affinity", aff]
     if getattr(args, "target_repo", None):
         argv += ["--target-repo", args.target_repo]
+    if getattr(args, "evaluator_ref", None):
+        argv += ["--evaluator-ref", args.evaluator_ref]
     if getattr(args, "target_worktree", None):
         argv += ["--target-worktree", args.target_worktree]
     if getattr(args, "source", None):

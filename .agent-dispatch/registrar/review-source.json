@@ -1,0 +1,29 @@
+{
+  "name": "copilot-extensions-review-source",
+  "kind": "emitter",
+  "spec": {
+    "id": "copilot-extensions-review-source",
+    "command": [
+      "{python}",
+      "plugins/copilot-extensions-harness/scripts/reviewer_source.py",
+      "discover",
+      "--policy",
+      ".agent-dispatch/reviewer-loop.json"
+    ],
+    "interval_seconds": 900,
+    "timeout_seconds": 120,
+    "cwd": "../..",
+    "task_output": "json",
+    "evaluator_ref": "copilot-extensions-review-lifecycle",
+    "side_load": {
+      "command": [
+        "{python}",
+        "plugins/copilot-extensions-harness/scripts/reviewer_source.py",
+        "side-load",
+        "{change_ref}",
+        "--policy",
+        ".agent-dispatch/reviewer-loop.json"
+      ]
+    }
+  }
+}

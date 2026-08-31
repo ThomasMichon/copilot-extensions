@@ -5,6 +5,7 @@
     }
   },
   "enabledPlugins": {
+    "agent-dispatch@copilot-extensions": true,
     "copilot-extensions-harness@copilot-extensions": true,
     "customizing-copilot@copilot-extensions": true,
     "efforts@copilot-extensions": true,

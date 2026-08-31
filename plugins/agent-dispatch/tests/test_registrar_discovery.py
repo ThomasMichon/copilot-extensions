@@ -130,6 +130,51 @@ def test_read_declaration_file_json(tmp_path):
     assert decl.labels == ("general",)
 
 
+def test_relative_emitter_cwd_resolves_from_declaration_directory(tmp_path):
+    root = tmp_path / "repo"
+    registrar = root / ".agent-dispatch" / "registrar"
+    registrar.mkdir(parents=True)
+    path = registrar / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "reviews",
+                "kind": "emitter",
+                "spec": {
+                    "id": "reviews",
+                    "command": ["python", "tools/reviews.py"],
+                    "interval_seconds": 60,
+                    "cwd": "../..",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    decl = read_declaration_file(path)
+    assert decl.spec["cwd"] == str(root.resolve())
+
+
+@pytest.mark.parametrize("cwd", ["/srv/repo", "C:\\src\\repo"])
+def test_cross_platform_absolute_emitter_cwd_is_not_rebased(tmp_path, cwd):
+    path = tmp_path / "reviews.json"
+    path.write_text(
+        json.dumps(
+            {
+                "name": "reviews",
+                "kind": "emitter",
+                "spec": {
+                    "id": "reviews",
+                    "command": ["reviewer"],
+                    "interval_seconds": 60,
+                    "cwd": cwd,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert read_declaration_file(path).spec["cwd"] == cwd
+
+
 def test_read_declaration_file_yaml(tmp_path):
     f = tmp_path / "general.yaml"
     f.write_text("name: general\nlabels: [general]\nconcurrency: 2\n", encoding="utf-8")
