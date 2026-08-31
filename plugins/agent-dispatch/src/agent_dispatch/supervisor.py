@@ -61,6 +61,11 @@ VerdictFn = Callable[[str, "str | None", "str | None"], str]
 #: steering message to a stalled-but-live embodied session. Injectable for tests.
 NudgeFn = Callable[[str, "str | None", dict], bool]
 
+#: A re-drive sender for a spawned-but-unclaimed embodied worker. The session is
+#: known live, but the task is still queued/unowned, so the supervisor re-sends
+#: the idempotent autopilot seed instead of spawning a duplicate.
+RedriveFn = Callable[[str, "str | None", dict, dict, dict], bool]
+
 #: A turn-state resolver: ``(worktree, machine) -> 'running' | 'idle' | None``.
 #: Reads an embodied worker's coarse turn state (the derived turn boundary the
 #: coordination layer computes from its session events); ``None`` when the worker
@@ -154,6 +159,51 @@ def _default_nudge(worktree: str, machine: str | None, task: dict) -> bool:
     return bridge.send_nudge(worktree, message)
 
 
+def make_redrive_sender(route: str = "") -> RedriveFn:
+    """Build a re-drive sender that uses the same coordinator route as spawn."""
+
+    def redrive(
+        worktree: str,
+        machine: str | None,
+        task: dict,
+        session: dict,
+        reservation: dict,
+    ) -> bool:
+        from . import bridge, embody
+
+        task_id = str(task.get("id") or "")
+        if not task_id:
+            return False
+        worker_id = f"redrive-{uuid.uuid4().hex[:8]}"
+        prompt = embody.autopilot_worker_prompt(
+            task_id, worker_id=worker_id, route=route
+        )
+        session_id = session.get("session_id")
+        expected_session_id = session_id if isinstance(session_id, str) else None
+        return bridge.redrive_embodied_worker(
+            worktree,
+            prompt,
+            machine=machine,
+            expected_session_id=expected_session_id,
+            idempotency_key=f"{reservation.get('key')}:redrive",
+        )
+
+    return redrive
+
+
+def _default_redrive(
+    worktree: str,
+    machine: str | None,
+    task: dict,
+    session: dict,
+    reservation: dict,
+) -> bool:
+    """Re-send the autopilot seed to a live worker that never claimed its task."""
+    return make_redrive_sender()(
+        worktree, machine, task, session, reservation
+    )
+
+
 def _default_turn_state(worktree: str, machine: str | None) -> str | None:
     """Resolve an embodied worker's coarse **turn state** via the agent-bridge
     registry (shells the CLI, cross-machine over SSH).
@@ -180,6 +230,22 @@ def _worktree_from_owner(owner: str | None) -> str | None:
     from . import tracking
 
     return tracking.worktree_from_owner(owner)
+
+
+def _worktree_from_reservation(reservation: dict, owner: str | None = None) -> str | None:
+    """Best-effort worktree handle for a spawn reservation.
+
+    Newer reservations persist ``worktree`` directly. Older rows sometimes only
+    have the mux session handle (``wt-<worktree>``); decode that enough to
+    reconcile and re-drive rather than leaving the worker invisible forever.
+    """
+    worktree = reservation.get("worktree")
+    if isinstance(worktree, str) and worktree:
+        return worktree
+    handle = reservation.get("session_handle")
+    if isinstance(handle, str) and handle.startswith("wt-") and len(handle) > 3:
+        return handle[3:]
+    return _worktree_from_owner(owner)
 
 
 def _machine_from_owner(owner: str | None) -> str | None:
@@ -450,6 +516,7 @@ class Supervisor:
         fleet_activity_fn: FleetActivityFn | None = None,
         local_body_verdict_fn: LocalBodyVerdictFn | None = None,
         nudge_fn: NudgeFn | None = None,
+        redrive_fn: RedriveFn | None = None,
         turn_state_fn: TurnStateFn | None = None,
         capacity_gate: Callable[[dict], bool] | None = None,
         evaluator: Any | None = None,
@@ -506,6 +573,9 @@ class Supervisor:
         )
         #: Nudge sender used by :meth:`nudge_stalled`. Injectable for tests.
         self.nudge_fn = nudge_fn or _default_nudge
+        #: Re-drive sender used when a spawned CLI body is alive but still has
+        #: not claimed its queued task after a supervisor/bridge restart.
+        self.redrive_fn = redrive_fn or _default_redrive
         #: When True, the inter-cycle wait in :meth:`serve` is **interruptible by a
         #: turn boundary**: it returns early when an embodied worker settles a turn
         #: (goes idle), so a completed goal is reconciled and the next task embodied
@@ -521,6 +591,9 @@ class Supervisor:
         #: task_id -> last nudge ts (in-memory cooldown so a persistently-quiet
         #: live worker is nudged at most once per stall window, not every cycle).
         self._last_nudge: dict[str, float] = {}
+        #: reservation key -> redrive attempted in this supervisor process. A
+        #: restarted supervisor may retry; a healthy worker claims promptly.
+        self._redriven_spawn_keys: set[str] = set()
         #: Optional pre-reservation capacity gate. When it returns False for a
         #: task, the task is **skipped this cycle without a reservation** -- so a
         #: transient "no capacity" (e.g. a fleet pool that is entirely asleep)
@@ -661,7 +734,6 @@ class Supervisor:
         local_by_id: dict[str, dict] | None = None
         held = 0
         for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
-            worktree = res.get("worktree")
             try:
                 task = self.client.get(res["task_id"])
             except DispatchError:
@@ -748,7 +820,7 @@ class Supervisor:
                     except DispatchError:
                         pass
                 continue
-            probe_worktree = worktree or _worktree_from_owner(owner)
+            probe_worktree = _worktree_from_reservation(res, owner)
             if not probe_worktree or not owner:
                 continue
             try:
@@ -926,7 +998,7 @@ class Supervisor:
                             "recovery release failed for reservation %s", res["key"]
                         )
                 continue  # local body handled -> don't fall to the worktree path
-            worktree = res.get("worktree") or _worktree_from_owner(owner)
+            worktree = _worktree_from_reservation(res, owner)
             if not worktree:
                 continue  # headless / no worktree handle -> not recoverable here
             try:
@@ -972,6 +1044,68 @@ class Supervisor:
                 log.exception("recovery release failed for reservation %s", res["key"])
         return recovered
 
+    def redrive_unclaimed_spawns(self) -> int:
+        """Prompt live embodied workers that exist but never claimed the task.
+
+        A supervisor/bridge restart can leave a reservation in ``spawned`` while
+        the task is still ``queued`` and unowned: the body exists, but its seed
+        was lost or never resumed. That reservation must remain active (to
+        prevent duplicate spawns), but the live worker needs one explicit drive
+        prompt so it can claim/start/complete the task. Only a confirmed live
+        worktree session is re-driven; unknown bridge state is left untouched.
+        """
+        redriven = 0
+        for res in self.client.list_reservations(state=SpawnState.SPAWNED, limit=500):
+            key = res.get("key")
+            if not key or key in self._redriven_spawn_keys:
+                continue
+            if _parse_fleet_body_handle(res.get("session_handle")) is not None:
+                continue
+            if _parse_local_body_handle(res.get("session_handle")) is not None:
+                continue
+            try:
+                task = self.client.get(res["task_id"])
+            except DispatchError:
+                continue
+            if task.get("status") != Status.QUEUED or task.get("owner"):
+                continue
+            worktree = _worktree_from_reservation(res, task.get("owner"))
+            if not worktree:
+                continue
+            machine = _machine_from_owner(task.get("owner"))
+            try:
+                session = self.liveness_fn(worktree, machine)
+            except Exception:
+                session = None
+            if not session:
+                continue
+            try:
+                self.client.record_spawn(
+                    key,
+                    session_handle=session.get("session_id"),
+                    worktree=session.get("worktree_id") or worktree,
+                )
+            except DispatchError:
+                pass
+            try:
+                if self.redrive_fn(worktree, machine, task, session, res):
+                    self._redriven_spawn_keys.add(key)
+                    redriven += 1
+                    if self.publish_activity:
+                        try:
+                            self.client.set_activity(
+                                task["id"], "ACTIVE", reservation_key=key
+                            )
+                        except DispatchError:
+                            pass
+                    log.info(
+                        "re-drove live unclaimed embody for task %s (%s)",
+                        task["id"], key,
+                    )
+            except Exception:
+                log.exception("redrive failed for reservation %s", key)
+        return redriven
+
     def nudge_stalled(self, *, now: float | None = None) -> int:
         """Nudge a worker that is **confirmed alive but has gone quiet** -- no
         progress within ``stall_seconds`` (*nudge-before-recover*).
@@ -1000,7 +1134,7 @@ class Supervisor:
             if (now - self._last_nudge.get(task["id"], 0.0)) < self.stall_seconds:
                 continue  # cooldown -> already nudged this window
             owner = task.get("owner")
-            worktree = res.get("worktree") or _worktree_from_owner(owner)
+            worktree = _worktree_from_reservation(res, owner)
             if not worktree:
                 continue
             machine = _machine_from_owner(owner)
@@ -1042,7 +1176,7 @@ class Supervisor:
             if task.get("status") not in _LEASED:
                 continue
             owner = task.get("owner")
-            worktree = res.get("worktree") or _worktree_from_owner(owner)
+            worktree = _worktree_from_reservation(res, owner)
             if not worktree:
                 continue
             key = (worktree, _machine_from_owner(owner))
@@ -1247,6 +1381,7 @@ class Supervisor:
             self.hold_live_leases()
         if self.recover:
             self.recover_gone()
+        self.redrive_unclaimed_spawns()
         if self.nudge:
             self.nudge_stalled(now=now)
         failed_counts = self._failed_spawn_counts()

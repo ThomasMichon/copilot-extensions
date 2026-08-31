@@ -10,7 +10,9 @@ exhaustive on the "no" side.
 from __future__ import annotations
 
 import socket
+from types import SimpleNamespace
 
+from agent_bridge.app import _count_active_sessions
 from agent_bridge.self_retire import _is_listening, is_superseded
 
 CONFIG_DIR = "/does/not/matter"  # read_table is injected in every case
@@ -171,3 +173,16 @@ def test_end_to_end_supersession_with_real_listener():
             CONFIG_DIR, my_pid=111, my_generation=6,
             read_table=lambda _d: table,
         ) is True
+
+
+def test_active_count_includes_live_host_records_for_retire_gate():
+    mgr = SimpleNamespace(list_sessions=lambda: [], _live_host_records=lambda: [object()])
+
+    assert _count_active_sessions(mgr) == 1
+
+
+def test_active_count_includes_fresh_live_session_registrations_for_retire_gate():
+    mgr = SimpleNamespace(list_sessions=lambda: [], _live_host_records=lambda: [])
+    db = SimpleNamespace(list_fresh_live_sessions=lambda *, now: [{"session_id": "s"}])
+
+    assert _count_active_sessions(mgr, db) == 1

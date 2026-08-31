@@ -460,6 +460,25 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     assert handle["session"] == "sess-9"
 
 
+def test_parse_handle_accepts_nested_worktree_object():
+    """Older/newer agent-worktrees JSON shapes both preserve the worktree handle."""
+    import subprocess
+
+    from agent_dispatch import embody
+
+    result = subprocess.CompletedProcess(
+        args=[],
+        returncode=0,
+        stdout='{"worktree": {"id": "wt-nested"}, "session": "sess-nested"}',
+        stderr="",
+    )
+
+    assert embody.parse_handle(result) == {
+        "worktree": "wt-nested",
+        "session": "sess-nested",
+    }
+
+
 def test_resolving_client_uses_fresh_client_for_each_operation():
     from agent_dispatch.client import ResolvingDispatchClient
 
@@ -867,6 +886,83 @@ def test_recover_gone_worktree_started_requeues_then_reembodies(q, client):
     assert sup.poll_once() == [t.id]
     assert spawn.calls == [t.id, t.id]
     assert q.latest_reservation(t.id).attempt == 2
+
+
+def test_redrive_live_spawned_worker_that_never_claimed(q, client):
+    """A live spawned worker with a queued task is re-prompted, not duplicated."""
+    task = q.create("work")
+    reservation, acquired = q.reserve_spawn(task.id, reserved_by="supervisor")
+    assert acquired is True
+    q.record_spawn(reservation.key, session_handle="wt-wt-1", worktree=None)
+    redriven = []
+    spawn = _ok_spawn({"session": "new", "worktree": "new-wt"})
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        liveness_fn=lambda wt, mc: {
+            "session_id": "live-session-1",
+            "worktree_id": wt,
+            "liveness": "idle",
+        },
+        redrive_fn=lambda *args: redriven.append(args) or True,
+        nudge=False,
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert len(redriven) == 1
+    assert redriven[0][0] == "wt-1"
+    updated = q.get_reservation(reservation.key)
+    assert updated.state == SpawnState.SPAWNED
+    assert updated.worktree == "wt-1"
+    assert updated.session_handle == "live-session-1"
+
+
+def test_redrive_unknown_spawned_worker_is_left_reserved(q, client):
+    """Unknown bridge liveness is not treated as death and is not re-driven."""
+    task = q.create("work")
+    reservation, acquired = q.reserve_spawn(task.id, reserved_by="supervisor")
+    assert acquired is True
+    q.record_spawn(reservation.key, session_handle="wt-wt-1", worktree=None)
+    redriven = []
+    spawn = _ok_spawn({"session": "new", "worktree": "new-wt"})
+    sup = Supervisor(
+        client,
+        spawn_fn=spawn,
+        repo=TEST_REPO,
+        max_concurrent=5,
+        liveness_fn=lambda wt, mc: None,
+        redrive_fn=lambda *args: redriven.append(args) or True,
+        nudge=False,
+    )
+
+    assert sup.poll_once() == []
+    assert spawn.calls == []
+    assert redriven == []
+    assert q.get_reservation(reservation.key).state == SpawnState.SPAWNED
+
+
+def test_redrive_is_once_per_supervisor_process(q, client):
+    task = q.create("work")
+    reservation, acquired = q.reserve_spawn(task.id, reserved_by="supervisor")
+    assert acquired is True
+    q.record_spawn(reservation.key, session_handle="s", worktree="wt-1")
+    redriven = []
+    sup = Supervisor(
+        client,
+        spawn_fn=_ok_spawn(),
+        repo=TEST_REPO,
+        max_concurrent=5,
+        liveness_fn=lambda wt, mc: {"session_id": "live-session-1", "worktree_id": wt},
+        redrive_fn=lambda *args: redriven.append(args) or True,
+        nudge=False,
+    )
+
+    assert sup.redrive_unclaimed_spawns() == 1
+    assert sup.redrive_unclaimed_spawns() == 0
+    assert len(redriven) == 1
 
 
 @pytest.mark.parametrize("verdict", ["live", "unknown"])

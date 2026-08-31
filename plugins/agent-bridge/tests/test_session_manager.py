@@ -1792,6 +1792,70 @@ class TestRemoteForwardRelaySupervision:
         assert "s1" not in manager._relays
 
 
+@pytest.mark.asyncio
+async def test_startup_reattach_resumes_session_stopped_while_starting(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """A surviving Session Host that was STARTING at daemon restart is re-driven."""
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    session.restart_status = SessionStatus.STARTING.value
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=1,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(manager, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+
+    assert await manager.reattach_session_hosts(remote_recovery_timeout=1.0) == 1
+    assert attach.await_args.kwargs["send_resume"] is True
+
+
+@pytest.mark.asyncio
+async def test_startup_reattach_leaves_prior_idle_session_idle(
+    tmp_db, tmp_path, monkeypatch,
+) -> None:
+    """Already-idle sessions are adopted without manufacturing an extra turn."""
+    manager = SessionManager(tmp_db, session_host_state_dir=str(tmp_path))
+    session = Session("session-1", "agent", SpawnTarget(type="local", cwd=str(tmp_path)))
+    session.status = SessionStatus.STOPPED
+    session.acp_session_id = "acp-1"
+    session.restart_status = SessionStatus.IDLE.value
+    manager._sessions[session.session_id] = session
+    rec = SimpleNamespace(
+        session_id=session.session_id,
+        protocol_version=1,
+        host_version="test",
+        host_pid=123,
+        child_pid=456,
+        created_at=time.time(),
+        resume_on_reattach=False,
+        boundary="local",
+    )
+    attach = AsyncMock(return_value=True)
+    monkeypatch.setattr(manager, "_recover_remote_host_records", AsyncMock(return_value=0))
+    monkeypatch.setattr(manager, "_prune_dead_hosts", lambda: None)
+    monkeypatch.setattr(manager, "_live_host_records", lambda: [rec])
+    monkeypatch.setattr(manager, "_rec_child_alive", lambda _rec: True)
+    monkeypatch.setattr(manager, "_reattach_one", attach)
+
+    assert await manager.reattach_session_hosts(remote_recovery_timeout=1.0) == 1
+    assert attach.await_args.kwargs["send_resume"] is False
+
+
 class TestSubmitPrompt:
     """Prompt submission."""
 

@@ -173,6 +173,87 @@ def send_nudge(
     return proc.returncode == 0
 
 
+def redrive_embodied_worker(
+    worktree: str,
+    prompt: str,
+    *,
+    machine: str | None = None,
+    expected_session_id: str | None = None,
+    sender: str = "agent-dispatch-supervisor",
+    idempotency_key: str | None = None,
+    timeout: float | None = 20.0,
+) -> bool:
+    """Deliver a work-bearing prompt to an already-live embodied worker.
+
+    Used by the supervisor after a restart/cutover when the spawn reservation says
+    an embody worker exists, the live-session registry confirms a worker is still
+    there, but the task remains queued/unclaimed because the startup seed was
+    lost or never resumed. The prompt is delivered by worktree handle, guarded by
+    the resolved live session id when available, and queued if the worker is busy.
+    """
+    bridge_argv = [
+        "agent-bridge",
+        "send",
+        "--no-wait",
+        "--queue",
+        "--kind",
+        "prompt",
+        "--sender",
+        sender,
+        *(
+            ["--idempotency-key", idempotency_key]
+            if idempotency_key
+            else []
+        ),
+        *(
+            ["--expected-session-id", expected_session_id]
+            if expected_session_id
+            else []
+        ),
+        worktree,
+        "--prompt-file",
+        "-",
+    ]
+    local_machine = remote_dispatch.local_machine()
+    is_remote = (
+        machine is not None
+        and local_machine is not None
+        and machine.casefold() != local_machine.casefold()
+    )
+    if is_remote:
+        ssh = shutil.which("ssh")
+        if ssh is None:
+            return False
+        remote_cmd = " ".join(shlex.quote(arg) for arg in bridge_argv)
+        cmd = [
+            ssh,
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "ConnectTimeout=3",
+            machine.lower(),
+            remote_cmd,
+        ]
+    else:
+        exe = _agent_bridge_launch_prefix()
+        if exe is None:
+            return False
+        cmd = [*exe, *bridge_argv[1:]]
+    try:
+        proc = subprocess.run(  # noqa: S603 -- fixed argv, exe resolved locally
+            cmd,
+            input=prompt,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            **no_window_kwargs(),
+        )
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return proc.returncode == 0
+
+
 def resume_steered_owner(
     owner: str,
     task_id: str,

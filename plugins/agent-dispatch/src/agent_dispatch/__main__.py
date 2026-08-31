@@ -2535,6 +2535,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         make_embody_spawn,
         make_headless_spawn,
         make_label_routed_spawn,
+        make_redrive_sender,
     )
 
     repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
@@ -2553,6 +2554,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         label for label in (getattr(args, "cli_label", None) or []) if label
     ]
     capacity_gate = None
+    redrive_fn = None
     if pool:
         from . import remote_dispatch
         from .fleet import FleetSpawner
@@ -2604,6 +2606,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         # a raw --url is refused here (a spawned local body must not be pinned to a
         # raw, possibly-dynamic endpoint).
         route = _spawn_route(args)
+        redrive_fn = make_redrive_sender(route=route)
         headless_spawn = make_headless_spawn(
             agent=getattr(args, "headless_agent", None) or "task-worker",
             route=route,
@@ -2689,6 +2692,7 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             reactive_interval=getattr(args, "reactive_interval", 2.0) or 2.0,
             capacity_gate=capacity_gate,
             evaluator=evaluator,
+            redrive_fn=redrive_fn,
         )
         if args.once:
             return _emit({"spawned": sup.poll_once()})
