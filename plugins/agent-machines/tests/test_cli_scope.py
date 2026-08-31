@@ -108,7 +108,9 @@ def test_reconcile_explicit_non_git_directory_is_specific(monkeypatch, tmp_path)
         cli._layout,
         "resolve_cwd_repo",
         lambda path: (_ for _ in ()).throw(
-            ManifestError(f"{path} is not inside a Git repository")
+            cli._layout.NotGitRepositoryError(
+                f"{path} is not inside a Git repository"
+            )
         ),
     )
 

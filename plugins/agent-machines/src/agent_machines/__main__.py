@@ -58,9 +58,7 @@ def _collect_reconcile_packages(
                 )
             try:
                 repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo(repo_path)
-            except ManifestError as exc:
-                if "is not inside a Git repository" not in str(exc):
-                    raise
+            except _layout.NotGitRepositoryError as exc:
                 raise ManifestError(
                     f"repo path {selector!r} is not a Git repository"
                 ) from exc

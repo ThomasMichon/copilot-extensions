@@ -56,6 +56,14 @@ class MigrationResult:
         return asdict(self)
 
 
+class GitUnavailableError(ManifestError):
+    """Git is required to resolve a repository-local reconciliation scope."""
+
+
+class NotGitRepositoryError(ManifestError):
+    """The selected path exists but is not contained by a Git repository."""
+
+
 def _legacy_moves(repo_path: Path, repo_name: str) -> list[tuple[Path, Path]]:
     legacy = repo_path / discover.LEGACY_MACHINE_STATE_DIR
     if legacy.exists() and not legacy.is_dir():
@@ -244,13 +252,13 @@ def resolve_cwd_repo(
     """
     current = (cwd or Path.cwd()).resolve()
     if shutil.which("git") is None:
-        raise ManifestError(
+        raise GitUnavailableError(
             "git is required to resolve repository scope; install Git or pass "
             "--all-projects"
         )
     top_level = _git_path(current, "--show-toplevel")
     if top_level is None:
-        raise ManifestError(
+        raise NotGitRepositoryError(
             f"{current} is not inside a Git repository; pass --repo "
             "<name-or-path> or --all-projects"
         )

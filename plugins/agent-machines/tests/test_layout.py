@@ -22,6 +22,11 @@ from ._helpers import base_package, write_package
 GIT = shutil.which("git")
 
 
+def _git(*args: str) -> None:
+    assert GIT is not None
+    subprocess.run([GIT, *args], check=True)
+
+
 def test_doctor_reports_canonical_layout(tmp_path):
     write_package(tmp_path, "defaults.yaml", base_package(gate=["*"]))
     report = inspect_repo_layout(tmp_path, "acme", "box-1")
@@ -305,22 +310,22 @@ def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
 @pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
 def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path):
     anchor = tmp_path / "anchor"
-    subprocess.run(["git", "init", "-q", str(anchor)], check=True)
-    subprocess.run(
-        ["git", "-C", str(anchor), "config", "user.email", "test@example.com"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(anchor), "config", "user.name", "Test"],
-        check=True,
-    )
+    _git("init", "-q", str(anchor))
+    _git("-C", str(anchor), "config", "user.email", "test@example.com")
+    _git("-C", str(anchor), "config", "user.name", "Test")
     (anchor / "file.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "-C", str(anchor), "add", "file.txt"], check=True)
-    subprocess.run(["git", "-C", str(anchor), "commit", "-qm", "init"], check=True)
+    _git("-C", str(anchor), "add", "file.txt")
+    _git("-C", str(anchor), "commit", "-qm", "init")
     worktree = tmp_path / "worktree"
-    subprocess.run(
-        ["git", "-C", str(anchor), "worktree", "add", "-q", "-b", "test", str(worktree)],
-        check=True,
+    _git(
+        "-C",
+        str(anchor),
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "test",
+        str(worktree),
     )
     registry = {
         "repos": {
@@ -343,22 +348,22 @@ def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path):
 @pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
 def test_resolve_cwd_repo_matches_registered_nonadopted_worktree(tmp_path):
     anchor = tmp_path / "anchor"
-    subprocess.run(["git", "init", "-q", str(anchor)], check=True)
-    subprocess.run(
-        ["git", "-C", str(anchor), "config", "user.email", "test@example.com"],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(anchor), "config", "user.name", "Test"],
-        check=True,
-    )
+    _git("init", "-q", str(anchor))
+    _git("-C", str(anchor), "config", "user.email", "test@example.com")
+    _git("-C", str(anchor), "config", "user.name", "Test")
     (anchor / "file.txt").write_text("x", encoding="utf-8")
-    subprocess.run(["git", "-C", str(anchor), "add", "file.txt"], check=True)
-    subprocess.run(["git", "-C", str(anchor), "commit", "-qm", "init"], check=True)
+    _git("-C", str(anchor), "add", "file.txt")
+    _git("-C", str(anchor), "commit", "-qm", "init")
     worktree = tmp_path / "worktree"
-    subprocess.run(
-        ["git", "-C", str(anchor), "worktree", "add", "-q", "-b", "test", str(worktree)],
-        check=True,
+    _git(
+        "-C",
+        str(anchor),
+        "worktree",
+        "add",
+        "-q",
+        "-b",
+        "test",
+        str(worktree),
     )
     registry = {
         "repos": {
@@ -380,7 +385,7 @@ def test_resolve_cwd_repo_matches_registered_nonadopted_worktree(tmp_path):
 @pytest.mark.skipif(GIT is None, reason="git is required for repository fixture")
 def test_resolve_cwd_repo_standalone_falls_back_to_top_level(tmp_path):
     repo = tmp_path / "standalone"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    _git("init", "-q", str(repo))
     nested = repo / "nested"
     nested.mkdir()
 
