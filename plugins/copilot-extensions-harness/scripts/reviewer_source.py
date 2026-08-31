@@ -45,6 +45,18 @@ class ReviewerSourceError(RuntimeError):
     """The repository review source could not produce a trustworthy result."""
 
 
+def _command_argv(executable: str, args: list[str]) -> list[str]:
+    if os.name == "nt" and Path(executable).suffix.casefold() in {".cmd", ".bat"}:
+        return [
+            os.environ.get("COMSPEC", "cmd.exe"),
+            "/d",
+            "/c",
+            executable,
+            *args,
+        ]
+    return [executable, *args]
+
+
 def _run_json(
     argv: list[str],
     *,
@@ -56,16 +68,7 @@ def _run_json(
         executable = shutil.which(argv[0])
         if executable is None:
             raise ReviewerSourceError(f"required command is not on PATH: {argv[0]}")
-        if os.name == "nt" and Path(executable).suffix.casefold() in {".cmd", ".bat"}:
-            command = [
-                os.environ.get("COMSPEC", "cmd.exe"),
-                "/d",
-                "/c",
-                executable,
-                *argv[1:],
-            ]
-        else:
-            command = [executable, *argv[1:]]
+        command = _command_argv(executable, argv[1:])
     completed = runner(
         command, check=False, capture_output=True, text=True, env=env
     )
@@ -116,7 +119,10 @@ def _gh_environment(
     if gh is None:
         raise ReviewerSourceError("required command is not on PATH: gh")
     token = subprocess.run(
-        [gh, "auth", "token", "--user", str(policy["acting_identity"])],
+        _command_argv(
+            gh,
+            ["auth", "token", "--user", str(policy["acting_identity"])],
+        ),
         check=False,
         capture_output=True,
         text=True,
@@ -142,22 +148,23 @@ def _gh_environment(
 def _pull_requests(policy: dict[str, Any], *, runner: Runner) -> list[dict[str, Any]]:
     owner, name = policy["repository"].split("/", 1)
     rows = []
-    after = ""
+    after: str | None = None
     while True:
+        argv = [
+            "gh",
+            "api",
+            "graphql",
+            "-f",
+            f"query={_QUERY}",
+            "-F",
+            f"owner={owner}",
+            "-F",
+            f"name={name}",
+        ]
+        if after is not None:
+            argv += ["-f", f"after={after}"]
         data = _run_json(
-            [
-                "gh",
-                "api",
-                "graphql",
-                "-f",
-                f"query={_QUERY}",
-                "-F",
-                f"owner={owner}",
-                "-F",
-                f"name={name}",
-                "-f",
-                f"after={after}",
-            ],
+            argv,
             runner=runner,
             env=_gh_environment(policy, runner=runner),
         )

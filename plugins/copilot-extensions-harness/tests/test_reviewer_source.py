@@ -319,4 +319,16 @@ def test_discovery_paginates_all_open_pull_requests(tmp_path):
         )
 
     assert reviewer_source.discover(_policy(tmp_path), runner=runner) == []
+    assert not any(
+        isinstance(value, str) and value.startswith("after=")
+        for value in calls[-2]
+    )
     assert any("after=cursor-1" == value for value in calls[-1])
+
+
+def test_windows_command_shim_uses_cmd(monkeypatch):
+    monkeypatch.setattr(reviewer_source.os, "name", "nt")
+    argv = reviewer_source._command_argv(
+        "C:\\tools\\gh.cmd", ["auth", "status"]
+    )
+    assert argv[1:4] == ["/d", "/c", "C:\\tools\\gh.cmd"]
