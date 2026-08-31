@@ -64,9 +64,9 @@ Required pull-request CI is a fast regression gate, not the complete test
 inventory. Its design target is a wall time below five minutes under normal
 runner variance. This is not the runner's timeout: containment budgets such as
 the 15-minute per-plugin ceiling remain safety limits for unusually slow or
-explicit runs. A suite that cannot fit the required-CI target must provide a
-contract-focused smoke lane and move its exhaustive cross-products to a
-scheduled or manually dispatched workflow.
+explicit runs. A suite that cannot fit the required pull-request CI target must
+provide a contract-focused smoke lane and move its exhaustive cross-products to
+a scheduled or manually dispatched workflow.
 
 - Gate specialized suites by changed paths so unrelated pull requests do not
   pay their cost.
@@ -78,8 +78,8 @@ scheduled or manually dispatched workflow.
   behavior under test. Concurrency and process-lifecycle tests must bypass
   pooling so they still exercise real process boundaries.
 - When adding a large or subprocess-heavy family, state which lane owns it and
-  measure required-CI wall time. Do not make the default lane grow merely
-  because the tests are individually valid.
+  measure required pull-request CI wall time. Do not make the default lane grow
+  merely because the tests are individually valid.
 
 The installation-context foundation follows a reference-versus-adapter model
 for its most expensive matrices. The default suite exercises the complete
