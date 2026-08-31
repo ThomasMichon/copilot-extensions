@@ -79,6 +79,16 @@ def test_clear_endpoint_cutover_retains_newest_successor_record(tmp_path):
     assert ep.tcp_host_port == ("127.0.0.1", 41002)
 
 
+def test_clear_endpoint_removes_non_utf8_record(tmp_path):
+    run = tmp_path / "run"
+    run.mkdir()
+    rendezvous.endpoint_file(run).write_bytes(b"\xff")
+
+    rendezvous.clear_endpoint(run, owner_pid=1001)
+
+    assert not rendezvous.endpoint_file(run).exists()
+
+
 def test_server_bind_port_defaults_to_zero(monkeypatch):
     monkeypatch.delenv("AGENT_DISPATCH_PORT", raising=False)
     assert server._server_bind_port() == 0

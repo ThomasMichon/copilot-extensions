@@ -2,7 +2,27 @@
 
 from __future__ import annotations
 
+from agent_vault import rendezvous
 from agent_vault.service import advertised_endpoint
+
+
+def test_clear_endpoint_removes_owned_record(tmp_path):
+    rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41001", pid=1001)
+
+    rendezvous.clear_endpoint(tmp_path, owner_pid=1001)
+
+    assert rendezvous.read_endpoint(tmp_path) is None
+
+
+def test_clear_endpoint_preserves_successor_owned_record(tmp_path):
+    rendezvous.write_endpoint(tmp_path, "tcp", "127.0.0.1:41002", pid=2002)
+
+    rendezvous.clear_endpoint(tmp_path, owner_pid=1001)
+
+    endpoint = rendezvous.read_endpoint(tmp_path)
+    assert endpoint is not None
+    assert endpoint.pid == 2002
+    assert endpoint.tcp_host_port == ("127.0.0.1", 41002)
 
 
 def test_posix_prefers_unix_socket():

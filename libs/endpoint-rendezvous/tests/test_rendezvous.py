@@ -151,6 +151,14 @@ def test_clear_endpoint_cutover_retains_newest_successor_record(tmp_path):
     assert ep.tcp_host_port == ("127.0.0.1", 41002)
 
 
+def test_clear_endpoint_removes_non_utf8_record(tmp_path):
+    endpoint_file(tmp_path).write_bytes(b"\xff")
+
+    clear_endpoint(tmp_path, owner_pid=1001)
+
+    assert not endpoint_file(tmp_path).exists()
+
+
 # --- read robustness --------------------------------------------------------
 
 
