@@ -221,12 +221,17 @@ class DispatchClient:
 
     def yield_task(
         self, task_id: str, worker_id: str, *, note: str | None = None,
-        exclude: str | None = None,
+        exclude: str | None = None, release_spawn: bool = True,
     ) -> dict:
         return self._unwrap(
             self._http.post(
                 f"/tasks/{task_id}/yield",
-                json={"worker_id": worker_id, "note": note, "exclude": exclude},
+                json={
+                    "worker_id": worker_id,
+                    "note": note,
+                    "exclude": exclude,
+                    "release_spawn": release_spawn,
+                },
             )
         )
 

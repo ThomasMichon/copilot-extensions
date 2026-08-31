@@ -1497,6 +1497,7 @@ class Supervisor:
                             self.client.yield_task(
                                 task["id"], owner,
                                 note="fleet body confirmed gone; requeued for re-embody",
+                                release_spawn=False,
                             )
                         except DispatchError:
                             pass  # lease-expiry GC is the backstop requeue
@@ -1544,6 +1545,7 @@ class Supervisor:
                             self.client.yield_task(
                                 task["id"], owner,
                                 note="local body confirmed gone; requeued for re-embody",
+                                release_spawn=False,
                             )
                         except DispatchError:
                             pass  # lease-expiry GC is the backstop requeue
@@ -1592,6 +1594,7 @@ class Supervisor:
                         self.client.yield_task(
                             task["id"], owner,
                             note="worktree owner confirmed gone; requeued for re-embody",
+                            release_spawn=False,
                         )
                     except DispatchError:
                         pass  # lease-expiry GC is the backstop requeue
