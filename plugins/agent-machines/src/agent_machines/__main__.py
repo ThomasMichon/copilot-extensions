@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from . import __version__
 from . import discover as _discover
@@ -25,11 +26,53 @@ from . import validator as _validator
 from .manifest import ManifestError, RequirementPackage
 
 
-def _collect_packages(machine: str) -> list[RequirementPackage]:
+def _collect_all_packages(machine: str) -> list[RequirementPackage]:
     packages: list[RequirementPackage] = []
     for repo in _discover.discover(machine):
         packages.extend(repo.packages)
     return packages
+
+
+def _collect_reconcile_packages(
+    args: argparse.Namespace,
+    machine: str,
+) -> tuple[list[RequirementPackage], str]:
+    """Select the package scope shared by plan, validate, and restore."""
+    if getattr(args, "all_projects", False):
+        return _collect_all_packages(machine), "all-projects"
+    selector = getattr(args, "repo", None)
+    if selector:
+        candidate = _discover.resolve_registered_repo(selector)
+        if candidate is not None:
+            repo_name, repo_path = candidate
+            if not repo_path.is_dir():
+                raise ManifestError(
+                    f"registered repo {repo_name!r} is unavailable at {repo_path}"
+                )
+            repo_anchor = repo_path
+        else:
+            repo_path = Path(selector).expanduser()
+            if not repo_path.is_dir():
+                raise ManifestError(
+                    f"repo {selector!r} is neither a directory nor a registered repo name"
+                )
+            try:
+                repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo(repo_path)
+            except _layout.NotGitRepositoryError as exc:
+                raise ManifestError(
+                    f"repo path {selector!r} is not a Git repository"
+                ) from exc
+    else:
+        repo_name, repo_path, repo_anchor = _layout.resolve_cwd_repo()
+    return (
+        _discover.packages_in_repo(
+            repo_path,
+            repo_name,
+            machine,
+            source_anchor=repo_anchor,
+        ),
+        f"repo:{repo_name}",
+    )
 
 
 def _cmd_version(_args: argparse.Namespace) -> int:
@@ -98,12 +141,14 @@ def _cmd_migrate(args: argparse.Namespace) -> int:
 
 def _cmd_plan(args: argparse.Namespace) -> int:
     machine = args.machine or _discover.current_machine()
-    packages = _collect_packages(machine)
+    packages, scope = _collect_reconcile_packages(args, machine)
     plan = _reconcile.plan(packages, machine)
     if args.json:
-        print(json.dumps(_reconcile.plan_to_dict(plan), indent=2))
+        payload = _reconcile.plan_to_dict(plan)
+        payload["scope"] = scope
+        print(json.dumps(payload, indent=2))
         return 0
-    print(f"plan for {machine}  (drift-key {plan.drift_key})")
+    print(f"plan for {machine} [{scope}]  (drift-key {plan.drift_key})")
     if not plan.surfaces and not plan.modules and not plan.resources:
         print("  no managed surfaces, resources, or modules (no requirement packages apply)")
         return 0
@@ -120,13 +165,15 @@ def _cmd_plan(args: argparse.Namespace) -> int:
 
 def _cmd_validate(args: argparse.Namespace) -> int:
     machine = args.machine or _discover.current_machine()
-    resolved = _reconcile.resolve_union(_collect_packages(machine), machine)
+    packages, scope = _collect_reconcile_packages(args, machine)
+    resolved = _reconcile.resolve_union(packages, machine)
     findings = _validator.validate(resolved, machine)
     if args.json:
         print(json.dumps([f.__dict__ for f in findings], indent=2))
     else:
+        print(f"validator [{scope}]")
         if not findings:
-            print("validator: no findings")
+            print("  no findings")
         for f in findings:
             print(f"  [{f.level}] {f.code}: {f.message}")
     return 1 if _validator.has_errors(findings) else 0
@@ -147,7 +194,7 @@ def _fmt_val(v: object) -> str:
 def _cmd_restore(args: argparse.Namespace) -> int:
     machine = args.machine or _discover.current_machine()
     dry_run = not args.apply
-    packages = _collect_packages(machine)
+    packages, scope = _collect_reconcile_packages(args, machine)
     resolved = _reconcile.resolve_union(packages, machine)
     findings = _validator.validate(resolved, machine)
     if _validator.has_errors(findings):
@@ -159,10 +206,12 @@ def _cmd_restore(args: argparse.Namespace) -> int:
 
     result = _reconcile.restore(packages, machine, dry_run=dry_run, only=args.only)
     if args.json:
-        print(json.dumps(_reconcile.restore_result_to_dict(result), indent=2))
+        payload = _reconcile.restore_result_to_dict(result)
+        payload["scope"] = scope
+        print(json.dumps(payload, indent=2))
         return 0 if result.ok else 2
     header = "DRY-RUN (preview only; re-run with --apply to make changes)" if dry_run else "APPLY"
-    print(f"restore [{header}] for {machine}  (drift-key {result.plan.drift_key})")
+    print(f"restore [{header}] for {machine} [{scope}]  (drift-key {result.plan.drift_key})")
 
     if not result.surface_results:
         print("  surfaces: none")
@@ -264,10 +313,27 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="perform the migration (default is a dry-run preview)",
     )
-    add("plan", _cmd_plan)
-    add("validate", _cmd_validate)
+
+    def add_reconcile_scope(command: argparse.ArgumentParser) -> None:
+        scope = command.add_mutually_exclusive_group()
+        scope.add_argument(
+            "--repo",
+            help="reconcile one registered repo name or repository path "
+                 "(default: repository containing CWD)",
+        )
+        scope.add_argument(
+            "--all-projects",
+            action="store_true",
+            help="reconcile the full machine-scoped adopted-project union",
+        )
+
+    plan = add("plan", _cmd_plan)
+    add_reconcile_scope(plan)
+    validate = add("validate", _cmd_validate)
+    add_reconcile_scope(validate)
     add("installer-readiness", _cmd_installer_readiness)
     restore = add("restore", _cmd_restore)
+    add_reconcile_scope(restore)
     restore.add_argument("--apply", action="store_true",
                          help="make changes (default is a dry-run preview)")
     restore.add_argument("--only", action="append", metavar="NAME",

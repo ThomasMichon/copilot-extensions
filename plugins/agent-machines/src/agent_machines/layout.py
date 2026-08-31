@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -52,6 +54,14 @@ class MigrationResult:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+class GitUnavailableError(ManifestError):
+    """Git is required to resolve a repository-local reconciliation scope."""
+
+
+class NotGitRepositoryError(ManifestError):
+    """The selected path exists but is not contained by a Git repository."""
 
 
 def _legacy_moves(repo_path: Path, repo_name: str) -> list[tuple[Path, Path]]:
@@ -206,6 +216,65 @@ def resolve_repo(
     raise ManifestError(
         f"repo {value!r} is neither a directory nor an adopted project name"
     )
+
+
+def _git_path(repo_path: Path, argument: str) -> Path | None:
+    git = shutil.which("git")
+    if git is None:
+        return None
+    try:
+        result = subprocess.run(  # noqa: S603 - resolved executable, fixed argv
+            [git, "-C", str(repo_path), "rev-parse", argument],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    path = Path(result.stdout.strip())
+    if not path.is_absolute():
+        path = repo_path / path
+    return path.resolve()
+
+
+def resolve_cwd_repo(
+    cwd: Path | None = None,
+    registry: dict | None = None,
+    projects: dict | None = None,
+) -> tuple[str, Path, Path]:
+    """Resolve the package-owning repository containing ``cwd``.
+
+    Registered linked worktrees match their anchor by Git common-directory
+    identity, while a standalone repository falls back to its Git top-level
+    directory and basename.
+    """
+    current = (cwd or Path.cwd()).resolve()
+    if shutil.which("git") is None:
+        raise GitUnavailableError(
+            "git is required to infer repository scope from a path; install Git, "
+            "pass --repo <registered-name>, or pass --all-projects"
+        )
+    top_level = _git_path(current, "--show-toplevel")
+    if top_level is None:
+        raise NotGitRepositoryError(
+            f"{current} is not inside a Git repository; pass --repo "
+            "<name-or-path> or --all-projects"
+        )
+    current_common = _git_path(top_level, "--git-common-dir")
+    current_anchor = (
+        current_common.parent
+        if current_common is not None and current_common.name.casefold() == ".git"
+        else None
+    )
+    for candidate in discover.registered_repos(registry):
+        candidate_path = candidate.path.resolve()
+        if current_anchor is not None and candidate_path == current_anchor:
+            return candidate.name, top_level, candidate.path.resolve()
+        if candidate_path == top_level:
+            return candidate.name, top_level, candidate.path.resolve()
+    return top_level.name, top_level, top_level
 
 
 def inspect_layouts(
