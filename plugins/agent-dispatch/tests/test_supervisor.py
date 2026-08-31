@@ -421,7 +421,7 @@ def test_cli_supervise_once(monkeypatch, q, client):
     monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
     monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
-    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: spawn)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda **_kw: spawn)
 
     args = types.SimpleNamespace(
         all_repos=False, repo=None, url=None, token=None, label=None,
@@ -444,7 +444,7 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
     from agent_dispatch.supervisor import make_embody_spawn
 
     def fake_spawn_embodied_worker(
-        task_id, *, coordinator_url, worker_id, driver, project=None, verify_timeout=0
+        task_id, *, worker_id, driver, project=None, route="", verify_timeout=0
     ):
         return subprocess.CompletedProcess(
             args=[], returncode=0,
@@ -452,12 +452,42 @@ def test_make_embody_spawn_records_handle_on_success(monkeypatch):
         )
 
     monkeypatch.setattr(embody, "spawn_embodied_worker", fake_spawn_embodied_worker)
-    ok, handle = make_embody_spawn("http://coord")(
+    ok, handle = make_embody_spawn()(
         {"id": "t", "repo": "gitea.example/org/widgets"}
     )
     assert ok is True
     assert handle["worktree"] == "wt-9"
     assert handle["session"] == "sess-9"
+
+
+def test_resolving_client_uses_fresh_client_for_each_operation():
+    from agent_dispatch.client import ResolvingDispatchClient
+
+    created: list[int] = []
+
+    class FakeClient:
+        def __init__(self, generation):
+            self.generation = generation
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def get(self, task_id):
+            return {"generation": self.generation, "task_id": task_id}
+
+    def factory():
+        generation = len(created) + 1
+        created.append(generation)
+        return FakeClient(generation)
+
+    client = ResolvingDispatchClient(factory)
+
+    assert client.get("a") == {"generation": 1, "task_id": "a"}
+    assert client.get("b") == {"generation": 2, "task_id": "b"}
+    assert created == [1, 2]
 
 
 # -- headless-ACP embody backend ---------------------------------------------
@@ -475,10 +505,10 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     calls: dict = {}
 
     def fake_spawn_worker(
-        task_id, *, agent, coordinator_url, worker_id, prompt, wait, **_kw
+        task_id, *, agent, worker_id, prompt, route="", wait, **_kw
     ):
         calls.update(
-            task_id=task_id, agent=agent, coordinator_url=coordinator_url,
+            task_id=task_id, agent=agent,
             worker_id=worker_id, prompt=prompt, wait=wait,
         )
         return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -486,10 +516,10 @@ def test_make_headless_spawn_uses_bridge_with_autopilot_seed(monkeypatch):
     monkeypatch.setattr(bridge, "spawn_worker", fake_spawn_worker)
     monkeypatch.setattr(
         embody, "autopilot_worker_prompt",
-        lambda task_id, *, coordinator_url, worker_id: f"SEED::{task_id}",
+        lambda task_id, *, worker_id, route="": f"SEED::{task_id}",
     )
 
-    spawn = make_headless_spawn("http://coord", agent="review-worker")
+    spawn = make_headless_spawn(agent="review-worker")
     ok, handle = spawn({"id": "task-1"})
 
     assert ok is True
@@ -510,7 +540,7 @@ def test_make_headless_spawn_reports_failure_on_nonzero(monkeypatch):
         bridge, "spawn_worker",
         lambda *a, **k: subprocess.CompletedProcess([], 1, "", "boom"),
     )
-    ok, handle = make_headless_spawn("http://coord")({"id": "t"})
+    ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "boom" in handle["error"]
 
@@ -525,7 +555,7 @@ def test_make_headless_spawn_degrades_when_bridge_absent(monkeypatch):
         raise bridge.BridgeUnavailable("no agent-bridge on PATH")
 
     monkeypatch.setattr(bridge, "spawn_worker", _boom)
-    ok, handle = make_headless_spawn("http://coord")({"id": "t"})
+    ok, handle = make_headless_spawn()({"id": "t"})
     assert ok is False
     assert "agent-bridge" in handle["error"]
 
@@ -581,8 +611,8 @@ def test_cli_supervise_headless_is_default(monkeypatch, q, client):
     monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
     monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
-    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: embody_spawn)
-    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda _url, **_kw: headless_spawn)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda **_kw: embody_spawn)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda **_kw: headless_spawn)
 
     args = types.SimpleNamespace(
         all_repos=False, repo=None, url=None, token=None, label=None,
@@ -621,8 +651,8 @@ def test_cli_supervise_cli_label_opts_out(monkeypatch, q, client):
     monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
     monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
-    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: embody_spawn)
-    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda _url, **_kw: headless_spawn)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda **_kw: embody_spawn)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda **_kw: headless_spawn)
 
     args = types.SimpleNamespace(
         all_repos=False, repo=None, url=None, token=None, label=None,
@@ -662,8 +692,8 @@ def test_cli_supervise_headless_label_routes(monkeypatch, q, client):
     monkeypatch.setattr(m, "_client", lambda _args, **_kw: client)
     monkeypatch.setattr(m, "client_url", lambda: "http://coord")
     monkeypatch.setattr(m, "_scope_repo", lambda _args: TEST_REPO)
-    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda _url, **_kw: embody_spawn)
-    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda _url, **_kw: headless_spawn)
+    monkeypatch.setattr(sup_mod, "make_embody_spawn", lambda **_kw: embody_spawn)
+    monkeypatch.setattr(sup_mod, "make_headless_spawn", lambda **_kw: headless_spawn)
 
     args = types.SimpleNamespace(
         all_repos=False, repo=None, url=None, token=None, label=None,
