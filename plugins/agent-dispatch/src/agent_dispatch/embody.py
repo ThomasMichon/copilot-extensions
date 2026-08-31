@@ -115,7 +115,13 @@ def embody_available() -> bool:
     return _agent_worktrees_launch_prefix() is not None
 
 
-def autopilot_worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
+def autopilot_worker_prompt(
+    task_id: str,
+    *,
+    worker_id: str,
+    route: str = "",
+    repo: str | None = None,
+) -> str:
     """Build the autopilot seed handed to a dispatched, embodied CLI session.
 
     A dispatch-flavored variant of :func:`agent_dispatch.bridge.worker_prompt`:
@@ -141,6 +147,7 @@ def autopilot_worker_prompt(task_id: str, *, worker_id: str, route: str = "") ->
     preserved so a task created on a non-default coordinator is still reachable.
     """
     ad = f"agent-dispatch{route}"
+    lane = f" --repo {repo}" if repo else ""
     if route:
         route_note = (
             f"Use the `{ad}` CLI commands exactly as shown below so every command "
@@ -165,12 +172,12 @@ def autopilot_worker_prompt(task_id: str, *, worker_id: str, route: str = "") ->
         f"yours to do, and only THEN commit to running it. Steps: "
         f"(1) read it with `{ad} show {task_id}`; "
         f"(2) claim it for evaluation with "
-        f"`{ad} claim --task {task_id} --evaluation` "
+        f"`{ad} claim --task {task_id} --evaluation{lane}` "
         f"(add `--capability <cap>` for each capability the task requires) -- "
         f"this takes a SHORT evaluation lease, not the full work lease; "
         f"(3) **EVALUATE before committing** -- while you hold the evaluation "
         f"window, assess: (a) DUPLICATE check -- sweep open tasks "
-        f"(`{ad} list`) and any active worktree charters for an "
+        f"(`{ad} list{lane}`) and any active worktree charters for an "
         f"equivalent already queued, claimed, or in progress; (b) FEASIBILITY -- "
         f"is the task well-formed and doable from here; (c) IS-THIS-FOR-ME -- do "
         f"your machine/worktree/capabilities actually fit it; "
