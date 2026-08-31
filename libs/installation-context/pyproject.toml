@@ -32,3 +32,6 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "installation_context_smoke: fast cross-platform contract lane for PR CI",
+]

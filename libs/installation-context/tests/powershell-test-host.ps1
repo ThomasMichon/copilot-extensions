@@ -79,12 +79,15 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
         $originalError = [Console]::Error
         try {
             $builder = $runner.AddCommand($ScriptPath).AddArgument($arguments[0])
-            for ($index = 1; $index -lt $arguments.Count; $index += 2) {
-                if ($index + 1 -ge $arguments.Count) {
-                    throw "Argument '$($arguments[$index])' is missing its value."
-                }
+            for ($index = 1; $index -lt $arguments.Count;) {
                 $name = $arguments[$index].TrimStart('-')
+                if ($index + 1 -ge $arguments.Count) {
+                    [void]$builder.AddParameter($name)
+                    $index += 1
+                    continue
+                }
                 [void]$builder.AddParameter($name, $arguments[$index + 1])
+                $index += 2
             }
 
             [Console]::SetError($errorWriter)

@@ -58,6 +58,34 @@ scenario-style test that validates several related observable features over
 many process-launching micro-tests that repeat the same setup and failure
 boundary.
 
+The installation-context foundation follows a reference-versus-adapter model
+for its most expensive matrices. The default suite exercises the complete
+snapshot-provenance and installation-governance case corpora against the
+canonical Python implementation, preferring its importable API when a Python
+CLI process would duplicate the same contract. A smaller contract-focused set
+keeps Python CLI, POSIX shell, and PowerShell parity, interoperability,
+security-boundary, and atomicity coverage. Every exemplar's delegation wiring
+is checked; repeated security behavior still spans both exemplar plugins and
+both shell styles, while low-risk staged-CWD behavior defaults to the installer
+with legacy-discovery support. Source-identity fixtures likewise run exhaustively
+in-process against the reference implementation and use representative vectors
+for external adapter parity instead of respawning every adapter for every
+fixture. Set
+`INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1` to restore the full CLI and
+exemplar cross-products when changing an adapter implementation:
+
+```bash
+INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
+  python -m pytest -q libs/installation-context/tests
+```
+
+Pull-request CI runs the `installation_context_smoke` contract lane only when
+the installation-context foundation, its synchronization tool, or an adopter's
+vendored copy changes. The complete exhaustive portfolio runs nightly and on
+demand through the `Installation context full` workflow. This keeps unrelated
+pull requests incremental and keeps the required fast lane independent from the
+size of the long-form regression portfolio.
+
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are
 marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
