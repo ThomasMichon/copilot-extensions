@@ -116,8 +116,8 @@
     defers while a command-bearing SSH session is active.
 
 .PARAMETER IdleSessionWarnThreshold
-    Top-level dedicated-sshd session trees with no non-sshd descendants above
-    which the launcher logs released-build relay leakage (default 8).
+    Top-level dedicated-sshd session-tree count at which the launcher logs
+    released-build relay leakage (default 8). Set to 0 to disable.
 
 .PARAMETER IdleSessionReapThreshold
     Idle session-tree count at which the launcher recycles the host (default
@@ -544,7 +544,7 @@ try {
 
         # Soft pre-saturation early-warning (advisory; does not force a restart).
         $estConns = Get-EstablishedConnCount $Port
-        if ($estConns -ge $PreAuthWarnThreshold) {
+        if ($PreAuthWarnThreshold -gt 0 -and $estConns -ge $PreAuthWarnThreshold) {
             Write-Log "pre-auth pressure: $estConns established connection(s) on :$Port (>= $PreAuthWarnThreshold; MaxStartups wedge risk)" 'WARN'
         }
 
