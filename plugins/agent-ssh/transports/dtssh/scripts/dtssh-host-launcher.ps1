@@ -99,6 +99,11 @@
     builds can leak one connection per completed command and OpenSSH begins
     probabilistic MaxStartups drops at 10 connections.
 
+.PARAMETER SessionClassificationSec
+    Minimum seconds between full sshd process-tree classifications (default
+    15). The launcher refreshes sooner when the cached authenticated-root count
+    puts the estimated pre-auth population near a warning or reap threshold.
+
 .PARAMETER ConsecutiveFailures
     Number of consecutive unhealthy health checks before restarting the child
     (default 2). Unhealthy means either zero relay host connections or no SSH
@@ -147,6 +152,7 @@ param(
     [string]$User,
     [int]$HealthCheckSec      = 120,
     [int]$PressureCheckSec    = 5,
+    [int]$SessionClassificationSec = 15,
     [int]$ConsecutiveFailures = 2,
     [int]$GracePeriodSec      = 45,
     [int]$PreAuthWarnThreshold = 8,
@@ -565,12 +571,16 @@ if ($existing) {
 
 $failCount = 0
 $nextHealthCheckAt = [datetime]::MinValue
+$nextSessionClassificationAt = [datetime]::MinValue
+$sessionPressureCache = $null
 try {
     while ($true) {
         if ($null -eq $hostProc -or $hostProc.HasExited) {
             if ($hostProc -and $hostProc.HasExited) { Write-Log "dtssh host exited (code $($hostProc.ExitCode)); restarting" 'WARN' }
             $hostProc = Start-HostProc
             $failCount = 0
+            $sessionPressureCache = $null
+            $nextSessionClassificationAt = [datetime]::MinValue
             if (-not $tunnelId) { $tunnelId = Resolve-TunnelId $Alias; if ($tunnelId) { Write-Log "resolved tunnel id after start: $tunnelId" } }
             $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
             continue
@@ -586,20 +596,37 @@ try {
         # population is abnormal, but never while a command-bearing session is
         # active. The upstream relay teardown / ClientAlive fixes remain the
         # root solution; this keeps released binaries bounded.
-        $sessionPressure = $null
-        $shouldClassifySessions = (
+        $classificationRelevant = (
             ($IdleSessionWarnThreshold -gt 0 -and $estConns -ge $IdleSessionWarnThreshold) -or
             ($IdleSessionReapThreshold -gt 0 -and $estConns -ge $IdleSessionReapThreshold) -or
             ($PreAuthWarnThreshold -gt 0 -and $estConns -ge $PreAuthWarnThreshold) -or
             ($PreAuthReapThreshold -gt 0 -and $estConns -ge $PreAuthReapThreshold)
         )
+        $cachedPreAuthConns = Get-EstimatedPreAuthConnCount $estConns $sessionPressureCache
+        $cachedPreAuthNearBoundary = (
+            $sessionPressureCache -and (
+                ($PreAuthWarnThreshold -gt 0 -and $cachedPreAuthConns -ge $PreAuthWarnThreshold) -or
+                ($PreAuthReapThreshold -gt 0 -and $cachedPreAuthConns -ge $PreAuthReapThreshold)
+            )
+        )
+        $shouldClassifySessions = (
+            $classificationRelevant -and (
+                $nextSessionClassificationAt -eq [datetime]::MinValue -or
+                (Get-Date) -ge $nextSessionClassificationAt -or
+                $cachedPreAuthNearBoundary
+            )
+        )
         if ($shouldClassifySessions) {
-            $sessionPressure = Get-DedicatedSshdSessionPressure $Port
+            $sessionPressureCache = Get-DedicatedSshdSessionPressure $Port
+            $nextSessionClassificationAt = (Get-Date).AddSeconds(
+                [Math]::Max(1, $SessionClassificationSec)
+            )
         }
+        $sessionPressure = $sessionPressureCache
         $preAuthConns = Get-EstimatedPreAuthConnCount $estConns $sessionPressure
         $forceHealthCheck = (
             $estConns -lt 0 -or
-            ($shouldClassifySessions -and -not $sessionPressure)
+            ($classificationRelevant -and -not $sessionPressure)
         )
         if ($PreAuthWarnThreshold -gt 0 -and $preAuthConns -ge $PreAuthWarnThreshold) {
             Write-Log "pre-auth pressure: ~$preAuthConns unauthenticated connection(s) on :$Port (>= $PreAuthWarnThreshold; $estConns total Established; MaxStartups wedge risk)" 'WARN'
@@ -617,13 +644,15 @@ try {
             $sessionPressure.IdleRoots -ge $IdleSessionReapThreshold
         ) {
             if ($sessionPressure.ActiveRoots -gt 0) {
-                Write-Log "SESSION REAP deferred: $($sessionPressure.ActiveRoots) command-bearing SSH session(s) active" 'WARN'
+                Write-Log "SESSION REAP deferred: $($sessionPressure.ActiveRoots) command-bearing/forwarding SSH session(s) active" 'WARN'
             } else {
                 Write-Log "SESSION REAP: $($sessionPressure.IdleRoots) idle/no-command SSH root(s) (>= $IdleSessionReapThreshold) — restarting host to drain released-build relay leakage" 'WARN'
                 Stop-HostProc $hostProc.Id
                 Start-Sleep -Seconds 3
                 $hostProc = Start-HostProc
                 $failCount = 0
+                $sessionPressureCache = $null
+                $nextSessionClassificationAt = [datetime]::MinValue
                 $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
                 continue
             }
@@ -640,13 +669,15 @@ try {
             if (-not $sessionPressure) {
                 Write-Log "PRESSURE REAP deferred: sshd session classification unavailable; forcing banner health check" 'WARN'
             } elseif ($sessionPressure.ActiveRoots -gt 0) {
-                Write-Log "PRESSURE REAP deferred: $($sessionPressure.ActiveRoots) command-bearing SSH session(s) active" 'WARN'
+                Write-Log "PRESSURE REAP deferred: $($sessionPressure.ActiveRoots) command-bearing/forwarding SSH session(s) active" 'WARN'
             } else {
                 Write-Log "PRESSURE REAP: ~$preAuthConns unauthenticated connection(s) on :$Port (>= $PreAuthReapThreshold; $estConns total Established) — restarting before MaxStartups begins dropping clients" 'WARN'
                 Stop-HostProc $hostProc.Id
                 Start-Sleep -Seconds 3
                 $hostProc = Start-HostProc
                 $failCount = 0
+                $sessionPressureCache = $null
+                $nextSessionClassificationAt = [datetime]::MinValue
                 $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
                 continue
             }
@@ -684,6 +715,8 @@ try {
                     Start-Sleep -Seconds 3
                     $hostProc = Start-HostProc
                     $failCount = 0
+                    $sessionPressureCache = $null
+                    $nextSessionClassificationAt = [datetime]::MinValue
                     $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
                     continue
                 }

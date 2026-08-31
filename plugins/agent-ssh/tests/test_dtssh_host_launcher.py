@@ -26,6 +26,7 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     text = LAUNCHER.read_text(encoding="utf-8")
 
     assert "[int]$PressureCheckSec    = 5" in text
+    assert "[int]$SessionClassificationSec = 15" in text
     assert "[int]$PreAuthWarnThreshold = 8" in text
     assert "[int]$PreAuthReapThreshold = 9" in text
     assert "[int]$IdleSessionWarnThreshold = 4" in text
@@ -45,14 +46,17 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
         "$preAuthConns -ge $PreAuthWarnThreshold"
         in text
     )
-    assert "$shouldClassifySessions = (" in text
+    assert "$classificationRelevant = (" in text
     assert "$estConns -ge $PreAuthWarnThreshold" in text
+    assert "$cachedPreAuthNearBoundary = (" in text
+    assert "$nextSessionClassificationAt" in text
+    assert "[Math]::Max(1, $SessionClassificationSec)" in text
     assert "function Get-EstimatedPreAuthConnCount" in text
     assert "$preAuthConns -ge $PreAuthReapThreshold" in text
     assert "if (-not $sessionPressure)" in text
     assert "$forceHealthCheck = (" in text
     assert "$estConns -lt 0 -or" in text
-    assert "$shouldClassifySessions -and -not $sessionPressure" in text
+    assert "$classificationRelevant -and -not $sessionPressure" in text
     assert "forcing banner health check" in text
     assert "$scheduledHealthCheck = (Get-Date) -ge $nextHealthCheckAt" in text
     assert "$forceHealthCheck -or $scheduledHealthCheck" in text
