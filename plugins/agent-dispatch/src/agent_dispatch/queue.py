@@ -39,6 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .identity import canonical_reviewer_target
 from .payload import PayloadStore, is_blob_ref
 from .registrations import (
     RegistrationError,
@@ -273,6 +274,10 @@ class Task:
     target_repo: str | None = None
     source: str | None = None
     origin_ref: str | None = None
+    #: Producer-selected evaluator identity. Evaluator services consume only
+    #: terminal tasks stamped with their own identity; worker pools remain
+    #: ordinary filters and never own domain judgment.
+    evaluator_ref: str | None = None
     dedup_key: str | None = None
     owner: str | None = None
     attempts: int = 0
@@ -360,6 +365,7 @@ class Task:
             target_repo=row["target_repo"],
             source=row["source"],
             origin_ref=row["origin_ref"],
+            evaluator_ref=row["evaluator_ref"],
             dedup_key=row["dedup_key"],
             owner=row["owner"],
             attempts=row["attempts"],
@@ -572,6 +578,7 @@ _COLUMNS: dict[str, str] = {
     # append-only counterpart of ``latest_progress`` lives in ``task_progress``.
     "goal": "TEXT",
     "done_criteria": "TEXT",
+    "evaluator_ref": "TEXT",
     "owner_session_id": "TEXT",
     "generation": "INTEGER NOT NULL DEFAULT 0",
     "last_seen_at": "REAL",
@@ -656,10 +663,27 @@ class TaskQueue:
                     continue
                 # name/decl are internal constants from _COLUMNS, never user input.
                 conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {decl}")
-            conn.execute(
-                "CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_dedup "
-                "ON tasks(dedup_key) WHERE dedup_key IS NOT NULL"
+            desired_dedup_index = (
+                "CREATE UNIQUE INDEX idx_tasks_dedup ON tasks(dedup_key) "
+                "WHERE dedup_key IS NOT NULL AND status IN "
+                "('proposed','queued','claimed','started','suspended')"
             )
+            current_index = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' "
+                "AND name = 'idx_tasks_dedup'"
+            ).fetchone()
+            current_sql = " ".join(
+                str(current_index["sql"] or "").split()
+            ) if current_index else ""
+            if current_sql != desired_dedup_index:
+                conn.execute("BEGIN IMMEDIATE")
+                try:
+                    conn.execute("DROP INDEX IF EXISTS idx_tasks_dedup")
+                    conn.execute(desired_dedup_index)
+                    conn.execute("COMMIT")
+                except Exception:
+                    conn.execute("ROLLBACK")
+                    raise
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tasks_repo ON tasks(repo)")
             # Sentinel-backfill rows created before ``repo`` became required so a
@@ -1032,6 +1056,29 @@ class TaskQueue:
 
     # -- producers -----------------------------------------------------------
 
+    @staticmethod
+    def _legacy_reviewer_target(dedup_key: str | None) -> str | None:
+        """Parse the pre-target-stable reviewer dedup format."""
+        if not dedup_key or not dedup_key.startswith("recipe:reviewer:"):
+            return None
+        marker = ":pr="
+        repo_marker = ":repo="
+        pr_at = dedup_key.rfind(marker)
+        repo_at = dedup_key.rfind(repo_marker)
+        if pr_at < 0 or repo_at <= pr_at:
+            return None
+        change = dedup_key[pr_at + len(marker) : repo_at]
+        repo = dedup_key[repo_at + len(repo_marker) :]
+        if not repo or not change:
+            return None
+        return canonical_reviewer_target(repo, change)
+
+    @classmethod
+    def _reviewer_target(cls, dedup_key: str | None) -> str | None:
+        if dedup_key and dedup_key.startswith("recipe:reviewer:target="):
+            return dedup_key.removeprefix("recipe:reviewer:target=")
+        return cls._legacy_reviewer_target(dedup_key)
+
     def create(
         self,
         title: str,
@@ -1050,6 +1097,7 @@ class TaskQueue:
         target_repo: str | None = None,
         source: str | None = None,
         origin_ref: str | None = None,
+        evaluator_ref: str | None = None,
         dedup_key: str | None = None,
         goal: str | None = None,
         done_criteria: str | None = None,
@@ -1066,8 +1114,9 @@ class TaskQueue:
         that work via ``working-cross-repo``, never by launching another repo's
         harness.)
 
-        If ``dedup_key`` collides with an existing task, no new row is created
-        and the *existing* task is returned (ideation-time duplicate guard).
+        If ``dedup_key`` collides with an existing non-terminal task, no new row
+        is created and the *existing* task is returned. Terminal rows release
+        the key so a later deterministic generation can be created.
 
         ``claim_as`` makes this an **atomic create-and-claim**: a brand-new task
         is inserted already ``claimed`` by that owner in the *same* transaction,
@@ -1093,19 +1142,58 @@ class TaskQueue:
             conn.execute("BEGIN IMMEDIATE")
             if dedup_key is not None:
                 existing = conn.execute(
-                    f"SELECT {_TASK_SELECT} FROM tasks WHERE dedup_key = ?",
-                    (dedup_key,),
+                    f"SELECT {_TASK_SELECT} FROM tasks WHERE dedup_key = ? "
+                    "AND status IN (?,?,?,?,?)",
+                    (
+                        dedup_key,
+                        Status.PROPOSED,
+                        Status.QUEUED,
+                        Status.CLAIMED,
+                        Status.STARTED,
+                        Status.SUSPENDED,
+                    ),
                 ).fetchone()
                 if existing is not None:
                     conn.execute("COMMIT")
                     return Task._from_row(existing)
+                target = (
+                    self._reviewer_target(dedup_key)
+                    if source == "recipe" and origin_ref == "reviewer"
+                    else None
+                )
+                if target is not None:
+                    rows = conn.execute(
+                        f"SELECT {_TASK_SELECT} FROM tasks WHERE source = ? "
+                        "AND origin_ref = ? AND status IN (?,?,?,?,?) "
+                        "AND dedup_key LIKE 'recipe:reviewer:%'",
+                        (
+                            "recipe",
+                            "reviewer",
+                            Status.PROPOSED,
+                            Status.QUEUED,
+                            Status.CLAIMED,
+                            Status.STARTED,
+                            Status.SUSPENDED,
+                        ),
+                    ).fetchall()
+                    legacy = next(
+                        (
+                            row
+                            for row in rows
+                            if self._reviewer_target(row["dedup_key"]) == target
+                        ),
+                        None,
+                    )
+                    if legacy is not None:
+                        conn.execute("COMMIT")
+                        return Task._from_row(legacy)
             conn.execute(
                 "INSERT INTO tasks (id, title, prompt, status, repo, requires, excludes,"
                 " affinity, labels, payload_ref, payload_inline, target_machine,"
                 " target_worktree, target_repo,"
-                " source, origin_ref, dedup_key, goal, done_criteria,"
+                " source, origin_ref, evaluator_ref, dedup_key, goal, done_criteria,"
                 " not_before, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     title,
@@ -1123,6 +1211,7 @@ class TaskQueue:
                     target_repo,
                     source,
                     origin_ref,
+                    evaluator_ref,
                     dedup_key,
                     goal,
                     done_criteria,
@@ -2908,6 +2997,7 @@ class TaskQueue:
         target_machine: str | None = None,
         target_repo: str | None = None,
         label: str | None = None,
+        evaluator_ref: str | None = None,
         limit: int = 200,
     ) -> list[Task]:
         """List tasks, optionally filtered. Newest first.
@@ -2934,6 +3024,12 @@ class TaskQueue:
         if target_repo is not None:
             clauses.append("target_repo = ?")
             params.append(target_repo)
+        if evaluator_ref is not None:
+            if evaluator_ref:
+                clauses.append("evaluator_ref = ?")
+                params.append(evaluator_ref)
+            else:
+                clauses.append("evaluator_ref IS NULL")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         params.append(limit)
         with self._connect() as conn:

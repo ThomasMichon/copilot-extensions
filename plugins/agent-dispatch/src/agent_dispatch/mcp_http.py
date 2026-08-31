@@ -22,6 +22,7 @@ importable (otherwise the REST API still serves).
 # can't see ``Context`` imported locally inside ``build_coordinator_mcp``. Real
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
 
+import json
 from dataclasses import asdict
 from typing import Annotated, Any
 
@@ -146,6 +147,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
+        evaluator_ref: str | None = None,
         dedup_key: str | None = None,
         goal: str | None = None,
         done_criteria: str | None = None,
@@ -181,6 +183,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
             target_machine=target_machine,
             target_worktree=target_worktree,
             target_repo=target_repo,
+            evaluator_ref=evaluator_ref,
             dedup_key=dedup_key,
             goal=goal,
             done_criteria=done_criteria,
@@ -301,6 +304,68 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         result = asdict(task)
         _emit("task.proposed" if proposed else "task.created", result)
         return result
+
+    @mcp.tool(name="dispatch_emitter_side_load")
+    def emitter_side_load(registration_id: str, change_ref: str) -> dict:
+        """Run one registered emitter's on-demand path on the coordinator host."""
+        from .producers.emitter import EmitterError, run_side_load
+        from . import remote_dispatch
+
+        registration = queue.get_registration(registration_id)
+        if registration is None:
+            return {"error": f"no such registration {registration_id!r}"}
+        if remote_dispatch.is_peer_machine(registration.machine):
+            try:
+                completed = remote_dispatch.browse_remote(
+                    registration.machine,
+                    [
+                        "agent-dispatch",
+                        "emitter",
+                        "side-load",
+                        registration_id,
+                        change_ref,
+                        "--env",
+                        registration.env,
+                    ],
+                    timeout=120,
+                )
+            except remote_dispatch.RemoteDispatchUnavailable as exc:
+                return {"error": str(exc)}
+            if completed.returncode != 0:
+                return {
+                    "error": remote_dispatch.diagnose_remote_failure(
+                        registration.machine,
+                        completed.returncode,
+                        completed.stderr,
+                    )
+                }
+            try:
+                return json.loads(completed.stdout)
+            except ValueError as exc:
+                return {"error": f"remote side-load returned invalid JSON: {exc}"}
+
+        class _QueueClient:
+            def create(self, title: str, **fields: Any) -> dict:
+                proposed = bool(fields.pop("proposed", False))
+                task = (
+                    queue.propose(title, **fields)
+                    if proposed
+                    else queue.create(title, **fields)
+                )
+                result = asdict(task)
+                _emit("task.proposed" if proposed else "task.created", result)
+                return result
+
+        try:
+            return run_side_load(
+                _QueueClient(),
+                asdict(registration),
+                change_ref,
+                current_machine=remote_dispatch.local_machine(),
+                current_env=registration.env,
+            )
+        except EmitterError as exc:
+            return {"error": str(exc)}
 
     @mcp.tool(name="dispatch_list")
     def list_tasks(
