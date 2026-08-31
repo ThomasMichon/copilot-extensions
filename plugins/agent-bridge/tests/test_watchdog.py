@@ -32,6 +32,7 @@ def _make(**overrides):
     defaults = dict(
         is_started=lambda: True,
         is_shutting_down=lambda: False,
+        is_stopped=lambda: False,
         probe_serving=lambda: True,
         on_dead=dead.append,
         interval=15.0,
@@ -56,7 +57,9 @@ def test_serving_ok_then_graceful_shutdown_does_not_fire():
         return True
 
     wd, dead, _ = _make(
-        probe_serving=probe, is_shutting_down=lambda: shutting["v"]
+        probe_serving=probe,
+        is_shutting_down=lambda: shutting["v"],
+        is_stopped=lambda: shutting["v"],
     )
     wd.run()
     assert dead == []  # graceful stop is not a wedge
@@ -90,6 +93,7 @@ def test_single_transient_failure_is_tolerated():
     wd, dead, _ = _make(
         probe_serving=probe,
         is_shutting_down=lambda: shutting["v"],
+        is_stopped=lambda: shutting["v"],
         serving_grace=60.0,
         interval=15.0,
     )
@@ -111,7 +115,11 @@ def test_failure_recovers_before_grace_resets_timer():
             shutting["v"] = True
             return True
 
-    wd, dead, _ = _make(probe_serving=probe, is_shutting_down=lambda: shutting["v"])
+    wd, dead, _ = _make(
+        probe_serving=probe,
+        is_shutting_down=lambda: shutting["v"],
+        is_stopped=lambda: shutting["v"],
+    )
     wd.run()
     assert dead == []
 
@@ -125,9 +133,57 @@ def test_startup_never_completes_fires():
 
 def test_startup_graceful_shutdown_before_start_is_clean():
     # Shutdown requested before the server ever started -> clean no-op.
-    wd, dead, _ = _make(is_started=lambda: False, is_shutting_down=lambda: True)
+    wd, dead, _ = _make(
+        is_started=lambda: False,
+        is_shutting_down=lambda: True,
+        is_stopped=lambda: True,
+    )
     wd.run()
     assert dead == []
+
+
+def test_stuck_graceful_shutdown_force_exits():
+    serving_dead = []
+    shutdown_dead = []
+    wd, dead, _ = _make(
+        is_shutting_down=lambda: True,
+        is_stopped=lambda: False,
+        shutdown_grace=30.0,
+        interval=5.0,
+        on_dead=serving_dead.append,
+        on_shutdown_stuck=shutdown_dead.append,
+    )
+    wd.run()
+    assert dead == []
+    assert serving_dead == []
+    assert len(shutdown_dead) == 1
+    assert "graceful shutdown did not complete" in shutdown_dead[0]
+
+
+def test_shutdown_requested_during_failed_probe_does_not_spawn_replacement():
+    shutting = {"value": False}
+    serving_dead = []
+    shutdown_dead = []
+    probes = {"count": 0}
+
+    def probe():
+        probes["count"] += 1
+        if probes["count"] >= 2:
+            shutting["value"] = True
+        return False
+
+    wd, _dead, _ = _make(
+        probe_serving=probe,
+        is_shutting_down=lambda: shutting["value"],
+        is_stopped=lambda: True,
+        on_dead=serving_dead.append,
+        on_shutdown_stuck=shutdown_dead.append,
+        serving_grace=0,
+    )
+    wd.run()
+
+    assert serving_dead == []
+    assert shutdown_dead == []
 
 
 def test_startup_completes_late_then_serves():
@@ -155,6 +211,7 @@ def test_startup_completes_late_then_serves():
         is_started=is_started,
         probe_serving=probe,
         is_shutting_down=lambda: shutting["v"],
+        is_stopped=lambda: shutting["v"],
     )
     wd.run()
     assert dead == []
@@ -201,10 +258,17 @@ def test_arm_uses_supplied_terminal_action(monkeypatch):
         should_exit = False
 
     terminal = lambda reason: None
+    shutdown_terminal = lambda reason: None
     monkeypatch.setattr(watchdog.threading, "Thread", FakeThread)
+    monkeypatch.setattr(watchdog, "_force_exit", shutdown_terminal)
     thread = watchdog.arm_serving_watchdog(
-        Server(), bind="127.0.0.1", port=1234, on_dead=terminal
+        Server(),
+        bind="127.0.0.1",
+        port=1234,
+        is_stopped=lambda: False,
+        on_dead=terminal,
     )
 
     assert thread is not None
     assert captured["target"].__self__._on_dead is terminal
+    assert captured["target"].__self__._on_shutdown_stuck is shutdown_terminal

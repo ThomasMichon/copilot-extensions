@@ -487,12 +487,20 @@ def _cmd_start(args: argparse.Namespace) -> None:
             "serving_grace": _WINDOWS_SERVING_GRACE,
             "on_dead": _watchdog_dead,
         }
+    import threading
+
+    server_stopped = threading.Event()
     arm_serving_watchdog(
-        server, bind=cfg.bind, port=bound_port, **watchdog_kwargs
+        server,
+        bind=cfg.bind,
+        port=bound_port,
+        is_stopped=server_stopped.is_set,
+        **watchdog_kwargs,
     )
     try:
         server.run(sockets=[listen_sock])
     finally:
+        server_stopped.set()
         singleton.release()
         listen_sock.close()
 
@@ -783,6 +791,19 @@ def _service_pid() -> int | None:
     return _read_pid_file()
 
 
+def _service_process_is_live(*, probe_timeout: float = 1.0) -> bool:
+    """Whether routing or service markers identify a live bridge process."""
+    endpoint = _active_endpoint()
+    candidates = {
+        endpoint.pid if endpoint is not None else None,
+        _read_pid_file(),
+    }
+    candidates.discard(None)
+    return any(
+        _pid_is_agent_bridge(int(pid), probe_timeout) for pid in candidates
+    )
+
+
 def _wait_for_service_start(
     *,
     timeout: int = _SERVICE_START_TIMEOUT_S,
@@ -807,18 +828,11 @@ def _wait_for_service_start(
     while time.monotonic() < deadline:
         if _service_is_running():
             return True
-        endpoint = _active_endpoint()
-        candidates = {
-            endpoint.pid if endpoint is not None else None,
-            _read_pid_file(),
-        }
-        candidates.discard(None)
         probe_timeout = max(
             0.1, min(1.0, deadline - time.monotonic())
         )
-        live_process = any(
-            _pid_is_agent_bridge(int(pid), probe_timeout)
-            for pid in candidates
+        live_process = _service_process_is_live(
+            probe_timeout=probe_timeout
         )
         if live_process:
             saw_live_process = True
@@ -979,8 +993,6 @@ def _ensure_retired_daemon_exited(
         if not _pid_is_agent_bridge(pid):
             return True, False
 
-    # PID reuse safety: _kill_pid is reached only while the process still
-    # identifies as an agent_bridge module invocation.
     _force_kill_agent_bridge_tree(pid)
     deadline = time.monotonic() + max(0.0, forced_timeout)
     while time.monotonic() < deadline:
@@ -1010,7 +1022,6 @@ def _pid_is_agent_bridge(pid: int, timeout: float = 15.0) -> bool:
                 capture_output=True, text=True, timeout=timeout,
             )
             return "agent_bridge" in (out.stdout or "")
-        # POSIX: read the process command line (Linux /proc; fall back to ps).
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as fh:
                 return b"agent_bridge" in fh.read()
@@ -1300,6 +1311,21 @@ def _release_ensure_lock(fd: int) -> None:
         pass
 
 
+def _wait_for_ensure_owner() -> bool:
+    """Follow a concurrent ensure from process appearance through liveness."""
+    import time
+
+    for _ in range(int(_ENSURE_BACKOFF_S)):
+        if _service_is_running():
+            return True
+        if _service_process_is_live():
+            return _wait_for_service_start()
+        if not os.path.exists(_ENSURE_LOCK):
+            return _wait_for_service_start()
+        time.sleep(1)
+    return _service_is_running()
+
+
 def _ensure_daemon() -> bool:
     """Boot the daemon if it is down, so a daemon-touching command self-heals.
 
@@ -1320,6 +1346,8 @@ def _ensure_daemon() -> bool:
         return _service_is_running()
     if _service_is_running():
         return True
+    if _service_process_is_live() and _wait_for_service_start():
+        return True
 
     import time
 
@@ -1330,17 +1358,23 @@ def _ensure_daemon() -> bool:
         last_attempt = 0.0
     if now - last_attempt < _ENSURE_BACKOFF_S:
         # Recently tried and still down -> a crash loop; don't hammer.
+        if _service_process_is_live():
+            return _wait_for_service_start()
+        if os.path.exists(_ENSURE_LOCK):
+            return _wait_for_ensure_owner()
         return _service_is_running()
 
     fd = _acquire_ensure_lock()
     if fd is None:
-        # Another invocation is booting -- wait briefly for its daemon.
-        for _ in range(15):
-            time.sleep(1)
-            if _service_is_running():
-                return True
-        return _service_is_running()
+        return _wait_for_ensure_owner()
+    lock_held = True
     try:
+        if _service_is_running():
+            return True
+        if _service_process_is_live():
+            _release_ensure_lock(fd)
+            lock_held = False
+            return _wait_for_service_start()
         try:
             with open(_ENSURE_MARKER, "w") as fh:
                 fh.write(str(now))
@@ -1353,7 +1387,8 @@ def _ensure_daemon() -> bool:
                 return True
         return False
     finally:
-        _release_ensure_lock(fd)
+        if lock_held:
+            _release_ensure_lock(fd)
 
 
 def _service_start() -> None:

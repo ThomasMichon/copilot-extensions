@@ -44,6 +44,7 @@ log = logging.getLogger("agent-bridge")
 _DEFAULT_INTERVAL = 15.0
 _DEFAULT_STARTUP_GRACE = 120.0
 _DEFAULT_SERVING_GRACE = 60.0
+_DEFAULT_SHUTDOWN_GRACE = 120.0
 _WINDOWS_INTERVAL = 5.0
 _WINDOWS_SERVING_GRACE = 15.0
 _EXIT_CODE = 70  # EX_SOFTWARE -- distinguishable in logs/postmortems
@@ -62,21 +63,27 @@ class ServingWatchdog:
         *,
         is_started: Callable[[], bool],
         is_shutting_down: Callable[[], bool],
+        is_stopped: Callable[[], bool],
         probe_serving: Callable[[], bool],
         on_dead: Callable[[str], None],
+        on_shutdown_stuck: Callable[[str], None] | None = None,
         interval: float = _DEFAULT_INTERVAL,
         startup_grace: float = _DEFAULT_STARTUP_GRACE,
         serving_grace: float = _DEFAULT_SERVING_GRACE,
+        shutdown_grace: float = _DEFAULT_SHUTDOWN_GRACE,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._is_started = is_started
         self._is_shutting_down = is_shutting_down
+        self._is_stopped = is_stopped
         self._probe_serving = probe_serving
         self._on_dead = on_dead
+        self._on_shutdown_stuck = on_shutdown_stuck or on_dead
         self._interval = interval
         self._startup_grace = startup_grace
         self._serving_grace = serving_grace
+        self._shutdown_grace = shutdown_grace
         self._sleep = sleep
         self._monotonic = monotonic
 
@@ -96,6 +103,7 @@ class ServingWatchdog:
         deadline = self._monotonic() + self._startup_grace
         while not self._is_started():
             if self._is_shutting_down():
+                self._await_shutdown()
                 return False
             if self._monotonic() >= deadline:
                 self._on_dead(
@@ -117,6 +125,7 @@ class ServingWatchdog:
         while True:
             self._sleep(self._interval)
             if self._is_shutting_down():
+                self._await_shutdown()
                 return
             if self._probe_serving():
                 failing_since = None
@@ -126,11 +135,26 @@ class ServingWatchdog:
                 failing_since = now
                 continue
             if now - failing_since >= self._serving_grace:
+                if self._is_shutting_down():
+                    self._await_shutdown()
+                    return
                 self._on_dead(
                     f"stopped serving for {now - failing_since:.0f}s "
                     "without a graceful-shutdown request"
                 )
                 return
+
+    def _await_shutdown(self) -> None:
+        """Force-exit only when a requested graceful shutdown never finishes."""
+        deadline = self._monotonic() + self._shutdown_grace
+        while not self._is_stopped():
+            if self._monotonic() >= deadline:
+                self._on_shutdown_stuck(
+                    "graceful shutdown did not complete within "
+                    f"{self._shutdown_grace:.0f}s"
+                )
+                return
+            self._sleep(min(self._interval, self._shutdown_grace))
 
 
 def _watchdog_enabled() -> bool:
@@ -184,6 +208,7 @@ def arm_serving_watchdog(
     *,
     bind: str,
     port: int,
+    is_stopped: Callable[[], bool] = lambda: False,
     interval: float = _DEFAULT_INTERVAL,
     startup_grace: float = _DEFAULT_STARTUP_GRACE,
     serving_grace: float = _DEFAULT_SERVING_GRACE,
@@ -202,8 +227,10 @@ def arm_serving_watchdog(
     watchdog = ServingWatchdog(
         is_started=lambda: bool(getattr(server, "started", False)),
         is_shutting_down=lambda: bool(getattr(server, "should_exit", False)),
+        is_stopped=is_stopped,
         probe_serving=_make_health_probe(bind, port),
         on_dead=_force_exit if on_dead is None else on_dead,
+        on_shutdown_stuck=_force_exit,
         interval=interval,
         startup_grace=startup_grace,
         serving_grace=serving_grace,

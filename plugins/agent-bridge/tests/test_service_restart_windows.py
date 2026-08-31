@@ -131,6 +131,87 @@ def test_service_start_early_returns_when_already_running(monkeypatch):
     assert spawned["n"] == 0
 
 
+def test_ensure_waits_for_live_generation_before_spawning(monkeypatch):
+    monkeypatch.delenv("AGENT_BRIDGE_NO_ENSURE", raising=False)
+    health = iter([False])
+    monkeypatch.setattr(
+        m, "_service_is_running", lambda: next(health, False)
+    )
+    monkeypatch.setattr(m, "_service_process_is_live", lambda: True)
+    monkeypatch.setattr(m, "_wait_for_service_start", lambda: True)
+    monkeypatch.setattr(
+        m,
+        "_acquire_ensure_lock",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("live generation must be awaited before locking")
+        ),
+    )
+    monkeypatch.setattr(
+        m,
+        "_spawn_detached_daemon",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("live generation must not be duplicated")
+        ),
+    )
+
+    assert m._ensure_daemon() is True
+
+
+def test_ensure_lock_loser_follows_winner_into_full_start_wait(
+    monkeypatch, tmp_path
+):
+    _fast_time(monkeypatch)
+    monkeypatch.delenv("AGENT_BRIDGE_NO_ENSURE", raising=False)
+    lock = tmp_path / ".ensure.lock"
+    lock.write_text("winner", encoding="utf-8")
+    monkeypatch.setattr(m, "_ENSURE_LOCK", str(lock))
+    monkeypatch.setattr(m, "_ENSURE_MARKER", str(tmp_path / ".ensure-attempt"))
+    monkeypatch.setattr(m, "_acquire_ensure_lock", lambda: None)
+
+    health = iter([False, False])
+    monkeypatch.setattr(
+        m, "_service_is_running", lambda: next(health, False)
+    )
+    live = iter([False, True])
+    monkeypatch.setattr(
+        m, "_service_process_is_live", lambda: next(live, True)
+    )
+    waited = {"count": 0}
+    monkeypatch.setattr(
+        m,
+        "_wait_for_service_start",
+        lambda: waited.__setitem__("count", waited["count"] + 1) or True,
+    )
+
+    assert m._ensure_daemon() is True
+    assert waited["count"] == 1
+
+
+def test_ensure_lock_handoff_keeps_launch_grace_for_process_appearance(
+    monkeypatch, tmp_path
+):
+    _fast_time(monkeypatch)
+    lock = tmp_path / ".ensure.lock"
+    lock.write_text("winner", encoding="utf-8")
+    monkeypatch.setattr(m, "_ENSURE_LOCK", str(lock))
+    monkeypatch.setattr(m, "_service_is_running", lambda: False)
+    monkeypatch.setattr(m, "_service_process_is_live", lambda: False)
+
+    exists = iter([True, False])
+    monkeypatch.setattr(
+        m.os.path, "exists", lambda _path: next(exists, False)
+    )
+    waited = {"count": 0}
+    monkeypatch.setattr(
+        m,
+        "_wait_for_service_start",
+        lambda: waited.__setitem__("count", waited["count"] + 1) or True,
+    )
+
+    assert m._wait_for_ensure_owner() is True
+    assert waited["count"] == 1
+
+
 def test_service_start_waits_for_slow_live_daemon_without_fallback(monkeypatch):
     _fast_time(monkeypatch)
     monkeypatch.setattr(m, "_systemd_available", lambda: False)
