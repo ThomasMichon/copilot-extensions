@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-ssh"
-version = "0.1.0-dev59"
+version = "0.1.0-dev60"
 description = "SSH profile emitter, verifier, and transport-provider contract for the agent fabric"
 readme = "README.md"
 license = "MIT"
@@ -46,3 +46,8 @@ select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "S108"]
+
+[tool.pytest.ini_options]
+markers = [
+    "guard: fast structural and contract checks",
+]
