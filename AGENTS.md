@@ -166,6 +166,14 @@ as-is) → **contribution** (this file + the harness skills, how-to-land).
 > step-by-step, and `diagnosing-copilot-extensions` covers a broken plugin or
 > deploy.
 
+### Test Portfolio
+
+Required pull-request CI must remain a fast, change-scoped contract gate; do not
+grow it into the exhaustive portfolio. New subprocess-heavy matrices need a
+focused smoke lane, path gating, and an explicit scheduled/manual full lane.
+Preserve real process boundaries for concurrency tests. `TESTING.md` owns the
+detailed portfolio invariants and execution mechanics.
+
 ### Branch and Publication
 
 This repo is **PR-required** and uses the `pr-self-merge` profile. Work in an
