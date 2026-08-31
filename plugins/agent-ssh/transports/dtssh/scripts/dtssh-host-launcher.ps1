@@ -676,7 +676,7 @@ try {
                 $failCount++
                 $reasons = @()
                 if (-not $relayOk) { $reasons += '0 relay host-connections' }
-                if (-not $sshdOk)  { $reasons += "sshd :$Port not serving (no SSH banner$(if ($preAuthConns -ge $PreAuthWarnThreshold) { "; ~$preAuthConns unauthenticated connections — likely MaxStartups pressure" }))" }
+                if (-not $sshdOk)  { $reasons += "sshd :$Port not serving (no SSH banner$(if ($PreAuthWarnThreshold -gt 0 -and $preAuthConns -ge $PreAuthWarnThreshold) { "; ~$preAuthConns unauthenticated connections — likely MaxStartups pressure" }))" }
                 Write-Log "UNHEALTHY: $($reasons -join '; ') (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
                 if ($failCount -ge $ConsecutiveFailures) {
                     Write-Log "restarting dtssh host after $failCount unhealthy checks" 'WARN'
