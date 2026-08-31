@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from agent_machines.layout import (
 from agent_machines.manifest import ManifestError
 
 from ._helpers import base_package, write_package
+
+GIT = shutil.which("git")
 
 
 def test_doctor_reports_canonical_layout(tmp_path):
@@ -299,6 +302,7 @@ def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
     assert path == registered
 
 
+@pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
 def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path, monkeypatch):
     anchor = tmp_path / "anchor"
     subprocess.run(["git", "init", "-q", str(anchor)], check=True)
@@ -336,6 +340,7 @@ def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path, monkeypat
     assert anchor_path == anchor.resolve()
 
 
+@pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
 def test_resolve_cwd_repo_matches_registered_nonadopted_worktree(tmp_path):
     anchor = tmp_path / "anchor"
     subprocess.run(["git", "init", "-q", str(anchor)], check=True)
@@ -372,6 +377,7 @@ def test_resolve_cwd_repo_matches_registered_nonadopted_worktree(tmp_path):
     assert anchor_path == anchor.resolve()
 
 
+@pytest.mark.skipif(GIT is None, reason="git is required for repository fixture")
 def test_resolve_cwd_repo_standalone_falls_back_to_top_level(tmp_path):
     repo = tmp_path / "standalone"
     subprocess.run(["git", "init", "-q", str(repo)], check=True)

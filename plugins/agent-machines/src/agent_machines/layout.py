@@ -255,11 +255,16 @@ def resolve_cwd_repo(
             "<name-or-path> or --all-projects"
         )
     current_common = _git_path(top_level, "--git-common-dir")
+    current_anchor = (
+        current_common.parent
+        if current_common is not None and current_common.name.casefold() == ".git"
+        else None
+    )
     for candidate in discover.registered_repos(registry):
-        candidate_common = _git_path(candidate.path, "--git-common-dir")
-        if current_common is not None and candidate_common == current_common:
+        candidate_path = candidate.path.resolve()
+        if current_anchor is not None and candidate_path == current_anchor:
             return candidate.name, top_level, candidate.path.resolve()
-        if candidate.path.resolve() == top_level:
+        if candidate_path == top_level:
             return candidate.name, top_level, candidate.path.resolve()
     return top_level.name, top_level, top_level
 
