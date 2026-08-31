@@ -9,7 +9,7 @@
   "max_attempts": 3,
   "body": {
     "type": "headless",
-    "agent": "copilot-extensions-reviewer"
+    "agent": "cloud1"
   },
   "description": "Bounded worker pool for the repository's self-hosted reviewer loop"
 }
