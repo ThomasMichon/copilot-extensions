@@ -135,3 +135,30 @@ def test_validate_json_preserves_findings_array(monkeypatch, capsys):
 
     assert rc == 0
     assert payload == []
+
+
+def test_validate_human_reports_scope_with_findings(monkeypatch, capsys):
+    finding = type(
+        "Finding",
+        (),
+        {"level": "advisory", "code": "example", "message": "detail"},
+    )()
+    monkeypatch.setattr(
+        cli,
+        "_collect_reconcile_packages",
+        lambda args, machine: ([], "repo:current"),
+    )
+    monkeypatch.setattr(cli._reconcile, "resolve_union", lambda packages, machine: [])
+    monkeypatch.setattr(
+        cli._validator,
+        "validate",
+        lambda resolved, machine: [finding],
+    )
+    monkeypatch.setattr(cli._validator, "has_errors", lambda findings: False)
+
+    rc = cli.main(["validate"])
+    output = capsys.readouterr().out
+
+    assert rc == 0
+    assert "validator [repo:current]" in output
+    assert "[advisory] example: detail" in output

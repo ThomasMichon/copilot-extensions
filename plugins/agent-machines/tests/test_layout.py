@@ -303,7 +303,7 @@ def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
 
 
 @pytest.mark.skipif(GIT is None, reason="git is required for linked-worktree fixture")
-def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path, monkeypatch):
+def test_resolve_cwd_repo_matches_registered_linked_worktree(tmp_path):
     anchor = tmp_path / "anchor"
     subprocess.run(["git", "init", "-q", str(anchor)], check=True)
     subprocess.run(
@@ -391,6 +391,7 @@ def test_resolve_cwd_repo_standalone_falls_back_to_top_level(tmp_path):
     assert anchor_path == repo.resolve()
 
 
+@pytest.mark.skipif(GIT is None, reason="git is required for repository fixture")
 def test_resolve_cwd_repo_outside_git_fails(tmp_path):
     with pytest.raises(ManifestError, match=r"pass --repo.*or --all-projects"):
         resolve_cwd_repo(tmp_path, {}, {})

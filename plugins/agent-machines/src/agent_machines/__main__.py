@@ -173,8 +173,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     if args.json:
         print(json.dumps([f.__dict__ for f in findings], indent=2))
     else:
+        print(f"validator [{scope}]")
         if not findings:
-            print(f"validator [{scope}]: no findings")
+            print("  no findings")
         for f in findings:
             print(f"  [{f.level}] {f.code}: {f.message}")
     return 1 if _validator.has_errors(findings) else 0
