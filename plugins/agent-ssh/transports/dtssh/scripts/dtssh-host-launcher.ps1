@@ -102,7 +102,7 @@
     (default 45) — lets the relay register the host before we judge it.
 
 .PARAMETER PreAuthWarnThreshold
-    Established-connection count on :$Port above which the launcher logs a soft
+    Established-connection count on :$Port at which the launcher logs a soft
     pre-saturation warning (default 80 — below OpenSSH's default MaxStartups full
     cutoff of 100). Advisory only: the banner probe, not this count, drives
     restarts, so legitimate concurrent sessions are never force-killed by the
@@ -122,7 +122,7 @@
 .PARAMETER IdleSessionReapThreshold
     Idle session-tree count at which the launcher recycles the host (default
     16), but only when no command-bearing session tree is active. Idle
-    idle forwarding-only sessions may be included; active forwarded TCP
+    forwarding-only sessions may be included; active forwarded TCP
     channels are classified command-bearing and protected.
 
 .PARAMETER NoMonitor
