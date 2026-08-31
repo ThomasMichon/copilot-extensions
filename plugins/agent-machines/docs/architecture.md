@@ -37,6 +37,9 @@ Discovery is implemented in `src\agent_machines\discover.py`:
    repository as a required supplemental source. Independently adopted duplicates are collapsed
    case-insensitively under the registry's canonical name; an unresolved active
    binding is an error rather than an empty package set.
+   Canonical registration may resolve through an explicit platform path or the
+   registry's declared source root; filesystem discovery without a registry
+   entry is not accepted.
 4. Each repo contributes `*.yaml` / `*.yml` files from
    `.agent-machines/all/` plus `.agent-machines/machines/<machine>/`; package
    gates then apply as an additional filter.

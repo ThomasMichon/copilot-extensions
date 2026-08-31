@@ -188,9 +188,10 @@ def candidate_repos(
 
     Adopted projects remain the discovery roots. A project's machine-local
     ``knowledge_repo`` binding contributes one required supplemental repository.
-    Supplemental repositories must have a canonical ``repos.yaml`` entry; this
-    intentionally does not use source-root fallback because a configured binding
-    must not look ready when registration is incomplete.
+    Supplemental repositories must have a canonical ``repos.yaml`` entry. Once
+    registered, normal registry resolution applies: an explicit platform path or
+    the registry's declared ``srcroot``. An unregistered checkout at a conventional
+    source-root path is never accepted.
     """
     proj = projects if projects is not None else read_projects()
     reg = registry if registry is not None else read_registry()

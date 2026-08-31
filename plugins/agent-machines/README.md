@@ -22,7 +22,10 @@ actions) and per-machine data stay in the consuming repo.
   registered repository to the same
   package union even when it is not independently adopted. Duplicate adoption
   collapses to one canonical source, and an active but unresolved relationship
-  fails loudly. A repo does not have to enable this plugin to contribute packages;
+  fails loudly. Canonically registered repos may use either an explicit
+  per-platform path or the registry's declared source root; an unregistered
+  conventional checkout is not accepted. A repo does not have to enable this
+  plugin to contribute packages;
   `discover` annotates enablement, but the CLI does not require it by default.
 - **Restore is machine-scoped.** `~/.copilot/` is global to the user account, so
   restore uses the union of every discovered package gated to this machine, not a
