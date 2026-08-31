@@ -11,6 +11,7 @@ that pattern to this repository.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [agent-bridge Contract Evolution](active/agent-bridge-contract-evolution/README.md) | Draft | #1460 |
+| [agent-bridge Contract Baseline](active/agent-bridge-contract-baseline/README.md) | Draft | #1468 |
 | [agent-bridge AHP Convergence](active/agent-bridge-ahp-convergence/README.md) | Draft | #1266 |
 | [agent-bridge Delegation Convergence](active/agent-bridge-delegation-convergence/README.md) | Draft | #1448 |
 | [Migration Intake](active/migration-intake/README.md) | Draft | See effort |
