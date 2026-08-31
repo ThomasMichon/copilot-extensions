@@ -179,7 +179,8 @@ branch. Three profiles decide which verbs apply:
 - **`pr-agent-merge`** — an auto-merge consent label/native auto-complete marker
   is bound: after approval the author runs `pr-merge` to signal consent and the
   review gate merges. The full family applies.
-- **`pr-self-merge`** — the submitter is authorized to merge directly. Bare
+- **`pr-self-merge`** — the submitter is authorized to merge directly after
+  provider-required checks/reviews. On GitHub this never means self-approval. Bare
   `pr-merge` refuses; use `pr-merge <pr> --now`, which prefers native
   CI-gated auto-merge when the provider supports it and otherwise performs the
   configured merge.

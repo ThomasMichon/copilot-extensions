@@ -20388,17 +20388,17 @@ def _pr_merge_print_human(summary: dict) -> None:
 
 
 def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
-    """Perform (or preview) a direct submitter self-merge -- ``pr-merge --now``.
+    """Perform (or preview) a submitter-direct merge -- ``pr-merge --now``.
 
-    Only a **pr-self-merge** repo (the owner of a PR-required repo with a
-    non-blocking bot review) may self-merge. Honoring the repo's ``prefer_auto_merge``
-    policy (#225, default on): it first tries the provider's native CI-gated
-    auto-merge (``enable_auto_merge`` -- the PR lands on its own once required
-    checks pass) and falls back to an immediate squash merge (``merge_pull``,
-    ``--admin`` past the non-blocking gate) only where auto-merge is unavailable
-    or ``prefer_auto_merge`` is off. Either way it is the OWNER's sanctioned
-    self-merge verb, never an agent ad-hoc bypass. Any other profile is
-    refused-with-reminder, steering the agent to the sanctioned wait/consent path.
+    Only a **pr-self-merge** repo may use this submitter-direct merge verb.
+    Honoring the repo's ``prefer_auto_merge`` policy (#225, default on): it first
+    tries the provider's native CI-gated auto-merge (``enable_auto_merge`` -- the
+    PR lands on its own once required checks/reviews pass) and falls back to a
+    squash merge (``merge_pull``) only where auto-merge is unavailable or
+    ``prefer_auto_merge`` is off. The fallback uses an admin bypass only for a
+    non-blocking review posture; a blocking review remains provider-enforced.
+    Any other profile is refused-with-reminder, steering the agent to the
+    sanctioned wait/consent path.
     Returns a shell exit code (0 success, 1 merge failure, 2 refusal/usage).
     """
     import json as _json
@@ -20438,7 +20438,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
         rem = pc.pr_reminder(flow, "pr-merge", ok=True)
         would = (
             "request CI-gated native auto-merge (fallback: direct squash-merge)"
-            if prefer_auto else "squash-merge directly (submitter self-merge)"
+            if prefer_auto else "squash-merge directly (submitter-direct)"
         )
         if args.json:
             print(_json.dumps({
@@ -20491,7 +20491,12 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
 
     try:
         err = provider.merge_pull(
-            args.repo, args.pr, squash=True, admin=True, api_base=base, token=tok,
+            args.repo,
+            args.pr,
+            squash=True,
+            admin=not flow.review_blocking,
+            api_base=base,
+            token=tok,
         )
     except ProviderError as exc:
         err = str(exc)
@@ -20522,7 +20527,7 @@ def _pr_merge_now(args, prcfg, flow, *, apply: bool) -> int:
     else:
         output.ok(
             f"pr-merge --now: squash-merged PR #{args.pr} in {args.repo} "
-            f"(submitter self-merge). Run `finalize` to clean up the worktree."
+            f"(submitter-direct). Run `finalize` to clean up the worktree."
         )
         print(rem.text(), file=sys.stderr)
     return 0

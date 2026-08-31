@@ -196,13 +196,14 @@ class PRConfig:
     #   than a non-blocking advisory pass?
     # - ``review_latency_hint`` -- rough human hint for how long review takes
     #   (e.g. ``"~2m"``), shown by pr-watch so an agent knows how long to wait.
-    # - ``self_approve``    -- may the SUBMITTER approve their own PR? An owner
-    #   repo may allow it; a reviewer-gated repo forbids it. This (or
-    #   ``merge_actor: submitter-direct``) selects the ``pr-self-merge`` profile.
+    # - ``self_approve``    -- legacy provider capability: may the submitter
+    #   satisfy a provider-specific approval step? This (or ``merge_actor:
+    #   submitter-direct``) selects the ``pr-self-merge`` profile. It never
+    #   means a GitHub author should cast an approving review on their own PR.
     # - ``merge_actor``     -- how the merge is performed. **Only
     #   ``"submitter-direct"`` is consumed as an input today**: it (or
     #   ``self_approve``) selects the ``pr-self-merge`` profile. The other modes
-    #   a flow can report -- ``reviewer`` (the approver merges) and
+    #   a flow can report -- ``reviewer`` (the reviewer merges) and
     #   ``consent-gate`` (a consent label triggers the gate) -- are **derived**
     #   from ``automerge_label`` / ``self_approve`` by ``classify_pr_flow`` and
     #   are not (yet) accepted here; setting them has no effect. Leave ``""`` to

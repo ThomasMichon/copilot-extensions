@@ -1,9 +1,9 @@
-"""Tests for `pr-merge --now` -- the direct submitter self-merge dispatch.
+"""Tests for `pr-merge --now` -- the submitter-direct merge dispatch.
 
-Covers ``_pr_merge_now``: it merges only on a ``pr-self-merge`` repo (squash +
-admin, via the provider's ``merge_pull``), refuses-with-reminder on every other
-flow profile, and previews without merging under ``--dry-run``. The provider
-seam is mocked so no ``gh`` is invoked.
+Covers ``_pr_merge_now``: it merges only on a ``pr-self-merge`` repo, uses an
+admin bypass only for non-blocking review posture, refuses-with-reminder on
+every other flow profile, and previews without merging under ``--dry-run``.
+The provider seam is mocked so no ``gh`` is invoked.
 """
 
 from __future__ import annotations
@@ -66,6 +66,25 @@ def test_now_self_merge_calls_merge_pull_squash_admin(monkeypatch, capsys):
     rc = m._pr_merge_now(_args(), _prcfg(), _self_merge_flow(), apply=True)
     assert rc == 0
     assert fake.calls == [dict(repo="o/r", number=7, squash=True, admin=True)]
+
+
+def test_now_blocking_review_never_uses_admin_bypass(monkeypatch):
+    fake = _FakeProvider()
+    _patch_provider(monkeypatch, fake)
+    flow = pc.classify_pr_flow(
+        enabled=True,
+        required=True,
+        provider="github",
+        automerge_label="",
+        merge_actor="submitter-direct",
+        reviewer="independent reviewer",
+        review_blocking=True,
+    )
+    rc = m._pr_merge_now(_args(), _prcfg(), flow, apply=True)
+    assert rc == 0
+    assert fake.calls == [
+        dict(repo="o/r", number=7, squash=True, admin=False)
+    ]
 
 
 def test_now_refused_on_non_self_merge(monkeypatch):
