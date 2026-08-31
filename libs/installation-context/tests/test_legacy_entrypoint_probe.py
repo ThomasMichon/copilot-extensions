@@ -319,6 +319,7 @@ def test_scalar_footprint_list_is_unknown_not_declared(
     assert evidence["result"] == "unknown"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="systemd user services require POSIX")
 @pytest.mark.parametrize("runner", RUNNERS)
 def test_loaded_systemd_user_service_counts_as_present(
     tmp_path: Path,

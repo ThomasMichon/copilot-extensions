@@ -302,7 +302,10 @@ def _stat_identity(value: os.stat_result) -> tuple[int, int]:
 
 
 def _stat_metadata(value: os.stat_result) -> tuple[int, int, int, int]:
-    return value.st_mode, value.st_size, value.st_mtime_ns, value.st_ctime_ns
+    change_time_ns = value.st_ctime_ns
+    if os.name == "nt":
+        change_time_ns = getattr(value, "st_birthtime_ns", change_time_ns)
+    return value.st_mode, value.st_size, value.st_mtime_ns, change_time_ns
 
 
 def _file_cache_key(path: Path) -> str:
@@ -533,9 +536,7 @@ def _snapshot_content_sha256(
         final_stat = os.fstat(descriptor)
         if (
             _stat_identity(opened_stat) != _stat_identity(final_stat)
-            or opened_stat.st_size != final_stat.st_size
-            or opened_stat.st_mtime_ns != final_stat.st_mtime_ns
-            or opened_stat.st_ctime_ns != final_stat.st_ctime_ns
+            or _stat_metadata(opened_stat) != _stat_metadata(final_stat)
         ):
             _fail(f"Snapshot content changed during hashing: '{relative_text}'.")
         return file_hash.hexdigest()
@@ -858,7 +859,7 @@ def _snapshot_content_sha256(
                                 f"or reparse points: '{relative_text}'."
                             )
                         try:
-                            entry_stat = entry.stat(follow_symlinks=False)
+                            entry_stat = os.lstat(path)
                         except OSError as error:
                             _fail(
                                 f"Cannot inspect snapshot content '{path}': {error}"
@@ -962,7 +963,7 @@ def _snapshot_content_sha256(
                                 "Snapshot content may not contain symbolic links "
                                 f"or reparse points: '{relative_text}'."
                             )
-                        entry_stat = entry.stat(follow_symlinks=False)
+                        entry_stat = os.lstat(path)
                         final_manifest.append(
                             (
                                 relative_bytes(relative_text),

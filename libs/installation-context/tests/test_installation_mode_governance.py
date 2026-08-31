@@ -778,7 +778,10 @@ def test_dangling_plugin_maintenance_marker_fails_closed(
     legacy = tmp_path / "legacy"
     legacy.mkdir()
     marker = Path(layout["plugin_root"]) / "maintenance"
-    marker.symlink_to(marker.with_name("missing-maintenance-target"))
+    try:
+        marker.symlink_to(marker.with_name("missing-maintenance-target"))
+    except OSError as error:
+        pytest.skip(f"file symlinks are unavailable: {error}")
 
     result = _run(
         runner,

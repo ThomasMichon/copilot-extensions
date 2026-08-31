@@ -121,6 +121,7 @@ def test_shell_metadata_tokens_retain_posix_subsecond_precision() -> None:
     assert "digest_safe_file_fd_into verification_digest" in posix
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable semantics are required")
 def test_posix_cache_hit_hashes_same_size_same_second_rewrite(
     tmp_path: Path,
 ) -> None:
@@ -203,6 +204,20 @@ def test_python_cache_hit_rehashes_same_metadata_rewrite(tmp_path: Path) -> None
         probe()
     assert module._VALIDATED_FILE_SHA256.get() is None
     assert module._VALIDATION_SCOPE_DEPTH.get() == 0
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows stat semantics are required")
+def test_python_path_and_handle_metadata_are_comparable(tmp_path: Path) -> None:
+    module = _load_python_module()
+    path = tmp_path / "receipt.json"
+    path.write_text("{}\n", encoding="utf-8")
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        assert module._stat_metadata(os.fstat(descriptor)) == module._stat_metadata(
+            os.lstat(path)
+        )
+    finally:
+        os.close(descriptor)
 
 
 def test_python_validation_cache_is_isolated_between_threads(

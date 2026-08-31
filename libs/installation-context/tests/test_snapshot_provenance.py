@@ -1121,7 +1121,8 @@ def test_exemplar_producer_evidence_is_accepted_without_activation_mutation(
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested payload\n")
     (nested / "\u00e9.txt").write_bytes(b"unicode path\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    if os.name != "nt":
+        (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
     (nested / "empty").mkdir()
     snapshot_root = Path(layout["snapshot_root"])
     (snapshot_root / "payload-content.txt").unlink()
@@ -2925,7 +2926,8 @@ def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
     nested = snapshot_root / "nested"
     nested.mkdir()
     (nested / "snapshot-provenance.json").write_bytes(b"nested sidecar name\n")
-    (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
+    if os.name != "nt":
+        (nested / "line\nbreak.txt").write_bytes(b"newline path\n")
     (nested / "z.txt").write_bytes(b"last\n")
     (snapshot_root / "\u03a9.txt").write_bytes(b"unicode path\n")
     (snapshot_root / "empty").mkdir()
@@ -3003,6 +3005,7 @@ def test_snapshot_content_hashing_rejects_links_and_non_regular_entries(
     ).exists()
 
 
+@pytest.mark.skipif(BASH is None, reason="Bash is unavailable")
 def test_posix_snapshot_hashing_fails_closed_on_partial_find_output(
     tmp_path: Path,
 ) -> None:
@@ -3221,6 +3224,7 @@ def test_python_completion_rejects_atomic_regular_replacement_after_validation(
     ).exists()
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX replace-open-file semantics")
 def test_python_immutable_completion_read_rejects_atomic_replacement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3273,10 +3277,12 @@ def test_python_immutable_completion_read_rejects_atomic_replacement(
 
     monkeypatch.setattr(module.os, "open", racing_open)
     monkeypatch.setattr(module.os, "read", racing_read)
-    with pytest.raises(
-        module.InstallationContextError,
-        match="changed while it was being read",
-    ):
+    expected = (
+        "Cannot read runtime slot completion"
+        if os.name == "nt"
+        else "changed while it was being read"
+    )
+    with pytest.raises(module.InstallationContextError, match=expected):
         module.validate_runtime_slot_completion(
             context=layout["install"],
             expected_marketplace_id=layout["marketplace_id"],
@@ -3989,6 +3995,7 @@ def test_completion_accepts_literal_replacement_character_in_snapshot_path(
     assert result["created"] is True
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX replace-open-file semantics")
 @pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_completion_captures_one_concurrently_replaced_build_receipt(
     runner: Runner,
@@ -4722,7 +4729,10 @@ def test_python_snapshot_leaf_name_defends_when_link_detection_degrades(
     requested_root = Path(layout["snapshot_root"])
     other_root = Path(layout["snapshots"]) / "other"
     shutil.move(requested_root, other_root)
-    requested_root.symlink_to(other_root, target_is_directory=True)
+    try:
+        requested_root.symlink_to(other_root, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks are unavailable: {error}")
     monkeypatch.setattr(module, "_is_link_or_junction", lambda _path: False)
     with pytest.raises(
         module.InstallationContextError,
