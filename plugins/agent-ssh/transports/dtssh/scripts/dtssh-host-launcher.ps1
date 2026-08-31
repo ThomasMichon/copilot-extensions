@@ -93,35 +93,41 @@
 .PARAMETER HealthCheckSec
     Seconds between relay health checks (default 120).
 
+.PARAMETER PressureCheckSec
+    Seconds between local sshd connection-pressure checks (default 5). This is
+    intentionally much shorter than HealthCheckSec because released dtssh
+    builds can leak one connection per completed command and OpenSSH begins
+    probabilistic MaxStartups drops at 10 connections.
+
 .PARAMETER ConsecutiveFailures
     Number of consecutive 0-host-connection checks before restarting the child
     (default 2). With the default interval that heals a wedged tunnel in ~4 min.
 
 .PARAMETER GracePeriodSec
     Seconds to wait after (re)starting `dtssh host` before the first health check
-    (default 45) — lets the relay register the host before we judge it.
+    (default 45) — lets the relay register the host before we judge it. Local
+    connection-pressure checks continue during this grace period.
 
 .PARAMETER PreAuthWarnThreshold
-    Established-connection count on :$Port at which the launcher logs a soft
-    pre-saturation warning (default 80 — below OpenSSH's default MaxStartups full
-    cutoff of 100). Advisory only: the banner probe, not this count, drives
-    restarts, so legitimate concurrent sessions are never force-killed by the
-    count alone. Set to 0 to disable.
+    Estimated unauthenticated-connection count on :$Port at which the launcher
+    logs a soft pre-saturation warning (default 8 — below OpenSSH's default
+    MaxStartups drop onset of 10). The estimate subtracts authenticated sshd
+    session roots from the total Established count. Set to 0 to disable.
 
 .PARAMETER PreAuthReapThreshold
-    Established-connection count on :$Port at which the launcher PREEMPTIVELY
-    restarts the host to reap the pile-up (default 128), before saturation fully
-    wedges the port. This remains an unconditional last-resort fallback if an
-    active session never settles or process-tree classification is unavailable.
-    Set to 0 to disable.
+    Estimated unauthenticated-connection count on :$Port at which the launcher
+    PREEMPTIVELY restarts the host to reap the pile-up (default 9), before
+    OpenSSH's default MaxStartups drop onset of 10. Reaping is deferred while a
+    command-bearing or actively forwarding SSH session exists, or when session
+    classification is unavailable. Set to 0 to disable.
 
 .PARAMETER IdleSessionWarnThreshold
     Top-level dedicated-sshd session-tree count at which the launcher logs
-    released-build relay leakage (default 8). Set to 0 to disable.
+    released-build relay leakage (default 4). Set to 0 to disable.
 
 .PARAMETER IdleSessionReapThreshold
     Idle session-tree count at which the launcher recycles the host (default
-    16), but only when no command-bearing session tree is active. Idle
+    8), but only when no command-bearing session tree is active. Idle
     forwarding-only sessions may be included; active forwarded TCP
     channels are classified command-bearing and protected.
 
@@ -139,12 +145,13 @@ param(
     [string]$Tunnel,
     [string]$User,
     [int]$HealthCheckSec      = 120,
+    [int]$PressureCheckSec    = 5,
     [int]$ConsecutiveFailures = 2,
     [int]$GracePeriodSec      = 45,
-    [int]$PreAuthWarnThreshold = 80,
-    [int]$PreAuthReapThreshold = 128,
-    [int]$IdleSessionWarnThreshold = 8,
-    [int]$IdleSessionReapThreshold = 16,
+    [int]$PreAuthWarnThreshold = 8,
+    [int]$PreAuthReapThreshold = 9,
+    [int]$IdleSessionWarnThreshold = 4,
+    [int]$IdleSessionReapThreshold = 8,
     [switch]$NoMonitor
 )
 
@@ -356,11 +363,17 @@ function Get-EstablishedConnCount {
 
 function Get-DedicatedSshdSessionPressure {
     <#
-      Classify the dedicated sshd's top-level session trees. A completed short
-      dtssh command can leave the relay socket and its two sshd-session
-      processes alive after every client process has exited. Those leaked trees
-      have no command descendants. Interactive shells, commands, and SFTP
-      sessions retain a non-sshd descendant and are classified active.
+      Classify the dedicated sshd's top-level session trees. Win32 OpenSSH
+      creates a top-level `sshd-session -R` process before authentication and
+      adds an `sshd-session -z` child after authentication. Only roots with a
+      `-z` descendant are authenticated and eligible for idle/active
+      classification; pre-auth roots remain part of MaxStartups pressure.
+
+      A completed short dtssh command can leave the relay socket and its two
+      sshd-session processes alive after every client process has exited. Those
+      leaked authenticated trees have no command descendants. Interactive
+      shells, commands, and SFTP sessions retain a non-sshd descendant and are
+      classified active.
 
       A forwarding-only `ssh -N` session also has no command descendant, so the
       idle count is deliberately not called "provably stale". A tree that owns
@@ -404,10 +417,13 @@ function Get-DedicatedSshdSessionPressure {
             Where-Object { $_.Name -eq 'sshd-session.exe' })
         $idle = 0
         $active = 0
+        $authenticated = 0
+        $preAuth = 0
         foreach ($root in $roots) {
             $queue = [System.Collections.Generic.Queue[int]]::new()
             $queue.Enqueue([int]$root.ProcessId)
             $seen = [System.Collections.Generic.HashSet[int]]::new()
+            $isAuthenticated = $false
             $hasCommandDescendant = $false
             while ($queue.Count -gt 0) {
                 $current = $queue.Dequeue()
@@ -418,23 +434,52 @@ function Get-DedicatedSshdSessionPressure {
                 if (-not $children.ContainsKey($current)) { continue }
                 foreach ($child in @($children[$current])) {
                     $queue.Enqueue([int]$child.ProcessId)
+                    if (
+                        $child.Name -eq 'sshd-session.exe' -and
+                        $child.CommandLine -match '(?:^|\s)-z(?:\s|$)'
+                    ) {
+                        $isAuthenticated = $true
+                    }
                     if ($child.Name -notin @('sshd-session.exe', 'conhost.exe')) {
                         $hasCommandDescendant = $true
                     }
                 }
             }
+            if (-not $isAuthenticated) {
+                $preAuth++
+                continue
+            }
+            $authenticated++
             if ($hasCommandDescendant) { $active++ } else { $idle++ }
         }
 
         return [pscustomobject]@{
-            TotalRoots  = $roots.Count
-            IdleRoots   = $idle
-            ActiveRoots = $active
+            AuthenticatedRoots = $authenticated
+            PreAuthRoots       = $preAuth
+            IdleRoots          = $idle
+            ActiveRoots        = $active
         }
     } catch {
         Write-Log "sshd session-tree classification failed: $_" 'WARN'
         return $null
     }
+}
+
+function Get-EstimatedPreAuthConnCount {
+    <#
+      MaxStartups applies only to unauthenticated connections, not every
+      Established socket. Subtract only roots proven authenticated by a
+      descendant `sshd-session -z`; top-level `-R` roots exist before auth and
+      must remain in the pressure estimate.
+    #>
+    param([int]$EstablishedCount, $SessionPressure)
+
+    if ($EstablishedCount -lt 0) { return -1 }
+    if (-not $SessionPressure) { return $EstablishedCount }
+    return [Math]::Max(
+        0,
+        $EstablishedCount - [int]$SessionPressure.AuthenticatedRoots
+    )
 }
 
 function Start-HostProc {
@@ -504,7 +549,7 @@ try {
 # ── Monitor loop ─────────────────────────────────────────────────────────
 
 $tunnelId = Resolve-TunnelId $Alias
-if ($tunnelId) { Write-Log "monitoring tunnel '$tunnelId' (alias $Alias): every ${HealthCheckSec}s, restart after $ConsecutiveFailures zero-connection checks" }
+if ($tunnelId) { Write-Log "monitoring tunnel '$tunnelId' (alias $Alias): health every ${HealthCheckSec}s, pressure every ${PressureCheckSec}s, restart after $ConsecutiveFailures unhealthy checks" }
 else { Write-Log "could not resolve tunnel id for alias '$Alias' — process-only monitoring (restart on child exit)" 'WARN' }
 
 # Adopt an already-running host (e.g. from a prior boot) instead of duplicating.
@@ -516,6 +561,7 @@ if ($existing) {
 }
 
 $failCount = 0
+$nextHealthCheckAt = [datetime]::MinValue
 try {
     while ($true) {
         if ($null -eq $hostProc -or $hostProc.HasExited) {
@@ -523,30 +569,14 @@ try {
             $hostProc = Start-HostProc
             $failCount = 0
             if (-not $tunnelId) { $tunnelId = Resolve-TunnelId $Alias; if ($tunnelId) { Write-Log "resolved tunnel id after start: $tunnelId" } }
-            Start-Sleep -Seconds $GracePeriodSec
+            $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
             continue
         }
 
-        # Health = relay connected AND the dedicated sshd is actually SERVING.
-        # Checking only the relay host-connection count misses the case where the
-        # dtssh host stays connected but its sshd CHILD dies (#576); checking only
-        # a bare TCP connect misses the pre-auth WEDGE (sshd accepts TCP but never
-        # banners once MaxStartups is saturated). So probe the relay AND read the
-        # sshd banner, and restart on either failure. A restart's Clear-DedicatedSshd
-        # reaps any piled-up pre-auth connections that caused a wedge.
-        $relayOk = $true
-        if ($tunnelId) {
-            $conns = Get-HostConnections $tunnelId
-            if ($conns -eq 0) { $relayOk = $false }
-            # $conns -eq -1: transient/unknown — do not treat as a failure.
-        }
-        $sshdOk = Test-SshdServing $Port
-
-        # Soft pre-saturation early-warning (advisory; does not force a restart).
+        # Check local pressure frequently without querying the remote relay on
+        # every pass. Released dtssh builds can leak a connection per completed
+        # command, so the slower relay-health cadence cannot protect MaxStartups.
         $estConns = Get-EstablishedConnCount $Port
-        if ($PreAuthWarnThreshold -gt 0 -and $estConns -ge $PreAuthWarnThreshold) {
-            Write-Log "pre-auth pressure: $estConns established connection(s) on :$Port (>= $PreAuthWarnThreshold; MaxStartups wedge risk)" 'WARN'
-        }
 
         # Released dtssh builds can leak one host-side forwarded connection and
         # sshd-session tree per completed command. Recycle once that idle
@@ -554,8 +584,17 @@ try {
         # active. The upstream relay teardown / ClientAlive fixes remain the
         # root solution; this keeps released binaries bounded.
         $sessionPressure = $null
-        if ($IdleSessionWarnThreshold -gt 0 -or $IdleSessionReapThreshold -gt 0) {
+        $shouldClassifySessions = (
+            ($IdleSessionWarnThreshold -gt 0 -and $estConns -ge $IdleSessionWarnThreshold) -or
+            ($IdleSessionReapThreshold -gt 0 -and $estConns -ge $IdleSessionReapThreshold) -or
+            ($PreAuthReapThreshold -gt 0 -and $estConns -ge $PreAuthReapThreshold)
+        )
+        if ($shouldClassifySessions) {
             $sessionPressure = Get-DedicatedSshdSessionPressure $Port
+        }
+        $preAuthConns = Get-EstimatedPreAuthConnCount $estConns $sessionPressure
+        if ($PreAuthWarnThreshold -gt 0 -and $preAuthConns -ge $PreAuthWarnThreshold) {
+            Write-Log "pre-auth pressure: ~$preAuthConns unauthenticated connection(s) on :$Port (>= $PreAuthWarnThreshold; $estConns total Established; MaxStartups wedge risk)" 'WARN'
         }
         if (
             $sessionPressure -and
@@ -577,48 +616,69 @@ try {
                 Start-Sleep -Seconds 3
                 $hostProc = Start-HostProc
                 $failCount = 0
-                Start-Sleep -Seconds $GracePeriodSec
+                $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
                 continue
             }
         }
 
-        # Last-resort hard ceiling. Preserve the previous unconditional
-        # saturation behavior: if classification is wrong or an active session
-        # never settles, eventual reachability still wins over a full wedge.
+        # Reachability ceiling below OpenSSH's default MaxStartups drop onset.
+        # Protect command-bearing and actively forwarding sessions; otherwise
+        # recycle even when process-tree classification found no authenticated
+        # idle roots, because leaked pre-auth sockets do not have such roots.
         if (
             $PreAuthReapThreshold -gt 0 -and
-            $estConns -ge $PreAuthReapThreshold
+            $preAuthConns -ge $PreAuthReapThreshold
         ) {
-            Write-Log "SATURATION REAP: $estConns established connection(s) on :$Port (>= $PreAuthReapThreshold) — restarting host to drain the pile-up before it wedges" 'WARN'
-            Stop-HostProc $hostProc.Id
-            Start-Sleep -Seconds 3
-            $hostProc = Start-HostProc
-            $failCount = 0
-            Start-Sleep -Seconds $GracePeriodSec
-            continue
-        }
-
-        if ($relayOk -and $sshdOk) {
-            if ($failCount -ne 0) { Write-Log "recovered: healthy (relay connected, sshd :$Port serving banner)" }
-            $failCount = 0
-        } else {
-            $failCount++
-            $reasons = @()
-            if (-not $relayOk) { $reasons += '0 relay host-connections' }
-            if (-not $sshdOk)  { $reasons += "sshd :$Port not serving (no SSH banner$(if ($estConns -ge $PreAuthWarnThreshold) { "; $estConns pre-auth conns — likely MaxStartups wedge" }))" }
-            Write-Log "UNHEALTHY: $($reasons -join '; ') (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
-            if ($failCount -ge $ConsecutiveFailures) {
-                Write-Log "restarting dtssh host after $failCount unhealthy checks" 'WARN'
+            if (-not $sessionPressure) {
+                Write-Log "PRESSURE REAP deferred: sshd session classification unavailable" 'WARN'
+            } elseif ($sessionPressure.ActiveRoots -gt 0) {
+                Write-Log "PRESSURE REAP deferred: $($sessionPressure.ActiveRoots) command-bearing SSH session(s) active" 'WARN'
+            } else {
+                Write-Log "PRESSURE REAP: ~$preAuthConns unauthenticated connection(s) on :$Port (>= $PreAuthReapThreshold; $estConns total Established) — restarting before MaxStartups begins dropping clients" 'WARN'
                 Stop-HostProc $hostProc.Id
                 Start-Sleep -Seconds 3
                 $hostProc = Start-HostProc
                 $failCount = 0
-                Start-Sleep -Seconds $GracePeriodSec
+                $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
                 continue
             }
         }
 
-        Start-Sleep -Seconds $HealthCheckSec
+        if ((Get-Date) -ge $nextHealthCheckAt) {
+            # Health = relay connected AND the dedicated sshd is actually
+            # SERVING. The banner probe distinguishes a listening-but-wedged
+            # sshd from a usable one.
+            $relayOk = $true
+            if ($tunnelId) {
+                $conns = Get-HostConnections $tunnelId
+                if ($conns -eq 0) { $relayOk = $false }
+                # $conns -eq -1: transient/unknown — do not treat as a failure.
+            }
+            $sshdOk = Test-SshdServing $Port
+            $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $HealthCheckSec))
+
+            if ($relayOk -and $sshdOk) {
+                if ($failCount -ne 0) { Write-Log "recovered: healthy (relay connected, sshd :$Port serving banner)" }
+                $failCount = 0
+            } else {
+                $failCount++
+                $reasons = @()
+                if (-not $relayOk) { $reasons += '0 relay host-connections' }
+                if (-not $sshdOk)  { $reasons += "sshd :$Port not serving (no SSH banner$(if ($preAuthConns -ge $PreAuthWarnThreshold) { "; ~$preAuthConns unauthenticated connections — likely MaxStartups pressure" }))" }
+                Write-Log "UNHEALTHY: $($reasons -join '; ') (consecutive $failCount/$ConsecutiveFailures)" 'WARN'
+                if ($failCount -ge $ConsecutiveFailures) {
+                    Write-Log "restarting dtssh host after $failCount unhealthy checks" 'WARN'
+                    Stop-HostProc $hostProc.Id
+                    Start-Sleep -Seconds 3
+                    $hostProc = Start-HostProc
+                    $failCount = 0
+                    $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $GracePeriodSec))
+                    continue
+                }
+            }
+        }
+
+        Start-Sleep -Seconds ([Math]::Max(1, $PressureCheckSec))
     }
 } finally {
     if ($mutex) { try { $mutex.ReleaseMutex() } catch { }; $mutex.Dispose() }
