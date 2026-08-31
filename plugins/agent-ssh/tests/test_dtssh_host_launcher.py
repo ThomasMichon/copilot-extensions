@@ -37,6 +37,7 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "SESSION REAP:" in text
     assert "[int]$PreAuthReapThreshold = 128" in text
     assert "$PreAuthWarnThreshold -gt 0" in text
+    assert "$IdleSessionWarnThreshold -gt 0 -or $IdleSessionReapThreshold -gt 0" in text
     assert "SATURATION REAP:" in text
 
 

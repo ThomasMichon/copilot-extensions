@@ -106,14 +106,14 @@
     pre-saturation warning (default 80 — below OpenSSH's default MaxStartups full
     cutoff of 100). Advisory only: the banner probe, not this count, drives
     restarts, so legitimate concurrent sessions are never force-killed by the
-    count alone.
+    count alone. Set to 0 to disable.
 
 .PARAMETER PreAuthReapThreshold
     Established-connection count on :$Port at which the launcher PREEMPTIVELY
     restarts the host to reap the pile-up (default 128), before saturation fully
-    wedges the port. This remains a last-resort fallback when process-tree
-    classification is unavailable. When classification succeeds, the fallback
-    defers while a command-bearing SSH session is active.
+    wedges the port. This remains an unconditional last-resort fallback if an
+    active session never settles or process-tree classification is unavailable.
+    Set to 0 to disable.
 
 .PARAMETER IdleSessionWarnThreshold
     Top-level dedicated-sshd session-tree count at which the launcher logs
@@ -553,7 +553,10 @@ try {
         # population is abnormal, but never while a command-bearing session is
         # active. The upstream relay teardown / ClientAlive fixes remain the
         # root solution; this keeps released binaries bounded.
-        $sessionPressure = Get-DedicatedSshdSessionPressure $Port
+        $sessionPressure = $null
+        if ($IdleSessionWarnThreshold -gt 0 -or $IdleSessionReapThreshold -gt 0) {
+            $sessionPressure = Get-DedicatedSshdSessionPressure $Port
+        }
         if (
             $sessionPressure -and
             $IdleSessionWarnThreshold -gt 0 -and
