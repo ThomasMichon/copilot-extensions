@@ -1842,6 +1842,7 @@ def test_exemplar_slot_actions_reject_spoofed_staging_payload_identity(
 
 
 @pytest.mark.parametrize("runner", ADAPTER_RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.installation_context_smoke
 def test_snapshot_stamp_and_validate_are_idempotent_and_cell_local(
     runner: Runner,
     tmp_path: Path,
@@ -2514,6 +2515,7 @@ def test_python_api_provisions_and_reuses_nonactivating_owned_runtime_slot(
 
 
 @pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.installation_context_smoke
 def test_runtime_slot_actions_bind_expected_snapshot_payload_identity(
     runner: Runner,
     tmp_path: Path,
@@ -3090,7 +3092,8 @@ def test_python_cli_provisions_and_validates_runtime_slot(tmp_path: Path) -> Non
     assert json.loads(validate.stdout)["reason"] == "runtime-slot-ownership-valid"
 
 
-@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.installation_context_smoke
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_completion_publishes_validates_and_replays_without_activation(
     runner: Runner,
     tmp_path: Path,
@@ -4151,6 +4154,7 @@ def test_slot_validate_semantics_ignore_completion_artifacts(
     ("producer", "consumer"),
     INTEROPERABILITY_PAIRS,
 )
+@pytest.mark.installation_context_smoke
 def test_runtime_slot_completion_interoperates_across_runners(
     producer: Runner,
     consumer: Runner,
@@ -4168,6 +4172,7 @@ def test_runtime_slot_completion_interoperates_across_runners(
     assert validated["receipt"] == published["receipt"]
 
 
+@pytest.mark.installation_context_smoke
 @pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_completion_serializes_concurrent_publishers(
     runner: Runner,
@@ -4373,7 +4378,8 @@ def test_python_api_publishes_and_validates_runtime_slot_completion(
     assert validated["operative"] is False
 
 
-@pytest.mark.parametrize("runner", PARITY_RUNNERS, ids=lambda runner: runner[0])
+@pytest.mark.installation_context_smoke
+@pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_cutover_tracks_selected_last_known_good(
     runner: Runner,
     tmp_path: Path,
@@ -4610,6 +4616,7 @@ def test_runtime_slot_cutover_rejects_directory_markers(
     assert list(marker.iterdir()) == []
 
 
+@pytest.mark.installation_context_smoke
 @pytest.mark.parametrize("runner", FAST_PARITY_RUNNERS, ids=lambda runner: runner[0])
 def test_runtime_slot_cutover_serializes_concurrent_winners(
     runner: Runner,

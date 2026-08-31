@@ -733,6 +733,7 @@ def test_concurrent_first_stamp_leaves_one_untorn_receipt(
 
 
 @pytest.mark.parametrize(("runner_name", "command"), RUNNERS)
+@pytest.mark.installation_context_smoke
 def test_stamp_creation_and_idempotence_match_across_runners(
     tmp_path: Path,
     runner_name: str,

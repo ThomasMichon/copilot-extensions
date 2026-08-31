@@ -1066,6 +1066,7 @@ def test_status_and_probe_cli_parity_and_read_only(
     "runner",
     ALL_RUNNERS,
 )
+@pytest.mark.installation_context_smoke
 def test_policy_precedence_evidence_matches_across_runners(
     tmp_path: Path, runner: str
 ) -> None:

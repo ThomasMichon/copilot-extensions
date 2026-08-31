@@ -311,6 +311,7 @@ def test_validate_rejects_rooted_but_not_fully_qualified_context(
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+@pytest.mark.installation_context_smoke
 def test_stamp_creates_and_idempotently_validates_receipts(tmp_path: Path) -> None:
     arguments, _ = _stamp_arguments(tmp_path)
     first = json.loads(_run_ps(*arguments).stdout)

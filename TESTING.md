@@ -79,6 +79,13 @@ INSTALLATION_CONTEXT_EXHAUSTIVE_ADAPTERS=1 \
   python -m pytest -q libs/installation-context/tests
 ```
 
+Pull-request CI runs the `installation_context_smoke` contract lane only when
+the installation-context foundation, its synchronization tool, or an adopter's
+vendored copy changes. The complete exhaustive portfolio runs nightly and on
+demand through the `Installation context full` workflow. This keeps unrelated
+pull requests incremental and keeps the required fast lane independent from the
+size of the long-form regression portfolio.
+
 Run the relevant suite yourself before pushing a runtime change — there is
 intentionally **no** automatic push/PR gate. Fast structural/contract checks are
 marked `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest

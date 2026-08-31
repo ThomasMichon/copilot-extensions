@@ -79,8 +79,30 @@ jobs:
           python -m pytest -q
           libs/payload-invocation/tests
           plugins/agent-index/tests/test_command_catalog.py
-      - name: Installation context foundation tests
-        run: python -m pytest -q --durations=50 libs/installation-context/tests
+      - id: installation-context
+        name: Detect installation-context changes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            base="${{ github.event.before }}"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base"...HEAD | grep -Eq \
+            '^(libs/installation-context/|plugins/(agent-index|agent-machines|agent-worktrees)/scripts/installation-context/|tools/sync-installation-context.py$)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Installation context contract smoke
+        if: steps.installation-context.outputs.run == 'true'
+        run: >-
+          python -m pytest -q --durations=25
+          -m installation_context_smoke
+          libs/installation-context/tests
       - name: Installation context vendoring
         run: python tools/sync-installation-context.py --check
       - name: Installer readiness contract tests
