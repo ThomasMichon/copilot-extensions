@@ -506,6 +506,19 @@ PATH-based sibling launches, fixed lifecycle identities, and operative bare
 commands while the marketplace-installation-cell migration is active. Do not
 enable `--strict` until the producing phases in #1096 have removed the baseline.
 
+### Test portfolio discipline
+
+Treat required pull-request CI as a fast, change-scoped contract gate. Do not
+add exhaustive cross-products or repeated subprocess setup directly to that
+lane. Subprocess-heavy suites must use focused smoke markers and path gating,
+with the complete portfolio retained in a scheduled or manually dispatched
+workflow. Prefer broad canonical implementation coverage plus representative
+adapter checks at real divergence seams; never pool the process boundaries that
+a concurrency or lifecycle test exists to verify.
+
+`TESTING.md` is the canonical source for the portfolio invariants, runner
+mechanics, and the current smoke/exhaustive split.
+
 They are **not active until wired** per clone (git does not auto-enable a
 committed hooks dir). Run the helper once per checkout:
 
