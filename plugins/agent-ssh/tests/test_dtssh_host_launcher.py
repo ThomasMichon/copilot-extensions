@@ -33,6 +33,7 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "function Get-DedicatedSshdSessionPressure" in text
     assert "$children.ContainsKey($current)" in text
     assert "$seen.Add($current)" in text
+    assert "$root.CommandLine -match '(?:^|\\s)-z(?:\\s|$)'" in text
     assert "$proc.CreationDate -lt $parentProc.CreationDate" in text
     assert "$forwardingPids.Contains($current)" in text
     assert "$sessionPressure.ActiveRoots -gt 0" in text
@@ -48,7 +49,9 @@ def test_released_dtssh_leaks_are_classified_before_reaping() -> None:
     assert "$estConns -lt 0 -or" in text
     assert "$shouldClassifySessions -and -not $sessionPressure" in text
     assert "forcing banner health check" in text
-    assert "$forceHealthCheck -or (Get-Date) -ge $nextHealthCheckAt" in text
+    assert "$scheduledHealthCheck = (Get-Date) -ge $nextHealthCheckAt" in text
+    assert "$forceHealthCheck -or $scheduledHealthCheck" in text
+    assert "$scheduledHealthCheck -and $tunnelId" in text
     assert "$sessionPressure.ActiveRoots -gt 0" in text
     assert "PRESSURE REAP deferred:" in text
     assert "PRESSURE REAP:" in text

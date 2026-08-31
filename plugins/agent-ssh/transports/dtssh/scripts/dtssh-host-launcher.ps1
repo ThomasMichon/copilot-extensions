@@ -100,8 +100,9 @@
     probabilistic MaxStartups drops at 10 connections.
 
 .PARAMETER ConsecutiveFailures
-    Number of consecutive 0-host-connection checks before restarting the child
-    (default 2). With the default interval that heals a wedged tunnel in ~4 min.
+    Number of consecutive unhealthy health checks before restarting the child
+    (default 2). Unhealthy means either zero relay host connections or no SSH
+    banner. With the default interval that heals a wedged tunnel in ~4 min.
 
 .PARAMETER GracePeriodSec
     Seconds to wait after (re)starting `dtssh host` before the first health check
@@ -423,7 +424,9 @@ function Get-DedicatedSshdSessionPressure {
             $queue = [System.Collections.Generic.Queue[int]]::new()
             $queue.Enqueue([int]$root.ProcessId)
             $seen = [System.Collections.Generic.HashSet[int]]::new()
-            $isAuthenticated = $false
+            $isAuthenticated = (
+                $root.CommandLine -match '(?:^|\s)-z(?:\s|$)'
+            )
             $hasCommandDescendant = $false
             while ($queue.Count -gt 0) {
                 $current = $queue.Dequeue()
@@ -649,18 +652,22 @@ try {
             }
         }
 
-        if ($forceHealthCheck -or (Get-Date) -ge $nextHealthCheckAt) {
+        $scheduledHealthCheck = (Get-Date) -ge $nextHealthCheckAt
+        if ($forceHealthCheck -or $scheduledHealthCheck) {
             # Health = relay connected AND the dedicated sshd is actually
             # SERVING. The banner probe distinguishes a listening-but-wedged
-            # sshd from a usable one.
+            # sshd from a usable one. Forced pressure-path checks stay local;
+            # only the scheduled health cadence queries the remote relay.
             $relayOk = $true
-            if ($tunnelId) {
+            if ($scheduledHealthCheck -and $tunnelId) {
                 $conns = Get-HostConnections $tunnelId
                 if ($conns -eq 0) { $relayOk = $false }
                 # $conns -eq -1: transient/unknown — do not treat as a failure.
             }
             $sshdOk = Test-SshdServing $Port
-            $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $HealthCheckSec))
+            if ($scheduledHealthCheck) {
+                $nextHealthCheckAt = (Get-Date).AddSeconds([Math]::Max(1, $HealthCheckSec))
+            }
 
             if ($relayOk -and $sshdOk) {
                 if ($failCount -ne 0) { Write-Log "recovered: healthy (relay connected, sshd :$Port serving banner)" }
