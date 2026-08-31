@@ -14,11 +14,16 @@ actions) and per-machine data stay in the consuming repo.
 - **Runtime is standalone.** The CLI installs under `~/.agent-machines` and can
   run without `agent-worktrees`; without the sibling registries, discovery simply
   returns no packages.
-- **Discovery is registry-based.** The candidate set is
-  `~/.agent-worktrees/projects.yaml`; paths are resolved through
-  `~/.agent-worktrees/repos.yaml`. A repo does not have to enable this plugin to
-  contribute packages; `discover` annotates enablement, but the CLI does not
-  require it by default.
+- **Discovery is relationship-aware and registry-based.** Adopted projects come
+  from `~/.agent-worktrees/projects.yaml`; paths are resolved through
+  `~/.agent-worktrees/repos.yaml`. When a project declares `stateless` or
+  `requires_external_state_root`, its project-local (then machine-global
+  fallback) `knowledge_repo` relationship contributes that canonically
+  registered repository to the same
+  package union even when it is not independently adopted. Duplicate adoption
+  collapses to one canonical source, and an active but unresolved relationship
+  fails loudly. A repo does not have to enable this plugin to contribute packages;
+  `discover` annotates enablement, but the CLI does not require it by default.
 - **Restore is machine-scoped.** `~/.copilot/` is global to the user account, so
   restore uses the union of every discovered package gated to this machine, not a
   single current repo.

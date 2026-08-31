@@ -254,6 +254,7 @@ def test_plan_and_drift_key_stable(tmp_path):
     p2 = plan([a], "box-1")
     assert p1.drift_key == p2.drift_key
     assert "copilot.settings" in {s.key for s in p1.surfaces}
+    assert p1.package_sources == [{"package": "a/x", "source_repo": "a"}]
 
 
 def test_drift_key_changes_with_content(tmp_path):
@@ -262,3 +263,38 @@ def test_drift_key_changes_with_content(tmp_path):
     bdata["manage"]["copilot.settings"]["values"]["model"] = "different"
     b = _pkg(tmp_path, "b", bdata)
     assert manifest_hash(resolve_union([a], "box-1")) != manifest_hash(resolve_union([b], "box-1"))
+
+
+def test_drift_key_includes_source_modules_and_resources(tmp_path):
+    base = base_package("shared/package", gate=["*"])
+    a = _pkg(tmp_path, "a", base)
+
+    source_changed = _pkg(tmp_path, "b", base)
+    assert manifest_hash([a]) != manifest_hash([source_changed])
+
+    module_data = base_package("shared/package", gate=["*"])
+    module_data["modules"] = [
+        {
+            "name": "probe",
+            "windows": {"command": ["pwsh", "-File", "tools/probe.ps1"]},
+        }
+    ]
+    module_changed = load_package(
+        write_package(tmp_path / "a-module", "p.yaml", module_data),
+        source_repo="a",
+    )
+    assert manifest_hash([a]) != manifest_hash([module_changed])
+
+    resource_data = base_package("shared/package", gate=["*"])
+    resource_data["resources"] = [
+        {
+            "type": "package",
+            "manager": "winget",
+            "id": "Example.Tool",
+        }
+    ]
+    resource_changed = load_package(
+        write_package(tmp_path / "a-resource", "p.yaml", resource_data),
+        source_repo="a",
+    )
+    assert manifest_hash([a]) != manifest_hash([resource_changed])

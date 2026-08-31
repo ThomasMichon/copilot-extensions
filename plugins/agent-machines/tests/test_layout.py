@@ -277,6 +277,26 @@ def test_resolve_repo_prefers_adopted_name_over_cwd_directory(tmp_path, monkeypa
     assert path == registered
 
 
+def test_resolve_repo_matches_canonical_name_case_insensitively(tmp_path):
+    registered = tmp_path / "registered"
+    registered.mkdir()
+    registry = {
+        "repos": {
+            "knowledge": {
+                "windows": str(registered),
+                "linux": str(registered),
+                "wsl": str(registered),
+            }
+        }
+    }
+    projects = {"projects": {"KNOWLEDGE": {}}}
+
+    name, path = resolve_repo("KNOWLEDGE", registry, projects)
+
+    assert name == "knowledge"
+    assert path == registered
+
+
 def test_unavailable_adopted_repo_is_advisory(tmp_path):
     missing = tmp_path / "missing"
     registry = {
@@ -294,6 +314,44 @@ def test_unavailable_adopted_repo_is_advisory(tmp_path):
     assert reports[0].status == "unavailable"
     assert reports[0].ok
     assert reports[0].findings[0].level == "advisory"
+
+
+def test_unavailable_bound_supplemental_repo_is_error(tmp_path):
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    repo_config = harness / ".agent-worktrees" / "config.yaml"
+    repo_config.parent.mkdir()
+    repo_config.write_text("requires_external_state_root: true\n", encoding="utf-8")
+    config_dir = tmp_path / ".harness"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        "knowledge_repo: knowledge\n",
+        encoding="utf-8",
+    )
+    missing = tmp_path / "knowledge"
+    registry = {
+        "repos": {
+            "harness": {
+                "windows": str(harness),
+                "linux": str(harness),
+                "wsl": str(harness),
+            },
+            "knowledge": {
+                "windows": str(missing),
+                "linux": str(missing),
+                "wsl": str(missing),
+            },
+        }
+    }
+    projects = {"projects": {"harness": {"config_dir": str(config_dir)}}}
+
+    reports = inspect_layouts("box-1", registry=registry, projects=projects)
+
+    assert len(reports) == 2
+    supplemental = reports[1]
+    assert supplemental.status == "unavailable"
+    assert not supplemental.ok
+    assert supplemental.findings[0].code == "supplemental-repo-unavailable"
 
 
 def test_doctor_cli_json(tmp_path, capsys):

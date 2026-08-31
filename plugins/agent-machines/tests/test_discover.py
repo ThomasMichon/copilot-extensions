@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from agent_machines import discover
+from agent_machines import reconcile, validator
 from agent_machines.manifest import ManifestError
 
 from ._helpers import base_package, enable_plugin, write_package
@@ -15,6 +17,22 @@ def _registry(srcroot, **repos):
 
 def _projects(*names):
     return {"schema_version": 2, "projects": {n: {"config_dir": f"~/.{n}"} for n in names}}
+
+
+def _bind_knowledge(tmp_path, project, knowledge):
+    config_dir = tmp_path / f".{project}"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        yaml.safe_dump({"knowledge_repo": knowledge}),
+        encoding="utf-8",
+    )
+    return {"config_dir": str(config_dir)}
+
+
+def _mark_external_state(repo):
+    config = repo / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("stateless: true\n", encoding="utf-8")
 
 
 def test_discover_finds_gated_packages(tmp_path, monkeypatch):
@@ -159,6 +177,175 @@ def test_discover_only_considers_adopted_projects(tmp_path):
     reg = _registry(srcroot, acme={"class": "worktree"})
     assert discover.discover(machine="box-1", registry=reg, projects=_projects("other")) == []
     assert len(discover.discover(machine="box-1", registry=reg, projects=_projects("acme"))) == 1
+
+
+def test_discover_grafts_bound_supplemental_repo(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    knowledge = srcroot / "knowledge"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    _mark_external_state(harness)
+    write_package(
+        knowledge,
+        "knowledge.yaml",
+        base_package(name="knowledge/preferences", gate=["*"]),
+    )
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+        }
+    }
+
+    found = discover.discover(machine="box-1", registry=reg, projects=projects)
+
+    assert [repo.name for repo in found] == ["harness", "knowledge"]
+    assert [pkg.source_repo for repo in found for pkg in repo.packages] == [
+        "harness",
+        "knowledge",
+    ]
+
+
+def test_bound_supplemental_repo_is_deduplicated_when_adopted(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    knowledge = srcroot / "knowledge"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    _mark_external_state(harness)
+    write_package(
+        knowledge,
+        "knowledge.yaml",
+        base_package(name="knowledge/preferences", gate=["*"]),
+    )
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+            "KNOWLEDGE": {"config_dir": str(tmp_path / ".knowledge")},
+        }
+    }
+
+    found = discover.discover(machine="box-1", registry=reg, projects=projects)
+
+    assert [repo.name for repo in found] == ["harness", "knowledge"]
+
+
+def test_normal_project_ignores_inactive_knowledge_pointer(tmp_path):
+    srcroot = tmp_path / "Src"
+    project = srcroot / "project"
+    write_package(project, "project.yaml", base_package(name="project/base", gate=["*"]))
+    reg = _registry(srcroot, project={"class": "worktree"})
+    projects = {
+        "projects": {
+            "project": _bind_knowledge(tmp_path, "project", "missing"),
+        }
+    }
+
+    found = discover.discover(machine="box-1", registry=reg, projects=projects)
+
+    assert [repo.name for repo in found] == ["project"]
+
+
+def test_stateless_project_uses_global_knowledge_binding(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    global_config = tmp_path / ".agent-worktrees" / "config.yaml"
+    global_config.parent.mkdir()
+    global_config.write_text("knowledge_repo: knowledge\n", encoding="utf-8")
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    knowledge = srcroot / "knowledge"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    _mark_external_state(harness)
+    write_package(
+        knowledge,
+        "knowledge.yaml",
+        base_package(name="knowledge/preferences", gate=["*"]),
+    )
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+    projects = {"projects": {"harness": {"config_dir": str(tmp_path / ".harness")}}}
+
+    found = discover.discover(machine="box-1", registry=reg, projects=projects)
+
+    assert [repo.name for repo in found] == ["harness", "knowledge"]
+
+
+def test_bound_supplemental_repo_requires_canonical_registration(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    _mark_external_state(harness)
+    reg = _registry(srcroot, harness={"class": "worktree"})
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+        }
+    }
+
+    with pytest.raises(ManifestError, match="no canonical repos.yaml entry"):
+        discover.discover(machine="box-1", registry=reg, projects=projects)
+
+
+def test_bound_supplemental_repo_unavailable_fails_loudly(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    _mark_external_state(harness)
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+        }
+    }
+
+    with pytest.raises(ManifestError, match="required by harness is unavailable"):
+        discover.discover(machine="box-1", registry=reg, projects=projects)
+
+
+def test_grafted_packages_participate_in_cross_repo_conflict_validation(tmp_path):
+    srcroot = tmp_path / "Src"
+    harness = srcroot / "harness"
+    knowledge = srcroot / "knowledge"
+    write_package(harness, "harness.yaml", base_package(name="harness/base", gate=["*"]))
+    _mark_external_state(harness)
+    conflicting = base_package(name="knowledge/preferences", gate=["*"])
+    conflicting["manage"]["copilot.settings"]["values"]["model"] = "other"
+    write_package(knowledge, "knowledge.yaml", conflicting)
+    reg = _registry(
+        srcroot,
+        harness={"class": "worktree"},
+        knowledge={"class": "worktree"},
+    )
+    projects = {
+        "projects": {
+            "harness": _bind_knowledge(tmp_path, "harness", "knowledge"),
+        }
+    }
+
+    packages = [
+        pkg
+        for repo in discover.discover(machine="box-1", registry=reg, projects=projects)
+        for pkg in repo.packages
+    ]
+    findings = validator.validate(reconcile.resolve_union(packages, "box-1"), "box-1")
+
+    assert any(finding.level == "error" for finding in findings)
 
 
 def test_discover_uses_explicit_path_key(tmp_path):

@@ -24,6 +24,7 @@ import platform
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -33,6 +34,8 @@ MACHINE_STATE_ROOT = ".agent-machines"
 ALL_PACKAGES_DIR = "all"
 MACHINES_PACKAGES_DIR = "machines"
 LEGACY_MACHINE_STATE_DIR = ".github/machine-state"
+PROJECT_CONFIG_FILE = "config.yaml"
+REPO_CONFIG_FILE = Path(".agent-worktrees") / "config.yaml"
 
 
 def home() -> Path:
@@ -62,6 +65,10 @@ def projects_path(home_dir: Path | None = None) -> Path:
     return (home_dir or home()) / ".agent-worktrees" / "projects.yaml"
 
 
+def global_config_path(home_dir: Path | None = None) -> Path:
+    return (home_dir or home()) / ".agent-worktrees" / PROJECT_CONFIG_FILE
+
+
 @dataclass
 class DiscoveredRepo:
     """A registered repo that carries applicable requirement packages."""
@@ -70,6 +77,19 @@ class DiscoveredRepo:
     path: Path
     enabled: bool
     packages: list[RequirementPackage] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class RepoCandidate:
+    """One adopted or relationship-required repository considered for discovery."""
+
+    name: str
+    path: Path
+    required_by: tuple[str, ...] = ()
+
+    @property
+    def required(self) -> bool:
+        return bool(self.required_by)
 
 
 def resolve_repo_path(name: str, entry: dict, srcroot: dict, plat: str) -> Path | None:
@@ -109,6 +129,137 @@ def read_projects(path: Path | None = None) -> dict:
         return yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
         return {}
+
+
+def read_global_config(path: Path | None = None) -> dict:
+    """Read the machine-wide agent-worktrees config, gracefully when absent."""
+    path = path or global_config_path()
+    if not path.is_file():
+        return {}
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def _project_config(project: Any) -> dict:
+    """Read one adopted project's machine-local config without requiring agent-worktrees."""
+    if not isinstance(project, dict) or not project.get("config_dir"):
+        return {}
+    path = Path(str(project["config_dir"])).expanduser() / PROJECT_CONFIG_FILE
+    if not path.is_file():
+        return {}
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
+def _registered_repo_entry(repos: dict, name: str) -> tuple[str, dict] | None:
+    """Return a canonical registry entry, matching repository names case-insensitively."""
+    folded = name.casefold()
+    for registered_name, entry in repos.items():
+        if str(registered_name).casefold() == folded and isinstance(entry, dict):
+            return str(registered_name), entry
+    return None
+
+
+def _repo_requires_external_state(repo_path: Path) -> bool:
+    """Return whether committed repo config activates the knowledge relationship."""
+    path = repo_path / REPO_CONFIG_FILE
+    if not path.is_file():
+        return False
+    try:
+        config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    if not isinstance(config, dict):
+        return False
+    return bool(config.get("stateless") or config.get("requires_external_state_root"))
+
+
+def candidate_repos(
+    registry: dict | None = None,
+    projects: dict | None = None,
+) -> list[RepoCandidate]:
+    """Resolve adopted projects plus their declared supplemental package repositories.
+
+    Adopted projects remain the discovery roots. A project's machine-local
+    ``knowledge_repo`` binding contributes one required supplemental repository.
+    Supplemental repositories must have a canonical ``repos.yaml`` entry; this
+    intentionally does not use source-root fallback because a configured binding
+    must not look ready when registration is incomplete.
+    """
+    proj = projects if projects is not None else read_projects()
+    reg = registry if registry is not None else read_registry()
+    project_entries = proj.get("projects") or {}
+    if not isinstance(project_entries, dict):
+        return []
+    repos = reg.get("repos") or {}
+    srcroot = reg.get("srcroot") or {}
+    plat = current_platform()
+    global_config = read_global_config()
+
+    candidates: dict[str, RepoCandidate] = {}
+    for raw_name in project_entries:
+        name = str(raw_name)
+        registered = _registered_repo_entry(repos, name)
+        canonical_name = registered[0] if registered else name
+        entry = registered[1] if registered else {}
+        path = resolve_repo_path(canonical_name, entry, srcroot, plat)
+        if path is not None:
+            candidates.setdefault(
+                canonical_name.casefold(),
+                RepoCandidate(name=canonical_name, path=path),
+            )
+
+    for raw_project_name, project in project_entries.items():
+        project_name = str(raw_project_name)
+        project_candidate = candidates.get(project_name.casefold())
+        if (
+            project_candidate is None
+            or not project_candidate.path.is_dir()
+            or not _repo_requires_external_state(project_candidate.path)
+        ):
+            continue
+        project_config = _project_config(project)
+        knowledge_repo = (
+            project_config.get("knowledge_repo")
+            or global_config.get("knowledge_repo")
+        )
+        if not knowledge_repo:
+            continue
+        if not isinstance(knowledge_repo, str):
+            raise ManifestError(
+                f"project {project_name!r} config: knowledge_repo must be a repository name"
+            )
+        required_name = knowledge_repo.strip()
+        if not required_name:
+            continue
+        registered = _registered_repo_entry(repos, required_name)
+        if registered is None:
+            raise ManifestError(
+                f"project {project_name!r} binds supplemental repo {required_name!r}, "
+                "but it has no canonical repos.yaml entry"
+            )
+        canonical_name, entry = registered
+        path = resolve_repo_path(canonical_name, entry, srcroot, plat)
+        if path is None:
+            raise ManifestError(
+                f"project {project_name!r} binds supplemental repo {canonical_name!r}, "
+                f"but its repos.yaml entry has no path for platform {plat!r}"
+            )
+        folded = canonical_name.casefold()
+        existing = candidates.get(folded)
+        required_by = tuple(sorted(set((existing.required_by if existing else ()) + (project_name,))))
+        candidates[folded] = RepoCandidate(
+            name=canonical_name,
+            path=path,
+            required_by=required_by,
+        )
+    return list(candidates.values())
 
 
 def repo_enables_agent_machines(repo_path: Path) -> bool:
@@ -238,18 +389,15 @@ def discover(
     is absent.
     """
     machine = machine or current_machine()
-    proj = projects if projects is not None else read_projects()
-    reg = registry if registry is not None else read_registry()
-    project_names = (proj.get("projects") or {}).keys()
-    repos = reg.get("repos") or {}
-    srcroot = reg.get("srcroot") or {}
-    plat = current_platform()
-
     found: list[DiscoveredRepo] = []
-    for name in project_names:
-        entry = repos.get(name) or {}
-        path = resolve_repo_path(name, entry if isinstance(entry, dict) else {}, srcroot, plat)
-        if not path or not path.is_dir():
+    for candidate in candidate_repos(registry, projects):
+        name, path = candidate.name, candidate.path
+        if not path.is_dir():
+            if candidate.required:
+                owners = ", ".join(candidate.required_by)
+                raise ManifestError(
+                    f"supplemental repo {name!r} required by {owners} is unavailable at {path}"
+                )
             continue
         pkgs = packages_in_repo(path, name, machine)
         if not pkgs:
@@ -267,8 +415,8 @@ def _main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI 
     print(f"machine: {machine}  platform: {current_platform()}")
     if not repos:
         print("no requirement packages discovered "
-              "(no adopted projects in ~/.agent-worktrees/projects.yaml, "
-              "or none carry .agent-machines packages)")
+              "(no adopted projects or declared supplemental repositories carry "
+              ".agent-machines packages)")
         return 0
     for repo in repos:
         flag = "enabled" if repo.enabled else "not-enabled"
