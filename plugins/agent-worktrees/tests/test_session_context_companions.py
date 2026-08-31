@@ -7,6 +7,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,8 @@ def _bash() -> str:
     bash = shutil.which("bash")
     if bash is None:
         pytest.skip("Bash is not available")
+    if os.name == "nt" and "WindowsApps" in Path(bash).parts:
+        pytest.skip("WSL Bash cannot execute Windows test paths directly")
     return bash
 
 
@@ -54,10 +57,16 @@ def _run(
     home: Path,
     cwd: Path,
     context_only: bool = False,
+    side_effect_only: bool = False,
+    await_context: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     command = [_bash(), str(PLUGIN / "scripts" / script)]
     if context_only:
         command.append("--context-only")
+    elif side_effect_only:
+        command.append("--side-effect-only")
+    elif await_context:
+        command.append("--await-context")
     environment = {
         **os.environ,
         "HOME": str(home),
@@ -81,6 +90,8 @@ def _run_powershell(
     home: Path,
     cwd: Path,
     context_only: bool = False,
+    side_effect_only: bool = False,
+    await_context: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         _powershell(),
@@ -91,6 +102,10 @@ def _run_powershell(
     ]
     if context_only:
         command.append("--context-only")
+    elif side_effect_only:
+        command.append("--side-effect-only")
+    elif await_context:
+        command.append("--await-context")
     environment = {
         **os.environ,
         "HOME": str(home),
@@ -210,6 +225,94 @@ def test_register_nudge_context_only_replays_without_mutating(
     assert json.loads(changed_version.stdout) == {}
 
 
+def test_register_nudge_side_effect_mode_suppresses_but_preserves_context(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    repo = tmp_path / "example"
+    bin_dir = home / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    command = bin_dir / "agent-worktrees"
+    command.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    command.chmod(0o755)
+    _write_version(home)
+    payload = _payload("session-nudge-side-effect", repo)
+
+    direct = _run(
+        "register-nudge.sh",
+        payload,
+        home=home,
+        cwd=repo,
+        side_effect_only=True,
+    )
+    replay = _run(
+        "register-nudge.sh",
+        payload,
+        home=home,
+        cwd=repo,
+        context_only=True,
+    )
+
+    assert json.loads(direct.stdout) == {}
+    assert "not a registered agent-worktrees project" in json.loads(
+        replay.stdout
+    )["additionalContext"]
+
+
+def test_register_nudge_awaits_direct_completion_receipt(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    repo = tmp_path / "example"
+    bin_dir = home / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    command = bin_dir / "agent-worktrees"
+    command.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    command.chmod(0o755)
+    _write_version(home)
+    payload = _payload("session-nudge-await", repo)
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "USERPROFILE": str(home),
+    }
+    waiter = subprocess.Popen(
+        [
+            _bash(),
+            str(PLUGIN / "scripts" / "register-nudge.sh"),
+            "--await-context",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=repo,
+        env=environment,
+        text=True,
+    )
+    assert waiter.stdin is not None
+    waiter.stdin.write(payload)
+    waiter.stdin.close()
+    time.sleep(0.1)
+
+    direct = _run(
+        "register-nudge.sh",
+        payload,
+        home=home,
+        cwd=repo,
+        side_effect_only=True,
+    )
+    assert waiter.stdout is not None
+    replay_output = waiter.stdout.read()
+    waiter.wait(timeout=5)
+
+    assert json.loads(direct.stdout) == {}
+    assert "not a registered agent-worktrees project" in json.loads(
+        replay_output
+    )["additionalContext"]
+
+
 def test_marketplace_context_only_replays_without_reconciling(
     tmp_path: Path,
 ) -> None:
@@ -308,6 +411,51 @@ def test_marketplace_context_only_replays_without_reconciling(
     assert json.loads(changed_version.stdout) == {}
 
 
+def test_marketplace_side_effect_mode_suppresses_but_preserves_context(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    repo = tmp_path / "repo"
+    bin_dir = home / ".agent-worktrees" / "bin"
+    bin_dir.mkdir(parents=True)
+    repo.mkdir()
+    fake_python = tmp_path / "fake-python"
+    expected = {
+        "additionalContext": "Local marketplace sources changed; restart."
+    }
+    fake_python.write_text(
+        "#!/usr/bin/env bash\ncat >/dev/null\nprintf '%s' "
+        + shlex.quote(json.dumps(expected))
+        + "\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    (bin_dir / "resolve-runtime.sh").write_text(
+        f"AW_PY={shlex.quote(str(fake_python))}\n",
+        encoding="utf-8",
+    )
+    _write_version(home)
+    payload = _payload("session-marketplace-side-effect", repo)
+
+    direct = _run(
+        "marketplace-overrides.sh",
+        payload,
+        home=home,
+        cwd=repo,
+        side_effect_only=True,
+    )
+    replay = _run(
+        "marketplace-overrides.sh",
+        payload,
+        home=home,
+        cwd=repo,
+        context_only=True,
+    )
+
+    assert json.loads(direct.stdout) == {}
+    assert json.loads(replay.stdout) == expected
+
+
 def test_register_nudge_powershell_context_only_replays(
     tmp_path: Path,
 ) -> None:
@@ -342,15 +490,19 @@ def test_register_nudge_powershell_context_only_replays(
     assert json.loads(replay.stdout) == direct_payload
 
     alias = tmp_path / "example-link"
-    alias.symlink_to(repo, target_is_directory=True)
-    canonical_alias = _run_powershell(
-        "register-nudge.ps1",
-        _payload("session-nudge-ps", alias),
-        home=home,
-        cwd=repo,
-        context_only=True,
-    )
-    assert json.loads(canonical_alias.stdout) == direct_payload
+    try:
+        alias.symlink_to(repo, target_is_directory=True)
+    except OSError:
+        alias = None
+    if alias is not None:
+        canonical_alias = _run_powershell(
+            "register-nudge.ps1",
+            _payload("session-nudge-ps", alias),
+            home=home,
+            cwd=repo,
+            context_only=True,
+        )
+        assert json.loads(canonical_alias.stdout) == direct_payload
 
     changed_source = _run_powershell(
         "register-nudge.ps1",

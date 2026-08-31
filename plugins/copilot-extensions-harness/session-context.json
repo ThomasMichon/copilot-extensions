@@ -9,8 +9,16 @@
       "order": 130,
       "timeoutSeconds": 1,
       "maxBytes": 448,
-      "bash": ["scripts/emit-contribution-boundary.sh"],
-      "powershell": ["scripts/emit-contribution-boundary.ps1"]
+      "bash": [
+        "scripts/emit-contribution-boundary.sh"
+      ],
+      "powershell": [
+        "scripts/emit-contribution-boundary.ps1"
+      ]
     }
-  ]
+  ],
+  "sessionStart": {
+    "sideEffects": "none",
+    "context": "authority-aware"
+  }
 }

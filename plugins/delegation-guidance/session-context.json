@@ -9,8 +9,18 @@
       "order": 120,
       "timeoutSeconds": 1,
       "maxBytes": 1024,
-      "bash": ["scripts/emit-guidance.sh", "--aggregate"],
-      "powershell": ["scripts/emit-guidance.ps1", "--aggregate"]
+      "bash": [
+        "scripts/emit-guidance.sh",
+        "--aggregate"
+      ],
+      "powershell": [
+        "scripts/emit-guidance.ps1",
+        "--aggregate"
+      ]
     }
-  ]
+  ],
+  "sessionStart": {
+    "sideEffects": "none",
+    "context": "authority-aware"
+  }
 }

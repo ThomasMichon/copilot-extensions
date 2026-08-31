@@ -441,6 +441,22 @@ implementation work, plus the suite's inspectable contributor declaration, are
 documented in
 [`references/session-context-aggregation.md`](references/session-context-aggregation.md).
 
+For a copilot-extensions marketplace producer, publish a complete
+`session-context.json` declaration from `plugin.json`, declare each contributor
+as a pure payload-relative Bash/PowerShell argv pair, and register the
+engine-v2 producer wrapper for each contributor with `timeoutSec: 30`.
+Context-only plugins declare `sideEffects: none`; mixed plugins declare
+`sideEffects: restart-safe-idempotent` and keep those direct idempotent commands
+separate from the pure contributor. Never put a state mutation in a contributor:
+the aggregate authority runs contributors but never reruns direct hooks.
+
+The wrapper invokes the payload-relative contributor directly before exact
+authority proof. After proof of
+`context-injection@copilot-extensions` and its compatible engine, it
+rendezvouses on `(sessionId, canonical resolved cwd)` and emits `{}`. Only the
+authority emits the cached aggregate. Keep the canonical Bash and PowerShell
+wrappers synchronized; do not hand-author a per-plugin authority resolver.
+
 Hook payload/output shape:
 
 ```json

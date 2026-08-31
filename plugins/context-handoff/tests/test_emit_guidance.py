@@ -85,12 +85,13 @@ def test_manifest_registers_cross_platform_session_start_hook() -> None:
     assert manifest["hooks"] == "hooks.json"
     entry = _hook_entry()
     assert entry["type"] == "command"
-    assert entry["timeoutSec"] == 5
+    assert entry["timeoutSec"] == 30
     for shell in ("powershell", "bash"):
         command = str(entry[shell])
         assert "COPILOT_PLUGIN_ROOT" in command
         assert "PLUGIN_ROOT" in command
         assert "CLAUDE_PLUGIN_ROOT" in command
+        assert "invoke-context-contributor." in command
         assert "emit-guidance." in command
 
 
@@ -224,7 +225,7 @@ def test_hook_commands_use_plugin_root() -> None:
         text=True,
         env=environment,
     )
-    assert _context(result) == _context(_run_bash())
+    assert _context(result) == _context(_run_bash("--aggregate"))
 
     powershell = _powershell()
     if powershell:
@@ -235,7 +236,7 @@ def test_hook_commands_use_plugin_root() -> None:
             text=True,
             env=environment,
         )
-        assert _context(result) == _context(_run_powershell())
+        assert _context(result) == _context(_run_powershell("--aggregate"))
 
 
 def test_hook_commands_accept_compatibility_root_aliases() -> None:

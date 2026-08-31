@@ -29,10 +29,33 @@ EXPECTED = {
     "context-handoff": {"continuity-guidance"},
     "copilot-extensions-harness": {"contribution-boundary"},
     "delegation-guidance": {"delegation-guidance"},
-    "zz-context-injection": set(),
+    "context-injection": set(),
 }
+CONTEXT_ONLY = {
+    "ai-attribution",
+    "context-handoff",
+    "copilot-extensions-harness",
+    "delegation-guidance",
+}
+MIXED = set(EXPECTED) - CONTEXT_ONLY - {"context-injection"}
 def _json(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def test_repository_adoption_is_plugin_owned_configuration() -> None:
+    settings = _json(ROOT / ".github" / "copilot" / "settings.json")
+    assert settings["enabledPlugins"]["context-injection@copilot-extensions"] is True
+    assert "sessionContextAggregation" not in settings
+    assert (
+        ROOT / ".context-injection" / "config.yaml"
+    ).read_text(encoding="utf-8") == (
+        "schema: copilot-extensions.context-injection\n"
+        "version: 1\n"
+        "authority: context-injection@copilot-extensions\n"
+        "engine:\n"
+        "  schema: copilot-extensions.context-injection-engine\n"
+        "  version: 2\n"
+    )
 
 
 def _session_start_entries(plugin: Path, manifest: dict[str, object]) -> list[object]:
@@ -76,8 +99,25 @@ def test_every_session_start_plugin_has_a_complete_declaration() -> None:
             for contributor in contributors
             if isinstance(contributor, dict)
         } == EXPECTED[plugin.name]
+        behavior = declaration["sessionStart"]
+        if plugin.name == "context-injection":
+            assert behavior == {
+                "sideEffects": "none",
+                "context": "aggregate-authority",
+            }
+        else:
+            assert behavior == {
+                "sideEffects": (
+                    "none"
+                    if plugin.name in CONTEXT_ONLY
+                    else "restart-safe-idempotent"
+                ),
+                "context": "authority-aware",
+            }
 
     assert discovered == set(EXPECTED)
+    assert len(MIXED) == 11
+    assert len(CONTEXT_ONLY) == 4
 
 
 def test_contributor_commands_are_bounded_payload_scripts() -> None:
@@ -128,3 +168,83 @@ def test_mixed_hooks_expose_only_read_only_companion_modes() -> None:
     contributor = handoff["contributors"][0]
     assert contributor["bash"][1:] == ["--aggregate"]
     assert contributor["powershell"][1:] == ["--aggregate"]
+
+
+def test_every_contributor_hook_uses_the_engine_v2_wrapper() -> None:
+    for plugin_name, expected_ids in EXPECTED.items():
+        if plugin_name == "context-injection":
+            continue
+        plugin = PLUGINS / plugin_name
+        manifest = _json(plugin / "plugin.json")
+        entries = _session_start_entries(plugin, manifest)
+        declaration = _json(plugin / "session-context.json")
+        contributors = {
+            contributor["id"]: contributor
+            for contributor in declaration["contributors"]
+        }
+        for contributor_id in expected_ids:
+            source = f"{plugin_name}@copilot-extensions"
+            matches = [
+                entry
+                for entry in entries
+                if isinstance(entry, dict)
+                and source in str(entry.get("bash", ""))
+                and source in str(entry.get("powershell", ""))
+                and contributor_id in str(entry.get("bash", ""))
+                and contributor_id in str(entry.get("powershell", ""))
+            ]
+            assert len(matches) == 1
+            entry = matches[0]
+            assert entry["timeoutSec"] == 30
+            assert "invoke-context-contributor.sh" in entry["bash"]
+            assert "invoke-context-contributor.ps1" in entry["powershell"]
+
+            for platform in ("bash", "powershell"):
+                relative = contributors[contributor_id][platform][0]
+                legacy = [
+                    candidate
+                    for candidate in entries
+                    if isinstance(candidate, dict)
+                    and relative in str(candidate.get(platform, ""))
+                    and "invoke-context-contributor" not in str(
+                        candidate.get(platform, "")
+                    )
+                ]
+                assert legacy == []
+
+
+def test_producer_wrappers_are_byte_identical_to_the_authority_copy() -> None:
+    authority = PLUGINS / "context-injection" / "scripts"
+    for plugin_name, contributors in EXPECTED.items():
+        if not contributors:
+            continue
+        scripts = PLUGINS / plugin_name / "scripts"
+        for filename in (
+            "invoke-context-contributor.sh",
+            "invoke-context-contributor.ps1",
+        ):
+            assert (scripts / filename).read_bytes() == (
+                authority / filename
+            ).read_bytes()
+
+
+def test_agent_worktrees_side_effect_hooks_are_explicitly_context_free() -> None:
+    plugin = PLUGINS / "agent-worktrees"
+    manifest = _json(plugin / "plugin.json")
+    entries = _session_start_entries(plugin, manifest)
+    commands = "\n".join(
+        str(entry.get(platform, ""))
+        for entry in entries
+        if isinstance(entry, dict)
+        for platform in ("bash", "powershell")
+    )
+    for stem in ("register-session", "register-nudge", "marketplace-overrides"):
+        matching = [
+            line
+            for line in commands.splitlines()
+            if stem in line and "invoke-context-contributor" not in line
+        ]
+        assert matching
+        assert all("--side-effect-only" in line for line in matching)
+    assert "session-conduct" not in commands
+    assert "session-machine" not in commands

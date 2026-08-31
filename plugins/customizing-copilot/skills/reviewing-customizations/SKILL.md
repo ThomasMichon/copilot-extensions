@@ -67,8 +67,8 @@ anti-self-delegation line), **MCP readiness** (an MCP-owning agent without a
 `## MCP Readiness` section), **agent-mcp fallback** (an agent-mcp-backed agent
 without an equivalent materialized CLI fallback), **inline secrets** in config
 files, **raw IPs** in ssh/scp/rsync commands, and, with `--from-settings`,
-**session-start context composition**, including unsupported designs that
-depend on `enabledPlugins` order or one plugin running last.
+**session-start context composition**, including missing or ambiguous aggregate
+ownership.
 `--strict` exits non-zero on any BLOCKING finding, so it drops into a hook or CI
 gate. It is a **heuristic aid, not a proof** — it deliberately under-flags rather
 than cry wolf; feed its findings into the design critique, don't treat a clean
@@ -136,27 +136,42 @@ python3 <skill-dir>/scripts/scan-customizations.py <repo-root> --from-settings
 The same loaded-set pass inventories each active command `sessionStart` plugin
 without executing hooks. It reports plugin identities and these roles only:
 
-- **aggregate authority** — the `zz-context-injection` candidate;
+- **aggregate authority** — the exact `context-injection@copilot-extensions`
+  plugin selected by repository adoption;
 - **complete declared contributor** — `plugin.json` points through
   `sessionContext` to a version-1 `session-context.json` whose contributors are
-  explicitly pure;
+  explicitly pure and whose direct context behavior is `authority-aware`;
 - **complete declared side-effect-only** — the declaration is complete and has
-  no contributors; and
+  `sideEffects: restart-safe-idempotent`, `context: none`, and no contributors;
+  and
 - **legacy direct or unknown** — no complete declaration proves the hook's
   context behavior.
 
-The scanner never infers plugin priority from `enabledPlugins` JSON key order,
-lexical plugin names, catalog order, or the current inventory. Those are not
-author-facing compatibility contracts. An aggregate-authority design that needs
-its plugin to run last is therefore BLOCKING even when one observed runtime
-orders it that way. A known session-start plugin missing its declaration also
-blocks safe composition. An external plugin whose payload cannot be inspected
-remains a warning because the scanner cannot establish whether it emits
-context.
+The scanner accepts aggregate authority only when the plugin-owned
+`.context-injection/config.yaml` names the exact enabled
+`context-injection@copilot-extensions` authority and its engine contract is
+compatible. Host settings only enable the plugin. Missing, malformed,
+unknown-shaped, or ambiguous adoption remains BLOCKING. In an adopted stack,
+every enabled session-start plugin must be complete-declared; unclassified hooks,
+incomplete side-effect-only declarations, and contributors without
+authority-aware direct behavior are BLOCKING. An external plugin whose payload
+cannot be inspected remains a warning because the scanner cannot establish
+whether it emits context. Producer hooks rendezvous but emit `{}` after proof;
+only the authority emits the cached aggregate. The authority may run before,
+after, or concurrently with producers. Their host-level `timeoutSec` must be at
+least the engine's 25-second rendezvous deadline, with 30 seconds recommended
+for wrapper overhead.
+
+For this marketplace's owned stack, the repository guard is stricter: every
+declared contributor must have exactly one 30-second engine-v2 wrapper hook,
+the Bash and PowerShell wrapper copies must remain byte-identical to the
+authority copy, and no legacy direct hook may still invoke the contributor.
+Mixed plugins must prove their direct state mutations use context-free modes;
+the aggregate authority must never invoke those mutations.
 
 More than one possible non-empty result is BLOCKING unless the runtime defines
 merge semantics for that event/field or one attributable owner composes the
-outputs without relying on a last-writer race. The version-1 declaration makes
+outputs. The version-1 declaration makes
 contributors inspectable; it does not prove host execution order. Reports never
 include hook commands, contributor argv, or emitted context. The full execution
 and output-composition contract, including the open start-hook runtime work, is
@@ -204,8 +219,7 @@ equivalent independent reviewer. Ask it for **bugs and design flaws, not style**
   procedures stay in the skill (see `customizing-copilot:authoring-skills`
   § *sessionStart context injection*);
 - **contradictory rules** between `AGENTS.md`, skills, and hooks;
-- hook or plugin designs that treat `enabledPlugins` key order, lexical names,
-  catalog order, or a plugin being the last context emitter as arbitration;
+- hook or plugin designs without explicit context ownership and composition;
 - Task-capable sub-agents missing the agent-specific **anti-recursion** guard,
   and MCP-owning agents missing readiness / equivalent fallback behavior;
 - **footguns** — destructive commands without confirmation, hardcoded paths,
