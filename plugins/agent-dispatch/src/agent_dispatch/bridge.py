@@ -56,20 +56,37 @@ def bridge_available() -> bool:
     return _agent_bridge_launch_prefix() is not None
 
 
-def worker_prompt(task_id: str, *, coordinator_url: str, worker_id: str) -> str:
-    """Build the instruction prompt handed to a spawned worker agent."""
+def worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
+    """Build the instruction prompt handed to a spawned worker agent.
+
+    ``route`` is the coordinator **routing intent** (a leading ``agent-dispatch``
+    flag fragment: ``""`` for the default local coordinator, or ``" --shared"``
+    for the env-configured shared moniker). The default carries **no** endpoint,
+    so each command rediscovers the live local coordinator -- transparent to a
+    zero-downtime port cutover. A raw ``--url`` endpoint is never baked into a
+    worker (the caller rejects that combination); routing is by discovery or a
+    stable moniker only.
+    """
+    ad = f"agent-dispatch{route}"
+    if route:
+        discover = f"Use the payload-local `{ad}` CLI (targets the shared coordinator moniker) "
+    else:
+        discover = (
+            "Use the payload-local `agent-dispatch` CLI without `--url` so each "
+            "command resolves the live local coordinator "
+        )
     return (
         f"You are an agent-dispatch task worker (worker id: {worker_id}). "
-        f"A task has been queued for you on the coordinator at {coordinator_url}. "
-        f"Steps: (1) read it with `agent-dispatch show {task_id}`; "
-        f"(2) claim it with `agent-dispatch claim {task_id} --worker {worker_id}` "
+        f"A task has been queued for you. {discover}for each command. "
+        f"Steps: (1) read it with `{ad} show {task_id}`; "
+        f"(2) claim it with `{ad} claim {task_id} --worker {worker_id}` "
         f"(add `--capability <cap>` for each capability the task requires); "
-        f"(3) `agent-dispatch start {task_id} {worker_id}`, then run "
-        f"`agent-dispatch steer take {task_id} {worker_id} --all` and incorporate any "
+        f"(3) `{ad} start {task_id} {worker_id}`, then run "
+        f"`{ad} steer take {task_id} {worker_id} --all` and incorporate any "
         f"pending operator guidance before doing the work described in the "
         f"task's prompt/payload; "
-        f"(4) `agent-dispatch complete {task_id} {worker_id} --result-ref <ref>`. "
-        f"On a recoverable snag, `agent-dispatch yield {task_id} {worker_id} "
+        f"(4) `{ad} complete {task_id} {worker_id} --result-ref <ref>`. "
+        f"On a recoverable snag, `{ad} yield {task_id} {worker_id} "
         f"--note <why>` returns it to the queue."
     )
 
@@ -78,9 +95,9 @@ def spawn_worker(
     task_id: str,
     *,
     agent: str = DEFAULT_WORKER_AGENT,
-    coordinator_url: str,
     worker_id: str,
     prompt: str | None = None,
+    route: str = "",
     wait: bool = True,
     json_output: bool = False,
     timeout: float | None = None,
@@ -95,7 +112,8 @@ def spawn_worker(
     embodying a task headlessly with richer semantics -- e.g. the supervisor's
     headless embody backend, which reuses the CLI autopilot seed so a
     headless-embodied task is driven identically to a CLI-embodied one -- passes
-    the seed it wants delivered verbatim.
+    the seed it wants delivered verbatim. ``route`` is threaded into the default
+    seed only (ignored when ``prompt`` is supplied).
 
     ``json_output`` inserts the ``--json`` global flag before ``create`` so the
     created session id rides stdout as JSON -- the caller then records a recovery
@@ -108,9 +126,7 @@ def spawn_worker(
     if exe is None:
         raise BridgeUnavailable("agent-bridge CLI not found on PATH")
     if prompt is None:
-        prompt = worker_prompt(
-            task_id, coordinator_url=coordinator_url, worker_id=worker_id
-        )
+        prompt = worker_prompt(task_id, worker_id=worker_id, route=route)
     cmd = [*exe]
     if json_output:
         cmd.append("--json")

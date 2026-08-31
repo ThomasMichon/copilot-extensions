@@ -111,9 +111,7 @@ def embody_available() -> bool:
     return _agent_worktrees_launch_prefix() is not None
 
 
-def autopilot_worker_prompt(
-    task_id: str, *, coordinator_url: str, worker_id: str
-) -> str:
+def autopilot_worker_prompt(task_id: str, *, worker_id: str, route: str = "") -> str:
     """Build the autopilot seed handed to a dispatched, embodied CLI session.
 
     A dispatch-flavored variant of :func:`agent_dispatch.bridge.worker_prompt`:
@@ -128,64 +126,85 @@ def autopilot_worker_prompt(
     embodied session (see :mod:`agent_dispatch.tracking`) -- a dispatched CLI
     body is then as trackable as a headless worker. ``worker_id`` names the
     session in the seed for legibility only.
+
+    ``route`` is the coordinator **routing intent** to bake into the worker's
+    ``agent-dispatch`` commands, as a leading flag fragment (``""`` for the
+    default local coordinator, ``" --shared"``, or ``" --url <endpoint>"``).
+    The default (``""``) deliberately carries **no** endpoint so each command
+    rediscovers the live local coordinator -- that is what makes a zero-downtime
+    coordinator port cutover transparent to a long-running dispatcher. A stable
+    explicit target (``--url``) or the env-configured ``--shared`` endpoint is
+    preserved so a task created on a non-default coordinator is still reachable.
     """
+    ad = f"agent-dispatch{route}"
+    if route:
+        route_note = (
+            f"Use the `{ad}` CLI commands exactly as shown below so every command "
+            f"targets the same coordinator this task lives on. "
+        )
+    else:
+        route_note = (
+            "Use the payload-local `agent-dispatch` CLI commands exactly as shown "
+            "below, without `--url`; the CLI resolves the live local coordinator "
+            "endpoint for each command (transparent to a coordinator port change). "
+        )
     return (
         f"You are a dispatched agent-dispatch **autopilot** worker (worker id: "
         f"{worker_id}), running in a fresh parallel worktree with tools "
-        f"auto-approved (--allow-all-tools). A task has been queued for you on "
-        f"the coordinator at {coordinator_url}. Work it end-to-end, "
+        f"auto-approved (--allow-all-tools). A task has been queued for you. "
+        f"{route_note}Work the task end-to-end, "
         f"autonomously, without waiting for a human. Claim it under this "
         f"worktree's own identity (no owner argument -- the coordinator resolves "
         f"machine/worktree), which keeps the task trackable as your live "
         f"session. This is a **contract-net evaluation**: you win an exclusive, "
         f"tight-lease EVALUATION window first, decide whether the task is really "
         f"yours to do, and only THEN commit to running it. Steps: "
-        f"(1) read it with `agent-dispatch show {task_id}`; "
+        f"(1) read it with `{ad} show {task_id}`; "
         f"(2) claim it for evaluation with "
-        f"`agent-dispatch claim --task {task_id} --evaluation` "
+        f"`{ad} claim --task {task_id} --evaluation` "
         f"(add `--capability <cap>` for each capability the task requires) -- "
         f"this takes a SHORT evaluation lease, not the full work lease; "
         f"(3) **EVALUATE before committing** -- while you hold the evaluation "
         f"window, assess: (a) DUPLICATE check -- sweep open tasks "
-        f"(`agent-dispatch list`) and any active worktree charters for an "
+        f"(`{ad} list`) and any active worktree charters for an "
         f"equivalent already queued, claimed, or in progress; (b) FEASIBILITY -- "
         f"is the task well-formed and doable from here; (c) IS-THIS-FOR-ME -- do "
         f"your machine/worktree/capabilities actually fit it; "
-        f"(4a) on ACCEPT, `agent-dispatch start {task_id}` (this extends the "
+        f"(4a) on ACCEPT, `{ad} start {task_id}` (this extends the "
         f"lease from the tight evaluation window to the full work lease), run "
-        f"`agent-dispatch steer take {task_id} --all` and incorporate any pending "
+        f"`{ad} steer take {task_id} --all` and incorporate any pending "
         f"operator guidance, then carry out the work as follows. FIRST re-read the task with "
-        f"`agent-dispatch show {task_id}` and check whether it carries a durable "
+        f"`{ad} show {task_id}` and check whether it carries a durable "
         f"**goal** and **done-criteria** (the `goal` / `done_criteria` fields) "
         f"plus an accumulated **progress log** (the `progress_log` array). "
         f"If it DOES, treat the task as a goal to PURSUE, and RESUME rather than "
         f"restart: read the prior progress log to see what earlier passes already "
         f"accomplished, then continue from there. LOOP: do one unit of work "
         f"toward the goal -> record a progress beat with "
-        f"`agent-dispatch progress {task_id} --phase <phase> --summary "
+        f"`{ad} progress {task_id} --phase <phase> --summary "
         f"\"<one line>\"` (this now APPENDS to the durable progress log, so a "
         f"replacement worker can resume) -> re-check the done-criteria -> repeat "
         f"until they are genuinely met. If the task carries NO goal/done-criteria "
         f"(a plain one-shot task), just carry out the work described in its "
         f"prompt/payload to completion as usual; "
         f"(4b) if the task is NOT FOR YOU or you hit a transient blocker, decline "
-        f"WITHOUT abandoning it: `agent-dispatch yield {task_id} --exclude-self "
+        f"WITHOUT abandoning it: `{ad} yield {task_id} --exclude-self "
         f"worktree --note <why>` returns it to the queue and appends a narrow "
         f"'not me' exclusion so you are not re-offered it (widen to "
         f"`--exclude-self machine` only when the mismatch is machine-wide); "
         f"(4c) if it is a DUPLICATE or obsolete, retire it terminally with "
-        f"`agent-dispatch abandon {task_id} --duplicate-of <ref>` (cite the "
+        f"`{ad} abandon {task_id} --duplicate-of <ref>` (cite the "
         f"existing task/PR/issue) so the dedup is recorded, never a silent drop; "
         f"(5) ONLY once you judge an accepted task's goal genuinely reached (its "
         f"done-criteria met, when it carries them), run "
-        f"`agent-dispatch complete {task_id} --result-ref <ref>`. "
+        f"`{ad} complete {task_id} --result-ref <ref>`. "
         f"Do NOT mark it complete before the goal is met -- completing the task "
         f"is your explicit signal that the work is done. "
         f"**Report progress as you go** so the operator can watch the fleet at a "
         f"glance and so a replacement worker can resume from your recorded "
         f"progress: at each phase boundary (plan settled, implementation done, a "
         f"PR opened, a blocker hit) and at each pass of a goal loop run "
-        f"`agent-dispatch progress {task_id} --phase <phase> --summary "
+        f"`{ad} progress {task_id} --phase <phase> --summary "
         f"\"<one line toward the goal>\"` (add `--pr <ref>` or `--blocker <why>` "
         f"when relevant). Keep each summary to a single line -- it is a status "
         f"beat, not a transcript; emit one at real transitions, never on a "
@@ -196,10 +215,10 @@ def autopilot_worker_prompt(
 def spawn_embodied_worker(
     task_id: str,
     *,
-    coordinator_url: str,
     worker_id: str,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
+    route: str = "",
     verify_timeout: int = 0,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
@@ -224,9 +243,7 @@ def spawn_embodied_worker(
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
-    seed = autopilot_worker_prompt(
-        task_id, coordinator_url=coordinator_url, worker_id=worker_id
-    )
+    seed = autopilot_worker_prompt(task_id, worker_id=worker_id, route=route)
     cmd = list(exe_prefix)
     if project:
         # `--project` is an agent-worktrees GLOBAL option -- it precedes the

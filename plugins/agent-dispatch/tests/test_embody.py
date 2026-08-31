@@ -12,12 +12,13 @@ from agent_dispatch import embody, procutil
 
 
 def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
-    prompt = embody.autopilot_worker_prompt(
-        "abc123", coordinator_url="http://c", worker_id="w9"
-    )
+    prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
     assert "abc123" in prompt
     assert "w9" in prompt
-    assert "http://c" in prompt
+    assert "without `--url`" in prompt
+    assert "resolves the live local coordinator" in prompt
+    # The default (no route) bakes no coordinator endpoint into the worker.
+    assert "http://" not in prompt
     # The full deferred-completion worker loop, driven under the worktree
     # identity (owner-less claim/start/complete so the task owner stays
     # machine/worktree and live-session tracking can join it).
@@ -40,10 +41,20 @@ def test_autopilot_prompt_mentions_task_verbs_and_deferred_completion():
     assert "agent-dispatch abandon abc123 --duplicate-of" in prompt
 
 
+def test_autopilot_prompt_threads_shared_moniker_route():
+    """A --shared route stamps the stable moniker onto every worker command --
+    a label, never a raw endpoint (no URL is ever baked in)."""
+    prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9", route=" --shared")
+    assert "agent-dispatch --shared show abc123" in prompt
+    assert "agent-dispatch --shared claim --task abc123 --evaluation" in prompt
+    assert "agent-dispatch --shared complete abc123" in prompt
+    # No bare (route-less) lifecycle command leaks through.
+    assert "agent-dispatch show abc123" not in prompt
+    assert "http://" not in prompt
+
+
 def test_autopilot_prompt_carries_goal_loop_contract():
-    prompt = embody.autopilot_worker_prompt(
-        "abc123", coordinator_url="http://c", worker_id="w9"
-    )
+    prompt = embody.autopilot_worker_prompt("abc123", worker_id="w9")
     # The seed reads the durable goal + done-criteria + prior progress log and
     # resumes rather than restarting (the resumable-goal contract).
     assert "agent-dispatch show abc123" in prompt
@@ -66,7 +77,7 @@ def test_spawn_embodied_worker_unavailable_when_no_cli(monkeypatch):
     monkeypatch.setattr(embody, "_agent_worktrees_launch_prefix", lambda: None)
     with pytest.raises(embody.EmbodyUnavailable):
         embody.spawn_embodied_worker(
-            "t1", coordinator_url="http://c", worker_id="w1"
+            "t1", worker_id="w1"
         )
 
 
@@ -138,7 +149,7 @@ def test_spawn_embodied_worker_builds_embody_new_command(monkeypatch):
     monkeypatch.setattr(embody.subprocess, "run", fake_run)
 
     embody.spawn_embodied_worker(
-        "task-9", coordinator_url="http://c", worker_id="embody-1",
+        "task-9", worker_id="embody-1",
     )
     cmd = captured["cmd"]
     assert cmd[:2] == ["/usr/bin/agent-worktrees", "embody"]
@@ -164,7 +175,7 @@ def test_spawn_embodied_worker_passes_verify_timeout(monkeypatch):
                            or types.SimpleNamespace(returncode=0, stdout="", stderr="")),
     )
     embody.spawn_embodied_worker(
-        "t", coordinator_url="http://c", worker_id="w", verify_timeout=30,
+        "t", worker_id="w", verify_timeout=30,
     )
     cmd = captured["cmd"]
     assert cmd[cmd.index("--verify-timeout") + 1] == "30"
@@ -183,7 +194,7 @@ def test_spawn_embodied_worker_threads_project_as_global(monkeypatch):
                            or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
     )
     embody.spawn_embodied_worker(
-        "t", coordinator_url="http://c", worker_id="w", project="test-chamber",
+        "t", worker_id="w", project="test-chamber",
     )
     cmd = captured["cmd"]
     # [exe, "--project", "test-chamber", "embody", ...] -- project BEFORE embody.
@@ -204,7 +215,7 @@ def test_spawn_embodied_worker_omits_project_when_none(monkeypatch):
         lambda cmd, **kw: (captured.__setitem__("cmd", cmd)
                            or types.SimpleNamespace(returncode=0, stdout="{}", stderr="")),
     )
-    embody.spawn_embodied_worker("t", coordinator_url="http://c", worker_id="w")
+    embody.spawn_embodied_worker("t", worker_id="w")
     cmd = captured["cmd"]
     assert "--project" not in cmd
     assert cmd[:2] == ["/usr/bin/agent-worktrees", "embody"]
@@ -263,7 +274,7 @@ def test_spawn_worker_for_uses_embody_backend(monkeypatch):
 
     def fake_spawn(task_id, **kwargs):
         calls["task_id"] = task_id
-        calls["driver"] = kwargs.get("coordinator_url")
+        calls["route"] = kwargs.get("route")
         return subprocess.CompletedProcess([], 0, "", "")
 
     monkeypatch.setattr(embody, "embody_available", lambda: True)
@@ -276,6 +287,7 @@ def test_spawn_worker_for_uses_embody_backend(monkeypatch):
     )
     m._do_spawn(args, {"id": "T7"})
     assert calls["task_id"] == "T7"
+    assert calls["route"] == ""  # default local discovery, no baked endpoint
 
 
 def test_spawn_worker_for_embody_degrades_to_bridge(monkeypatch):

@@ -49,19 +49,27 @@ def test_claim_by_id_already_claimed_returns_none(q):
 
 
 def test_worker_prompt_mentions_task_and_verbs():
-    prompt = bridge.worker_prompt("abc123", coordinator_url="http://c", worker_id="w9")
+    prompt = bridge.worker_prompt("abc123", worker_id="w9")
     assert "abc123" in prompt
     assert "w9" in prompt
-    assert "http://c" in prompt
+    assert "without `--url`" in prompt
+    assert "http://" not in prompt
     assert "agent-dispatch claim abc123 --worker w9" in prompt
     assert "agent-dispatch steer take abc123 w9 --all" in prompt
+
+
+def test_worker_prompt_threads_shared_moniker_route():
+    prompt = bridge.worker_prompt("abc123", worker_id="w9", route=" --shared")
+    assert "agent-dispatch --shared show abc123" in prompt
+    assert "agent-dispatch --shared claim abc123 --worker w9" in prompt
+    assert "http://" not in prompt
 
 
 def test_spawn_worker_unavailable_when_no_bridge(monkeypatch):
     monkeypatch.setattr(bridge, "_agent_bridge_launch_prefix", lambda: None)
     assert bridge.bridge_available() is False
     with pytest.raises(bridge.BridgeUnavailable):
-        bridge.spawn_worker("t1", coordinator_url="http://c", worker_id="w1")
+        bridge.spawn_worker("t1", worker_id="w1")
 
 
 def test_launch_prefix_prefers_versioned_runtime_over_cmd_shim(monkeypatch, tmp_path):
@@ -131,7 +139,7 @@ def test_spawn_worker_invokes_agent_bridge_create(monkeypatch):
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
 
     result = bridge.spawn_worker(
-        "task42", agent="task-worker", coordinator_url="http://c", worker_id="w1", wait=False
+        "task42", agent="task-worker", worker_id="w1", wait=False
     )
     assert result.returncode == 0
     cmd = calls["cmd"]
@@ -156,7 +164,7 @@ def test_spawn_worker_passes_no_window_kwargs(monkeypatch):
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
-    bridge.spawn_worker("t", coordinator_url="http://c", worker_id="w")
+    bridge.spawn_worker("t", worker_id="w")
     assert calls["kwargs"].get("creationflags") == 0x08000000
 
 
@@ -168,7 +176,7 @@ def test_spawn_worker_wait_omits_no_wait(monkeypatch):
         bridge.subprocess, "run",
         lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, "", ""),
     )
-    result = bridge.spawn_worker("t", coordinator_url="http://c", worker_id="w", wait=True)
+    result = bridge.spawn_worker("t", worker_id="w", wait=True)
     assert result.returncode == 0
 
 

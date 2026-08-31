@@ -277,7 +277,7 @@ def _tracking():
 
 
 def make_embody_spawn(
-    coordinator_url: str, *, driver: str = "agent-dispatch", verify_timeout: int = 0
+    *, driver: str = "agent-dispatch", verify_timeout: int = 0, route: str = ""
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker via ``agent-worktrees``.
 
@@ -290,6 +290,10 @@ def make_embody_spawn(
     global, rather than relying on git-like CWD discovery (which would fail with
     "Could not resolve a project for 'embody'"). See the
     ``project-scoped-invocation`` pattern.
+
+    ``route`` is the coordinator routing intent handed to the worker's
+    ``agent-dispatch`` commands (``""`` for local discovery, ``" --shared"`` for
+    the shared moniker); never a raw ``--url`` (the caller rejects that).
     """
     from . import embody
 
@@ -298,10 +302,10 @@ def make_embody_spawn(
         try:
             result = embody.spawn_embodied_worker(
                 task["id"],
-                coordinator_url=coordinator_url,
                 worker_id=worker_id,
                 driver=driver,
                 project=embody.project_for_task(task),
+                route=route,
                 verify_timeout=verify_timeout,
             )
         except embody.EmbodyUnavailable as exc:
@@ -314,9 +318,7 @@ def make_embody_spawn(
 
 
 def make_headless_spawn(
-    coordinator_url: str,
-    *,
-    agent: str = "task-worker",
+    *, agent: str = "task-worker", route: str = "",
 ) -> SpawnFn:
     """Build a :data:`SpawnFn` that embodies a worker as a **headless
     agent-bridge ACP** session -- no mux, no CLI-start-prompt.
@@ -344,19 +346,22 @@ def make_headless_spawn(
     ``spawned`` reservation -- freeing the label's concurrency slot instead of
     starving it. Reconciliation still settles the reservation when the task
     reaches a terminal state.
+
+    ``route`` is the coordinator routing intent handed to the worker's
+    ``agent-dispatch`` commands (``""`` for local discovery, ``" --shared"`` for
+    the shared moniker); never a raw ``--url`` (the caller rejects that).
     """
     from . import bridge, embody
 
     def spawn(task: dict) -> tuple[bool, dict]:
         worker_id = f"headless-{uuid.uuid4().hex[:8]}"
         seed = embody.autopilot_worker_prompt(
-            task["id"], coordinator_url=coordinator_url, worker_id=worker_id
+            task["id"], worker_id=worker_id, route=route
         )
         try:
             result = bridge.spawn_worker(
                 task["id"],
                 agent=agent,
-                coordinator_url=coordinator_url,
                 worker_id=worker_id,
                 prompt=seed,
                 wait=False,

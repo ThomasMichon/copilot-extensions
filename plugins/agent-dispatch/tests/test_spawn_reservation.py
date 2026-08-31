@@ -445,7 +445,7 @@ def test_create_spawn_never_double_spawns(monkeypatch, q):
 
     monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
 
-    def fake_do_spawn(_args, task):
+    def fake_do_spawn(_args, task, *, route=""):
         spawns.append(task["id"])
         return (types.SimpleNamespace(returncode=0), "fake", {"session": "s", "worktree": "w"})
 
@@ -467,7 +467,7 @@ def test_create_spawn_failure_allows_retry(monkeypatch, q):
 
     monkeypatch.setattr(m, "_client", lambda _args: _QueueBackedClient(q))
 
-    def failing_do_spawn(_args, task):
+    def failing_do_spawn(_args, task, *, route=""):
         calls.append(1)
         return (types.SimpleNamespace(returncode=1), "fake", {"session": None, "worktree": None})
 

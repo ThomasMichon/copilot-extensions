@@ -827,6 +827,9 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
     """
     task_id = task["id"]
     reserved_by = f"cli:{uuid.uuid4().hex[:8]}"
+    # Resolve (and validate) the worker's coordinator routing BEFORE reserving,
+    # so an invalid raw --url target fails loud without leaking a reservation.
+    route = _spawn_route(args)
     try:
         with _client(args) as c:
             resp = c.reserve_spawn(task_id, reserved_by=reserved_by)
@@ -850,7 +853,7 @@ def _spawn_worker_for(args: argparse.Namespace, task: dict) -> None:
         return
 
     key = resp["reservation"]["key"]
-    spawned = _do_spawn(args, task)
+    spawned = _do_spawn(args, task, route=route)
     try:
         with _client(args) as c:
             if spawned is None:
@@ -878,7 +881,29 @@ def _embody_handle(result) -> dict[str, str | None]:
     return embody.parse_handle(result)
 
 
-def _do_spawn(args: argparse.Namespace, task: dict):
+def _spawn_route(args: argparse.Namespace) -> str:
+    """Coordinator routing intent to hand a **locally-spawned** worker, as an
+    ``agent-dispatch`` flag fragment.
+
+    A spawned local body reaches its coordinator by discovery or a stable
+    moniker, never a raw endpoint: the default local path yields ``""`` (the
+    worker rediscovers the live local coordinator, so a zero-downtime port cutover
+    is transparent), and ``--shared`` yields ``" --shared"`` (the env-configured
+    shared moniker). A raw ``--url`` is refused -- baking a raw, possibly-dynamic
+    endpoint into a worker is the exact foot-gun this routing avoids; route by the
+    default local coordinator, ``--shared``, or fleet mode
+    (``--pool``/``--origin``, which routes by machine alias).
+    """
+    if getattr(args, "url", None):
+        raise SystemExit(
+            "agent-dispatch: a spawned worker cannot be pinned to a raw --url "
+            "coordinator; route it by the default local coordinator, --shared, or "
+            "fleet mode (--pool/--origin)"
+        )
+    return " --shared" if getattr(args, "shared", False) else ""
+
+
+def _do_spawn(args: argparse.Namespace, task: dict, *, route: str = ""):
     """Launch a worker for a task (best effort); return ``(result, via, handle)``.
 
     Returns ``None`` if no spawn mechanism is available (task left queued). Two
@@ -892,8 +917,6 @@ def _do_spawn(args: argparse.Namespace, task: dict):
     - ``bridge`` (default) -- a **headless** agent-bridge ACP worker.
     """
     backend = getattr(args, "spawn_backend", "bridge")
-    coordinator_url = _resolve_client_target(args)[0]
-
     if backend == "embody":
         from . import embody
 
@@ -902,8 +925,8 @@ def _do_spawn(args: argparse.Namespace, task: dict):
             try:
                 result = embody.spawn_embodied_worker(
                     task["id"],
-                    coordinator_url=coordinator_url,
                     worker_id=worker_id,
+                    route=route,
                     verify_timeout=getattr(args, "verify_timeout", 0) or 0,
                 )
             except embody.EmbodyUnavailable as exc:
@@ -929,8 +952,8 @@ def _do_spawn(args: argparse.Namespace, task: dict):
         result = bridge.spawn_worker(
             task["id"],
             agent=args.spawn_agent,
-            coordinator_url=coordinator_url,
             worker_id=worker_id,
+            route=route,
             wait=not args.run_async,
         )
     except bridge.BridgeUnavailable as exc:
@@ -2515,7 +2538,6 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
     )
 
     repo = None if getattr(args, "all_repos", False) else _scope_repo(args)
-    coordinator_url = _resolve_client_target(args)[0]
     pool = [h for h in (getattr(args, "pool", "") or "").split(",") if h.strip()]
     # Embody backend default is HEADLESS: a dispatched/supervised task is a
     # self-contained, autonomous body that needs no human attach, and headless
@@ -2577,12 +2599,17 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
         )
         _preflight_pool = list(fleet.pool)
     else:
+        # Local (non-fleet) spawn: hand the worker its coordinator routing intent
+        # (discovery for the default local coordinator, or the --shared moniker);
+        # a raw --url is refused here (a spawned local body must not be pinned to a
+        # raw, possibly-dynamic endpoint).
+        route = _spawn_route(args)
         headless_spawn = make_headless_spawn(
-            coordinator_url,
             agent=getattr(args, "headless_agent", None) or "task-worker",
+            route=route,
         )
         embody_spawn = make_embody_spawn(
-            coordinator_url, verify_timeout=getattr(args, "verify_timeout", 0) or 0
+            verify_timeout=getattr(args, "verify_timeout", 0) or 0, route=route
         )
         if backend == "cli":
             # CLI-default lane: headless is the per-label opt-in.
@@ -2627,7 +2654,9 @@ def _cmd_supervise(args: argparse.Namespace) -> int:
             _preflight_agent, pool=_preflight_pool
         ):
             print(_warning, file=sys.stderr)
-    with _client(args, ensure=False) as c:
+    from .client import ResolvingDispatchClient
+
+    with ResolvingDispatchClient(lambda: _client(args, ensure=False)) as c:
         evaluator = None
         spec_path = getattr(args, "evaluator", None)
         if spec_path:
