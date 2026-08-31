@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent_machines.manifest import (
@@ -79,7 +81,16 @@ def test_repo_anchor_can_differ_from_package_execution_root(tmp_path):
     pkg = load_package(path, source_repo="acme", source_anchor=anchor)
 
     assert pkg.repo_root() == worktree
-    assert pkg.repo_anchor() == anchor
+    assert pkg.repo_anchor() == anchor.resolve()
+
+
+def test_repo_anchor_normalizes_relative_path(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    worktree = tmp_path / "worktree"
+    path = write_package(worktree, "all.yaml", base_package())
+    pkg = load_package(path, source_repo="acme", source_anchor=Path("anchor"))
+
+    assert pkg.repo_anchor() == (tmp_path / "anchor").resolve()
 
 
 def test_repo_root_resolves_legacy_path(tmp_path):

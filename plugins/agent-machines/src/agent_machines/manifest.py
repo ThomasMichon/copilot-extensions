@@ -161,7 +161,8 @@ class RequirementPackage:
 
     def repo_anchor(self) -> Path | None:
         """Return the canonical checkout used for repository location classes."""
-        return self.source_anchor or self.repo_root()
+        anchor = self.source_anchor or self.repo_root()
+        return anchor.expanduser().resolve() if anchor is not None else None
 
 
 def _require(mapping: dict[str, Any], key: str, path: Path) -> Any:
