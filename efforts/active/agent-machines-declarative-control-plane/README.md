@@ -4,10 +4,11 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** independent per-slice worktrees
 - **Created:** 2026-08-29
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** agent-fabric `derive-dont-duplicate` and agent-ssh
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
+- **Umbrella issue:** #1418
 
 ## Guiding Intent
 
@@ -21,6 +22,7 @@ actions are derived views rather than separately maintained inventories.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
 | schema host | Owns resource and projection contracts | isolated worktree |
+| package-discovery owner | Owns relationship-aware package source discovery | isolated worktree |
 | module owners | Implement bounded resource reconcilers | independent slice PRs |
 | parity validator | Proves equivalent behavior across supported platforms | clean-room scenario |
 
@@ -28,11 +30,12 @@ actions are derived views rather than separately maintained inventories.
 
 - **Topology:** schema-first host with independently reviewable resource modules.
 - **Host (owns PRs):** schema host.
-- **Delegates:** module owners implement only their declared resource type.
+- **Delegates:** the package-discovery owner implements #1418; module owners
+  implement only their declared resource type.
 - **Handoff:** each module contributes validation, plan/apply behavior, and
   observable status to the shared control plane.
-- **Public coordination token:** the reviewed plan PR until a dedicated issue
-  is authorized; implementation does not begin under the temporary token.
+- **Public coordination token:** #1418 for relationship-aware package discovery;
+  later slices use their own dedicated issues.
 
 ## Context
 
@@ -56,6 +59,10 @@ fleet, topology, or operating environment.
   contracts with strict validation and forward-compatible extension seams.
 - [ ] Distinguish portable declarations from discovered facts and generated
   projections.
+- [ ] Resolve supplemental package repositories from generic project
+  relationships, preserve source provenance, deduplicate independently adopted
+  repositories, and fail clearly when a declared relationship is unresolved
+  (#1418).
 - [ ] Reject ambiguous ownership and dependency cycles before planning changes.
 
 ### Phase 2 - Build deterministic projections
@@ -88,6 +95,8 @@ fleet, topology, or operating environment.
 
 - [ ] Invalid schemas, dependency cycles, duplicate ownership, and unknown
   resource types fail before mutation.
+- [ ] Harness-only, harness-plus-supplemental, duplicate-adoption, unresolved
+  relationship, and cross-repository conflict fixtures prove #1418.
 - [ ] Repeated projection from the same declarations produces byte-stable
   derived views.
 - [ ] Plan and apply touch only resources named by the selected scope and report
@@ -109,3 +118,10 @@ behavioral parity is demonstrated.
 
 - Established the generic machine-resource, derived-projection, reconciliation,
   and drift-observation campaign.
+
+### 2026-08-30 - Relationship-aware package discovery
+
+- Activated the effort now that #1418 provides the public coordination token.
+- Added a focused discovery slice that composes declared supplemental
+  repositories into one provenance-preserving package union while retaining
+  standalone behavior.
