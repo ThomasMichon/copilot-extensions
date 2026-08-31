@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -14,6 +15,12 @@ SCRIPT = PLUGIN / "scripts" / "aggregate_context.py"
 BASH_WRAPPER = PLUGIN / "scripts" / "emit-context.sh"
 POWERSHELL_WRAPPER = PLUGIN / "scripts" / "emit-context.ps1"
 SCHEMA = "copilot-extensions.session-context-contributors"
+
+SPEC = importlib.util.spec_from_file_location("aggregate_context", SCRIPT)
+assert SPEC and SPEC.loader
+AGGREGATE_CONTEXT = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = AGGREGATE_CONTEXT
+SPEC.loader.exec_module(AGGREGATE_CONTEXT)
 
 
 def _plugin(
@@ -69,6 +76,44 @@ def _plugin(
         json.dumps(declaration), encoding="utf-8"
     )
     return plugin
+
+
+def test_windows_staging_probe_passes_parent_pid_in_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(AGGREGATE_CONTEXT.os, "name", "nt")
+    monkeypatch.setattr(AGGREGATE_CONTEXT.shutil, "which", lambda _: "pwsh")
+    monkeypatch.setattr(AGGREGATE_CONTEXT.os, "getppid", lambda: 4242)
+    captured: dict[str, object] = {}
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        captured["argv"] = argv
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(argv, 0, stdout="copilot --allow-all\n")
+
+    monkeypatch.setattr(AGGREGATE_CONTEXT.subprocess, "run", fake_run)
+
+    assert AGGREGATE_CONTEXT._has_unlisted_staged_plugins() is False
+    assert "-ProcessId" not in captured["argv"]
+    assert captured["env"]["COPILOT_CONTEXT_PARENT_PID"] == "4242"
+
+
+def test_windows_staging_probe_detects_explicit_plugin_dir(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(AGGREGATE_CONTEXT.os, "name", "nt")
+    monkeypatch.setattr(AGGREGATE_CONTEXT.shutil, "which", lambda _: "pwsh")
+    monkeypatch.setattr(
+        AGGREGATE_CONTEXT.subprocess,
+        "run",
+        lambda argv, **kwargs: subprocess.CompletedProcess(
+            argv,
+            0,
+            stdout="copilot --plugin-dir /tmp/staged\n",
+        ),
+    )
+
+    assert AGGREGATE_CONTEXT._has_unlisted_staged_plugins() is True
 
 
 def _run(
