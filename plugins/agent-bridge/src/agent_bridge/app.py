@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import logging
 import sys
 import threading
@@ -83,6 +84,8 @@ async def _run_in_daemon_thread(fn, *args):
 # K-confirmation count are env-tunable.
 _SELF_RETIRE_DEFAULT_POLL_S = 30.0
 _SELF_RETIRE_DEFAULT_CONFIRMATIONS = 3
+_SUPERSESSION_DRAIN_TIMEOUT_S = 30.0
+_SUPERSESSION_DRAIN_POLL_S = 0.25
 
 
 def _self_retire_settings() -> tuple[bool, float, int]:
@@ -116,6 +119,129 @@ def _self_retire_settings() -> tuple[bool, float, int]:
     except ValueError:
         k = _SELF_RETIRE_DEFAULT_CONFIRMATIONS
     return enabled, poll, k
+
+
+def _same_daemon(left, right) -> bool:
+    """Whether two routing endpoints identify the same daemon process."""
+    if left is None or right is None:
+        return False
+    if left.pid is not None and right.pid is not None:
+        return left.pid == right.pid and left.port == right.port
+    return left.bind == right.bind and left.port == right.port
+
+
+def _owns_generation(endpoint, owner) -> bool:
+    """Whether *endpoint* is the exact active generation published by *owner*."""
+    return (
+        _same_daemon(endpoint, owner)
+        and endpoint.generation == owner.generation
+    )
+
+
+async def _retire_previous_daemon(
+    app: FastAPI,
+    previous,
+    successor,
+    *,
+    make_client=None,
+    drain_timeout: float = _SUPERSESSION_DRAIN_TIMEOUT_S,
+) -> None:
+    """Drain and gracefully retire the predecessor atomically demoted at start."""
+    from .client import BridgeClient, BridgeClientError, BridgeConnectionError
+    from .config import config_dir
+    from zdd import routing
+    from zdd.routing import Endpoint
+
+    def read_active():
+        table = routing.read_table(config_dir())
+        raw = table.get("active") if isinstance(table, dict) else None
+        return Endpoint.from_dict(raw) if isinstance(raw, dict) else None
+
+    active = await asyncio.to_thread(read_active)
+    if not _owns_generation(active, successor):
+        log.info(
+            "Skipping predecessor retirement because generation %d is no "
+            "longer active", successor.generation,
+        )
+        return
+
+    if make_client is None:
+        make_client = lambda endpoint: BridgeClient(
+            endpoint.base_url,
+            app.state.auth_token,
+            timeout=max(1, int(drain_timeout + 30)),
+            connect_grace=0,
+        )
+    client = make_client(previous)
+
+    async def release_drain(message: str) -> None:
+        try:
+            await _run_in_daemon_thread(client.undrain)
+        except (BridgeClientError, BridgeConnectionError, OSError):
+            log.warning(message, exc_info=True)
+
+    try:
+        result = await _run_in_daemon_thread(
+            functools.partial(
+                client.drain,
+                timeout=drain_timeout,
+                poll=_SUPERSESSION_DRAIN_POLL_S,
+                force=False,
+                source="startup-supersession",
+                reason="superseded by a normal daemon start",
+            )
+        )
+    except (BridgeClientError, BridgeConnectionError, OSError):
+        log.warning(
+            "Could not drain superseded predecessor at %s; generation "
+            "self-retire remains the backstop",
+            previous.base_url,
+            exc_info=True,
+        )
+        await release_drain(
+            "Failed to release predecessor drain after drain request failure"
+        )
+        return
+
+    if not result.get("drained", False):
+        log.warning(
+            "Superseded predecessor at %s did not reach a safe drain boundary "
+            "within %.0fs; leaving it alive",
+            previous.base_url,
+            drain_timeout,
+        )
+        await release_drain(
+            "Failed to release predecessor drain after drain timeout"
+        )
+        return
+
+    active = await asyncio.to_thread(read_active)
+    if _same_daemon(active, previous):
+        log.warning(
+            "Superseded predecessor became active again while draining; "
+            "releasing its drain gate instead of shutting it down"
+        )
+        await release_drain("Failed to release restored predecessor drain")
+        return
+    if active is None or active.generation < successor.generation:
+        log.warning(
+            "Routing ownership became ambiguous while draining the predecessor; "
+            "releasing its drain gate instead of shutting it down"
+        )
+        await release_drain("Failed to release predecessor drain")
+        return
+
+    try:
+        await _run_in_daemon_thread(client.shutdown)
+    except (BridgeClientError, BridgeConnectionError, OSError):
+        log.warning(
+            "Could not request graceful shutdown of superseded predecessor at %s",
+            previous.base_url,
+            exc_info=True,
+        )
+        await release_drain(
+            "Failed to release predecessor drain after shutdown request failure"
+        )
 
 
 async def _start_credential_relay(app: FastAPI):
@@ -209,6 +335,7 @@ async def lifespan(app: FastAPI):
     # daemon becomes legacy. A passive ZDD cutover instance stays silent: its
     # orchestrator owns the health-gated routing flip.
     published_endpoint = None
+    previous_endpoint = None
     if getattr(app.state, "publish_on_ready", False):
         import os as _os
 
@@ -220,8 +347,8 @@ async def lifespan(app: FastAPI):
         _bound_port = getattr(app.state, "bound_port", cfg.port)
         await asyncio.to_thread(lifecycle_hooks.startup_sweep, config_dir())
         try:
-            published_endpoint = await asyncio.to_thread(
-                routing.publish_active,
+            published_endpoint, previous_endpoint = await asyncio.to_thread(
+                routing.publish_active_with_previous,
                 config_dir(),
                 bind=cfg.bind,
                 port=_bound_port,
@@ -342,6 +469,24 @@ async def lifespan(app: FastAPI):
                 )
             await asyncio.to_thread(db.close)
             raise RuntimeError(str(readiness_exception)) from readiness_exception
+
+    previous_retire_task = None
+    if published_endpoint is not None and previous_endpoint is not None:
+        previous_retire_task = asyncio.create_task(
+            _retire_previous_daemon(
+                app,
+                previous_endpoint,
+                published_endpoint,
+                make_client=getattr(
+                    app.state, "supersession_client_factory", None
+                ),
+                drain_timeout=getattr(
+                    app.state,
+                    "supersession_drain_timeout",
+                    _SUPERSESSION_DRAIN_TIMEOUT_S,
+                ),
+            )
+        )
 
     # Expose a relay-adoption hook so a passive cutover instance can bind the
     # shared relay port *after* the retiring daemon releases it (the relay is a
@@ -641,6 +786,16 @@ async def lifespan(app: FastAPI):
         lifecycle_start_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await lifecycle_start_task
+    if previous_retire_task is not None:
+        # Do not abandon an in-flight drain request: its daemon thread cannot
+        # be cancelled, and leaving after it opens the predecessor's drain gate
+        # would strand that daemon closed. The request is already bounded, so
+        # finish the handshake and let it either shut down or undrain the old
+        # daemon before this generation retracts its route.
+        try:
+            await asyncio.shield(previous_retire_task)
+        except asyncio.CancelledError:
+            await previous_retire_task
     # Shutdown: stop the generation self-retire watch (if armed)
     if self_retire_task is not None:
         self_retire_task.cancel()

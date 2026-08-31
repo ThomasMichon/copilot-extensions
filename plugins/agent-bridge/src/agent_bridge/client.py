@@ -983,7 +983,13 @@ class BridgeClient:
         return self._request("POST", "/api/v1/gc") or {}
 
     def drain(
-        self, *, timeout: float = 300.0, poll: float = 1.0, force: bool = False
+        self,
+        *,
+        timeout: float = 300.0,
+        poll: float = 1.0,
+        force: bool = False,
+        source: str | None = None,
+        reason: str | None = None,
     ) -> dict[str, Any]:
         """POST /api/v1/drain -- stop accepting new work and wait for in-flight
         sessions to settle (the zero-downtime pre-swap step).
@@ -997,6 +1003,10 @@ class BridgeClient:
         import os as _os
 
         body: dict[str, Any] = {"timeout": timeout, "poll": poll, "force": force}
+        if source:
+            body["source"] = source
+        if reason:
+            body["reason"] = reason
         self_sid = _os.environ.get("AGENT_BRIDGE_SESSION_ID")
         if self_sid:
             body["exclude_session_id"] = self_sid
