@@ -391,8 +391,8 @@ def test_slot_complete_reconfirms_digest_immediately_before_publication() -> Non
 @pytest.mark.parametrize(
     "shell",
     (
-        *((("posix",) if os.name != "nt" else ())),
-        *((("powershell",) if POWERSHELL is not None else ())),
+        *(("posix",) if os.name != "nt" else ()),
+        *(("powershell",) if POWERSHELL is not None else ()),
     ),
 )
 def test_canonical_shell_digest_limit_boundaries_are_inclusive(

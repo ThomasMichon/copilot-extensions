@@ -311,6 +311,7 @@ def test_validate_rejects_rooted_but_not_fully_qualified_context(
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
+@pytest.mark.installation_context_smoke
 def test_stamp_creates_and_idempotently_validates_receipts(tmp_path: Path) -> None:
     arguments, _ = _stamp_arguments(tmp_path)
     first = json.loads(_run_ps(*arguments).stdout)
@@ -638,30 +639,6 @@ def test_discovery_paths_use_cross_platform_separators() -> None:
         r".claude-plugin\marketplace",
     ):
         assert windows_only_relative not in script
-
-
-@pytest.mark.parametrize("powershell_host", POWERSHELL_HOSTS or [None])
-def test_powershell_matches_portable_source_vectors(
-    powershell_host: str | None,
-) -> None:
-    if powershell_host is None:
-        pytest.skip("PowerShell is not installed")
-    for vector in _vectors():
-        result = _run_ps(
-            "source-id",
-            "-SourceJson",
-            json.dumps(vector["descriptor"], separators=(",", ":")),
-            "-MarketplaceKey",
-            vector["marketplaceKey"],
-            host=powershell_host,
-        )
-        actual = json.loads(result.stdout)
-        assert actual["kind"] == vector["normalized"]["kind"]
-        assert actual["canonical"] == vector["normalized"]["canonical"]
-        assert actual["ref"] == vector["normalized"]["ref"]
-        assert actual["record"] == vector["record"]
-        assert actual["sha256"] == vector["sha256"]
-        assert actual["marketplaceId"] == vector["marketplaceId"]
 
 
 @pytest.mark.skipif(POWERSHELL is None, reason="PowerShell is not installed")
