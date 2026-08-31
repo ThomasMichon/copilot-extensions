@@ -465,6 +465,13 @@ def _cmd_start(args: argparse.Namespace) -> None:
         # would 403 every /acp WebSocket upgrade) on a host without it.
         "ws": "wsproto",
     }
+    if sys.platform == "win32":
+        from .windows_proactor import resilient_loop_factory
+
+        # Uvicorn 0.52 supplies its own explicit Windows loop factory, bypassing
+        # the process event-loop policy. Pass ours directly so transient
+        # AcceptEx client resets cannot permanently close the main listener.
+        config_kwargs["loop"] = resilient_loop_factory
     config = uvicorn.Config(app, **config_kwargs)
     server = uvicorn.Server(config)
     app.state.uvicorn_server = server
@@ -485,7 +492,14 @@ def _cmd_start(args: argparse.Namespace) -> None:
         watchdog_kwargs = {
             "interval": _WINDOWS_INTERVAL,
             "serving_grace": _WINDOWS_SERVING_GRACE,
-            "on_dead": _watchdog_dead,
+            "on_dead": lambda reason: _watchdog_dead(
+                reason,
+                active_port=(
+                    bound_port
+                    if _active_endpoint_port() == bound_port
+                    else None
+                ),
+            ),
         }
     import threading
 
@@ -1223,7 +1237,10 @@ def _spawn_detached_daemon() -> None:
 
 
 def _spawn_watchdog_replacement(
-    *, delay: float = 1.0, start_args: list[str] | None = None
+    *,
+    delay: float = 1.0,
+    start_args: list[str] | None = None,
+    active_port: int | None = None,
 ) -> None:
     """Schedule a fresh daemon after the wedged Windows process releases its lock.
 
@@ -1238,6 +1255,14 @@ def _spawn_watchdog_replacement(
         "os.execv(sys.executable,[sys.executable,'-m','agent_bridge',*sys.argv[2:]])"
     )
     original_args = list(sys.argv[1:] if start_args is None else start_args)
+    if "--passive" in original_args and active_port is not None:
+        try:
+            port_index = original_args.index("--port") + 1
+            serving_port = int(original_args[port_index])
+        except (ValueError, IndexError):
+            serving_port = None
+        if serving_port == active_port:
+            original_args.remove("--passive")
     argv = [
         windowless_python(sys.executable),
         "-c",
@@ -1248,12 +1273,12 @@ def _spawn_watchdog_replacement(
     _spawn_detached_argv(argv)
 
 
-def _watchdog_dead(reason: str) -> None:
+def _watchdog_dead(reason: str, *, active_port: int | None = None) -> None:
     """Restart the Windows frontend promptly, then hard-exit the wedged one."""
     from .watchdog import _force_exit
 
     try:
-        _spawn_watchdog_replacement()
+        _spawn_watchdog_replacement(active_port=active_port)
         logging.getLogger("agent-bridge").error(
             "Self-watchdog: scheduled a detached Windows replacement before exit"
         )

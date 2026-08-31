@@ -129,12 +129,30 @@ def test_watchdog_replacement_uses_delayed_versioned_start(monkeypatch):
     assert argv[4:] == ["start", "--passive", "--idle-shutdown", "30"]
 
 
+def test_watchdog_replacement_promotes_active_passive_generation(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(m.sys, "executable", r"C:\venv\python.exe")
+    monkeypatch.setattr(m, "windowless_python", lambda path: path)
+    monkeypatch.setattr(
+        m, "_spawn_detached_argv", lambda argv: captured.setdefault("argv", argv)
+    )
+
+    m._spawn_watchdog_replacement(
+        start_args=["start", "--port", "51103", "--passive"],
+        active_port=51103,
+    )
+
+    assert captured["argv"][4:] == ["start", "--port", "51103"]
+
+
 def test_watchdog_dead_schedules_replacement_before_exit(monkeypatch):
     from agent_bridge import watchdog
 
     calls = []
     monkeypatch.setattr(
-        m, "_spawn_watchdog_replacement", lambda: calls.append("replacement")
+        m,
+        "_spawn_watchdog_replacement",
+        lambda **_kwargs: calls.append("replacement"),
     )
     monkeypatch.setattr(
         watchdog, "_force_exit", lambda reason: calls.append(("exit", reason))
@@ -152,7 +170,7 @@ def test_watchdog_dead_still_exits_when_replacement_scheduling_crashes(
 
     calls = []
 
-    def crash():
+    def crash(**_kwargs):
         raise RuntimeError("unexpected helper failure")
 
     monkeypatch.setattr(m, "_spawn_watchdog_replacement", crash)
