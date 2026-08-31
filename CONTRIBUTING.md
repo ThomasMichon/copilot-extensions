@@ -506,7 +506,7 @@ PATH-based sibling launches, fixed lifecycle identities, and operative bare
 commands while the marketplace-installation-cell migration is active. Do not
 enable `--strict` until the producing phases in #1096 have removed the baseline.
 
-### Test portfolio discipline
+### Test Portfolio Discipline
 
 Treat required pull-request CI as a fast, change-scoped contract gate. Do not
 add exhaustive cross-products or repeated subprocess setup directly to that
