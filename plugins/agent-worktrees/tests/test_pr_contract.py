@@ -580,7 +580,45 @@ class TestPRReminder:
         r = pc.pr_reminder(flow, "create-pr")
         assert r.ok is True
         assert "pr-merge" in r.next_step and "--now" in r.next_step
+        assert "self-approve" not in r.next_step
+        assert "cannot approve their own" in r.next_step
         assert r.waiting_on  # waits on the copilot review
+
+    def test_github_submitter_direct_waits_for_blocking_review(self):
+        flow = _self_merge_flow(
+            self_approve=False,
+            merge_actor="submitter-direct",
+            reviewer="independent reviewer",
+            review_blocking=True,
+        )
+        r = pc.pr_reminder(flow, "create-pr")
+        assert "wait for" in r.next_step
+        assert "independent reviewer" in r.next_step
+        assert "self-approve" not in r.text()
+        assert r.waiting_on
+
+    def test_non_github_explicit_self_approval_uses_neutral_gating(self):
+        flow = _self_merge_flow(provider="azure-devops")
+        r = pc.pr_reminder(flow, "create-pr")
+        assert "required checks/reviews" in r.next_step
+        assert "self-approve" not in r.next_step
+
+    def test_blocking_self_merge_reminder_waits_on_approval(self):
+        flow = _self_merge_flow(review_blocking=True)
+        r = pc.pr_reminder(flow, "pr-merge")
+        assert r.waiting_on == ("approved", "merged")
+        assert "required checks/reviews" in r.next_step
+
+    def test_blocking_self_merge_refusal_waits_instead_of_retrying(self):
+        flow = _self_merge_flow(review_blocking=True)
+        r = pc.pr_reminder(
+            flow,
+            "pr-merge",
+            ok=False,
+            reason="the direct merge did not complete",
+        )
+        assert r.use_instead == ("pr-watch", "pr-status")
+        assert "pr-merge --now" not in r.use_instead
 
     def test_pr_merge_refused_on_human_merge_offers_sanctioned_alternatives(self):
         flow = pc.classify_pr_flow(enabled=True, required=True,
@@ -657,6 +695,14 @@ class TestPRReminder:
         flow = pc.classify_pr_flow(enabled=True, required=True, provider="gitea",
                                    automerge_label="auto-merge",
                                    reviewer="agent:mantis-counter")
+        r = pc.pr_reminder(flow, "create-pr")
+        assert any("manual" in c and "reviewer" in c for c in r.cautions)
+
+    def test_blocking_self_merge_nudges_manual_reviewer_request(self):
+        flow = _self_merge_flow(
+            reviewer="independent reviewer",
+            review_blocking=True,
+        )
         r = pc.pr_reminder(flow, "create-pr")
         assert any("manual" in c and "reviewer" in c for c in r.cautions)
 
