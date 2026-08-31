@@ -247,18 +247,23 @@ lifecycle). This is why a bridge/ACP worktree is *shown* yet still lifecycle-
 managed: `is_picker_hidden` (origin ∈ {system, delegate}) drives the row's
 `hidden` flag, independent of the kind-based cleanup exemption.
 
-### Two-step restore (Bare resume + Reclaim)
-A workaround for a Copilot-CLI outage in which starting Copilot **inside a
-repo/worktree directory** fails, and the only way in is to launch from the home
-directory and `/resume <id>` manually. While that outage is live, a worktree
-row's sub-menu cooperates so the manual restore keeps the correct mux identity:
+### Deprecated advanced recovery (Bare resume + Reclaim)
+
+**Bare resume is deprecated.** The extension-reload startup outage it was added
+for is fixed in Copilot CLI 1.0.81-10 and later. The action remains available
+temporarily as an advanced diagnostic fallback for a future cwd-specific startup
+failure, but normal **Resume** is the supported path and Bare resume is expected
+to be removed after a compatibility period.
+
+When needed, the worktree row's sub-menu supports a manual two-step restore that
+keeps the correct mux identity:
 
 - **The session id is shown** in the sub-menu header (with a *bound (lock live)*
   flag when a Copilot process currently holds the session's `inuse.<pid>.lock`),
   so you can copy it for the `/resume`.
-- **Bare resume** creates the worktree's `wt-<id>` mux (correct identity + status
-  bar) but launches Copilot in the **home** directory with **no `--resume`** —
-  dodging the cwd start bug. It prints the `/resume <id>` line to run inside.
+- **Bare resume (deprecated)** creates the worktree's `wt-<id>` mux (correct
+  identity + status bar) but launches Copilot in the **home** directory with
+  **no `--resume`**. It prints the `/resume <id>` line to run inside.
   (CLI: `resolve --worktree-id <id> --bare-resume`.)
 - **Reclaim** appears whenever a live `inuse.<pid>.lock` binds a Copilot process —
   including a **bare** Copilot with no mux session, which **Stop** cannot reach.
@@ -266,8 +271,8 @@ row's sub-menu cooperates so the manual restore keeps the correct mux identity:
   left to Stop) so the session can be re-Opened or Bare-resumed cleanly. (Backed
   by the `reclaim` CLI verb.)
 
-Typical flow during the outage: **Reclaim** the wedged/bare process, then **Bare
-resume** and `/resume <id>` inside.
+Advanced fallback flow: **Reclaim** the wedged/bare process, then **Bare resume
+(deprecated)** and `/resume <id>` inside.
 
 ### Bulk Cleanup and Sync
 The **Cleanup** and **Sync** buttons on the Worktrees row open dialogs that act

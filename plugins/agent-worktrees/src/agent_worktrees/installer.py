@@ -376,7 +376,6 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
     for name in ("resolve-runtime.ps1", "resolve-runtime.sh",
                  "session-conduct.ps1", "session-conduct.sh",
                  "session-machine.ps1", "session-machine.sh",
-                 "session-ext-reload.ps1", "session-ext-reload.sh",
                  "bootstrap-check.ps1", "bootstrap-check.sh",
                  "statelessness_guard.py", "cross_repo_guard.py",
                  "anchor_write_guard.py", "nudge_status.py"):
@@ -387,6 +386,22 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
                 (bd / name).chmod(0o755)
             output.ok(f"Bootstrap: {bd / name}")
 
+    # Copilot CLI 1.0.81-10 includes the extension-reload startup fix. Retire
+    # the temporary warning hook assets from existing installations.
+    for name in (
+        "session-ext-reload.ps1",
+        "session-ext-reload.sh",
+        "ext-reload-hang.md",
+    ):
+        stale = bd / name
+        if stale.exists():
+            try:
+                stale.unlink()
+            except OSError as exc:
+                output.err(f"Could not retire {stale}: {exc}")
+                return False
+            output.changed(f"retired {stale}")
+
     # Deploy the session-conduct data fragments (scripts/conduct/*.md) that the
     # session-conduct sessionStart hook emits as additionalContext (cwd-gated).
     conduct_src = scripts / "conduct"
@@ -396,15 +411,6 @@ def deploy_wrappers(repo_dir: str | Path) -> bool:
         for frag in sorted(conduct_src.glob("*.md")):
             shutil.copy2(frag, conduct_dst / frag.name)
             output.ok(f"Conduct: {conduct_dst / frag.name}")
-
-    # Deploy the temporary ext-reload hang warning fragment that the
-    # session-ext-reload sessionStart hook emits as additionalContext (NOT
-    # cwd-gated -- also fires at cwd=~/ so it reaches Bare resume; dotfiles#1055).
-    # Retired with the rest of the feature when #13494 ships.
-    ext_reload_src = scripts / "ext-reload-hang.md"
-    if ext_reload_src.is_file():
-        shutil.copy2(ext_reload_src, bd / "ext-reload-hang.md")
-        output.ok(f"Bootstrap: {bd / 'ext-reload-hang.md'}")
 
     # Deploy default setup scripts (used when repos lack their own)
     sd = install_dir() / "scripts"

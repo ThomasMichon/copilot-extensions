@@ -456,7 +456,10 @@ class TestSessionActionVerbs:
     ``_reclaimable``), so a bound-but-unclassifiable Copilot is never stranded
     ACTIVE with no verb."""
 
-    from agent_worktrees.picker_tui.engine import PickerScreen as _PS
+    from agent_worktrees.picker_tui.engine import (
+        BARE_RESUME_ACTION as _BARE_RESUME_ACTION,
+        PickerScreen as _PS,
+    )
 
     def _verbs(self, **rec):
         return type(self)._PS._session_action_verbs(rec)
@@ -478,7 +481,7 @@ class TestSessionActionVerbs:
                             session_bare_orphan=True, last_session_id="s1")
         assert "Reclaim" in verbs
         assert "Stop" not in verbs
-        assert "Resume" not in verbs and "Bare resume" not in verbs
+        assert "Resume" not in verbs and self._BARE_RESUME_ACTION not in verbs
         assert verbs[0] == "Reclaim"
 
     def test_bare_orphan_reclaims_even_when_lock_scan_missed_it(self):
@@ -518,7 +521,7 @@ class TestSessionActionVerbs:
                             session_bare_orphan=False, last_session_id="s1")
         assert "Reclaim" in verbs
         assert "Stop" not in verbs
-        assert "Resume" not in verbs and "Bare resume" not in verbs
+        assert "Resume" not in verbs and self._BARE_RESUME_ACTION not in verbs
         assert verbs[0] == "Reclaim"
 
     def test_muxed_plus_bare_is_warning_stop_and_repair(self):
@@ -546,7 +549,8 @@ class TestSessionActionVerbs:
         # the resumable group: Resume + Bare resume (Reclaim absent).
         verbs = self._verbs(mux_live=False, last_session_id="s1")
         assert verbs[0] == "Resume"
-        assert "Bare resume" in verbs
+        assert self._BARE_RESUME_ACTION == "Bare resume (deprecated)"
+        assert self._BARE_RESUME_ACTION in verbs
         assert "Reclaim" not in verbs and "Stop" not in verbs
 
     def test_gone_offers_cleanup_only(self):

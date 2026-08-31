@@ -515,9 +515,9 @@ if [[ "$ACTION" == "exec" ]]; then
 
     WORK_DIR=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('work_dir',''))")
     # Path the status-bar updater renders from. Normally the pane cwd (work_dir),
-    # but for two-step "Bare resume" work_dir is HOME (to dodge the worktree-cwd
-    # start bug) while the bar must still show the worktree's identity + git
-    # disposition -- so prefer status_path (the real worktree) when present.
+    # but for deprecated Bare resume work_dir is HOME while the bar must still
+    # show the worktree's identity + git disposition -- so prefer status_path
+    # (the real worktree) when present.
     STATUS_PATH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('status_path') or d.get('work_dir',''))")
     POST_EXIT=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('post_exit') else '0')")
     WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print(d.get('worktree_id') or '')")
@@ -580,7 +580,7 @@ print(' '.join(shlex.quote(a) for a in d.get('cmd', [])))
 
     # Compose the paired private knowledge repo's plugin settings into the
     # harness worktree before Copilot starts and performs plugin discovery.
-    # status_path is the real worktree during Bare resume (work_dir is HOME).
+    # status_path is the real worktree during deprecated Bare resume.
     if ! _REFRESHED_PYTHON="$(resolve_runtime_python)"; then
         setup_log ERROR "Agent-worktrees runtime is unavailable after update apply; expected a complete slot under $RUNTIME_DIR"
         printf 'ERROR: Agent-worktrees runtime is unavailable after update apply; expected a complete slot under %s\n' \

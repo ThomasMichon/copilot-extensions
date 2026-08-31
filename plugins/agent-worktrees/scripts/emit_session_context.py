@@ -14,7 +14,6 @@ from pathlib import Path
 
 MAX_CONTEXT_BYTES = 1_600
 _DISPLAY_ORDER = (
-    "extension",
     "marketplace",
     "binding",
     "machine",
@@ -26,7 +25,6 @@ _ADMISSION_ORDER = (
     "conduct",
     "machine",
     "marketplace",
-    "extension",
     "nudge",
 )
 
@@ -167,17 +165,7 @@ def main() -> int:
 
     scripts = root / "scripts"
     deadline = time.monotonic() + 3.5
-    extension = _run(
-        scripts / "session-ext-reload", payload, deadline=deadline
-    )
-    if extension:
-        extension = (
-            "Affected Copilot CLI builds may hang while loading extensions. "
-            "Use Bare resume from the home directory or `--no-experimental`; "
-            "see `agent-worktrees` skill guidance."
-        )
     fragments = {
-        "extension": extension,
         "marketplace": _run(
             scripts / "marketplace-overrides",
             payload,
