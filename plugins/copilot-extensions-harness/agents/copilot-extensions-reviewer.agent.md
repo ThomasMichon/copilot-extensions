@@ -5,7 +5,9 @@ description: |
   Reads untrusted changes through GitHub data surfaces, posts high-confidence
   findings, suspends for author updates, and lands an eligible clean change
   through the repository's required squash-merge flow. Invoked only by the
-  repository's agent-dispatch reviewer loop.
+  repository's agent-dispatch reviewer loop. This agent is a reusable guidance
+  reference; the raw self-host proof embodies through the registered host agent
+  and carries the same contract in the task prompt.
 tools: ["*"]
 ---
 
