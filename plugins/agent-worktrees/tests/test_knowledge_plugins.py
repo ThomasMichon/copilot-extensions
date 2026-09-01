@@ -180,6 +180,68 @@ def test_repointed_knowledge_retires_old_managed_entries(tmp_path: Path):
     assert overlay["editor"] == "unmanaged"
 
 
+def test_same_pair_recompose_converges_advanced_source_and_preserves_unmanaged(
+    tmp_path: Path,
+):
+    harness = tmp_path / "harness"
+    knowledge = tmp_path / "knowledge"
+    harness.mkdir()
+    knowledge.mkdir()
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "operator": {
+                    "source": {"source": "github", "repo": "example/old"}
+                }
+            },
+            "enabledPlugins": {"old@operator": True},
+        },
+    )
+    _write_settings(
+        harness,
+        {
+            "theme": "unmanaged",
+            "enabledPlugins": {"local-choice@example": False},
+        },
+        local=True,
+    )
+    kp.compose(
+        harness,
+        knowledge,
+        pair_id="pair-1",
+        pair_kind="worktree",
+    )
+
+    _write_settings(
+        knowledge,
+        {
+            "extraKnownMarketplaces": {
+                "operator": {
+                    "source": {"source": "github", "repo": "example/current"}
+                }
+            },
+            "enabledPlugins": {"current@operator": True},
+        },
+    )
+    summary = kp.compose(
+        harness,
+        knowledge,
+        pair_id="pair-1",
+        pair_kind="worktree",
+    )
+    overlay = _read_overlay(harness)
+
+    assert summary["changed"] is True
+    assert overlay["extraKnownMarketplaces"]["operator"]["source"]["repo"] == (
+        "example/current"
+    )
+    assert "old@operator" not in overlay["enabledPlugins"]
+    assert overlay["enabledPlugins"]["current@operator"] is True
+    assert overlay["enabledPlugins"]["local-choice@example"] is False
+    assert overlay["theme"] == "unmanaged"
+
+
 def test_legacy_anchor_overlay_is_adopted_and_repointed_to_pair(
     tmp_path: Path, monkeypatch
 ):
@@ -1406,6 +1468,8 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     assert '"${_KNOWLEDGE_ARGS[@]}" 2>&1' in sh
     assert 'exit "$_KNOWLEDGE_RC"' in sh
     assert "Knowledge plugin preflight failed" in sh
+    assert sh_compose < sh.index('PANE_CMD=("${CLEAN_ENV[@]}"')
+    assert sh_compose < sh.index('"${CLEAN_ENV[@]}" "${CMD_ARRAY[@]}"')
 
     ps_compose = ps.index("'knowledge', 'compose-plugins'")
     assert ps.index("Set-Location $plan.work_dir") < ps_compose
@@ -1418,3 +1482,4 @@ def test_launchers_compose_after_plan_before_copilot_handoff():
     assert "$knowledgeOutput = & $VenvPython @knowledgeArgs 2>&1" in ps
     assert "exit $knowledgeExit" in ps
     assert "Knowledge plugin preflight failed" in ps
+    assert ps_compose < ps.index("& $cmd[0] $cmd[1..($cmd.Count - 1)]")

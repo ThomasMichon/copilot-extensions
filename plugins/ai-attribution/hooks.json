@@ -4,8 +4,8 @@
     "sessionStart": [
       {
         "type": "command",
-        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if (-not $r) { $r = (Get-Location).Path }; $w = Join-Path (Join-Path $r 'scripts') 'invoke-context-contributor.ps1'; if (Test-Path -LiteralPath $w -PathType Leaf) { & $w 'ai-attribution@copilot-extensions' 'publication-policy' 'scripts/emit-policy.ps1' '--aggregate' } else { [Console]::Out.Write('{}') }",
-        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-$PWD}}}\"; w=\"$r/scripts/invoke-context-contributor.sh\"; if [ -f \"$w\" ]; then bash \"$w\" ai-attribution@copilot-extensions publication-policy scripts/emit-policy.sh --aggregate; else printf '{}'; fi",
+        "powershell": "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; if ($r) { try { [IO.Directory]::SetCurrentDirectory($env:USERPROFILE) } catch {}; $w = Join-Path (Join-Path $r 'scripts') 'invoke-context-contributor.ps1'; if (Test-Path -LiteralPath $w -PathType Leaf) { & $w 'ai-attribution@copilot-extensions' 'publication-policy' 'scripts/emit-policy.ps1' '--aggregate' } else { [Console]::Out.Write('{}') } } else { [Console]::Out.Write('{}') }",
+        "bash": "r=\"${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT:-}}}\"; w=\"$r/scripts/invoke-context-contributor.sh\"; if [ -n \"$r\" ] && [ -f \"$w\" ]; then bash \"$w\" ai-attribution@copilot-extensions publication-policy scripts/emit-policy.sh --aggregate; else printf '{}'; fi",
         "timeoutSec": 30
       }
     ]

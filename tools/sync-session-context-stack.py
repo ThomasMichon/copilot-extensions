@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
-import shlex
+import sys
 from pathlib import Path
 
 
@@ -31,6 +32,22 @@ WRAPPERS = {
     "powershell": "invoke-context-contributor.ps1",
 }
 
+CONFORMANCE_PATH = (
+    PLUGINS
+    / AUTHORITY
+    / "scripts"
+    / "session_context_conformance.py"
+)
+_SPEC = importlib.util.spec_from_file_location(
+    "session_context_conformance_sync",
+    CONFORMANCE_PATH,
+)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError("cannot load session-context conformance scanner")
+CONFORMANCE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = CONFORMANCE
+_SPEC.loader.exec_module(CONFORMANCE)
+
 
 def _load(path: Path) -> dict:
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -52,34 +69,11 @@ def _hook_paths(plugin: Path, manifest: dict) -> list[Path]:
 
 
 def _bash_hook(source: str, contributor: dict) -> str:
-    command = contributor["bash"]
-    arguments = " ".join(shlex.quote(str(part)) for part in command)
-    return (
-        'r="${COPILOT_PLUGIN_ROOT:-${PLUGIN_ROOT:-'
-        '${CLAUDE_PLUGIN_ROOT:-$PWD}}}"; '
-        'w="$r/scripts/invoke-context-contributor.sh"; '
-        f'if [ -f "$w" ]; then bash "$w" {shlex.quote(source)} '
-        f'{shlex.quote(contributor["id"])} {arguments}; '
-        "else printf '{}'; fi"
-    )
-
-
-def _ps_quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
+    return CONFORMANCE.canonical_bash_hook(source, contributor)
 
 
 def _powershell_hook(source: str, contributor: dict) -> str:
-    arguments = " ".join(_ps_quote(str(part)) for part in contributor["powershell"])
-    return (
-        "$r = $env:COPILOT_PLUGIN_ROOT; if (-not $r) { $r = $env:PLUGIN_ROOT }; "
-        "if (-not $r) { $r = $env:CLAUDE_PLUGIN_ROOT }; "
-        "if (-not $r) { $r = (Get-Location).Path }; "
-        "$w = Join-Path (Join-Path $r 'scripts') "
-        "'invoke-context-contributor.ps1'; "
-        f"if (Test-Path -LiteralPath $w -PathType Leaf) {{ & $w "
-        f"{_ps_quote(source)} {_ps_quote(contributor['id'])} {arguments} }} "
-        "else { [Console]::Out.Write('{}') }"
-    )
+    return CONFORMANCE.canonical_powershell_hook(source, contributor)
 
 
 def _entry_mentions(entry: dict, relative: str) -> bool:
@@ -217,7 +211,7 @@ def _desired_plugin(plugin: Path, marketplace: str) -> dict[Path, bytes]:
     return desired
 
 
-def _desired() -> dict[Path, bytes]:
+def _desired() -> tuple[dict[Path, bytes], list[str]]:
     marketplace = _load(MARKETPLACE)
     marketplace_name = marketplace.get("name")
     if not isinstance(marketplace_name, str):
@@ -226,11 +220,16 @@ def _desired() -> dict[Path, bytes]:
     if not isinstance(entries, list):
         raise ValueError("marketplace plugins must be a list")
     desired: dict[Path, bytes] = {}
+    errors: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict) or not isinstance(entry.get("source"), str):
             continue
         plugin = ROOT / entry["source"]
-        manifest = _load(plugin / "plugin.json")
+        try:
+            manifest = _load(plugin / "plugin.json")
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            errors.append(f"{plugin.name}: {exc}")
+            continue
         if not any(path.is_file() for path in _hook_paths(plugin, manifest)):
             continue
         has_session_start = False
@@ -243,8 +242,11 @@ def _desired() -> dict[Path, bytes]:
             ):
                 has_session_start = True
         if has_session_start:
-            desired.update(_desired_plugin(plugin, marketplace_name))
-    return desired
+            try:
+                desired.update(_desired_plugin(plugin, marketplace_name))
+            except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                errors.append(f"{plugin.name}: {exc}")
+    return desired, errors
 
 
 def main() -> int:
@@ -252,7 +254,8 @@ def main() -> int:
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
     mismatches: list[str] = []
-    for path, expected in _desired().items():
+    desired, errors = _desired()
+    for path, expected in desired.items():
         actual = path.read_bytes() if path.is_file() else None
         if actual == expected:
             continue
@@ -260,12 +263,37 @@ def main() -> int:
         if not args.check:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(expected)
-    if mismatches:
+    targets, discovery = CONFORMANCE.marketplace_targets(ROOT)
+    authority_targets = [
+        item
+        for item in targets
+        if item.source.partition("@")[0] == AUTHORITY
+    ]
+    authority_source = (
+        authority_targets[0].source if len(authority_targets) == 1 else None
+    )
+    report = CONFORMANCE.scan_plugins(
+        targets,
+        scope=discovery.scope,
+        authority_source=authority_source,
+        wrapper_root=authority_targets[0].root if authority_targets else None,
+        initial_violations=discovery.violations,
+    )
+    errors.extend(
+        (
+            f"{item.code}: {item.source or '<marketplace>'}: "
+            f"{item.message}"
+        )
+        for item in report.violations
+    )
+    if mismatches or errors:
         action = "out of date" if args.check else "updated"
         print(f"session-context stack {action}:")
         for path in mismatches:
             print(f"  {path}")
-        return 1 if args.check else 0
+        for error in errors:
+            print(f"  ERROR: {error}")
+        return 1 if args.check or errors else 0
     print("session-context stack is synchronized")
     return 0
 

@@ -17,6 +17,15 @@ POWERSHELL_PRODUCER = PLUGIN / "scripts" / "emit-guidance.ps1"
 BASH_PRODUCER = PLUGIN / "scripts" / "emit-guidance.sh"
 
 
+def _hook_input() -> str:
+    return json.dumps({
+        "sessionId": "context-handoff-hook-test",
+        "cwd": str(PLUGIN),
+        "source": "test",
+        "timestamp": 1,
+    })
+
+
 def _powershell() -> str | None:
     if os.name == "nt":
         return shutil.which("pwsh") or shutil.which("powershell.exe")
@@ -220,6 +229,7 @@ def test_hook_commands_use_plugin_root() -> None:
 
     result = subprocess.run(
         ["bash", "-c", str(entry["bash"])],
+        input=_hook_input(),
         check=True,
         capture_output=True,
         text=True,
@@ -231,6 +241,7 @@ def test_hook_commands_use_plugin_root() -> None:
     if powershell:
         result = subprocess.run(
             [powershell, "-NoProfile", "-Command", str(entry["powershell"])],
+            input=_hook_input(),
             check=True,
             capture_output=True,
             text=True,
@@ -249,6 +260,7 @@ def test_hook_commands_accept_compatibility_root_aliases() -> None:
 
         result = subprocess.run(
             ["bash", "-c", str(entry["bash"])],
+            input=_hook_input(),
             check=True,
             capture_output=True,
             text=True,

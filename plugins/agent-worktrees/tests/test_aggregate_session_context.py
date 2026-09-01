@@ -34,13 +34,38 @@ def test_compose_prioritizes_binding_and_conduct_within_budget() -> None:
         "nudge": "nudge-" + ("x" * 500),
     }
 
-    payload = json.loads(MODULE._compose("1.2.3", fragments))
+    rendered = MODULE._compose("1.2.3", fragments)
+    payload = json.loads(rendered)
     context = payload["additionalContext"]
 
     assert context.startswith("[owner: agent-worktrees@1.2.3]")
     assert fragments["binding"] in context
     assert fragments["conduct"] in context
-    assert len(context.encode("utf-8")) <= MODULE.MAX_CONTEXT_BYTES
+    assert len(rendered.encode("utf-8")) <= MODULE.MAX_CONTEXT_BYTES
+
+
+@pytest.mark.parametrize("segments", [80, 400])
+def test_compose_bounds_final_json_with_deep_windows_paths(
+    segments: int,
+) -> None:
+    windows_path = "C:\\" + "\\".join(
+        f"segment-{index:03d}" for index in range(segments)
+    )
+    fragments = {
+        "binding": (
+            "[agent-worktrees] This Copilot session is bound to "
+            f"{windows_path}."
+        ),
+        "conduct": "Use exact paths and preserve \"quoted\" context.",
+    }
+
+    rendered = MODULE._compose("1.2.3", fragments)
+    payload = json.loads(rendered)
+
+    assert len(rendered.encode("utf-8")) <= MODULE.MAX_CONTEXT_BYTES
+    assert payload["additionalContext"].startswith(
+        "[owner: agent-worktrees@1.2.3]"
+    )
 
 
 def test_compactors_preserve_binding_and_machine_identity() -> None:
@@ -128,7 +153,7 @@ def test_payload_wrappers_emit_identical_bounded_context(tmp_path: Path) -> None
     assert powershell.stdout == bash.stdout
     context = json.loads(bash.stdout)["additionalContext"]
     assert context == "[owner: agent-worktrees@1.2.3]"
-    assert len(context.encode("utf-8")) <= MODULE.MAX_CONTEXT_BYTES
+    assert len(bash.stdout.encode("utf-8")) <= MODULE.MAX_CONTEXT_BYTES
 
     py_only = tmp_path / "py-only"
     py_only.mkdir()

@@ -210,7 +210,7 @@ def test_no_config_emits_safe_defaults(tmp_path: Path) -> None:
     repo = _git_repo(tmp_path / "repo")
     context = _context(_run(_native_hook(), repo, tmp_path / "home"))
     assert context.startswith(
-        "[owner: ai-attribution@0.1.0-dev5] Before publishing"
+        "[owner: ai-attribution@0.1.0-dev6] Before publishing"
     )
     assert "another party's repo require" in context
     assert "verified operator-owned repo, omit disclosure" in context
@@ -257,7 +257,7 @@ def test_payload_cwd_decodes_json_unicode_escapes(tmp_path: Path) -> None:
     hooks = _parity_hooks()
     for hook in hooks:
         assert _context(_run(hook, repo, tmp_path / "home")).startswith(
-            "[owner: ai-attribution@0.1.0-dev5]"
+            "[owner: ai-attribution@0.1.0-dev6]"
         )
 
 
@@ -294,6 +294,7 @@ def test_missing_or_malformed_payload_fails_open_once(
         "x" * 65537,
         '{"cwd":"/path/to/repo"}\x00',
     ],
+    ids=["oversized", "nul"],
 )
 def test_oversized_or_nul_payload_fails_open_before_parsing(
     tmp_path: Path,
@@ -386,7 +387,7 @@ def test_payload_depth_limit_has_shell_parity(
     for result in results:
         if accepted:
             assert _context(result).startswith(
-                "[owner: ai-attribution@0.1.0-dev5]"
+                "[owner: ai-attribution@0.1.0-dev6]"
             )
         else:
             assert result.stdout == "{}"

@@ -313,6 +313,8 @@ Before landing:
 
 ```text
 python libs/payload-invocation/generate.py --all --check
+python plugins/context-injection/scripts/aggregate_context.py --validate \
+  --marketplace-root . --json
 python tools/sync-versioned-runtime.py --check
 python -m pytest -q libs/payload-invocation/tests
 python tools/check-install-contract.py

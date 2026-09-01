@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,22 @@ if _spec is None or _spec.loader is None:
     raise RuntimeError("cannot load payload-invocation generator")
 generator = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(generator)
+CONFORMANCE_SCRIPT = (
+    REPO
+    / "plugins"
+    / "context-injection"
+    / "scripts"
+    / "session_context_conformance.py"
+)
+_conformance_spec = importlib.util.spec_from_file_location(
+    "payload_invocation_session_context_conformance",
+    CONFORMANCE_SCRIPT,
+)
+if _conformance_spec is None or _conformance_spec.loader is None:
+    raise RuntimeError("cannot load session-context conformance scanner")
+conformance = importlib.util.module_from_spec(_conformance_spec)
+sys.modules[_conformance_spec.name] = conformance
+_conformance_spec.loader.exec_module(conformance)
 
 
 def _runtime_agent_plugins() -> list[tuple[str, Path, dict]]:
@@ -140,6 +157,36 @@ def test_runtime_agent_plugins_bootstrap_and_emit_their_command_glossary() -> No
     assert not failures, "\n" + "\n".join(failures)
 
 
+def test_runtime_agent_roster_passes_shared_session_context_conformance() -> None:
+    targets, discovery = conformance.marketplace_targets(REPO)
+    authority = next(
+        item
+        for item in targets
+        if item.source == "context-injection@copilot-extensions"
+    )
+    report = conformance.scan_plugins(
+        targets,
+        scope=discovery.scope,
+        authority_source=authority.source,
+        wrapper_root=authority.root,
+        initial_violations=discovery.violations,
+    )
+    runtime_sources = {
+        f"{name}@copilot-extensions"
+        for name, _plugin, _manifest in _runtime_agent_plugins()
+    }
+
+    assert {
+        "agent-index@copilot-extensions",
+        "agent-logger@copilot-extensions",
+    } <= runtime_sources
+    assert not [
+        item.as_dict()
+        for item in report.violations
+        if item.source in runtime_sources
+    ]
+
+
 @pytest.mark.parametrize(
     ("name", "plugin", "manifest"),
     _runtime_agent_plugins(),
@@ -174,7 +221,14 @@ def test_default_legacy_stamp_publishes_every_payload_command(
                 "COPILOT_EXT_INSTALLATION_",
                 "COPILOT_EXTENSIONS_INSTALLATION_",
             )
-        ):
+        ) or key in {
+            "COPILOT_PLUGIN_ROOT",
+            "PLUGIN_ROOT",
+            "CLAUDE_PLUGIN_ROOT",
+            "COPILOT_PLUGIN_DATA",
+            "PLUGIN_DATA",
+            "CLAUDE_PLUGIN_DATA",
+        }:
             env.pop(key, None)
     if os.name == "nt":
         pwsh = shutil.which("pwsh") or shutil.which("powershell")

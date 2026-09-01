@@ -49,10 +49,13 @@ reports can attribute the bytes:
 On affected Copilot CLI versions, the repository adopts the exact direct
 `context-injection@copilot-extensions` marketplace authority and engine-v5
 contract. Before exact authority proof, the wrapper invokes its own contributor
-directly. After proof, it joins the shared
-`(sessionId, canonical resolved cwd)` rendezvous and emits the same cached
-aggregate as the authority. Authority-first, producer-first, and concurrent
-execution therefore return byte-identical output. Missing,
+directly. After proof, it validates the current effective stack, derives a
+generation from its attributable payload roots and context-producing contracts,
+then joins the shared `(sessionId, canonical resolved cwd, stack generation)`
+rendezvous and emits the same cached aggregate as the authority. Authority-first,
+producer-first, and concurrent execution therefore return byte-identical output
+without carrying cached guidance across plugin, declaration, hook, contributor,
+or command-catalog changes. Missing,
 malformed, ambiguous, inactive, or incompatible authority proof preserves
 standalone output.
 
@@ -103,6 +106,24 @@ The start payload's `cwd` is for applicability gating; the plugin root is for
 locating the wrapper and contributor. A missing root or wrapper emits `{}`; a
 present wrapper owns exact authority resolution and direct fallback.
 
+Before activation, validate the complete roster with the authority's reusable
+scanner. It accepts either a directory-marketplace root or a trusted
+repository's effective plugin stack, reports every violation in one result, and
+supports structured JSON:
+
+```text
+python plugins/context-injection/scripts/aggregate_context.py --validate \
+  --marketplace-root . --json
+python plugins/context-injection/scripts/aggregate_context.py --validate \
+  --repository /path/to/repository --json
+```
+
+The scan covers payload availability, complete behavior declarations, bounded
+pure contributors, payload-relative command containment, attributable wrapper
+identity/argv, synchronized wrappers and hook timeouts, and runtime `agent-*`
+command catalogs. A nonzero exit means the stack is not safe to activate.
+Runtime aggregation reuses the same scanner and remains fail-closed.
+
 The kernel contains only policy that must remain active throughout the session.
 Detailed mechanics stay in an on-demand skill or a dedicated file named by a
 backtick faux-link so the agent can read it when needed. This preserves the
@@ -148,6 +169,13 @@ command substitutions, or execute a command found in configuration.
 Public repository configuration must not contain sensitive identifier lists.
 Keep private target names, accounts, network values, and other identifying
 policy inputs in operator-scoped configuration outside the public repository.
+
+When a launch reconciler generates marker-owned repository settings from a
+paired configuration source, it refreshes or retires those exact managed values
+before the host inventories plugins. It preserves unmanaged settings and fails
+the launch preflight closed when ownership cannot be proven. The aggregation
+authority only scans the resulting effective settings; it does not learn how a
+particular reconciler or pairing system works.
 
 ### Gate every emission
 

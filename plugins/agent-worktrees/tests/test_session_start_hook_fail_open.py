@@ -54,7 +54,12 @@ def _hooks(event: str) -> list[dict[str, object]]:
 
 def _run(command: str, shell: str, home: Path, cwd: Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
-    env.pop("COPILOT_PLUGIN_ROOT", None)
+    for key in (
+        "COPILOT_PLUGIN_ROOT",
+        "PLUGIN_ROOT",
+        "CLAUDE_PLUGIN_ROOT",
+    ):
+        env.pop(key, None)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
     return subprocess.run(
@@ -116,6 +121,8 @@ def test_bash_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         home.mkdir(parents=True)
         cwd.mkdir()
         command = str(hook["bash"])
+        if "invoke-context-contributor.sh" in command:
+            continue
         _stage_stub(command, home, cwd, "exit 23")
 
         result = _run(command, _bash(), home, cwd)
@@ -127,7 +134,11 @@ def test_bash_hook_forwards_runtime_script_output(tmp_path: Path):
     cwd = tmp_path / "cwd"
     home.mkdir()
     cwd.mkdir()
-    command = str(_hooks("sessionStart")[0]["bash"])
+    command = next(
+        str(hook["bash"])
+        for hook in _hooks("sessionStart")
+        if "invoke-context-contributor.sh" not in str(hook["bash"])
+    )
     expected = '{"additionalContext":"runtime guidance"}'
     _stage_stub(command, home, cwd, f"printf '%s' '{expected}'")
 
@@ -438,7 +449,10 @@ def test_powershell_hooks_do_not_mask_runtime_script_failures(tmp_path: Path):
         cwd.mkdir()
         script = tmp_path / str(index) / "stub.ps1"
         script.write_text("exit 23\n", encoding="utf-8")
-        command = _powershell_wrapper(str(hook["powershell"]), script)
+        raw_command = str(hook["powershell"])
+        if "invoke-context-contributor.ps1" in raw_command:
+            continue
+        command = _powershell_wrapper(raw_command, script)
 
         result = _run(command, powershell, home, cwd)
         assert result.returncode != 0
@@ -454,7 +468,12 @@ def test_powershell_hook_forwards_runtime_script_output(tmp_path: Path):
     expected = '{"additionalContext":"runtime guidance"}'
     script.write_text(f"[Console]::Out.Write('{expected}')\n", encoding="utf-8")
     command = _powershell_wrapper(
-        str(_hooks("sessionStart")[0]["powershell"]),
+        next(
+            str(hook["powershell"])
+            for hook in _hooks("sessionStart")
+            if "invoke-context-contributor.ps1"
+            not in str(hook["powershell"])
+        ),
         script,
     )
 
