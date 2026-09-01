@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import types
 
 import pytest
@@ -16,7 +17,8 @@ def _args(**kw) -> argparse.Namespace:
         spawn_backend="embody", target_machine="emancipation-cube",
         label=None, require=None, affinity=None, target_repo=None,
         target_worktree=None, source=None, origin_ref=None, evaluator_ref=None,
-        dedup_key=None, verify_timeout=0,
+        dedup_key=None, producer_id=None, producer_generation=None,
+        producer_capability=None, producer_request_id=None, verify_timeout=0,
     )
     base.update(kw)
     return argparse.Namespace(**base)
@@ -85,6 +87,21 @@ def test_build_remote_argv_no_payload_flag_without_payload():
     assert "--payload-file" not in argv
 
 
+def test_build_remote_argv_ignores_ambient_capability_without_fence(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "AGENT_DISPATCH_PRODUCER_CAPABILITY", "ambient-capability"
+    )
+
+    argv = remote_dispatch.build_remote_create_argv(
+        _args(), repo="r", has_payload=True
+    )
+
+    assert "--remote-create-envelope" not in argv
+    assert argv[argv.index("--payload-file") + 1] == "-"
+
+
 def test_build_remote_argv_preserves_producer_association():
     argv = remote_dispatch.build_remote_create_argv(
         _args(
@@ -97,6 +114,45 @@ def test_build_remote_argv_preserves_producer_association():
     )
     assert argv[argv.index("--origin-ref") + 1] == "review-source"
     assert argv[argv.index("--evaluator-ref") + 1] == "review-loop"
+
+
+def test_build_remote_argv_preserves_producer_fence():
+    argv = remote_dispatch.build_remote_create_argv(
+        _args(
+            source="scheduled",
+            label=["nightly"],
+            producer_id="scheduler-a",
+            producer_generation=3,
+            producer_capability="opaque-capability",
+            producer_request_id="request-3",
+        ),
+        repo="r",
+        has_payload=False,
+    )
+    assert argv[argv.index("--producer-id") + 1] == "scheduler-a"
+    assert argv[argv.index("--producer-generation") + 1] == "3"
+    assert argv[argv.index("--producer-request-id") + 1] == "request-3"
+    assert "--producer-capability" not in argv
+    assert argv[argv.index("--remote-create-envelope") + 1] == "-"
+
+
+def test_remote_dispatch_uses_capability_command_resolver(monkeypatch):
+    monkeypatch.setattr(
+        remote_dispatch,
+        "producer_capability",
+        lambda: "fetched-capability",
+    )
+    argv = remote_dispatch.build_remote_create_argv(
+        _args(
+            source="scheduled",
+            producer_id="scheduler-a",
+            producer_generation=3,
+            producer_request_id="request-3",
+        ),
+        repo="r",
+        has_payload=False,
+    )
+    assert argv[argv.index("--remote-create-envelope") + 1] == "-"
 
 
 def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
@@ -128,6 +184,107 @@ def test_dispatch_to_remote_builds_ssh_command(monkeypatch):
     assert "'do X'" in remote_cmd  # title is shell-quoted
     assert captured["input"] == "the brief"  # payload streamed over stdin
     assert captured["kwargs"]["creationflags"] == 123
+
+
+def test_dispatch_to_remote_keeps_producer_capability_out_of_argv(monkeypatch):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "no_window_kwargs", lambda: {})
+
+    remote_dispatch.dispatch_to_remote(
+        "emancipation-cube",
+        _args(
+            producer_id="scheduler-a",
+            producer_generation=3,
+            producer_capability="opaque-capability",
+            producer_request_id="request-3",
+        ),
+        repo="example.com/acme/widget",
+        payload="the brief",
+    )
+
+    command = " ".join(captured["cmd"])
+    assert "opaque-capability" not in command
+    assert "--remote-create-envelope" in command
+    assert '"producer_capability":"opaque-capability"' in captured["input"]
+    assert '"payload":"the brief"' in captured["input"]
+
+
+def test_dispatch_to_remote_fetches_capability_once_for_argv_and_stdin(
+    monkeypatch,
+):
+    captured = {}
+    fetches = []
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    def fetch():
+        fetches.append(True)
+        return "fetched-once" if len(fetches) == 1 else None
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "no_window_kwargs", lambda: {})
+    monkeypatch.setattr(remote_dispatch, "producer_capability", fetch)
+
+    remote_dispatch.dispatch_to_remote(
+        "emancipation-cube",
+        _args(
+            source="scheduled",
+            producer_id="scheduler-a",
+            producer_generation=3,
+            producer_request_id="request-3",
+        ),
+        repo="example.com/acme/widget",
+        payload="the brief",
+    )
+
+    assert len(fetches) == 1
+    assert "--remote-create-envelope" in captured["cmd"][-1]
+    assert '"producer_capability":"fetched-once"' in captured["input"]
+
+
+@pytest.mark.parametrize("payload", ["the brief", None])
+def test_dispatch_to_remote_empty_explicit_capability_keeps_envelope_framing(
+    monkeypatch, payload
+):
+    captured = {}
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["input"] = kwargs.get("input")
+        return types.SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(remote_dispatch.shutil, "which", lambda _n: "/usr/bin/ssh")
+    monkeypatch.setattr(remote_dispatch.subprocess, "run", fake_run)
+    monkeypatch.setattr(remote_dispatch, "no_window_kwargs", lambda: {})
+
+    remote_dispatch.dispatch_to_remote(
+        "emancipation-cube",
+        _args(
+            source="scheduled",
+            producer_id="scheduler-a",
+            producer_generation=3,
+            producer_capability="",
+            producer_request_id="request-3",
+        ),
+        repo="example.com/acme/widget",
+        payload=payload,
+    )
+
+    assert "--remote-create-envelope" in captured["cmd"][-1]
+    envelope = json.loads(captured["input"])
+    assert envelope == {"payload": payload, "producer_capability": ""}
 
 
 def test_dispatch_to_remote_unavailable_without_ssh(monkeypatch):

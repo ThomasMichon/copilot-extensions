@@ -121,6 +121,7 @@ def autopilot_worker_prompt(
     worker_id: str,
     route: str = "",
     repo: str | None = None,
+    all_repos: bool = False,
 ) -> str:
     """Build the autopilot seed handed to a dispatched, embodied CLI session.
 
@@ -147,7 +148,9 @@ def autopilot_worker_prompt(
     preserved so a task created on a non-default coordinator is still reachable.
     """
     ad = f"agent-dispatch{route}"
-    lane = f" --repo {repo}" if repo else ""
+    if repo and all_repos:
+        raise ValueError("autopilot claim scope cannot set repo and all_repos")
+    lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
     if route:
         route_note = (
             f"Use the `{ad}` CLI commands exactly as shown below so every command "
@@ -230,6 +233,8 @@ def spawn_embodied_worker(
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
     route: str = "",
+    repo: str | None = None,
+    all_repos: bool = False,
     verify_timeout: int = 0,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
@@ -254,7 +259,13 @@ def spawn_embodied_worker(
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
-    seed = autopilot_worker_prompt(task_id, worker_id=worker_id, route=route)
+    seed = autopilot_worker_prompt(
+        task_id,
+        worker_id=worker_id,
+        route=route,
+        repo=repo,
+        all_repos=all_repos,
+    )
     cmd = list(exe_prefix)
     if project:
         # `--project` is an agent-worktrees GLOBAL option -- it precedes the
@@ -274,7 +285,13 @@ def spawn_embodied_worker(
 
 
 def fleet_autopilot_worker_prompt(
-    task_id: str, *, origin: str, owner: str, worker_id: str
+    task_id: str,
+    *,
+    origin: str,
+    owner: str,
+    worker_id: str,
+    repo: str | None = None,
+    all_repos: bool = False,
 ) -> str:
     """Build the autopilot seed for a **fleet-dispatched, remote** embody body.
 
@@ -297,6 +314,9 @@ def fleet_autopilot_worker_prompt(
       (``{owner}``) on every lease-holding verb. It is an opaque lease-holder id,
       stable for this attempt.
     """
+    if repo and all_repos:
+        raise ValueError("fleet claim scope cannot set repo and all_repos")
+    lane = " --all-repos" if all_repos else (f" --repo {repo}" if repo else "")
     return (
         f"You are a fleet-dispatched agent-dispatch **autopilot** worker (worker "
         f"id: {worker_id}), running detached in a fresh parallel worktree on this "
@@ -312,7 +332,7 @@ def fleet_autopilot_worker_prompt(
         f"commit to running it. Steps: "
         f"(1) read it: `ssh {origin} agent-dispatch show {task_id}`; "
         f"(2) claim it for evaluation: `ssh {origin} agent-dispatch claim --task "
-        f"{task_id} --worker {owner} --evaluation` (add `--capability <cap>` for each "
+        f"{task_id} --worker {owner} --evaluation{lane}` (add `--capability <cap>` for each "
         f"capability the task requires) -- this takes a SHORT evaluation lease, "
         f"not the full work lease; "
         f"(3) **EVALUATE before committing** -- while you hold the evaluation "
@@ -359,6 +379,8 @@ def spawn_fleet_embodied_worker(
     worker_id: str,
     driver: str = DEFAULT_DRIVER,
     project: str | None = None,
+    repo: str | None = None,
+    all_repos: bool = False,
     verify_timeout: int = 0,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
@@ -386,7 +408,12 @@ def spawn_fleet_embodied_worker(
     if exe is None:
         raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
     seed = fleet_autopilot_worker_prompt(
-        task_id, origin=origin, owner=owner, worker_id=worker_id
+        task_id,
+        origin=origin,
+        owner=owner,
+        worker_id=worker_id,
+        repo=repo,
+        all_repos=all_repos,
     )
     remote_argv = ["agent-worktrees"]
     if project:
@@ -418,6 +445,8 @@ def spawn_fleet_headless_worker(
     owner: str,
     worker_id: str,
     agent: str = DEFAULT_HEADLESS_AGENT,
+    repo: str | None = None,
+    all_repos: bool = False,
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess:
     """Spawn a **headless agent-bridge ACP** body on a remote pool ``host`` via SSH.
@@ -452,7 +481,12 @@ def spawn_fleet_headless_worker(
     if exe is None:
         raise EmbodyUnavailable("ssh CLI not found on PATH (needed for fleet dispatch)")
     seed = fleet_autopilot_worker_prompt(
-        task_id, origin=origin, owner=owner, worker_id=worker_id
+        task_id,
+        origin=origin,
+        owner=owner,
+        worker_id=worker_id,
+        repo=repo,
+        all_repos=all_repos,
     )
     # `--json` (a global flag, before the subcommand) makes `create --no-wait`
     # emit the created session_id as JSON, so the caller can record a recovery

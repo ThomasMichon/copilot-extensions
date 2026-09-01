@@ -9,6 +9,7 @@ import pytest
 
 from agent_dispatch import steering
 from agent_dispatch.queue import Status, TaskError
+from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
@@ -437,7 +438,7 @@ def api(tmp_path):
 
 def _held_over_http(api, worker="w1"):
     tid = api.post("/tasks", json={"title": "review PR 42"}).json()["id"]
-    api.post("/claim", json={"worker_id": worker})
+    api.post("/claim", json={"worker_id": worker, "repo": TEST_REPO})
     api.post(
         f"/tasks/{tid}/start",
         json={"worker_id": worker, "owner_session_id": f"session-{worker}"},

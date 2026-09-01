@@ -21,6 +21,8 @@ over HTTP and never touch the directory directly.
 from __future__ import annotations
 
 import hashlib
+import os
+import uuid
 from pathlib import Path
 
 BLOB_PREFIX = "blob:"
@@ -48,14 +50,17 @@ class PayloadStore:
         """
         digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
         path = self._path_for(digest)
-        if not path.exists():
-            self.root.mkdir(parents=True, exist_ok=True)
-            # Write via a temp file + atomic rename so a reader never sees a
-            # half-written blob.
-            tmp = path.with_suffix(f".md.{digest[:8]}.tmp")
+        ref = f"{BLOB_PREFIX}{digest}"
+        if path.exists():
+            return ref
+        self.root.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+        try:
             tmp.write_text(content, encoding="utf-8")
-            tmp.replace(path)
-        return f"{BLOB_PREFIX}{digest}"
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return ref
 
     def has(self, ref: str) -> bool:
         """True if ``ref`` is a blob ref this store holds."""
