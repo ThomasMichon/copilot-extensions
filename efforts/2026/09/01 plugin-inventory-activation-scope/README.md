@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** isolated issue worktree
 - **Created:** 2026-08-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** plugin-services `install-adopt-boundary`
 - **Umbrella issue:** #1507
 
@@ -97,7 +97,7 @@ conflict detection and bootstrap protection.
 - [x] Run focused plugin suites, changed-Python ruff checks, version and install
   contract gates, and a practical clean-room scenario or equivalent hermetic
   subprocess coverage.
-- [ ] Bump every touched plugin version consistently, publish through the
+- [x] Bump every touched plugin version consistently, publish through the
   required PR flow, and verify the pushed ref and PR head.
 
 ## Validation Plan
@@ -151,3 +151,10 @@ unmanaged state.
   install-contract validation. Repository-only runtime behavior depends on the
   public trust fix in github/copilot-agent-runtime#18252; ACP plugin-directory
   parity remains tracked by github/copilot-agent-runtime#18250.
+
+### 2026-09-01 - Published and complete
+
+- Squash-merged PR #1563 as `a5bf2314dcf72e960e46e2e7077995e264db847f`,
+  closing #1507 after all checks passed and Copilot reported no findings.
+- Archived the completed effort. Remaining runtime dependencies continue under
+  github/copilot-agent-runtime#18252 and github/copilot-agent-runtime#18250.
