@@ -164,7 +164,7 @@ def has_mcp_troubleshooting_skill(plugin_root: Path) -> bool:
         fm = split_frontmatter(text)
         if fm is None:
             continue
-        frontmatter, body = fm
+        frontmatter, _ = fm
         identity = " ".join(filter(None, (
             get_field(frontmatter, "name"),
             get_field_block(frontmatter, "description"),
