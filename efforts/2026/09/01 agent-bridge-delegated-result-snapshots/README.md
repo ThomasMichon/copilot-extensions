@@ -4,14 +4,16 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** one issue-bound PR worktree to `main`
 - **Created:** 2026-09-01
-- **Status:** Active
+- **Status:** Done
 - **Vision:** advances
-  [`visions/plugins/agent-bridge`](../../../visions/plugins/agent-bridge/README.md)
+  [`visions/plugins/agent-bridge`](../../../../visions/plugins/agent-bridge/README.md)
   §Features/`bounded-delegated-results` and
   `task-shaped-delegation-control`
 - **Umbrella issue:** [#1452](https://github.com/ThomasMichon/copilot-extensions/issues/1452)
+- **PRs:** [#1566](https://github.com/ThomasMichon/copilot-extensions/pull/1566) ·
+  [#1588](https://github.com/ThomasMichon/copilot-extensions/pull/1588)
 - **Parent effort:**
-  [`agent-bridge-delegation-convergence`](../agent-bridge-delegation-convergence/README.md)
+  [`agent-bridge-delegation-convergence`](../../../active/agent-bridge-delegation-convergence/README.md)
   / [#1448](https://github.com/ThomasMichon/copilot-extensions/issues/1448)
 - **Related issues:** [#1045](https://github.com/ThomasMichon/copilot-extensions/issues/1045)
   (liveness and progress inspection) ·
@@ -150,7 +152,7 @@ reinterpreting the event ID against rebuilt history.
       deterministic truncation, position mismatch, succession, and cursor
       neutrality.
 - [x] Run the focused agent-bridge suite and repository contract/version gates.
-- [ ] Bump every agent-bridge version surface, publish and merge the PR, then
+- [x] Bump every agent-bridge version surface, publish and merge the PR, then
       reconcile the parent effort and #1452 claim.
 
 ## Validation Plan
@@ -262,3 +264,14 @@ settlement, #1506 remains the owner of the compact cross-target facade, and
 - Repeated full-suite attempts exposed an unrelated intermittent PowerShell 5.1
   subprocess-reader hang; the test passes in isolation and is tracked by
   [#1586](https://github.com/ThomasMichon/copilot-extensions/issues/1586).
+
+### 2026-09-01 — Published and closed
+
+- Merged the bridge-owned reader in
+  [#1566](https://github.com/ThomasMichon/copilot-extensions/pull/1566) and the
+  represented-session parity increment in
+  [#1588](https://github.com/ThomasMichon/copilot-extensions/pull/1588).
+- Advanced the owned and represented result contracts through HTTP protocol
+  generations 6 and 7 and agent-bridge releases through `0.4.0-dev412`.
+- Reconciled every focused Plan and Validation Plan item; #1452 is ready for
+  closure and the parent effort continues with #1450.
