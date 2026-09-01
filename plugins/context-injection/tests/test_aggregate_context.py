@@ -293,6 +293,12 @@ def test_windows_ancestry_reader_preserves_explicit_plugin_dir(
     )
 
 
+def test_windows_ancestry_snapshot_stops_at_copilot_host() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "[string]$process.Name -ieq 'copilot.exe'" in source
+    assert "[string]$process.Name -ieq 'copilot'" in source
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows startup allowance")
 def test_windows_contributors_receive_process_start_grace() -> None:
     assert AGGREGATE_CONTEXT.PROCESS_START_GRACE_SECONDS == 5
