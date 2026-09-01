@@ -1215,6 +1215,42 @@ def test_apply_plan_runs_runtime_drift(env):
     assert summary["executed"][0]["ok"] is True
 
 
+def test_apply_plan_strips_caller_payload_environment(monkeypatch, tmp_path):
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "/caller/payload")
+    monkeypatch.setenv("PYTHONPATH", "/caller/python")
+    monkeypatch.setenv("RECONCILE_KEEP", "present")
+    monkeypatch.setattr(
+        reconcile,
+        "build_plan",
+        lambda *_args, **_kwargs: {
+            "action": "reconcile",
+            "updates": [
+                {
+                    "service": "target-plugin",
+                    "reason": "runtime-drift",
+                    "argv": ["target-installer", "update"],
+                }
+            ],
+        },
+    )
+    captured: dict = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(argv, 0, stdout="")
+
+    monkeypatch.setattr(reconcile.subprocess, "run", fake_run)
+
+    summary = reconcile.apply_plan(tmp_path, passes=1)
+
+    assert summary["executed"][0]["ok"] is True
+    assert captured["argv"] == ["target-installer", "update"]
+    assert "COPILOT_PLUGIN_ROOT" not in captured["env"]
+    assert "PYTHONPATH" not in captured["env"]
+    assert captured["env"]["RECONCILE_KEEP"] == "present"
+
+
 def test_apply_plan_skips_copilot_when_absent(env, monkeypatch):
     """A 'copilot ...' payload step is skipped when copilot is not on PATH."""
     env.write_settings({f"agent-bridge@{MKT}": True})
