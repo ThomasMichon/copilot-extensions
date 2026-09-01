@@ -2135,7 +2135,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             return _json_error(
                 "--json requires exactly one of --worktree-id, --new, or --base"
             )
-        if getattr(args, "restore", False) and platform.system() != "Windows":
+        if (
+            getattr(args, "restore", False)
+            and not requested_machine
+            and platform.system() != "Windows"
+        ):
             return _json_error(
                 "--restore with --json is unsupported on Linux/WSL because a "
                 "successful reptyr adoption must attach the existing mux; run "

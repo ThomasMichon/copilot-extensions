@@ -429,8 +429,7 @@ def run_project_passthrough(
             "/d",
             "/s",
             "/c",
-            str(command),
-            *args,
+            subprocess.list2cmdline(argv),
         ]
     try:
         return subprocess.run(

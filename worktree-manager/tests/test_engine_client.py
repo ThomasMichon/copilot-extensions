@@ -170,7 +170,7 @@ def test_project_passthrough_uses_resolved_installer_binstub(monkeypatch):
             "/d",
             "/s",
             "/c",
-            *expected,
+            ec.subprocess.list2cmdline(expected),
         ]
     assert seen["cmd"] == expected
 

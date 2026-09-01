@@ -15,6 +15,7 @@ Everything here is **programmatic and non-agentic**: no AI agent is in the loop.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -725,6 +726,12 @@ def _restore_production_picker_session(
         else:
             from .production_picker.picker_tui import data_ssh, maintenance
 
+            if not machine or not environment:
+                print(
+                    "error: Picker returned a remote restore decision without "
+                    "a machine and environment."
+                )
+                return 1
             argv = data_ssh.remote_op_argv(
                 machine,
                 environment,
@@ -735,7 +742,7 @@ def _restore_production_picker_session(
                 print("error: the selected source does not support session restore.")
                 return 1
             result = maintenance._ssh_json(argv)
-    except engine_client.EngineError as error:
+    except (engine_client.EngineError, OSError, subprocess.SubprocessError) as error:
         print(f"error: could not prepare session restore: {error}")
         return 1
 
@@ -743,6 +750,12 @@ def _restore_production_picker_session(
         print(
             "error: could not prepare session restore: "
             f"{result.get('reason') or 'unknown engine error'}"
+        )
+        return 1
+    if result.get("action") != "reclaimed" and not result.get("verified"):
+        print(
+            "error: could not prepare session restore: the live process was "
+            "not confirmed inside the mux pane"
         )
         return 1
 
