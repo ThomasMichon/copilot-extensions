@@ -1,4 +1,4 @@
-# Session Context Aggregation - Investigation and Proposed Design
+# Session Context Aggregation - Archived Design
 
 [Effort](README.md) ·
 [Issue #1325](https://github.com/ThomasMichon/copilot-extensions/issues/1325)

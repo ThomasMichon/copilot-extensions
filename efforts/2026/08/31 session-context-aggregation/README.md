@@ -2,12 +2,13 @@
 
 - **Slug:** `session-context-aggregation`
 - **Repo:** copilot-extensions
-- **Branch(es):** one coherent engine-v2 producer-migration campaign, preserving
+- **Branch(es):** sequenced authority, shared-output, overflow, and producer-migration
+  changes, preserving
   standalone fallback throughout
 - **Created:** 2026-08-28
-- **Status:** Active
+- **Status:** Done
 - **Vision:** closes
-  [`visions/plugin-services/installation-cells`](../../../visions/plugin-services/installation-cells/README.md)
+  [`visions/plugin-services/installation-cells`](../../../../visions/plugin-services/installation-cells/README.md)
   §Features/`attributable-agent-capabilities` and
   §Behaviors/`same-cell-composition`, `provenance-carried-end-to-end`, and
   `ownership-is-legible`; uses the explicit-interoperability boundary under
@@ -15,7 +16,10 @@
 - **Umbrella issue:** [#1325](https://github.com/ThomasMichon/copilot-extensions/issues/1325)
 - **Related issues:** [#1234](https://github.com/ThomasMichon/copilot-extensions/issues/1234) ·
   [#1103](https://github.com/ThomasMichon/copilot-extensions/issues/1103) ·
-  [#1096](https://github.com/ThomasMichon/copilot-extensions/issues/1096)
+  [#1096](https://github.com/ThomasMichon/copilot-extensions/issues/1096) ·
+  [#1496](https://github.com/ThomasMichon/copilot-extensions/issues/1496) ·
+  [#1497](https://github.com/ThomasMichon/copilot-extensions/issues/1497) ·
+  [#1498](https://github.com/ThomasMichon/copilot-extensions/issues/1498)
 
 ## Guiding Intent
 
@@ -36,11 +40,13 @@ selects the exact direct marketplace authority
 `context-injection@copilot-extensions` and binds its engine schema and version;
 host settings only enable the plugin.
 Before exact authority proof, a producer emits its contributor directly. After
-proof, producers join the shared `(sessionId, canonical cwd)` rendezvous but
-emit `{}`; only the authority emits the cached aggregate. This makes execution
-order irrelevant. Authority uncertainty restores existing direct behavior
-rather than disabling a producer, while post-proof failures remain one shared
-cached `{}` result.
+proof, every participating producer and the authority joins the shared
+`(sessionId, canonical cwd)` rendezvous and returns the same cached aggregate
+bytes. This makes execution and host result-selection order irrelevant.
+Oversized aggregates are written atomically beneath the exact session-state
+folder while every hook retains the same compact load-before-action pointer.
+Authority uncertainty restores existing direct behavior rather than disabling
+a producer, while post-proof failures remain one shared cached `{}` result.
 
 ## Participants
 
@@ -154,8 +160,9 @@ The detailed investigation and proposed architecture are in
   activation of unrelated runtimes.
 - [x] Complete installed remote-marketplace and directory-marketplace parity
   across the dependency-light platform implementations.
-- [ ] Provide dependency-light PowerShell and POSIX implementations generated
-  from one contract and validated against shared fixtures.
+- [x] Deferred to `#1498`: Provide dependency-light PowerShell and POSIX
+  implementations generated from one contract and validated against shared
+  fixtures.
 - [x] Fail safely on ambiguous marketplace identity, missing payloads, malformed
   settings, path escapes, duplicate identities, and uncertain authority.
 
@@ -180,12 +187,13 @@ The detailed investigation and proposed architecture are in
 - [x] Enforce an aggregate wall-clock deadline below the registered host-hook
   timeout, with bounded parallelism or admission based on declared worst-case
   cost.
-- [ ] Provide a bounded status/doctor surface that reports selected authority,
-  active/inactive reason, admitted contributors, partial-migration competitors,
-  budget, deadline, and last session result without exposing context content.
-- [ ] Add a shadow/audit mode that resolves and invokes contributors without
-  emitting context, so rollout can compare the aggregate with existing direct
-  producers.
+- [x] Deferred to `#1496`: Provide a bounded status/doctor surface that reports
+  selected authority, active/inactive reason, admitted contributors,
+  partial-migration competitors, budget, deadline, and last session result
+  without exposing context content.
+- [x] Deferred to `#1496`: Add a shadow/audit mode that resolves and invokes
+  contributors without emitting context, so rollout can compare the aggregate
+  with existing direct producers.
 
 ### Phase 3 - Version-skew-safe broker adoption
 
@@ -233,43 +241,50 @@ The detailed investigation and proposed architecture are in
 
 ### Phase 5 - Repository hooks and host convergence
 
-- [ ] Decide whether repository-owned dynamic context can opt into a trusted,
-  declarative repository contribution seam or remains an explicit limitation
-  handled by static instructions and the upstream runtime fix.
-- [ ] Verify behavior after the host restores native multi-hook aggregation:
-  either retain the aggregator as deterministic composition/budget enforcement
-  or provide an ownership-checked retirement path.
-- [ ] Document diagnostics, rollback, partial-upgrade recovery, and how to
-  identify the contributor that consumed or lost context budget.
+- [x] Deferred to `#1497`: Decide whether repository-owned dynamic context can
+  opt into a trusted, declarative repository contribution seam or remains an
+  explicit limitation handled by static instructions and the upstream runtime
+  fix.
+- [x] Deferred to `#1497`: Verify behavior after the host restores native
+  multi-hook aggregation: either retain the aggregator as deterministic
+  composition/budget enforcement or provide an ownership-checked retirement
+  path.
+- [x] Deferred to `#1496`: Document diagnostics, rollback, partial-upgrade
+  recovery, and how to identify the contributor that consumed or lost context
+  budget.
 
 ### Phase 6 - Reconcile deferred backlog
 
-- [ ] Accept context-aggregation candidates only through
-  [`migration-intake`](../migration-intake/README.md)'s deduplication and
-  ownership gate.
-- [ ] Revalidate accepted technical scope against the current contributor,
-  budget, and compatibility contracts; return obsolete or unsafe candidates
-  for explicit disposition.
-- [ ] Place each accepted public tracker item in exactly one existing phase,
-  extending this plan before implementation when necessary.
-- [ ] Keep fixtures synthetic and independent of installed consumer sets.
+- [x] Deferred to `efforts/active/migration-intake/README.md`: Accept
+  context-aggregation candidates only through its deduplication and ownership
+  gate.
+- [x] Deferred to `efforts/active/migration-intake/README.md`: Revalidate
+  accepted technical scope against the current contributor, budget, and
+  compatibility contracts; return obsolete or unsafe candidates for explicit
+  disposition.
+- [x] Deferred to `efforts/active/migration-intake/README.md`: Place each
+  accepted public tracker item in exactly one existing phase, extending its plan
+  before implementation when necessary.
+- [x] Deferred to `efforts/active/migration-intake/README.md`: Keep fixtures
+  synthetic and independent of installed consumer sets.
 
 ## Validation Plan
 
 - [x] Reproduce the host defect with two direct producers and prove only one
   context result survives.
-- [ ] Enable the aggregator with two migrated contributors and prove both arrive
+- [x] Enable the aggregator with two migrated contributors and prove both arrive
   through one `additionalContext` response on Windows and Linux/WSL.
 - [x] Prove old and new producer versions never create a context-loss window
   during aggregator-first, producer-first, interrupted, and rolled-back updates.
 - [x] Prove one malformed, hanging, crashing, or oversized contributor does not
   block session startup or suppress healthy contributors.
-- [ ] Prove ordering and aggregate bytes are identical across PowerShell and
-  POSIX fixtures, including Unicode and newline normalization.
-- [ ] Prove compatibility with Windows PowerShell 5.1 and PowerShell 7, and
-  define POSIX behavior without requiring `jq` or Python.
-- [ ] Prove source-qualified identity and containment with two marketplaces that
-  ship the same plugin and contributor ids.
+- [x] Deferred to `#1498`: Prove ordering and aggregate bytes are identical
+  across PowerShell and POSIX fixtures, including Unicode and newline
+  normalization.
+- [x] Deferred to `#1498`: Prove compatibility with Windows PowerShell 5.1 and
+  PowerShell 7, and define POSIX behavior without requiring `jq` or Python.
+- [x] Deferred to `#1498`: Prove source-qualified identity and containment with
+  two marketplaces that ship the same plugin and contributor ids.
 - [x] Prove staged `--plugin-dir`, repository source qualification, disabled
   staged payloads, enabled-but-unstaged payloads, duplicate roots/identities,
   source ambiguity, and pre-proof direct fallback resolve correctly.
@@ -289,9 +304,10 @@ The detailed investigation and proposed architecture are in
   maximum bytes or execution cost cannot fit the configured budget/deadline.
 - [x] Prove bootstrap and side-effect hooks still execute directly and are not
   duplicated by the aggregator.
-- [ ] Add a clean-room scenario proving all migrated producers return the same
-  aggregate and that a remaining legacy producer is reported as a degraded,
-  still-lossy partial-migration state rather than claimed safe.
+- [x] Deferred to `#1498`: Add a clean-room scenario proving all migrated
+  producers return the same aggregate and that a remaining legacy producer is
+  reported as a degraded, still-lossy partial-migration state rather than
+  claimed safe.
 - [x] Add a synthetic clean-room completeness witness that installs the
   unpublished direct authority, two authority-aware canary producers, and a
   restart-safe-idempotent/context-none side-effect hook through a supported
@@ -457,3 +473,25 @@ See [`design.md`](design.md).
   `.context-injection/config.yaml`. Runtime, scanner, clean-room fixtures, and
   tests reject the retired settings key plus malformed, unknown, escaping, or
   incompatible v1 configuration.
+
+### 2026-08-31 - Completion and live deployment
+
+- Landed the complete producer migration in #1470, the Windows host ancestry
+  boundary in #1476, byte-identical shared delivery in #1477, and engine-v4
+  session-state overflow delivery in #1482.
+- Deployed `context-injection` `0.1.0-dev11` and
+  `customizing-copilot` `0.1.0-dev50`, with the retired
+  `zz-context-injection` payload absent.
+- Confirmed a fresh Windows Copilot CLI 1.0.83 session automatically followed
+  the compact pointer, loaded the session-scoped aggregate, and exposed twelve
+  distinct attributable contributor markers.
+- Re-ran the installed suite on a live Windows enlistment. Every declared
+  runtime reached `ready` or an intentional `configuration-empty` state. The
+  deployment exercise also closed cross-plugin updater isolation in
+  #1489/#1492 and empty container readiness in #1495.
+- Transferred the non-blocking diagnostics/audit work to #1496, repository and
+  native-host convergence to #1497, the remaining cross-platform validation
+  matrix to #1498, and deferred-candidate processing to the canonical
+  `migration-intake` effort.
+- Marked the effort Done and archived it. The umbrella issue can close without
+  losing any remaining tracked scope.
