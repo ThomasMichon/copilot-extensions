@@ -222,13 +222,53 @@ resolution, contributor admission, budgets, or compatibility decisions.
 The broker uses an ownership-checked rendezvous keyed by
 `(sessionId, canonical resolved cwd)`. Concurrent callers may elect a worker
 and cache the result, but every caller must read the same completed bytes.
-Producer callers remain empty after proof; only the authority returns aggregate
-bytes. Post-proof failures publish one shared cached `{}` and do not re-enter a
+Every proven producer and the authority returns the same aggregate bytes after
+proof, so a host that selects any completing hook observes the same result.
+Post-proof failures publish one shared cached `{}` and do not re-enter a
 caller-specific direct fallback.
 
 The rendezvous root is per-user. POSIX roots are current-user-owned `0700`
 directories, lock and result files are `0600`, and unsafe or symlinked paths
 stand down rather than exposing or accepting shared state.
+
+### 4a. Resume-generation recovery
+
+Current hosts do not durably record `sessionStart.additionalContext` in the
+local session timeline. They add it as a synthetic input to the first model
+request, then carry it through the model response chain. Resume reconstructs
+the durable timeline and reruns `sessionStart`, so a successful computation and
+hook return do not prove that the supplementary context reached the model.
+
+The proposed robustness layer in #1508 preserves supplementary instruction as
+the primary channel. Each start or resume creates a generation-scoped receipt
+under the exact session-state folder. The receipt may record that authority was
+proved, bytes were computed, participating hooks returned them, or a prompt
+fallback was applied; it must never claim model delivery without a host
+acknowledgement.
+
+Generation identity is stronger than `sessionId`. It binds the session-start
+event instance (`source` plus its event timestamp or an authority-created
+nonce), canonical cwd, adoption and authority version, and active-plugin
+fingerprint. Concurrent producer hooks join one generation. A later resume,
+changed cwd, changed stack, or changed trust state cannot reuse the earlier
+generation without revalidation.
+
+On the first model-facing prompt for a generation, a
+`userPromptTransformed` command hook may add one small, idempotent recovery
+witness:
+
+```text
+If matching supplementary startup context is already present, this marker is a
+no-op. Otherwise load the exact session-scoped aggregate before acting.
+```
+
+Only that marker becomes durable conversation history when ordinary
+supplementary delivery succeeds. The full aggregate remains outside durable
+messages unless recovery actually loads it. The hook must re-prove current
+repository trust, authority, cwd, adoption, and active-stack identity before
+referencing the artifact; otherwise it emits only bounded fail-closed guidance.
+An eventual host event over the fully assembled request, or an explicit
+delivery receipt, can make this conservative witness truly conditional.
 
 ### 5. Authoring and review enforcement
 
@@ -265,15 +305,15 @@ This creates version-skew states:
 | present | old | emits directly | ignores undeclared producer |
 | absent | migrated | broker lookup fails; emits directly | none |
 | incompatible | migrated | broker returns fallback; emits directly | stands down |
-| compatible | migrated | rendezvous; emits `{}` | emits the shared aggregate |
+| compatible | migrated | rendezvous; emits the shared aggregate | emits the shared aggregate |
 | ambiguous | migrated | broker returns fallback; emits directly | all candidates stand down |
 
 Aggregator-first and producer-first execution do not create a context-loss
 state because the aggregator independently discovers every contributor and all
-proven producers are empty. Full deterministic delivery begins only when every
-competing context producer in the loaded set is migrated or the host bug is
-fixed. A remaining legacy or repository-owned producer keeps authority proof
-from succeeding.
+proven producers return the same bytes. Full deterministic delivery begins only
+when every competing context producer in the loaded set is migrated or the host
+bug is fixed. A remaining legacy or repository-owned producer keeps authority
+proof from succeeding.
 
 The wrapper must not search PATH or enumerate wildcard same-named payloads. It
 resolves the configured source-qualified authority and validates its exact
