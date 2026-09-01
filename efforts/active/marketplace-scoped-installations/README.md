@@ -37,6 +37,13 @@ independent installation cell beneath that concept. Generic plugin commands stay
 with the payload that supplied the agent capability; machine-global command
 space is reserved for attributable project entry points.
 
+Installation cells are private infrastructure for the runtime-bearing core
+plugin identities defined by the `copilot-extensions` suite. They are not a
+general plugin facility. An independent source marketplace may carry a copy of
+one of those core plugins for coexistence testing, but its unrelated plugins,
+payload-only plugins, and other plugins that happen to expose tools or services
+remain outside this namespacing model.
+
 ## Participants
 
 | Participant | Role in this effort | Reached via |
@@ -57,6 +64,10 @@ space is reserved for attributable project entry points.
   lanes on a compatible contract. A platform-specific implementation may follow
   in the next PR only when the preceding PR is non-operative foundation and
   cannot change behavior on either platform.
+- **Execution boundary:** namespaced installation and usage are exercised only
+  in disposable clean-room environments for the duration of this effort.
+  Persistent development and production machines remain in legacy mode and
+  receive no namespaced activation, runtime, state, service, or migration.
 
 ## Context
 
@@ -82,6 +93,30 @@ cross-installation linkage. Runtime location should derive from marketplace
 payload provenance at install-from-payload time. Generic agent tool shims should
 live in their owning payload, while project binstubs may remain globally
 reachable when their ownership is explicit.
+
+The capability remains explicitly opt-in and default-off. During this effort,
+all namespaced install, activation, runtime use, lifecycle, migration, and
+coexistence testing occurs in disposable clean-room environments; no persistent
+machine is an activation or dogfood venue. The implementation applies only to
+runtime-bearing core plugin identities from the `copilot-extensions` suite and
+must not namespace unrelated downstream, internal, or third-party plugins merely
+because they provide tools or services.
+
+## Operating Constraints
+
+- **Opt-in only:** absent policy and every implicit default preserve legacy
+  operation. Repository content, marketplace payloads, installers, bootstrap,
+  reconciliation, or first use must never enable namespaced mode.
+- **Clean-room only:** namespaced cells may be created, activated, run, updated,
+  rolled back, repaired, migrated, or removed only inside disposable clean-room
+  environments while this effort is active. Persistent machines may perform
+  read-only status/doctor checks but must remain locally unused.
+- **Suite-private scope:** only runtime-bearing core plugins shipped by the
+  `copilot-extensions` suite participate. A second source marketplace may carry
+  those plugin identities for isolation proof; payload-only plugins and every
+  unrelated plugin in any marketplace remain outside the cell resolver and may
+  not gain namespaced state, commands, services, or lifecycle ownership through
+  this effort.
 
 ## Plan
 
@@ -172,7 +207,9 @@ reachable when their ownership is explicit.
       bypass legacy mutation, and reserve or validate only the payload version's
       empty owned slot.
 - [ ] Prove one on-demand plugin and one service-bearing plugin with two
-  simultaneous marketplace cells before broad rollout.
+  simultaneous marketplace cells in disposable clean-room environments before
+  broad rollout. Do not activate or use either exemplar namespaced on a
+  persistent machine.
 
 ### Phase 4 — Runtime and state rollout
 
@@ -230,6 +267,18 @@ reachable when their ownership is explicit.
 
 ## Validation Plan
 
+- [ ] At each operative phase boundary, use read-only status/doctor checks to
+  confirm every persistent development and production machine remains in legacy
+  mode with no namespaced activation or cell-owned runtime/service state.
+- [ ] Exercise every namespaced install, activation, runtime use, service start,
+  update, rollback, repair, migration, and uninstall path only in disposable
+  clean-room environments. Unit fixtures may model cells but may not create
+  host-local namespaced state.
+- [ ] Add negative coverage proving payload-only plugins and plugins from
+  downstream, internal, or third-party plugin families never resolve, create,
+  activate, or consume `copilot-extensions` installation cells, even when those
+  plugins share a source marketplace with a core suite plugin or expose
+  executable tools or long-running services.
 - [ ] Run two marketplace cells containing the same plugin name and version
   concurrently on Windows and Linux/WSL.
 - [ ] Repeat with different versions and concurrent stamp/provision/update
@@ -721,3 +770,21 @@ See [`design.md`](design.md).
 - Kept the primitive non-activating. Agent Machines normal-flow adoption,
   runtime gating, dual-cell lifecycle proof, and activation remain in the
   operative exemplar slice.
+
+### 2026-08-31 — Opt-in, clean-room, and suite-scope guardrails
+
+- Reaffirmed namespaced mode as explicit opt-in with legacy behavior for absent
+  policy and every implicit default. Repository config, payloads, installers,
+  bootstrap, reconciliation, and first use cannot activate it.
+- Restricted every namespaced install and usage path during this effort to
+  disposable clean-room environments. Persistent development and production
+  machines remain locally unused in legacy mode; only read-only status and
+  doctor checks may inspect readiness there.
+- Bound installation cells to runtime-bearing core plugin identities from the
+  `copilot-extensions` suite. Independent marketplaces may carry those same
+  identities for source-isolation proof, but payload-only plugins and unrelated
+  downstream, internal, or third-party plugin families remain outside this
+  mechanism even when they provide tools or services.
+- Added validation gates for persistent-host non-activation, clean-room-only
+  lifecycle proof, and negative scope coverage before the operative exemplar
+  work continues.
