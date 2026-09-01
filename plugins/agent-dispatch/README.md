@@ -577,6 +577,11 @@ worker pool in one `kind: reviewer-loop` declaration. The registrar expands it
 in memory to the same existing emitter/evaluator/supervised-lane units; the
 declaration remains the only source of truth.
 
+The loop's `task_label` is always included in its worker pool. A repository
+that already shares one bounded reviewer fleet with another producer may add
+that producer's labels through `pool.additional_labels`; duplicates are removed
+and the loop still expands to one pool with one process cap.
+
 ```bash
 agent-dispatch reviewer-loop setup .agent-dispatch/registrar/reviewer-loop.json
 agent-dispatch reviewer-loop inspect .agent-dispatch/registrar/reviewer-loop.json
