@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** managed worktree → generated PR branch
 - **Created:** 2026-08-31
-- **Status:** Active
+- **Status:** Done
 - **Vision:** Harness Guidance §Features `authoritative-ownership`; §Behaviors `guidance-follows-ownership`, `task-detail-on-demand`
 - **Umbrella issue:** #1520
 
@@ -70,7 +70,7 @@ owner, and reusable policy is checked mechanically where possible.
 - [x] Run the customizing-copilot test suite and touched-file lint.
 - [x] Run repository version and install-contract guards.
 - [x] Run the scanner against copilot-extensions and one consuming harness.
-- [ ] Submit, review, merge, deploy, and archive this effort.
+- [x] Submit, review, merge, deploy, and archive this effort.
 
 ## Validation Plan
 
@@ -106,3 +106,15 @@ reported no findings.
 - Real scans of copilot-extensions and the consuming harness worktree found no
   owned violations after the corresponding plugin guidance was added. The
   consuming-harness remediation must merge before this enforcement change.
+
+### 2026-08-31 — Landed, deployed, and archived
+- The prerequisite recovery guidance landed in
+  `gim-home/odsp-web-harness#157` and
+  `tmichon_microsoft/dotfiles#1970`.
+- PR #1549 merged the scanner enforcement after Copilot's final review reported
+  no findings and required checks passed.
+- The unified update deployed `customizing-copilot@0.1.0-dev54`; its installed
+  scanner ran successfully against the consuming harness. The broader update
+  also reported unrelated runtime-reconcile warnings for other plugins, which
+  are outside this effort.
+- Moved the completed effort to the dated archive.
