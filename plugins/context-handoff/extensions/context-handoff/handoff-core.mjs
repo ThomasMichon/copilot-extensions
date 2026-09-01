@@ -106,6 +106,14 @@ export function isHerdrPane(env = process.env) {
   return env.HERDR_ENV === "1" && Boolean(env.HERDR_PANE_ID);
 }
 
+function commandErrorDetail(error) {
+  for (const value of [error?.stderr, error?.stdout, error?.message]) {
+    const detail = value?.toString().trim();
+    if (detail) return detail;
+  }
+  return String(error).trim();
+}
+
 export function herdrHandoffDir(
   cwd, env = process.env, home = homedir(),
 ) {
@@ -148,9 +156,7 @@ export function resolveHandoffCwd(
     }
     return { cwd: resolve(paneCwd), error: null };
   } catch (error) {
-    const detail = (
-      error?.stderr || error?.stdout || error?.message || String(error)
-    ).toString().trim();
+    const detail = commandErrorDetail(error);
     return {
       cwd: null,
       error: detail || "Unable to resolve the current Herdr pane working directory.",
@@ -619,9 +625,7 @@ export function runHerdrHandoffCutover(
       predecessor_retained: true,
     };
   } catch (error) {
-    const detail = (
-      error?.stderr || error?.stdout || error?.message || String(error)
-    ).toString().trim();
+    const detail = commandErrorDetail(error);
     return {
       ok: false,
       host: "herdr",

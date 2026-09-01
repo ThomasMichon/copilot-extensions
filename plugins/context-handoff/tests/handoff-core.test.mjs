@@ -194,6 +194,23 @@ test("resolveHandoffCwd uses the current Herdr pane instead of process cwd", () 
   });
 });
 
+test("resolveHandoffCwd preserves stdout diagnostics when stderr is empty", () => {
+  const result = resolveHandoffCwd("/stale/process/cwd", {
+    env: { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" },
+    execute: () => {
+      throw {
+        stderr: Buffer.alloc(0),
+        stdout: Buffer.from("pane lookup failed"),
+      };
+    },
+  });
+
+  assert.deepEqual(result, {
+    cwd: null,
+    error: "pane lookup failed",
+  });
+});
+
 test("runHandoffCutover routes Herdr through one copilot-pane task file", () => {
   const home = mkdtempSync(join(process.cwd(), ".test-herdr-cutover-"));
   const cwd = join(process.cwd(), "stale-process-cwd");
@@ -251,6 +268,34 @@ test("runHandoffCutover routes Herdr through one copilot-pane task file", () => 
       new_session: "01234567-89ab-4cde-8fab-0123456789ab",
       predecessor_retained: true,
     });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runHandoffCutover preserves launcher stdout when stderr is empty", () => {
+  const home = mkdtempSync(join(process.cwd(), ".test-herdr-error-"));
+  const env = { HERDR_ENV: "1", HERDR_PANE_ID: "w1:p2" };
+  try {
+    const result = runHandoffCutover("/stale", "seed", "session-1", {
+      env,
+      home,
+      execute: (bin) => {
+        if (bin === join(home, ".local", "bin", "herdr")) {
+          return JSON.stringify({
+            result: { pane: { cwd: "/repo/current-checkout" } },
+          });
+        }
+        throw {
+          stderr: Buffer.alloc(0),
+          stdout: Buffer.from("launcher rejected task"),
+        };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.host, "herdr");
+    assert.equal(result.error, "launcher rejected task");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

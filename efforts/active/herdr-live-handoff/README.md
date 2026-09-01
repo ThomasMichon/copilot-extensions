@@ -80,4 +80,5 @@ path only.
 ### 2026-09-01 — Live validation
 - Installed the owner checkout through `copilot plugin install` and confirmed `copilot plugin update context-handoff` retains the direct `0.1.0-dev58` source while upstream publication is pending.
 - A real `/handoff-continue` run started with panes `w1:p1,w1:p2,w1:pS`, created only `w1:pT`, submitted the file-backed seed through `copilot-pane launch --task-file`, and consumed the baton once in the successor; `w1:pS` remained available until test cleanup.
-- The public pull request has a no-findings Copilot review. Upstream merge is blocked only by the available account lacking merge permission.
+- Follow-up review found that an empty stderr buffer could hide useful stdout from failed Herdr commands; the shared extractor now selects the first non-empty diagnostic, with focused regressions. The full Node suite passes 63 tests.
+- Upstream merge is blocked only by the available account lacking merge permission.
