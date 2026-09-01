@@ -25,25 +25,10 @@ payload="$(cat)" || {
     exit 0
 }
 if [[ -z "$python_bin" ]]; then
-    # Without a JSON parser, retain the safe standalone path and use only a
-    # host-provided absolute project directory (otherwise the hook process cwd).
-    launch_cwd="${COPILOT_PROJECT_DIR:-$PWD}"
-    if [[ "$launch_cwd" != /* || ! -d "$launch_cwd" ]]; then
-        launch_cwd="$PWD"
-    fi
-    if [[ -f "$script" && "$script" == "$root/"* && "$script" == *.sh ]]; then
-        (
-            cd "$launch_cwd" || {
-                printf '{}'
-                exit 0
-            }
-            printf '%s' "$payload" | bash "$script" "$@"
-        )
-    else
-        printf '{}'
-    fi
+    printf '{}'
     exit 0
 fi
+
 launch_cwd="$(
     printf '%s' "$payload" | "$python_bin" -c '
 import json
@@ -68,6 +53,34 @@ if [[ -z "$launch_cwd" ]]; then
     printf '{}'
     exit 0
 fi
+
+validate_output() {
+    "$python_bin" -c '
+import json
+import sys
+
+raw = sys.stdin.buffer.read()
+try:
+    value = json.loads(raw)
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit(1)
+if not isinstance(value, dict):
+    raise SystemExit(1)
+sys.stdout.buffer.write(raw)
+'
+}
+
+run_buffered() {
+    local output status
+    output="$("$@" 2> >(cat >&2))"
+    status=$?
+    if [[ $status -eq 0 ]] && printf '%s' "$output" | validate_output; then
+        return 0
+    fi
+    printf '{}'
+    return 0
+}
+
 authority=""
 if [[ -f "$resolver" ]]; then
     authority="$(
@@ -76,30 +89,21 @@ if [[ -f "$resolver" ]]; then
 fi
 engine="$authority/scripts/aggregate_context.py"
 if [[ -n "$authority" && -f "$engine" ]]; then
-    output="$(mktemp "${TMPDIR:-/tmp}/context-producer.XXXXXXXX")" || {
-        printf '{}'
-        exit 0
-    }
-    trap 'rm -f "$output"' EXIT
-    if printf '%s' "$payload" |
-        "$python_bin" "$engine" --producer "$source_id/$contributor_id" >"$output"; then
-        cat "$output"
-    else
-        printf '%s\n' \
-            "[$source_id] context authority failed after selection; context suppressed" >&2
-        printf '{}'
-    fi
+    printf '%s' "$payload" |
+        run_buffered "$python_bin" "$engine" --producer "$source_id/$contributor_id"
     exit 0
 fi
 
 if [[ -f "$script" && "$script" == "$root/"* && "$script" == *.sh ]]; then
-    (
+    printf '%s' "$payload" | (
         cd "$launch_cwd" || {
             printf '{}'
             exit 0
         }
-        printf '%s' "$payload" | bash "$script" "$@"
+        run_buffered bash "$script" "$@"
     )
-else
-    printf '{}'
+    exit 0
 fi
+
+printf '{}'
+exit 0

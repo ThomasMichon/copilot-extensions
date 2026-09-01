@@ -79,10 +79,15 @@ This is separate from each pure contributor's `timeoutSeconds` limit.
 
 Every contributing plugin carries byte-identical Bash and PowerShell producer
 wrappers. They use the exact payload-relative contributor id and command,
-preserve stdin, invoke the sibling authority only when its payload contract is
-present, and otherwise run the local pure contributor directly. The authority
-engine currently requires an available Python interpreter; standalone fallback
-does not.
+preserve stdin as UTF-8, resolve the exact source-qualified adopted authority,
+and otherwise run the local pure contributor directly. Engine and direct
+contributor output is buffered and accepted only when the child exits zero with
+exactly one JSON object; every other result becomes one `{}` with hook exit zero.
+PowerShell uses `ArgumentList` where available and the Windows command-line
+quoting algorithm on Windows PowerShell 5.1 so empty, quoted, and
+backslash-terminated arguments survive unchanged. The wrapper requires Python
+for authority resolution and JSON validation; without it, the safe result is
+`{}`.
 
 ## Complete suite-owned stack
 
@@ -99,7 +104,7 @@ direct-hook inventory to 42:
 - `context-injection` declares `sideEffects: none` and
   `context: aggregate-authority`.
 
-All 15 producers use the engine-v2 wrapper with a 30-second host timeout. The
+All 15 producers use the engine-v5 wrapper with a 30-second host timeout. The
 aggregator never invokes direct side-effect hooks. Repository guards derive the
 marketplace-owned inventory and reject incomplete declarations, legacy direct
 context emitters, wrapper drift, contributor identity mismatches, insufficient

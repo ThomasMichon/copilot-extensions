@@ -225,9 +225,15 @@ not block session startup. The hook writes exactly one final JSON object to
 stdout.
 
 The command wrapper treats an absent optional producer as a no-op. Once the
-producer exists, it owns its internal fail-open behavior; the wrapper must not
-hide a crashing producer, because partial stdout cannot be repaired by appending
-another JSON object.
+producer exists, the wrapper buffers both engine and direct-contributor output,
+requires a successful child plus exactly one JSON object, and otherwise emits
+one `{}` with exit zero. It never appends a second fallback around a pipe whose
+stdin writer can receive SIGPIPE.
+
+PowerShell wrappers set explicit UTF-8 input and output encodings, write
+redirected native stdin as UTF-8 bytes, and preserve arbitrary contributor
+arguments under both `ArgumentList` and the Windows PowerShell 5.1 command-line
+fallback.
 
 Some headless, cloud, or other confined launch paths do not load plugin hooks.
 Critical safety and publication rules therefore retain an irreducible static
