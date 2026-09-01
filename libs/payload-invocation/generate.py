@@ -71,10 +71,12 @@ def _load_command(path: Path, value: object, *, label: str) -> dict[str, str]:
 def load_manifest(path: Path) -> dict[str, object]:
     data = json.loads(path.read_text(encoding="utf-8"))
     manifest_version = data.get("version")
-    if data.get("schema") != SCHEMA or manifest_version not in {
-        LEGACY_VERSION,
-        VERSION,
-    }:
+    if (
+        data.get("schema") != SCHEMA
+        or not isinstance(manifest_version, int)
+        or isinstance(manifest_version, bool)
+        or manifest_version not in {LEGACY_VERSION, VERSION}
+    ):
         raise ValueError(
             f"{path}: expected {SCHEMA} version {LEGACY_VERSION} or {VERSION}"
         )

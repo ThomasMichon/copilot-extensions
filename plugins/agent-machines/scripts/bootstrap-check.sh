@@ -38,6 +38,10 @@ fi
 if [ -z "$ProfileHome" ] && [ -n "$uid" ] && [ -r /etc/passwd ]; then
   ProfileHome="$(awk -F: -v uid="$uid" '$3 == uid { print $6; exit }' /etc/passwd)"
 fi
+if [ -z "$ProfileHome" ]; then
+  echo "[agent-machines] canonical profile home is unavailable; skipping reconcile." >&2
+  exit 0
+fi
 PolicyPath="$ProfileHome/.copilot-extensions/installation-mode.json"
   resolver="$ScriptDir/installation-context/installation-context.sh"
   query="$ScriptDir/installation-context/json-query.awk"

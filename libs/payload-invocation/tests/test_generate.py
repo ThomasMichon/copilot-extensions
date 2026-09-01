@@ -202,6 +202,20 @@ def test_required_installation_context_uses_fixed_dispatchers(tmp_path: Path) ->
     assert "Resolve-PayloadRuntime" not in powershell
 
 
+@pytest.mark.parametrize("version", [True, False])
+def test_manifest_version_rejects_json_booleans(
+    tmp_path: Path,
+    version: bool,
+) -> None:
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["version"] = version
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="version 1 or 2"):
+        generator.load_manifest(manifest)
+
+
 @pytest.mark.parametrize("plugin", ["agent-unrelated", "context-handoff"])
 def test_required_installation_context_rejects_ineligible_plugin(
     tmp_path: Path,

@@ -586,6 +586,8 @@ def _runtime_catalog_contract(
     version = value.get("version")
     if (
         value.get("schema") != "copilot-extensions.payload-invocation"
+        or not isinstance(version, int)
+        or isinstance(version, bool)
         or version not in {1, 2}
     ):
         return None, "payload invocation schema or version is incompatible"

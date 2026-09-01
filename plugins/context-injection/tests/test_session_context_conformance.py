@@ -593,6 +593,29 @@ def test_runtime_catalog_rejects_mixed_installation_context_versions(
     assert error == "payload invocation version 2 runtime contract is invalid"
 
 
+@pytest.mark.parametrize("version", [True, False])
+def test_runtime_catalog_rejects_boolean_versions(
+    tmp_path: Path,
+    version: bool,
+) -> None:
+    manifest = tmp_path / "payload-invocation.json"
+    _write_json(
+        manifest,
+        {
+            "schema": "copilot-extensions.payload-invocation",
+            "version": version,
+            "command": "agent-example",
+            "purpose": "Operate the example runtime",
+            "runtimeRoot": ".agent-example",
+        },
+    )
+
+    contract, error = CONFORMANCE._runtime_catalog_contract(manifest)
+
+    assert contract is None
+    assert error == "payload invocation schema or version is incompatible"
+
+
 def test_runtime_catalog_rejects_incomplete_generated_contract(
     tmp_path: Path,
 ) -> None:
