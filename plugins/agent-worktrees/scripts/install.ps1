@@ -1660,11 +1660,11 @@ function Ensure-PsmuxSshSafe {
        piped/NoProfile pwsh. (Same reparse-shim wall the WinGet uv.exe install
        hits.)
 
-       Fix: select the REAL binary whose own version is exactly 3.3.5, remove
+       Fix: select the REAL binary whose own version is exactly 3.3.8, remove
        every stale marlocarlo.psmux package directory from User and process
        PATH, and put that directory first. This does not mutate the package or
        its server, so it remains safe while existing sessions are live. #>
-    $desiredVersion = '3.3.5'
+    $desiredVersion = '3.3.8'
     $packageRoot = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (-not (Test-Path -LiteralPath $helper)) {
@@ -1737,7 +1737,7 @@ function Resolve-AwPsmuxBin {
            . $helper
            $desired = Find-AwPsmuxPackageBinary `
                -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
-               -DesiredVersion '3.3.5'
+               -DesiredVersion '3.3.8'
            if ($desired) { return $desired.Path }
        }
        $src = $Cmd.Source
@@ -1754,15 +1754,16 @@ function Resolve-AwPsmuxBin {
 }
 
 function Ensure-PsmuxPin {
-    <# Ensure a winget 'Gating' pin to psmux 3.3.5 exists so winget cannot
-       auto-upgrade into the 3.3.6 `attach-session -t` regression (psmux#408).
-       Idempotent: a no-op when the 3.3.5 pin is already present. Safe at any
-       installed version -- a gating pin blocks upgrades outside 3.3.5 even when
+    <# Ensure a winget 'Gating' pin to psmux 3.3.8 exists. This release contains
+       the fixes for the 3.3.6 `attach-session -t` regression (psmux#408) and
+       subsequent Ctrl+C broadcast/teardown defects. Idempotent: a no-op when
+       the 3.3.8 pin is already present. Safe at any installed version -- the
+       gating pin blocks upgrades outside 3.3.8 even when
        a below-target version (e.g. 3.3.3) is installed, which is why a
        still-on-3.3.3 box can self-pin instead of waiting for a hand
        `winget pin add`. #>
     $packageId = 'marlocarlo.psmux'
-    $desiredVersion = '3.3.5'
+    $desiredVersion = '3.3.8'
     $helper = Join-Path $PSScriptRoot 'psmux-path.ps1'
     if (-not (Test-Path -LiteralPath $helper)) {
         Write-ServiceWarn "psmux: pin helper missing at $helper"
@@ -1782,19 +1783,18 @@ function Ensure-PsmuxPin {
         $verified = & winget pin list --id $packageId --exact 2>&1 | Out-String
     } catch {}
     if ((Get-AwWingetPinVersion -Output $verified -PackageId $packageId) -eq $desiredVersion) {
-        Write-ServiceChanged "psmux: added winget gating pin to 3.3.5 (blocks auto-upgrade into the 3.3.6 regression)"
+        Write-ServiceChanged "psmux: added winget gating pin to 3.3.8"
     } else {
         Write-ServiceWarn "psmux: could not verify the winget gating pin at $desiredVersion"
     }
 }
 
 function Ensure-Psmux {
-    <# Install and pin psmux 3.3.5. Any other executable version is replaced
+    <# Install and pin psmux 3.3.8. Any other executable version is replaced
        only when no live sessions exist, because refreshing the portable package
        tears down the running psmux server and every attached session. With live
-       sessions, pin and defer to the next clean run. This covers both the 3.3.6
-       attach-session regression and stale pre-3.3.5 WinGet package binaries. #>
-    $desiredVersion = '3.3.5'
+       sessions, pin and defer to the next clean run. #>
+    $desiredVersion = '3.3.8'
     if (-not (Get-Command psmux -ErrorAction SilentlyContinue)) {
         Write-Host "  Installing psmux $desiredVersion (terminal multiplexer)..."
         & winget install --id marlocarlo.psmux --version $desiredVersion --exact `
@@ -2654,7 +2654,7 @@ switch ($Action) {
         }
 
         # Optional: psmux terminal multiplexer for session persistence. Pinned
-        # to 3.3.5; 3.3.6 has the `attach-session -t` regression (psmux#408).
+        # to 3.3.8, which includes the post-3.3.6 attach and Ctrl+C fixes.
         # See Ensure-Psmux (shared with 'update' so existing boxes self-heal).
         Ensure-Psmux
 

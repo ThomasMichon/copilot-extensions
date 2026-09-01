@@ -36,10 +36,10 @@ param($Helper, $Root, $Old, $Desired, $Keep)
 $probe = {
     param($Path)
     if ($Path -like '*_old*') { return '3.3.3' }
-    return '3.3.5'
+    return '3.3.8'
 }
 $selected = Find-AwPsmuxPackageBinary -PackageRoot $Root `
-    -DesiredVersion '3.3.5' -VersionProbe $probe
+    -DesiredVersion '3.3.8' -VersionProbe $probe
 $repair = Repair-AwPsmuxPath -SelectedDirectory $selected.Directory `
     -UserPath "$Old;$Keep;$Desired" `
     -ProcessPath "$Keep;$Old;$Desired" -PackageRoot $Root
@@ -129,7 +129,8 @@ def test_installer_and_launcher_use_exact_version_helper():
         "Select-Object -First 1"
     ) in installer
     assert "Find-AwPsmuxPackageBinary" in launcher
-    assert "-DesiredVersion '3.3.5'" in launcher
+    assert "-DesiredVersion '3.3.8'" in launcher
+    assert "$desiredVersion = '3.3.8'" in installer
 
 
 def test_path_repair_does_not_mutate_live_sessions():
