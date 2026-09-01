@@ -35,6 +35,9 @@ def _local_identity() -> tuple[str, str]:
 LOCAL = _local_identity()
 LOCAL_LABEL = f"{LOCAL[0]} · {LOCAL[1].lower()}"
 
+# Import-time ``load_config`` blocked first paint (#1504). Resolve on first use.
+_REPO_BRANCH: tuple[str, str] | None = None
+
 
 def _project_repo() -> tuple[str, str]:
     """``(repo name, default branch)`` for the active project's default repo.
@@ -51,7 +54,13 @@ def _project_repo() -> tuple[str, str]:
         return "", ""
 
 
-REPO, BRANCH = _project_repo()
+def __getattr__(name: str):
+    global _REPO_BRANCH
+    if name in ("REPO", "BRANCH"):
+        if _REPO_BRANCH is None:
+            _REPO_BRANCH = _project_repo()
+        return _REPO_BRANCH[0] if name == "REPO" else _REPO_BRANCH[1]
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def machines():

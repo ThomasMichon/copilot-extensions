@@ -2367,9 +2367,6 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             })
             return 0
 
-        config = cfg.load_config()
-        repo = config.default_repo
-
         # Non-interactive: without a TTY the picker can't run. Steer
         # programmatic callers to ``create`` (no launch, no mux) rather than
         # ``--new`` (which launches a muxed interactive session).
@@ -2393,6 +2390,7 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # an interactive open gets a muxed session like a local launch.
         wt_id_noninteractive = getattr(args, "worktree_id", None)
         if wt_id_noninteractive:
+            config = cfg.load_config()
             wt_id_noninteractive = _resolve_worktree_id(wt_id_noninteractive)
             yaml_path = cfg.tracking_dir() / f"{wt_id_noninteractive}.yaml"
             if not yaml_path.exists():
@@ -2408,15 +2406,18 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             return _resolve_resume(record, config, args, profile=profile)
 
         if use_new:
+            config = cfg.load_config()
             profile = _resolve_profile(config, args)
             return _resolve_new(config, args, profile=profile)
 
         # --machine <remote> flag: skip picker entirely, emit SSH handoff
         requested_machine = getattr(args, "machine", None)
-        if requested_machine and requested_machine != config.machine:
-            rc = _try_machine_handoff(config, requested_machine)
-            if rc is not None:
-                return rc
+        if requested_machine:
+            config = cfg.load_config()
+            if requested_machine != config.machine:
+                rc = _try_machine_handoff(config, requested_machine)
+                if rc is not None:
+                    return rc
 
         tracking_path = cfg.tracking_dir()
         tracking_path.mkdir(parents=True, exist_ok=True)
@@ -2428,22 +2429,26 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         # Windows-over-SSH auto-falls-back (_new_picker_blocked_by_ssh).
         from . import picker_tui
 
-        # Fail-safe (interactive picker only): if this machine has no self-entry
-        # in the anchor's (possibly stale) machines.yaml, fast-forward the
-        # anchor *before* the picker parses it -- otherwise the picker can't
-        # identify this machine and crashes. The pull-forward that adds the
-        # entry otherwise runs only *after* a successful resolve (the ``update``
-        # path), so a stale anchor could never self-heal. See
-        # ``_heal_stale_anchor_if_self_missing``.
-        config = _heal_stale_anchor_if_self_missing(config)
-        repo = config.default_repo
-        picker_root = _start_picker_monitor_root()
-        if picker_tui.new_picker_enabled(config) and not _new_picker_blocked_by_ssh():
+        # Interactive TUI: do not load_config / heal the anchor before the
+        # first frame (#1504). Heal in the background; config is loaded after
+        # the operator picks (or immediately for the legacy ANSI fallback).
+        if picker_tui.new_picker_enabled() and not _new_picker_blocked_by_ssh():
+            def _heal_bg():
+                try:
+                    _heal_stale_anchor_if_self_missing(cfg.load_config())
+                except Exception:
+                    pass
+            threading.Thread(target=_heal_bg, name="heal-anchor", daemon=True).start()
+            picker_root = _start_picker_monitor_root()
             try:
-                return _run_new_picker(config, args)
+                return _run_new_picker(None, args)
             finally:
                 if picker_root is not None:
                     picker_root.close()
+
+        config = cfg.load_config()
+        config = _heal_stale_anchor_if_self_missing(config)
+        repo = config.default_repo
 
         # Picker loop -- re-enters after system menu actions
         while True:
@@ -3600,7 +3605,7 @@ def _machine_key_for_display(config: cfg.Config, name: str) -> str:
     return name
 
 
-def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
+def _run_new_picker(config: cfg.Config | None, args: argparse.Namespace) -> int:
     """Run the Textual worktree picker and resolve its launch decision.
 
     Maps the picker's decision dict onto the existing resume/create/remote
@@ -3640,6 +3645,8 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
+    if config is None:
+        config = cfg.load_config()
     action = decision.get("action")
     profile = _resolve_profile(config, args)
 

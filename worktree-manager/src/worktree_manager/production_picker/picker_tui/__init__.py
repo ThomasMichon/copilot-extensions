@@ -46,7 +46,24 @@ def new_picker_enabled(config=None) -> bool:
         return False
     if os.environ.get("AGENT_WORKTREES_NEW_PICKER"):
         return True
-    return bool(getattr(config, "new_picker", True))
+    if config is not None:
+        return bool(getattr(config, "new_picker", True))
+    # Cheap peek of machine-local/global yaml only -- never ``load_config``
+    # (related grafting) just to decide TUI vs legacy (#1504).
+    try:
+        from .. import config as cfg_mod
+        import yaml
+
+        for path in (cfg_mod.default_config_path(), cfg_mod.global_config_path()):
+            try:
+                raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except Exception:
+                continue
+            if isinstance(raw, dict) and "new_picker" in raw:
+                return bool(raw["new_picker"])
+    except Exception:
+        pass
+    return True
 
 
 def run_tui_picker(source=None, live=False, mock_mode=None):
