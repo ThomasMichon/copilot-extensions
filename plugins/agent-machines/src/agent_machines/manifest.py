@@ -24,7 +24,8 @@ import yaml
 
 #: Current requirement-package schema version. Bumped only by a deliberate,
 #: fixture-guarded migration (see docs/patterns/config-schema-migration.md).
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = (1, SCHEMA_VERSION)
 
 #: The seven dispositions that govern a managed key.
 DISPOSITIONS = (
@@ -185,9 +186,10 @@ def load_package(
         raise ManifestError(f"{path}: top-level document must be a mapping")
 
     schema = _require(raw, "schema_version", path)
-    if schema != SCHEMA_VERSION:
+    if type(schema) is not int or schema not in SUPPORTED_SCHEMA_VERSIONS:
         raise ManifestError(
-            f"{path}: unsupported schema_version {schema!r} (this engine speaks {SCHEMA_VERSION})"
+            f"{path}: unsupported schema_version {schema!r} "
+            f"(this engine supports {SUPPORTED_SCHEMA_VERSIONS})"
         )
 
     name = _require(raw, "package", path)
