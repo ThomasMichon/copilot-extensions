@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** `worktree/tmichon-cloud1-win-20260831-221938-9ff0`
 - **Created:** 2026-08-31
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** `visions/plugins/agent-worktrees` — private coordination state is explicit and source remotes are not state stores
 - **Umbrella issue:** #1528
 - **Sub-issues:** none
@@ -52,33 +52,33 @@ surface.
 ## Plan
 
 ### Phase 1 — Reviewed intent
-- [ ] Extend the agent-worktrees vision with the source-remote/state-store boundary.
-- [ ] Land this effort and vision revision through the proposal review gate.
+- [x] Extend the agent-worktrees vision with the source-remote/state-store boundary.
+- [x] Land this effort and vision revision through the proposal review gate.
 
 ### Phase 2 — Store resolution
-- [ ] Remove the implicit fallback from lease-store resolution to the current project's source remote.
-- [ ] Preserve explicitly supplied lease origins and bound knowledge-repository routing.
-- [ ] Make missing explicit private state fail with actionable remediation.
+- [x] Remove the implicit fallback from lease-store resolution to the current project's source remote.
+- [x] Preserve explicitly supplied lease origins and bound knowledge-repository routing.
+- [x] Make missing explicit private state fail with actionable remediation.
 
 ### Phase 3 — Consumer contract
-- [ ] Update CLI help and lease documentation to describe explicit private-store requirements.
-- [ ] Confirm callers surface configuration failures rather than silently degrading to the source remote.
+- [x] Update CLI help and lease documentation to describe explicit private-store requirements.
+- [x] Confirm callers surface configuration failures rather than silently degrading to the source remote.
 
 ### Phase 4 — Validation and landing
-- [ ] Cover explicit origin, bound knowledge repository, unresolved required state, and unconfigured repository cases.
-- [ ] Prove no test path pushes lease refs to an ordinary source `origin` by default.
-- [ ] Run the focused agent-worktrees suite and repository contract gates.
-- [ ] Bump the agent-worktrees plugin and marketplace versions.
+- [x] Cover explicit origin, bound knowledge repository, unresolved required state, and unconfigured repository cases.
+- [x] Prove no test path pushes lease refs to an ordinary source `origin` by default.
+- [x] Run the focused agent-worktrees suite and repository contract gates.
+- [x] Bump the agent-worktrees plugin and marketplace versions.
 - [ ] Publish, review, merge, deploy, and close #1528.
 
 ## Validation Plan
 
-- [ ] Unit tests prove explicit `--origin` / `AGENT_WORKTREES_LEASE_ORIGIN` remains supported.
-- [ ] Unit tests prove a bound knowledge repository remains the authoritative remote store.
-- [ ] Unit tests prove an unresolved bound knowledge repository fails closed.
-- [ ] Unit tests prove no binding and no explicit origin fails instead of resolving the source remote.
-- [ ] CLI tests prove the failure is actionable and issue-comment coordination is unaffected.
-- [ ] Targeted plugin tests and install-contract checks pass.
+- [x] Unit tests prove explicit `--origin` / `AGENT_WORKTREES_LEASE_ORIGIN` remains supported.
+- [x] Unit tests prove a bound knowledge repository remains the authoritative remote store.
+- [x] Unit tests prove an unresolved bound knowledge repository fails closed.
+- [x] Unit tests prove no binding and no explicit origin fails instead of resolving the source remote.
+- [x] CLI tests prove the failure is actionable and issue-comment coordination is unaffected.
+- [x] Targeted plugin tests and install-contract checks pass.
 - [ ] The merged plugin is deployed through `agent-worktrees update`.
 
 ## Proposal
@@ -103,3 +103,15 @@ decision visible and keeps the safe default independent of hosting provider.
 - Confirmed the target repository has adopted efforts.
 - Traced the unsafe default to `lease_config._resolve_store_target`.
 - Reconciled the change as an extension of the agent-worktrees vision.
+
+### 2026-08-31 — Implementation
+- Proposal PR #1532 merged and the worktree synced forward before code changes.
+- Removed the implicit current-project remote fallback; explicit origins and
+  bound knowledge repositories remain supported.
+- Updated CLI help and worktree guidance, added fail-closed configuration and
+  CLI tests, and bumped agent-worktrees to `1.5.3-dev693`.
+- Focused lease/config/CLI tests passed (112), as did all guard tests, Ruff,
+  install-contract, documentation-consistency, and diff checks.
+- The full suite and the unchanged lease-store integration test both hit the
+  same Windows temporary-Git subprocess timeout on the proposal baseline; the
+  failure reproduces on unmodified `main` and is not introduced by this change.

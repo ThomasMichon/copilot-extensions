@@ -3,19 +3,18 @@
 The lease store coordinates exclusive, cross-machine access to scarce shared
 resources (CodeSpaces, cross-repo worktrees, containers, bridges) through atomic
 compare-and-swap on Git refs -- no branches, no file commits, no working-tree
-writes, no new service, no new credential. The store repo is **the bound
-knowledge repo when one is set** (a stateless harness is shared across users, so
-per-user lease refs live in each operator's own knowledge repo, never in the
-shared harness), else the launch repo's own repository (the self-hosted /
-single-user case). See :func:`_resolve_store_target`.
+writes, no new service, no new credential. The store repo must be **explicitly
+selected**: either the bound knowledge repo or an operator-supplied origin. The
+current project's source remote is never an implicit state store. See
+:func:`_resolve_store_target`.
 
 This adapts David Michon's standalone ``agent-leases`` config
 (ThomasMichon/copilot-extensions#180) to agent-worktrees:
 
 * the store repo is **control-plane-derived** -- the bound knowledge repo's
   origin when one is set (so a shared harness never collects per-user lease
-  refs), else the current project's default-repo remote -- instead of a separate
-  ``origin`` config key, and
+  refs), or explicitly supplied -- instead of silently using the current
+  project's source remote, and
 * the ref namespace defaults to the **hidden** ``refs/agent-worktrees/leases/v1``
   (invisible to branch/tag UX) instead of a ``refs/heads/`` branch namespace.
 
@@ -36,8 +35,7 @@ from dataclasses import dataclass
 #: on push for repos you can write, so leases never appear as branches or tags.
 DEFAULT_REF_PREFIX = "refs/agent-worktrees/leases/v1"
 
-#: Optional operator override of the store origin URL (a pushable Git URL). When
-#: unset the origin is derived from the current project's default-repo remote.
+#: Optional operator override of the store origin URL (a pushable Git URL).
 ORIGIN_ENV = "AGENT_WORKTREES_LEASE_ORIGIN"
 
 
@@ -67,8 +65,8 @@ class LeaseSettings:
     def __post_init__(self) -> None:
         if not self.origin.strip():
             raise ConfigError(
-                "lease store origin is required; set a default-repo remote or "
-                f"the {ORIGIN_ENV} env / --origin override"
+                "lease store origin is required; bind a private knowledge repo "
+                f"or set the {ORIGIN_ENV} env / --origin override"
             )
         # Accept any fully-qualified ref namespace (not only refs/heads/), so the
         # hidden refs/agent-worktrees/leases/* namespace is allowed; keep every
@@ -129,14 +127,10 @@ def _resolve_store_target(
        per-user (and cross-user-mixed) lease refs is exactly what this redirect
        exists to prevent. (Cross-user coordination through a *shared* store is a
        deliberate future extension, not this fall-back.)
-    3. otherwise -- no knowledge repo bound -- the **current project's default
-       repo**: its anchor checkout + configured remote, whose URL is the store
-       origin and whose (remote, cwd) drive account-scoped auth.
-
-    Step 3 is the self-hosted / single-user path: the launch repo is its own
-    state home (``knowledge_repo`` empty) so its own repo *is* the store -- fully
-    backward compatible. The redirect (step 2) only diverges the target for a
-    harness bound to a separate knowledge repo.
+    3. otherwise, fail closed. A source repository's ordinary remote is not an
+       implicit coordination-state backend. Self-hosted or single-user setups
+       that deliberately want a Git-ref store must select it explicitly with
+       ``AGENT_WORKTREES_LEASE_ORIGIN`` or ``--origin``.
     """
     override = origin or os.environ.get(ORIGIN_ENV)
     if override and override.strip():
@@ -178,16 +172,11 @@ def _resolve_store_target(
             )
         return kurl, "origin", str(kanchor)
 
-    repo = conf.default_repo
-    anchor = repo.anchor
-    remote = repo.remote or "origin"
-    url = git_ops._remote_url(remote, cwd=anchor)
-    if not url:
-        raise ConfigError(
-            f"could not resolve the '{remote}' remote URL for the store repo at "
-            f"{anchor}; set {ORIGIN_ENV} or --origin"
-        )
-    return url, remote, str(anchor)
+    raise ConfigError(
+        "lease store is not configured: bind a private knowledge repo or set "
+        f"{ORIGIN_ENV}/--origin explicitly. Refusing to use the current "
+        "project's source remote as a coordination-state store."
+    )
 
 
 def load_lease_settings(

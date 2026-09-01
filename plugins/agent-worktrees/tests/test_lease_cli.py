@@ -13,7 +13,9 @@ from pathlib import Path
 
 import pytest
 
+from agent_worktrees import lease_cli
 from agent_worktrees import obligations as ob
+from agent_worktrees.lease_config import ConfigError
 from agent_worktrees.lease_cli import run_lease
 
 
@@ -32,6 +34,19 @@ def _run(capsys, *argv: str) -> dict:
     out = capsys.readouterr().out
     assert rc == 0, out
     return json.loads(out)
+
+
+def test_missing_private_store_fails_with_remediation(monkeypatch, capsys):
+    def fail_settings(*, origin=None):
+        raise ConfigError(
+            "lease store is not configured: bind a private knowledge repo or "
+            "set AGENT_WORKTREES_LEASE_ORIGIN/--origin explicitly"
+        )
+
+    monkeypatch.setattr(lease_cli, "load_lease_settings", fail_settings)
+
+    assert run_lease(["list"]) == 2
+    assert "bind a private knowledge repo" in capsys.readouterr().err
 
 
 def test_acquire_with_disposition_rides_context(remote: Path, capsys):
