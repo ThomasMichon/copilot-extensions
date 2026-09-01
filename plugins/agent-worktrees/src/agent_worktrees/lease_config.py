@@ -3,10 +3,12 @@
 The lease store coordinates exclusive, cross-machine access to scarce shared
 resources (CodeSpaces, cross-repo worktrees, containers, bridges) through atomic
 compare-and-swap on Git refs -- no branches, no file commits, no working-tree
-writes, no new service, no new credential. The store repo must be **explicitly
-selected**: either the bound knowledge repo or an operator-supplied origin. The
-current project's source remote is never an implicit state store. See
-:func:`_resolve_store_target`.
+writes, no new service, no new credential. The store repo must be **explicitly selected**. New acquisition in a repository
+that requires external state uses the bound state repository; an origin
+override is accepted only when it names that same repository. Self-hosted
+projects and maintenance of existing leases may use an operator-supplied
+origin. The current project's source remote is never an implicit state store.
+See :func:`_resolve_store_target`.
 
 This adapts David Michon's standalone ``agent-leases`` config
 (ThomasMichon/copilot-extensions#180) to agent-worktrees:
@@ -41,6 +43,14 @@ ORIGIN_ENV = "AGENT_WORKTREES_LEASE_ORIGIN"
 
 class ConfigError(ValueError):
     """Lease configuration is absent or invalid."""
+
+
+class CoordinationReadinessError(ConfigError):
+    """A new lease cannot be created under the current state-root identity."""
+
+    def __init__(self, readiness) -> None:
+        self.readiness = readiness
+        super().__init__(readiness.error or readiness.code)
 
 
 @dataclass(frozen=True)
@@ -104,42 +114,10 @@ class LeaseSettings:
         return ttl
 
 
-def _resolve_store_target(
-    origin: str | None = None,
-) -> tuple[str, str | None, str | None]:
-    """Resolve ``(origin_url, auth_remote, auth_cwd)`` for the shared store.
-
-    Resolution order:
-
-    1. an explicit ``origin`` argument or the ``AGENT_WORKTREES_LEASE_ORIGIN``
-       env -- a pushable URL used as-is (no auth context; the ambient credential
-       helper authenticates);
-    2. the bound **knowledge repo** (``config.knowledge_repo``), if any -- a
-       stateless harness (``citadel-harness`` and the like) is **shared across
-       users**, so its own repo must never accrue per-user lease refs; the
-       machine-bound knowledge repo (the operator's private state repo, e.g.
-       ``dotfiles``) is the per-user home for them. When a knowledge repo is
-       bound it is therefore **authoritative** for the lease store: its checkout
-       is resolved via the repos registry (the same redirect ``machines.yaml``
-       resolution uses) and its origin drives account-scoped auth. If a bound
-       knowledge repo cannot be resolved this **raises** rather than falling back
-       to the launch/harness repo -- silently polluting a shared harness with
-       per-user (and cross-user-mixed) lease refs is exactly what this redirect
-       exists to prevent. (Cross-user coordination through a *shared* store is a
-       deliberate future extension, not this fall-back.)
-    3. otherwise, fail closed. A source repository's ordinary remote is not an
-       implicit coordination-state backend. Self-hosted or single-user setups
-       that deliberately want a Git-ref store must select it explicitly with
-       ``AGENT_WORKTREES_LEASE_ORIGIN`` or ``--origin``.
-    """
-    override = origin or os.environ.get(ORIGIN_ENV)
-    if override and override.strip():
-        return override.strip(), None, None
-
-    from . import config as cfg
+def _resolve_bound_store_target(conf) -> tuple[str, str, str]:
+    """Resolve the bound knowledge repository without consulting overrides."""
     from . import git_ops
-
-    conf = cfg.load_config()
+    from . import repos as repos_mod
 
     knowledge = (conf.knowledge_repo or "").strip()
     if knowledge:
@@ -147,12 +125,13 @@ def _resolve_store_target(
         # the launch/harness repo (a shared stateless harness must not collect
         # per-user lease refs). Any resolution failure raises with remediation.
         _hint = (
-            f"register it (agent-worktrees repos add {knowledge} <path>) or set "
+            f"register it (agent-worktrees repos add {knowledge} <path>). For "
+            f"maintenance of an existing lease, supply its original "
             f"{ORIGIN_ENV}/--origin. Refusing to fall back to the harness repo "
             "(a shared harness must not collect per-user lease refs)."
         )
         try:
-            kanchor = cfg._resolve_anchor_from_registry(knowledge, conf.platform)
+            kanchor = repos_mod.resolve_path(knowledge)
         except Exception as exc:
             raise ConfigError(
                 f"lease store: the bound knowledge repo {knowledge!r} could not "
@@ -160,8 +139,8 @@ def _resolve_store_target(
             ) from exc
         if not kanchor:
             raise ConfigError(
-                f"lease store: the bound knowledge repo {knowledge!r} is not in "
-                f"the repos registry on this machine; {_hint}"
+                f"lease store: the bound knowledge repo {knowledge!r} has no "
+                f"usable checkout on this machine; {_hint}"
             )
         kurl = git_ops._remote_url("origin", cwd=kanchor)
         if not kurl:
@@ -173,9 +152,95 @@ def _resolve_store_target(
         return kurl, "origin", str(kanchor)
 
     raise ConfigError(
-        "lease store is not configured: bind a private knowledge repo or set "
-        f"{ORIGIN_ENV}/--origin explicitly. Refusing to use the current "
-        "project's source remote as a coordination-state store."
+        "lease store is not configured. New acquisition requires a usable "
+        "bound state repository, or an explicit origin in a self-hosted "
+        "project. For maintenance of an existing lease, supply its original "
+        f"{ORIGIN_ENV}/--origin. Refusing to use the current project's source "
+        "remote as a coordination-state store."
+    )
+
+
+def _resolve_store_target(
+    origin: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Resolve ``(origin_url, auth_remote, auth_cwd)`` for the shared store.
+
+    Resolution order:
+
+    1. an explicit ``origin`` argument or the ``AGENT_WORKTREES_LEASE_ORIGIN``
+       env -- a pushable URL used as-is for self-hosted operation or existing
+       lease maintenance (new externally-bound acquisition validates it through
+       :func:`_resolve_acquisition_store_target`);
+    2. the bound **knowledge repo** (``config.knowledge_repo``), if any -- a
+       stateless harness is shared across users, so its own repo must never
+       accrue per-user lease refs. Resolution uses the same repository resolver
+       as state-root readiness, and its origin supplies account-scoped auth.
+    3. otherwise, fail closed. A source repository's ordinary remote is not an
+       implicit coordination-state backend.
+    """
+    override = origin or os.environ.get(ORIGIN_ENV)
+    if override and override.strip():
+        return override.strip(), None, None
+
+    from . import config as cfg
+
+    return _resolve_bound_store_target(cfg.load_config())
+
+
+def _resolve_acquisition_store_target(
+    origin: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    """Resolve a store for new ownership after coordination preflight."""
+    from . import config as cfg
+    from . import state_root
+    from plugin_activation import normalize_remote
+
+    conf = cfg.load_config()
+    readiness = state_root.coordination_readiness(conf)
+    if not readiness.ready:
+        raise CoordinationReadinessError(readiness)
+
+    override = origin or os.environ.get(ORIGIN_ENV)
+    root = readiness.state_root
+    if not root.requires_external:
+        return _resolve_store_target(origin)
+
+    bound_origin, auth_remote, auth_cwd = _resolve_bound_store_target(conf)
+    if override and override.strip():
+        requested_identity = normalize_remote(override.strip())
+        bound_identity = normalize_remote(bound_origin)
+        if (
+            requested_identity is None
+            or bound_identity is None
+            or requested_identity != bound_identity
+        ):
+            raise ConfigError(
+                "lease acquisition origin must match the bound state "
+                f"repository origin ({bound_origin})"
+            )
+        return override.strip(), auth_remote, auth_cwd
+    return bound_origin, auth_remote, auth_cwd
+
+
+def _lease_settings(
+    target: tuple[str, str | None, str | None],
+    *,
+    default_ttl_seconds: int,
+    max_ttl_seconds: int,
+    clock_skew_seconds: int,
+    acquire_retries: int,
+    ref_prefix: str,
+) -> LeaseSettings:
+    url, auth_remote, auth_cwd = target
+    return LeaseSettings(
+        origin=url,
+        ref_prefix=ref_prefix,
+        default_ttl_seconds=default_ttl_seconds,
+        max_ttl_seconds=max_ttl_seconds,
+        clock_skew_seconds=clock_skew_seconds,
+        acquire_retries=acquire_retries,
+        auth_remote=auth_remote,
+        auth_cwd=auth_cwd,
     )
 
 
@@ -189,14 +254,31 @@ def load_lease_settings(
     ref_prefix: str = DEFAULT_REF_PREFIX,
 ) -> LeaseSettings:
     """Build :class:`LeaseSettings` with an anchor-derived (or overridden) origin."""
-    url, auth_remote, auth_cwd = _resolve_store_target(origin)
-    return LeaseSettings(
-        origin=url,
-        ref_prefix=ref_prefix,
+    return _lease_settings(
+        _resolve_store_target(origin),
         default_ttl_seconds=default_ttl_seconds,
         max_ttl_seconds=max_ttl_seconds,
         clock_skew_seconds=clock_skew_seconds,
         acquire_retries=acquire_retries,
-        auth_remote=auth_remote,
-        auth_cwd=auth_cwd,
+        ref_prefix=ref_prefix,
+    )
+
+
+def load_acquisition_lease_settings(
+    *,
+    origin: str | None = None,
+    default_ttl_seconds: int = 3600,
+    max_ttl_seconds: int = 86400,
+    clock_skew_seconds: int = 30,
+    acquire_retries: int = 3,
+    ref_prefix: str = DEFAULT_REF_PREFIX,
+) -> LeaseSettings:
+    """Build settings for new ownership after state-root readiness succeeds."""
+    return _lease_settings(
+        _resolve_acquisition_store_target(origin),
+        default_ttl_seconds=default_ttl_seconds,
+        max_ttl_seconds=max_ttl_seconds,
+        clock_skew_seconds=clock_skew_seconds,
+        acquire_retries=acquire_retries,
+        ref_prefix=ref_prefix,
     )

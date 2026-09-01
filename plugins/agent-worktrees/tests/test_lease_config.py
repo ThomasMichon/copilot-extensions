@@ -4,19 +4,31 @@ import pytest
 
 from agent_worktrees import config as cfg
 from agent_worktrees import git_ops
+from agent_worktrees import repos as repos_mod
+from agent_worktrees import state_root
 from agent_worktrees.lease_config import (
     ORIGIN_ENV,
     ConfigError,
+    CoordinationReadinessError,
+    _resolve_acquisition_store_target,
     _resolve_store_target,
 )
 
 
-def _fake_config(*, knowledge_repo: str, platform: str = "windows") -> cfg.Config:
+def _fake_config(
+    *,
+    knowledge_repo: str,
+    platform: str = "windows",
+    stateless: bool = False,
+    requires_external_state_root: bool = False,
+) -> cfg.Config:
     """A minimal Config whose default repo is the current project's own repo."""
     repo = cfg.RepoConfig(
         anchor="/anchors/self",
         worktree_root="/anchors/self-worktrees",
         remote="origin",
+        stateless=stateless,
+        requires_external_state_root=requires_external_state_root,
     )
     return cfg.Config(
         srcroot="/anchors",
@@ -56,9 +68,9 @@ def test_knowledge_repo_redirects_before_current_project(
         cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
     )
     monkeypatch.setattr(
-        cfg,
-        "_resolve_anchor_from_registry",
-        lambda name, platform: "/anchors/dotfiles" if name == "dotfiles" else None,
+        repos_mod,
+        "resolve_path",
+        lambda name: "/anchors/dotfiles" if name == "dotfiles" else None,
     )
 
     def fake_remote_url(remote: str, *, cwd: str) -> str | None:
@@ -87,7 +99,7 @@ def test_knowledge_repo_resolution_failure_raises_not_fall_through(
     )
     # Registry cannot resolve the knowledge checkout on this machine.
     monkeypatch.setattr(
-        cfg, "_resolve_anchor_from_registry", lambda name, platform: None
+        repos_mod, "resolve_path", lambda name: None
     )
 
     def fail_remote_url(remote: str, *, cwd: str) -> str | None:
@@ -112,9 +124,9 @@ def test_knowledge_repo_no_origin_remote_raises(
         cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
     )
     monkeypatch.setattr(
-        cfg,
-        "_resolve_anchor_from_registry",
-        lambda name, platform: "/anchors/dotfiles" if name == "dotfiles" else None,
+        repos_mod,
+        "resolve_path",
+        lambda name: "/anchors/dotfiles" if name == "dotfiles" else None,
     )
     monkeypatch.setattr(git_ops, "_remote_url", lambda remote, *, cwd: None)
 
@@ -135,3 +147,193 @@ def test_no_knowledge_repo_refuses_current_project_remote(
 
     with pytest.raises(ConfigError, match="Refusing to use.*source remote"):
         _resolve_store_target()
+
+
+def test_acquisition_override_cannot_bypass_missing_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: _fake_config(
+            knowledge_repo="",
+            stateless=True,
+            requires_external_state_root=True,
+        ),
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "_remote_url",
+        lambda *args, **kwargs: pytest.fail(
+            "unbound acquisition resolved a store origin"
+        ),
+    )
+
+    with pytest.raises(CoordinationReadinessError) as caught:
+        _resolve_acquisition_store_target("https://example.test/state.git")
+    assert caught.value.readiness.code == "knowledge_binding_required"
+
+
+def test_acquisition_distinguishes_unresolved_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: _fake_config(
+            knowledge_repo="missing",
+            stateless=True,
+            requires_external_state_root=True,
+        ),
+    )
+    monkeypatch.setattr(state_root, "_checkout_path", lambda name: None)
+
+    with pytest.raises(CoordinationReadinessError) as caught:
+        _resolve_acquisition_store_target("https://example.test/state.git")
+    assert caught.value.readiness.code == "state_root_resolution_failed"
+
+
+def test_acquisition_matching_override_keeps_bound_auth_context(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(
+        ORIGIN_ENV, "https://github.com/example/wrong-environment.git"
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: _fake_config(
+            knowledge_repo="knowledge",
+            stateless=True,
+            requires_external_state_root=True,
+        ),
+    )
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        repos_mod,
+        "resolve_path",
+        lambda name: str(knowledge),
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "_remote_url",
+        lambda remote, *, cwd: "git@github.com:example/state.git",
+    )
+
+    target = _resolve_acquisition_store_target(
+        "https://github.com/example/state.git"
+    )
+
+    assert target == (
+        "https://github.com/example/state.git",
+        "origin",
+        str(knowledge),
+    )
+
+
+def test_acquisition_rejects_override_for_different_repository(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: _fake_config(
+            knowledge_repo="knowledge",
+            stateless=True,
+            requires_external_state_root=True,
+        ),
+    )
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        repos_mod,
+        "resolve_path",
+        lambda name: str(knowledge),
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "_remote_url",
+        lambda remote, *, cwd: "https://github.com/example/state.git",
+    )
+
+    with pytest.raises(ConfigError, match="must match the bound state"):
+        _resolve_acquisition_store_target(
+            "https://github.com/example/other.git"
+        )
+
+
+def test_acquisition_rejects_mismatched_environment_origin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(
+        ORIGIN_ENV, "https://github.com/example/other.git"
+    )
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: _fake_config(
+            knowledge_repo="knowledge",
+            stateless=True,
+            requires_external_state_root=True,
+        ),
+    )
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        repos_mod, "resolve_path", lambda name: str(knowledge)
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "_remote_url",
+        lambda remote, *, cwd: "https://github.com/example/state.git",
+    )
+
+    with pytest.raises(ConfigError, match="must match the bound state"):
+        _resolve_acquisition_store_target()
+
+
+def test_acquisition_without_override_reuses_existing_target(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    config = _fake_config(
+        knowledge_repo="knowledge",
+        stateless=True,
+        requires_external_state_root=True,
+    )
+    monkeypatch.setattr(cfg, "load_config", lambda: config)
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        repos_mod, "resolve_path", lambda name: str(knowledge)
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "_remote_url",
+        lambda remote, *, cwd: "https://github.com/example/state.git",
+    )
+
+    assert _resolve_acquisition_store_target() == _resolve_store_target()
+
+
+def test_self_hosted_acquisition_keeps_explicit_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(
+        cfg,
+        "load_config",
+        lambda: _fake_config(knowledge_repo=""),
+    )
+
+    assert _resolve_acquisition_store_target(
+        "https://example.test/state.git"
+    ) == ("https://example.test/state.git", None, None)

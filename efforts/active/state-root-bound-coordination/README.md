@@ -9,9 +9,9 @@
   resource accountability, and claimed-resource-not-reclaimed
 - **Umbrella issue:** [#1513](https://github.com/ThomasMichon/copilot-extensions/issues/1513)
 - **Sub-issues:** [#1517](https://github.com/ThomasMichon/copilot-extensions/issues/1517)
-  (lease acquisition);
+  (provider preflight);
   [#1518](https://github.com/ThomasMichon/copilot-extensions/issues/1518)
-  (provider preflight)
+  (lease acquisition)
 - **Authorship:** AI-assisted; reviewed and directed by the repository owner.
 
 ## Guiding Intent
@@ -112,10 +112,10 @@ usable.
   acceptance implementation rather than speculating one in advance.
 - [ ] Gate `run` and automatic parent-child worktree ownership before child
   launch, Git worktree creation, or reciprocal claim writes.
-- [ ] Gate lease acquisition before store resolution or network I/O. For a
+- [x] Gate lease acquisition before store resolution or network I/O. For a
   required external state root, an explicit origin is accepted only after
   binding succeeds and only when it matches the bound state repository.
-- [ ] Allow renewal and release of already-held leases when the caller supplies
+- [x] Allow renewal and release of already-held leases when the caller supplies
   the original store origin (or a provider carries it in its existing lease
   receipt), even if current binding resolution later fails. Update remediation
   text so it never advertises an override that acquisition will reject.
@@ -225,3 +225,18 @@ agent-worktrees-owned operation, preserving the suite's a-la-carte invariant.
   portfolio repeatedly exceeded contained sub-suite budgets on this Windows
   host during unrelated Git-heavy tests; each timeout suspect passed alone.
   Required release-contract, payload-generation, version, and lint gates pass.
+- Implementation PR [#1578](https://github.com/ThomasMichon/copilot-extensions/pull/1578)
+  merged after CI and Copilot review. It published the v1 readiness contract,
+  direct claim gate, owner-project resolution, and handoff-offer gate.
+- Unified update refreshed the other registered runtimes, but this live Copilot
+  process held the installed agent-worktrees payload directory open on Windows.
+  The agent-worktrees payload/runtime deployment remains an explicit completion
+  obligation for a successor session that can retry after the lock is released.
+- Implemented the #1518 lease slice with a dedicated acquisition settings path:
+  required external state is checked before store construction or network I/O,
+  an explicit origin must identify the bound state repository, and the bound
+  checkout continues to supply account-scoped authentication.
+- Lease renew/release/inspect/list retain the maintenance settings path. Focused
+  tests prove explicit and environment-carried original origins remain usable
+  when current binding resolution fails, while new acquisition emits a
+  versioned JSON rejection with a dedicated exit code.
