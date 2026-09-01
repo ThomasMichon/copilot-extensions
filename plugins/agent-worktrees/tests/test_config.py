@@ -948,6 +948,35 @@ class TestKnowledgeConfigOverlay:
         assert conf.headless is True        # from the knowledge overlay
         assert conf.new_picker is False     # from the knowledge overlay
 
+    def test_overlay_may_arm_profile_assignment(self, tmp_path, monkeypatch):
+        h = self._mk_harness(tmp_path, stateless=True)
+        k = self._mk_knowledge(
+            tmp_path,
+            "copilot_profiles:\n"
+            "  - name: p1\n"
+            "  - name: p2\n"
+            "profile_assignment:\n"
+            "  name: portable-policy\n"
+            "  mode: balanced-random\n"
+            "  armed: true\n"
+            "  profiles: [p1, p2]\n",
+        )
+        self._registry(monkeypatch, harness=h, knowledge=k)
+        mfile = tmp_path / "machine.yaml"
+        mfile.write_text(
+            "repo_name: harness\nmachine: m\nplatform: wsl\n"
+            "knowledge_repo: knowledge\n"
+            f"repos:\n  harness:\n    anchor: {h}\n    worktree_root: /tmp/wt\n",
+            encoding="utf-8",
+        )
+
+        policy = cfg.load_config(mfile).profile_assignment
+
+        assert policy is not None
+        assert policy.armed is True
+        assert policy.name == "portable-policy"
+        assert policy.profiles == ("p1", "p2")
+
     def test_machine_local_wins_over_overlay(self, tmp_path, monkeypatch):
         h = self._mk_harness(tmp_path, stateless=True)
         k = self._mk_knowledge(tmp_path, "headless: true\n")

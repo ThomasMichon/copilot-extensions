@@ -40,6 +40,26 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+## Balanced Profile Assignment
+
+Agent-worktrees can optionally assign eligible new interactive session
+generations from a user-owned pool of existing `copilot_profiles` using a
+balanced shuffled bag. The feature is off by default. Once the policy is valid,
+explicit `--profile` selection remains authoritative; recovery, ACP/bridge,
+system/delegated, and base-repo launches remain outside assignment. Invalid
+armed user configuration fails before any worktree mutation even on those
+excluded launch paths. An excluded launch, unassigned older session, replay
+whose saved profile is unavailable, or optional assignment-state failure keeps
+the concrete ordinary default/manual profile the launch path already selected.
+
+Assignments are persisted before launch, reused by launch retries, bound to the
+actual Copilot session id at registration, and replayed on ordinary resume.
+Handoff cutover successors draw a new generation only while the policy is
+armed. See the
+[Configuration Reference](docs/config-reference.md#balanced-profile-assignment--profile_assignment)
+for the trust boundary, generic example, supported lanes, one-shot private
+token handling, and graceful fallback behavior.
+
 ## Status Bar at a Glance
 
 Every worktree session runs inside a multiplexer (psmux on Windows, tmux on

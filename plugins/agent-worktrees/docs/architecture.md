@@ -114,6 +114,52 @@ verb), so the round-trip preserves every overlay. A forward-compat guard test
 by a writer that touches only one field leaves all other overlays intact; if you
 add a field, extend that test.
 
+### Profile assignment state
+
+Balanced profile assignment follows the same single-owner rule with two
+coordinated, bounded views:
+
+- `~/.<project>/profile-assignments.json` is the atomic per-project allocator
+  ledger. It owns the installation seed, current shuffled bag,
+  generation/position, token-keyed pending assignments, one-shot token
+  retirement, eventual `bound|abandoned` disposition, and terminal-history
+  compaction. Live pending assignments are never evicted, so the ledger may
+  temporarily exceed its history limit until bind or expiry makes entries
+  terminal.
+- `WorktreeRecord.profile_assignments[]` is the record-local status view. It
+  carries the neutral assignment identity needed by `list --json` and
+  `list-sessions --json`; a monotonic `profile_assignment_revision` prevents an
+  unrelated stale record writer from rolling it back. Reflection is also
+  disposition-monotonic for one assignment identity: once the record mirrors
+  `bound` or `abandoned`, a delayed pending retry cannot replace it. Ordinary
+  worktree rows expose only the current bound head-session assignment. The
+  bounded history and latest terminal/pending entry are available on the explicit
+  `list --json --profile-assignment-history` detail surface, keeping Picker
+  polling constant-size. The record never stores the launch token.
+
+Allocation is locked across processes and persisted before launch. The selected
+profile is then passed to the ordinary launch planner as a `CopilotProfile`;
+there is no model/backend branch in the allocator. The launch environment
+carries only the opaque assignment token. `register-session` binds that token to
+the actual Copilot session id, retires the capability, and updates both stores.
+A retry finds the same pending token/generation key; expiry records `abandoned`
+without returning the bag position to the pool. Handoff assignments retain the
+neutral predecessor session id, while the eventual `session_id` is the
+successor link. Lazy maintenance returns before locking when no ledger exists
+and persists only actual expiry or terminal-history compaction. Cache-only and
+coalesced-cache-hit list paths skip maintenance entirely.
+
+Assignment state is an optional lifecycle enrichment, not a prerequisite for
+worktree creation, launch, session registration, activity logging, context
+emission, or status setup. Unsupported/corrupt state and lock contention warn
+and retain the concrete ordinary default/manual profile already selected by the
+launch path. The same fallback applies to assignment-excluded launches,
+unassigned pre-feature sessions, and persisted assignments whose profile is
+unavailable on the current machine. Invalid armed user configuration remains
+fail-closed before any worktree mutation, including explicit-profile, recovery,
+and other assignment-excluded launch classes; malformed repository-only
+default-off templates remain non-load-bearing.
+
 ### Two status registers: asserted disposition vs. derived pulse
 
 The status core carries **two complementary registers**, deliberately kept in
@@ -297,6 +343,13 @@ records it. A `bind-session --handoff-token <token>` call claims one exact
 pending handoff and performs the predecessor conclusion, two-way link, handoff
 state change, and head transition atomically.
 
+When a launch carries an opt-in profile-assignment token, the same registration
+also binds the pending assignment to the actual session id. Ordinary resume
+looks up that bound assignment and rebuilds the launch with the same ordinary
+profile without advancing the bag. A handoff cutover deliberately requests the
+`handoff-cutover` lane and therefore draws a successor generation only while the
+policy is armed.
+
 `deregister_session` (the sessionEnd hook) consumes the hook payload just like
 sessionStart. It resolves by payload cwd, then by exact previously registered
 session id across projects, and closes the latest open activation interval. It
@@ -368,6 +421,7 @@ agent-worktrees list-sessions --worktree <id> --json
 # {"head_session": "<sid>"|null, "head_revision": 7, "handoffs": [...],
 #  "sessions": [{"id": "<sid>", "state": "active"|"handed-off"|"concluded",
 #                "is_head": <bool>, "activations": [...],
+#                "profile_assignment": {...},
 #                "interface": "cli"|"acp",
 #                "origin": "user"|"system"|"delegate", ...}, ...]}
 ```

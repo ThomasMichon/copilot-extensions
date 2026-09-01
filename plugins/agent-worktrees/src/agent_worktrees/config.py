@@ -25,6 +25,7 @@ from . import config_migrations
 
 _ENV_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _PROJECT_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$")
+_ASSIGNMENT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 # In-repo, committed config carrying *repo-level policy/settings* (shared
 # across every machine that checks out the repo), as opposed to the
@@ -57,6 +58,20 @@ class CopilotProfile:
     label: str
     env: dict[str, str] = field(default_factory=dict)
     copilot_args: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ProfileAssignmentPolicy:
+    """Effective user-armed policy over existing named Copilot profiles."""
+
+    name: str = ""
+    mode: str = ""
+    armed: bool = False
+    profiles: tuple[str, ...] = ()
+    assignment_label: str = ""
+    eligible_lanes: tuple[str, ...] = ("new", "handoff-cutover")
+    error: str = ""
+    repository_error: str = ""
 
 
 # Synthetic default when no profiles are configured.
@@ -354,6 +369,7 @@ class Config:
     Empty means unbound -- the resolver then refuses to silently write state into
     the harness. See the ``stateless-harness`` vision."""
     copilot_profiles: list[CopilotProfile] = field(default_factory=list)
+    profile_assignment: ProfileAssignmentPolicy | None = None
     headless: bool = False
     """When true, the project is driven via CLI only -- its bare binstub
     invocation lists worktrees instead of launching an interactive Copilot
@@ -907,6 +923,7 @@ def load_config(
         names.append(repo_name)
 
     repos: dict[str, RepoConfig] = {}
+    inrepo_profile_assignments: dict[str, Any] = {}
     for name in names:
         machine_repo = machine_repos.get(name) or {}
         if not isinstance(machine_repo, dict):
@@ -926,6 +943,9 @@ def load_config(
 
         # Tier 2: the repo's own in-repo flat settings (base for repo settings).
         inrepo_settings = _load_inrepo_config(anchor)
+        inrepo_profile_assignments[name] = inrepo_settings.get(
+            "profile_assignment"
+        )
 
         # NEW tier (between in-repo and machine-local): a control-plane-supplied
         # ``pr:`` overlay for this FOREIGN repo (from the control plane's
@@ -972,6 +992,27 @@ def load_config(
         profiles_raw = knowledge_raw.get("copilot_profiles")
     else:
         profiles_raw = global_raw.get("copilot_profiles", [])
+    parsed_profiles = _parse_profiles(profiles_raw or [])
+
+    # Profile assignment has a deliberate trust-aware merge rather than the
+    # ordinary "highest value wins" top-level merge. User-owned layers may arm
+    # and define the pool; committed repository config may only provide a
+    # default-off template or intersect an already user-owned pool/lanes.
+    user_assignment_raw: Any = {}
+    for source in (
+        global_raw,
+        knowledge_raw,
+        machine_raw,
+        machine_repos.get(repo_name) if isinstance(machine_repos, dict) else {},
+    ):
+        if not isinstance(source, dict) or "profile_assignment" not in source:
+            continue
+        candidate = source.get("profile_assignment")
+        if isinstance(user_assignment_raw, dict) and isinstance(candidate, dict):
+            user_assignment_raw = _deep_merge(user_assignment_raw, candidate)
+        else:
+            user_assignment_raw = candidate
+    repository_assignment_raw = inrepo_profile_assignments.get(repo_name)
 
     return Config(
         srcroot=srcroot,
@@ -984,7 +1025,12 @@ def load_config(
             or global_raw.get("knowledge_repo")
             or ""
         ),
-        copilot_profiles=_parse_profiles(profiles_raw or []),
+        copilot_profiles=parsed_profiles,
+        profile_assignment=_parse_profile_assignment(
+            user_assignment_raw,
+            repository_assignment_raw,
+            parsed_profiles,
+        ),
         headless=bool(
             machine_raw.get(
                 "headless",
@@ -1117,7 +1163,8 @@ def _resolve_anchor_from_registry(name: str, platform: str) -> str | None:
 # ``repos.<name>`` blocks are intentionally EXCLUDED (a shared knowledge repo must
 # not dictate a machine's paths, its own binding, or another repo's settings).
 _KNOWLEDGE_OVERLAY_TOP_KEYS: tuple[str, ...] = (
-    "copilot_profiles", "headless", "auto_fast_forward", "new_picker",
+    "copilot_profiles", "profile_assignment", "headless", "auto_fast_forward",
+    "new_picker",
 )
 
 
@@ -1463,6 +1510,151 @@ def _parse_profiles(raw_list: list[Any]) -> list[CopilotProfile]:
         ))
 
     return profiles
+
+
+def _parse_profile_assignment(
+    user_raw: Any,
+    repository_raw: Any,
+    profiles: list[CopilotProfile],
+) -> ProfileAssignmentPolicy | None:
+    """Resolve a trust-aware profile-assignment policy.
+
+    The user-owned layers are the only authority for ``armed`` and the profile
+    pool. Repository config may provide other defaults and may narrow the pool
+    or eligible lanes, but it cannot add names the user did not already own.
+    """
+    if user_raw in (None, {}) and repository_raw in (None, {}):
+        return None
+    has_user_config = user_raw not in (None, {})
+    has_repository_config = repository_raw not in (None, {})
+    user = user_raw if isinstance(user_raw, dict) else {}
+    repository = repository_raw if isinstance(repository_raw, dict) else {}
+    armed = user.get("armed") is True
+    user_errors: list[str] = []
+    repository_errors: list[str] = []
+    if has_user_config and not isinstance(user_raw, dict):
+        user_errors.append("profile_assignment must be a mapping")
+    if has_repository_config and not isinstance(repository_raw, dict):
+        repository_errors.append(
+            "repository profile_assignment must be a mapping"
+        )
+    if "armed" in user and not isinstance(user.get("armed"), bool):
+        user_errors.append("profile_assignment.armed must be a boolean")
+
+    name = str(user.get("name") or repository.get("name") or "").strip()
+    if not name or not _ASSIGNMENT_NAME_RE.fullmatch(name):
+        target = (
+            user_errors
+            if user.get("name") or not has_repository_config
+            else repository_errors
+        )
+        target.append(
+            "profile_assignment.name must be a non-empty identifier using "
+            "letters, digits, '.', '_', or '-'"
+        )
+    repository_name = str(repository.get("name") or "").strip()
+    if armed and repository_name and repository_name != name:
+        repository_errors.append(
+            "repository profile_assignment.name does not match the user-armed policy"
+        )
+
+    mode = str(user.get("mode") or repository.get("mode") or "").strip().lower()
+    if mode != "balanced-random":
+        target = (
+            user_errors
+            if user.get("mode") or not has_repository_config
+            else repository_errors
+        )
+        target.append("profile_assignment.mode must be 'balanced-random'")
+
+    raw_pool = user.get("profiles")
+    pool: list[str] = []
+    if isinstance(raw_pool, list):
+        for item in raw_pool:
+            value = str(item).strip()
+            if value and value not in pool:
+                pool.append(value)
+    elif raw_pool is not None:
+        user_errors.append("profile_assignment.profiles must be a list")
+    if armed and not pool:
+        user_errors.append(
+            "an armed profile_assignment requires a non-empty user-owned profile pool"
+        )
+
+    repo_pool = repository.get("profiles")
+    if repo_pool is not None:
+        if isinstance(repo_pool, list):
+            allowed = {str(item).strip() for item in repo_pool if str(item).strip()}
+            pool = [name for name in pool if name in allowed]
+        else:
+            repository_errors.append(
+                "repository profile_assignment.profiles must be a list"
+            )
+    if armed and not pool:
+        repository_errors.append(
+            "repository profile_assignment narrowing left no eligible user profiles"
+        )
+
+    available = {profile.name for profile in profiles}
+    missing = [profile_name for profile_name in pool if profile_name not in available]
+    if armed and missing:
+        user_errors.append(
+            "profile_assignment references undefined copilot_profiles: "
+            + ", ".join(missing)
+        )
+
+    allowed_lanes = ("new", "handoff-cutover")
+    raw_lanes = user.get("eligible_lanes", allowed_lanes)
+    if isinstance(raw_lanes, list | tuple):
+        lanes = [
+            str(item).strip()
+            for item in raw_lanes
+            if str(item).strip() in allowed_lanes
+        ]
+    else:
+        lanes = []
+        user_errors.append("profile_assignment.eligible_lanes must be a list")
+    repo_lanes = repository.get("eligible_lanes")
+    if repo_lanes is not None:
+        if isinstance(repo_lanes, list | tuple):
+            allowed_by_repo = {
+                str(item).strip()
+                for item in repo_lanes
+                if str(item).strip() in allowed_lanes
+            }
+            lanes = [lane for lane in lanes if lane in allowed_by_repo]
+        else:
+            repository_errors.append(
+                "repository profile_assignment.eligible_lanes must be a list"
+            )
+    lanes = list(dict.fromkeys(lanes))
+    if armed and not lanes:
+        user_errors.append(
+            "an armed profile_assignment has no eligible launch lanes"
+        )
+
+    label_value = user.get(
+        "assignment_label", repository.get("assignment_label", "")
+    )
+    if label_value is not None and not isinstance(label_value, str):
+        target = (
+            user_errors
+            if "assignment_label" in user
+            else repository_errors
+        )
+        target.append("profile_assignment.assignment_label must be a string")
+    assignment_label = str(label_value or "").strip()
+
+    return ProfileAssignmentPolicy(
+        name=name,
+        mode=mode,
+        armed=armed,
+        profiles=tuple(pool),
+        assignment_label=assignment_label,
+        eligible_lanes=tuple(lanes),
+        error="; ".join(dict.fromkeys(user_errors)),
+        repository_error="; ".join(dict.fromkeys(repository_errors)),
+    )
 
 
 def derive_worktree_root(anchor: str | Path) -> str:

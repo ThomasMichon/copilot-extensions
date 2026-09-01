@@ -80,6 +80,7 @@ from . import (
     obligations,
     output,
     permissions,
+    profile_assignment,
     pr_ops,
     procs,
     prune,
@@ -608,6 +609,7 @@ def _worktree_to_dict(
     session_ctx: sessions.SessionContext | None = None,
     bare_orphan_wts: set[str] | None = None,
     bridge_live_wts: set[str] | None = None,
+    include_profile_assignment_history: bool = False,
 ) -> dict:
     """Serialize a WorktreeRecord to a JSON-friendly dict.
 
@@ -709,6 +711,23 @@ def _worktree_to_dict(
             }
             for c in rec.resources
         ]
+    if getattr(rec, "profile_assignments", None):
+        current_assignment = profile_assignment.assignment_for_session(
+            rec, rec.resolved_head_session
+        )
+        d["current_profile_assignment"] = (
+            profile_assignment.metadata(current_assignment)
+            if current_assignment is not None
+            else None
+        )
+        if include_profile_assignment_history:
+            d["profile_assignments"] = [
+                profile_assignment.metadata(assignment)
+                for assignment in rec.profile_assignments
+            ]
+            d["latest_profile_assignment"] = profile_assignment.metadata(
+                rec.profile_assignments[-1]
+            )
     if state_info is not None:
         d["state"] = state_info.state.value
         d["ahead"] = state_info.ahead
@@ -1077,6 +1096,7 @@ def _create_worktree_core(
     config: cfg.Config,
     *,
     profile: cfg.CopilotProfile | None = None,
+    profile_is_explicit: bool = True,
     no_mux: bool = False,
     kind: tracking.WorktreeKind = "session",
     owner: str | None = None,
@@ -1116,12 +1136,18 @@ def _create_worktree_core(
     branch = f"worktree/{worktree_id}"
     worktree_path = str(Path(repo.worktree_root) / worktree_id)
 
+    _validate_profile_assignment_config(config)
     launches_copilot = kind != "system"
     fake_args = None
     if launches_copilot:
         fake_args = argparse.Namespace(
             copilot_args=[], recovery=recovery, no_mux=no_mux,
-            no_resume=False, profile=None,
+            no_resume=False,
+            profile=(
+                profile.name
+                if profile is not None and profile_is_explicit
+                else None
+            ),
         )
         launch_preflight = launch_preflight or _preflight_launch(
             config,
@@ -1269,15 +1295,33 @@ def _create_worktree_core(
     # Build launch command (for caller to use).
     assert fake_args is not None
     assert launch_preflight is not None
+    selection = _launch_profile_selection(
+        config,
+        fake_args,
+        record,
+        lane="new",
+        generation_key=f"new:{worktree_id}",
+        ordinary_profile=profile,
+        explicit_profile=profile if profile_is_explicit else None,
+    )
+    _reflect_assignment(record, selection)
     launch_cmd = _build_launch_cmd(
         config,
         fake_args,
         worktree_path,
-        profile=profile,
+        profile=selection.profile,
         preflight=launch_preflight,
     )
-    env = _build_env(profile, _repo_session_env(config, worktree_path), work_dir=worktree_path)
+    env = _apply_assignment_env(
+        _build_env(
+            selection.profile,
+            _repo_session_env(config, worktree_path),
+            work_dir=worktree_path,
+        ),
+        selection,
+    )
 
+    result["worktree"] = _worktree_to_dict(record)
     result["launch"] = {
             "action": "exec",
             "work_dir": worktree_path,
@@ -1287,6 +1331,10 @@ def _create_worktree_core(
             "post_exit": True,
             "no_mux": no_mux,
     }
+    if selection.assignment is not None:
+        result["launch"]["profile_assignment"] = profile_assignment.metadata(
+            selection.assignment
+        )
     return result
 
 
@@ -1842,6 +1890,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     anchor_mode = wt_id == tracking.ANCHOR_ID
 
     mux_session = None
+    record = None
     if anchor_mode:
         if config is None:
             try:
@@ -1877,15 +1926,34 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     launch_preflight = _preflight_launch(config, args, work_dir)
     if launch_preflight.error:
         return _json_error(launch_preflight.error, exit_code=3)
+    try:
+        selection = _launch_profile_selection(
+            config,
+            args,
+            record,
+            lane="handoff-cutover",
+            generation_key=f"handoff:{session_id or wt_id}",
+            predecessor_session=session_id,
+            allocate_new=not getattr(args, "dry_run", False),
+        )
+    except profile_assignment.ProfileAssignmentError as exc:
+        return _json_error(str(exc), exit_code=3)
+    if record is not None:
+        _reflect_assignment(record, selection)
     launch_cmd = _build_launch_cmd(
         config,
         args,
         work_dir,
+        profile=selection.profile,
         preflight=launch_preflight,
     )
-    env = _build_env(
-        None, _repo_session_env(config, work_dir),
-        work_dir=work_dir,
+    env = _apply_assignment_env(
+        _build_env(
+            selection.profile,
+            _repo_session_env(config, work_dir),
+            work_dir=work_dir,
+        ),
+        selection,
     )
     # Keep the multi-word seed OUT of the pane command argv: psmux space-joins
     # that argv before CreateProcess and irreversibly splits it. mux_new_window
@@ -1909,12 +1977,17 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
     )
 
     if getattr(args, "dry_run", False):
-        _json_output({
+        dry_result = {
             "ok": True, "dry_run": True,
             "session": mux_session or sessions.mux_session_name(wt_id),
             "old_pane": old_pane, "work_dir": work_dir,
             "cmd": list(launch_cmd), "seed_len": len(seed),
-        })
+        }
+        if selection.assignment is not None:
+            dry_result["profile_assignment"] = profile_assignment.metadata(
+                selection.assignment
+            )
+        _json_output(dry_result)
         return 0
 
     result = sessions.mux_new_window(
@@ -1944,7 +2017,7 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         method="mux_new_window_interactive_argv",
     )
 
-    _json_output({
+    response = {
         "ok": True,
         "session": mux_session or sessions.mux_session_name(wt_id),
         "old_pane": old_pane,
@@ -1953,7 +2026,12 @@ def cmd_handoff_cutover(args: argparse.Namespace) -> int:
         "seeded": bool(result.get("prompt_received")),
         "seed_ready": bool(result.get("prompt_received")),
         "seed_method": "interactive-argv",
-    })
+    }
+    if selection.assignment is not None:
+        response["profile_assignment"] = profile_assignment.metadata(
+            selection.assignment
+        )
+    _json_output(response)
     return 0
 
 
@@ -2030,11 +2108,36 @@ def cmd_embody(args: argparse.Namespace) -> int:
         if launch_preflight.error:
             return _json_error(launch_preflight.error, exit_code=3)
 
+    record = None
+    selection = profile_assignment.LaunchProfileSelection(profile=None)
+    if not already:
+        try:
+            record = tracking.load_record(
+                cfg.tracking_dir() / f"{wt_id}.yaml"
+            )
+        except Exception:
+            if not make_new:
+                return _json_error(f"Worktree record not found: {wt_id}")
+        if record is not None:
+            try:
+                selection = _launch_profile_selection(
+                    config,
+                    args,
+                    record,
+                    lane="new",
+                    generation_key=f"new:{wt_id}",
+                    allocate_new=not getattr(args, "dry_run", False),
+                )
+                _reflect_assignment(record, selection)
+            except profile_assignment.ProfileAssignmentError as exc:
+                return _json_error(str(exc), exit_code=3)
+
     if getattr(args, "dry_run", False):
         launch_cmd = _build_launch_cmd(
             config,
             args,
             work_dir,
+            profile=selection.profile,
             preflight=launch_preflight,
         )
         _json_output({
@@ -2062,9 +2165,17 @@ def cmd_embody(args: argparse.Namespace) -> int:
         config,
         args,
         work_dir,
+        profile=selection.profile,
         preflight=launch_preflight,
     )
-    env = _build_env(None, _repo_session_env(config, work_dir), work_dir=work_dir)
+    env = _apply_assignment_env(
+        _build_env(
+            selection.profile,
+            _repo_session_env(config, work_dir),
+            work_dir=work_dir,
+        ),
+        selection,
+    )
     # D4: stamp the driver so the embodied session registers a "driven by
     # <agent>" banner (legible when a human takes it over in Neuron Forge).
     driver = getattr(args, "driver", None)
@@ -2100,7 +2211,7 @@ def cmd_embody(args: argparse.Namespace) -> int:
                 break
             time.sleep(0.3)
 
-    _json_output({
+    response = {
         "ok": True,
         "worktree_id": wt_id,
         "session": sessions.mux_session_name(wt_id),
@@ -2118,7 +2229,12 @@ def cmd_embody(args: argparse.Namespace) -> int:
             f"agent-bridge live-sessions | grep {wt_id}  "
             "(the embodied Copilot auto-registers with the local bridge)"
         ),
-    })
+    }
+    if selection.assignment is not None:
+        response["profile_assignment"] = profile_assignment.metadata(
+            selection.assignment
+        )
+    _json_output(response)
     return 0
 
 
@@ -2289,6 +2405,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 config = cfg.load_config()
             except Exception as e:
                 return _json_error(str(e))
+            try:
+                _validate_profile_assignment_config(config)
+            except profile_assignment.ProfileAssignmentError as exc:
+                return _json_error(str(exc), exit_code=3)
 
             repo = config.default_repo
             work_dir = repo.anchor
@@ -2318,6 +2438,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 config = cfg.load_config()
             except Exception as e:
                 return _json_error(str(e))
+            try:
+                _validate_profile_assignment_config(config)
+            except profile_assignment.ProfileAssignmentError as exc:
+                return _json_error(str(exc), exit_code=3)
 
             if use_new:
                 # --json --new: create a new worktree, return JSON plan
@@ -2379,48 +2503,73 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 resume_count=record.resume_count,
             )
 
-            launch_cmd = _build_launch_cmd(
-                config,
-                args,
-                record.worktree_path,
-                preflight=launch_preflight,
-            )
-            env = _build_env(
-                None, _repo_session_env(config, record.worktree_path),
-                work_dir=record.worktree_path,
-            )
-
             # Auto-resume session
             no_resume = getattr(args, "no_resume", False)
+            last_session = None
             if not no_resume:
                 last_session = sessions.find_latest_session_id_fast(
                     record.worktree_path, record.sessions,
                 )
-                if last_session:
-                    # copilot's --resume[=value] is an optional-value option;
-                    # the id MUST be attached with '=' or it is treated as a
-                    # stray operand ("unknown command").
-                    launch_cmd.append(f"--resume={last_session}")
-                else:
-                    # Fix B: never auto-resume a foreign ``parent_session`` --
-                    # it belongs to a different worktree, so Copilot's
-                    # resume-auto-cd would adopt its persisted cwd and launch
-                    # this tab in the parent's directory (worktree id/path
-                    # mismatch). Surface it as a hint only; keep this worktree's
-                    # own path.
-                    _emit_parent_context_hint(record, to_stderr=True)
+            explicit_profile = _resolve_profile(config, args)
+            try:
+                selection = _launch_profile_selection(
+                    config,
+                    args,
+                    record,
+                    lane="new",
+                    generation_key=f"new:{record.worktree_id}",
+                    explicit_profile=explicit_profile,
+                    resume_session=last_session,
+                )
+            except profile_assignment.ProfileAssignmentError as exc:
+                return _json_error(str(exc), exit_code=3)
+            _reflect_assignment(record, selection)
+            launch_cmd = _build_launch_cmd(
+                config,
+                args,
+                record.worktree_path,
+                profile=selection.profile,
+                preflight=launch_preflight,
+            )
+            env = _apply_assignment_env(
+                _build_env(
+                    selection.profile,
+                    _repo_session_env(config, record.worktree_path),
+                    work_dir=record.worktree_path,
+                ),
+                selection,
+            )
 
+            if last_session:
+                # copilot's --resume[=value] is an optional-value option;
+                # the id MUST be attached with '=' or it is treated as a
+                # stray operand ("unknown command").
+                launch_cmd.append(f"--resume={last_session}")
+            elif not no_resume:
+                # Fix B: never auto-resume a foreign ``parent_session`` --
+                # it belongs to a different worktree, so Copilot's
+                # resume-auto-cd would adopt its persisted cwd and launch
+                # this tab in the parent's directory (worktree id/path
+                # mismatch). Surface it as a hint only; keep this worktree's
+                # own path.
+                _emit_parent_context_hint(record, to_stderr=True)
+
+            launch = {
+                "action": "exec",
+                "work_dir": record.worktree_path,
+                "cmd": launch_cmd,
+                "env": env,
+                "worktree_id": record.worktree_id,
+                "post_exit": True,
+                "no_mux": True,
+            }
+            if selection.assignment is not None:
+                launch["profile_assignment"] = profile_assignment.metadata(
+                    selection.assignment
+                )
             _json_output({
                 "worktree": _worktree_to_dict(record),
-                "launch": {
-                    "action": "exec",
-                    "work_dir": record.worktree_path,
-                    "cmd": launch_cmd,
-                    "env": env,
-                    "worktree_id": record.worktree_id,
-                    "post_exit": True,
-                    "no_mux": True,
-                },
+                "launch": launch,
             })
             return 0
 
@@ -2757,7 +2906,14 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 
             # Build profile labels for the picker toggle
             profiles = config.copilot_profiles or [cfg.DEFAULT_PROFILE]
+            assignment_armed = bool(
+                config.profile_assignment
+                and config.profile_assignment.armed
+                and not getattr(args, "profile", None)
+            )
             profile_labels = [p.label for p in profiles]
+            if assignment_armed:
+                profile_labels.insert(0, "Balanced assignment")
 
             # Resolve --profile flag to a default index
             profile_default = 0
@@ -2790,7 +2946,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 return 0
 
             sel = result.selected
-            selected_profile = profiles[result.profile_idx]
+            selected_profile, explicit_profile = _picker_profile_choice(
+                profiles,
+                assignment_armed=assignment_armed,
+                profile_idx=result.profile_idx,
+            )
             action, value = menu_items[sel].value  # type: ignore[misc]
 
             # System menu via selectable ⚙ item
@@ -2832,10 +2992,21 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             # --- Resume ---
             if action == "worktree":
                 rec = value  # type: ignore[assignment]
-                return _resolve_resume(rec, config, args, profile=selected_profile)
+                return _resolve_resume(
+                    rec,
+                    config,
+                    args,
+                    profile=selected_profile,
+                    profile_is_explicit=explicit_profile is not None,
+                )
 
             # --- New worktree ---
-            return _resolve_new(config, args, profile=selected_profile)
+            return _resolve_new(
+                config,
+                args,
+                profile=selected_profile,
+                profile_is_explicit=explicit_profile is not None,
+            )
 
 
 def _run_system_menu(config: cfg.Config, args: argparse.Namespace) -> int | None:
@@ -3588,12 +3759,157 @@ def _resolve_profile(
     return None
 
 
+def _picker_profile_choice(
+    profiles: list[cfg.CopilotProfile],
+    *,
+    assignment_armed: bool,
+    profile_idx: int,
+) -> tuple[cfg.CopilotProfile, cfg.CopilotProfile | None]:
+    """Return the ordinary picker profile and any manual authority override."""
+    if assignment_armed and profile_idx == 0:
+        return profiles[0], None
+    selected = profiles[
+        profile_idx - 1 if assignment_armed else profile_idx
+    ]
+    return selected, selected
+
+
+def _validate_profile_assignment_config(config: cfg.Config) -> None:
+    """Validate authoritative assignment config before launch-class filtering."""
+    profile_assignment.validate_policy(
+        getattr(config, "profile_assignment", None),
+        getattr(config, "copilot_profiles", []),
+    )
+
+
+def _launch_profile_selection(
+    config: cfg.Config,
+    args: argparse.Namespace,
+    record: tracking.WorktreeRecord | None,
+    *,
+    lane: str,
+    generation_key: str,
+    ordinary_profile: cfg.CopilotProfile | None = None,
+    explicit_profile: cfg.CopilotProfile | None = None,
+    resume_session: str | None = None,
+    predecessor_session: str | None = None,
+    allocate_new: bool = True,
+) -> profile_assignment.LaunchProfileSelection:
+    """Resolve manual, replayed, or newly allocated launch profile identity."""
+    policy = getattr(config, "profile_assignment", None)
+    _validate_profile_assignment_config(config)
+    if explicit_profile is not None or getattr(args, "profile", None):
+        return profile_assignment.LaunchProfileSelection(
+            profile=explicit_profile
+        )
+    if (
+        getattr(args, "recovery", False)
+        or getattr(args, "emergency", False)
+    ):
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    if record is None:
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    copilot_args = getattr(args, "copilot_args", []) or []
+    if (
+        "--acp" in copilot_args
+        or getattr(record, "resolved_interface", "cli") != "cli"
+    ):
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    if (
+        getattr(record, "resolved_origin", "user") != "user"
+        or getattr(record, "kind", "session") != "session"
+    ):
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    if resume_session:
+        return profile_assignment.replay(
+            profile_assignment.assignment_for_session(record, resume_session),
+            getattr(config, "copilot_profiles", []),
+            fallback_profile=ordinary_profile,
+        )
+    if not allocate_new:
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    if policy is None:
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    if not policy.armed:
+        return profile_assignment.LaunchProfileSelection(
+            profile=ordinary_profile
+        )
+    return profile_assignment.allocate_best_effort(
+        policy,
+        getattr(config, "copilot_profiles", []),
+        fallback_profile=ordinary_profile,
+        worktree_id=getattr(record, "worktree_id", generation_key),
+        lane=lane,
+        generation_key=generation_key,
+        predecessor_session_id=predecessor_session,
+    )
+
+
+def _apply_assignment_env(
+    env: dict[str, str],
+    selection: profile_assignment.LaunchProfileSelection,
+) -> dict[str, str]:
+    """Add the durable assignment token to the launched session environment."""
+    if not selection.launch_token:
+        return env
+    merged = dict(env)
+    merged[profile_assignment.ASSIGNMENT_TOKEN_ENV] = (
+        selection.launch_token
+    )
+    return merged
+
+
+def _reflect_assignment(
+    record: tracking.WorktreeRecord,
+    selection: profile_assignment.LaunchProfileSelection,
+) -> None:
+    """Reflect a just-persisted assignment in an already-loaded record object."""
+    assignment = selection.assignment
+    if assignment is None:
+        return
+    identity = (
+        assignment.policy,
+        assignment.bag_generation,
+        assignment.bag_position,
+        assignment.assigned_at,
+    )
+    record.profile_assignments = [
+        item
+        for item in record.profile_assignments
+        if (
+            item.policy,
+            item.bag_generation,
+            item.bag_position,
+            item.assigned_at,
+        ) != identity
+    ]
+    record.profile_assignments.append(assignment)
+
+
 def _resolve_base_repo(
     config: cfg.Config,
     args: argparse.Namespace,
     profile: cfg.CopilotProfile | None = None,
 ) -> int:
     """Resolve launch plan for base repo mode."""
+    try:
+        _validate_profile_assignment_config(config)
+    except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     repo = config.default_repo
     launch_preflight = _preflight_launch(config, args, repo.anchor)
     if launch_preflight.error:
@@ -3814,8 +4130,15 @@ def _resolve_resume(
     config: cfg.Config,
     args: argparse.Namespace,
     profile: cfg.CopilotProfile | None = None,
+    profile_is_explicit: bool = True,
 ) -> int:
     """Resolve launch plan for resuming an existing worktree."""
+    try:
+        _validate_profile_assignment_config(config)
+    except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     print()
     print(f"🌳 Resuming worktree: {record.worktree_id}")
     print(f"   Path: {record.worktree_path}")
@@ -3911,16 +4234,47 @@ def _resolve_resume(
         elif ff.reason in ("ahead", "diverged"):
             print(f"   ⚠ Local commits present -- skipping auto-update ({ff.reason})")
 
+    # Resolve the session generation before constructing argv. A persisted
+    # session assignment replays even when the policy has since been disarmed;
+    # a true cold/new generation draws only when the policy is currently armed.
+    resume_target = None
+    if not getattr(args, "no_resume", False):
+        resume_target = sessions.resolve_resume_target(record)
+    try:
+        selection = _launch_profile_selection(
+            config,
+            args,
+            record,
+            lane="new",
+            generation_key=f"new:{record.worktree_id}",
+            ordinary_profile=profile,
+            explicit_profile=profile if profile_is_explicit else None,
+            resume_session=resume_target,
+            allocate_new=(
+                not args.dry_run
+                and not bool(_verdict and _verdict.mux_live)
+            ),
+        )
+    except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
+    _reflect_assignment(record, selection)
+
     launch_cmd = _build_launch_cmd(
         config,
         args,
         record.worktree_path,
-        profile=profile,
+        profile=selection.profile,
         preflight=launch_preflight,
     )
-    merged_env = _build_env(
-        profile, _repo_session_env(config, record.worktree_path),
-        work_dir=record.worktree_path,
+    merged_env = _apply_assignment_env(
+        _build_env(
+            selection.profile,
+            _repo_session_env(config, record.worktree_path),
+            work_dir=record.worktree_path,
+        ),
+        selection,
     )
 
     # Deprecated advanced "Bare resume": launch Copilot in HOME instead of the
@@ -3934,12 +4288,16 @@ def _resolve_resume(
             config,
             args,
             plan_work_dir,
-            profile=profile,
+            profile=selection.profile,
             preflight=launch_preflight,
         )
-        merged_env = _build_env(
-            profile, _repo_session_env(config, plan_work_dir),
-            work_dir=plan_work_dir,
+        merged_env = _apply_assignment_env(
+            _build_env(
+                selection.profile,
+                _repo_session_env(config, plan_work_dir),
+                work_dir=plan_work_dir,
+            ),
+            selection,
         )
 
     # Auto-resume target: the ONE session Open / Resume / Bare resume all agree
@@ -3950,10 +4308,6 @@ def _resolve_resume(
     # every entry mode: a plain Resume/Open passes it to ``--resume``; Bare
     # resume surfaces it as the ``/resume`` id and binds the session back to the
     # worktree. ``None`` means genuinely nothing to resume (cold start).
-    resume_target = None
-    if not getattr(args, "no_resume", False):
-        resume_target = sessions.resolve_resume_target(record)
-
     no_resume = getattr(args, "no_resume", False) or bare_resume
     if not no_resume:
         if resume_target:
@@ -3998,7 +4352,7 @@ def _resolve_resume(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
-    _emit_plan({
+    plan = {
         "action": "exec",
         "work_dir": plan_work_dir,
         # The mux status bar (status-updater --path) must render the *worktree's*
@@ -4012,7 +4366,12 @@ def _resolve_resume(
         "worktree_id": record.worktree_id,
         "post_exit": True,
         "no_mux": getattr(args, "no_mux", False),
-    })
+    }
+    if selection.assignment is not None:
+        plan["profile_assignment"] = profile_assignment.metadata(
+            selection.assignment
+        )
+    _emit_plan(plan)
     return 0
 
 
@@ -4020,8 +4379,15 @@ def _resolve_new(
     config: cfg.Config,
     args: argparse.Namespace,
     profile: cfg.CopilotProfile | None = None,
+    profile_is_explicit: bool = True,
 ) -> int:
     """Resolve launch plan for creating a new worktree."""
+    try:
+        _validate_profile_assignment_config(config)
+    except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     repo = config.default_repo
     plat = cfg.detect_platform()
     plat_short = "win" if plat == "windows" else plat
@@ -4068,14 +4434,22 @@ def _resolve_new(
         _emit_plan({"action": "none", "exit_code": 0})
         return 0
 
-    result = _create_worktree_core(
-        config, profile=profile, no_mux=getattr(args, "no_mux", False),
-        parent_session=getattr(args, "parent_session", None),
-        caller_worktree=getattr(args, "caller_worktree", None),
-        owner_ref=getattr(args, "owner_ref", None),
-        launch_preflight=launch_preflight,
-        recovery=getattr(args, "recovery", False),
-    )
+    try:
+        result = _create_worktree_core(
+            config,
+            profile=profile,
+            profile_is_explicit=profile_is_explicit,
+            no_mux=getattr(args, "no_mux", False),
+            parent_session=getattr(args, "parent_session", None),
+            caller_worktree=getattr(args, "caller_worktree", None),
+            owner_ref=getattr(args, "owner_ref", None),
+            launch_preflight=launch_preflight,
+            recovery=getattr(args, "recovery", False),
+        )
+    except profile_assignment.ProfileAssignmentError as exc:
+        output.err(str(exc))
+        _emit_plan({"action": "error", "error": str(exc), "exit_code": 3})
+        return 3
     _emit_plan({
         "action": "exec",
         **result["launch"],
@@ -5693,6 +6067,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if getattr(args, "history", False):
         return _cmd_status_history(args)
 
+    profile_assignment.maintain()
     tracking_path = cfg.tracking_dir()
 
     records = tracking.list_records(tracking_path)
@@ -7133,7 +7508,11 @@ def _cmd_list_stream(args: argparse.Namespace, records) -> int:
         wt = _worktree_to_dict(
             rec, mux_info=mux_map.get(rec.worktree_id),
             session_ctx=session_ctx, state_info=state_info,
-            bare_orphan_wts=bare_orphan_wts)
+            bare_orphan_wts=bare_orphan_wts,
+            include_profile_assignment_history=getattr(
+                args, "profile_assignment_history", False
+            ),
+        )
         title = wt.get("title")
         if not title or title == "null":
             wt["title"] = session_ctx.latest_summary.get(
@@ -7340,6 +7719,9 @@ def _build_list_json_payload(
             state_info=state_map.get(rec.worktree_id),
             bare_orphan_wts=bare_orphan_wts,
             bridge_live_wts=bridge_live_wts,
+            include_profile_assignment_history=getattr(
+                args, "profile_assignment_history", False
+            ),
         )
         for rec in records
     ]
@@ -7414,11 +7796,13 @@ def cmd_list(args: argparse.Namespace) -> int:
     if getattr(args, "glance", False):
         # Compact situational-awareness digest -- active worktrees only, title +
         # disposition summary, ranked by recency; consumed by agents/sub-agents.
+        profile_assignment.maintain()
         return _cmd_list_glance(records)
 
     if getattr(args, "stream", False):
         # NDJSON streaming path (implies --json): the Picker's streaming SSH
         # consumer reads rows progressively over one connection.
+        profile_assignment.maintain()
         return _cmd_list_stream(args, records)
 
     if args.json:
@@ -7430,7 +7814,12 @@ def cmd_list(args: argparse.Namespace) -> int:
             from .picker_tui.data_local import _overlay_cached_state
             worktrees = []
             for rec in records:
-                raw = _worktree_to_dict(rec)
+                raw = _worktree_to_dict(
+                    rec,
+                    include_profile_assignment_history=getattr(
+                        args, "profile_assignment_history", False
+                    ),
+                )
                 if rec.session_summary and not (
                         raw.get("title") and raw["title"] != "null"):
                     raw["title"] = rec.session_summary
@@ -7469,6 +7858,7 @@ def cmd_list(args: argparse.Namespace) -> int:
             if isinstance(_cached, dict) and "worktrees" in _cached:
                 _json_output(_cached)
                 return 0
+        profile_assignment.maintain()
         _payload = _build_list_json_payload(args, records)
         if _lc_key:
             list_cache.write(_lc_key, _payload)
@@ -7476,9 +7866,11 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     if not records:
+        profile_assignment.maintain()
         print("No tracked worktrees.")
         return 0
 
+    profile_assignment.maintain()
     # Light session scan for display text (names/summaries)
     session_ctx = sessions.scan_sessions_fast(records)
 
@@ -16706,6 +17098,13 @@ def build_parser() -> argparse.ArgumentParser:
                         "classify. Never-populated worktrees render Unknown. "
                         "Used by the Picker's SSH fast phase; a --classify "
                         "populate later fills + writes the cache back.")
+    p.add_argument(
+        "--profile-assignment-history",
+        action="store_true",
+        help="Include bounded profile_assignments history and the latest "
+             "assignment in each JSON worktree row. Ordinary and cache-polled "
+             "rows include only current_profile_assignment.",
+    )
     p.add_argument("--stream", action="store_true",
                    help="Emit newline-delimited JSON (one worktree per line, "
                         "flushed) for the Picker's streaming SSH consumer: a "
@@ -17390,6 +17789,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="Mux pane id (defaults to TMUX_PANE/PSMUX_PANE)")
     sp.add_argument("--launch-id", dest="launch_id", default=None,
                     help="Launch-flow correlation id (from WORKTREE_LAUNCH_ID)")
+    sp.add_argument("--assignment-token", dest="assignment_token", default=None,
+                    help="Profile-assignment launch token (normally from the "
+                         "session environment)")
     sp.add_argument("--emit-context", action="store_true",
                     help="Emit sessionStart additionalContext for the recovered binding")
     sp.add_argument("--handoff-token", default=None,
@@ -17425,6 +17827,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="PID of the Copilot process (diagnostic only)")
     sp.add_argument("--handoff-token", default=None,
                     help="Exact pending handoff token this successor consumes")
+    sp.add_argument("--assignment-token", dest="assignment_token", default=None,
+                    help="Profile-assignment launch token (normally from the "
+                         "session environment)")
 
     # bind-nudge -- postToolUse hook: nudge an unbound-but-active session to bind
     sp = sub.add_parser(
@@ -17835,6 +18240,13 @@ def cmd_register_session(args: argparse.Namespace) -> int:
     except Exception as e:
         output.err(f"Failed to register session: {e}")
         return 1
+    profile_assignment.bind(
+        getattr(args, "assignment_token", None)
+        or os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV),
+        session_id,
+        wt_id,
+    )
+    profile_assignment.maintain()
     activity.log_event(
         "session_started",
         worktree_id=wt_id,
@@ -18004,6 +18416,12 @@ def cmd_bind_session(args: argparse.Namespace) -> int:
             pane_id=pane_id,
             source="bind",
             handoff_token=getattr(args, "handoff_token", None),
+        )
+        profile_assignment.bind(
+            getattr(args, "assignment_token", None)
+            or os.environ.get(profile_assignment.ASSIGNMENT_TOKEN_ENV),
+            session_id,
+            wt_id,
         )
     except Exception as e:
         return _json_error(f"failed to bind session: {e}")
@@ -18833,6 +19251,13 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
             session_id = row.get("id")
             if not isinstance(session_id, str) or not session_id:
                 continue
+            assignment = profile_assignment.assignment_for_session(
+                rec, session_id
+            )
+            if assignment is not None:
+                row["profile_assignment"] = profile_assignment.metadata(
+                    assignment
+                )
             existing = by_session.get(session_id)
             if existing is None:
                 by_session[session_id] = row

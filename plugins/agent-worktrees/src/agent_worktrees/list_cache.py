@@ -48,6 +48,7 @@ _OFF = frozenset({"0", "off", "false", "no"})
 #: The ``cmd_list`` args that change the JSON payload -- the cache key axes.
 _KEY_ARGS = (
     "classify", "mux_details", "all", "include_other_platforms",
+    "profile_assignment_history",
 )
 
 
