@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
 
@@ -125,7 +128,101 @@ def knowledge_origin(knowledge_path: str) -> str:
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""
-    return result.stdout.strip() if result.returncode == 0 else ""
+    return sanitize_remote(result.stdout.strip()) if result.returncode == 0 else ""
+
+
+def sanitize_remote(remote: str) -> str:
+    """Remove HTTP(S) userinfo before registration, output, or persistence."""
+    if not remote or "://" not in remote:
+        return remote
+    parsed = urlsplit(remote)
+    if parsed.scheme.lower() not in {"http", "https"} or parsed.hostname is None:
+        return remote
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+    return urlunsplit(
+        (parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)
+    )
+
+
+def knowledge_default_branch(knowledge_path: str) -> str:
+    path = Path(knowledge_path).resolve()
+    if not knowledge_path or not path.is_dir():
+        return ""
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "ls-remote",
+                "--symref",
+                "origin",
+                "HEAD",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result is not None and result.returncode == 0:
+        for line in result.stdout.splitlines():
+            line = line.strip()
+            if line.startswith("ref:") and "HEAD" in line:
+                ref = line[len("ref:"):].split("\t", 1)[0].strip()
+                if ref.startswith("refs/heads/"):
+                    return ref.removeprefix("refs/heads/")
+
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(path),
+                "symbolic-ref",
+                "--quiet",
+                "--short",
+                "refs/remotes/origin/HEAD",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().removeprefix("origin/")
+
+    for candidate in ("main", "master"):
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(path),
+                    "rev-parse",
+                    "--verify",
+                    "--quiet",
+                    f"refs/remotes/origin/{candidate}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
+        if result.returncode == 0:
+            return candidate
+    return ""
 
 
 def classify_origin(remote: str) -> tuple[str, str]:
@@ -162,6 +259,468 @@ def classify_origin(remote: str) -> tuple[str, str]:
     ):
         return "azure-devops", ""
     return "other", ""
+
+
+def _run_agent_worktrees(
+    agent_worktrees_path: str,
+    args: list[str],
+    *,
+    cwd: str = "",
+    noninteractive: bool = False,
+) -> subprocess.CompletedProcess[str] | None:
+    if not agent_worktrees_path:
+        return None
+    command = _agent_worktrees_command(agent_worktrees_path, args)
+    if not command:
+        return None
+    try:
+        return subprocess.run(
+            command,
+            cwd=cwd or None,
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL if noninteractive else None,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def _same_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    return os.path.normcase(os.path.abspath(os.path.expanduser(left))) == os.path.normcase(
+        os.path.abspath(os.path.expanduser(right))
+    )
+
+
+def _current_platform_key() -> str:
+    if sys.platform == "win32":
+        return "windows"
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return "wsl"
+    return "linux"
+
+
+def _registration_argv(
+    knowledge: str,
+    knowledge_path: str,
+    *,
+    remote: str,
+    default_branch: str,
+    account: str,
+) -> list[str]:
+    argv = [
+        "repos",
+        "add",
+        knowledge,
+        knowledge_path,
+        "--class",
+        "worktree",
+    ]
+    if remote:
+        argv.extend(["--remote", remote])
+    if default_branch:
+        argv.extend(["--default-branch", default_branch])
+    if account:
+        argv.extend(["--account", account])
+    return argv
+
+
+def _agent_worktrees_command(
+    agent_worktrees_path: str,
+    args: list[str],
+) -> list[str]:
+    if (
+        os.name == "nt"
+        and Path(agent_worktrees_path).suffix.casefold() == ".ps1"
+    ):
+        host = shutil.which("pwsh.exe") or shutil.which("powershell.exe")
+        if not host:
+            return []
+        return [
+            host,
+            "-NoProfile",
+            "-NoLogo",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            agent_worktrees_path,
+            *args,
+        ]
+    return [agent_worktrees_path, *args]
+
+
+def _render_command(command: list[str]) -> str:
+    if os.name == "nt":
+        quoted = ["'" + value.replace("'", "''") + "'" for value in command]
+        return "& " + " ".join(quoted)
+    return shlex.join(command)
+
+
+def _inspect_github_account(
+    agent_worktrees_path: str,
+    remote: str,
+    account: str,
+) -> tuple[str, str]:
+    provider, repo = classify_origin(remote)
+    if provider != "github" or not repo:
+        return "not_applicable", ""
+    if not account:
+        return "not_ready", "canonical registration has no resolved GitHub account"
+    result = _run_agent_worktrees(
+        agent_worktrees_path,
+        ["repos", "gh", repo, "--", "api", "user", "--jq", ".login"],
+    )
+    if result is None:
+        return "unverified", "repository-scoped GitHub account check could not run"
+    login = result.stdout.strip()
+    used_ambient_auth = "using ambient auth" in result.stderr.casefold()
+    if (
+        result.returncode == 0
+        and login.casefold() == account.casefold()
+        and not used_ambient_auth
+    ):
+        return "ready", ""
+    detail = result.stderr.strip() or result.stdout.strip() or "account check failed"
+    return (
+        "not_ready",
+        f"resolved account {account} is not usable for {repo}: {detail}",
+    )
+
+
+def inspect_registration(
+    knowledge: str,
+    knowledge_path: str,
+    agent_worktrees_path: str,
+    account_override: str = "",
+) -> dict[str, object]:
+    """Inspect canonical registration without mistaking fallback discovery for it."""
+    remote = knowledge_origin(knowledge_path)
+    default_branch = knowledge_default_branch(knowledge_path)
+    account = ""
+    base = {
+        "status": "unverified",
+        "canonical": False,
+        "path_source": "unverified",
+        "name": knowledge,
+        "expected_path": str(Path(knowledge_path).resolve()) if knowledge_path else "",
+        "resolved_path": "",
+        "class": "",
+        "remote": remote,
+        "default_branch": default_branch,
+        "account": "",
+        "account_status": "unverified",
+        "reason": "agent-worktrees command was not supplied or could not be invoked",
+        "registration_argv": [],
+        "registration_command": "",
+    }
+    listed = _run_agent_worktrees(
+        agent_worktrees_path,
+        ["repos", "list", "--json"],
+    )
+    if listed is None:
+        return base
+    if listed.returncode != 0:
+        base["reason"] = listed.stderr.strip() or "agent-worktrees repos list failed"
+        return base
+    try:
+        payload = json.loads(listed.stdout)
+        entries = payload.get("repos", [])
+    except (json.JSONDecodeError, AttributeError):
+        base["reason"] = "agent-worktrees repos list returned invalid JSON"
+        return base
+
+    entry = next(
+        (
+            item
+            for item in entries
+            if isinstance(item, dict)
+            and str(item.get("name", "")) == knowledge
+        ),
+        None,
+    )
+    case_collision = next(
+        (
+            item
+            for item in entries
+            if isinstance(item, dict)
+            and str(item.get("name", "")).casefold() == knowledge.casefold()
+        ),
+        None,
+    )
+    if entry is None and case_collision is not None:
+        collision_name = str(case_collision.get("name", "") or "")
+        return {
+            **base,
+            "status": "mismatch",
+            "path_source": "canonical_registry",
+            "resolved_path": str(
+                (case_collision.get("paths") or {}).get(
+                    _current_platform_key(),
+                    "",
+                )
+            ),
+            "class": str(case_collision.get("class", "") or ""),
+            "remote": sanitize_remote(
+                str(case_collision.get("remote", "") or remote)
+            ),
+            "default_branch": str(
+                case_collision.get("default_branch", "") or default_branch
+            ),
+            "account": str(
+                case_collision.get("resolved_account", "")
+                or case_collision.get("account", "")
+                or ""
+            ),
+            "account_status": "unverified",
+            "reason": (
+                f"canonical registry name is {collision_name}; "
+                f"binding name {knowledge} differs only by case"
+            ),
+        }
+    if entry is not None:
+        paths = entry.get("paths") if isinstance(entry.get("paths"), dict) else {}
+        resolved_path = str(paths.get(_current_platform_key(), "") or "")
+        repo_class = str(entry.get("class", "") or "")
+        account = str(entry.get("resolved_account", "") or entry.get("account", "") or "")
+        explicit_account = str(entry.get("account", "") or "")
+        registered_remote_raw = str(entry.get("remote", "") or "")
+        registered_remote = sanitize_remote(registered_remote_raw)
+        registered_branch = str(entry.get("default_branch", "") or "")
+        account_status, account_reason = _inspect_github_account(
+            agent_worktrees_path,
+            registered_remote or remote,
+            account,
+        )
+        effective_remote = remote or registered_remote
+        effective_branch = default_branch or registered_branch
+        repair_argv = _registration_argv(
+            knowledge,
+            knowledge_path,
+            remote=effective_remote,
+            default_branch=effective_branch,
+            account=account_override or explicit_account,
+        )
+        mismatches = []
+        if repo_class != "worktree":
+            mismatches.append(f"class is {repo_class or 'unset'}, expected worktree")
+        if not _same_path(resolved_path, knowledge_path):
+            mismatches.append(
+                f"registered path is {resolved_path or 'unset'}, expected {knowledge_path}"
+            )
+        if remote and registered_remote != remote:
+            mismatches.append(
+                f"registered remote is {registered_remote or 'unset'}, expected {remote}"
+            )
+        if registered_remote_raw != registered_remote:
+            mismatches.append(
+                "registered remote contains HTTP(S) userinfo and must be sanitized"
+            )
+        if default_branch and registered_branch != default_branch:
+            mismatches.append(
+                f"registered default branch is {registered_branch or 'unset'}, "
+                f"expected {default_branch}"
+            )
+        if not (registered_branch or default_branch):
+            mismatches.append(
+                "default branch is unset and could not be determined from the remote"
+            )
+        if account_status in {"not_ready", "unverified"}:
+            mismatches.append(account_reason)
+        if account_override and account.casefold() != account_override.casefold():
+            mismatches.append(
+                f"resolved account is {account or 'unset'}, expected {account_override}"
+            )
+        account_repairable = bool(account_override)
+        if account_status in {"not_ready", "unverified"} and not account_repairable:
+            mismatches.append(
+                "pass --account <login> to repair the repository account mapping"
+            )
+            repair_argv = []
+        return {
+            **base,
+            "status": "mismatch" if mismatches else "ready",
+            "canonical": True,
+            "path_source": "canonical_registry",
+            "resolved_path": resolved_path,
+            "class": repo_class,
+            "remote": registered_remote or remote,
+            "default_branch": registered_branch or default_branch,
+            "account": account,
+            "account_status": account_status,
+            "reason": "; ".join(mismatches),
+            "registration_argv": repair_argv if mismatches and repair_argv else [],
+            "registration_command": (
+                _render_command(
+                    _agent_worktrees_command(
+                        agent_worktrees_path,
+                        repair_argv,
+                    )
+                )
+                if mismatches and repair_argv
+                else ""
+            ),
+        }
+
+    account = ""
+    fallback = _run_agent_worktrees(
+        agent_worktrees_path,
+        ["repos", "find", knowledge, "--json"],
+    )
+    resolved_path = ""
+    path_source = "unresolved"
+    if fallback is not None and fallback.returncode == 0:
+        try:
+            fallback_payload = json.loads(fallback.stdout)
+            resolved_path = str(fallback_payload.get("path", "") or "")
+        except (json.JSONDecodeError, AttributeError):
+            resolved_path = ""
+        if resolved_path:
+            path_source = "fallback_discovery"
+    register_argv = _registration_argv(
+        knowledge,
+        knowledge_path,
+        remote=remote,
+        default_branch=default_branch,
+        account=account_override,
+    )
+    return {
+        **base,
+        "status": "missing",
+        "path_source": path_source,
+        "resolved_path": resolved_path,
+        "account": account,
+        "account_status": "unverified",
+        "reason": "knowledge repo is absent from the canonical registry",
+        "registration_argv": register_argv,
+        "registration_command": _render_command(
+            _agent_worktrees_command(
+                agent_worktrees_path,
+                register_argv,
+            )
+        ),
+    }
+
+
+def ensure_registration(
+    knowledge: str,
+    knowledge_path: str,
+    agent_worktrees_path: str,
+    account_override: str = "",
+) -> dict[str, object]:
+    registration = inspect_registration(
+        knowledge,
+        knowledge_path,
+        agent_worktrees_path,
+        account_override,
+    )
+    if registration["status"] == "ready":
+        return registration
+    if not registration.get("default_branch"):
+        raise RuntimeError(
+            "knowledge repo default branch is unknown; fetch origin/HEAD or "
+            "register the repo with an explicit default branch"
+        )
+    argv = registration.get("registration_argv")
+    if not agent_worktrees_path or not isinstance(argv, list) or not argv:
+        raise RuntimeError(str(registration["reason"]))
+    result = _run_agent_worktrees(
+        agent_worktrees_path,
+        argv,
+        noninteractive=True,
+    )
+    if result is None:
+        raise RuntimeError("agent-worktrees registration command could not be invoked")
+    if result.returncode != 0:
+        raise RuntimeError(
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "agent-worktrees registration failed"
+        )
+    registration = inspect_registration(
+        knowledge,
+        knowledge_path,
+        agent_worktrees_path,
+        account_override,
+    )
+    if registration["status"] != "ready":
+        detail = result.stderr.strip() or result.stdout.strip()
+        suffix = f"; registration output: {detail}" if detail else ""
+        raise RuntimeError(
+            "canonical knowledge-repo registration is still not ready: "
+            + str(registration["reason"])
+            + suffix
+        )
+    return registration
+
+
+def inspect_state_root(
+    knowledge: str,
+    knowledge_path: str,
+    harness_path: str,
+    agent_worktrees_path: str,
+) -> dict[str, object]:
+    if not harness_path or not Path(harness_path).is_dir():
+        return {
+            "status": "unverified",
+            "bound": False,
+            "repo": "",
+            "state_root": "",
+            "reason": "harness checkout path is unavailable",
+        }
+    result = _run_agent_worktrees(
+        agent_worktrees_path,
+        ["state-root", "--json"],
+        cwd=harness_path,
+    )
+    if result is None:
+        return {
+            "status": "unverified",
+            "bound": False,
+            "repo": "",
+            "state_root": "",
+            "reason": "agent-worktrees command was not supplied or could not be invoked",
+        }
+    if result.returncode != 0:
+        return {
+            "status": "not_ready",
+            "bound": False,
+            "repo": "",
+            "state_root": "",
+            "reason": result.stderr.strip() or "agent-worktrees state-root failed",
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {
+            "status": "unverified",
+            "bound": False,
+            "repo": "",
+            "state_root": "",
+            "reason": "agent-worktrees state-root returned invalid JSON",
+        }
+    bound = bool(payload.get("bound"))
+    repo = str(payload.get("repo", "") or "")
+    state_root = str(payload.get("state_root", "") or "")
+    ready = (
+        bound
+        and repo.casefold() == knowledge.casefold()
+        and _same_path(state_root, knowledge_path)
+    )
+    reason = str(payload.get("error", "") or "")
+    if not ready and not reason:
+        reason = (
+            f"state-root resolved repo={repo or 'unset'} "
+            f"path={state_root or 'unset'}"
+        )
+    return {
+        "status": "ready" if ready else "not_ready",
+        "bound": bound,
+        "repo": repo,
+        "state_root": state_root,
+        "reason": reason,
+    }
 
 
 def inspect_issue_routing(knowledge_path: str) -> dict[str, str]:
@@ -279,9 +838,27 @@ def bind(
     harness_path: str = "",
     product_repos: list[tuple[str, str]] | None = None,
     assemble_plugins: bool = True,
+    agent_worktrees_path: str = "",
+    register: bool = False,
+    account: str = "",
 ) -> dict:
     """Write the machine-local binding. Idempotent. Returns a summary dict."""
     del product_repos  # Retained as a compatibility argument for existing callers.
+    registration = (
+        ensure_registration(
+            knowledge,
+            knowledge_path,
+            agent_worktrees_path,
+            account,
+        )
+        if register
+        else inspect_registration(
+            knowledge,
+            knowledge_path,
+            agent_worktrees_path,
+            account,
+        )
+    )
     base = Path(home) / f".{harness}"
     base.mkdir(parents=True, exist_ok=True)
 
@@ -311,6 +888,13 @@ def bind(
         "knowledge_repo": knowledge,
         "knowledge_path": knowledge_path,
         "config": str(cfg),
+        "registration": registration,
+        "state_root": inspect_state_root(
+            knowledge,
+            knowledge_path,
+            harness_path,
+            agent_worktrees_path,
+        ),
         "issues": inspect_issue_routing(knowledge_path),
     }
 
@@ -355,6 +939,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--knowledge-path", default="", help="Local checkout path of the knowledge repo.")
     p.add_argument("--harness-path", default="", help="Local checkout path of the harness (for the label).")
     p.add_argument(
+        "--agent-worktrees-path",
+        default="",
+        help="Exact agent-worktrees argv[0] from its session command catalog.",
+    )
+    p.add_argument(
+        "--register",
+        action="store_true",
+        help="Idempotently create or repair the canonical worktree-class registration.",
+    )
+    p.add_argument(
+        "--account",
+        default="",
+        help="Writable GitHub login to persist when account mapping needs repair.",
+    )
+    p.add_argument(
         "--product",
         action="append",
         default=[],
@@ -365,18 +964,53 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true", help="Emit the summary as JSON.")
     args = p.parse_args(argv)
 
-    summary = bind(
-        args.harness, args.knowledge, args.knowledge_path,
-        home=Path(args.home), harness_path=args.harness_path,
-        product_repos=_parse_products(args.product),
-    )
+    try:
+        summary = bind(
+            args.harness, args.knowledge, args.knowledge_path,
+            home=Path(args.home), harness_path=args.harness_path,
+            product_repos=_parse_products(args.product),
+            agent_worktrees_path=args.agent_worktrees_path,
+            register=args.register,
+            account=args.account,
+        )
+    except RuntimeError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     if args.json:
         print(json.dumps(summary, indent=2))
     else:
         print(f"Bound {args.harness} -> knowledge_repo: {args.knowledge}")
         print(f"  pointer:      {summary['config']}")
-        print("Next: register the knowledge repo so state-root can resolve it, e.g.")
-        print(f"  agent-worktrees repos add {args.knowledge} \"{args.knowledge_path or '<path>'}\" --class worktree")
+        registration = summary["registration"]
+        print(
+            "Knowledge registration: "
+            f"{registration['status']} ({registration['path_source']})"
+        )
+        if registration["canonical"]:
+            print(
+                f"  class: {registration['class'] or 'unset'}; "
+                f"path: {registration['resolved_path'] or 'unset'}"
+            )
+            print(
+                f"  remote: {registration['remote'] or 'unset'}; "
+                f"default branch: {registration['default_branch'] or 'unset'}; "
+                f"account: {registration['account'] or 'unset'} "
+                f"({registration['account_status']})"
+            )
+        if registration["status"] in {"missing", "mismatch"}:
+            print(f"  {registration['reason']}")
+            print("Next: create or repair the canonical registration:")
+            print(f"  {registration['registration_command']}")
+        elif registration["status"] == "unverified":
+            print(f"  {registration['reason']}; registration was not assumed missing")
+        state_root = summary["state_root"]
+        print(
+            f"State root: {state_root['status']} "
+            f"(repo={state_root['repo'] or 'unset'}, "
+            f"path={state_root['state_root'] or 'unset'})"
+        )
+        if state_root["status"] != "ready":
+            print(f"  {state_root['reason']}")
         issues = summary["issues"]
         if issues["status"] == "ready":
             print(f"Personal issues: {issues['provider']}:{issues['repo']} ({issues['source']})")

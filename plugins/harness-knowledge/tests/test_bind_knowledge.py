@@ -125,6 +125,639 @@ def test_bind_idempotent_repoint(tmp_path: Path):
     assert "k1" not in text
 
 
+# --- canonical registration readiness ---------------------------------------
+
+def _completed(
+    args: list[str],
+    returncode: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(args, returncode, stdout, stderr)
+
+
+def test_registered_worktree_reports_canonical_readiness(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        bk,
+        "knowledge_origin",
+        lambda _path: "https://github.com/example/knowledge.git",
+    )
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+
+    def fake_run(_command, args, **_kwargs):
+        if args == ["repos", "list", "--json"]:
+            return _completed(
+                args,
+                stdout=json.dumps(
+                    {
+                        "repos": [
+                            {
+                                "name": "knowledge",
+                                "class": "worktree",
+                                "remote": "https://github.com/example/knowledge.git",
+                                "default_branch": "main",
+                                "resolved_account": "example",
+                                "paths": {
+                                    bk._current_platform_key(): str(knowledge),
+                                },
+                            }
+                        ]
+                    }
+                ),
+            )
+        if args == [
+            "repos",
+            "gh",
+            "example/knowledge",
+            "--",
+            "api",
+            "user",
+            "--jq",
+            ".login",
+        ]:
+            return _completed(args, stdout="example\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "ready"
+    assert registration["canonical"] is True
+    assert registration["path_source"] == "canonical_registry"
+    assert registration["class"] == "worktree"
+    assert registration["resolved_path"] == str(knowledge)
+    assert registration["remote"] == "https://github.com/example/knowledge.git"
+    assert registration["default_branch"] == "main"
+    assert registration["account"] == "example"
+    assert registration["registration_command"] == ""
+
+
+def test_unregistered_fallback_is_not_canonical_readiness(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        bk,
+        "knowledge_origin",
+        lambda _path: "https://github.com/example/knowledge.git",
+    )
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+
+    def fake_run(_command, args, **_kwargs):
+        if args == ["repos", "list", "--json"]:
+            return _completed(args, stdout='{"repos":[]}')
+        if args == ["repos", "find", "knowledge", "--json"]:
+            return _completed(
+                args,
+                stdout=json.dumps(
+                    {"name": "knowledge", "path": str(knowledge)}
+                ),
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "missing"
+    assert registration["canonical"] is False
+    assert registration["path_source"] == "fallback_discovery"
+    assert registration["resolved_path"] == str(knowledge)
+    assert registration["account"] == ""
+    assert registration["registration_argv"] == [
+        "repos",
+        "add",
+        "knowledge",
+        str(knowledge),
+        "--class",
+        "worktree",
+        "--remote",
+        "https://github.com/example/knowledge.git",
+        "--default-branch",
+        "main",
+    ]
+
+
+def test_registered_path_and_class_mismatch_has_repair_command(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    wrong = tmp_path / "wrong"
+    monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "")
+
+    def fake_run(_command, args, **_kwargs):
+        assert args == ["repos", "list", "--json"]
+        return _completed(
+            args,
+            stdout=json.dumps(
+                {
+                    "repos": [
+                        {
+                            "name": "knowledge",
+                            "class": "reference",
+                            "remote": "",
+                            "default_branch": "",
+                            "resolved_account": None,
+                            "paths": {
+                                bk._current_platform_key(): str(wrong),
+                            },
+                        }
+                    ]
+                }
+            ),
+        )
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "mismatch"
+    assert registration["canonical"] is True
+    assert "expected worktree" in registration["reason"]
+    assert str(wrong) in registration["reason"]
+    assert registration["registration_argv"] == [
+        "repos",
+        "add",
+        "knowledge",
+        str(knowledge),
+        "--class",
+        "worktree",
+    ]
+
+
+def test_case_only_registry_collision_is_not_ready_or_auto_repaired(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(bk, "knowledge_origin", lambda _path: "")
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "")
+
+    def fake_run(_command, args, **_kwargs):
+        assert args == ["repos", "list", "--json"]
+        return _completed(
+            args,
+            stdout=json.dumps(
+                {
+                    "repos": [
+                        {
+                            "name": "Knowledge",
+                            "class": "worktree",
+                            "remote": "",
+                            "default_branch": "",
+                            "resolved_account": None,
+                            "paths": {
+                                bk._current_platform_key(): str(knowledge),
+                            },
+                        }
+                    ]
+                }
+            ),
+        )
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "mismatch"
+    assert registration["canonical"] is False
+    assert registration["path_source"] == "canonical_registry"
+    assert registration["registration_argv"] == []
+    assert "differs only by case" in registration["reason"]
+
+
+def test_stale_default_branch_is_repaired_without_persisting_derived_account(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        bk,
+        "knowledge_origin",
+        lambda _path: "https://github.com/example/knowledge.git",
+    )
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+
+    def fake_run(_command, args, **_kwargs):
+        if args == ["repos", "list", "--json"]:
+            return _completed(
+                args,
+                stdout=json.dumps(
+                    {
+                        "repos": [
+                            {
+                                "name": "knowledge",
+                                "class": "worktree",
+                                "remote": "https://github.com/example/knowledge.git",
+                                "default_branch": "feature",
+                                "account": "",
+                                "resolved_account": "example",
+                                "paths": {
+                                    bk._current_platform_key(): str(knowledge),
+                                },
+                            }
+                        ]
+                    }
+                ),
+            )
+        if args == [
+            "repos",
+            "gh",
+            "example/knowledge",
+            "--",
+            "api",
+            "user",
+            "--jq",
+            ".login",
+        ]:
+            return _completed(args, stdout="example\n")
+        raise AssertionError(args)
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "mismatch"
+    assert "expected main" in registration["reason"]
+    assert registration["account"] == "example"
+    assert registration["registration_argv"][-2:] == [
+        "--default-branch",
+        "main",
+    ]
+    assert "--account" not in registration["registration_argv"]
+
+
+def test_unusable_resolved_account_blocks_registration_readiness(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    monkeypatch.setattr(
+        bk,
+        "knowledge_origin",
+        lambda _path: "https://github.com/example-org/knowledge.git",
+    )
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+
+    def fake_run(_command, args, **_kwargs):
+        if args == ["repos", "list", "--json"]:
+            return _completed(
+                args,
+                stdout=json.dumps(
+                    {
+                        "repos": [
+                            {
+                                "name": "knowledge",
+                                "class": "worktree",
+                                "remote": "https://github.com/example-org/knowledge.git",
+                                "default_branch": "main",
+                                "account": "",
+                                "resolved_account": "example-org",
+                                "paths": {
+                                    bk._current_platform_key(): str(knowledge),
+                                },
+                            }
+                        ]
+                    }
+                ),
+            )
+        if args[:3] == ["repos", "gh", "example-org/knowledge"]:
+            return _completed(
+                args,
+                returncode=1,
+                stderr="no token for account example-org",
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+    )
+
+    assert registration["status"] == "mismatch"
+    assert registration["account_status"] == "not_ready"
+    assert "not usable" in registration["reason"]
+    assert "pass --account" in registration["reason"]
+    assert registration["registration_argv"] == []
+
+
+def test_account_override_repairs_unusable_owner_fallback(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    account = "contributor"
+    stored_account = ""
+    monkeypatch.setattr(
+        bk,
+        "knowledge_origin",
+        lambda _path: "https://github.com/example-org/knowledge.git",
+    )
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+
+    def fake_run(_command, args, **_kwargs):
+        nonlocal stored_account
+        if args == ["repos", "list", "--json"]:
+            return _completed(
+                args,
+                stdout=json.dumps(
+                    {
+                        "repos": [
+                            {
+                                "name": "knowledge",
+                                "class": "worktree",
+                                "remote": "https://github.com/example-org/knowledge.git",
+                                "default_branch": "main",
+                                "account": stored_account,
+                                "resolved_account": stored_account or "example-org",
+                                "paths": {
+                                    bk._current_platform_key(): str(knowledge),
+                                },
+                            }
+                        ]
+                    }
+                ),
+            )
+        if args[:3] == ["repos", "gh", "example-org/knowledge"]:
+            login = stored_account or "example-org"
+            if login == account:
+                return _completed(args, stdout=f"{account}\n")
+            return _completed(
+                args,
+                returncode=1,
+                stderr=f"no token for account {login}",
+            )
+        if args[:3] == ["repos", "add", "knowledge"]:
+            index = args.index("--account")
+            stored_account = args[index + 1]
+            return _completed(args)
+        raise AssertionError(args)
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    registration = bk.ensure_registration(
+        "knowledge",
+        str(knowledge),
+        "agent-worktrees",
+        account,
+    )
+
+    assert stored_account == account
+    assert registration["status"] == "ready"
+    assert registration["account"] == account
+    assert registration["account_status"] == "ready"
+
+
+def test_default_branch_uses_remote_symref_when_origin_head_is_missing(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    calls = []
+
+    def fake_run(command, **_kwargs):
+        calls.append(command)
+        if "symbolic-ref" in command:
+            return _completed(command, returncode=1)
+        if "ls-remote" in command:
+            return _completed(
+                command,
+                stdout="ref: refs/heads/trunk\tHEAD\nabc123\tHEAD\n",
+            )
+        raise AssertionError(command)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert bk.knowledge_default_branch(str(knowledge)) == "trunk"
+    assert any("ls-remote" in command for command in calls)
+
+
+def test_default_branch_prefers_remote_and_preserves_slashes(
+    tmp_path: Path,
+    monkeypatch,
+):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+
+    def fake_run(command, **_kwargs):
+        if "ls-remote" in command:
+            return _completed(
+                command,
+                stdout="ref: refs/heads/release/stable\tHEAD\nabc123\tHEAD\n",
+            )
+        if "symbolic-ref" in command:
+            return _completed(command, stdout="origin/main\n")
+        raise AssertionError(command)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert bk.knowledge_default_branch(str(knowledge)) == "release/stable"
+
+
+def test_http_remote_userinfo_is_removed():
+    assert bk.sanitize_remote(
+        "https://user:secret@example.com/owner/repo.git"
+    ) == "https://example.com/owner/repo.git"
+    assert bk.sanitize_remote(
+        "git@github.com:owner/repo.git"
+    ) == "git@github.com:owner/repo.git"
+
+
+def test_windows_powershell_catalog_path_uses_host(monkeypatch):
+    if bk.os.name != "nt":
+        return
+    monkeypatch.setattr(
+        bk.shutil,
+        "which",
+        lambda name: r"C:\Program Files\PowerShell\7\pwsh.exe"
+        if name == "pwsh.exe"
+        else None,
+    )
+
+    command = bk._agent_worktrees_command(
+        r"C:\payload\agent-worktrees.ps1",
+        ["repos", "list", "--json"],
+    )
+
+    assert command == [
+        r"C:\Program Files\PowerShell\7\pwsh.exe",
+        "-NoProfile",
+        "-NoLogo",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        r"C:\payload\agent-worktrees.ps1",
+        "repos",
+        "list",
+        "--json",
+    ]
+    rendered = bk._render_command(command)
+    assert rendered.startswith(
+        "& 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' '-NoProfile'"
+    )
+
+
+def test_ambient_auth_fallback_is_not_account_readiness(monkeypatch):
+    def fake_run(_command, args, **_kwargs):
+        return _completed(
+            args,
+            stdout="example\n",
+            stderr="could not mint a gh token for 'example'; using ambient auth\n",
+        )
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    status, reason = bk._inspect_github_account(
+        "agent-worktrees",
+        "https://github.com/example/knowledge.git",
+        "example",
+    )
+
+    assert status == "not_ready"
+    assert "ambient auth" in reason
+
+
+def test_registration_without_agent_worktrees_is_unverified(tmp_path: Path):
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+
+    registration = bk.inspect_registration(
+        "knowledge",
+        str(knowledge),
+        "",
+    )
+
+    assert registration["status"] == "unverified"
+    assert registration["path_source"] == "unverified"
+    assert registration["registration_command"] == ""
+    assert "not supplied" in registration["reason"]
+
+
+def test_register_repairs_then_binds_and_verifies_state_root(
+    tmp_path: Path,
+    monkeypatch,
+):
+    home = tmp_path / "home"
+    harness = tmp_path / "harness"
+    harness.mkdir()
+    knowledge = tmp_path / "knowledge"
+    knowledge.mkdir()
+    registered = False
+    monkeypatch.setattr(
+        bk,
+        "knowledge_origin",
+        lambda _path: "https://github.com/example/knowledge.git",
+    )
+    monkeypatch.setattr(bk, "knowledge_default_branch", lambda _path: "main")
+
+    def fake_run(_command, args, **_kwargs):
+        nonlocal registered
+        if args == ["repos", "list", "--json"]:
+            repos = []
+            if registered:
+                repos.append(
+                    {
+                        "name": "knowledge",
+                        "class": "worktree",
+                        "remote": "https://github.com/example/knowledge.git",
+                        "default_branch": "main",
+                        "resolved_account": "example",
+                        "paths": {
+                            bk._current_platform_key(): str(knowledge),
+                        },
+                    }
+                )
+            return _completed(args, stdout=json.dumps({"repos": repos}))
+        if args == [
+            "repos",
+            "gh",
+            "example/knowledge",
+            "--",
+            "api",
+            "user",
+            "--jq",
+            ".login",
+        ]:
+            return _completed(args, stdout="example\n")
+        if args == ["repos", "find", "knowledge", "--json"]:
+            return _completed(args, returncode=1, stderr="not found")
+        if args[:3] == ["repos", "add", "knowledge"]:
+            registered = True
+            return _completed(args)
+        if args == ["state-root", "--json"]:
+            return _completed(
+                args,
+                stdout=json.dumps(
+                    {
+                        "bound": True,
+                        "repo": "knowledge",
+                        "state_root": str(knowledge),
+                        "error": None,
+                    }
+                ),
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(bk, "_run_agent_worktrees", fake_run)
+
+    summary = bk.bind(
+        "harness",
+        "knowledge",
+        str(knowledge),
+        home=home,
+        harness_path=str(harness),
+        assemble_plugins=False,
+        agent_worktrees_path="agent-worktrees",
+        register=True,
+    )
+
+    assert registered is True
+    assert summary["registration"]["status"] == "ready"
+    assert summary["state_root"]["status"] == "ready"
+    assert "knowledge_repo: knowledge" in (
+        home / ".harness" / "config.yaml"
+    ).read_text(encoding="utf-8")
+
+
 # --- bind assembles the personal-plugin overlay (#955) ------------------------
 
 def test_bind_assembles_plugins_when_paths_known(tmp_path: Path, monkeypatch):
