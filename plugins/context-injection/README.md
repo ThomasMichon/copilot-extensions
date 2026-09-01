@@ -63,10 +63,13 @@ hook results: every authority-aware producer and the authority return the same
 non-empty aggregate after proof.
 
 Aggregates above 8 KB are atomically written to
-`~/.copilot/session-state/<sessionId>/files/startup-context.md`. Every hook then
-returns the same compact critical kernel with an absolute instruction to load
-that file before acting. This keeps repeated hook output below host-wide context
-limits without discarding the complete attributable aggregate.
+`~/.copilot/session-state/<sessionId>/files/startup-context-<cwd-digest>.md`.
+The 96-bit SHA-256 prefix keys the spill to the same canonical CWD used by the
+rendezvous without exposing that path in the filename or exceeding common
+Windows path limits. Every hook then returns the same compact critical kernel
+with an absolute instruction to load that file before acting. This keeps
+repeated hook output below host-wide context limits without discarding the
+complete attributable aggregate.
 
 Set the host-level `timeoutSec` on producer and authority hooks to at least the
 engine's 25-second rendezvous deadline. A value of 30 seconds is recommended so
