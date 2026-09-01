@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import sys
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,11 +100,119 @@ def test_stage_and_push_rejects_corrupt_archive():
     assert "corrupt" in res["detail"] or "invalid" in res["detail"]
 
 
+def _active_plugin(name: str, marketplace: str, root: Path) -> SimpleNamespace:
+    return SimpleNamespace(name=name, marketplace=marketplace, root=root)
+
+
+def test_find_session_sync_uses_invoking_payload_marketplace(
+    tmp_path: Path,
+    monkeypatch,
+):
+    codespaces = tmp_path / "market-a" / "agent-codespaces"
+    other_codespaces = tmp_path / "market-b" / "agent-codespaces"
+    logger = tmp_path / "market-a" / "agent-logger"
+    other_logger = tmp_path / "market-b" / "agent-logger"
+    codespaces.mkdir(parents=True)
+    other_codespaces.mkdir(parents=True)
+    command_name = "session-sync.cmd" if sys.platform == "win32" else "session-sync"
+    command = logger / "bin" / command_name
+    command.parent.mkdir(parents=True)
+    command.write_text("echo session-sync", encoding="utf-8")
+    command.chmod(0o755)
+    report = SimpleNamespace(active={
+        "agent-codespaces@market-a": _active_plugin(
+            "agent-codespaces", "market-a", codespaces
+        ),
+        "agent-codespaces@market-b": _active_plugin(
+            "agent-codespaces", "market-b", other_codespaces
+        ),
+        "agent-logger@market-a": _active_plugin("agent-logger", "market-a", logger),
+        "agent-logger@market-b": _active_plugin(
+            "agent-logger", "market-b", other_logger
+        ),
+    })
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(codespaces))
+
+    with patch.object(sessions, "resolve_active_plugins", return_value=report):
+        resolved, detail = sessions.find_session_sync()
+
+    assert resolved == str(command)
+    assert detail == ""
+
+
+def test_find_session_sync_reports_missing_same_marketplace_logger(
+    tmp_path: Path,
+    monkeypatch,
+):
+    codespaces = tmp_path / "market-a" / "agent-codespaces"
+    codespaces.mkdir(parents=True)
+    report = SimpleNamespace(active={
+        "agent-codespaces@market-a": _active_plugin(
+            "agent-codespaces", "market-a", codespaces
+        ),
+    })
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", str(codespaces))
+
+    with patch.object(sessions, "resolve_active_plugins", return_value=report):
+        resolved, detail = sessions.find_session_sync()
+
+    assert resolved is None
+    assert "not installed and enabled" in detail
+
+
+def test_find_session_sync_rejects_ambiguous_marketplace_identity(
+    tmp_path: Path,
+    monkeypatch,
+):
+    monkeypatch.delenv("COPILOT_PLUGIN_ROOT", raising=False)
+    runtime = tmp_path / ".agent-codespaces"
+    runtime.mkdir()
+    (runtime / "payload-dir").write_text(
+        str(tmp_path / "market-a"),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    report = SimpleNamespace(active={
+        "agent-codespaces@market-a": _active_plugin(
+            "agent-codespaces", "market-a", tmp_path / "market-a"
+        ),
+        "agent-codespaces@market-b": _active_plugin(
+            "agent-codespaces", "market-b", tmp_path / "market-b"
+        ),
+    })
+
+    with patch.object(sessions, "resolve_active_plugins", return_value=report):
+        resolved, detail = sessions.find_session_sync()
+
+    assert resolved is None
+    assert "multiple active" in detail
+
+
+def test_push_via_session_sync_clears_parent_payload_context(monkeypatch):
+    completed = SimpleNamespace(returncode=0, stdout="ok", stderr="")
+    monkeypatch.setenv("COPILOT_PLUGIN_ROOT", "parent-payload")
+
+    with patch.object(
+        sessions, "find_session_sync", return_value=("session-sync", "")
+    ), patch.object(sessions.subprocess, "run", return_value=completed) as run:
+        ok, detail = sessions._push_via_session_sync(
+            Path("."), ".codespaces/x", verbose=False
+        )
+
+    assert ok is True
+    assert detail == "ok"
+    assert "COPILOT_PLUGIN_ROOT" not in run.call_args.kwargs["env"]
+
+
 def test_push_via_session_sync_missing_cli():
-    with patch.object(sessions, "find_session_sync", return_value=None):
+    with patch.object(
+        sessions,
+        "find_session_sync",
+        return_value=(None, "session-sync unavailable: agent-logger is not enabled"),
+    ):
         ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
     assert ok is False
-    assert "session-sync" in detail
+    assert detail == "session-sync unavailable: agent-logger is not enabled"
 
 
 def test_push_via_session_sync_stale_cli_gives_upgrade_hint():
@@ -116,7 +225,7 @@ def test_push_via_session_sync_stale_cli_gives_upgrade_hint():
         "(choose from run, status, doctor)"
     )
     completed = SimpleNamespace(returncode=2, stdout="", stderr=stale_err)
-    with patch.object(sessions, "find_session_sync", return_value="session-sync"), \
+    with patch.object(sessions, "find_session_sync", return_value=("session-sync", "")), \
             patch.object(sessions.subprocess, "run", return_value=completed):
         ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
     assert ok is False
@@ -131,7 +240,7 @@ def test_push_via_session_sync_other_error_passes_through():
     completed = SimpleNamespace(
         returncode=1, stdout="", stderr="session-sync: push failed: target unreachable"
     )
-    with patch.object(sessions, "find_session_sync", return_value="session-sync"), \
+    with patch.object(sessions, "find_session_sync", return_value=("session-sync", "")), \
             patch.object(sessions.subprocess, "run", return_value=completed):
         ok, detail = sessions._push_via_session_sync(Path("."), ".codespaces/x", verbose=False)
     assert ok is False

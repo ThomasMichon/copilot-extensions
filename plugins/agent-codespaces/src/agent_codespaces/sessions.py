@@ -19,13 +19,15 @@ import asyncio
 import base64
 import logging
 import os
-import shutil
 import string
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
 from pathlib import Path
+
+from plugin_activation import ActivePlugin, resolve_active_plugins
 
 from .codespace_config import CodespaceSource
 
@@ -66,9 +68,78 @@ def _extract_b64(text: str) -> str:
     return "".join(out)
 
 
-def find_session_sync() -> str | None:
-    """Locate the agent-logger ``session-sync`` console script on PATH."""
-    return shutil.which("session-sync")
+def _same_path(left: Path, right: Path) -> bool:
+    try:
+        return left.samefile(right)
+    except OSError:
+        return left.resolve(strict=False) == right.resolve(strict=False)
+
+
+def _agent_codespaces_marketplace(
+    active: tuple[ActivePlugin, ...],
+) -> tuple[str | None, str]:
+    codespaces = [plugin for plugin in active if plugin.name == "agent-codespaces"]
+
+    explicit_root = os.environ.get("COPILOT_PLUGIN_ROOT", "").strip()
+    if explicit_root:
+        matches = [
+            plugin
+            for plugin in codespaces
+            if _same_path(plugin.root, Path(explicit_root).expanduser())
+        ]
+        if len(matches) == 1:
+            return matches[0].marketplace, ""
+        return None, (
+            "session-sync unavailable: the invoking agent-codespaces payload "
+            "does not identify one active marketplace installation"
+        )
+
+    marketplaces = {plugin.marketplace for plugin in codespaces}
+    if len(marketplaces) == 1:
+        return next(iter(marketplaces)), ""
+    detail = (
+        "agent-codespaces marketplace identity is unavailable"
+        if not marketplaces
+        else "multiple active agent-codespaces marketplace installations found"
+    )
+    return None, f"session-sync unavailable: {detail}"
+
+
+def find_session_sync() -> tuple[str | None, str]:
+    """Locate the same-marketplace agent-logger payload command."""
+    active = tuple(resolve_active_plugins().active.values())
+    marketplace, unavailable = _agent_codespaces_marketplace(active)
+    if marketplace is None:
+        return None, unavailable
+    loggers = [
+        plugin
+        for plugin in active
+        if plugin.name == "agent-logger" and plugin.marketplace == marketplace
+    ]
+    if not loggers:
+        return None, (
+            "session-sync unavailable: agent-logger is not installed and enabled "
+            f"in marketplace '{marketplace}'"
+        )
+    if len(loggers) != 1:
+        return None, (
+            "session-sync unavailable: multiple active agent-logger installations "
+            f"found in marketplace '{marketplace}'"
+        )
+
+    command_name = "session-sync.cmd" if sys.platform == "win32" else "session-sync"
+    command = loggers[0].root / "bin" / command_name
+    if not command.is_file():
+        return None, (
+            "session-sync unavailable: agent-logger's payload command is missing: "
+            f"{command}"
+        )
+    if sys.platform != "win32" and not os.access(command, os.X_OK):
+        return None, (
+            "session-sync unavailable: agent-logger's payload command is not executable: "
+            f"{command}"
+        )
+    return str(command), ""
 
 
 async def _connect_with_retry(manager, name: str, *, timeout: float) -> None:
@@ -150,14 +221,15 @@ def _is_stale_session_sync(stderr: str) -> bool:
 def _push_via_session_sync(staging: Path, machine_label: str, *, verbose: bool) -> tuple[bool, str]:
     """Shell out to ``session-sync push`` (agent-logger) to land *staging* in
     the configured hub target under *machine_label*."""
-    exe = find_session_sync()
+    exe, unavailable = find_session_sync()
     if not exe:
-        return False, ("session-sync CLI not found on PATH "
-                       "(agent-logger not installed?)")
+        return False, unavailable
     cmd = [exe, "push", "--source", str(staging), "--machine", machine_label]
     if verbose:
         cmd.append("--verbose")
-    proc = subprocess.run(cmd, capture_output=True, text=True)
+    child_env = os.environ.copy()
+    child_env.pop("COPILOT_PLUGIN_ROOT", None)
+    proc = subprocess.run(cmd, capture_output=True, text=True, env=child_env)
     out = (proc.stdout or "").strip()
     if proc.returncode != 0:
         err = (proc.stderr or out).strip()

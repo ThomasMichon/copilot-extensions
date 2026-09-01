@@ -287,9 +287,10 @@ retirement, and reserve `delete` for deliberate break-glass cleanup.
 > agent-worktrees reclaim sweep reads the lease mirror and settles the stale claim
 > automatically. See the `borrowing-codespaces` skill for the obligation model.
 
-> Requires the **agent-logger** plugin (provides the `session-sync` CLI). If it
-> isn't installed, recovery reports a clear error and (for plain `delete`) the
-> deletion still proceeds.
+> Requires the **agent-logger** plugin to be installed and enabled from the same
+> marketplace (providing its payload-local `session-sync` command). If it isn't
+> available, recovery reports a clear error and (for plain `delete`) deletion
+> still proceeds.
 
 ## Stop — pause-and-keep (preserve, don't delete)
 
