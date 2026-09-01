@@ -9,7 +9,7 @@
   `declared-mesh-adoption`, `derived-agent-roster`, and
   `live-machine-introspection`
 - **Umbrella issue:** #1418
-- **Sub-issues:** #1455
+- **Sub-issues:** #1455 · #1507
 
 ## Guiding Intent
 
@@ -80,6 +80,9 @@ fleet, topology, or operating environment.
 - [ ] Make `plan`, `validate`, and `restore` default to the package-owning
   repository containing CWD, with `--repo` for another single repository and
   explicit `--all-projects` for the machine union (#1455).
+- [ ] Add a schema-versioned, conflict-validated settings disposition for exact
+  map-key absence, beginning with user-level plugin activation and preserving
+  installed inventory (#1507).
 - [ ] Give each resource module plan, apply, verify, and report operations with
   explicit privilege and restart boundaries.
 - [ ] Order actions from declared dependencies and preserve idempotence across
@@ -136,3 +139,9 @@ behavioral parity is demonstrated.
 
 - Added #1455 to make repository-local reconciliation the safe default while
   preserving the machine-wide union as an explicit `--all-projects` operation.
+
+### 2026-08-31 - Plugin activation scope
+
+- Added #1507 as a bounded schema and settings-reconciler slice: exact desired
+  absence for selected user-level plugin activation keys, distinct from
+  installed inventory, capture exclusion, and out-of-band pruning.
