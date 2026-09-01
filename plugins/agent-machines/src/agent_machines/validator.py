@@ -242,7 +242,13 @@ def check_plugin_tombstone_schema(
     for pkg in packages:
         if pkg.schema_version >= 2:
             continue
-        for values in _managed_values_under(pkg, "copilot.settings"):
+        for key, spec in pkg.manage.items():
+            if (
+                key != "copilot.settings"
+                and not key.startswith("copilot.settings.")
+            ) or spec.get("disposition") != "ensure-present":
+                continue
+            values = spec.get("values", spec.get("value"))
             if not isinstance(values, dict):
                 continue
             enabled_plugins = values.get("enabledPlugins")
