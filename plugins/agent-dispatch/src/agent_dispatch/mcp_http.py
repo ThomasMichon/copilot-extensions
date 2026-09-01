@@ -23,16 +23,19 @@ importable (otherwise the REST API still serves).
 # (non-stringized) annotations resolve at def-time via the enclosing scope.
 
 import json
+import secrets
 from dataclasses import asdict
 from typing import Annotated, Any
 
-from pydantic import PlainValidator, WithJsonSchema
+from pydantic import PlainValidator, StrictInt, WithJsonSchema
 
 from . import telemetry
 from .events import EventBus
 from .identity import canonicalize_remote
 from .queue import (
     CompletionOutcome,
+    ProducerFenceError,
+    ProducerScopeValidationError,
     StructuredResult,
     Task,
     TaskError,
@@ -43,6 +46,13 @@ from .queue import (
 MACHINE_HEADER = "x-agent-machine"
 WORKTREE_HEADER = "x-agent-worktree"
 REPO_HEADER = "x-agent-repo"
+
+
+def _bearer_credential(authorization: str) -> str | None:
+    parts = authorization.split(None, 1)
+    if len(parts) != 2 or parts[0].casefold() != "bearer" or not parts[1]:
+        return None
+    return parts[1]
 
 
 def _validate_mcp_structured_result(value: Any) -> StructuredResult:
@@ -77,7 +87,12 @@ def _event_task_dict(task: dict) -> dict:
     return result
 
 
-def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
+def build_coordinator_mcp(
+    queue: TaskQueue,
+    bus: EventBus,
+    *,
+    control_token: str | None = None,
+) -> Any:
     """Build the MCPServer the coordinator mounts at ``/mcp``.
 
     Raises ``RuntimeError`` (via import failure) if the ``mcp`` extra is absent;
@@ -99,6 +114,34 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         bus.publish({"type": event_type, "task": event_task})
         # Generic telemetry seam (no-op unless a consumer registered a sink).
         telemetry.emit(telemetry.task_lifecycle_event(event_type, event_task))
+
+    def _emit_producer_event(event_type: str, detail: dict[str, object]) -> None:
+        bus.publish({"type": event_type, "producer_fence": detail})
+        telemetry.emit(telemetry.producer_fence_event(event_type, detail))
+
+    def _control_error(ctx: Context) -> dict[str, object] | None:
+        if control_token is None:
+            return {
+                "code": "producer_control_unavailable",
+                "operation": "transition",
+                "reason": "control_authority_not_configured",
+                "message": "managed producer transitions require a configured control token",
+                "retryable": False,
+            }
+        credential = _bearer_credential(
+            _headers_of(ctx).get("authorization", "")
+        )
+        if credential is None or not secrets.compare_digest(
+            credential, control_token
+        ):
+            return {
+                "code": "producer_control_forbidden",
+                "operation": "transition",
+                "reason": "invalid_control_authority",
+                "message": "invalid or missing producer control bearer",
+                "retryable": False,
+            }
+        return None
 
     def _mutate(op, event_type: str | None) -> dict:
         """Run a queue mutation; map TaskError to an error dict; emit on success."""
@@ -147,8 +190,15 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         target_machine: str | None = None,
         target_worktree: str | None = None,
         target_repo: str | None = None,
+        source: str | None = None,
+        origin_ref: str | None = None,
         evaluator_ref: str | None = None,
         dedup_key: str | None = None,
+        producer_scope: dict[str, str] | None = None,
+        producer_id: str | None = None,
+        producer_generation: StrictInt | None = None,
+        producer_capability: str | None = None,
+        producer_request_id: str | None = None,
         goal: str | None = None,
         done_criteria: str | None = None,
         not_before: float = 0.0,
@@ -169,29 +219,139 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         lane = _repo(ctx, repo)
         if not lane:
             return {"error": "no repo (lane): send X-Agent-Repo or pass repo=<remote URL>"}
-        make = queue.propose if proposed else queue.create
-        task = make(
-            title,
-            repo=lane,
-            prompt=prompt,
-            payload_inline=payload,
-            payload_ref=payload_ref,
-            requires=requires or [],
-            excludes=excludes or [],
-            affinity=affinity or {},
-            labels=labels or [],
-            target_machine=target_machine,
-            target_worktree=target_worktree,
-            target_repo=target_repo,
-            evaluator_ref=evaluator_ref,
-            dedup_key=dedup_key,
-            goal=goal,
-            done_criteria=done_criteria,
-            not_before=not_before,
-        )
-        result = asdict(task)
-        _emit("task.proposed" if proposed else "task.created", result)
+        make = queue.propose_outcome if proposed else queue.create_outcome
+        try:
+            outcome = make(
+                title,
+                repo=lane,
+                prompt=prompt,
+                payload_inline=payload,
+                payload_ref=payload_ref,
+                requires=requires or [],
+                excludes=excludes or [],
+                affinity=affinity or {},
+                labels=labels or [],
+                target_machine=target_machine,
+                target_worktree=target_worktree,
+                target_repo=target_repo,
+                source=source,
+                origin_ref=origin_ref,
+                evaluator_ref=evaluator_ref,
+                dedup_key=dedup_key,
+                producer_scope=producer_scope,
+                producer_id=producer_id,
+                producer_generation=producer_generation,
+                producer_capability=producer_capability,
+                producer_request_id=producer_request_id,
+                goal=goal,
+                done_criteria=done_criteria,
+                not_before=not_before,
+            )
+        except ProducerScopeValidationError as exc:
+            detail = exc.detail(operation="create")
+            _emit_producer_event(
+                "task.create_rejected",
+                {key: value for key, value in detail.items() if key != "message"},
+            )
+            return {"error": detail}
+        except ProducerFenceError as exc:
+            detail = exc.detail(operation="create")
+            _emit_producer_event(
+                "task.create_rejected", exc.event(operation="create")
+            )
+            return {"error": detail}
+        result = asdict(outcome.task)
+        if outcome.event_type is not None:
+            _emit(outcome.event_type, result)
         return result
+
+    @mcp.tool(name="dispatch_producer_scope_status")
+    def producer_scope_status(
+        ctx: Context, source: str, repo: str | None = None
+    ) -> dict:
+        """Inspect one exact repo+source creation fence."""
+        lane = _repo(ctx, repo)
+        if not lane:
+            return {
+                "error": {
+                    "code": "producer_request_invalid",
+                    "operation": "status",
+                    "reason": "missing_scope_repo",
+                    "message": "no repo (lane): send X-Agent-Repo or pass repo",
+                    "retryable": False,
+                }
+            }
+        try:
+            return asdict(queue.producer_scope_status(lane, source))
+        except ProducerScopeValidationError as exc:
+            return {"error": exc.detail(operation="status")}
+
+    @mcp.tool(name="dispatch_producer_scope_handoff")
+    def producer_scope_handoff(
+        ctx: Context,
+        source: str,
+        producer_id: str,
+        expected_generation: StrictInt,
+        repo: str | None = None,
+        required_label: str | None = None,
+    ) -> dict:
+        """Retire N and activate N+1 for one selected producer."""
+        control_error = _control_error(ctx)
+        if control_error is not None:
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                {
+                    key: value
+                    for key, value in control_error.items()
+                    if key != "message"
+                },
+            )
+            return {"error": control_error}
+        lane = _repo(ctx, repo)
+        if not lane:
+            return {
+                "error": {
+                    "code": "producer_request_invalid",
+                    "operation": "transition",
+                    "reason": "missing_scope_repo",
+                    "message": "no repo (lane): send X-Agent-Repo or pass repo",
+                    "retryable": False,
+                }
+            }
+        try:
+            transition = queue.handoff_producer_scope(
+                lane,
+                source,
+                producer_id=producer_id,
+                expected_generation=expected_generation,
+                required_label=required_label,
+            )
+        except ProducerScopeValidationError as exc:
+            detail = exc.detail(operation="transition")
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                {key: value for key, value in detail.items() if key != "message"},
+            )
+            return {"error": detail}
+        except ProducerFenceError as exc:
+            _emit_producer_event(
+                "producer_scope.transition_rejected",
+                exc.event(operation="transition"),
+            )
+            return {"error": exc.detail(operation="transition")}
+        state = transition.state
+        detail: dict[str, object] = {
+            "repo": state.scope["repo"],
+            "source": state.scope["source"],
+            "from_generation": expected_generation,
+            "to_generation": state.current_generation,
+            "active_producer": state.active_producer,
+            "replayed": transition.replayed,
+        }
+        if state.required_label is not None:
+            detail["required_label"] = state.required_label
+        _emit_producer_event("producer_scope.transitioned", detail)
+        return transition.as_dict()
 
     @mcp.tool(name="dispatch_approve")
     def approve(task_id: str) -> dict:
@@ -466,6 +626,7 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         machine: str | None = None,
         worktree: str | None = None,
         repo: str | None = None,
+        all_repos: bool = False,
     ) -> dict | None:
         """Atomically lease one eligible task (identity + lane via header or args).
 
@@ -476,15 +637,33 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
         machine, worktree = _identity(ctx, machine, worktree)
         if not machine or not worktree:
             return {"error": "no identity: send X-Agent-Machine/X-Agent-Worktree or pass args"}
-        task = queue.claim_one(
+        lane = None if all_repos else _repo(ctx, repo)
+        if all_repos and repo:
+            return {
+                "error": {
+                    "code": "claim_scope_invalid",
+                    "message": "claim accepts repo or all_repos=true, not both",
+                }
+            }
+        if not all_repos and not lane:
+            return {
+                "error": {
+                    "code": "claim_scope_required",
+                    "message": "claim requires X-Agent-Repo, repo, or explicit all_repos=true",
+                }
+            }
+        outcome = queue.claim_outcome(
             worker_id_for(machine, worktree),
             capabilities or [],
-            repo=_repo(ctx, repo),
+            repo=lane,
             machine=machine,
             worktree=worktree,
             task_id=task_id,
             lease_seconds=lease_seconds,
         )
+        for rejection in outcome.producer_rejections:
+            _emit_producer_event("producer.claim_rejected", rejection)
+        task = outcome.task
         if task is None:
             return None
         result = asdict(task)
@@ -629,15 +808,22 @@ def build_coordinator_mcp(queue: TaskQueue, bus: EventBus) -> Any:
     return mcp
 
 
-def bearer_guard_middleware(token: str):
-    """A Starlette middleware factory that 401s the MCP mount without the token."""
+def bearer_guard_middleware(
+    token: str | None, control_token: str | None = None
+):
+    """A middleware factory that accepts ordinary or control bearer auth."""
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.responses import JSONResponse
 
     class _Guard(BaseHTTPMiddleware):
         async def dispatch(self, request, call_next):
-            auth = request.headers.get("authorization", "")
-            if auth != f"Bearer {token}":
+            credential = _bearer_credential(
+                request.headers.get("authorization", "")
+            )
+            accepted = tuple(value for value in (token, control_token) if value)
+            if credential is None or not any(
+                secrets.compare_digest(credential, value) for value in accepted
+            ):
                 return JSONResponse({"detail": "invalid or missing bearer token"}, status_code=401)
             return await call_next(request)
 

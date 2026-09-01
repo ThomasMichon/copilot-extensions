@@ -30,16 +30,22 @@ Design notes
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import hmac
 import json
+import logging
+import math
+import re
+import secrets
 import sqlite3
 import time
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .identity import canonical_reviewer_target
+from .identity import canonical_reviewer_target, canonicalize_remote
 from .payload import PayloadStore, is_blob_ref
 from .registrations import (
     RegistrationError,
@@ -69,6 +75,16 @@ DEFAULT_RESULT_MAX_BYTES = 64 * 1024
 LEGACY_REPO = "(legacy)"
 _BUSY_TIMEOUT_MS = 5000
 _MAX_AFFINITY = 1000
+_PRODUCER_SCOPE_SOURCE_MAX = 64
+_PRODUCER_SCOPE_LABEL_MAX = 64
+_PRODUCER_ID_MAX = 128
+_PRODUCER_REQUEST_ID_MAX = 128
+_PRODUCER_CAPABILITY_MAX = 512
+_PRODUCER_HISTORY_LIMIT = 32
+_PRODUCER_BLOCKING_TASK_LIMIT = 20
+_CLAIM_REJECTION_EVENT_LIMIT = 20
+_PRODUCER_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/-]*$")
+log = logging.getLogger("agent-dispatch.queue")
 
 
 def worker_id_for(machine: str, worktree: str) -> str:
@@ -177,6 +193,102 @@ class TaskError(RuntimeError):
     """Raised on an illegal state transition or a lease/ownership violation."""
 
 
+class ProducerScopeValidationError(TaskError):
+    """Raised when a producer scope or producer identity is not narrow and exact."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str = "invalid_producer_request",
+        repo: str | None = None,
+        source: str | None = None,
+        producer_request_id: str | None = None,
+    ):
+        super().__init__(message)
+        self.reason = reason
+        self.repo = repo
+        self.source = source
+        self.producer_request_id = producer_request_id
+
+    def detail(self, *, operation: str) -> dict[str, object]:
+        result: dict[str, object] = {
+            "code": "producer_request_invalid",
+            "operation": operation,
+            "reason": self.reason,
+            "message": str(self),
+            "retryable": False,
+        }
+        for key in ("repo", "source", "producer_request_id"):
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        return result
+
+
+class ProducerFenceError(TaskError):
+    """A create or handoff rejected by a producer-generation fence."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str,
+        repo: str | None = None,
+        source: str | None = None,
+        required_label: str | None = None,
+        requested_producer: str | None = None,
+        active_producer: str | None = None,
+        requested_generation: int | None = None,
+        current_generation: int | None = None,
+        producer_request_id: str | None = None,
+        retryable: bool = False,
+        diagnostics: Mapping[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.reason = reason
+        self.repo = repo
+        self.source = source
+        self.required_label = required_label
+        self.requested_producer = requested_producer
+        self.active_producer = active_producer
+        self.requested_generation = requested_generation
+        self.current_generation = current_generation
+        self.producer_request_id = producer_request_id
+        self.retryable = retryable
+        self.diagnostics = dict(diagnostics or {})
+
+    def detail(self, *, operation: str) -> dict[str, object]:
+        """Return bounded, content-free rejection metadata."""
+        result: dict[str, object] = {
+            "code": "producer_fence_rejected",
+            "operation": operation,
+            "reason": self.reason,
+            "message": str(self),
+            "retryable": self.retryable,
+        }
+        for key in (
+            "repo",
+            "source",
+            "required_label",
+            "requested_producer",
+            "active_producer",
+            "requested_generation",
+            "current_generation",
+            "producer_request_id",
+        ):
+            value = getattr(self, key)
+            if value is not None:
+                result[key] = value
+        result.update(self.diagnostics)
+        return result
+
+    def event(self, *, operation: str) -> dict[str, object]:
+        result = self.detail(operation=operation)
+        result.pop("message")
+        return result
+
+
 class ResultValidationError(TaskError):
     """Raised when a completion result is not a structured JSON value."""
 
@@ -283,6 +395,11 @@ class Task:
     #: ordinary filters and never own domain judgment.
     evaluator_ref: str | None = None
     dedup_key: str | None = None
+    #: Bounded coordinator-owned create authority metadata. ``None`` preserves
+    #: legacy/unmanaged create behavior. The nested scope is one exact canonical
+    #: ``repo`` + ``source`` pair; ``producer_id`` is audit metadata rather than
+    #: authority, and ``generation`` is permanently retired on handoff.
+    producer_fence: dict | None = None
     owner: str | None = None
     attempts: int = 0
     not_before: float = 0.0
@@ -375,6 +492,11 @@ class Task:
             origin_ref=row["origin_ref"],
             evaluator_ref=row["evaluator_ref"],
             dedup_key=row["dedup_key"],
+            producer_fence=(
+                json.loads(row["producer_fence"])
+                if row["producer_fence"]
+                else None
+            ),
             owner=row["owner"],
             attempts=row["attempts"],
             not_before=row["not_before"],
@@ -453,6 +575,52 @@ class CompletionOutcome:
 
     task: Task
     event_type: str | None
+
+
+@dataclass(frozen=True)
+class CreationOutcome:
+    """A create result plus whether it inserted a new lifecycle row."""
+
+    task: Task
+    disposition: str
+    event_type: str | None
+
+
+@dataclass(frozen=True)
+class ClaimOutcome:
+    """A claim result plus newly recorded managed-producer rejections."""
+
+    task: Task | None
+    producer_rejections: list[dict[str, object]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ProducerScopeState:
+    """Current and recent durable state for one permanent producer scope."""
+
+    scope: dict[str, str]
+    managed: bool
+    required_label: str | None = None
+    current_generation: int = 0
+    active_producer: str | None = None
+    generations: list[dict[str, object]] = field(default_factory=list)
+    history_truncated: bool = False
+
+
+@dataclass(frozen=True)
+class ProducerScopeTransition:
+    """A handoff result; the capability is present only on a new transition."""
+
+    state: ProducerScopeState
+    producer_capability: str | None = None
+    replayed: bool = False
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            **dataclasses.asdict(self.state),
+            "producer_capability": self.producer_capability,
+            "replayed": self.replayed,
+        }
 
 
 @dataclass(frozen=True)
@@ -568,6 +736,8 @@ _COLUMNS: dict[str, str] = {
     "source": "TEXT",
     "origin_ref": "TEXT",
     "dedup_key": "TEXT",
+    "producer_fence": "TEXT",
+    "producer_request_hash": "TEXT",
     "owner": "TEXT",
     "attempts": "INTEGER NOT NULL DEFAULT 0",
     "not_before": "REAL NOT NULL DEFAULT 0",
@@ -659,8 +829,17 @@ class TaskQueue:
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, timeout=_BUSY_TIMEOUT_MS / 1000, isolation_level=None)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
+        deadline = time.monotonic() + (_BUSY_TIMEOUT_MS / 1000)
+        while True:
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or time.monotonic() >= deadline:
+                    conn.close()
+                    raise
+                time.sleep(0.05)
         conn.execute("PRAGMA foreign_keys=ON")
         return conn
 
@@ -672,9 +851,28 @@ class TaskQueue:
                 if name == "id" or name in existing:
                     continue
                 # name/decl are internal constants from _COLUMNS, never user input.
-                conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {decl}")
+                try:
+                    conn.execute(f"ALTER TABLE tasks ADD COLUMN {name} {decl}")
+                except sqlite3.OperationalError as exc:
+                    # Another concurrently-starting coordinator may have added
+                    # this exact column after our PRAGMA snapshot.
+                    if "duplicate column name" not in str(exc).lower():
+                        raise
+            # Canonicalize legacy lane spellings before the repo-scoped unique
+            # dedup index is installed. The previous global dedup index already
+            # prevented active duplicate keys, so normalization cannot expose an
+            # active same-lane collision.
+            for row in conn.execute(
+                "SELECT id, repo FROM tasks WHERE repo IS NOT NULL"
+            ).fetchall():
+                canonical = canonicalize_remote(row["repo"])
+                if canonical and canonical != row["repo"]:
+                    conn.execute(
+                        "UPDATE tasks SET repo = ? WHERE id = ?",
+                        (canonical, row["id"]),
+                    )
             desired_dedup_index = (
-                "CREATE UNIQUE INDEX idx_tasks_dedup ON tasks(dedup_key) "
+                "CREATE UNIQUE INDEX idx_tasks_dedup ON tasks(repo, dedup_key) "
                 "WHERE dedup_key IS NOT NULL AND status IN "
                 "('proposed','queued','claimed','started','suspended')"
             )
@@ -905,12 +1103,155 @@ class TaskQueue:
                 "CREATE INDEX IF NOT EXISTS idx_registrations_kind "
                 "ON registrations(kind)"
             )
+            self._migrate_producer_schema(conn)
+
+    @staticmethod
+    def _migrate_producer_schema(conn: sqlite3.Connection) -> None:
+        """Install the producer-fence schema under one migration write lock."""
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            # The first fence prototype keyed authority by source+label. It was
+            # never released; preserve any local prototype tables for inspection
+            # but do not let their label-dependent authority reopen a real source.
+            scope_columns = {
+                row["name"]
+                for row in conn.execute("PRAGMA table_info(producer_scopes)")
+            }
+            history_columns = {
+                row["name"]
+                for row in conn.execute(
+                    "PRAGMA table_info(producer_scope_generations)"
+                )
+            }
+            legacy_scope = bool(scope_columns) and "repo" not in scope_columns
+            legacy_history = bool(history_columns) and "repo" not in history_columns
+            if legacy_scope or legacy_history:
+                # A renamed table keeps its old index name, which would block
+                # creation of the canonical index on the replacement table.
+                conn.execute("DROP INDEX IF EXISTS idx_producer_scope_history")
+                if legacy_scope:
+                    conn.execute(
+                        "ALTER TABLE producer_scopes "
+                        "RENAME TO producer_scopes_label_v1"
+                    )
+                if legacy_history:
+                    conn.execute(
+                        "ALTER TABLE producer_scope_generations "
+                        "RENAME TO producer_scope_generations_label_v1"
+                    )
+            # Coordinator-owned task-create generations. A scope is permanently
+            # one canonical repo lane + one exact task source. An optional label
+            # also protects that label from alternate or omitted source claims;
+            # omission under the managed source is rejected. Every handoff
+            # retires N and activates N+1 atomically.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS producer_scopes ("
+                "  repo TEXT NOT NULL,"
+                "  source TEXT NOT NULL,"
+                "  required_label TEXT,"
+                "  current_generation INTEGER NOT NULL,"
+                "  active_producer TEXT NOT NULL,"
+                "  capability_hash TEXT NOT NULL,"
+                "  created_at REAL NOT NULL,"
+                "  updated_at REAL NOT NULL,"
+                "  PRIMARY KEY(repo, source)"
+                ")"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS producer_scope_generations ("
+                "  repo TEXT NOT NULL,"
+                "  source TEXT NOT NULL,"
+                "  generation INTEGER NOT NULL,"
+                "  producer_id TEXT NOT NULL,"
+                "  capability_hash TEXT NOT NULL,"
+                "  required_label TEXT,"
+                "  state TEXT NOT NULL,"
+                "  activated_at REAL NOT NULL,"
+                "  retired_at REAL,"
+                "  PRIMARY KEY(repo, source, generation)"
+                ")"
+            )
+            desired_history_index = (
+                "CREATE INDEX idx_producer_scope_history "
+                "ON producer_scope_generations(repo, source, generation DESC)"
+            )
+            current_history_index = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' "
+                "AND name = 'idx_producer_scope_history'"
+            ).fetchone()
+            current_history_sql = " ".join(
+                str(current_history_index["sql"] or "").split()
+            ) if current_history_index else ""
+            if current_history_sql != desired_history_index:
+                conn.execute("DROP INDEX IF EXISTS idx_producer_scope_history")
+                conn.execute(desired_history_index)
+            # Accepted managed create requests are durable independently from a
+            # task's lifecycle and from ordinary dedup.
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS producer_create_requests ("
+                "  repo TEXT NOT NULL,"
+                "  source TEXT NOT NULL,"
+                "  generation INTEGER NOT NULL,"
+                "  request_id TEXT NOT NULL,"
+                "  request_hash TEXT NOT NULL,"
+                "  producer_id TEXT NOT NULL,"
+                "  task_id TEXT NOT NULL,"
+                "  accepted_at REAL NOT NULL,"
+                "  PRIMARY KEY(repo, source, generation, request_id)"
+                ")"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_producer_requests_task "
+                "ON producer_create_requests(task_id)"
+            )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS producer_claim_rejections ("
+                "  task_id TEXT NOT NULL,"
+                "  fingerprint TEXT NOT NULL,"
+                "  observed_at REAL NOT NULL,"
+                "  PRIMARY KEY(task_id, fingerprint)"
+                ")"
+            )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
 
     # -- helpers -------------------------------------------------------------
 
     @staticmethod
     def _now(now: float | None) -> float:
         return time.time() if now is None else now
+
+    @staticmethod
+    def _canonical_repo(repo: str | None) -> str | None:
+        if repo is None:
+            return None
+        canonical = canonicalize_remote(repo)
+        if not canonical:
+            raise TaskError("repo lane must be a canonical, non-empty remote")
+        return canonical
+
+    @classmethod
+    def _canonical_selector_tokens(
+        cls, tokens: Iterable[str], *, strict: bool = True
+    ) -> list[str]:
+        normalized: list[str] = []
+        for token in tokens:
+            if not isinstance(token, str):
+                if strict:
+                    raise TaskError("selector tokens must be strings")
+                continue
+            if token.startswith("repo:"):
+                repo = canonicalize_remote(token.removeprefix("repo:"))
+                if not repo:
+                    if strict:
+                        raise TaskError("repo selector must name a repo lane")
+                    normalized.append(token)
+                    continue
+                token = f"repo:{repo}"
+            normalized.append(token)
+        return normalized
 
     @staticmethod
     def _audit(
@@ -941,6 +1282,690 @@ class TaskQueue:
             (task_id, Status.COMPLETED, Status.COMPLETED),
         )
         return [str(row["worker"]) for row in rows]
+
+    @staticmethod
+    def _validate_producer_token(value: object, *, field: str, limit: int) -> str:
+        if not isinstance(value, str) or not value:
+            raise ProducerScopeValidationError(f"{field} must be a non-empty string")
+        if value != value.strip():
+            raise ProducerScopeValidationError(
+                f"{field} must not have leading or trailing whitespace"
+            )
+        if len(value) > limit or not _PRODUCER_TOKEN_RE.fullmatch(value):
+            raise ProducerScopeValidationError(
+                f"{field} must be an exact token of at most {limit} characters "
+                "using letters, digits, '.', '_', ':', '@', '/', or '-'"
+            )
+        return value
+
+    @classmethod
+    def _validate_producer_scope(
+        cls, repo: object, source: object
+    ) -> tuple[str, str]:
+        canonical_repo = canonicalize_remote(repo if isinstance(repo, str) else None)
+        if not canonical_repo:
+            raise ProducerScopeValidationError(
+                "producer scope repo must be a canonical, non-empty repo lane",
+                reason="invalid_scope_repo",
+            )
+        return (
+            canonical_repo,
+            cls._validate_producer_token(
+                source, field="producer scope source", limit=_PRODUCER_SCOPE_SOURCE_MAX
+            ),
+        )
+
+    @classmethod
+    def _validate_required_label(cls, value: object | None) -> str | None:
+        if value is None:
+            return None
+        return cls._validate_producer_token(
+            value,
+            field="producer scope required_label",
+            limit=_PRODUCER_SCOPE_LABEL_MAX,
+        )
+
+    @staticmethod
+    def _validate_producer_capability(value: object) -> str:
+        if not isinstance(value, str) or not value:
+            raise ProducerScopeValidationError(
+                "producer_capability must be a non-empty string",
+                reason="invalid_capability",
+            )
+        if len(value) > _PRODUCER_CAPABILITY_MAX:
+            raise ProducerScopeValidationError(
+                f"producer_capability must be at most {_PRODUCER_CAPABILITY_MAX} characters",
+                reason="invalid_capability",
+            )
+        return value
+
+    @staticmethod
+    def _capability_hash(capability: str) -> str:
+        return hashlib.sha256(capability.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _normalize_producer_fence(
+        cls,
+        producer_scope: Mapping[str, object] | None,
+        producer_id: str | None,
+        producer_generation: int | None,
+        producer_capability: str | None,
+        producer_request_id: str | None,
+        *,
+        repo: str,
+        source: str | None,
+    ) -> dict[str, object] | None:
+        provided = (
+            producer_scope is not None,
+            producer_id is not None,
+            producer_generation is not None,
+            producer_capability is not None,
+            producer_request_id is not None,
+        )
+        if not any(provided):
+            return None
+        if not all(provided):
+            raise ProducerScopeValidationError(
+                "producer_scope, producer_id, producer_generation, "
+                "producer_capability, and producer_request_id must be provided together"
+            )
+        assert producer_scope is not None
+        if set(producer_scope) != {"repo", "source"}:
+            raise ProducerScopeValidationError(
+                "producer_scope must contain exactly 'repo' and 'source'"
+            )
+        scope_repo, scope_source = cls._validate_producer_scope(
+            producer_scope["repo"], producer_scope["source"]
+        )
+        producer = cls._validate_producer_token(
+            producer_id, field="producer_id", limit=_PRODUCER_ID_MAX
+        )
+        capability = cls._validate_producer_capability(producer_capability)
+        request_id = cls._validate_producer_token(
+            producer_request_id,
+            field="producer_request_id",
+            limit=_PRODUCER_REQUEST_ID_MAX,
+        )
+        if (
+            isinstance(producer_generation, bool)
+            or not isinstance(producer_generation, int)
+            or producer_generation < 1
+        ):
+            raise ProducerScopeValidationError(
+                "producer_generation must be an integer greater than zero"
+            )
+        if repo != scope_repo:
+            raise ProducerScopeValidationError(
+                "producer scope repo must exactly match the task repo lane",
+                reason="scope_repo_mismatch",
+                repo=scope_repo,
+                source=scope_source,
+                producer_request_id=request_id,
+            )
+        if source != scope_source:
+            raise ProducerScopeValidationError(
+                "producer scope source must exactly match the task source",
+                reason="scope_source_mismatch",
+                repo=scope_repo,
+                source=scope_source,
+                producer_request_id=request_id,
+            )
+        return {
+            "scope": {"repo": scope_repo, "source": scope_source},
+            "producer_id": producer,
+            "generation": producer_generation,
+            "capability": capability,
+            "request_id": request_id,
+        }
+
+    @staticmethod
+    def _producer_request_hash(fields: Mapping[str, object]) -> str:
+        try:
+            encoded = json.dumps(
+                fields,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ProducerScopeValidationError(
+                "managed create fields must be finite JSON values",
+                reason="invalid_request_json",
+            ) from exc
+        return hashlib.sha256(encoded).hexdigest()
+
+    @staticmethod
+    def _producer_scope_row(
+        conn: sqlite3.Connection,
+        *,
+        repo: str,
+        source: str | None,
+    ) -> sqlite3.Row | None:
+        if not source:
+            return None
+        return conn.execute(
+            "SELECT repo, source, required_label, current_generation, "
+            "active_producer, capability_hash FROM producer_scopes "
+            "WHERE repo = ? AND source = ?",
+            (repo, source),
+        ).fetchone()
+
+    @staticmethod
+    def _required_label_scope_rows(
+        conn: sqlite3.Connection,
+        *,
+        labels: Iterable[object],
+    ) -> list[sqlite3.Row]:
+        protected_labels = tuple(
+            dict.fromkeys(label for label in labels if isinstance(label, str))
+        )
+        if not protected_labels:
+            return []
+        placeholders = ",".join("?" for _ in protected_labels)
+        return conn.execute(
+            "SELECT repo, source, required_label, current_generation, "
+            "active_producer, capability_hash FROM producer_scopes "
+            f"WHERE required_label IN ({placeholders})",
+            protected_labels,
+        ).fetchall()
+
+    @classmethod
+    def _task_fence_matches_scope(
+        cls,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+        *,
+        repo: str,
+        source: str,
+        required_label: str,
+    ) -> bool:
+        """Return whether a task has durable accepted provenance for a scope."""
+        if row["repo"] != repo or row["source"] != source:
+            return False
+        try:
+            fence = json.loads(row["producer_fence"])
+        except (TypeError, ValueError):
+            return False
+        if not isinstance(fence, dict) or set(fence) != {
+            "scope",
+            "producer_id",
+            "generation",
+            "request_id",
+        }:
+            return False
+        scope = fence["scope"]
+        generation = fence["generation"]
+        if (
+            not isinstance(scope, dict)
+            or scope
+            != {
+                "repo": repo,
+                "source": source,
+            }
+            or not isinstance(fence["producer_id"], str)
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation < 1
+            or not isinstance(fence["request_id"], str)
+        ):
+            return False
+        generation_row = conn.execute(
+            "SELECT producer_id, required_label "
+            "FROM producer_scope_generations "
+            "WHERE repo = ? AND source = ? AND generation = ?",
+            (repo, source, generation),
+        ).fetchone()
+        if (
+            generation_row is None
+            or generation_row["producer_id"] != fence["producer_id"]
+            or generation_row["required_label"] != required_label
+        ):
+            return False
+        request = conn.execute(
+            "SELECT request_hash, producer_id, task_id "
+            "FROM producer_create_requests "
+            "WHERE repo = ? AND source = ? AND generation = ? "
+            "AND request_id = ?",
+            (
+                repo,
+                source,
+                generation,
+                fence["request_id"],
+            ),
+        ).fetchone()
+        return bool(
+            request is not None
+            and request["producer_id"] == fence["producer_id"]
+            and request["task_id"] == row["id"]
+            and row["producer_request_hash"]
+            and hmac.compare_digest(
+                str(request["request_hash"]),
+                str(row["producer_request_hash"]),
+            )
+        )
+
+    @classmethod
+    def _claim_fence_rejection(
+        cls,
+        conn: sqlite3.Connection,
+        row: sqlite3.Row,
+    ) -> dict[str, object] | None:
+        """Describe why a protected-label task cannot be claimed."""
+        try:
+            labels = json.loads(row["labels"] or "[]")
+        except (TypeError, ValueError):
+            labels = None
+        if not isinstance(labels, list):
+            return {
+                "task_id": str(row["id"]),
+                "status": str(row["status"]),
+                "repo": str(row["repo"]),
+                "reason": "invalid_labels",
+            }
+        scopes = cls._required_label_scope_rows(conn, labels=labels)
+        if not scopes:
+            return None
+        if len(scopes) != 1:
+            return {
+                "task_id": str(row["id"]),
+                "status": str(row["status"]),
+                "repo": str(row["repo"]),
+                "reason": "ambiguous_required_label",
+            }
+        managed = scopes[0]
+        detail: dict[str, object] = {
+            "task_id": str(row["id"]),
+            "status": str(row["status"]),
+            "repo": str(row["repo"]),
+            "source": str(row["source"]) if row["source"] is not None else None,
+            "required_label": str(managed["required_label"]),
+            "owning_repo": str(managed["repo"]),
+            "owning_source": str(managed["source"]),
+        }
+        if row["repo"] != managed["repo"]:
+            detail["reason"] = "required_label_repo_mismatch"
+        elif row["source"] != managed["source"]:
+            detail["reason"] = "required_label_source_mismatch"
+        elif not cls._task_fence_matches_scope(
+            conn,
+            row,
+            repo=str(managed["repo"]),
+            source=str(managed["source"]),
+            required_label=str(managed["required_label"]),
+        ):
+            detail["reason"] = "producer_fence_mismatch"
+        else:
+            return None
+        fingerprint_fields = {
+            "task_id": row["id"],
+            "repo": row["repo"],
+            "source": row["source"],
+            "labels": row["labels"],
+            "producer_fence": row["producer_fence"],
+            "producer_request_hash": row["producer_request_hash"],
+            "owning_repo": managed["repo"],
+            "owning_source": managed["source"],
+            "required_label": managed["required_label"],
+            "reason": detail["reason"],
+        }
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                fingerprint_fields,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        detail["fingerprint"] = fingerprint[:16]
+        detail["_fingerprint"] = fingerprint
+        return detail
+
+    @classmethod
+    def _scope_blockers(
+        cls,
+        conn: sqlite3.Connection,
+        *,
+        repo: str,
+        source: str,
+        required_label: str,
+        scope_exists: bool,
+    ) -> dict[str, object] | None:
+        """Summarize nonterminal label rows that are not accepted by this scope."""
+        rows = conn.execute(
+            f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
+            "WHERE status IN (?,?,?,?,?) ORDER BY created_at ASC",
+            (
+                Status.PROPOSED,
+                Status.QUEUED,
+                Status.CLAIMED,
+                Status.STARTED,
+                Status.SUSPENDED,
+            ),
+        ).fetchall()
+        blockers: list[sqlite3.Row] = []
+        for row in rows:
+            try:
+                labels = json.loads(row["labels"] or "[]")
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(labels, list) or required_label not in labels:
+                continue
+            if scope_exists and cls._task_fence_matches_scope(
+                conn,
+                row,
+                repo=repo,
+                source=source,
+                required_label=required_label,
+            ):
+                continue
+            blockers.append(row)
+        if not blockers:
+            return None
+        status_counts: dict[str, int] = {}
+        for row in blockers:
+            status = str(row["status"])
+            status_counts[status] = status_counts.get(status, 0) + 1
+        task_ids = [str(row["id"]) for row in blockers[:_PRODUCER_BLOCKING_TASK_LIMIT]]
+        return {
+            "blocking_task_count": len(blockers),
+            "blocking_task_ids": task_ids,
+            "blocking_status_counts": status_counts,
+            "blocking_ids_truncated": len(blockers) > len(task_ids),
+        }
+
+    @staticmethod
+    def _record_claim_rejection(
+        conn: sqlite3.Connection,
+        detail: dict[str, object],
+        *,
+        ts: float,
+    ) -> bool:
+        """Persist one audit row per task/mismatch fingerprint."""
+        fingerprint = str(detail["_fingerprint"])
+        inserted = conn.execute(
+            "INSERT OR IGNORE INTO producer_claim_rejections "
+            "(task_id, fingerprint, observed_at) VALUES (?,?,?)",
+            (detail["task_id"], fingerprint, ts),
+        )
+        if inserted.rowcount != 1:
+            return False
+        TaskQueue._audit(
+            conn,
+            str(detail["task_id"]),
+            ts=ts,
+            from_status=Status.QUEUED,
+            to_status=Status.QUEUED,
+            note=f"producer.claim_rejected:{detail['reason']}",
+        )
+        return True
+
+    @staticmethod
+    def _producer_scope_state_from_conn(
+        conn: sqlite3.Connection,
+        repo: str,
+        source: str,
+        *,
+        history_limit: int = _PRODUCER_HISTORY_LIMIT,
+    ) -> ProducerScopeState:
+        row = conn.execute(
+            "SELECT required_label, current_generation, active_producer "
+            "FROM producer_scopes WHERE repo = ? AND source = ?",
+            (repo, source),
+        ).fetchone()
+        scope = {"repo": repo, "source": source}
+        if row is None:
+            return ProducerScopeState(scope=scope, managed=False)
+        history = conn.execute(
+            "SELECT generation, producer_id, state, activated_at, retired_at "
+            "FROM producer_scope_generations WHERE repo = ? AND source = ? "
+            "ORDER BY generation DESC LIMIT ?",
+            (repo, source, history_limit + 1),
+        ).fetchall()
+        truncated = len(history) > history_limit
+        generations = [
+            {
+                "generation": item["generation"],
+                "producer_id": item["producer_id"],
+                "state": item["state"],
+                "activated_at": item["activated_at"],
+                "retired_at": item["retired_at"],
+            }
+            for item in history[:history_limit]
+        ]
+        return ProducerScopeState(
+            scope=scope,
+            managed=True,
+            required_label=row["required_label"],
+            current_generation=row["current_generation"],
+            active_producer=row["active_producer"],
+            generations=generations,
+            history_truncated=truncated,
+        )
+
+    def producer_scope_status(
+        self, repo: str, source: str
+    ) -> ProducerScopeState:
+        """Inspect one exact producer scope without mutating it."""
+        repo, source = self._validate_producer_scope(repo, source)
+        with self._connect() as conn:
+            return self._producer_scope_state_from_conn(conn, repo, source)
+
+    def handoff_producer_scope(
+        self,
+        repo: str,
+        source: str,
+        *,
+        producer_id: str,
+        expected_generation: int,
+        required_label: str | None = None,
+        now: float | None = None,
+    ) -> ProducerScopeTransition:
+        """Atomically retire generation N and activate N+1 for one producer.
+
+        ``expected_generation=0`` is the only way to move an unmanaged scope
+        into managed generation 1. Managed scopes require an exact compare-and-
+        swap against their current generation. A lost successful response may be
+        retried with the same expected generation and producer, but the one-time
+        capability is never returned again. No operation clears, decrements, or
+        reopens a retired generation.
+        """
+        repo, source = self._validate_producer_scope(repo, source)
+        label = self._validate_required_label(required_label)
+        producer = self._validate_producer_token(
+            producer_id, field="producer_id", limit=_PRODUCER_ID_MAX
+        )
+        if (
+            isinstance(expected_generation, bool)
+            or not isinstance(expected_generation, int)
+            or expected_generation < 0
+        ):
+            raise ProducerScopeValidationError(
+                "expected_generation must be an integer greater than or equal to zero"
+            )
+        ts = self._now(now)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            current = conn.execute(
+                "SELECT required_label, current_generation, active_producer "
+                "FROM producer_scopes WHERE repo = ? AND source = ?",
+                (repo, source),
+            ).fetchone()
+            current_label = current["required_label"] if current is not None else None
+            if current is not None and label is not None and label != current_label:
+                raise ProducerFenceError(
+                    "producer scope required_label is immutable",
+                    reason="scope_label_mismatch",
+                    repo=repo,
+                    source=source,
+                    required_label=current_label,
+                    requested_producer=producer,
+                    active_producer=current["active_producer"],
+                    requested_generation=expected_generation,
+                    current_generation=current["current_generation"],
+                )
+            effective_label = current_label if current is not None else label
+            if effective_label is not None:
+                conflict = conn.execute(
+                    "SELECT repo, source FROM producer_scopes "
+                    "WHERE required_label = ? "
+                    "AND (repo <> ? OR source <> ?) "
+                    "LIMIT 1",
+                    (effective_label, repo, source),
+                ).fetchone()
+                if conflict is not None:
+                    raise ProducerFenceError(
+                        "producer scope required_label is already owned by "
+                        "another producer scope on this coordinator",
+                        reason="required_label_conflict",
+                        repo=repo,
+                        source=source,
+                        required_label=effective_label,
+                        requested_producer=producer,
+                        requested_generation=expected_generation,
+                        diagnostics={
+                            "owning_repo": conflict["repo"],
+                            "owning_source": conflict["source"],
+                        },
+                    )
+                blockers = self._scope_blockers(
+                    conn,
+                    repo=repo,
+                    source=source,
+                    required_label=effective_label,
+                    scope_exists=current is not None,
+                )
+                if blockers is not None:
+                    raise ProducerFenceError(
+                        "producer scope cannot transition while its managed label "
+                        "has nonterminal tasks without matching accepted fence metadata",
+                        reason="scope_not_quiescent",
+                        repo=repo,
+                        source=source,
+                        required_label=effective_label,
+                        requested_producer=producer,
+                        active_producer=(
+                            current["active_producer"]
+                            if current is not None
+                            else None
+                        ),
+                        requested_generation=expected_generation,
+                        current_generation=(
+                            current["current_generation"]
+                            if current is not None
+                            else 0
+                        ),
+                        diagnostics=blockers,
+                    )
+            if current is None:
+                if expected_generation != 0:
+                    raise ProducerFenceError(
+                        "producer scope is unmanaged; initial handoff requires "
+                        "expected_generation=0",
+                        reason="unmanaged_scope",
+                        repo=repo,
+                        source=source,
+                        required_label=label,
+                        requested_producer=producer,
+                        requested_generation=expected_generation,
+                        current_generation=0,
+                    )
+                next_generation = 1
+                capability = secrets.token_urlsafe(32)
+                capability_hash = self._capability_hash(capability)
+                conn.execute(
+                    "INSERT INTO producer_scopes "
+                    "(repo, source, required_label, current_generation, active_producer, "
+                    "capability_hash, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (
+                        repo,
+                        source,
+                        label,
+                        next_generation,
+                        producer,
+                        capability_hash,
+                        ts,
+                        ts,
+                    ),
+                )
+            else:
+                current_generation = int(current["current_generation"])
+                if expected_generation != current_generation:
+                    if (
+                        expected_generation + 1 == current_generation
+                        and producer == current["active_producer"]
+                    ):
+                        state = self._producer_scope_state_from_conn(
+                            conn, repo, source
+                        )
+                        conn.execute("COMMIT")
+                        return ProducerScopeTransition(state=state, replayed=True)
+                    raise ProducerFenceError(
+                        f"producer fence generation mismatch: expected "
+                        f"{expected_generation}, current is {current_generation}",
+                        reason="generation_mismatch",
+                        repo=repo,
+                        source=source,
+                        required_label=current_label,
+                        requested_producer=producer,
+                        active_producer=current["active_producer"],
+                        requested_generation=expected_generation,
+                        current_generation=current_generation,
+                    )
+                next_generation = current_generation + 1
+                capability = secrets.token_urlsafe(32)
+                capability_hash = self._capability_hash(capability)
+                retired = conn.execute(
+                    "UPDATE producer_scope_generations SET state = 'retired', "
+                    "retired_at = ? WHERE repo = ? AND source = ? "
+                    "AND generation = ? AND state = 'active'",
+                    (ts, repo, source, current_generation),
+                )
+                if retired.rowcount != 1:
+                    raise ProducerFenceError(
+                        "producer fence history is inconsistent; current generation "
+                        "is not active",
+                        reason="inconsistent_history",
+                        repo=repo,
+                        source=source,
+                        required_label=current_label,
+                        active_producer=current["active_producer"],
+                        current_generation=current_generation,
+                    )
+                conn.execute(
+                    "UPDATE producer_scopes SET current_generation = ?, "
+                    "active_producer = ?, capability_hash = ?, updated_at = ? "
+                    "WHERE repo = ? AND source = ?",
+                    (
+                        next_generation,
+                        producer,
+                        capability_hash,
+                        ts,
+                        repo,
+                        source,
+                    ),
+                )
+            conn.execute(
+                "INSERT INTO producer_scope_generations "
+                "(repo, source, generation, producer_id, capability_hash, "
+                "required_label, state, activated_at) "
+                "VALUES (?,?,?,?,?,?, 'active', ?)",
+                (
+                    repo,
+                    source,
+                    next_generation,
+                    producer,
+                    capability_hash,
+                    current["required_label"] if current is not None else label,
+                    ts,
+                ),
+            )
+            state = self._producer_scope_state_from_conn(conn, repo, source)
+            conn.execute("COMMIT")
+            return ProducerScopeTransition(
+                state=state,
+                producer_capability=capability,
+            )
 
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None:
         row = conn.execute(
@@ -1014,21 +2039,32 @@ class TaskQueue:
 
     # -- payload -------------------------------------------------------------
 
-    def _spill_payload(
+    def _payload_needs_spill(
         self, payload_ref: str | None, payload_inline: str | None
-    ) -> tuple[str | None, str | None]:
-        """Spill an oversized inline payload to a content-addressed blob.
+    ) -> bool:
+        return (
+            payload_ref is None
+            and payload_inline is not None
+            and len(payload_inline.encode("utf-8")) > self.blob_threshold
+        )
 
-        A caller-supplied ``payload_ref`` is always respected (the caller took
-        control of storage). Otherwise, an inline payload larger than
-        ``blob_threshold`` bytes is written to the blob store and replaced by its
-        ``blob:<hash>`` ref, keeping the row (and every list/find result) small.
+    def _spill_committed_payload(self, task_id: str, content: str) -> None:
+        """Move a committed inline payload to the blob store.
+
+        The task commits with its complete inline content first. Blob I/O then
+        happens without a SQLite write lock, followed by one guarded row update.
+        A failed insert therefore cannot orphan a blob, and a crash before the
+        update leaves a readable inline payload rather than a broken reference.
         """
-        if payload_ref is not None or payload_inline is None:
-            return payload_ref, payload_inline
-        if len(payload_inline.encode("utf-8")) <= self.blob_threshold:
-            return payload_ref, payload_inline
-        return self.payloads.put(payload_inline), None
+        ref = self.payloads.put(content)
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE tasks SET payload_ref = ?, payload_inline = NULL "
+                "WHERE id = ? AND payload_ref IS NULL AND payload_inline = ?",
+                (ref, task_id, content),
+            )
+            conn.execute("COMMIT")
 
     def read_payload(self, task_or_id: Task | str) -> str | None:
         """Resolve a task's payload content (inline or blob), or ``None``.
@@ -1111,12 +2147,18 @@ class TaskQueue:
         origin_ref: str | None = None,
         evaluator_ref: str | None = None,
         dedup_key: str | None = None,
+        producer_scope: Mapping[str, object] | None = None,
+        producer_id: str | None = None,
+        producer_generation: int | None = None,
+        producer_capability: str | None = None,
+        producer_request_id: str | None = None,
         goal: str | None = None,
         done_criteria: str | None = None,
         not_before: float = 0.0,
         claim_as: str | None = None,
         now: float | None = None,
-    ) -> Task:
+        _with_outcome: bool = False,
+    ) -> Task | CreationOutcome:
         """Insert a task (default status ``queued``; ``proposed`` for a draft).
 
         ``repo`` is the **lane** -- the canonical remote of the producing agent's
@@ -1126,9 +2168,15 @@ class TaskQueue:
         that work via ``working-cross-repo``, never by launching another repo's
         harness.)
 
-        If ``dedup_key`` collides with an existing non-terminal task, no new row
-        is created and the *existing* task is returned. Terminal rows release
-        the key so a later deterministic generation can be created.
+        If ``dedup_key`` collides with an existing non-terminal task in the same
+        repo lane, no new row is created and the *existing* task is returned.
+        Terminal rows release the key so a later request can create new work.
+        Managed creates use a separate ``producer_request_id`` ledger: an exact
+        retry with that generation's capability returns the accepted task from
+        any status after generation retirement, while a new request id retains
+        ordinary dedup semantics. A managed ``required_label`` also binds back
+        to its owning source, so caller-selected alternate or omitted sources
+        cannot place unfenced work in the protected label pool.
 
         ``claim_as`` makes this an **atomic create-and-claim**: a brand-new task
         is inserted already ``claimed`` by that owner in the *same* transaction,
@@ -1142,119 +2190,584 @@ class TaskQueue:
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
-        if not repo:
+        canonical_repo = self._canonical_repo(repo)
+        if not canonical_repo:
             raise TaskError(
                 "task requires a repo (the lane -- the producing repo's canonical "
                 "remote); the CLI resolves it from the CWD or --repo"
             )
-        payload_ref, payload_inline = self._spill_payload(payload_ref, payload_inline)
+        if (
+            isinstance(not_before, bool)
+            or not isinstance(not_before, (int, float))
+            or not math.isfinite(float(not_before))
+        ):
+            raise ProducerScopeValidationError(
+                "not_before must be a finite number",
+                reason="invalid_not_before",
+                repo=canonical_repo,
+                source=source,
+                producer_request_id=producer_request_id,
+            )
+        not_before = float(not_before)
+        normalized_requires = self._canonical_selector_tokens(requires or ())
+        normalized_excludes = self._canonical_selector_tokens(excludes or ())
+        fence = self._normalize_producer_fence(
+            producer_scope,
+            producer_id,
+            producer_generation,
+            producer_capability,
+            producer_request_id,
+            repo=canonical_repo,
+            source=source,
+        )
+        fence_record = None
+        if fence is not None:
+            fence_record = {
+                "scope": fence["scope"],
+                "producer_id": fence["producer_id"],
+                "generation": fence["generation"],
+                "request_id": fence["request_id"],
+            }
+        fence_json = (
+            json.dumps(fence_record, separators=(",", ":"), sort_keys=True)
+            if fence_record is not None
+            else None
+        )
+        request_hash = None
+        legacy_request_hash = None
+        if fence is not None:
+            request_fields = {
+                "title": title,
+                "repo": canonical_repo,
+                "prompt": prompt,
+                "status": status,
+                "requires": sorted(set(normalized_requires)),
+                "excludes": sorted(set(normalized_excludes)),
+                "affinity": dict(affinity or {}),
+                "labels": sorted(set(labels or ())),
+                "payload_ref": payload_ref,
+                "payload_inline": payload_inline,
+                "target_machine": target_machine,
+                "target_worktree": target_worktree,
+                "target_repo": target_repo,
+                "source": source,
+                "origin_ref": origin_ref,
+                "evaluator_ref": evaluator_ref,
+                "dedup_key": dedup_key,
+                "producer_scope": fence["scope"],
+                "producer_id": fence["producer_id"],
+                "producer_generation": fence["generation"],
+                "goal": goal,
+                "done_criteria": done_criteria,
+            }
+            request_hash = self._producer_request_hash(request_fields)
+            raw_requires = sorted(set(requires or ()))
+            raw_excludes = sorted(set(excludes or ()))
+            if (
+                raw_requires != request_fields["requires"]
+                or raw_excludes != request_fields["excludes"]
+            ):
+                legacy_fields = dict(request_fields)
+                legacy_fields["requires"] = raw_requires
+                legacy_fields["excludes"] = raw_excludes
+                legacy_request_hash = self._producer_request_hash(legacy_fields)
         ts = self._now(now)
         task_id = uuid.uuid4().hex
+        spill_content = (
+            payload_inline
+            if self._payload_needs_spill(payload_ref, payload_inline)
+            else None
+        )
+        accepted: Task | None = None
+        request_already_recorded = False
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            if dedup_key is not None:
-                existing = conn.execute(
-                    f"SELECT {_TASK_SELECT} FROM tasks WHERE dedup_key = ? "
-                    "AND status IN (?,?,?,?,?)",
-                    (
-                        dedup_key,
-                        Status.PROPOSED,
-                        Status.QUEUED,
-                        Status.CLAIMED,
-                        Status.STARTED,
-                        Status.SUSPENDED,
-                    ),
-                ).fetchone()
-                if existing is not None:
-                    conn.execute("COMMIT")
-                    return Task._from_row(existing)
-                target = (
-                    self._reviewer_target(dedup_key)
-                    if source == "recipe" and origin_ref == "reviewer"
-                    else None
+            try:
+                managed = self._producer_scope_row(
+                    conn, repo=canonical_repo, source=source
                 )
-                if target is not None:
-                    rows = conn.execute(
-                        f"SELECT {_TASK_SELECT} FROM tasks WHERE source = ? "
-                        "AND origin_ref = ? AND status IN (?,?,?,?,?) "
-                        "AND dedup_key LIKE 'recipe:reviewer:%'",
+                label_scopes = self._required_label_scope_rows(
+                    conn,
+                    labels=labels or (),
+                )
+                if len(label_scopes) > 1:
+                    raise ProducerFenceError(
+                        "task labels resolve to ambiguous managed producer scopes",
+                        reason="ambiguous_required_label",
+                        repo=canonical_repo,
+                        source=source,
+                    )
+                label_scope = label_scopes[0] if label_scopes else None
+                if label_scope is not None:
+                    owning_scope = {
+                        "repo": str(label_scope["repo"]),
+                        "source": str(label_scope["source"]),
+                    }
+                    if owning_scope["repo"] != canonical_repo:
+                        raise ProducerFenceError(
+                            "task required label belongs to a managed producer "
+                            "scope in a different repo lane",
+                            reason="required_label_scope_mismatch",
+                            repo=canonical_repo,
+                            source=source,
+                            required_label=label_scope["required_label"],
+                            active_producer=label_scope["active_producer"],
+                            current_generation=label_scope["current_generation"],
+                            producer_request_id=(
+                                str(fence["request_id"])
+                                if fence is not None
+                                else None
+                            ),
+                            diagnostics={
+                                "owning_repo": owning_scope["repo"],
+                                "owning_source": owning_scope["source"],
+                            },
+                        )
+                    if fence is None:
+                        raise ProducerFenceError(
+                            "task carries a managed required label and requires "
+                            "producer authority for its owning scope",
+                            reason="missing_fence",
+                            repo=canonical_repo,
+                            source=label_scope["source"],
+                            required_label=label_scope["required_label"],
+                            active_producer=label_scope["active_producer"],
+                            current_generation=label_scope["current_generation"],
+                        )
+                    fence_scope = fence["scope"]
+                    assert isinstance(fence_scope, dict)
+                    if fence_scope != owning_scope:
+                        raise ProducerFenceError(
+                            "task required label belongs to a different managed "
+                            "producer scope",
+                            reason="required_label_scope_mismatch",
+                            repo=canonical_repo,
+                            source=label_scope["source"],
+                            required_label=label_scope["required_label"],
+                            requested_producer=str(fence["producer_id"]),
+                            active_producer=label_scope["active_producer"],
+                            requested_generation=int(fence["generation"]),
+                            current_generation=label_scope["current_generation"],
+                            producer_request_id=str(fence["request_id"]),
+                            diagnostics={
+                                "owning_repo": owning_scope["repo"],
+                                "owning_source": owning_scope["source"],
+                            },
+                        )
+                if fence is None:
+                    if managed is not None:
+                        raise ProducerFenceError(
+                            "task source is permanently generation-managed and "
+                            "requires producer authority",
+                            reason="missing_fence",
+                            repo=canonical_repo,
+                            source=managed["source"],
+                            required_label=managed["required_label"],
+                            active_producer=managed["active_producer"],
+                            current_generation=managed["current_generation"],
+                        )
+                else:
+                    scope = fence["scope"]
+                    assert isinstance(scope, dict)
+                    scope_source = str(scope["source"])
+                    requested_producer = str(fence["producer_id"])
+                    requested_generation = int(fence["generation"])
+                    request_id = str(fence["request_id"])
+                    if managed is None:
+                        raise ProducerFenceError(
+                            "producer scope is not generation-managed",
+                            reason="unmanaged_scope",
+                            repo=canonical_repo,
+                            source=scope_source,
+                            requested_producer=requested_producer,
+                            requested_generation=requested_generation,
+                            producer_request_id=request_id,
+                            current_generation=0,
+                        )
+                    required_label = managed["required_label"]
+                    generation = conn.execute(
+                        "SELECT producer_id, capability_hash, required_label "
+                        "FROM producer_scope_generations "
+                        "WHERE repo = ? AND source = ? AND generation = ?",
                         (
-                            "recipe",
-                            "reviewer",
+                            canonical_repo,
+                            scope_source,
+                            requested_generation,
+                        ),
+                    ).fetchone()
+                    if generation is None:
+                        raise ProducerFenceError(
+                            "producer generation is not present in managed scope history",
+                            reason="unknown_generation",
+                            repo=canonical_repo,
+                            source=scope_source,
+                            required_label=required_label,
+                            requested_producer=requested_producer,
+                            active_producer=managed["active_producer"],
+                            requested_generation=requested_generation,
+                            current_generation=managed["current_generation"],
+                            producer_request_id=request_id,
+                        )
+                    request = conn.execute(
+                        "SELECT request_hash, producer_id, task_id "
+                        "FROM producer_create_requests "
+                        "WHERE repo = ? AND source = ? AND generation = ? "
+                        "AND request_id = ?",
+                        (
+                            canonical_repo,
+                            scope_source,
+                            requested_generation,
+                            request_id,
+                        ),
+                    ).fetchone()
+                    if (
+                        requested_generation != managed["current_generation"]
+                        and request is None
+                    ):
+                        raise ProducerFenceError(
+                            f"producer generation {requested_generation} is retired; "
+                            f"current generation is {managed['current_generation']}",
+                            reason="stale_generation",
+                            repo=canonical_repo,
+                            source=scope_source,
+                            required_label=required_label,
+                            requested_producer=requested_producer,
+                            active_producer=managed["active_producer"],
+                            requested_generation=requested_generation,
+                            current_generation=managed["current_generation"],
+                            producer_request_id=request_id,
+                        )
+                    if requested_producer != generation["producer_id"]:
+                        raise ProducerFenceError(
+                            "producer_id does not match the selected producer "
+                            "for this generation",
+                            reason="wrong_producer",
+                            repo=canonical_repo,
+                            source=scope_source,
+                            required_label=required_label,
+                            requested_producer=requested_producer,
+                            active_producer=generation["producer_id"],
+                            requested_generation=requested_generation,
+                            current_generation=managed["current_generation"],
+                            producer_request_id=request_id,
+                        )
+                    capability_hash = self._capability_hash(
+                        str(fence["capability"])
+                    )
+                    if not hmac.compare_digest(
+                        capability_hash, str(generation["capability_hash"])
+                    ):
+                        raise ProducerFenceError(
+                            "producer capability is invalid for the requested generation",
+                            reason="invalid_capability",
+                            repo=canonical_repo,
+                            source=scope_source,
+                            required_label=required_label,
+                            requested_producer=requested_producer,
+                            active_producer=generation["producer_id"],
+                            requested_generation=requested_generation,
+                            current_generation=managed["current_generation"],
+                            producer_request_id=request_id,
+                        )
+                    if request is not None:
+                        if request["request_hash"] not in {
+                            request_hash,
+                            legacy_request_hash,
+                        }:
+                            raise ProducerFenceError(
+                                "producer_request_id was already accepted with "
+                                "different canonical create fields",
+                                reason="request_mismatch",
+                                repo=canonical_repo,
+                                source=scope_source,
+                                requested_producer=requested_producer,
+                                requested_generation=requested_generation,
+                                producer_request_id=request_id,
+                            )
+                        if request["producer_id"] != requested_producer:
+                            raise ProducerFenceError(
+                                "accepted producer request has inconsistent "
+                                "producer metadata",
+                                reason="inconsistent_request_ledger",
+                                repo=canonical_repo,
+                                source=scope_source,
+                                requested_producer=requested_producer,
+                                requested_generation=requested_generation,
+                                producer_request_id=request_id,
+                            )
+                        row = conn.execute(
+                            f"SELECT {_TASK_SELECT} FROM tasks WHERE id = ?",
+                            (request["task_id"],),
+                        ).fetchone()
+                        if row is None:
+                            raise ProducerFenceError(
+                                "accepted producer request references a missing task",
+                                reason="inconsistent_request_ledger",
+                                repo=canonical_repo,
+                                source=scope_source,
+                                requested_generation=requested_generation,
+                                producer_request_id=request_id,
+                            )
+                        accepted = Task._from_row(row)
+                        request_already_recorded = True
+                    if accepted is None:
+                        if required_label is not None and required_label not in set(
+                            labels or ()
+                        ):
+                            raise ProducerFenceError(
+                                "managed producer scope requires its configured label",
+                                reason="required_label_missing",
+                                repo=canonical_repo,
+                                source=scope_source,
+                                required_label=required_label,
+                                requested_producer=requested_producer,
+                                active_producer=managed["active_producer"],
+                                requested_generation=requested_generation,
+                                current_generation=managed["current_generation"],
+                                producer_request_id=request_id,
+                            )
+                        if requested_producer != managed["active_producer"]:
+                            raise ProducerFenceError(
+                                "producer_id is metadata and does not identify the "
+                                "selected producer for this generation",
+                                reason="wrong_producer",
+                                repo=canonical_repo,
+                                source=scope_source,
+                                required_label=required_label,
+                                requested_producer=requested_producer,
+                                active_producer=managed["active_producer"],
+                                requested_generation=requested_generation,
+                                current_generation=managed["current_generation"],
+                                producer_request_id=request_id,
+                            )
+                        if not hmac.compare_digest(
+                            capability_hash, str(managed["capability_hash"])
+                        ):
+                            raise ProducerFenceError(
+                                "producer capability is invalid for the current generation",
+                                reason="invalid_capability",
+                                repo=canonical_repo,
+                                source=scope_source,
+                                required_label=required_label,
+                                requested_producer=requested_producer,
+                                active_producer=managed["active_producer"],
+                                requested_generation=requested_generation,
+                                current_generation=managed["current_generation"],
+                                producer_request_id=request_id,
+                            )
+                if accepted is None and dedup_key is not None:
+                    existing = conn.execute(
+                        f"SELECT {_TASK_SELECT} FROM tasks WHERE repo = ? "
+                        "AND dedup_key = ? AND status IN (?,?,?,?,?)",
+                        (
+                            canonical_repo,
+                            dedup_key,
                             Status.PROPOSED,
                             Status.QUEUED,
                             Status.CLAIMED,
                             Status.STARTED,
                             Status.SUSPENDED,
                         ),
-                    ).fetchall()
-                    legacy = next(
-                        (
-                            row
-                            for row in rows
-                            if self._reviewer_target(row["dedup_key"]) == target
-                        ),
-                        None,
+                    ).fetchone()
+                    if existing is not None:
+                        accepted = Task._from_row(existing)
+                    else:
+                        target = (
+                            self._reviewer_target(dedup_key)
+                            if source == "recipe" and origin_ref == "reviewer"
+                            else None
+                        )
+                        if target is not None:
+                            rows = conn.execute(
+                                f"SELECT {_TASK_SELECT} FROM tasks WHERE repo = ? "
+                                "AND source = ? AND origin_ref = ? "
+                                "AND status IN (?,?,?,?,?) "
+                                "AND dedup_key LIKE 'recipe:reviewer:%'",
+                                (
+                                    canonical_repo,
+                                    "recipe",
+                                    "reviewer",
+                                    Status.PROPOSED,
+                                    Status.QUEUED,
+                                    Status.CLAIMED,
+                                    Status.STARTED,
+                                    Status.SUSPENDED,
+                                ),
+                            ).fetchall()
+                            legacy = next(
+                                (
+                                    row
+                                    for row in rows
+                                    if self._reviewer_target(row["dedup_key"]) == target
+                                ),
+                                None,
+                            )
+                            if legacy is not None:
+                                accepted = Task._from_row(legacy)
+                if (
+                    fence is not None
+                    and accepted is not None
+                    and not request_already_recorded
+                ):
+                    raise ProducerFenceError(
+                        "managed create dedup collided with a task that is not "
+                        "this exact accepted producer request",
+                        reason="unfenced_dedup_conflict",
+                        repo=canonical_repo,
+                        source=str(fence["scope"]["source"]),
+                        requested_producer=str(fence["producer_id"]),
+                        requested_generation=int(fence["generation"]),
+                        producer_request_id=str(fence["request_id"]),
+                        diagnostics={
+                            "conflicting_task_id": accepted.id,
+                            "conflicting_task_status": accepted.status,
+                        },
                     )
-                    if legacy is not None:
-                        conn.execute("COMMIT")
-                        return Task._from_row(legacy)
-            conn.execute(
-                "INSERT INTO tasks (id, title, prompt, status, repo, requires, excludes,"
-                " affinity, labels, payload_ref, payload_inline, target_machine,"
-                " target_worktree, target_repo,"
-                " source, origin_ref, evaluator_ref, dedup_key, goal, done_criteria,"
-                " not_before, created_at, updated_at)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    task_id,
-                    title,
-                    prompt,
-                    status,
-                    repo,
-                    json.dumps(list(requires or [])),
-                    json.dumps(list(excludes or [])),
-                    json.dumps(dict(affinity or {})),
-                    json.dumps(list(labels or [])),
-                    payload_ref,
-                    payload_inline,
-                    target_machine,
-                    target_worktree,
-                    target_repo,
-                    source,
-                    origin_ref,
-                    evaluator_ref,
-                    dedup_key,
-                    goal,
-                    done_criteria,
-                    not_before,
-                    ts,
-                    ts,
+                if accepted is None:
+                    conn.execute(
+                        "INSERT INTO tasks (id, title, prompt, status, repo, requires, excludes,"
+                        " affinity, labels, payload_ref, payload_inline, target_machine,"
+                        " target_worktree, target_repo,"
+                        " source, origin_ref, evaluator_ref, dedup_key, goal, done_criteria,"
+                        " producer_fence, producer_request_hash,"
+                        " not_before, created_at, updated_at)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (
+                            task_id,
+                            title,
+                            prompt,
+                            status,
+                            canonical_repo,
+                            json.dumps(normalized_requires),
+                            json.dumps(normalized_excludes),
+                            json.dumps(dict(affinity or {})),
+                            json.dumps(list(labels or [])),
+                            payload_ref,
+                            payload_inline,
+                            target_machine,
+                            target_worktree,
+                            target_repo,
+                            source,
+                            origin_ref,
+                            evaluator_ref,
+                            dedup_key,
+                            goal,
+                            done_criteria,
+                            fence_json,
+                            request_hash,
+                            not_before,
+                            ts,
+                            ts,
+                        ),
+                    )
+                    self._audit(
+                        conn,
+                        task_id,
+                        ts=ts,
+                        from_status=None,
+                        to_status=status,
+                        note="create",
+                    )
+                    if claim_as and status == Status.QUEUED:
+                        lease = self.lease_seconds
+                        conn.execute(
+                            "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, "
+                            "updated_at = ?, lease_expires_at = ?, last_seen_at = ?, "
+                            "generation = generation + 1, attempts = 1 WHERE id = ?",
+                            (
+                                Status.CLAIMED,
+                                claim_as,
+                                ts,
+                                ts,
+                                ts + lease,
+                                ts,
+                                task_id,
+                            ),
+                        )
+                        self._audit(
+                            conn,
+                            task_id,
+                            ts=ts,
+                            from_status=Status.QUEUED,
+                            to_status=Status.CLAIMED,
+                            worker=claim_as,
+                            note="create-claim",
+                        )
+                    row = conn.execute(
+                        f"SELECT {_TASK_SELECT} FROM tasks WHERE id = ?", (task_id,)
+                    ).fetchone()
+                    assert row is not None
+                    accepted = Task._from_row(row)
+                if fence is not None and not request_already_recorded:
+                    scope = fence["scope"]
+                    assert isinstance(scope, dict)
+                    conn.execute(
+                        "INSERT INTO producer_create_requests "
+                        "(repo, source, generation, request_id, request_hash, "
+                        "producer_id, task_id, accepted_at) VALUES (?,?,?,?,?,?,?,?)",
+                        (
+                            canonical_repo,
+                            scope["source"],
+                            fence["generation"],
+                            fence["request_id"],
+                            request_hash,
+                            fence["producer_id"],
+                            accepted.id,
+                            ts,
+                        ),
+                    )
+                conn.execute("COMMIT")
+            except Exception:
+                conn.execute("ROLLBACK")
+                raise
+        assert accepted is not None
+        if accepted.id != task_id:
+            outcome = CreationOutcome(
+                task=accepted,
+                disposition=(
+                    "replayed" if request_already_recorded else "deduplicated"
                 ),
+                event_type=None,
             )
-            self._audit(conn, task_id, ts=ts, from_status=None, to_status=status, note="create")
-            if claim_as and status == Status.QUEUED:
-                # Atomic create-and-claim: flip the just-inserted row to claimed
-                # under the same lock, so there is no unclaimed gap. (No-op for a
-                # 'proposed' draft, which is deliberately unclaimable.)
-                lease = self.lease_seconds
-                conn.execute(
-                    "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
-                    " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
-                    " attempts = 1 WHERE id = ?",
-                    (Status.CLAIMED, claim_as, ts, ts, ts + lease, ts, task_id),
+            return outcome if _with_outcome else accepted
+        if spill_content is not None:
+            try:
+                self._spill_committed_payload(task_id, spill_content)
+            except (OSError, sqlite3.Error) as exc:
+                log.warning(
+                    "payload spill compaction failed for committed task %s: %s",
+                    task_id,
+                    exc,
                 )
-                self._audit(
-                    conn, task_id, ts=ts, from_status=Status.QUEUED,
-                    to_status=Status.CLAIMED, worker=claim_as, note="create-claim",
-                )
-            conn.execute("COMMIT")
-        return self.get(task_id)  # type: ignore[return-value]
+        task = self.get(task_id)
+        assert task is not None
+        outcome = CreationOutcome(
+            task=task,
+            disposition="created",
+            event_type=(
+                "task.proposed" if status == Status.PROPOSED else "task.created"
+            ),
+        )
+        return outcome if _with_outcome else task
+
+    def create_outcome(self, title: str, **kwargs: object) -> CreationOutcome:
+        """Create a task and report whether a lifecycle row was inserted."""
+        kwargs["_with_outcome"] = True
+        result = self.create(title, **kwargs)  # type: ignore[arg-type]
+        assert isinstance(result, CreationOutcome)
+        return result
 
     def propose(self, title: str, **kwargs: object) -> Task:
         """Create a task in the un-claimable ``proposed`` state."""
         kwargs["status"] = Status.PROPOSED
-        return self.create(title, **kwargs)  # type: ignore[arg-type]
+        result = self.create(title, **kwargs)  # type: ignore[arg-type]
+        assert isinstance(result, Task)
+        return result
+
+    def propose_outcome(self, title: str, **kwargs: object) -> CreationOutcome:
+        """Propose a task and report whether a lifecycle row was inserted."""
+        kwargs["status"] = Status.PROPOSED
+        return self.create_outcome(title, **kwargs)
 
     def approve(self, task_id: str, *, now: float | None = None) -> Task:
         """Move a ``proposed`` task to ``queued`` (makes it claimable)."""
@@ -1276,7 +2789,8 @@ class TaskQueue:
         now: float | None = None,
         lease_seconds: int | None = None,
         evaluation: bool = False,
-    ) -> Task | None:
+        _with_outcome: bool = False,
+    ) -> Task | None | ClaimOutcome:
         """Atomically lease the best eligible ``queued`` task, or ``None``.
 
         Eligible = ``status='queued'``, ``not_before <= now``, in the claimer's
@@ -1292,13 +2806,16 @@ class TaskQueue:
 
         If ``task_id`` is given, only that task is considered (a spawned worker
         deterministically claiming *its* task) — still subject to the same gates,
-        including the ``repo`` lane.
+        including the ``repo`` lane. Tasks carrying a managed required label are
+        additionally claimable only when their persisted fence, generation, and
+        accepted-request ledger row agree.
 
         ``worker_id`` is stamped as the task ``owner``; in a multi-machine system it is the
         canonical ``machine/worktree`` composite (see :func:`worker_id_for`).
         """
+        repo = self._canonical_repo(repo)
         ts = self._now(now)
-        caps = set(capabilities)
+        caps = set(self._canonical_selector_tokens(capabilities))
         # The worker's FULL advertised token set for selector matching: its
         # capabilities plus its identity tokens (``machine:``/``worktree:``/
         # ``repo:``). This is what ``requires`` (affinity) and ``excludes``
@@ -1322,26 +2839,66 @@ class TaskQueue:
             conn.execute("BEGIN IMMEDIATE")
             if task_id is not None:
                 rows = conn.execute(
-                    f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                    f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
                     "WHERE id = ? AND status = ? AND not_before <= ?",
                     (task_id, Status.QUEUED, ts),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    f"SELECT {_TASK_BULK_SELECT} FROM tasks "
+                    f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
                     "WHERE status = ? AND not_before <= ?"
                     " ORDER BY created_at ASC",
                     (Status.QUEUED, ts),
                 ).fetchall()
             chosen: sqlite3.Row | None = None
             best_affinity = -1
+            producer_rejections: list[dict[str, object]] = []
             for row in rows:
                 if repo is not None and row["repo"] != repo:
                     continue  # lane isolation: never claim another repo's work
-                requires = set(json.loads(row["requires"] or "[]"))
+                rejection = self._claim_fence_rejection(conn, row)
+                if rejection is not None:
+                    if "_fingerprint" not in rejection:
+                        rejection["_fingerprint"] = hashlib.sha256(
+                            json.dumps(
+                                {
+                                    "task_id": row["id"],
+                                    "repo": row["repo"],
+                                    "source": row["source"],
+                                    "labels": row["labels"],
+                                    "producer_fence": row["producer_fence"],
+                                    "producer_request_hash": row[
+                                        "producer_request_hash"
+                                    ],
+                                    "reason": rejection["reason"],
+                                },
+                                ensure_ascii=True,
+                                separators=(",", ":"),
+                                sort_keys=True,
+                            ).encode("utf-8")
+                        ).hexdigest()
+                        rejection["fingerprint"] = str(
+                            rejection["_fingerprint"]
+                        )[:16]
+                    if (
+                        len(producer_rejections) < _CLAIM_REJECTION_EVENT_LIMIT
+                        and self._record_claim_rejection(conn, rejection, ts=ts)
+                    ):
+                        rejection.pop("_fingerprint")
+                        producer_rejections.append(rejection)
+                    continue
+                requires = set(
+                    self._canonical_selector_tokens(
+                        json.loads(row["requires"] or "[]"), strict=False
+                    )
+                )
                 if not requires.issubset(full_caps):
                     continue
-                excludes = set(json.loads(row["excludes"] or "[]"))
+                excludes = set(
+                    self._canonical_selector_tokens(
+                        json.loads(row["excludes"] or "[]"), strict=False
+                    )
+                )
                 if excludes & full_caps:
                     continue  # anti-affinity: this worker is excluded (incl. a prior "not me")
                 if not machine_matches(row["target_machine"], machine):
@@ -1355,7 +2912,11 @@ class TaskQueue:
                         break
             if chosen is None:
                 conn.execute("COMMIT")
-                return None
+                outcome = ClaimOutcome(
+                    task=None,
+                    producer_rejections=producer_rejections,
+                )
+                return outcome if _with_outcome else None
             conn.execute(
                 "UPDATE tasks SET status = ?, owner = ?, claimed_at = ?, updated_at = ?,"
                 " lease_expires_at = ?, last_seen_at = ?, generation = generation + 1,"
@@ -1374,7 +2935,18 @@ class TaskQueue:
             )
             task = self._fetch(conn, chosen["id"])
             conn.execute("COMMIT")
-        return task
+        outcome = ClaimOutcome(
+            task=task,
+            producer_rejections=producer_rejections,
+        )
+        return outcome if _with_outcome else task
+
+    def claim_outcome(self, *args: object, **kwargs: object) -> ClaimOutcome:
+        """Claim a task and return newly recorded producer rejection events."""
+        kwargs["_with_outcome"] = True
+        result = self.claim_one(*args, **kwargs)  # type: ignore[arg-type]
+        assert isinstance(result, ClaimOutcome)
+        return result
 
     def mine(
         self, machine: str, worktree: str, *, repo: str | None = None
@@ -1391,6 +2963,7 @@ class TaskQueue:
         - ``owned``: non-terminal tasks this agent has claimed/started/suspended
           (``owner == machine/worktree``).
         """
+        repo = self._canonical_repo(repo)
         owner = worker_id_for(machine, worktree)
         repo_clause = " AND repo = ?" if repo is not None else ""
         repo_param: tuple = (repo,) if repo is not None else ()
@@ -2829,6 +4402,7 @@ class TaskQueue:
           task last made progress (``last_seen_at``), i.e. the *stuck-but-alive*
           signal Q2 says buildup should surface (``None`` when none).
         """
+        repo = self._canonical_repo(repo)
         ts = self._now(now)
         where_repo = " AND repo = ?" if repo is not None else ""
         args: tuple[object, ...] = (repo,) if repo is not None else ()
@@ -3058,6 +4632,7 @@ class TaskQueue:
         ``IN (...)`` filter), so a producer can browse several states in one
         call. :meth:`sweep` uses this to pull the whole non-abandoned corpus.
         """
+        repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
         if repo is not None:
@@ -3100,6 +4675,7 @@ class TaskQueue:
         agent-driven dedup flow (a quick targeted probe). Scoped to the ``repo``
         lane when given. For a full pre-create review, prefer :meth:`sweep`.
         """
+        repo = self._canonical_repo(repo)
         like = f"%{text}%"
         repo_clause = " AND repo = ?" if repo is not None else ""
         repo_param: tuple = (repo,) if repo is not None else ()
@@ -3446,6 +5022,7 @@ class TaskQueue:
     ) -> list[SpawnReservation]:
         """List spawn reservations, newest first, optionally filtered by task or
         state (a single state or a set of states)."""
+        repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
         if task_id is not None:

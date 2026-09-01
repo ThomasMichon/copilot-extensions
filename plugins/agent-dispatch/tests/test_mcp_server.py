@@ -12,6 +12,7 @@ from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.mcp_server import DispatchTools, build_server
 from agent_dispatch.queue import Status
+from tests._helpers import TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 
@@ -19,7 +20,10 @@ from tests._helpers import RepoDefaultingQueue as TaskQueue
 def server_url(tmp_path):
     import uvicorn
 
-    app = create_app(TaskQueue(tmp_path / "tasks.db"))
+    app = create_app(
+        TaskQueue(tmp_path / "tasks.db"),
+        control_token="control-secret",
+    )
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
@@ -49,8 +53,11 @@ def server_url(tmp_path):
 def tools(server_url):
     # a fixed identity so claim/worktree_status are deterministic
     return DispatchTools(
-        client_factory=lambda: DispatchClient(server_url),
+        client_factory=lambda: DispatchClient(
+            server_url, control_token="control-secret"
+        ),
         identity_resolver=lambda: ("m1", "wt-1"),
+        repo_resolver=lambda: TEST_REPO,
     )
 
 
@@ -65,6 +72,33 @@ def test_dedup_via_create(tools):
     a = tools.create("dup", dedup_key="same")
     b = tools.create("dup", dedup_key="same")
     assert a["id"] == b["id"]
+
+
+def test_producer_fence_tools(tools):
+    first = tools.producer_scope_handoff(
+        "scheduled",
+        "scheduler-a",
+        0,
+        required_label="nightly",
+    )
+    assert first["current_generation"] == 1
+    capability = first["producer_capability"]
+    task = tools.create(
+        "bounded",
+        source="scheduled",
+        labels=["nightly"],
+        producer_scope={"repo": TEST_REPO, "source": "scheduled"},
+        producer_id="scheduler-a",
+        producer_generation=1,
+        producer_capability=capability,
+        producer_request_id="mcp-request",
+    )
+    assert task["producer_fence"]["producer_id"] == "scheduler-a"
+    assert tools.producer_scope_status("scheduled")[
+        "current_generation"
+    ] == 1
+    invalid = tools.producer_scope_handoff("scheduled", "scheduler-b", 5)
+    assert invalid["error"]["code"] == "producer_fence_rejected"
 
 
 def test_claim_uses_resolved_identity(tools):
@@ -141,6 +175,19 @@ def test_worktree_status_without_identity(server_url):
     assert "error" in tools.worktree_status()
 
 
+def test_claim_requires_repo_or_explicit_all_repos(server_url):
+    client = DispatchClient(server_url)
+    task = client.create("work")
+    tools = DispatchTools(
+        client_factory=lambda: DispatchClient(server_url),
+        identity_resolver=lambda: ("m1", "wt-1"),
+        repo_resolver=lambda: None,
+    )
+
+    assert tools.claim()["error"]["code"] == "claim_scope_required"
+    assert tools.claim(all_repos=True)["id"] == task["id"]
+
+
 def test_build_server_registers_tools():
     import asyncio
 
@@ -160,6 +207,14 @@ def test_build_server_registers_tools():
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= names
     assert "dispatch_wakes" in names
     assert "dispatch_rearm_spawn" in names
+    assert {
+        "dispatch_producer_scope_status",
+        "dispatch_producer_scope_handoff",
+    } <= names
+    handoff = next(
+        t for t in registered if t.name == "dispatch_producer_scope_handoff"
+    )
+    assert handoff.input_schema["properties"]["expected_generation"]["type"] == "integer"
     complete = next(t for t in registered if t.name == "dispatch_complete")
     result_schema = complete.input_schema["properties"]["result"]
     variants = result_schema.get("anyOf", [result_schema])

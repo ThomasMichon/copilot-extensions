@@ -29,7 +29,7 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -260,6 +260,52 @@ def task_lifecycle_event(event_type: str, task: dict[str, Any]) -> dict[str, Any
     }
     for field in _SAFE_TASK_FIELDS:
         value = task.get(field)
+        if value is not None:
+            record[field] = value
+    return record
+
+
+_SAFE_PRODUCER_FENCE_FIELDS = (
+    "code",
+    "operation",
+    "reason",
+    "retryable",
+    "task_id",
+    "status",
+    "repo",
+    "owning_repo",
+    "owning_source",
+    "source",
+    "required_label",
+    "producer_request_id",
+    "requested_producer",
+    "active_producer",
+    "requested_generation",
+    "current_generation",
+    "from_generation",
+    "to_generation",
+    "replayed",
+    "fingerprint",
+    "blocking_task_count",
+    "blocking_task_ids",
+    "blocking_status_counts",
+    "blocking_ids_truncated",
+    "conflicting_task_id",
+    "conflicting_task_status",
+)
+
+
+def producer_fence_event(
+    event_type: str, detail: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Shape a producer-fence event without task content or dedup payloads."""
+    record: dict[str, Any] = {
+        "kind": "state_transition",
+        "name": "producer_fence",
+        "event": event_type,
+    }
+    for field in _SAFE_PRODUCER_FENCE_FIELDS:
+        value = detail.get(field)
         if value is not None:
             record[field] = value
     return record

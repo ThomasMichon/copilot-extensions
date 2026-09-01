@@ -8,17 +8,43 @@ import time
 from types import SimpleNamespace
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.coordinator import create_app
+from agent_dispatch.mcp_http import bearer_guard_middleware
 from agent_dispatch.queue import Status
-from tests._helpers import TEST_REPO
+from tests._helpers import OTHER_REPO, TEST_REPO
 from tests._helpers import RepoDefaultingQueue as TaskQueue
 
 mcp = pytest.importorskip("mcp")
 import httpx2  # noqa: E402
 from mcp import ClientSession  # noqa: E402
 from mcp.client.streamable_http import streamable_http_client  # noqa: E402
+
+
+def test_bearer_guard_accepts_case_insensitive_scheme():
+    app = FastAPI()
+    app.add_middleware(bearer_guard_middleware("client-secret", "control-secret"))
+
+    @app.get("/health")
+    def health():
+        return {"ok": True}
+
+    api = TestClient(app)
+    assert api.get(
+        "/health",
+        headers={"Authorization": "bearer client-secret"},
+    ).status_code == 200
+    assert api.get(
+        "/health",
+        headers={"Authorization": "bEaReR control-secret"},
+    ).status_code == 200
+    assert api.get(
+        "/health",
+        headers={"Authorization": "Basic control-secret"},
+    ).status_code == 401
 
 
 def _boot(app):
@@ -54,7 +80,12 @@ def _boot(app):
 
 @pytest.fixture
 def coord(tmp_path):
-    url, stop = _boot(create_app(TaskQueue(tmp_path / "tasks.db")))
+    url, stop = _boot(
+        create_app(
+            TaskQueue(tmp_path / "tasks.db"),
+            control_token="control-secret",
+        )
+    )
     yield url
     stop()
 
@@ -88,7 +119,7 @@ def test_mcp_endpoint_lists_tools(coord):
     names = sorted(t.name for t in tools)
     assert "dispatch_create" in names
     assert "dispatch_claim" in names
-    assert len(names) == 27
+    assert len(names) == 29
     assert {"dispatch_suspend", "dispatch_resume", "dispatch_release"} <= set(
         names
     )
@@ -96,6 +127,10 @@ def test_mcp_endpoint_lists_tools(coord):
     assert "dispatch_result" in names
     assert "dispatch_rearm_spawn" in names
     assert "dispatch_emitter_side_load" in names
+    assert {
+        "dispatch_producer_scope_status",
+        "dispatch_producer_scope_handoff",
+    } <= set(names)
     complete = next(t for t in tools if t.name == "dispatch_complete")
     result_schema = complete.input_schema["properties"]["result"]
     variants = result_schema.get("anyOf", [result_schema])
@@ -289,6 +324,76 @@ def test_mcp_create_visible_over_rest(coord):
     assert got["title"] == "via mcp"
 
 
+def test_mcp_producer_fence_parity(coord):
+    import asyncio
+    import json
+
+    loop = asyncio.new_event_loop()
+    denied = loop.run_until_complete(
+        _call(
+            coord,
+            "dispatch_producer_scope_handoff",
+            {
+                "repo": TEST_REPO,
+                "source": "scheduled",
+                "producer_id": "scheduler-a",
+                "expected_generation": 0,
+            },
+        )
+    )
+    assert json.loads(denied.content[0].text)["error"]["reason"] == (
+        "invalid_control_authority"
+    )
+
+    first = loop.run_until_complete(
+        _call(
+            coord,
+            "dispatch_producer_scope_handoff",
+            {
+                "repo": TEST_REPO,
+                "source": "scheduled",
+                "producer_id": "scheduler-a",
+                "expected_generation": 0,
+                "required_label": "nightly",
+            },
+            headers={"Authorization": "Bearer control-secret"},
+        )
+    )
+    transition = json.loads(first.content[0].text)
+    assert transition["current_generation"] == 1
+    capability = transition["producer_capability"]
+
+    created = loop.run_until_complete(
+        _call(
+            coord,
+            "dispatch_create",
+            {
+                "title": "bounded",
+                "repo": TEST_REPO,
+                "source": "scheduled",
+                "labels": ["nightly"],
+                "producer_scope": {"repo": TEST_REPO, "source": "scheduled"},
+                "producer_id": "scheduler-a",
+                "producer_generation": 1,
+                "producer_capability": capability,
+                "producer_request_id": "http-mcp-request",
+            },
+        )
+    )
+    task = json.loads(created.content[0].text)
+    assert task["producer_fence"]["generation"] == 1
+
+    status = loop.run_until_complete(
+        _call(
+            coord,
+            "dispatch_producer_scope_status",
+            {"repo": TEST_REPO, "source": "scheduled"},
+        )
+    )
+    assert json.loads(status.content[0].text)["active_producer"] == "scheduler-a"
+    loop.close()
+
+
 def test_mcp_claim_uses_header_identity(coord):
     import asyncio
     import json
@@ -300,7 +405,11 @@ def test_mcp_claim_uses_header_identity(coord):
             coord,
             "dispatch_claim",
             {},
-            headers={"X-Agent-Machine": "host-a", "X-Agent-Worktree": "wt-1"},
+            headers={
+                "X-Agent-Machine": "host-a",
+                "X-Agent-Worktree": "wt-1",
+                "X-Agent-Repo": TEST_REPO,
+            },
         )
     )
     claimed = json.loads(res.content[0].text)
@@ -317,13 +426,36 @@ def test_mcp_claim_without_identity_errors(coord):
     assert "error" in payload
 
 
+def test_mcp_claim_requires_repo_or_explicit_all_repos(coord):
+    import asyncio
+    import json
+
+    task = DispatchClient(coord).create("work")
+    headers = {"X-Agent-Machine": "host-a", "X-Agent-Worktree": "wt-1"}
+    missing = asyncio.new_event_loop().run_until_complete(
+        _call(coord, "dispatch_claim", {}, headers=headers)
+    )
+    assert json.loads(missing.content[0].text)["error"]["code"] == (
+        "claim_scope_required"
+    )
+    claimed = asyncio.new_event_loop().run_until_complete(
+        _call(
+            coord,
+            "dispatch_claim",
+            {"all_repos": True},
+            headers={**headers, "X-Agent-Repo": OTHER_REPO},
+        )
+    )
+    assert json.loads(claimed.content[0].text)["id"] == task["id"]
+
+
 def test_mcp_complete_result_is_visible_over_rest(coord):
     import asyncio
     import json
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     client.start(task["id"], owner)
     result = {"verdict": "accepted", "details": {"count": 2}}
 
@@ -370,7 +502,7 @@ def test_mcp_retry_fill_emits_result_recorded_not_duplicate_completion(
     monkeypatch.setattr(EventBus, "publish", capture)
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     client.start(task["id"], owner)
     client.complete(task["id"], owner)
 
@@ -397,7 +529,7 @@ def test_mcp_complete_rejects_null_result(coord):
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     client.start(task["id"], owner)
 
     response = asyncio.new_event_loop().run_until_complete(
@@ -421,7 +553,7 @@ def test_mcp_complete_normalizes_json_object_string(coord):
 
     client = DispatchClient(coord)
     task = client.create("work")
-    owner = client.claim(worker_id="worker-1")["owner"]
+    owner = client.claim(worker_id="worker-1", repo=TEST_REPO)["owner"]
     client.start(task["id"], owner)
 
     response = asyncio.new_event_loop().run_until_complete(

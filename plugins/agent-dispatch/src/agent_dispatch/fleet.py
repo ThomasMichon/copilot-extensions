@@ -140,6 +140,7 @@ class FleetSpawner:
         driver: str = embody.DEFAULT_DRIVER,
         headless: bool = False,
         agent: str = embody.DEFAULT_HEADLESS_AGENT,
+        all_repos: bool = False,
         verify_timeout: int = 0,
         liveness: LivenessFn | None = None,
         spawn_fn: Callable[..., subprocess.CompletedProcess] | None = None,
@@ -154,6 +155,7 @@ class FleetSpawner:
         self.driver = driver
         self.headless = bool(headless)
         self.agent = agent
+        self.all_repos = bool(all_repos)
         self.verify_timeout = verify_timeout
         default_liveness = host_can_bridge if self.headless else host_can_embody
         self._liveness = liveness or default_liveness
@@ -244,6 +246,8 @@ class FleetSpawner:
                     owner=owner,
                     worker_id=owner,
                     agent=self.agent,
+                    repo=None if self.all_repos else task.get("repo"),
+                    all_repos=self.all_repos,
                 )
             else:
                 result = self._spawn(
@@ -254,6 +258,8 @@ class FleetSpawner:
                     worker_id=owner,
                     driver=self.driver,
                     project=embody.project_for_task(task),
+                    repo=None if self.all_repos else task.get("repo"),
+                    all_repos=self.all_repos,
                     verify_timeout=self.verify_timeout,
                 )
         except embody.EmbodyUnavailable as exc:

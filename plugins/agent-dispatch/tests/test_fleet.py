@@ -33,11 +33,23 @@ def _fake_spawn(record: list | None = None, *, ok: bool = True, rc: int = 0):
     """A fake `spawn_fleet_embodied_worker` returning a CompletedProcess-like."""
     import subprocess
 
-    def spawn(host, task_id, *, origin, owner, worker_id, driver, project=None, verify_timeout=0):
+    def spawn(
+        host,
+        task_id,
+        *,
+        origin,
+        owner,
+        worker_id,
+        driver,
+        project=None,
+        repo=None,
+        all_repos=False,
+        verify_timeout=0,
+    ):
         if record is not None:
             record.append(
                 {"host": host, "task_id": task_id, "origin": origin, "owner": owner,
-                 "project": project}
+                 "project": project, "repo": repo, "all_repos": all_repos}
             )
         stdout = '{"worktree_id": "wt-x", "session_id": "sess-x"}' if ok else ""
         return subprocess.CompletedProcess(
@@ -56,11 +68,21 @@ def _fake_headless_spawn(record: list | None = None, *, ok: bool = True, rc: int
     """
     import subprocess
 
-    def spawn(host, task_id, *, origin, owner, worker_id, agent):
+    def spawn(
+        host,
+        task_id,
+        *,
+        origin,
+        owner,
+        worker_id,
+        agent,
+        repo=None,
+        all_repos=False,
+    ):
         if record is not None:
             record.append(
                 {"host": host, "task_id": task_id, "origin": origin, "owner": owner,
-                 "agent": agent}
+                 "agent": agent, "repo": repo, "all_repos": all_repos}
             )
         return subprocess.CompletedProcess(
             args=["ssh"], returncode=rc, stdout="", stderr="" if ok else "boom"
@@ -155,6 +177,23 @@ def test_call_success_builds_handle_with_host_and_owner():
     assert rec[0]["origin"] == "orig"
     # the task's lane was resolved to a project name for the CWD-neutral body
     assert rec[0]["project"] == "widgets"
+    assert rec[0]["repo"] == "gitea.example/org/widgets"
+    assert rec[0]["all_repos"] is False
+
+
+def test_all_repos_fleet_spawn_carries_explicit_claim_mode():
+    rec: list = []
+    spawner = fleet.FleetSpawner(
+        ["a"],
+        origin="orig",
+        all_repos=True,
+        liveness=lambda _host: True,
+        spawn_fn=_fake_spawn(rec),
+    )
+
+    assert spawner({"id": "t1", "repo": TEST_REPO})[0] is True
+    assert rec[0]["repo"] is None
+    assert rec[0]["all_repos"] is True
 
 
 def test_selection_cache_is_released_after_successful_spawn():
@@ -215,6 +254,20 @@ def test_fleet_seed_drives_origin_over_ssh_with_explicit_owner():
         "ssh brain agent-dispatch abandon t42 --worker-id fleet-t42-abc123 --duplicate-of"
         in seed
     )
+
+
+def test_fleet_seed_carries_explicit_all_repos_claim_mode():
+    seed = embody.fleet_autopilot_worker_prompt(
+        "t42",
+        origin="brain",
+        owner="fleet-t42-abc123",
+        worker_id="fleet-t42-abc123",
+        all_repos=True,
+    )
+    assert (
+        "ssh brain agent-dispatch claim --task t42 --worker "
+        "fleet-t42-abc123 --evaluation --all-repos"
+    ) in seed
 
 
 def test_spawn_fleet_embodied_worker_builds_ssh_embody_argv(monkeypatch):
@@ -394,7 +447,17 @@ def test_headless_call_encodes_fleet_body_recovery_handle():
     `fleet-body:<host>:<sid>` recovery handle (so the body is auto-recoverable)."""
     import subprocess
 
-    def spawn(host, task_id, *, origin, owner, worker_id, agent):
+    def spawn(
+        host,
+        task_id,
+        *,
+        origin,
+        owner,
+        worker_id,
+        agent,
+        repo=None,
+        all_repos=False,
+    ):
         return subprocess.CompletedProcess(
             args=["ssh"], returncode=0,
             stdout='{"session_id": "brg-77"}', stderr="",
@@ -415,7 +478,17 @@ def test_headless_call_without_session_id_falls_back_to_owner():
     owner (the body still runs; it just isn't auto-recovered)."""
     import subprocess
 
-    def spawn(host, task_id, *, origin, owner, worker_id, agent):
+    def spawn(
+        host,
+        task_id,
+        *,
+        origin,
+        owner,
+        worker_id,
+        agent,
+        repo=None,
+        all_repos=False,
+    ):
         return subprocess.CompletedProcess(args=["ssh"], returncode=0, stdout="", stderr="")
 
     f = fleet.FleetSpawner(
