@@ -137,7 +137,7 @@ def _resolve_bound_store_target(conf) -> tuple[str, str, str]:
                 f"lease store: the bound knowledge repo {knowledge!r} could not "
                 f"be resolved from the repos registry ({exc}); {_hint}"
             ) from exc
-        if not kanchor:
+        if not kanchor or not os.path.isdir(kanchor):
             raise ConfigError(
                 f"lease store: the bound knowledge repo {knowledge!r} has no "
                 f"usable checkout on this machine; {_hint}"

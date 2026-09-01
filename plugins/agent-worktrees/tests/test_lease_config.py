@@ -62,20 +62,23 @@ def test_override_env_used_verbatim_without_auth(
 
 def test_knowledge_repo_redirects_before_current_project(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     monkeypatch.delenv(ORIGIN_ENV, raising=False)
     monkeypatch.setattr(
         cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
     )
+    knowledge = tmp_path / "dotfiles"
+    knowledge.mkdir()
     monkeypatch.setattr(
         repos_mod,
         "resolve_path",
-        lambda name: "/anchors/dotfiles" if name == "dotfiles" else None,
+        lambda name: str(knowledge) if name == "dotfiles" else None,
     )
 
     def fake_remote_url(remote: str, *, cwd: str) -> str | None:
         # Only the knowledge checkout should be consulted -- not the self anchor.
-        assert str(cwd) == "/anchors/dotfiles"
+        assert str(cwd) == str(knowledge)
         assert remote == "origin"
         return "https://github.com/example-operator/dotfiles.git"
 
@@ -84,7 +87,7 @@ def test_knowledge_repo_redirects_before_current_project(
     url, remote, anchor = _resolve_store_target()
     assert url == "https://github.com/example-operator/dotfiles.git"
     assert remote == "origin"
-    assert anchor == "/anchors/dotfiles"
+    assert anchor == str(knowledge)
 
 
 def test_knowledge_repo_resolution_failure_raises_not_fall_through(
@@ -114,8 +117,34 @@ def test_knowledge_repo_resolution_failure_raises_not_fall_through(
         _resolve_store_target()
 
 
+def test_knowledge_repo_file_path_is_controlled_config_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv(ORIGIN_ENV, raising=False)
+    monkeypatch.setattr(
+        cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
+    )
+    not_a_checkout = tmp_path / "not-a-checkout"
+    not_a_checkout.write_text("file", encoding="utf-8")
+    monkeypatch.setattr(
+        repos_mod, "resolve_path", lambda name: str(not_a_checkout)
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "_remote_url",
+        lambda *args, **kwargs: pytest.fail(
+            "invalid checkout path reached git"
+        ),
+    )
+
+    with pytest.raises(ConfigError, match="no usable checkout"):
+        _resolve_store_target()
+
+
 def test_knowledge_repo_no_origin_remote_raises(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
 ) -> None:
     # The knowledge checkout resolves but has no 'origin' remote URL -> raise
     # (still no fall-back to the harness repo).
@@ -123,10 +152,12 @@ def test_knowledge_repo_no_origin_remote_raises(
     monkeypatch.setattr(
         cfg, "load_config", lambda: _fake_config(knowledge_repo="dotfiles")
     )
+    knowledge = tmp_path / "dotfiles"
+    knowledge.mkdir()
     monkeypatch.setattr(
         repos_mod,
         "resolve_path",
-        lambda name: "/anchors/dotfiles" if name == "dotfiles" else None,
+        lambda name: str(knowledge) if name == "dotfiles" else None,
     )
     monkeypatch.setattr(git_ops, "_remote_url", lambda remote, *, cwd: None)
 
