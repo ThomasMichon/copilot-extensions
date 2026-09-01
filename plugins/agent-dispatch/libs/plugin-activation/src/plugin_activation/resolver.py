@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import ntpath
 import os
 import platform
@@ -37,6 +36,8 @@ from plugin_resolve import (
     plugin_dir,
     split_source,
 )
+
+from .state import PluginStateError, read_json_object
 
 REGISTRY_NAME = "plugin-activation"
 _SCP_REMOTE = re.compile(r"^(?:[^@/]+@)?([^:/]+):(.+)$")
@@ -210,48 +211,25 @@ def _combine_authority(*authorities: ScanAuthority) -> ScanAuthority:
 
 
 def _load_json_object(path: Path) -> tuple[ScanAuthority, dict, list[Finding]]:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    if not path.exists():
         return ScanAuthority.ABSENT, {}, []
-    except (OSError, UnicodeDecodeError) as exc:
-        return (
-            ScanAuthority.INDETERMINATE,
-            {},
-            [
-                _finding(
-                    path,
-                    "entry-indeterminate",
-                    status="indeterminate",
-                    detail=str(exc),
-                )
-            ],
-        )
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
+        _, data = read_json_object(path)
+    except PluginStateError as exc:
+        reason = (
+            "entry-indeterminate"
+            if isinstance(exc.__cause__, (OSError, UnicodeError))
+            else "invalid-entry"
+        )
         return (
             ScanAuthority.INDETERMINATE,
             {},
             [
                 _finding(
                     path,
-                    "invalid-entry",
+                    reason,
                     status="indeterminate",
                     detail=str(exc),
-                )
-            ],
-        )
-    if not isinstance(data, dict):
-        return (
-            ScanAuthority.INDETERMINATE,
-            {},
-            [
-                _finding(
-                    path,
-                    "invalid-entry",
-                    status="indeterminate",
-                    detail="settings document must be an object",
                 )
             ],
         )

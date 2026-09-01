@@ -47,6 +47,7 @@ class Plan:
     modules: list[dict[str, str]] = field(default_factory=list)
     resources: list[dict[str, Any]] = field(default_factory=list)
     package_sources: list[dict[str, str]] = field(default_factory=list)
+    removals: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _repo_paths(resolved: list[RequirementPackage]) -> dict[str, Path]:
@@ -115,6 +116,13 @@ def plan(packages: list[RequirementPackage], machine: str, plat: str | None = No
         }
         for res in resolved_resources
     ]
+    removals: dict[str, set[str]] = {}
+    for pkg in resolved:
+        for spec in pkg.manage.values():
+            if spec.get("disposition") != "ensure-absent":
+                continue
+            for identity in spec.get("keys", {}).get("enabledPlugins", []):
+                removals.setdefault(identity, set()).add(pkg.name)
     return Plan(
         machine=machine,
         surfaces=sorted(surfaces.values(), key=lambda s: s.key),
@@ -125,6 +133,15 @@ def plan(packages: list[RequirementPackage], machine: str, plat: str | None = No
         package_sources=[
             {"package": pkg.name, "source_repo": pkg.source_repo}
             for pkg in sorted(resolved, key=lambda item: (item.source_repo, item.name))
+        ],
+        removals=[
+            {
+                "op": "remove",
+                "key": "enabledPlugins",
+                "item": identity,
+                "contributors": sorted(contributors),
+            }
+            for identity, contributors in sorted(removals.items())
         ],
     )
 
@@ -138,6 +155,7 @@ def plan_to_dict(p: Plan) -> dict[str, Any]:
         "surfaces": [dataclasses.asdict(s) for s in p.surfaces],
         "modules": p.modules,
         "resources": p.resources,
+        "removals": p.removals,
     }
 
 

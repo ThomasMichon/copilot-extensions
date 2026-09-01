@@ -80,7 +80,7 @@ across folders. The legacy `.github/machine-state/` path is consulted only when
 Minimal shape:
 
 ```yaml
-schema_version: 2
+schema_version: 3
 package: <owner>/<name>            # e.g. myrepo/copilot-defaults
 gate: [this-machine, other-machine]  # omit or ["*"] for all machines
 aliases:
@@ -121,6 +121,28 @@ When a migration must run correctly on existing schema-v1 runtimes, use the
 supported false-only `copilot.settings.plugin-tombstones` enforce group instead.
 It may contain only `enabledPlugins.<plugin>: false` entries and preserves every
 undeclared operator plugin.
+
+To make selected installed plugins repository-only, use schema v3 desired
+absence. This removes user-global activation keys without uninstalling plugin
+inventory:
+
+```yaml
+schema_version: 3
+package: example/plugin-activation
+manage:
+  copilot.settings.plugin-activation:
+    disposition: ensure-absent
+    keys:
+      enabledPlugins:
+        - optional-plugin@example-marketplace
+```
+
+`ensure-absent` is valid only for this exact source-qualified key list. Restore
+is dry-run-first, reports exact removals, and preserves unrelated settings.
+Never use `exclude` for this purpose (`exclude` prevents secret capture) or
+`prune` (garbage collection). Validation rejects value/removal conflicts and
+protects `agent-worktrees`, `agent-machines`, and every declared bootstrap-floor
+plugin.
 
 Run `<catalog argv[0]> validate` after authoring to catch conflicts.
 

@@ -91,7 +91,7 @@ fleet, topology, or operating environment.
   isolation.
 - [x] Update CLI help, README, architecture, and remediation text to distinguish
   bare project scope from exact `--repo` and full `--all-projects` scope.
-- [ ] Add a schema-versioned, conflict-validated settings disposition for exact
+- [x] Add a schema-versioned, conflict-validated settings disposition for exact
   map-key absence, beginning with user-level plugin activation and preserving
   installed inventory (#1507).
 - [ ] Give each resource module plan, apply, verify, and report operations with
@@ -185,3 +185,9 @@ behavioral parity is demonstrated.
 - Added linked-worktree, standalone clone, non-transitive relationship,
   unavailable supplement, and explicit-scope coverage. The full agent-machines
   suite passes.
+
+### 2026-09-01 - Exact activation-key absence
+
+- Added schema-v3 `ensure-absent` for exact source-qualified user activation
+  keys with package-union conflict detection, bootstrap protection, dry-run
+  reporting, backup-before-write apply, and idempotent reconciliation (#1507).

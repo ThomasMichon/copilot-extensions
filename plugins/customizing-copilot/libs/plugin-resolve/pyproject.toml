@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+# Distribution name is namespaced (agent-plugin-resolve, not the squattable
+# "plugin-resolve") to prevent dependency-confusion; the import module stays
+# ``plugin_resolve``. Mirrors agent-config-migrate / agent-ssh-manager / agent-zdd.
+name = "agent-plugin-resolve"
+version = "0.1.0-dev2"
+description = "Copilot CLI + Claude plugin resolution: locate marketplaces, plugins, and a repo's enabled plugins across both conventions"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thomas Michon" }
+]
+# Pure-stdlib: only JSON (settings, marketplace/plugin manifests are JSON in both
+# the Copilot-native and Claude conventions). No YAML/third-party dependency.
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 99
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "S", "B", "A", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests legitimately use `assert` (pytest) and hardcoded fixtures.
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

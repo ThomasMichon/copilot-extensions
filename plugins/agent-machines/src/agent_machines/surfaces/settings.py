@@ -22,7 +22,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from plugin_activation import (
+    PluginStateError,
+    read_json_object,
+    remove_activation_entries,
+)
+
 from ._common import (
+    SurfaceStateError,
     SurfaceResult,
     backup_file,
     copilot_home,
@@ -51,20 +58,31 @@ def _merge_settings_floor(key: str, live: Any, manifest: Any) -> Any:
 
 
 def apply(
-    contributions: list[tuple[str, dict[str, Any]]],
+    contributions: list[
+        tuple[str, dict[str, Any]] | tuple[str, dict[str, Any], str]
+    ],
     home: Path | None = None,
     dry_run: bool = True,
 ) -> SurfaceResult:
     """Converge ``settings.json`` from ``(disposition, values)`` contributions."""
     home = home or copilot_home()
     path = home / SETTINGS_FILE
-    live = read_json(path)
+    normalized = [
+        (item[0], item[1], item[2] if len(item) == 3 else "")
+        for item in contributions
+    ]
+    has_removals = any(disp == "ensure-absent" for disp, _, _ in normalized)
+    try:
+        _, live = read_json_object(path) if has_removals else ("", read_json(path))
+    except PluginStateError as exc:
+        raise SurfaceStateError(str(exc)) from exc
     new = dict(live)
     applied: list[str] = []
+    removal_changes: list[dict[str, Any]] = []
 
     # Floors first (union), then enforce (authoritative overwrite).
     for disposition in ("ensure-present", "enforce"):
-        for disp, values in contributions:
+        for disp, values, _ in normalized:
             if disp != disposition or not isinstance(values, dict):
                 continue
             for key, val in values.items():
@@ -74,17 +92,71 @@ def apply(
                     new[key] = _merge_settings_floor(key, new.get(key), val)
                 applied.append(key)
 
+    # Desired absence is deliberately last. Validation rejects any declaration
+    # that also manages the same identity to a value.
+    removal_requests: dict[str, set[str]] = {}
+    for disp, keys, contributor in normalized:
+        if disp == "ensure-absent":
+            for identity in keys.get("enabledPlugins", []):
+                removal_requests.setdefault(identity, set())
+                if contributor:
+                    removal_requests[identity].add(contributor)
+    if removal_requests:
+        try:
+            new, removed = remove_activation_entries(
+                new,
+                removal_requests,
+                path=path,
+            )
+        except PluginStateError as exc:
+            raise SurfaceStateError(str(exc)) from exc
+        for identity in removed:
+            removal_changes.append(
+                {
+                    "op": "remove",
+                    "key": "enabledPlugins",
+                    "items": [identity],
+                    "contributors": sorted(removal_requests[identity]),
+                }
+            )
+            applied.append("enabledPlugins")
+
     changed = new != live
     backup = None
     if changed and not dry_run:
         backup = backup_file(path)
         write_json_atomic(path, new)
+    changes = diff_keys(live, new, applied)
+    if removal_changes:
+        changes = [change for change in changes if change["key"] != "enabledPlugins"]
+        old_enabled = live.get("enabledPlugins", {})
+        new_enabled = new.get("enabledPlugins", {})
+        if isinstance(old_enabled, dict) and isinstance(new_enabled, dict):
+            removed = {
+                item
+                for change in removal_changes
+                for item in change["items"]
+            }
+            for identity in sorted(set(old_enabled) | set(new_enabled)):
+                if identity in removed:
+                    continue
+                before = old_enabled.get(identity)
+                after = new_enabled.get(identity)
+                if before != after:
+                    changes.append(
+                        {
+                            "key": f"enabledPlugins.{identity}",
+                            "before": before,
+                            "after": after,
+                        }
+                    )
+        changes.extend(removal_changes)
     return SurfaceResult(
         surface=SURFACE,
         file=SETTINGS_FILE,
         changed=changed,
         dry_run=dry_run,
         applied_keys=sorted(set(applied)),
-        changes=diff_keys(live, new, applied),
+        changes=changes,
         backup_path=str(backup) if backup else None,
     )

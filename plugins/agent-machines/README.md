@@ -159,7 +159,7 @@ is a separate explicit edit.
 A package under `.agent-machines/all/` has this shape:
 
 ```yaml
-schema_version: 2
+schema_version: 3
 package: myrepo/copilot-defaults
 gate: [my-box]                         # omit or ["*"] for all machines
 manage:
@@ -245,10 +245,34 @@ copilot.settings.plugin-tombstones:
 This group may contain only non-bootstrap plugin identities set to `false`.
 Undeclared operator plugins remain untouched.
 
-Recognized dispositions are `enforce`, `ensure-present`, `capture-only`,
-`ignore`, `exclude`, `prune`, and `prerequisite-check`. Current restore applies
-`enforce` and `ensure-present`; `capture` and `prune` are placeholder CLI verbs
-today.
+Schema v3 adds precise desired absence for user-global plugin activation. A
+private requirement package can remove selected keys from
+`~/.copilot/settings.json` without uninstalling their inventory:
+
+```yaml
+schema_version: 3
+package: example/plugin-activation
+manage:
+  copilot.settings.plugin-activation:
+    disposition: ensure-absent
+    keys:
+      enabledPlugins:
+        - optional-plugin@example-marketplace
+        - repo-focused-tools@example-marketplace
+```
+
+Restore previews exact `enabledPlugins` removals by default; `--apply` backs up
+`settings.json` before deleting only the listed keys. Duplicate removal requests
+compose across packages, while any true/false value declaration for the same
+identity is a validation conflict. `agent-worktrees`, `agent-machines`, and
+plugins named by any package's `bootstrap-floor.plugins` are protected from
+removal. This is intentionally distinct from `exclude` (a capture secret guard)
+and `prune` (out-of-reconcile garbage collection).
+
+Recognized dispositions are `enforce`, `ensure-present`, `ensure-absent`,
+`capture-only`, `ignore`, `exclude`, `prune`, and `prerequisite-check`.
+Current restore applies `enforce`, `ensure-present`, and `ensure-absent`;
+`capture` and `prune` are placeholder CLI verbs today.
 
 The top-level `resources:` list declares typed, identity-bearing machine state
 -- package-manager packages, canonical config files (whole-file or a marked

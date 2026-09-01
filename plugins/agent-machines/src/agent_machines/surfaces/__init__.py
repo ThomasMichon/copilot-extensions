@@ -39,15 +39,20 @@ SURFACE_FILES = {
 
 def collect_contributions(
     packages: list[RequirementPackage], prefix: str
-) -> list[tuple[str, dict[str, Any]]]:
-    """Gather ``(disposition, values)`` for every managed key under ``prefix``."""
-    out: list[tuple[str, dict[str, Any]]] = []
+) -> list[tuple[str, dict[str, Any], str]]:
+    """Gather ``(disposition, payload, package)`` under ``prefix``."""
+    out: list[tuple[str, dict[str, Any], str]] = []
     for pkg in packages:
         for key, spec in pkg.manage.items():
             if key == prefix or key.startswith(prefix + "."):
-                values = spec.get("values", spec.get("value"))
-                if isinstance(values, dict):
-                    out.append((spec.get("disposition", "ignore"), values))
+                disposition = spec.get("disposition", "ignore")
+                payload = (
+                    spec.get("keys")
+                    if disposition == "ensure-absent"
+                    else spec.get("values", spec.get("value"))
+                )
+                if isinstance(payload, dict):
+                    out.append((disposition, payload, pkg.name))
     return out
 
 

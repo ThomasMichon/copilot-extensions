@@ -11,6 +11,8 @@ import json
 
 from agent_machines import __main__ as cli
 from agent_machines import modules, reconcile, resources
+from agent_machines.surfaces import SurfaceResult
+from agent_machines.surfaces._common import SurfaceStateError
 
 
 def _fake_result(stdout: str) -> reconcile.RestoreResult:
@@ -80,6 +82,50 @@ def test_json_emits_structured_result_with_stdout(monkeypatch, capsys):
     assert data["modules"][0]["stdout_tail"] == "[OK] did the thing"
     assert "plan" in data
     assert data["scope"] == "repo:acme"
+
+
+def test_restore_prints_exact_plugin_removal(monkeypatch, capsys):
+    result = _fake_result("")
+    result.module_results = []
+    result.surface_results = [
+        SurfaceResult(
+            surface="copilot.settings",
+            file="settings.json",
+            changed=True,
+            dry_run=True,
+            changes=[
+                {
+                    "op": "remove",
+                    "key": "enabledPlugins",
+                    "items": ["optional@example-marketplace"],
+                    "contributors": ["example/activation"],
+                }
+            ],
+        )
+    ]
+    _patch(monkeypatch, result)
+    rc = cli.main(["restore", "--machine", "box"])
+    assert rc == 0
+    assert (
+        "- enabledPlugins.optional@example-marketplace"
+        in capsys.readouterr().out
+    )
+
+
+def test_restore_reports_malformed_surface_without_traceback(monkeypatch, capsys):
+    _patch(monkeypatch, _fake_result(""))
+
+    def fail(*args, **kwargs):
+        raise SurfaceStateError("settings.json: enabledPlugins must be an object")
+
+    monkeypatch.setattr(cli._reconcile, "restore", fail)
+    rc = cli.main(["restore", "--machine", "box"])
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert captured.err == (
+        "restore refused: settings.json: enabledPlugins must be an object\n"
+    )
 
 
 def _resource_error_result() -> reconcile.RestoreResult:
