@@ -123,9 +123,9 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    "The authoritative worktree head is not a bridge-owned "
-                    "session; represented-session result parity is unavailable "
-                    "in this protocol generation"
+                    "The authoritative worktree head is a represented session; "
+                    "use the represented result surface or the result CLI's "
+                    "automatic target selection"
                 ),
             )
         return session
