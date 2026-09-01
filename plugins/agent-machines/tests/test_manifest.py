@@ -175,7 +175,7 @@ def test_per_machine_case_duplicates_rejected(tmp_path):
     )
     path = write_package(tmp_path, "d.yaml", data)
 
-    with pytest.raises(ManifestError, match="differ only by case"):
+    with pytest.raises(ManifestError, match="same case-insensitive identity"):
         load_package(path)
 
 
@@ -210,6 +210,18 @@ def test_per_machine_explicit_null_is_empty(tmp_path):
     package = load_package(path)
 
     assert package.per_machine == {}
+
+
+@pytest.mark.parametrize("spelling", ["per-machine", "per_machine"])
+def test_per_machine_non_mapping_container_rejected(tmp_path, spelling):
+    data = base_package(**{spelling: "invalid"})
+    path = write_package(tmp_path, "d.yaml", data)
+
+    with pytest.raises(
+        ManifestError,
+        match="'per-machine'/'per_machine' must be a mapping",
+    ):
+        load_package(path)
 
 
 @pytest.mark.parametrize("overlay", ["invalid", [], 1, False])

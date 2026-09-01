@@ -217,8 +217,9 @@ resources:
 ```
 
 Package gates and `per-machine` overlay keys both match machine identities
-case-insensitively. Defining two overlay keys that differ only by case is
-invalid, as are empty or surrounding-whitespace keys.
+case-insensitively. Defining two overlay keys that normalize to the same
+case-insensitive identity is invalid, as are empty or surrounding-whitespace
+keys.
 
 Within an `ensure-present` `enabledPlugins` map, `true` remains an additive
 floor and preserves an existing operator `false`. A declared `false` is a

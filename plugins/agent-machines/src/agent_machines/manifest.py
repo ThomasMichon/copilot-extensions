@@ -351,7 +351,9 @@ def load_package(
     )
     per_machine = {} if raw_per_machine is None else raw_per_machine
     if not isinstance(per_machine, dict):
-        raise ManifestError(f"{path}: 'per-machine' must be a mapping")
+        raise ManifestError(
+            f"{path}: 'per-machine'/'per_machine' must be a mapping"
+        )
     normalized_per_machine: dict[str, Any] = {}
     original_machine_keys: dict[str, str] = {}
     for machine_key, overlay in per_machine.items():
@@ -373,7 +375,7 @@ def load_package(
         if previous is not None:
             raise ManifestError(
                 f"{path}: per-machine keys {previous!r} and {machine_key!r} "
-                "differ only by case"
+                "normalize to the same case-insensitive identity"
             )
         original_machine_keys[folded] = machine_key
         normalized_per_machine[folded] = overlay
