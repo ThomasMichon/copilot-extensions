@@ -577,7 +577,8 @@ def remote_op_argv(machine, env, op, worktree_id, *, source_id=None,
                    force=False):
     """Build the SSH argv to run one maintenance op on a remote machine/env.
 
-    ``op`` is ``"cleanup"``, ``"sync"``, ``"restart"``, or ``"finalize"``.
+    ``op`` is ``"cleanup"``, ``"sync"``, ``"restart"``, ``"reclaim"``,
+    ``"remux"``, or ``"finalize"``.
     Returns the ssh argv, or ``None`` for the local host or an unknown /
     not-ready target (the caller runs local ops in-process). The remote runs
     the project binstub's JSON per-worktree CLI.
@@ -620,6 +621,11 @@ def remote_op_argv(machine, env, op, worktree_id, *, source_id=None,
                 f"{project} reclaim --worktree-id "
                 f"{_remote_arg(s.shell, worktree_id)} "
                 f"--bare-only --yes --json"
+            )
+        elif op == "remux":
+            inner = (
+                f"{project} remux --worktree-id "
+                f"{_remote_arg(s.shell, worktree_id)} --yes --json"
             )
         elif op == "finalize":
             inner = (

@@ -2065,6 +2065,34 @@ def cmd_embody(args: argparse.Namespace) -> int:
     return 0
 
 
+def _restore_before_resume(record: tracking.WorktreeRecord) -> bool:
+    """Prepare one unreachable bound session for a normal muxed resume."""
+    session_id = sessions.find_latest_session_id_fast(
+        record.worktree_path, record.sessions
+    )
+    result = _perform_remux(
+        worktree_id=record.worktree_id,
+        session_id=session_id,
+        worktree_path=record.worktree_path,
+        force_sudo=None,
+        apply_windows=True,
+    )
+    if result.get("ok") and not result.get("requires_resume"):
+        if result.get("verified"):
+            return True
+        output.err(
+            result.get(
+                "reason",
+                "the live process was not confirmed inside the mux pane",
+            )
+        )
+        return False
+    if result.get("ok"):
+        return True
+    output.err(result.get("reason", "could not restore the session"))
+    return False
+
+
 def cmd_resolve(args: argparse.Namespace) -> int:
     """Resolve a launch plan and emit it as JSON.
 
@@ -2106,6 +2134,12 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         if selectors != 1:
             return _json_error(
                 "--json requires exactly one of --worktree-id, --new, or --base"
+            )
+        if getattr(args, "restore", False) and platform.system() != "Windows":
+            return _json_error(
+                "--restore with --json is unsupported on Linux/WSL because a "
+                "successful reptyr adoption must attach the existing mux; run "
+                "`remux` interactively instead"
             )
 
     if use_base:
@@ -2171,6 +2205,8 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 remote_args += ["--worktree-id", str(wt_id)]
                 if getattr(args, "bare_resume", False):
                     remote_args.append("--bare-resume")
+                if getattr(args, "restore", False):
+                    remote_args.append("--restore")
             if getattr(args, "target_no_mux", False):
                 remote_args.append("--no-mux")
             rc = _emit_remote_plan_for_env(
@@ -2244,10 +2280,26 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             yaml_path = cfg.tracking_dir() / f"{wt_id}.yaml"
             if not yaml_path.exists():
                 return _json_error(f"Worktree not found: {wt_id}")
+            record = tracking.load_record(yaml_path)
+            if getattr(args, "restore", False):
+                session_id = sessions.find_latest_session_id_fast(
+                    record.worktree_path, record.sessions
+                )
+                restored = _perform_remux(
+                    worktree_id=record.worktree_id,
+                    session_id=session_id,
+                    worktree_path=record.worktree_path,
+                    force_sudo=None,
+                    apply_windows=True,
+                )
+                if not restored.get("ok"):
+                    return _json_error(
+                        restored.get("reason", "could not restore the session")
+                    )
             launch_preflight = _preflight_launch(
                 config,
                 args,
-                tracking.load_record(yaml_path).worktree_path,
+                record.worktree_path,
             )
             if launch_preflight.error:
                 return _json_error(launch_preflight.error, exit_code=3)
@@ -2343,6 +2395,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
                 output.err(f"Worktree not found: {wt_id_noninteractive}")
                 return 1
             record = tracking.load_record(yaml_path)
+            if (
+                getattr(args, "restore", False)
+                and not _restore_before_resume(record)
+            ):
+                return 1
             profile = _resolve_profile(config, args)
             return _resolve_resume(record, config, args, profile=profile)
 
@@ -3601,10 +3658,12 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
         env_label = decision.get("env") or ""
         opts = decision.get("options") or {}
         remote_args: list[str] = []
-        if action == "resume":
+        if action in ("resume", "restore"):
             wt_id = decision.get("worktree_id")
             if wt_id:
                 remote_args = ["--worktree-id", str(wt_id)]
+                if action == "restore":
+                    remote_args.append("--restore")
                 if opts.get("no_mux"):
                     remote_args.append("--no-mux")
                 if opts.get("bare_resume"):
@@ -3623,10 +3682,12 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
         )
         return 1
 
-    if action == "resume":
+    if action in ("resume", "restore"):
         wt_id = decision.get("worktree_id")
         if not wt_id:
-            output.err("Picker returned a resume decision with no worktree id.")
+            output.err(
+                f"Picker returned a {action} decision with no worktree id."
+            )
             return 1
         # The Open sub-menu's No-mux toggle (picker #1343) launches without the
         # PSMux/TMux wrapper.
@@ -3644,6 +3705,8 @@ def _run_new_picker(config: cfg.Config, args: argparse.Namespace) -> int:
             output.err(f"Worktree not found: {wt_id}")
             return 1
         record = tracking.load_record(yaml_path)
+        if action == "restore" and not _restore_before_resume(record):
+            return 1
         return _resolve_resume(record, config, args, profile=profile)
     if action == "new":
         opts = decision.get("options") or {}
@@ -9662,17 +9725,119 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_remux(args: argparse.Namespace) -> int:
-    """``remux`` -- reparent a bare Copilot into its ``wt-<id>`` tmux pane.
-
-    Linux/WSL only (delegates to :func:`agent_worktrees.remux.remux_bare_copilot`).
-    Target selection mirrors ``reclaim``: ``--session-id``, ``--worktree-id``, or
-    inferred from the current worktree cwd. The bound-but-BARE Copilot is adopted
-    into a tmux pane via ``reptyr`` (no conversation lost) instead of being
-    reaped-and-resumed. JSON with ``--json``; a hard, clear no-op on Windows.
-    """
+def _perform_remux(
+    *,
+    worktree_id: str | None,
+    session_id: str | None,
+    worktree_path: str | None,
+    force_sudo: bool | None,
+    apply_windows: bool,
+) -> dict:
+    """Run the platform remux primitive and return its structured result."""
     from . import remux as _remux
 
+    if platform.system() != "Windows":
+        return _remux.remux_bare_copilot(
+            worktree_id=worktree_id,
+            session_id=session_id,
+            worktree_path=worktree_path,
+            force_sudo=force_sudo,
+        )
+
+    def _fail(reason: str, **extra) -> dict:
+        return {
+            "ok": False,
+            "reason": reason,
+            "worktree_id": worktree_id,
+            "session_id": session_id,
+            "action": "failed",
+            "requires_resume": False,
+            **extra,
+        }
+
+    if not worktree_id:
+        return _fail("Windows remux requires a resolved worktree id")
+    if sessions.has_mux_session(worktree_id):
+        return _fail(
+            "the worktree already has a live mux session; attach with Open "
+            "instead of restoring it"
+        )
+
+    table = reclaim.build_process_table()
+    found = reclaim.resolve_bound_copilots(
+        session_id=session_id,
+        worktree_id=worktree_id,
+        worktree_path=worktree_path,
+        table=table,
+    )
+    seen_pids = {item["pid"] for item in found}
+    for bound in reclaim.resolve_bridge_bound(worktree_id, table=table):
+        if bound["pid"] not in seen_pids:
+            found.append(bound)
+            seen_pids.add(bound["pid"])
+    found = reclaim.filter_stop_unreachable(found, table=table)
+
+    me = os.getpid()
+    targets = [
+        item for item in found
+        if me not in (
+            {item["pid"]} | reclaim.descendants_of(item["pid"], table)
+        )
+    ]
+    if not targets:
+        return _fail("no Stop-unreachable bound Copilot found for the target")
+    if len(targets) > 1:
+        pids = ", ".join(str(item["pid"]) for item in targets)
+        return _fail(
+            f"multiple unreachable Copilots match ({pids}); narrow with "
+            "--session-id",
+            targets=targets,
+        )
+
+    target = targets[0]
+    preview = {
+        "ok": True,
+        "reason": (
+            "Windows cannot reparent the live ConPTY process; reclaim this "
+            "confirmed unreachable owner, then resume the persisted session "
+            "through the normal mux launcher"
+        ),
+        "worktree_id": worktree_id,
+        "session_id": target.get("session_id"),
+        "pid": target.get("pid"),
+        "action": "preview",
+        "requires_resume": True,
+        "targets": targets,
+    }
+    if not apply_windows:
+        return preview
+
+    reclaimed = reclaim_one(
+        worktree_id,
+        bare_only=True,
+        target_pids={int(target["pid"])},
+    )
+    return {
+        **preview,
+        "ok": bool(reclaimed.get("ok")) and bool(reclaimed.get("targets")),
+        "reason": (
+            "unreachable owner reclaimed; resume the persisted session through "
+            "the normal mux launcher"
+            if reclaimed.get("ok") and reclaimed.get("targets")
+            else "the unreachable owner could not be reclaimed"
+        ),
+        "action": "reclaimed",
+        "reclaim": reclaimed,
+    }
+
+
+def cmd_remux(args: argparse.Namespace) -> int:
+    """``remux`` -- restore a bare Copilot to the worktree mux fleet.
+
+    Linux/WSL adopts the live process into tmux with ``reptyr``. Windows cannot
+    move an arbitrary live console process into a new ConPTY, so it previews a
+    precise reclaim-before-resume plan and applies it only with ``--yes``.
+    """
     session_id = getattr(args, "session_id", None)
     raw_wt = getattr(args, "worktree_id", None)
     as_json = getattr(args, "json", False)
@@ -9699,9 +9864,13 @@ def cmd_remux(args: argparse.Namespace) -> int:
                 exit_code=2)
         wt_path = _wt_path(wt_id)
 
-    result = _remux.remux_bare_copilot(
-        worktree_id=wt_id, session_id=session_id, worktree_path=wt_path,
-        force_sudo=getattr(args, "force_sudo", None))
+    result = _perform_remux(
+        worktree_id=wt_id,
+        session_id=session_id,
+        worktree_path=wt_path,
+        force_sudo=getattr(args, "force_sudo", None),
+        apply_windows=getattr(args, "yes", False),
+    )
 
     if as_json:
         _json_output(result)
@@ -9710,6 +9879,16 @@ def cmd_remux(args: argparse.Namespace) -> int:
     if not result.get("ok"):
         output.err(result.get("reason", "re-mux failed"))
         return 1
+    if result.get("requires_resume"):
+        verb = "Reclaimed" if result.get("action") == "reclaimed" else "Would reclaim"
+        output.ok(
+            f"{verb} pid {result.get('pid')} for "
+            f"{result.get('worktree_id')}; resume next to create and attach "
+            "the mux session."
+        )
+        if result.get("action") == "preview":
+            output.info("Dry run -- pass --yes to reclaim the unreachable owner.")
+        return 0
     sess, pid = result.get("session"), result.get("pid")
     if result.get("verified"):
         output.ok(f"Re-muxed pid {pid} into {sess} (pane {result.get('pane')}). "
@@ -9721,7 +9900,12 @@ def cmd_remux(args: argparse.Namespace) -> int:
     return 0
 
 
-def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
+def reclaim_one(
+    worktree_id: str,
+    *,
+    bare_only: bool = True,
+    target_pids: set[int] | None = None,
+) -> dict:
     """Reap the bound Copilot process(es) for one worktree (Picker "Reclaim").
 
     The in-process executor behind the Picker's per-row **Reclaim** action:
@@ -9735,6 +9919,10 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
     muxed sibling is left to the graceful ``restart``/Stop path. Never reaps the
     process subtree containing this command. Returns a JSON-able
     ``{ok, worktree_id, targets, reaped}``.
+
+    ``target_pids`` narrows mutation to an already-verified process set. The
+    Windows remux flow uses it so the apply step cannot re-resolve and kill a
+    different owner that appeared after the guard pass.
     """
     table = reclaim.build_process_table()
     found = reclaim.resolve_bound_copilots(worktree_id=worktree_id, table=table)
@@ -9753,6 +9941,8 @@ def reclaim_one(worktree_id: str, *, bare_only: bool = True) -> dict:
         # unreachable by Stop (a detached psmux server -- dotfiles #1447), so
         # Reclaim isn't a no-op on it; preserve only a live, Stop-able mux.
         found = reclaim.filter_stop_unreachable(found, table=table)
+    if target_pids is not None:
+        found = [item for item in found if item["pid"] in target_pids]
     me = os.getpid()
     targets = [
         f for f in found
@@ -15914,6 +16104,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "Copilot in the HOME dir with no --resume (dodges a CLI "
                         "bug that fails to start Copilot inside a repo/worktree "
                         "cwd). Finish with a manual '/resume <id>' inside.")
+    p.add_argument("--restore", action="store_true",
+                   help="Before resuming, restore a Stop-unreachable bound "
+                        "Copilot through the platform remux path")
     p.add_argument("--no-mux", action="store_true",
                    help="Bypass tmux/psmux multiplexer (launch directly)")
     p.add_argument("--no-fast-forward", action="store_true",
@@ -16611,14 +16804,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 
-    # remux (Linux/WSL: adopt a bare Copilot into its wt-<id> tmux pane)
+    # remux (adopt on Linux/WSL; guarded reclaim-before-resume on Windows)
     p = sub.add_parser(
         "remux",
-        help="Linux/WSL only: reparent a running BARE (un-muxed) Copilot into "
-             "its wt-<id> tmux pane via reptyr, so no conversation is lost and "
-             "the session rejoins the mux fleet. Companion to `reclaim` (which "
-             "reaps-and-resumes). A clear no-op on Windows (ConPTY cannot adopt "
-             "a running process).")
+        help="Restore a running BARE (un-muxed) Copilot to the mux fleet. "
+             "Linux/WSL reparents it into tmux via reptyr. Windows cannot "
+             "reparent a live ConPTY process, so --yes precisely reclaims the "
+             "Stop-unreachable owner and returns a resume-next result.")
     p.add_argument("--session-id", default=None,
                    help="Target one session (exact dir name or unambiguous "
                         "prefix)")
@@ -16631,6 +16823,9 @@ def build_parser() -> argparse.ArgumentParser:
                         "under sudo -A. Needed when the yama ptrace_scope "
                         "forbids attaching a non-descendant; auto-detected by "
                         "default.")
+    p.add_argument("--yes", action="store_true",
+                   help="Windows only: reclaim the confirmed unreachable owner "
+                        "(without it, report the recovery plan)")
     p.add_argument("--json", action="store_true",
                    help="Emit a single JSON result object")
 

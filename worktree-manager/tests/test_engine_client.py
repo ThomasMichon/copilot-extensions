@@ -148,6 +148,33 @@ def test_timeout_raises_engine_error(monkeypatch):
     assert "timed out" in str(ei.value)
 
 
+def test_project_passthrough_uses_installer_owned_windows_binstub(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(ec.os, "name", "nt")
+    monkeypatch.setenv("USERPROFILE", r"C:\Users\example")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+    monkeypatch.setattr(ec.Path, "is_file", lambda self: True)
+    monkeypatch.setattr(
+        ec.subprocess,
+        "run",
+        lambda cmd, **kwargs: (
+            seen.update(cmd=cmd, kwargs=kwargs)
+            or _fake_completed(cmd, returncode=7)
+        ),
+    )
+
+    assert ec.run_project_passthrough("demo", ["--worktree-id", "wt-1"]) == 7
+    assert seen["cmd"] == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/s",
+        "/c",
+        r"C:\Users\example\.local\bin\demo.cmd",
+        "--worktree-id",
+        "wt-1",
+    ]
+
+
 def test_empty_worktrees_list(monkeypatch):
     _install_fake(monkeypatch, lambda cmd, kw: _fake_completed(
         cmd, stdout=json.dumps({"version": 1, "worktrees": []})))
