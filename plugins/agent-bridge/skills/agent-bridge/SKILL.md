@@ -164,6 +164,37 @@ plugin. Source code lives in the installed plugin directory at
 pointing to optional `machines.yaml`; the roster is derived from it when present.
 Provider namespaces from `~/.agent-bridge/providers.d/` work without a topology.)
 
+### Repository edits vs configuration adoption
+
+The payload-local `config adopt` operation is a **machine-local projection
+command**. It reads
+repository topology and writes the current user's `~/.agent-bridge/config.yaml`;
+it never edits, publishes, or deploys repository files.
+
+When topology or purpose-built agent definitions must change:
+
+1. use `config show` to identify the actual `machines_yaml` / `agents_config`
+   source paths;
+2. edit that repository source in its normal isolated worktree;
+3. publish and merge through that repository's contribution flow;
+4. deploy or sync the canonical checkout on the target machine;
+5. run `config adopt` only if the user-level projection needs to be created or
+   refreshed, then restart the service when instructed.
+
+Persistent profiles must point at a canonical checkout, not a disposable
+worktree. In-repo topology auto-discovered from `--repo <linked-worktree>` is
+canonicalized to the anchor. A stateless harness may instead inherit
+`machines.yaml` from its bound knowledge/state root, and explicit
+`--machines-yaml` / `--agents-config` paths always remain exact. Any of those
+external paths can become invalid if it names a disposable worktree; `config
+validate` reports the missing file.
+
+Before repairing a profile with `config adopt`, back up its topology-profile
+stanza in `~/.agent-bridge/config.yaml`, including `default_copilot_args` and
+`default_env`: adoption replaces the named profile rather than merging those
+spawn defaults. Re-adopt against canonical source paths, then restore any
+recorded defaults.
+
 
 ## CLI Commands
 

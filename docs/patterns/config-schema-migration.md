@@ -44,7 +44,9 @@ without bound.
 YAML (`~/.agent-*/…`). **Repo-committed** config (`machines.yaml`,
 in-repo `.agent-codespaces/config.yaml`, in-repo `.agent-worktrees/*`,
 checked-in `*.mcp.yaml`) is **warn-only** on install/update — its migration is
-an `adopt` concern (see the
+an explicit repository-maintenance concern, performed through the owning repo's
+normal contribution flow or a command whose contract specifically owns that
+repo integration (see the
 [install-vs-adopt boundary](install-vs-adopt-boundary.md)). SQLite and
 `deploy-manifest.json` already solve their own versioning and are untouched.
 

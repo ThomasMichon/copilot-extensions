@@ -391,6 +391,11 @@ agent-bridge elevated stop --deregister # marketplace-isolation: allow elevated-
 
 ### Config Management
 
+These commands modify **user-level bridge state**, not repository content.
+First edit and publish topology through the repository's normal worktree and
+contribution flow; then adopt from the canonical checkout to project that
+published state into `~/.agent-bridge/config.yaml`.
+
 ```bash
 # Show current config
 <agent-bridge catalog argv[0]> config show
@@ -405,6 +410,14 @@ agent-bridge elevated stop --deregister # marketplace-isolation: allow elevated-
 # Validate config (checks file paths, topology completeness)
 <agent-bridge catalog argv[0]> config validate
 ```
+
+Explicit `--machines-yaml` and `--agents-config` arguments remain exact even
+when `--repo` itself is canonicalized to the anchor. If such a path names a
+temporary worktree, removing that worktree strands the profile; `config
+validate` reports the missing file. Before re-adopting from canonical source
+paths, back up the profile stanza in `~/.agent-bridge/config.yaml`, including
+`default_copilot_args` and `default_env`; adoption replaces the profile and
+those spawn defaults must be restored afterward.
 
 For first-time setup, see the `agent-worktrees:copilot-extensions-setup` skill. For
 detailed topology configuration, see `plugins/agent-bridge/docs/machine-config.md`.

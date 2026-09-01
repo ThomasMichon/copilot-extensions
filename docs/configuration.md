@@ -15,15 +15,23 @@ the right one is the whole game:
 This split is not arbitrary — it follows the
 [install-vs-adopt boundary](patterns/install-vs-adopt-boundary.md): **`install` /
 `update` only ever touch machine-local state** (and may migrate its *schema*),
-while **`register` / `adopt` is the only verb that writes into the repo**. So
-"where does this setting go?" and "what writes it?" are the same question.
+while **`register` / `adopt` is an explicit integration boundary whose exact
+write scope is plugin-specific**. Some adoption commands bootstrap repository
+configuration; others only project already-published repository state into
+machine-local configuration.
+
+`agent-bridge config adopt` is in the second category: it reads topology from a
+repository and writes `~/.agent-bridge/config.yaml`. It does not edit the
+repository. Change repository topology in a worktree, publish it through that
+repository's contribution flow, deploy/sync the canonical checkout, and only
+then re-run adoption when the machine-local projection needs refreshing.
 
 ## The rule
 
 | | In the repo | Machine-local / user-global |
 |---|-------------|------------------------------|
 | **Put here** | Settings that should be **shared** and are **safe to commit** — the plugin set, PR/workflow policy, machine & agent topology, related-repo links | Anything **per-user / per-machine** or **secret** — absolute paths, machine identity, tokens, personal toggles |
-| **Written by** | `register` / `adopt` (and you, editing committed files) | `install` / `update` (deploys + migrates schema) and you, per machine |
+| **Written by** | You or a repo-bootstrap command, through the repository's normal contribution flow | `install` / `update`, machine-local `register` / `adopt` commands, and you per machine |
 | **Committed?** | **Yes** | **No** (git-ignored / outside the tree) |
 | **Applies to** | Everyone who clones/uses the repo | Only this user on this machine |
 
@@ -40,16 +48,16 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 
 | File | Purpose | Written by |
 |------|---------|-----------|
-| `.github/copilot/settings.json` | Which plugins the repo enables + the marketplace (`enabledPlugins`, `extraKnownMarketplaces`) | `customizing-copilot:installing-plugins` skill / adopt |
-| `<repo>/.agent-worktrees/config.yaml` | The repo's own worktree settings — PR mode (`pr:`), workflow, defaults shared by every machine | `register` / adopt |
-| `<repo>/.agent-logger.yaml` (or documented aliases) | Shared session-log location, naming/template, and optional writer voice seams | you / adopt |
+| `.github/copilot/settings.json` | Which plugins the repo enables + the marketplace (`enabledPlugins`, `extraKnownMarketplaces`) | `customizing-copilot:installing-plugins` skill / normal repo edit |
+| `<repo>/.agent-worktrees/config.yaml` | The repo's own worktree settings — PR mode (`pr:`), workflow, defaults shared by every machine | agent-worktrees repo bootstrap / normal repo edit |
+| `<repo>/.agent-logger.yaml` (or documented aliases) | Shared session-log location, naming/template, and optional writer voice seams | agent-logger repo setup / normal repo edit |
 | `<repo>/.agent-worktrees/related.yaml` | The related-repo index (role, locus, delegate) from this repo's POV | `related add` |
-| `machines.yaml` | SSH machine topology the mesh plugins read (control repo) | you / adopt |
+| `machines.yaml` | SSH machine topology the mesh plugins read (control repo) | normal repo edit; agent-bridge adoption only reads it |
 | `<repo>/.agent-codespaces/config.yaml` | **Supplementary** Codespace overrides + credential-relay policy (control repo). Most repos need none — machine defaults, `/workspaces/<basename>`, and the git-credential relay are convention-derived. Legacy repo-root `codespaces.yaml` still read (relocate with `config migrate`). | `codespaces-setup` |
 | `containers.yaml` | Container fleet defaults (control repo) | `containers-fleet` |
 | `.github/agents/<name>.mcp.yaml` | A **repo-scoped** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
-| `<repo>/.context-handoff/config.yaml` | Optional repository-owned soft/hard context utilization percentages | you / adopt |
-| `<repo>/.copilot-extensions/efforts/config.json` | Exact repository adoption marker for required effort-backed planning (`version: 1`, `enforcement: required`) | `efforts:efforts-setup` / adopt |
+| `<repo>/.context-handoff/config.yaml` | Optional repository-owned soft/hard context utilization percentages | context-handoff repo setup / normal repo edit |
+| `<repo>/.copilot-extensions/efforts/config.json` | Exact repository adoption marker for required effort-backed planning (`version: 1`, `enforcement: required`) | `efforts:efforts-setup` / normal repo edit |
 | `tools/setup/setup.{ps1,sh}` | The session setup script run before Copilot launches | `create-setup-script` |
 
 ### Machine-local / user-global (never committed)
@@ -62,7 +70,7 @@ while **`register` / `adopt` is the only verb that writes into the repo**. So
 | `~/.agent-worktrees/config.yaml` | Machine-wide defaults: `srcroot`, `machine`, `platform`, `copilot_profiles` | `install` |
 | `~/.agent-worktrees/repos.yaml` · `projects.yaml` | The repos registry + adopted-projects registry (checkout paths, class) | `repos` / `register` |
 | `~/.{project}/config.yaml` | Per-machine overrides + the adapter that makes a *foreign* repo compatible | `register` (machine wiring) |
-| `~/.agent-bridge/config.yaml` · `auth.yaml` | Bridge service config + bearer token (**secret**) | `install` / the service |
+| `~/.agent-bridge/config.yaml` · `auth.yaml` | Bridge service config + bearer token (**secret**) | `install`, `agent-bridge config adopt`, and the service |
 | `~/.agent-logger/config.yaml` | Session-logging config (store dir, sync target) | `install` / you |
 | `~/.agent-mcp/bridges/<name>` | A **personal / cross-repo** agent-mcp bridge config | you (per the `agent-mcp:agent-mcp` skill) |
 | `~/.agent-*/deploy-manifest.json`, runtime state | Per-machine runtime footprint (version, source, venv) | `install` / `update` |
