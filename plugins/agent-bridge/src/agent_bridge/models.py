@@ -369,7 +369,7 @@ class ResultIncrement(BaseModel):
 class ResultCurrentState(BaseModel):
     """Current lifecycle/attention state composed from existing owners."""
 
-    session_status: SessionStatus
+    session_status: str
     liveness: str | None = None
     observer_only: bool = True
     retained_attention: bool = False

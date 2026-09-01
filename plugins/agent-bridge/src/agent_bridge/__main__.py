@@ -3830,13 +3830,27 @@ def _cmd_read(args: argparse.Namespace) -> None:
 def _cmd_result(args: argparse.Namespace) -> None:
     """Read a bounded delegated-result snapshot or expand one detail reference."""
     from .client import BridgeClientError
+    from .protocol import REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION
 
     client = _get_client(ensure=False)
     try:
+        represented = (
+            client.daemon_supports(REPRESENTED_RESULT_SNAPSHOT_PROTOCOL_VERSION)
+            and bool(client.resolve_live_result_target(args.session_ref))
+        )
         if args.expand:
-            payload = client.expand_result_ref(args.session_ref, args.expand)
+            payload = (
+                client.expand_live_result_ref(args.session_ref, args.expand)
+                if represented
+                else client.expand_result_ref(args.session_ref, args.expand)
+            )
         else:
-            payload = client.get_result_snapshot(
+            method = (
+                client.get_live_result_snapshot
+                if represented
+                else client.get_result_snapshot
+            )
+            payload = method(
                 args.session_ref,
                 position=args.position,
                 max_items=args.max_items,

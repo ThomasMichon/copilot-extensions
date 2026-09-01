@@ -1477,6 +1477,29 @@ class Database:
         )
         return rows[0]["session_id"] if rows else None
 
+    def current_represented_session_for_worktree(
+        self,
+        worktree_id: str,
+        *,
+        now: float,
+        stale_seconds: float = LIVE_SESSION_STALE_SECONDS,
+    ) -> str | None:
+        """Return the current readable live or wedged represented incarnation.
+
+        Messaging intentionally excludes ``wedged`` rows; result inspection must
+        retain them because the process is still known alive and its represented
+        tail remains useful.
+        """
+        cutoff = now - stale_seconds
+        rows = self.execute_read(
+            "SELECT session_id FROM live_sessions "
+            "WHERE worktree_id=? AND (status='wedged' OR "
+            "(status='live' AND updated_at>=?)) "
+            "ORDER BY registered_at DESC, updated_at DESC LIMIT 1",
+            (worktree_id, cutoff),
+        )
+        return rows[0]["session_id"] if rows else None
+
     def enqueue_live_message(
         self, session_id: str, sender: str, body: str, now: float,
         reply_to: str | None = None, kind: str = "prompt",

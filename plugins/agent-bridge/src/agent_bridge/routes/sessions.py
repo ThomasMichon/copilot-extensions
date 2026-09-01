@@ -72,7 +72,14 @@ def _resolve_result_session(mgr: SessionManager, ref: str) -> Session | None:
         item for item in mgr.list_sessions()
         if item.target.worktree_id == ref
     ]
-    live_session_id = mgr.db.current_live_session_for_worktree(
+    if ownership:
+        owned = mgr.get_session(ownership.get("session_id") or "")
+        if owned is not None and owned.status in {
+            SessionStatus.RUNNING,
+            SessionStatus.IDLE,
+        }:
+            return owned
+    live_session_id = mgr.db.current_represented_session_for_worktree(
         ref, now=time.time()
     )
     if live_session_id:
